@@ -9,8 +9,11 @@ import {createInterface} from 'node:readline';
 export type LineDispatcher = {
   /** The next line no prompt claims: the REPL's read. */
   replLine(): Promise<string | undefined>;
-  /** The next line, ahead of the REPL; prompts take turns in order. */
-  promptLine(): Promise<string | undefined>;
+  /**
+   * The next line, ahead of the REPL; prompts take turns in order. An
+   * aborted signal withdraws the prompt and resolves `undefined`.
+   */
+  promptLine(signal?: AbortSignal): Promise<string | undefined>;
   close(): void;
 };
 
@@ -26,6 +29,9 @@ export function createLineDispatcher(
   const iterator = lines[Symbol.asyncIterator]();
   const prompts: Waiter[] = [];
   let repl: Waiter | undefined;
+  // A line read for a prompt that was withdrawn meanwhile waits here for
+  // whoever asks next; nothing typed is dropped.
+  let held: string | undefined;
   let reading = false;
   let closed = false;
 
@@ -45,15 +51,20 @@ export function createLineDispatcher(
 
         if (line === undefined) {
           closed = true;
-        }
-
-        takeWaiter()?.resolve(line);
-
-        if (closed) {
           settleAll();
-        } else {
-          pump();
+
+          return;
         }
+
+        const waiter = takeWaiter();
+
+        if (waiter === undefined) {
+          held = line;
+        } else {
+          waiter.resolve(line);
+        }
+
+        pump();
       },
       (error: unknown) => {
         reading = false;
@@ -86,23 +97,59 @@ export function createLineDispatcher(
   };
   const take = (
     register: (waiter: Waiter) => void,
-  ): Promise<string | undefined> =>
-    closed
-      ? Promise.resolve(undefined)
-      : new Promise((resolve, reject) => {
-          register({resolve, reject});
-          pump();
-        });
+    withdraw: (waiter: Waiter) => void,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> => {
+    if (closed || signal?.aborted === true) {
+      return Promise.resolve(undefined);
+    }
+
+    if (held !== undefined) {
+      const line = held;
+
+      held = undefined;
+
+      return Promise.resolve(line);
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter: Waiter = {resolve, reject};
+
+      register(waiter);
+      signal?.addEventListener(
+        'abort',
+        () => {
+          withdraw(waiter);
+          resolve(undefined);
+        },
+        {once: true},
+      );
+      pump();
+    });
+  };
 
   return {
     replLine: () =>
-      take(waiter => {
-        repl = waiter;
-      }),
-    promptLine: () =>
-      take(waiter => {
-        prompts.push(waiter);
-      }),
+      take(
+        waiter => {
+          repl = waiter;
+        },
+        () => undefined,
+      ),
+    promptLine: signal =>
+      take(
+        waiter => {
+          prompts.push(waiter);
+        },
+        waiter => {
+          const index = prompts.indexOf(waiter);
+
+          if (index !== -1) {
+            prompts.splice(index, 1);
+          }
+        },
+        signal,
+      ),
     close: () => {
       closed = true;
       settleAll();
