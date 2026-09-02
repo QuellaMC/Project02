@@ -169,6 +169,28 @@ describe('gateway reference client', () => {
     await close();
   });
 
+  it('lets an abort interrupt a bootstrap that never finishes', async () => {
+    const {client, close} = await startServer();
+    const abort = new AbortController();
+    let bootstrapping = false;
+    const following = client.events(() => undefined, {
+      signal: abort.signal,
+      onReady: () => {
+        bootstrapping = true;
+
+        return new Promise<void>(() => undefined);
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(bootstrapping).toBe(true);
+    });
+    abort.abort();
+    await expect(following).resolves.toBeUndefined();
+    expect(getEventListeners(abort.signal, 'abort')).toHaveLength(0);
+    await close();
+  });
+
   it('lets go of each finished stream, so reconnects never pile up abort listeners', async () => {
     const {server, client, close} = await startServer();
     const readies: boolean[] = [];

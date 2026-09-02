@@ -156,12 +156,17 @@ export function createGatewayClient(
           });
 
           await rejectUnlessOk(response);
-          await followStream(response, listener, async () => {
-            const wasReconnect = reconnected;
+          await followStream(
+            response,
+            listener,
+            async () => {
+              const wasReconnect = reconnected;
 
-            reconnected = true;
-            await eventsOptions.onReady?.({reconnected: wasReconnect});
-          });
+              reconnected = true;
+              await eventsOptions.onReady?.({reconnected: wasReconnect});
+            },
+            signal,
+          );
         } catch (error: unknown) {
           if (aborted()) {
             return;
@@ -267,6 +272,7 @@ async function followStream(
   response: Response,
   listener: (event: GatewayEvent) => void,
   onReady: () => void | Promise<void>,
+  signal: AbortSignal,
 ): Promise<void> {
   if (response.body === null) {
     return;
@@ -300,7 +306,7 @@ async function followStream(
 
         if (frame.event === 'ready') {
           assertProtocol(data);
-          await onReady();
+          await bootstrapOrAbort(onReady, signal);
         } else if (isGatewayEvent(data)) {
           listener(data);
         }
@@ -309,6 +315,44 @@ async function followStream(
   } finally {
     // Whatever ended the loop, the socket does not outlive it.
     await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * Runs the caller's bootstrap, but an abort must not wait out a request
+ * of its that hangs: the abort wins the race and a late result is
+ * discarded. The abort listener lives only for the wait.
+ */
+async function bootstrapOrAbort(
+  onReady: () => void | Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  let onAbort = (): void => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(new GatewayClientError(0, 'aborted', 'The stream was aborted.'));
+    };
+  });
+
+  if (signal.aborted) {
+    onAbort();
+  } else {
+    signal.addEventListener('abort', onAbort, {once: true});
+  }
+
+  try {
+    await Promise.race([
+      Promise.resolve(onReady()).catch((error: unknown) => {
+        if (!signal.aborted) {
+          throw error;
+        }
+      }),
+      aborted,
+    ]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    // Nobody may be listening by the time it rejects; that is not a fault.
+    aborted.catch(() => undefined);
   }
 }
 
