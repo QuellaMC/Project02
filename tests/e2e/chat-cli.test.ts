@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {chmodSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
@@ -5,12 +6,16 @@ import {PassThrough, Readable} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 
 import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
-import {createGateway} from '../../src/gateway/index.ts';
+import {createGateway, type Gateway} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
-import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
+import {
+  authoredTone,
+  createConfirmationHome,
+  createGatewayTestHome,
+} from '../support/gateway-fixtures.ts';
 import {
   startTestGatewayServer,
   testGatewayToken,
@@ -49,16 +54,76 @@ async function startDaemon(
 
   await gateway.reconcile();
 
+  return serveDaemon(gateway, storeRoot);
+}
+
+async function serveDaemon(gateway: Gateway, storeRoot = '') {
   const server = await startTestGatewayServer({gateway});
 
   return {
     storeRoot,
     gateway,
+    server,
     env: {PROJECT02_GATEWAY: `${server.baseUrl}/#token=${testGatewayToken}`},
     close: async () => {
       await server.close();
       await gateway.stop();
     },
+  };
+}
+
+/** A shim on a live stdin, with a view of everything it printed so far. */
+function openShim(args: readonly string[], env: NodeJS.ProcessEnv) {
+  const stdin = new PassThrough();
+  let seen = '';
+  const run = runChat(args, {
+    env,
+    input: stdin,
+    onStdout: stdout => {
+      seen = stdout;
+    },
+  });
+  const printed = (text: string) =>
+    vi.waitFor(
+      () => {
+        expect(seen).toContain(text);
+      },
+      {timeout: 10_000},
+    );
+
+  return {
+    stdin,
+    run,
+    printed,
+    seen: () => seen,
+    async exit() {
+      stdin.write('/exit\n');
+
+      return run;
+    },
+  };
+}
+
+async function deliverFromWeb(
+  gateway: Gateway,
+  characterId: string,
+  text: string,
+) {
+  const opened = await gateway.openDirectConversation(characterId);
+
+  if (opened.status !== 'opened') {
+    expect.fail(opened.message);
+  }
+
+  return {
+    conversationId: opened.conversationId,
+    outcome: gateway.deliver({
+      conversationId: opened.conversationId,
+      senderId: opened.userParticipantId,
+      text,
+      source: 'web',
+      clientMessageId: randomUUID(),
+    }),
   };
 }
 
@@ -227,6 +292,90 @@ describe('chat shim', () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain('mira is ready.');
     expect(stderr).toContain('Error:');
+    await daemon.close();
+  });
+  it('answers a confirmation raised elsewhere with the next line, which never becomes a message', async () => {
+    const home = await createConfirmationHome();
+    const daemon = await serveDaemon(home.gateway);
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    // The REPL is waiting at its prompt when the web asks for a tool change.
+    await shim.printed('> ');
+
+    const web = await deliverFromWeb(home.gateway, 'mira', 'please be warmer');
+
+    await shim.printed('[y/N] ');
+    shim.stdin.write('yes\n');
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+    expect(authoredTone(home.inspectTone())).toBe('warm');
+    await shim.printed('Mira: done');
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+
+    // One turn on the thread: the web's. "yes" answered, it was never sent.
+    const history = await home.gateway.history(web.conversationId);
+
+    expect(
+      history.status === 'ok' && history.messages.map(message => message.text),
+    ).toEqual(['please be warmer', 'done']);
+    await daemon.close();
+  });
+
+  it("leaves another character's confirmation to the terminal that talks to it", async () => {
+    const home = await createConfirmationHome('done', 'zeta');
+    const daemon = await serveDaemon(home.gateway);
+    const shim = openShim(['--character', 'mira'], daemon.env);
+
+    await shim.printed('mira is ready.');
+
+    const web = await deliverFromWeb(home.gateway, 'zeta', 'please be warmer');
+
+    await vi.waitFor(
+      () => {
+        expect(home.gateway.pendingConfirmations()).toHaveLength(1);
+      },
+      {timeout: 10_000},
+    );
+    // Time for a prompt to have appeared, had the shim taken it.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(shim.seen()).not.toContain('Confirm');
+
+    const [pending] = home.gateway.pendingConfirmations();
+
+    expect(pending).toMatchObject({characterId: 'zeta'});
+    expect(
+      home.gateway.answerConfirmation(pending?.id ?? '', 'denied'),
+    ).toEqual({
+      status: 'answered',
+    });
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0, stderr: ''});
+    await daemon.close();
+  });
+
+  it('catches up on what the stream missed once it is back', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    await vi.waitFor(() => {
+      expect(daemon.server.events.openCount()).toBe(1);
+    });
+
+    // The daemon ends every stream; a message lands before the shim is back.
+    daemon.server.events.closeAll();
+
+    const web = await deliverFromWeb(
+      daemon.gateway,
+      'mira',
+      'while you were away',
+    );
+
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+    await shim.printed('You: while you were away');
+    await shim.printed('Mira: noted');
+    expect(shim.seen().match(/Mira: noted/gu)).toHaveLength(1);
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     await daemon.close();
   });
 });

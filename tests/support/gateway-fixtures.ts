@@ -13,6 +13,7 @@ import {
   ensureInitializedProject02Store,
   inspectRuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
+import {writeTestCharacterPackage} from './character-fixtures.ts';
 import {runtimeLocationForTest, writeRuntimeConfig} from './runtime-config.ts';
 import {createTestTempRoot} from './temp-root.ts';
 
@@ -31,13 +32,25 @@ export async function createGatewayTestHome(
  * A gateway whose character runs the bundled demo-config plugin, and an
  * adapter that asks to change its tone: the one confirmation-gated path in
  * the runtime, driven through real activation and the runtime's own broker.
+ * A character other than the bundled mira is installed beside her.
  */
-export async function createConfirmationHome(reply = 'done'): Promise<{
+export async function createConfirmationHome(
+  reply = 'done',
+  characterId = 'mira',
+): Promise<{
+  readonly homeRoot: string;
   readonly gateway: Gateway;
   readonly inspectTone: () => ReturnType<typeof inspectRuntimePluginConfig>;
 }> {
   const homeRoot = await createGatewayTestHome();
   const manifest = createDemoConfigPluginManifest();
+
+  if (characterId !== 'mira') {
+    writeTestCharacterPackage(homeRoot, {
+      id: characterId,
+      displayName: (characterId[0] ?? '').toUpperCase() + characterId.slice(1),
+    });
+  }
 
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
     plugins: {[demoConfigPluginId]: {enabled: true}},
@@ -80,16 +93,16 @@ export async function createConfirmationHome(reply = 'done'): Promise<{
       targetScope: 'character',
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
-        character: 'mira',
+        character: characterId,
       }),
       manifest,
       pluginManifests: [manifest],
     });
 
-  await gateway.startCharacter('mira');
+  await gateway.startCharacter(characterId);
   expectedFingerprint = inspectTone().fingerprint;
 
-  return {gateway, inspectTone};
+  return {homeRoot, gateway, inspectTone};
 }
 
 export function authoredTone(
