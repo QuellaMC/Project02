@@ -31,6 +31,7 @@ import {
   acquireLocalRuntimeSessionWriterLease,
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
+  ensureCharacterDataDir,
   listConversationSegments,
 } from '../../src/runtime/storage/index.ts';
 import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
@@ -1351,5 +1352,192 @@ describe('gateway façade', () => {
       status: 'failed',
       code: 'malformed_record',
     });
+  });
+  it('reconcile boots every enabled character and leaves a disabled one offline', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeTestCharacterPackage(homeRoot, {id: 'zeta', displayName: 'Zeta'});
+    await ensureCharacterDataDir({homeRoot, characterId: 'zeta'});
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'zeta'), 'config.json'),
+      {project02: {enabled: false}},
+    );
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: ['mira'],
+      stopping: [],
+    });
+    expect(
+      gateway.health().characters.map(({id, enabled, state}) => ({
+        id,
+        enabled,
+        state,
+      })),
+    ).toEqual([
+      {id: 'mira', enabled: true, state: 'ready'},
+      {id: 'zeta', enabled: false, state: 'not_started'},
+    ]);
+    await gateway.stop();
+  });
+
+  it('reconcile stops a character disabled since it started and starts it again once enabled', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.reconcile();
+
+    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
+
+    writeRuntimeConfig(overlay, {project02: {enabled: false}});
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: ['mira'],
+    });
+    expect(gateway.health().characters[0]).toMatchObject({
+      enabled: false,
+      state: 'stopped',
+    });
+
+    writeRuntimeConfig(overlay, {});
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: ['mira'],
+      stopping: [],
+    });
+    expect(gateway.health().characters[0]).toMatchObject({
+      enabled: true,
+      state: 'ready',
+    });
+    await gateway.stop();
+  });
+
+  it('reconcile retries a failed boot once the config is fixed', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: -5},
+    });
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.reconcile();
+    expect(gateway.health().characters[0]?.state).toBe('failed');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: ['mira'],
+      stopping: [],
+    });
+    expect(gateway.health().characters[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
+  it('reconcile stops a disabled character that failed, freeing what it still held', async () => {
+    const homeRoot = await createGatewayHome();
+    const options = {
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const gateway = createGateway(options);
+
+    await gateway.reconcile();
+
+    const ref = await open(gateway, 'mira');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const sessionsRoot = join(dataRoot, 'sessions');
+    const locksRoot = join(dataRoot, '.locks');
+
+    // The turn dies, and the automatic recovery cannot release the thread:
+    // the character stays failed, still holding its conversation.
+    chmodSync(sessionsRoot, 0o000);
+    chmodSync(locksRoot, 0o500);
+
+    try {
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+        source: 'test',
+        clientMessageId: randomUUID(),
+      });
+      await vi.waitFor(() => {
+        expect(gateway.health().characters[0]?.diagnostic).toContain(
+          'could not release',
+        );
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+      chmodSync(locksRoot, 0o755);
+    }
+
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {enabled: false},
+    });
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: ['mira'],
+    });
+    expect(gateway.health().characters[0]).toMatchObject({
+      enabled: false,
+      state: 'stopped',
+    });
+
+    // Released for real: another gateway can open the same thread.
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {});
+
+    const fresh = createGateway(options);
+
+    await fresh.reconcile();
+    await expect(fresh.openDirectConversation('mira')).resolves.toMatchObject({
+      status: 'opened',
+      conversationId: ref.conversationId,
+    });
+    await fresh.stop();
+    await gateway.stop();
+  });
+
+  it('a reconcile requested during a pass ends on the newest configuration', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const first = gateway.reconcile();
+
+    expect(gateway.health().characters[0]?.state).toBe('starting');
+    // The person turns the character off while its boot is in flight.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {enabled: false},
+    });
+
+    const second = gateway.reconcile();
+
+    expect(second).toBe(first);
+    await expect(first).resolves.toMatchObject({stopping: ['mira']});
+    expect(gateway.health().characters[0]).toMatchObject({
+      enabled: false,
+      state: 'stopped',
+    });
+    await gateway.stop();
   });
 });

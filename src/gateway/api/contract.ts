@@ -142,6 +142,12 @@ export type HistoryOutcome =
     }
   | StorageFailure;
 
+/** What one reconcile pass set in motion; the outcomes arrive as states. */
+export type ReconcilePlan = {
+  readonly starting: readonly string[];
+  readonly stopping: readonly string[];
+};
+
 /** `settled` says the start ran; the summary's state says how it ended. */
 export type StartOutcome =
   | {readonly status: 'settled'; readonly character: CharacterSummary}
@@ -293,5 +299,7 @@ export type Gateway = {
   ): AnswerOutcome;
   events(listener: GatewayEventListener): Unsubscribe;
   startCharacter(characterId: string): Promise<StartOutcome>;
+  /** Makes the running set match the config: at boot, and after any change. */
+  reconcile(): Promise<ReconcilePlan>;
   stop(): Promise<void>;
 };

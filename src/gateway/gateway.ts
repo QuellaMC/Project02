@@ -27,6 +27,7 @@ import {
   type HistoryPage,
   type OpenOutcome,
   type PendingConfirmation,
+  type ReconcilePlan,
   type StartOutcome,
   type TurnOutcome,
   type Unsubscribe,
@@ -36,6 +37,7 @@ import {
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
 import {readConversationHistory} from './history.ts';
+import {createReconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
@@ -70,7 +72,6 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   // policy replaces this single-participant lookup when groups arrive.
   const conversationRoutes = new Map<string, string>();
   const listeners = new Set<GatewayEventListener>();
-  const lastStates = new Map<string, string>();
   const startsInFlight = new Map<string, Promise<void>>();
   const submissions = createSubmissionLedger();
   let stopped = false;
@@ -87,61 +88,22 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     }
   };
 
-  const runtimeFor = (characterId: string): LocalCharacterRuntime => {
-    const existing = runtimes.get(characterId);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const {createPluginHost} = options;
-    const runtime = createLocalCharacterRuntime({
-      loadHome,
-      characterId,
-      ...(options.provider === undefined ? {} : {provider: options.provider}),
-      ...(options.roleModelAdapter === undefined
-        ? {}
-        : {roleModelAdapter: options.roleModelAdapter}),
-      ...(createPluginHost === undefined
-        ? {}
-        : {
-            createPluginHost: (
-              confirmations: RuntimePluginToolConfirmationHandler,
-            ) => createPluginHost(characterId, confirmations),
-          }),
-    });
-
-    runtime.events(event => {
-      if (event.kind === 'state_changed') {
-        const previous = lastStates.get(event.characterId);
-
-        lastStates.set(event.characterId, event.state);
-
-        // One automatic restart, and only for a fatal turn: a boot failure
-        // arrives from 'starting' and stays failed rather than crash-looping.
-        // Registered like an explicit start, so a retry or attach that lands
-        // mid-recovery joins it instead of resolving early.
-        if (event.state === 'failed' && previous === 'ready') {
-          const recovery = runtime
-            .reactivate()
-            .catch(() => {
-              // The failure is already visible in health; a reactivate lost
-              // to a racing lifecycle change has nothing further to report.
-            })
-            .finally(() => {
-              startsInFlight.delete(event.characterId);
-            });
-
-          startsInFlight.set(event.characterId, recovery);
-        }
-      }
-
-      emit(event);
-    });
-    runtimes.set(characterId, runtime);
-
-    return runtime;
-  };
+  const runtimeFor = createRuntimeFactory({
+    options,
+    loadHome,
+    runtimes,
+    startsInFlight,
+    emit,
+  });
+  const reconciler = createReconciler({
+    roster: () => listProject02Characters(loadHome()).characters,
+    stateOf: characterId =>
+      runtimes.get(characterId)?.health().state ?? 'not_started',
+    start: startCharacter,
+    stop: async characterId => {
+      await runtimes.get(characterId)?.stop();
+    },
+  });
 
   return Object.freeze({
     health(): GatewayHealth {
@@ -157,38 +119,8 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         ...(page === undefined ? {} : {page}),
       });
     },
-    async startCharacter(characterId: string): Promise<StartOutcome> {
-      if (stopped) {
-        return refusedStart('gateway_stopped', 'The gateway is stopped.');
-      }
-
-      // The same resolution activation will use: a typo'd id fails fast with
-      // the discovered roster instead of a runtime health() never lists,
-      // and a broken package reports its own diagnostic instead of posing as
-      // not installed. The enabled decision belongs to the runtime's own
-      // assembly, where reactivation passes too.
-      const resolution = prepareProject02CharacterActivation({
-        storeRoot: loadHome().runtimeLocation.homeRoot,
-        configuredCharacterId: characterId,
-      });
-
-      if (resolution.status === 'failed') {
-        return refusedStart('unknown_character', resolution.messages.join(' '));
-      }
-
-      const runtime = runtimeFor(characterId);
-
-      await startOrJoin(runtime);
-
-      return Object.freeze({
-        status: 'settled' as const,
-        character: settledSummary(
-          loadHome(),
-          runtime,
-          resolution.profile.displayName,
-        ),
-      });
-    },
+    startCharacter,
+    reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const runtime = runtimes.get(characterId);
 
@@ -276,17 +208,53 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       };
     },
     async stop(): Promise<void> {
-      // Terminal by design: no new starts. Runtimes are signalled first so
-      // a start or recovery in flight is overtaken — refused at the door,
-      // drained, discarded — never finished into a ready character during
-      // shutdown; the joins then confirm those promises settled.
+      // Terminal by design: no new starts. A reconcile pass in flight sees
+      // its starts refused and finishes its stops first; then the runtimes
+      // are signalled, so a start or recovery in flight is overtaken —
+      // refused at the door, drained, discarded — never finished into a
+      // ready character during shutdown; the joins then confirm those
+      // promises settled.
       stopped = true;
+      await reconciler.settled();
       await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
       await Promise.all(
         [...startsInFlight.values()].map(start => start.catch(() => undefined)),
       );
     },
   });
+
+  async function startCharacter(characterId: string): Promise<StartOutcome> {
+    if (stopped) {
+      return refusedStart('gateway_stopped', 'The gateway is stopped.');
+    }
+
+    // The same resolution activation will use: a typo'd id fails fast with
+    // the discovered roster instead of a runtime health() never lists,
+    // and a broken package reports its own diagnostic instead of posing as
+    // not installed. The enabled decision belongs to the runtime's own
+    // assembly, where reactivation passes too.
+    const resolution = prepareProject02CharacterActivation({
+      storeRoot: loadHome().runtimeLocation.homeRoot,
+      configuredCharacterId: characterId,
+    });
+
+    if (resolution.status === 'failed') {
+      return refusedStart('unknown_character', resolution.messages.join(' '));
+    }
+
+    const runtime = runtimeFor(characterId);
+
+    await startOrJoin(runtime);
+
+    return Object.freeze({
+      status: 'settled' as const,
+      character: settledSummary(
+        loadHome(),
+        runtime,
+        resolution.profile.displayName,
+      ),
+    });
+  }
 
   /**
    * A second caller joins the start already in flight instead of resolving
@@ -318,6 +286,76 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
     return start;
   }
+}
+
+/**
+ * Construct-once runtimes, each wired for one automatic restart after a
+ * fatal turn: a boot failure arrives from 'starting' and stays failed
+ * rather than crash-looping. The recovery is registered like an explicit
+ * start, so a retry or attach that lands mid-recovery joins it instead of
+ * resolving early.
+ */
+function createRuntimeFactory(seams: {
+  readonly options: CreateGatewayOptions;
+  readonly loadHome: () => Project02Home;
+  readonly runtimes: Map<string, LocalCharacterRuntime>;
+  readonly startsInFlight: Map<string, Promise<void>>;
+  readonly emit: (event: GatewayEvent) => void;
+}): (characterId: string) => LocalCharacterRuntime {
+  const {options, runtimes, startsInFlight} = seams;
+  const lastStates = new Map<string, string>();
+
+  return characterId => {
+    const existing = runtimes.get(characterId);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const {createPluginHost} = options;
+    const runtime = createLocalCharacterRuntime({
+      loadHome: seams.loadHome,
+      characterId,
+      ...(options.provider === undefined ? {} : {provider: options.provider}),
+      ...(options.roleModelAdapter === undefined
+        ? {}
+        : {roleModelAdapter: options.roleModelAdapter}),
+      ...(createPluginHost === undefined
+        ? {}
+        : {
+            createPluginHost: (
+              confirmations: RuntimePluginToolConfirmationHandler,
+            ) => createPluginHost(characterId, confirmations),
+          }),
+    });
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed') {
+        const previous = lastStates.get(event.characterId);
+
+        lastStates.set(event.characterId, event.state);
+
+        if (event.state === 'failed' && previous === 'ready') {
+          const recovery = runtime
+            .reactivate()
+            .catch(() => {
+              // The failure is already visible in health; a reactivate lost
+              // to a racing lifecycle change has nothing further to report.
+            })
+            .finally(() => {
+              startsInFlight.delete(event.characterId);
+            });
+
+          startsInFlight.set(event.characterId, recovery);
+        }
+      }
+
+      seams.emit(event);
+    });
+    runtimes.set(characterId, runtime);
+
+    return runtime;
+  };
 }
 
 function readHealth(home: Project02Home, runtimes: Runtimes): GatewayHealth {
