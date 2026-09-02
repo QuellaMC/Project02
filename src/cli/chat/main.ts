@@ -291,7 +291,12 @@ async function runChat(
         continue;
       }
 
-      await watch.attached();
+      if (!(await watch.attached())) {
+        options.stderr.write(
+          `Your line was not sent: ${characterId} is no longer installed.\n`,
+        );
+        continue;
+      }
 
       const clientMessageId = randomUUID();
       const outcome = await deliverOrReport(client, {
@@ -357,16 +362,22 @@ function createCharacterWatch(options: {
   readonly reportError: (error: unknown) => void;
 }): {
   ensureAttached(): Promise<void>;
-  /** Waits for the latest reopen, trying once more if the thread is lost. */
-  attached(): Promise<void>;
+  /**
+   * Resolves true once the thread is attached — waiting, after one more
+   * try, for the character to come back — and false when it never will,
+   * because the roster no longer has it.
+   */
+  attached(): Promise<boolean>;
   stateChanged(state: string, message: string | undefined): void;
   maintenanceFailed(failure: {at: string; message: string}): void;
   reportHealth(): Promise<void>;
 } {
   const {client, characterId} = options;
   let attached = true;
+  let gone = false;
   let attachment: Promise<void> = Promise.resolve();
   let reportedMaintenanceAt: string | undefined;
+  const waiting: (() => void)[] = [];
   const ensureAttached = (): Promise<void> => {
     attachment = client.openDirectConversation(characterId).then(
       outcome => {
@@ -376,8 +387,15 @@ function createCharacterWatch(options: {
           }
 
           attached = true;
+
+          for (const resume of waiting.splice(0)) {
+            resume();
+          }
         } else {
           attached = false;
+          gone =
+            outcome.status === 'refused' &&
+            outcome.reason === 'unknown_character';
           options.stderr.write(`Error: ${outcome.message}\n`);
         }
       },
@@ -408,6 +426,25 @@ function createCharacterWatch(options: {
       if (!attached) {
         await ensureAttached().catch(options.reportError);
       }
+
+      if (attached) {
+        return true;
+      }
+
+      if (gone) {
+        return false;
+      }
+
+      // The line waits, not the person's patience: it goes the moment the
+      // character is back.
+      options.stderr.write(
+        `${characterId} is not available right now; your line will be sent when it is back.\n`,
+      );
+      await new Promise<void>(resolve => {
+        waiting.push(resolve);
+      });
+
+      return true;
     },
     stateChanged(state, message) {
       if (state === 'failed') {
