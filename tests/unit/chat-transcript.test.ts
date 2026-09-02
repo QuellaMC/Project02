@@ -33,6 +33,7 @@ function createHarness(
 ) {
   const thread = [...initial];
   let printed = '';
+  let pagesRead = 0;
   let release: () => void = () => undefined;
   const pageSize = options.pageSize ?? 100;
   const pageAt = (end: number): HistoryOutcome => {
@@ -65,6 +66,8 @@ function createHarness(
           ? thread.length
           : Number(page.before.slice('v1:'.length));
 
+      pagesRead += 1;
+
       if (options.hold !== true || page?.before !== undefined) {
         return Promise.resolve(pageAt(end));
       }
@@ -89,6 +92,7 @@ function createHarness(
     append: (next: HistoryMessage) => {
       thread.push(next);
     },
+    pagesRead: () => pagesRead,
   };
 }
 
@@ -145,6 +149,13 @@ describe('chat transcript', () => {
     expect(harness.printed()).toBe(
       [2, 3, 4, 5, 6].map(id => `Mira: missed ${String(id)}\n`).join(''),
     );
+    expect(harness.pagesRead()).toBe(3);
+
+    // The anchor moved up: the next catch-up reads one page, not the session.
+    harness.append(message(7, 'missed 7'));
+    await transcript.catchUp();
+    expect(harness.pagesRead()).toBe(4);
+    expect(harness.printed()).toContain('Mira: missed 7\n');
   });
 
   it('reports a turn shown once its own messages are on the screen, own lines included', async () => {

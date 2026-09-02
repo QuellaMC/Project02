@@ -29,7 +29,10 @@ export type ConfirmationPrompts = {
 export type SettledDecision = GatewayConfirmationDecision | 'cancelled';
 
 export function createConfirmationPrompts(options: {
-  readonly client: Pick<GatewayClient, 'answerConfirmation'>;
+  readonly client: Pick<
+    GatewayClient,
+    'answerConfirmation' | 'pendingConfirmations'
+  >;
   readonly characterId: string;
   readonly lines: Pick<LineDispatcher, 'promptLine'>;
   readonly stdout: NodeJS.WritableStream;
@@ -62,12 +65,13 @@ export function createConfirmationPrompts(options: {
         }
       },
       (error: unknown) => {
-        // The daemon never heard the answer; the request is still pending
-        // there, and the next handshake may ask again.
+        // The daemon never heard the answer. If it still holds the request,
+        // ask again now — the stream may be fine and bring no handshake.
         asked.delete(pending.id);
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
         );
+        options.client.pendingConfirmations().then(reconcile, () => undefined);
       },
     );
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
@@ -151,23 +155,19 @@ export function createConfirmationPrompts(options: {
       showing.withdraw();
     }
   };
+  const reconcile = (pending: readonly PendingConfirmation[]): void => {
+    const present = new Set(pending.map(request => request.id));
 
-  return {
-    ask,
-    settle,
-    reconcile: pending => {
-      const present = new Set(pending.map(request => request.id));
-
-      for (const id of outstanding) {
-        if (!present.has(id)) {
-          settle(id);
-        }
+    for (const id of outstanding) {
+      if (!present.has(id)) {
+        settle(id);
       }
+    }
 
-      for (const request of pending) {
-        ask(request);
-      }
-    },
-    idle: () => chain,
+    for (const request of pending) {
+      ask(request);
+    }
   };
+
+  return {ask, settle, reconcile, idle: () => chain};
 }

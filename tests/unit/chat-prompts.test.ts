@@ -25,6 +25,7 @@ function createHarness(
   let stderr = '';
   const answers: string[] = [];
   const reads: {resolve(line: string | undefined): void}[] = [];
+  const stillPending: PendingConfirmation[] = [];
   const prompts = createConfirmationPrompts({
     client: {
       answerConfirmation(id, decision) {
@@ -34,6 +35,7 @@ function createHarness(
           ? Promise.reject(new Error('The daemon could not be reached.'))
           : Promise.resolve({status: taken});
       },
+      pendingConfirmations: () => Promise.resolve([...stillPending]),
     },
     characterId: 'mira',
     lines: {
@@ -57,6 +59,7 @@ function createHarness(
     prompts,
     answers,
     reads,
+    stillPending,
     stdout: () => stdout,
     stderr: () => stderr,
     shown: () => (stdout.match(/\[y\/N\]/gu) ?? []).length,
@@ -92,18 +95,17 @@ describe('chat confirmation prompts', () => {
     );
   });
 
-  it('asks again on the next handshake when the daemon never heard the answer', async () => {
+  it('asks again at once when the daemon never heard the answer but still holds the request', async () => {
     const harness = createHarness('unreachable');
 
+    harness.stillPending.push(pending('lost'));
     harness.prompts.ask(pending('lost'));
     await new Promise(resolve => setImmediate(resolve));
     harness.reads[0]?.resolve('y');
     await harness.prompts.idle();
 
     expect(harness.stderr()).toContain('could not be reached');
-
-    // The pending list still holds it: it is asked once more.
-    harness.prompts.reconcile([pending('lost')]);
+    // No handshake needed: the daemon's list was read right away.
     await new Promise(resolve => setImmediate(resolve));
     expect(harness.shown()).toBe(2);
   });
