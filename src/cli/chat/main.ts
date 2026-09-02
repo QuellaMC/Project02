@@ -181,9 +181,6 @@ async function runChat(
   // every handshake, since the stream may have missed the whole episode.
   let attached = true;
   const isAttached = (): boolean => attached;
-  // Whose turn the thread is on: turns run one at a time, so the source
-  // stamped on the last user message names the owner of what follows.
-  let turnOwner: string | undefined;
   // The REPL waits for the latest reopen before it delivers, so a line
   // typed right after a reconnect is never refused for a thread mid-reopen.
   let attachment: Promise<void> = Promise.resolve();
@@ -217,23 +214,17 @@ async function runChat(
       event => {
         if (event.kind === 'turn_progress') {
           if (event.conversationId === opened.conversationId) {
-            if (event.progress.kind === 'user_message') {
-              turnOwner = event.progress.source;
-            }
-
             transcript.showProgress(event.progress);
           }
         } else if (event.kind === 'turn_completed') {
           if (event.conversationId === opened.conversationId) {
             // This terminal's own turn reports through its answer; another
             // surface's turn has only the stream to say how it ended.
-            if (event.status !== 'completed' && turnOwner !== source) {
+            if (event.status !== 'completed' && event.source !== source) {
               options.stderr.write(
                 `Warning: a turn on this thread was ${event.status}${event.message === undefined ? '' : `: ${event.message}`}\n`,
               );
             }
-
-            turnOwner = undefined;
           }
         } else if (
           event.kind === 'maintenance_failed' &&

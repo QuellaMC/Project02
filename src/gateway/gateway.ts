@@ -175,7 +175,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         message.clientMessageId,
         () =>
           runtime.deliver(message).then(outcome => {
-            emit(turnCompleted(characterId, message.conversationId, outcome));
+            emit(turnCompleted(characterId, message, outcome));
 
             return outcome;
           }),
@@ -394,13 +394,15 @@ function summarize(
 /** The sender has the outcome; every other surface hears how the turn ended. */
 function turnCompleted(
   characterId: string,
-  conversationId: string,
+  message: GatewayMessage,
   outcome: TurnOutcome,
 ): GatewayEvent {
   return Object.freeze({
     kind: 'turn_completed' as const,
     characterId,
-    conversationId,
+    conversationId: message.conversationId,
+    source: message.source,
+    clientMessageId: message.clientMessageId,
     status: outcome.status,
     ...(outcome.status === 'rejected' || outcome.status === 'refused'
       ? {reason: outcome.reason, message: outcome.message}

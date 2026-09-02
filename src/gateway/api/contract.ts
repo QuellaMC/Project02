@@ -200,6 +200,9 @@ export type GatewayEvent =
       readonly kind: 'turn_completed';
       readonly characterId: string;
       readonly conversationId: string;
+      /** The submission's own stamps, so a surface knows whose turn ended. */
+      readonly source: string;
+      readonly clientMessageId: string;
       readonly status: TurnOutcome['status'];
       /** The terminal explanation every surface can show, not only the sender. */
       readonly reason?: string;

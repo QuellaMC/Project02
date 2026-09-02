@@ -162,14 +162,14 @@ event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply",…}}
 
 event: turn_completed
-data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","status":"completed"}</code></pre>
+data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed"}</code></pre>
 
     <table>
       <thead><tr><th>Event</th><th>Carries</th></tr></thead>
       <tbody>
         <tr><td><code>ready</code></td><td>The protocol version. The client bootstraps on every one it sees.</td></tr>
         <tr><td><code>turn_progress</code></td><td>A turn's progress, including both committed roles: <code>user_message</code> (with <code>source</code> and <code>clientMessageId</code>) and <code>visible_reply</code>.</td></tr>
-        <tr><td><code>turn_completed</code></td><td>The turn's terminal status, with the reason and message when it was not completed.</td></tr>
+        <tr><td><code>turn_completed</code></td><td>The turn's terminal status, with the reason and message when it was not completed, stamped with the submission's <code>source</code> and <code>clientMessageId</code> so every surface knows whose turn ended — even one that committed nothing.</td></tr>
         <tr><td><code>confirmation_requested</code></td><td>A tool asking for approval: id, request, deadline. The same shape the pending list returns.</td></tr>
         <tr><td><code>confirmation_settled</code></td><td>The decision: approved, denied, or cancelled.</td></tr>
         <tr><td><code>state_changed</code></td><td>A character's runtime state, with a message when something went wrong.</td></tr>
