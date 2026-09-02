@@ -142,6 +142,11 @@ export type HistoryOutcome =
     }
   | StorageFailure;
 
+/** The one shape every transport refusal takes; a verb's outcome never uses it. */
+export type GatewayErrorBody = {
+  readonly error: {readonly code: string; readonly message: string};
+};
+
 /** What one reconcile pass set in motion; the outcomes arrive as states. */
 export type ReconcilePlan = {
   readonly starting: readonly string[];
