@@ -158,6 +158,19 @@ async function runChat(
     stderr: options.stderr,
   });
   const turns = createTurnTracker();
+  // A fatal turn — anyone's — costs the character its open threads; when
+  // it is back, this terminal opens the same one again.
+  let attached = true;
+  const reattach = (): void => {
+    client.openDirectConversation(characterId).then(outcome => {
+      if (outcome.status === 'opened') {
+        attached = true;
+        options.stdout.write(`${characterId} is back.\n`);
+      } else {
+        options.stderr.write(`Error: ${outcome.message}\n`);
+      }
+    }, reportError);
+  };
   const streaming = new AbortController();
   const streamEnded = client
     .events(
@@ -176,10 +189,19 @@ async function runChat(
           confirmations.settle(event.id, event.decision);
         } else if (
           event.kind === 'state_changed' &&
-          event.characterId === characterId &&
-          event.message !== undefined
+          event.characterId === characterId
         ) {
-          options.stderr.write(`Warning: ${event.message}\n`);
+          if (event.state === 'failed') {
+            attached = false;
+          }
+
+          if (event.message !== undefined) {
+            options.stderr.write(`Warning: ${event.message}\n`);
+          }
+
+          if (event.state === 'ready' && !attached) {
+            reattach();
+          }
         }
       },
       {

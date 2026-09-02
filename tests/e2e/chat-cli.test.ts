@@ -378,4 +378,59 @@ describe('chat shim', () => {
     await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     await daemon.close();
   });
+  it("reattaches its thread after another surface's turn killed it", async () => {
+    let sessionsRoot = '';
+    let breakNextTurn = false;
+    const daemon = await startDaemon(
+      {
+        invoke() {
+          if (breakNextTurn) {
+            breakNextTurn = false;
+            // Break the session store mid-turn so the commit fails.
+            chmodSync(sessionsRoot, 0o000);
+          }
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+            }),
+          };
+        },
+      },
+      storeRoot => {
+        sessionsRoot = join(
+          characterDataDirPath(storeRoot, 'mira'),
+          'sessions',
+        );
+      },
+    );
+    // The store is mended the moment the failure lands, before recovery.
+    const stopMending = daemon.gateway.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+
+    try {
+      const shim = openShim([], daemon.env);
+
+      await shim.printed('mira is ready.');
+      breakNextTurn = true;
+
+      const web = await deliverFromWeb(daemon.gateway, 'mira', 'boom');
+
+      await expect(web.outcome).resolves.toMatchObject({status: 'failed'});
+      await shim.printed('mira is back.');
+      shim.stdin.write('hello again\n');
+      await shim.printed('Mira: noted');
+
+      const {exitCode} = await shim.exit();
+
+      expect(exitCode).toBe(0);
+    } finally {
+      stopMending();
+      chmodSync(sessionsRoot, 0o755);
+      await daemon.close();
+    }
+  });
 });

@@ -6,6 +6,7 @@
  * shows twice.
  */
 import type {GatewayClient} from '../../gateway/client/index.ts';
+import type {HistoryMessage} from '../../gateway/index.ts';
 import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 
 export type Transcript = {
@@ -63,23 +64,7 @@ export async function createTranscript(options: {
     buffering = true;
 
     try {
-      const page = await options.client.history(options.conversationId, {
-        limit: catchUpPageSize,
-      });
-
-      if (page.status !== 'ok') {
-        throw new Error(page.message);
-      }
-
-      // Not on the page any more means the whole page is newer than it.
-      const from =
-        startAfter === null
-          ? 0
-          : page.messages.findIndex(
-              message => message.messageId === startAfter,
-            ) + 1;
-
-      for (const message of page.messages.slice(from)) {
+      for (const message of await readSince(startAfter)) {
         show(message);
       }
     } finally {
@@ -94,6 +79,39 @@ export async function createTranscript(options: {
           render(progress);
         }
       }
+    }
+  };
+
+  // Pages walk backward until the anchor, or the thread's start, is on one;
+  // what comes back is everything after the anchor, oldest first.
+  const readSince = async (
+    anchor: string | null,
+  ): Promise<readonly HistoryMessage[]> => {
+    const collected: HistoryMessage[] = [];
+    let before: string | undefined;
+
+    for (;;) {
+      const page = await options.client.history(options.conversationId, {
+        limit: catchUpPageSize,
+        ...(before === undefined ? {} : {before}),
+      });
+
+      if (page.status !== 'ok') {
+        throw new Error(page.message);
+      }
+
+      const at =
+        anchor === null
+          ? -1
+          : page.messages.findIndex(message => message.messageId === anchor);
+
+      collected.unshift(...page.messages.slice(at + 1));
+
+      if (at !== -1 || page.earlier === undefined) {
+        return collected;
+      }
+
+      before = page.earlier;
     }
   };
 

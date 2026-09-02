@@ -18,7 +18,7 @@ function pending(id: string, characterId = 'mira'): PendingConfirmation {
   };
 }
 
-function createHarness() {
+function createHarness(taken: 'answered' | 'expired' | 'unknown' = 'answered') {
   let stdout = '';
   let stderr = '';
   const answers: string[] = [];
@@ -28,7 +28,7 @@ function createHarness() {
       answerConfirmation(id, decision) {
         answers.push(`${id}:${decision}`);
 
-        return Promise.resolve({status: 'answered' as const});
+        return Promise.resolve({status: taken});
       },
     },
     characterId: 'mira',
@@ -72,6 +72,20 @@ describe('chat confirmation prompts', () => {
     harness.reads[0]?.resolve('y');
     await harness.prompts.idle();
     expect(harness.answers).toEqual(['one:approved']);
+  });
+
+  it('says so when the daemon did not take the answer', async () => {
+    const harness = createHarness('expired');
+
+    harness.prompts.ask(pending('late'));
+    await new Promise(resolve => setImmediate(resolve));
+    harness.reads[0]?.resolve('y');
+    await harness.prompts.idle();
+
+    expect(harness.answers).toEqual(['late:approved']);
+    expect(harness.stdout()).toContain(
+      'demo_tool was not approved: the confirmation had expired.',
+    );
   });
 
   it('withdraws a showing prompt settled elsewhere and never shows a queued one', async () => {

@@ -22,35 +22,58 @@ function message(
   };
 }
 
-function createHarness(existing: readonly HistoryMessage[]) {
+/**
+ * A conversation of `thread`, paged like the daemon pages it: newest page
+ * first, `earlier` cursors walking back. The newest page can be held until
+ * the test releases it.
+ */
+function createHarness(
+  initial: readonly HistoryMessage[],
+  options: {readonly pageSize?: number; readonly hold?: boolean} = {},
+) {
+  const thread = [...initial];
   let printed = '';
-  let release: (page: readonly HistoryMessage[]) => void = () => undefined;
-  const pages: Promise<HistoryOutcome>[] = [];
+  let release: () => void = () => undefined;
+  const pageSize = options.pageSize ?? 100;
+  const pageAt = (end: number): HistoryOutcome => {
+    const start = Math.max(0, end - pageSize);
+
+    return {
+      status: 'ok',
+      conversationId: 'conv',
+      characterId: 'mira',
+      messages: thread.slice(start, end),
+      ...(start === 0 ? {} : {earlier: `v1:${String(start)}`}),
+    };
+  };
   const client = {
-    history: (_id: string, page?: {limit?: string | number}) => {
+    history: (
+      _id: string,
+      page?: {limit?: string | number; before?: string},
+    ) => {
       if (page?.limit === 1) {
         return Promise.resolve<HistoryOutcome>({
           status: 'ok',
           conversationId: 'conv',
           characterId: 'mira',
-          messages: existing.slice(-1),
+          messages: thread.slice(-1),
         });
       }
 
-      const next = new Promise<HistoryOutcome>(resolve => {
-        release = messages => {
-          resolve({
-            status: 'ok',
-            conversationId: 'conv',
-            characterId: 'mira',
-            messages,
-          });
+      const end =
+        page?.before === undefined
+          ? thread.length
+          : Number(page.before.slice('v1:'.length));
+
+      if (options.hold !== true || page?.before !== undefined) {
+        return Promise.resolve(pageAt(end));
+      }
+
+      return new Promise<HistoryOutcome>(resolve => {
+        release = () => {
+          resolve(pageAt(end));
         };
       });
-
-      pages.push(next);
-
-      return next;
     },
   };
 
@@ -60,33 +83,38 @@ function createHarness(existing: readonly HistoryMessage[]) {
     stdout: collect(chunk => {
       printed += chunk;
     }),
-    release: (messages: readonly HistoryMessage[]) => {
-      release(messages);
+    release: () => {
+      release();
+    },
+    append: (next: HistoryMessage) => {
+      thread.push(next);
     },
   };
 }
 
 describe('chat transcript', () => {
   it('holds live events while a catch-up page is read, so the thread stays in order', async () => {
-    const before = [message(1, 'earlier', 'web'), message(2, 'earlier reply')];
-    const harness = createHarness(before);
+    const harness = createHarness(
+      [message(1, 'earlier', 'web'), message(2, 'earlier reply')],
+      {hold: true},
+    );
     const transcript = await createTranscript({
       client: harness.client,
       conversationId: 'conv',
       source: 'chat-shim:1',
       stdout: harness.stdout,
     });
+
+    // A was committed while the stream was down; B is live, right after.
+    harness.append(message(3, 'A, missed', 'web'));
+    harness.append(message(4, 'B, live'));
+
     const catchingUp = transcript.catchUp();
     const live: LocalRuntimeTurnProgressEvent = message(4, 'B, live');
 
-    // B arrives while the page holding the missed A is still in flight.
     transcript.showProgress(live);
     expect(harness.printed()).toBe('');
-    harness.release([
-      ...before,
-      message(3, 'A, missed', 'web'),
-      message(4, 'B, live'),
-    ]);
+    harness.release();
     await catchingUp;
 
     expect(harness.printed()).toBe('You: A, missed\nMira: B, live\n');
@@ -94,6 +122,29 @@ describe('chat transcript', () => {
     // Nothing from before this terminal joined, and nothing twice.
     transcript.showProgress(live);
     expect(harness.printed()).toBe('You: A, missed\nMira: B, live\n');
+  });
+
+  it('walks earlier pages until the anchor when more was missed than one page holds', async () => {
+    const thread = [
+      message(1, 'anchor'),
+      ...[2, 3, 4, 5, 6].map(id => message(id, `missed ${String(id)}`)),
+    ];
+    const harness = createHarness(thread.slice(0, 1), {pageSize: 2});
+    const transcript = await createTranscript({
+      client: harness.client,
+      conversationId: 'conv',
+      source: 'chat-shim:1',
+      stdout: harness.stdout,
+    });
+
+    for (const next of thread.slice(1)) {
+      harness.append(next);
+    }
+    await transcript.catchUp();
+
+    expect(harness.printed()).toBe(
+      [2, 3, 4, 5, 6].map(id => `Mira: missed ${String(id)}\n`).join(''),
+    );
   });
 
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
@@ -107,11 +158,9 @@ describe('chat transcript', () => {
 
     transcript.showProgress(message(1, 'mine', 'chat-shim:1'));
     transcript.showProgress(message(2, 'reply'));
-
-    const catchingUp = transcript.catchUp();
-
-    harness.release([message(1, 'mine', 'chat-shim:1'), message(2, 'reply')]);
-    await catchingUp;
+    harness.append(message(1, 'mine', 'chat-shim:1'));
+    harness.append(message(2, 'reply'));
+    await transcript.catchUp();
     expect(harness.printed()).toBe('Mira: reply\n');
   });
 });
