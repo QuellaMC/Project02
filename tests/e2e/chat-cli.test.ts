@@ -440,8 +440,9 @@ describe('chat shim', () => {
       await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
       await shim.printed('You: landed');
       await shim.printed('Mira: noted');
-      // The line sent into the void is settled from the thread: it never landed.
-      await shim.printed('Your line "did this land?" did not reach');
+      // The line sent into the void: the thread does not have it, and the
+      // shim says just that, leaving the decision to the person.
+      await shim.printed('Your line "did this land?" is not on the thread yet');
 
       const {exitCode, stderr} = await shim.exit();
 

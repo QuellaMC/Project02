@@ -245,6 +245,8 @@ async function runChat(
           }
         } else if (event.kind === 'turn_completed') {
           if (event.conversationId === opened.conversationId) {
+            transcript.settleLanding(event.clientMessageId, event.status);
+
             // This terminal's own turn reports through its answer; another
             // surface's turn has only the stream to say how it ended.
             if (event.status !== 'completed' && event.source !== source) {
