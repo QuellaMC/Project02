@@ -1,4 +1,5 @@
-import {readdirSync} from 'node:fs';
+import {mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
 import {describe, expect, it} from 'vitest';
@@ -122,6 +123,25 @@ describe('serve', () => {
       conversationId: opened.conversationId,
     });
     await fresh.stop();
+  });
+
+  it('names a character package that failed discovery, and serves the rest', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-broken-');
+    const packageRoot = join(storeRoot, 'characters', 'broken');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(join(packageRoot, 'project02.character.json'), '{not json');
+
+    const serve = runServe(['--store', storeRoot]);
+    const client = createGatewayClient({url: await serve.url});
+
+    expect(serve.stderr()).toContain('Character package ');
+    expect(serve.stderr()).toContain('broken');
+    expect(serve.stderr()).toContain('invalid_descriptor');
+    await expect(client.health()).resolves.toMatchObject({
+      characters: [{id: 'mira', state: 'ready'}],
+    });
+    await expect(serve.stop()).resolves.toBe(0);
   });
 
   it('creates the store only with --init', async () => {

@@ -155,7 +155,7 @@ async function serve(
     const origin = `http://127.0.0.1:${String(server.port)}/`;
 
     options.stdout.write(`Gateway listening on ${origin}\n`);
-    reportConfigErrors(gateway.health(), options.stderr);
+    reportStartupProblems(gateway.health(), options.stderr);
     await gateway.reconcile();
     options.stdout.write(`${gatewayUrlEnvVarName}=${origin}#token=${token}\n`);
     await aborted(options.signal);
@@ -173,7 +173,12 @@ async function serve(
   }
 }
 
-function reportConfigErrors(
+/**
+ * What the roster cannot carry: a config that failed to load, and a
+ * character package that failed discovery — which has no runtime to report
+ * itself, and would otherwise vanish without a word.
+ */
+function reportStartupProblems(
   health: GatewayHealth,
   stderr: NodeJS.WritableStream,
 ): void {
@@ -183,6 +188,12 @@ function reportConfigErrors(
         `Config: ${runtimeConfigDiagnosticAttribution(diagnostic)}${diagnostic.message}\n`,
       );
     }
+  }
+
+  for (const diagnostic of health.packages.diagnostics) {
+    stderr.write(
+      `Character package ${diagnostic.path} (${diagnostic.code}): ${diagnostic.message}\n`,
+    );
   }
 }
 
