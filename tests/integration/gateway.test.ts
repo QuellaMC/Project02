@@ -1052,19 +1052,25 @@ describe('gateway façade', () => {
 
     const ref = await open(gateway, 'mira');
 
+    const clientMessageId = randomUUID();
+
     await expect(
       gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
         text: 'hello there',
         source: 'test',
-        clientMessageId: randomUUID(),
+        clientMessageId,
       }),
     ).resolves.toMatchObject({status: 'rejected'});
+    // Stamped with the submission's own marks, so every surface knows
+    // whose turn ended, even one that committed nothing.
     expect(events.at(-1)).toMatchObject({
       kind: 'turn_completed',
       characterId: 'mira',
       conversationId: ref.conversationId,
+      source: 'test',
+      clientMessageId,
       status: 'rejected',
       reason: 'malformed_output',
     });
