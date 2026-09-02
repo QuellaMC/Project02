@@ -133,6 +133,34 @@ describe('chat transcript', () => {
     expect(harness.printed()).toBe(`${joined}You: A, missed\nMira: B, live\n`);
   });
 
+  it('keeps a turn ending behind the page it arrived during, so it cannot overtake the line', async () => {
+    const harness = createHarness([], {hold: true});
+    const transcript = await createTranscript({
+      client: harness.client,
+      conversationId: 'conv',
+      source: 'chat-shim:1',
+      stdout: harness.stdout,
+    });
+    const own = (id: number, text: string, clientMessageId: string) => ({
+      ...message(id, text, 'chat-shim:1'),
+      clientMessageId,
+    });
+
+    // The answer was lost; the line, its record, and its turn's end all
+    // arrive while the page is being read.
+    transcript.expectLanding('c1', 'mine');
+    harness.append(own(1, 'mine', 'c1'));
+    const catchingUp = transcript.catchUp();
+
+    transcript.showProgress(own(1, 'mine', 'c1'));
+    transcript.turnEnded('c1', 'rejected');
+    expect(harness.printed()).toBe('');
+    harness.release();
+    await catchingUp;
+
+    expect(harness.printed()).toBe('Your line "mine" did land.\n');
+  });
+
   it('walks earlier pages until the anchor when more was missed than one page holds', async () => {
     const thread = [
       message(1, 'anchor'),
@@ -237,9 +265,9 @@ describe('chat transcript', () => {
     // the stream can carry the turn's end before the answer fails. The
     // line's own record decides whether it reached the thread at all.
     transcript.showProgress(own(4, 'fourth', 'c4'));
-    transcript.settleLanding('c4', 'rejected');
+    transcript.turnEnded('c4', 'rejected');
     transcript.expectLanding('c4', 'fourth');
-    transcript.settleLanding('c5', 'failed');
+    transcript.turnEnded('c5', 'failed');
     transcript.expectLanding('c5', 'fifth');
     expect(harness.printed()).toContain(
       'Your line "fourth" did reach the character; its turn was rejected.',

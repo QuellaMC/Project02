@@ -11,9 +11,14 @@ import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 
 export type Transcript = {
   showProgress(progress: LocalRuntimeTurnProgressEvent): void;
+  /** A turn on the thread ended; kept in order with the messages. */
+  turnEnded(clientMessageId: string, status: string): void;
   /** Reads back and shows what this terminal has not shown yet. */
   catchUp(): Promise<void>;
-  /** Resolves once no catch-up is in flight and nothing waits on one. */
+  /**
+   * Resolves once no catch-up is in flight, or after the grace period —
+   * a read-back that hangs must not hold the terminal.
+   */
   settled(): Promise<void>;
   /**
    * Resolves once every one of these messages has reached the screen (or
@@ -29,9 +34,18 @@ export type Transcript = {
    * thread, or its turn's end, settles it.
    */
   expectLanding(clientMessageId: string, text: string): void;
-  /** The daemon said how that line's turn ended: the last word on it. */
-  settleLanding(clientMessageId: string, status: string): void;
 };
+
+type Arrival =
+  | {
+      readonly kind: 'progress';
+      readonly progress: LocalRuntimeTurnProgressEvent;
+    }
+  | {
+      readonly kind: 'ended';
+      readonly clientMessageId: string;
+      readonly status: string;
+    };
 
 type ShownMessage = {
   readonly messageId: string;
@@ -89,7 +103,7 @@ export async function createTranscript(options: {
   const say = (text: string): void => {
     options.stdout.write(`${text}\n`);
   };
-  const waiting: LocalRuntimeTurnProgressEvent[] = [];
+  const waiting: Arrival[] = [];
   let buffering = false;
   let inFlight = 0;
   let queue: Promise<void> = Promise.resolve();
@@ -121,9 +135,36 @@ export async function createTranscript(options: {
       }
     }
   };
-  const render = (progress: LocalRuntimeTurnProgressEvent): void => {
-    if (progress.kind === 'visible_reply' || progress.kind === 'user_message') {
-      show(progress);
+  const settleLanding = (clientMessageId: string, status: string): void => {
+    const text = uncertain.get(clientMessageId);
+
+    if (text !== undefined) {
+      uncertain.delete(clientMessageId);
+      say(verdict(clientMessageId, text, status));
+
+      return;
+    }
+
+    remember(ended, clientMessageId);
+    ended.set(clientMessageId, status);
+  };
+  const apply = (arrival: Arrival): void => {
+    if (arrival.kind === 'ended') {
+      settleLanding(arrival.clientMessageId, arrival.status);
+    } else if (
+      arrival.progress.kind === 'visible_reply' ||
+      arrival.progress.kind === 'user_message'
+    ) {
+      show(arrival.progress);
+    }
+  };
+  // While a page is being read, what the stream brings waits behind it —
+  // messages and turn endings alike, in the order they came.
+  const arrive = (arrival: Arrival): void => {
+    if (buffering) {
+      waiting.push(arrival);
+    } else {
+      apply(arrival);
     }
   };
   // A terminal joins on the thread's recent tail, so what happened before
@@ -173,8 +214,8 @@ export async function createTranscript(options: {
       if (inFlight === 0) {
         buffering = false;
 
-        for (const progress of waiting.splice(0)) {
-          render(progress);
+        for (const arrival of waiting.splice(0)) {
+          apply(arrival);
         }
       }
     }
@@ -215,11 +256,10 @@ export async function createTranscript(options: {
 
   return {
     showProgress(progress) {
-      if (buffering) {
-        waiting.push(progress);
-      } else {
-        render(progress);
-      }
+      arrive({kind: 'progress', progress});
+    },
+    turnEnded(clientMessageId, status) {
+      arrive({kind: 'ended', clientMessageId, status});
     },
     catchUp() {
       // The first read-back starts now, so a live event that arrives in the
@@ -234,7 +274,15 @@ export async function createTranscript(options: {
 
       return run;
     },
-    settled: () => queue,
+    settled: () =>
+      inFlight === 0
+        ? Promise.resolve()
+        : Promise.race([
+            queue,
+            new Promise<void>(resolve => {
+              setTimeout(resolve, echoTimeoutMs);
+            }),
+          ]),
     expectLanding(clientMessageId, text) {
       const status = ended.get(clientMessageId);
 
@@ -245,19 +293,6 @@ export async function createTranscript(options: {
       } else {
         uncertain.set(clientMessageId, text);
       }
-    },
-    settleLanding(clientMessageId, status) {
-      const text = uncertain.get(clientMessageId);
-
-      if (text !== undefined) {
-        uncertain.delete(clientMessageId);
-        say(verdict(clientMessageId, text, status));
-
-        return;
-      }
-
-      remember(ended, clientMessageId);
-      ended.set(clientMessageId, status);
     },
     whenShown: messageIds =>
       messageIds.every(id => shown.has(id))
