@@ -4,6 +4,7 @@ import {Readable} from 'node:stream';
 import {hc} from 'hono/client';
 
 import {
+  gatewayLoopbackHostnames,
   gatewayProtocolVersion,
   type AnswerOutcome,
   type GatewayConfirmationDecision,
@@ -241,12 +242,21 @@ function resolveOptions(options: GatewayClientOptions): {
     );
   }
 
-  // The daemon speaks plain HTTP on loopback; anything else is a typo.
+  // The daemon speaks plain HTTP on loopback; anything else is a typo, and
+  // a token or a thread must never go anywhere else in the clear.
   if (url.protocol !== 'http:') {
     throw new GatewayClientError(
       0,
       'invalid_url',
       `A gateway URL starts with http://, not ${url.protocol}//: ${given}`,
+    );
+  }
+
+  if (!gatewayLoopbackHostnames.has(url.hostname)) {
+    throw new GatewayClientError(
+      0,
+      'invalid_url',
+      `A gateway URL points at this machine (127.0.0.1, localhost, or [::1]), not ${url.hostname}: ${given}`,
     );
   }
 

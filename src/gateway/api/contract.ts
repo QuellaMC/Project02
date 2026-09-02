@@ -14,6 +14,16 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
 export const gatewayProtocolVersion = 1;
 
 /**
+ * The only hosts the daemon answers on, and the only ones a client may be
+ * pointed at: a token and a thread never leave the machine in the clear.
+ */
+export const gatewayLoopbackHostnames: ReadonlySet<string> = new Set([
+  '127.0.0.1',
+  'localhost',
+  '[::1]',
+]);
+
+/**
  * A message from one participant into one conversation. The shape is
  * participant-agnostic; the current gateway accepts only the local user as
  * sender and refuses anything else with a structured outcome. The two
