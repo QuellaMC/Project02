@@ -259,6 +259,7 @@ async function runChat(
         // this terminal would keep taking lines it can show nothing for.
         streamFailure = error;
         reportError(error);
+        watch.giveUp();
         lines.close();
         firstHandshake?.();
         firstHandshake = undefined;
@@ -268,7 +269,10 @@ async function runChat(
   try {
     await streamListening;
 
-    if (streamFailure === undefined) {
+    // Ready means the stream listens and the thread is attached; if the
+    // character failed between the open and the handshake, the warnings
+    // already said so, and the first line waits for it to be back.
+    if (streamFailure === undefined && watch.isAttached()) {
       options.stdout.write(`${characterId} is ready.\n`);
     }
 
@@ -293,7 +297,7 @@ async function runChat(
 
       if (!(await watch.attached())) {
         options.stderr.write(
-          `Your line was not sent: ${characterId} is no longer installed.\n`,
+          `Your line was not sent: ${characterId} is gone.\n`,
         );
         continue;
       }
@@ -368,6 +372,9 @@ function createCharacterWatch(options: {
    * because the roster no longer has it.
    */
   attached(): Promise<boolean>;
+  isAttached(): boolean;
+  /** Nothing will attach any more: every held line is let go. */
+  giveUp(): void;
   stateChanged(state: string, message: string | undefined): void;
   maintenanceFailed(failure: {at: string; message: string}): void;
   reportHealth(): Promise<void>;
@@ -377,7 +384,7 @@ function createCharacterWatch(options: {
   let gone = false;
   let attachment: Promise<void> = Promise.resolve();
   let reportedMaintenanceAt: string | undefined;
-  const waiting: (() => void)[] = [];
+  const waiting: ((attached: boolean) => void)[] = [];
   const ensureAttached = (): Promise<void> => {
     attachment = client.openDirectConversation(characterId).then(
       outcome => {
@@ -389,7 +396,7 @@ function createCharacterWatch(options: {
           attached = true;
 
           for (const resume of waiting.splice(0)) {
-            resume();
+            resume(true);
           }
         } else {
           attached = false;
@@ -440,11 +447,18 @@ function createCharacterWatch(options: {
       options.stderr.write(
         `${characterId} is not available right now; your line will be sent when it is back.\n`,
       );
-      await new Promise<void>(resolve => {
+
+      return new Promise<boolean>(resolve => {
         waiting.push(resolve);
       });
+    },
+    isAttached: () => attached,
+    giveUp() {
+      gone = true;
 
-      return true;
+      for (const resume of waiting.splice(0)) {
+        resume(false);
+      }
     },
     stateChanged(state, message) {
       if (state === 'failed') {
