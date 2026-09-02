@@ -1,16 +1,33 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
+import {connect} from 'node:net';
 import {join} from 'node:path';
 
-import {describe, expect, it} from 'vitest';
+import {Hono} from 'hono';
+import {describe, expect, it, vi} from 'vitest';
 
 import {createGatewayApp} from '../../src/gateway/http/app.ts';
-import {createGateway} from '../../src/gateway/index.ts';
+import type {ApiEnv} from '../../src/gateway/http/env.ts';
+import {createEventStreams} from '../../src/gateway/http/events.ts';
+import {
+  createGateway,
+  type GatewayEvent,
+  type GatewayEventListener,
+} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
+import {
+  createConfirmationHome,
+  openDirect,
+} from '../support/gateway-fixtures.ts';
+import {
+  frameData,
+  listen,
+  startTestGatewayServer,
+  subscribeToEvents,
+  testGatewayToken as token,
+} from '../support/gateway-http.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
-
-const token = 'test-token-0123456789abcdef';
 
 function replyAdapter(): RoleModelAdapter {
   return {
@@ -44,6 +61,7 @@ async function createHttpHarness(
   const app = createGatewayApp({
     gateway,
     token,
+    events: createEventStreams(gateway),
     lifecycle: {stopping: options.stopping ?? (() => false)},
     ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
@@ -320,5 +338,195 @@ describe('gateway over HTTP', () => {
 
     expect(late.status).toBe(503);
     expect(await errorOf(late)).toMatchObject({code: 'unavailable'});
+  });
+  it('opens every stream with ready, then carries the turn in order once durable', async () => {
+    const homeRoot = join(createTestTempRoot('project02-gateway-sse-'), 'home');
+
+    await ensureInitializedProject02Store({homeRoot});
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const server = await startTestGatewayServer({
+      gateway,
+      streams: {heartbeatMs: 50},
+    });
+    const events = await subscribeToEvents(server.baseUrl);
+
+    expect(events.response.headers.get('content-type')).toContain(
+      'text/event-stream',
+    );
+    expect(events.response.headers.get('cache-control')).toBe('no-store');
+
+    const ready = await events.next(frame => frame.event === 'ready');
+
+    expect(frameData(ready)).toEqual({protocolVersion: 1});
+    expect(events.frames[0]).toBe(ready);
+    await events.next(frame => frame.comment === 'ping');
+
+    // Every event after the handshake reaches the stream, in order.
+    await gateway.startCharacter('mira');
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'hello there',
+      source: 'web',
+      clientMessageId: 'msg-1',
+    });
+    await events.next(frame => frame.event === 'turn_completed');
+
+    const kinds = events.frames
+      .filter(frame => frame.event !== undefined && frame.event !== 'ready')
+      .map(
+        frame => frameData(frame) as {kind: string; progress?: {kind: string}},
+      )
+      .map(event => event.progress?.kind ?? event.kind);
+
+    expect(kinds).toEqual([
+      'state_changed',
+      'state_changed',
+      'user_message',
+      'visible_reply',
+      'turn_completed',
+    ]);
+    expect(server.events.openCount()).toBe(1);
+
+    await server.close();
+    await events.ended;
+    expect(server.events.openCount()).toBe(0);
+    await gateway.stop();
+  });
+
+  it('lets a client that reconnects mid-confirmation find it in the list and answer it', async () => {
+    const {gateway, inspectTone} = await createConfirmationHome();
+    const server = await startTestGatewayServer({gateway});
+    const first = await subscribeToEvents(server.baseUrl);
+    const ref = await openDirect(gateway, 'mira');
+    const turn = fetch(`${server.baseUrl}/api/turns`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'please be warmer',
+        source: 'web',
+        clientMessageId: 'msg-confirm',
+      }),
+    });
+
+    await first.next(frame => frame.event === 'confirmation_requested');
+    await first.cancel();
+
+    // The second connection missed the request; the list has it.
+    const second = await subscribeToEvents(server.baseUrl);
+
+    await second.next(frame => frame.event === 'ready');
+
+    const pending = (await (
+      await fetch(`${server.baseUrl}/api/confirmations`, {
+        headers: {authorization: `Bearer ${token}`},
+      })
+    ).json()) as {id: string}[];
+
+    expect(pending).toHaveLength(1);
+
+    const answered = await fetch(
+      `${server.baseUrl}/api/confirmations/${pending[0]?.id ?? ''}`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({decision: 'approved'}),
+      },
+    );
+
+    await expect(answered.json()).resolves.toEqual({status: 'answered'});
+    await expect((await turn).json()).resolves.toMatchObject({
+      status: 'completed',
+    });
+    await second.next(
+      frame =>
+        frame.event === 'confirmation_settled' &&
+        (frameData(frame) as {decision: string}).decision === 'approved',
+    );
+    expect(
+      inspectTone().fields.find(field => field.name === 'tone')?.authored.value,
+    ).toBe('warm');
+    await second.cancel();
+    await server.close();
+    await gateway.stop();
+  });
+
+  it('drops a client that stops reading once the frames it left behind pass the bound', async () => {
+    // Only the stream is under test: a fan-out the test drives directly.
+    const listeners = new Set<GatewayEventListener>();
+    const streams = createEventStreams(
+      {
+        events(listener) {
+          listeners.add(listener);
+
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      },
+      {maxPendingFrames: 8},
+    );
+    const app = new Hono<ApiEnv>().get('/api/events', c => streams.handler(c));
+    const server = await listen(app);
+    const stalled = connect(server.port, '127.0.0.1');
+
+    await new Promise<void>(resolve => {
+      stalled.once('connect', () => {
+        resolve();
+      });
+    });
+    stalled.write(
+      `GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\n\r\n`,
+    );
+    stalled.pause();
+    await vi.waitFor(() => {
+      expect(streams.openCount()).toBe(1);
+    });
+
+    // Frames large enough that the socket's own buffer fills fast.
+    const event = {
+      kind: 'turn_progress',
+      characterId: 'mira',
+      conversationId: 'c',
+      progress: {
+        kind: 'visible_reply',
+        messageId: 'm',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'x'.repeat(256 * 1024),
+      },
+    } satisfies GatewayEvent;
+
+    for (let index = 0; index < 64; index += 1) {
+      for (const listener of listeners) {
+        listener(event);
+      }
+    }
+
+    await vi.waitFor(
+      () => {
+        expect(streams.openCount()).toBe(0);
+      },
+      {timeout: 10_000},
+    );
+    stalled.destroy();
+    await server.close();
   });
 });

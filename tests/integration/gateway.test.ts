@@ -16,17 +16,9 @@ import {
   type Gateway,
   type GatewayEvent,
 } from '../../src/gateway/index.ts';
-import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
-import {
-  createDemoConfigPluginManifest,
-  demoConfigPluginId,
-} from '../../src/plugins/packages/demo-config/plugin.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
-import {
-  ensureInitializedProject02Store,
-  inspectRuntimePluginConfig,
-} from '../../src/runtime/config/index.ts';
+import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
   characterDataDirPath,
@@ -40,9 +32,10 @@ import {
   testCharacterProfile,
 } from '../support/character-fixtures.ts';
 import {
-  runtimeLocationForTest,
-  writeRuntimeConfig,
-} from '../support/runtime-config.ts';
+  authoredTone,
+  createConfirmationHome,
+} from '../support/gateway-fixtures.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(
@@ -84,75 +77,6 @@ async function open(gateway: Gateway, characterId: string) {
   return outcome;
 }
 
-/**
- * A gateway whose character runs the bundled demo-config plugin, and an
- * adapter that asks to change its tone: the one confirmation-gated path in
- * the runtime, driven through real activation and the runtime's own broker.
- */
-async function createConfirmationHome(reply = 'done') {
-  const homeRoot = await createGatewayHome();
-  const manifest = createDemoConfigPluginManifest();
-
-  writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    plugins: {[demoConfigPluginId]: {enabled: true}},
-  });
-
-  let expectedFingerprint = '';
-  let invocations = 0;
-  const adapter: RoleModelAdapter = {
-    invoke() {
-      invocations += 1;
-
-      return {
-        rawOutputText: JSON.stringify({
-          toolCalls:
-            invocations === 1
-              ? [
-                  {
-                    name: runtimePluginConfigUpdateToolName,
-                    input: {
-                      pluginId: demoConfigPluginId,
-                      fieldName: 'tone',
-                      operation: 'set',
-                      value: 'warm',
-                      expectedFingerprint,
-                    },
-                  },
-                ]
-              : [{name: 'visible_reply', input: {text: reply}}],
-        }),
-      };
-    },
-  };
-  const gateway = createGateway({
-    location: {storeRoot: homeRoot},
-    env: {},
-    roleModelAdapter: adapter,
-  });
-  const inspectTone = () =>
-    inspectRuntimePluginConfig({
-      targetScope: 'character',
-      runtimeLocation: runtimeLocationForTest({
-        storeRoot: homeRoot,
-        character: 'mira',
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-
-  await gateway.startCharacter('mira');
-  expectedFingerprint = inspectTone().fingerprint;
-
-  return {gateway, inspectTone};
-}
-
-function authoredTone(
-  inspected: ReturnType<typeof inspectRuntimePluginConfig>,
-): unknown {
-  return inspected.fields.find(field => field.name === 'tone')?.authored.value;
-}
-
-/** A chat long enough to have rotated: the window is tiny, the turns many. */
 async function createRotatedChat(texts: readonly string[]) {
   const homeRoot = await createGatewayHome();
 

@@ -6,7 +6,9 @@ import {HTTPException} from 'hono/http-exception';
 import {relative} from 'node:path';
 
 import type {Gateway} from '../api/contract.ts';
-import {createApiRouter, errorBody, type ApiEnv} from './api.ts';
+import {createApiRouter, errorBody} from './api.ts';
+import type {ApiEnv} from './env.ts';
+import type {EventStreams} from './events.ts';
 
 export type GatewayLifecycle = {
   /** True once shutdown began: new API requests are told so, with a 503. */
@@ -16,6 +18,7 @@ export type GatewayLifecycle = {
 export type CreateGatewayAppOptions = {
   readonly gateway: Gateway;
   readonly token: string;
+  readonly events: EventStreams;
   readonly lifecycle: GatewayLifecycle;
   /** Static files for the web UI, served without auth; absent until PR 4 ships one. */
   readonly uiRoot?: string;
@@ -87,11 +90,15 @@ export function createGatewayApp(options: CreateGatewayAppOptions) {
   };
   const routes = app.route(
     '/api',
-    createApiRouter(options.gateway, [
-      guard,
-      bearerAuth({token: options.token}),
-      bodyLimit({maxSize: maxBodyBytes}),
-    ]),
+    createApiRouter(
+      options.gateway,
+      [
+        guard,
+        bearerAuth({token: options.token}),
+        bodyLimit({maxSize: maxBodyBytes}),
+      ],
+      options.events,
+    ),
   );
 
   if (options.uiRoot === undefined) {

@@ -1,16 +1,15 @@
-import type {HttpBindings} from '@hono/node-server';
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {validator} from 'hono/validator';
 
 import type {Gateway, GatewayErrorBody, HistoryPage} from '../api/contract.ts';
+import type {ApiEnv} from './env.ts';
+import type {EventStreams} from './events.ts';
 import {
   answerConfirmationBody,
   gatewayMessageBody,
   openConversationBody,
   type BodyValidator,
 } from './schemas.ts';
-
-export type ApiEnv = {Bindings: HttpBindings};
 
 export function errorBody(code: string, message: string): GatewayErrorBody {
   return Object.freeze({error: Object.freeze({code, message})});
@@ -47,6 +46,7 @@ const historyQuery = validator(
 export function createApiRouter(
   gateway: Gateway,
   middleware: readonly MiddlewareHandler<ApiEnv>[],
+  events: EventStreams,
 ) {
   const api = new Hono<ApiEnv>();
 
@@ -84,6 +84,7 @@ export function createApiRouter(
         200,
       ),
     )
+    .get('/events', c => events.handler(c))
     .all('/*', c =>
       c.json(errorBody('not_found', `No API route at ${c.req.path}.`), 404),
     );
