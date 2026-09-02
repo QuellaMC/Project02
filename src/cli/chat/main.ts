@@ -13,17 +13,15 @@ import {
 } from '../../gateway/client/index.ts';
 import {
   selectProject02CharacterId,
-  type GatewayConfirmationDecision,
   type GatewayHealth,
-  type PendingConfirmation,
 } from '../../gateway/index.ts';
 import {runtimeConfigDiagnosticAttribution} from '../../runtime/config/index.ts';
-import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
-import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
-import {createLineDispatcher, type LineDispatcher} from './lines.ts';
+import {createLineDispatcher} from './lines.ts';
+import {createConfirmationPrompts} from './prompts.ts';
+import {createTranscript} from './transcript.ts';
 
 export type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -174,6 +172,8 @@ async function runChat(
           }
         } else if (event.kind === 'confirmation_requested') {
           confirmations.ask(event);
+        } else if (event.kind === 'confirmation_settled') {
+          confirmations.settle(event.id, event.decision);
         } else if (
           event.kind === 'state_changed' &&
           event.characterId === characterId &&
@@ -238,173 +238,16 @@ async function runChat(
       }
 
       await turns.seen(before);
+      await transcript.settled();
     }
 
     return 0;
   } finally {
     streaming.abort();
     await streamEnded;
+    await transcript.settled();
     lines.close();
   }
-}
-
-type ShownMessage = {
-  readonly messageId: string;
-  readonly speakerName: string;
-  readonly text: string;
-  readonly source?: string;
-};
-
-/**
- * Replies render from the stream, never from the turn's answer, so this
- * terminal shows the same thread every other surface shows. What the stream
- * did not carry is read back from history on every handshake, and nothing
- * shows twice.
- */
-async function createTranscript(options: {
-  readonly client: GatewayClient;
-  readonly conversationId: string;
-  readonly source: string;
-  readonly stdout: NodeJS.WritableStream;
-}): Promise<{
-  showProgress(progress: LocalRuntimeTurnProgressEvent): void;
-  catchUp(): Promise<void>;
-}> {
-  const shown = new Set<string>();
-  const show = (message: ShownMessage): void => {
-    if (shown.has(message.messageId)) {
-      return;
-    }
-
-    shown.add(message.messageId);
-
-    // This terminal's own lines are already on its screen.
-    if (message.source !== options.source) {
-      options.stdout.write(`${message.speakerName}: ${message.text}\n`);
-    }
-  };
-  // The thread before this terminal joined stays where it was.
-  const newest = await options.client.history(options.conversationId, {
-    limit: 1,
-  });
-  const startAfter =
-    newest.status === 'ok' ? (newest.messages.at(-1)?.messageId ?? null) : null;
-
-  return {
-    showProgress(progress) {
-      if (
-        progress.kind === 'visible_reply' ||
-        progress.kind === 'user_message'
-      ) {
-        show(progress);
-      }
-    },
-    async catchUp() {
-      const page = await options.client.history(options.conversationId, {
-        limit: 100,
-      });
-
-      if (page.status !== 'ok') {
-        throw new Error(page.message);
-      }
-
-      // Not on the page any more means the whole page is newer than it.
-      const from =
-        startAfter === null
-          ? 0
-          : page.messages.findIndex(
-              message => message.messageId === startAfter,
-            ) + 1;
-
-      for (const message of page.messages.slice(from)) {
-        show(message);
-      }
-    },
-  };
-}
-
-/**
- * Prompts chain: each prints only when it is next and consumes its own
- * line, so one keystroke never approves two proposed effects. The person
- * approves exactly what will happen: the summary and the full change — and
- * only for the character this terminal talks to.
- */
-function createConfirmationPrompts(options: {
-  readonly client: GatewayClient;
-  readonly characterId: string;
-  readonly lines: LineDispatcher;
-  readonly stdout: NodeJS.WritableStream;
-  readonly stderr: NodeJS.WritableStream;
-}): {ask(pending: PendingConfirmation): void; idle(): Promise<void>} {
-  const asked = new Set<string>();
-  let chain: Promise<void> = Promise.resolve();
-  const answer = (
-    id: string,
-    decision: GatewayConfirmationDecision,
-  ): Promise<void> =>
-    options.client.answerConfirmation(id, decision).then(
-      () => undefined,
-      (error: unknown) => {
-        options.stderr.write(
-          `Error: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
-      },
-    );
-  const prompt = async (pending: PendingConfirmation): Promise<void> => {
-    // Expired while queued: the daemon already cancelled it, and asking
-    // now would feed the answer to the REPL.
-    if (Date.now() >= pending.deadlineAt) {
-      await answer(pending.id, 'denied');
-
-      return;
-    }
-
-    options.stdout.write(
-      `Confirm ${pending.request.toolName} (${pending.request.pluginId}): ` +
-        `${pending.request.summary}\n` +
-        `${JSON.stringify(pending.request.preview, null, 2)}\n[y/N] `,
-    );
-
-    let line: string | undefined;
-
-    try {
-      line = await options.lines.promptLine();
-    } catch {
-      // A failed read is a denial, never a parked confirmation.
-      await answer(pending.id, 'denied');
-
-      return;
-    }
-
-    if (Date.now() >= pending.deadlineAt) {
-      options.stderr.write(
-        'Confirmation timed out; the answer was discarded.\n',
-      );
-      await answer(pending.id, 'denied');
-
-      return;
-    }
-
-    await answer(
-      pending.id,
-      cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
-    );
-  };
-
-  return {
-    ask: pending => {
-      if (
-        pending.characterId !== options.characterId ||
-        asked.has(pending.id)
-      ) {
-        return;
-      }
-
-      asked.add(pending.id);
-      chain = chain.then(() => prompt(pending));
-    },
-    idle: () => chain,
-  };
 }
 
 /** How long a settled turn may take to show up on the stream. */
