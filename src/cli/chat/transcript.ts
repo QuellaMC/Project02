@@ -31,6 +31,8 @@ type ShownMessage = {
 };
 
 const catchUpPageSize = 100;
+/** The thread's recent tail, shown when a terminal joins it. */
+const joinTailSize = 20;
 /** How long a settled turn may take to show up on the stream. */
 const echoTimeoutMs = 5_000;
 
@@ -71,14 +73,23 @@ export async function createTranscript(options: {
       show(progress);
     }
   };
-  // The thread before this terminal joined stays where it was. The anchor
-  // then moves up with each catch-up, so a reconnect late in a long
-  // session reads one page, not the whole session again.
+  // A terminal joins on the thread's recent tail, so what happened before
+  // it — a reply to a line sent from a terminal that is gone — is on the
+  // screen. The anchor starts at the newest of it and moves up with each
+  // catch-up, so a reconnect late in a long session reads one page, not
+  // the whole session again.
   const newest = await options.client.history(options.conversationId, {
-    limit: 1,
+    limit: joinTailSize,
   });
-  let anchor: string | null =
-    newest.status === 'ok' ? (newest.messages.at(-1)?.messageId ?? null) : null;
+  let anchor: string | null = null;
+
+  if (newest.status === 'ok') {
+    for (const message of newest.messages) {
+      show(message);
+    }
+
+    anchor = newest.messages.at(-1)?.messageId ?? null;
+  }
   const readBack = async (): Promise<void> => {
     buffering = true;
 

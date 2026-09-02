@@ -76,17 +76,21 @@ async function serveDaemon(gateway: Gateway, storeRoot = '') {
 function openShim(args: readonly string[], env: NodeJS.ProcessEnv) {
   const stdin = new PassThrough();
   let seen = '';
+  let errors = '';
   const run = runChat(args, {
     env,
     input: stdin,
     onStdout: stdout => {
       seen = stdout;
     },
+    onStderr: stderr => {
+      errors = stderr;
+    },
   });
   const printed = (text: string) =>
     vi.waitFor(
       () => {
-        expect(seen).toContain(text);
+        expect(seen, `stderr so far:\n${errors}`).toContain(text);
       },
       {timeout: 10_000},
     );
@@ -96,6 +100,7 @@ function openShim(args: readonly string[], env: NodeJS.ProcessEnv) {
     run,
     printed,
     seen: () => seen,
+    errors: () => errors,
     async exit() {
       stdin.write('/exit\n');
 
@@ -133,6 +138,7 @@ async function runChat(
     readonly env: NodeJS.ProcessEnv;
     readonly input?: string | NodeJS.ReadableStream;
     readonly onStdout?: (stdout: string) => void;
+    readonly onStderr?: (stderr: string) => void;
   },
 ): Promise<{
   readonly exitCode: number;
@@ -154,6 +160,7 @@ async function runChat(
     }),
     stderr: collect(chunk => {
       stderr += chunk;
+      options.onStderr?.(stderr);
     }),
     env: options.env,
   });
@@ -382,6 +389,60 @@ describe('chat shim', () => {
     await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     await daemon.close();
   });
+  it('stays up when the daemon cannot be reached mid-turn, and shows what landed once it is back', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+
+    // The daemon's socket goes away with a line in flight.
+    await daemon.server.close();
+    shim.stdin.write('did this land?\n');
+    await vi.waitFor(() => {
+      expect(shim.seen().match(/> /gu)).toHaveLength(2);
+    });
+
+    // It comes back on the same address; a turn lands meanwhile.
+    const returned = await startTestGatewayServer({
+      gateway: daemon.gateway,
+      port: daemon.server.port,
+    });
+
+    try {
+      const web = await deliverFromWeb(daemon.gateway, 'mira', 'landed');
+
+      await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+      await shim.printed('You: landed');
+      await shim.printed('Mira: noted');
+
+      const {exitCode, stderr} = await shim.exit();
+
+      expect(exitCode).toBe(0);
+      expect(stderr).toContain('could not be reached');
+    } finally {
+      await returned.close();
+      await daemon.gateway.stop();
+    }
+  }, 20_000);
+
+  it('opens on the recent tail of the thread, so a reply to a terminal that is gone is not lost', async () => {
+    const daemon = await startDaemon();
+    const earlier = await deliverFromWeb(daemon.gateway, 'mira', 'from before');
+
+    await expect(earlier.outcome).resolves.toMatchObject({status: 'completed'});
+
+    const {exitCode, stdout} = await runChat([], {env: daemon.env});
+
+    expect(exitCode).toBe(0);
+    expect(stdout.indexOf('You: from before')).toBeLessThan(
+      stdout.indexOf('mira is ready.'),
+    );
+    expect(stdout.indexOf('Mira: noted')).toBeLessThan(
+      stdout.indexOf('mira is ready.'),
+    );
+    await daemon.close();
+  });
+
   it.each([
     ['while it was watching', false],
     ['while its stream was down', true],

@@ -52,12 +52,12 @@ function createHarness(
       _id: string,
       page?: {limit?: string | number; before?: string},
     ) => {
-      if (page?.limit === 1) {
+      if (page?.limit !== undefined && page.limit !== 100) {
         return Promise.resolve<HistoryOutcome>({
           status: 'ok',
           conversationId: 'conv',
           characterId: 'mira',
-          messages: thread.slice(-1),
+          messages: thread.slice(-Number(page.limit)),
         });
       }
 
@@ -113,19 +113,24 @@ describe('chat transcript', () => {
     harness.append(message(3, 'A, missed', 'web'));
     harness.append(message(4, 'B, live'));
 
+    // The thread so far is on the screen from the start.
+    const joined = 'You: earlier\nMira: earlier reply\n';
+
+    expect(harness.printed()).toBe(joined);
+
     const catchingUp = transcript.catchUp();
     const live: LocalRuntimeTurnProgressEvent = message(4, 'B, live');
 
     transcript.showProgress(live);
-    expect(harness.printed()).toBe('');
+    expect(harness.printed()).toBe(joined);
     harness.release();
     await catchingUp;
 
-    expect(harness.printed()).toBe('You: A, missed\nMira: B, live\n');
+    expect(harness.printed()).toBe(`${joined}You: A, missed\nMira: B, live\n`);
 
-    // Nothing from before this terminal joined, and nothing twice.
+    // Nothing twice.
     transcript.showProgress(live);
-    expect(harness.printed()).toBe('You: A, missed\nMira: B, live\n');
+    expect(harness.printed()).toBe(`${joined}You: A, missed\nMira: B, live\n`);
   });
 
   it('walks earlier pages until the anchor when more was missed than one page holds', async () => {
@@ -147,7 +152,9 @@ describe('chat transcript', () => {
     await transcript.catchUp();
 
     expect(harness.printed()).toBe(
-      [2, 3, 4, 5, 6].map(id => `Mira: missed ${String(id)}\n`).join(''),
+      ['anchor', ...[2, 3, 4, 5, 6].map(id => `missed ${String(id)}`)]
+        .map(text => `Mira: ${text}\n`)
+        .join(''),
     );
     expect(harness.pagesRead()).toBe(3);
 
