@@ -8,6 +8,7 @@ import {randomUUID} from 'node:crypto';
 
 import {
   createGatewayClient,
+  GatewayClientError,
   gatewayUrlEnvVarName,
   type GatewayClient,
 } from '../../gateway/client/index.ts';
@@ -263,13 +264,23 @@ async function runChat(
 
       await attachment;
 
-      const outcome = await client.deliver({
+      const outcome = await deliverOrReport(client, {
         conversationId: opened.conversationId,
         senderId: opened.userParticipantId,
         text: line,
         source,
         clientMessageId: randomUUID(),
       });
+
+      // The daemon could not be reached: the turn may or may not have
+      // landed, and only the daemon can say. The stream comes back with it
+      // and the handshake shows what happened; the person decides then.
+      if (outcome === undefined) {
+        options.stderr.write(
+          `${characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
+        );
+        continue;
+      }
 
       if (outcome.status !== 'completed') {
         options.stderr.write(`Error: ${outcome.message}\n`);
@@ -296,6 +307,22 @@ async function runChat(
     await streamEnded;
     await transcript.settled();
     lines.close();
+  }
+}
+
+/** A turn's outcome, or undefined when the daemon could not be reached. */
+async function deliverOrReport(
+  client: GatewayClient,
+  message: Parameters<GatewayClient['deliver']>[0],
+): Promise<Awaited<ReturnType<GatewayClient['deliver']>> | undefined> {
+  try {
+    return await client.deliver(message);
+  } catch (error: unknown) {
+    if (error instanceof GatewayClientError && error.status === 0) {
+      return undefined;
+    }
+
+    throw error;
   }
 }
 

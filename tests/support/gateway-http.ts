@@ -27,11 +27,14 @@ export type TestGatewayServer = TestServer & {
   readonly lifecycle: {stopping: boolean};
 };
 
-/** Any fetch handler on a real loopback socket with an ephemeral port. */
-export async function listen(app: {
-  readonly fetch: (request: Request) => Response | Promise<Response>;
-}): Promise<TestServer> {
-  const server = serve({fetch: app.fetch, hostname: '127.0.0.1', port: 0});
+/** Any fetch handler on a real loopback socket; an ephemeral port unless asked. */
+export async function listen(
+  app: {
+    readonly fetch: (request: Request) => Response | Promise<Response>;
+  },
+  port = 0,
+): Promise<TestServer> {
+  const server = serve({fetch: app.fetch, hostname: '127.0.0.1', port});
 
   await new Promise<void>(resolve => {
     server.once('listening', () => {
@@ -66,6 +69,8 @@ export async function startTestGatewayServer(options: {
   readonly gateway: Gateway;
   readonly uiRoot?: string;
   readonly streams?: EventStreamsOptions;
+  /** A port to come back on, for a daemon that goes away and returns. */
+  readonly port?: number;
 }): Promise<TestGatewayServer> {
   const events = createEventStreams(options.gateway, options.streams ?? {});
   const lifecycle = {stopping: false};
@@ -76,7 +81,7 @@ export async function startTestGatewayServer(options: {
     lifecycle: {stopping: () => lifecycle.stopping},
     ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
-  const server = await listen(app);
+  const server = await listen(app, options.port ?? 0);
 
   return {
     ...server,
