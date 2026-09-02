@@ -195,6 +195,41 @@ describe('chat transcript', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('settles a line whose answer was lost: landed when the thread shows it, or not at all', async () => {
+    const harness = createHarness([]);
+    const transcript = await createTranscript({
+      client: harness.client,
+      conversationId: 'conv',
+      source: 'chat-shim:1',
+      stdout: harness.stdout,
+    });
+    const own = (id: number, text: string, clientMessageId: string) => ({
+      ...message(id, text, 'chat-shim:1'),
+      clientMessageId,
+    });
+
+    // Already on the thread when the answer was lost: said at once.
+    transcript.showProgress(own(1, 'first', 'c1'));
+    transcript.expectLanding('c1', 'first');
+    expect(harness.printed()).toBe('Your line "first" did land.\n');
+
+    // Not yet: said the moment a catch-up shows it.
+    transcript.expectLanding('c2', 'second');
+    harness.append(own(1, 'first', 'c1'));
+    harness.append(own(2, 'second', 'c2'));
+    await transcript.catchUp();
+    expect(harness.printed()).toBe(
+      'Your line "first" did land.\nYour line "second" did land.\n',
+    );
+
+    // Never: said once a catch-up has read the thread without it.
+    transcript.expectLanding('c3', 'third');
+    await transcript.catchUp();
+    expect(harness.printed()).toContain(
+      'Your line "third" did not reach the character',
+    );
+  });
+
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
     const harness = createHarness([]);
     const transcript = await createTranscript({
