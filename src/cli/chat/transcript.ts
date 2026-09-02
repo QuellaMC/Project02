@@ -22,11 +22,15 @@ export type Transcript = {
    */
   whenShown(messageIds: readonly string[]): Promise<void>;
   /**
-   * A line whose answer was lost: says at once whether it landed if the
-   * thread already shows it, and otherwise the moment the thread does —
-   * or that it did not, once a catch-up has read the thread without it.
+   * A line whose answer was lost: says it landed at once if the thread
+   * already shows it, or the moment the thread does. A catch-up that reads
+   * the thread without it says so once, without a verdict — the turn may
+   * still be queued behind another — and the line stays open until the
+   * thread, or its turn's end, settles it.
    */
   expectLanding(clientMessageId: string, text: string): void;
+  /** The daemon said how that line's turn ended: the last word on it. */
+  settleLanding(clientMessageId: string, status: string): void;
 };
 
 type ShownMessage = {
@@ -54,6 +58,7 @@ export async function createTranscript(options: {
   // This terminal's own lines the thread has, by the id it sent them with.
   const landed = new Set<string>();
   const uncertain = new Map<string, string>();
+  const noted = new Set<string>();
   const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
   const say = (text: string): void => {
     options.stdout.write(`${text}\n`);
@@ -124,13 +129,15 @@ export async function createTranscript(options: {
 
       anchor = missed.at(-1)?.messageId ?? anchor;
 
-      // The thread has been read past every uncertain line's turn: what is
-      // not on it did not land.
-      for (const [id, text] of [...uncertain]) {
-        uncertain.delete(id);
-        say(
-          `Your line "${text}" did not reach the character; send it again if you still want to.`,
-        );
+      // Not on the thread yet is all a snapshot can say: the turn may still
+      // be queued behind another. Said once; the line stays open.
+      for (const [id, text] of uncertain) {
+        if (!noted.has(id)) {
+          noted.add(id);
+          say(
+            `Your line "${text}" is not on the thread yet; if it never arrives, send it again.`,
+          );
+        }
       }
     } finally {
       inFlight -= 1;
@@ -207,6 +214,16 @@ export async function createTranscript(options: {
         say(`Your line "${text}" did land.`);
       } else {
         uncertain.set(clientMessageId, text);
+      }
+    },
+    settleLanding(clientMessageId, status) {
+      const text = uncertain.get(clientMessageId);
+
+      if (text !== undefined) {
+        uncertain.delete(clientMessageId);
+        say(
+          `Your line "${text}" did reach the character; its turn ${status === 'completed' ? 'completed' : `was ${status}`}.`,
+        );
       }
     },
     whenShown: messageIds =>

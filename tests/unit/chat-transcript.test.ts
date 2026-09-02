@@ -222,12 +222,25 @@ describe('chat transcript', () => {
       'Your line "first" did land.\nYour line "second" did land.\n',
     );
 
-    // Never: said once a catch-up has read the thread without it.
+    // Not yet on the thread: said once, without a verdict — the turn may
+    // still be queued — and the line stays open until the thread has it.
     transcript.expectLanding('c3', 'third');
     await transcript.catchUp();
+    await transcript.catchUp();
+    expect(
+      harness.printed().match(/Your line "third" is not on the thread yet/gu),
+    ).toHaveLength(1);
+    transcript.showProgress(own(3, 'third', 'c3'));
+    expect(harness.printed()).toContain('Your line "third" did land.');
+
+    // Or until the daemon says how its turn ended.
+    transcript.expectLanding('c4', 'fourth');
+    transcript.settleLanding('c4', 'rejected');
+    transcript.settleLanding('c5', 'completed');
     expect(harness.printed()).toContain(
-      'Your line "third" did not reach the character',
+      'Your line "fourth" did reach the character; its turn was rejected.',
     );
+    expect(harness.printed()).not.toContain('c5');
   });
 
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
