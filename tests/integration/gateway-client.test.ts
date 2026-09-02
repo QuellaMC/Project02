@@ -272,6 +272,29 @@ describe('gateway reference client error boundary', () => {
     await server.close();
   });
 
+  it('cancels a snapshot request on abort instead of holding its socket', async () => {
+    let requests = 0;
+    const app = new Hono().get('/api/health', () => {
+      requests += 1;
+
+      return new Promise<Response>(() => undefined);
+    });
+    const server = await listen(app);
+    const client = createGatewayClient({baseUrl: server.baseUrl, token});
+    const abort = new AbortController();
+    const health = client.health({signal: abort.signal});
+
+    await vi.waitFor(() => {
+      expect(requests).toBe(1);
+    });
+    abort.abort();
+    await expect(health).rejects.toMatchObject({
+      name: 'GatewayClientError',
+      status: 0,
+    });
+    await server.close();
+  });
+
   it('never opens the stream for a signal that was already aborted', async () => {
     let requests = 0;
     const app = new Hono().get('/api/events', c => {

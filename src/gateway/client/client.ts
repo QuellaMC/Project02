@@ -28,6 +28,11 @@ export type GatewayClientOptions =
   /** The line `serve` prints: `http://127.0.0.1:<port>/#token=<token>`. */
   {readonly url: string} | {readonly baseUrl: string; readonly token: string};
 
+/** Cancels a verb's request: its socket is destroyed and the call rejects. */
+export type GatewayCallOptions = {
+  readonly signal?: AbortSignal;
+};
+
 export type GatewayEventsOptions = {
   readonly signal: AbortSignal;
   /**
@@ -49,16 +54,29 @@ export type GatewayEventsOptions = {
  */
 export type GatewayClient = {
   readonly baseUrl: string;
-  health(): Promise<GatewayHealth>;
-  startCharacter(characterId: string): Promise<StartOutcome>;
-  openDirectConversation(characterId: string): Promise<OpenOutcome>;
+  health(options?: GatewayCallOptions): Promise<GatewayHealth>;
+  startCharacter(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<StartOutcome>;
+  openDirectConversation(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<OpenOutcome>;
   /** Waits for the turn however long it takes, and is never retried. */
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
-  history(conversationId: string, page?: HistoryPage): Promise<HistoryOutcome>;
-  pendingConfirmations(): Promise<readonly PendingConfirmation[]>;
+  history(
+    conversationId: string,
+    page?: HistoryPage,
+    options?: GatewayCallOptions,
+  ): Promise<HistoryOutcome>;
+  pendingConfirmations(
+    options?: GatewayCallOptions,
+  ): Promise<readonly PendingConfirmation[]>;
   answerConfirmation(
     id: string,
     decision: GatewayConfirmationDecision,
+    options?: GatewayCallOptions,
   ): Promise<AnswerOutcome>;
   /**
    * Follows the event stream until the signal aborts, reconnecting after
@@ -107,41 +125,55 @@ export function createGatewayClient(
 
   const client: GatewayClient = {
     baseUrl,
-    async health() {
-      const health = await readOutcome<GatewayHealth>(await api.health.$get());
+    async health(callOptions) {
+      const health = await readOutcome<GatewayHealth>(
+        await api.health.$get(undefined, requestInit(callOptions)),
+      );
 
       // Typed as this build's version; another daemon build answers here.
       assertProtocol(health);
 
       return health;
     },
-    startCharacter: async characterId =>
+    startCharacter: async (characterId, callOptions) =>
       readOutcome<StartOutcome>(
-        await api.characters[':id'].start.$post({param: {id: characterId}}),
+        await api.characters[':id'].start.$post(
+          {param: {id: characterId}},
+          requestInit(callOptions),
+        ),
       ),
-    openDirectConversation: async characterId =>
+    openDirectConversation: async (characterId, callOptions) =>
       readOutcome<OpenOutcome>(
-        await api.conversations.open.$post({json: {characterId}}),
+        await api.conversations.open.$post(
+          {json: {characterId}},
+          requestInit(callOptions),
+        ),
       ),
     deliver: async message =>
       readOutcome<TurnOutcome>(await api.turns.$post({json: message})),
-    history: async (conversationId, page = {}) =>
+    history: async (conversationId, page = {}, callOptions) =>
       readOutcome<HistoryOutcome>(
-        await api.conversations[':id'].messages.$get({
-          param: {id: conversationId},
-          query: {
-            ...(page.before === undefined ? {} : {before: page.before}),
-            ...(page.limit === undefined ? {} : {limit: String(page.limit)}),
+        await api.conversations[':id'].messages.$get(
+          {
+            param: {id: conversationId},
+            query: {
+              ...(page.before === undefined ? {} : {before: page.before}),
+              ...(page.limit === undefined ? {} : {limit: String(page.limit)}),
+            },
           },
-        }),
+          requestInit(callOptions),
+        ),
       ),
-    pendingConfirmations: async () =>
+    pendingConfirmations: async callOptions =>
       readOutcome<readonly PendingConfirmation[]>(
-        await api.confirmations.$get(),
+        await api.confirmations.$get(undefined, requestInit(callOptions)),
       ),
-    answerConfirmation: async (id, decision) =>
+    answerConfirmation: async (id, decision, callOptions) =>
       readOutcome<AnswerOutcome>(
-        await api.confirmations[':id'].$post({param: {id}, json: {decision}}),
+        await api.confirmations[':id'].$post(
+          {param: {id}, json: {decision}},
+          requestInit(callOptions),
+        ),
       ),
     async events(listener, eventsOptions) {
       const {signal} = eventsOptions;
@@ -189,6 +221,14 @@ export function createGatewayClient(
   };
 
   return client;
+}
+
+function requestInit(
+  options: GatewayCallOptions | undefined,
+): {init: RequestInit} | undefined {
+  return options?.signal === undefined
+    ? undefined
+    : {init: {signal: options.signal}};
 }
 
 /**
