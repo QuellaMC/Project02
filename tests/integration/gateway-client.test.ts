@@ -140,6 +140,35 @@ describe('gateway reference client', () => {
     await close();
   });
 
+  it('comes back after the daemon severs the stream and returns on its port', async () => {
+    const {gateway, server, client, close} = await startServer();
+    const readies: boolean[] = [];
+    const abort = new AbortController();
+    const following = client.events(() => undefined, {
+      signal: abort.signal,
+      retryMs: 20,
+      onReady: ({reconnected}) => {
+        readies.push(reconnected);
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(readies).toEqual([false]);
+    });
+    // Severed, not ended: the socket is torn down under the stream.
+    await server.close();
+
+    const returned = await startTestGatewayServer({gateway, port: server.port});
+
+    await vi.waitFor(() => {
+      expect(readies).toEqual([false, true]);
+    });
+    abort.abort();
+    await following;
+    await returned.close();
+    await close();
+  });
+
   it('lets go of each finished stream, so reconnects never pile up abort listeners', async () => {
     const {server, client, close} = await startServer();
     const readies: boolean[] = [];
