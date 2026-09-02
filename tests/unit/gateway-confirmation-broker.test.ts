@@ -72,4 +72,23 @@ describe('gateway confirmation broker', () => {
     await expect(first).resolves.toEqual({status: 'cancelled'});
     await expect(second).resolves.toEqual({status: 'cancelled'});
   });
+
+  it('settles a request that arrives after shutdown at once, then parks again re-armed', async () => {
+    const {broker, events, ask} = createBrokerHarness();
+
+    broker.cancelAll();
+    const duringShutdown = ask();
+
+    // A turn draining into an approval-gated tool never parks for the host
+    // deadline: no event, settled immediately.
+    expect(events).toHaveLength(0);
+    await expect(duringShutdown).resolves.toEqual({status: 'cancelled'});
+
+    broker.arm();
+    const afterRestart = ask();
+
+    expect(events).toHaveLength(1);
+    broker.answer(events[0]?.id ?? '', 'approved');
+    await expect(afterRestart).resolves.toEqual({status: 'approved'});
+  });
 });

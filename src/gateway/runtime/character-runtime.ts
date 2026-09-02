@@ -218,6 +218,8 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 
   context.stopping = undefined;
+  // A fresh boot re-arms the broker that the previous stop left cancelling.
+  context.broker.arm();
 
   // Assembly rides the queue — enqueued before 'starting' is announced, so
   // even a stop issued from that event drains it: shutdown never resolves

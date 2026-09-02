@@ -13,7 +13,10 @@ export type ConfirmationBroker = {
   readonly handler: RuntimePluginToolConfirmationHandler;
   /** Unknown or already-settled ids are a no-op: a late answer is benign. */
   answer(id: string, decision: GatewayConfirmationDecision): void;
+  /** Cancel every parked request, and settle later ones at once. */
   cancelAll(): void;
+  /** Re-arm after a cancelAll, so a fresh boot parks confirmations again. */
+  arm(): void;
 };
 
 /**
@@ -27,12 +30,21 @@ export function createConfirmationBroker(options: {
   readonly emit: (event: GatewayEvent) => void;
 }): ConfirmationBroker {
   const pending = new Map<string, (decision: Decision) => void>();
+  let cancelling = false;
 
   return Object.freeze({
     handler(request, context) {
       const id = randomUUID();
 
       return new Promise<Decision>(resolve => {
+        // A request raised once shutdown began settles at once: a turn
+        // draining into an approval-gated tool must not park the drain for
+        // the host's deadline.
+        if (cancelling) {
+          resolve({status: 'cancelled'});
+          return;
+        }
+
         const settle = (decision: Decision): void => {
           if (pending.delete(id)) {
             resolve(decision);
@@ -60,9 +72,13 @@ export function createConfirmationBroker(options: {
       pending.get(id)?.({status: decision});
     },
     cancelAll() {
+      cancelling = true;
       for (const settle of [...pending.values()]) {
         settle({status: 'cancelled'});
       }
+    },
+    arm() {
+      cancelling = false;
     },
   });
 }
