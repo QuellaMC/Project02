@@ -22,6 +22,7 @@ export {
   type ConfirmationAnswerStatus,
   type Gateway,
   type GatewayConfirmationDecision,
+  type GatewayErrorBody,
   type GatewayEvent,
   type GatewayEventListener,
   type GatewayHealth,

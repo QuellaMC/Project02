@@ -1,0 +1,324 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+
+import {describe, expect, it} from 'vitest';
+
+import {createGatewayApp} from '../../src/gateway/http/app.ts';
+import {createGateway} from '../../src/gateway/index.ts';
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
+import type {RoleModelAdapter} from '../../src/role-model/index.ts';
+import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+
+const token = 'test-token-0123456789abcdef';
+
+function replyAdapter(): RoleModelAdapter {
+  return {
+    invoke: () => ({
+      rawOutputText: JSON.stringify({
+        toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+      }),
+    }),
+  };
+}
+
+type RequestOptions = {
+  readonly method?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+};
+
+async function createHttpHarness(
+  options: {readonly uiRoot?: string; readonly stopping?: () => boolean} = {},
+) {
+  const homeRoot = join(createTestTempRoot('project02-gateway-http-'), 'home');
+
+  await ensureInitializedProject02Store({homeRoot});
+
+  const gateway = createGateway({
+    location: {storeRoot: homeRoot},
+    env: {},
+    roleModelAdapter: replyAdapter(),
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
+  });
+  const app = createGatewayApp({
+    gateway,
+    token,
+    lifecycle: {stopping: options.stopping ?? (() => false)},
+    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
+  });
+  // Every request names the loopback host and carries the token unless a
+  // case overrides one of them.
+  const request = (path: string, init: RequestOptions = {}) =>
+    app.request(path, {
+      method: init.method ?? 'GET',
+      headers: {
+        host: '127.0.0.1:1',
+        authorization: `Bearer ${token}`,
+        ...init.headers,
+      },
+      ...(init.body === undefined ? {} : {body: init.body}),
+    });
+  const post = (path: string, body: unknown, headers = {}) =>
+    request(path, {
+      method: 'POST',
+      headers: {'content-type': 'application/json', ...headers},
+      body: JSON.stringify(body),
+    });
+
+  return {gateway, app, request, post, homeRoot};
+}
+
+async function errorOf(response: Response): Promise<{code: string}> {
+  const body = (await response.json()) as {error: {code: string}};
+
+  return body.error;
+}
+
+describe('gateway over HTTP', () => {
+  it('lets only a loopback host with the right token in, one envelope per refusal', async () => {
+    const {request} = await createHttpHarness();
+
+    const noToken = await request('/api/health', {
+      headers: {authorization: ''},
+    });
+
+    expect(noToken.status).toBe(401);
+    expect(await errorOf(noToken)).toMatchObject({code: 'unauthorized'});
+
+    const wrongToken = await request('/api/health', {
+      headers: {authorization: 'Bearer definitely-not-the-token'},
+    });
+
+    expect(wrongToken.status).toBe(401);
+
+    const malformedToken = await request('/api/health', {
+      headers: {authorization: 'Bearer not a token!'},
+    });
+
+    expect(malformedToken.status).toBe(400);
+    expect(await errorOf(malformedToken)).toMatchObject({
+      code: 'invalid_request',
+    });
+
+    const foreignHost = await request('/api/health', {
+      headers: {host: 'evil.example:80'},
+    });
+
+    expect(foreignHost.status).toBe(421);
+    expect(await errorOf(foreignHost)).toMatchObject({
+      code: 'misdirected_host',
+    });
+
+    const foreignOrigin = await request('/api/health', {
+      headers: {origin: 'http://evil.example'},
+    });
+
+    expect(foreignOrigin.status).toBe(403);
+    expect(await errorOf(foreignOrigin)).toMatchObject({
+      code: 'forbidden_origin',
+    });
+
+    const ownOrigin = await request('/api/health', {
+      headers: {origin: 'http://127.0.0.1:1'},
+    });
+
+    expect(ownOrigin.status).toBe(200);
+    expect(ownOrigin.headers.get('cache-control')).toBe('no-store');
+    expect(noToken.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('refuses bodies it cannot read, bodies that are too large, and bodies of the wrong shape', async () => {
+    const {request, post} = await createHttpHarness();
+
+    const malformed = await request('/api/turns', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: '{not json',
+    });
+
+    expect(malformed.status).toBe(400);
+    expect(await errorOf(malformed)).toMatchObject({code: 'invalid_request'});
+
+    const huge = await post('/api/turns', {
+      conversationId: 'c',
+      senderId: 'u',
+      text: 'x'.repeat(70 * 1024),
+      source: 'web',
+      clientMessageId: 'm',
+    });
+
+    expect(huge.status).toBe(413);
+    expect(await errorOf(huge)).toMatchObject({code: 'payload_too_large'});
+
+    const misshaped = await post('/api/turns', {conversationId: 'c'});
+
+    expect(misshaped.status).toBe(400);
+    expect(await errorOf(misshaped)).toMatchObject({code: 'invalid_request'});
+
+    const badStamp = await post('/api/turns', {
+      conversationId: 'c',
+      senderId: 'u',
+      text: 'hi',
+      source: 'web ui',
+      clientMessageId: 'm',
+    });
+
+    expect(badStamp.status).toBe(400);
+
+    const noContentType = await request('/api/conversations/open', {
+      method: 'POST',
+      body: JSON.stringify({characterId: 'mira'}),
+    });
+
+    expect(noContentType.status).toBe(400);
+  });
+
+  it('answers every verb with its outcome, verbatim, under a 200', async () => {
+    const {request, post, gateway} = await createHttpHarness();
+
+    const health = await request('/api/health');
+
+    expect(health.status).toBe(200);
+    await expect(health.json()).resolves.toMatchObject({
+      protocolVersion: 1,
+      characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
+    });
+
+    const unstarted = await post('/api/conversations/open', {
+      characterId: 'mira',
+    });
+
+    expect(unstarted.status).toBe(200);
+    await expect(unstarted.json()).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'character_unavailable',
+    });
+
+    const started = await post('/api/characters/mira/start', {});
+
+    await expect(started.json()).resolves.toMatchObject({
+      status: 'settled',
+      character: {id: 'mira', state: 'ready'},
+    });
+
+    const opened = (await (
+      await post('/api/conversations/open', {characterId: 'mira'})
+    ).json()) as {
+      status: string;
+      conversationId: string;
+      userParticipantId: string;
+    };
+
+    expect(opened.status).toBe('opened');
+
+    const turn = await post('/api/turns', {
+      conversationId: opened.conversationId,
+      senderId: opened.userParticipantId,
+      text: 'hello there',
+      source: 'web',
+      clientMessageId: 'msg-1',
+    });
+
+    expect(turn.status).toBe(200);
+    await expect(turn.json()).resolves.toMatchObject({
+      status: 'completed',
+      messages: [
+        expect.objectContaining({text: 'hello there'}),
+        expect.objectContaining({text: 'noted'}),
+      ],
+    });
+
+    const history = await request(
+      `/api/conversations/${opened.conversationId}/messages?limit=1`,
+    );
+
+    await expect(history.json()).resolves.toMatchObject({
+      status: 'ok',
+      messages: [expect.objectContaining({text: 'noted'})],
+    });
+
+    const badPage = await request(
+      `/api/conversations/${opened.conversationId}/messages?limit=abc`,
+    );
+
+    expect(badPage.status).toBe(200);
+    await expect(badPage.json()).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'invalid_page',
+    });
+
+    await expect((await request('/api/confirmations')).json()).resolves.toEqual(
+      [],
+    );
+    await expect(
+      (await post('/api/confirmations/nope', {decision: 'approved'})).json(),
+    ).resolves.toEqual({status: 'unknown'});
+    await gateway.stop();
+  });
+
+  it('keeps unknown API routes inside the API and static files out of it', async () => {
+    const outside = createTestTempRoot('project02-gateway-ui-');
+    const uiRoot = join(outside, 'ui');
+
+    mkdirSync(uiRoot, {recursive: true});
+    writeFileSync(join(uiRoot, 'index.html'), '<h1>ui ok</h1>', 'utf8');
+    writeFileSync(join(outside, 'secret.txt'), 'not for the browser', 'utf8');
+
+    const {request} = await createHttpHarness({uiRoot});
+
+    const page = await request('/', {headers: {authorization: ''}});
+
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('ui ok');
+
+    const missingApi = await request('/api/missing');
+
+    expect(missingApi.status).toBe(404);
+    expect(await errorOf(missingApi)).toMatchObject({code: 'not_found'});
+
+    const apiRoot = await request('/api');
+
+    expect(apiRoot.status).toBe(404);
+    expect(await errorOf(apiRoot)).toMatchObject({code: 'not_found'});
+
+    const apiRootNoToken = await request('/api', {
+      headers: {authorization: ''},
+    });
+
+    expect(apiRootNoToken.status).toBe(401);
+
+    const postedFile = await request('/index.html', {method: 'POST'});
+
+    expect(postedFile.status).toBe(404);
+
+    // A path that climbs out of the UI root reaches nothing: encoded or not.
+    for (const path of [
+      '/%2e%2e/secret.txt',
+      '/../secret.txt',
+      '/ui/../../secret.txt',
+    ]) {
+      const escape = await request(path, {headers: {authorization: ''}});
+
+      expect(escape.status, path).toBe(404);
+      expect(await escape.text()).not.toContain('not for the browser');
+    }
+  });
+
+  it('answers a plain 404 at the root without a UI, and 503 once stopping', async () => {
+    let stopping = false;
+    const {request} = await createHttpHarness({stopping: () => stopping});
+
+    const root = await request('/', {headers: {authorization: ''}});
+
+    expect(root.status).toBe(404);
+    expect(await root.text()).toContain('/api');
+
+    stopping = true;
+
+    const late = await request('/api/health');
+
+    expect(late.status).toBe(503);
+    expect(await errorOf(late)).toMatchObject({code: 'unavailable'});
+  });
+});
