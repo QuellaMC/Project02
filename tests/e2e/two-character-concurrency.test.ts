@@ -6,10 +6,16 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
+import {readFile, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
+import {
+  createGatewayClient,
+  gatewayUrlEnvVarName,
+  type GatewayClient,
+} from '../../src/gateway/client/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -35,58 +41,139 @@ function seedNovaPackage(homeRoot: string): void {
   );
 }
 
-function spawnCharacterChat(
-  homeRoot: string,
-  characterId: string,
-): ChildProcessWithoutNullStreams {
-  return spawn(
+type Daemon = {
+  readonly child: ChildProcessWithoutNullStreams;
+  readonly client: GatewayClient;
+  /** SIGINT, the way an operator stops it; resolves with the exit code. */
+  stop(): Promise<{readonly code: number | null; readonly stderr: string}>;
+};
+
+/** A real serve process on this home; ready once it printed its URL. */
+async function spawnDaemon(homeRoot: string): Promise<Daemon> {
+  const child = spawn(
     process.execPath,
-    ['src/cli/chat/main.ts', '--store', homeRoot, '--character', characterId],
+    ['src/cli/serve/main.ts', '--store', homeRoot, '--init'],
     {cwd: process.cwd(), stdio: 'pipe'},
   );
-}
+  let stderr = '';
 
-async function runOneMessageChat(
-  child: ChildProcessWithoutNullStreams,
-  message: string,
-): Promise<{
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}> {
-  return await new Promise((resolveExit, rejectExit) => {
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const url = await new Promise<string>((resolveUrl, rejectUrl) => {
     let stdout = '';
-    let stderr = '';
-    let sent = false;
-    // Generous on purpose: loaded CI runners take seconds just to cold-start
-    // the child Node process.
-    const timeout = setTimeout(() => {
-      child.kill();
-      rejectExit(new Error(`Timed out waiting for chat: ${stdout}${stderr}`));
-    }, 30_000);
+    // An idle deadline, not a total one: these cases cold-start several
+    // real Node processes, so any fixed budget goes flaky under load.
+    let timeout: NodeJS.Timeout | undefined;
+    const failIfIdle = (): void => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        child.kill();
+        rejectUrl(new Error(`Timed out waiting for serve: ${stdout}${stderr}`));
+      }, 20_000);
+    };
 
+    failIfIdle();
     child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
 
-      if (!sent && stdout.includes('is ready.')) {
-        sent = true;
-        child.stdin.write(`${message}\n/exit\n`);
+      const line = stdout
+        .split('\n')
+        .find(candidate => candidate.startsWith(`${gatewayUrlEnvVarName}=`));
+
+      if (line !== undefined) {
+        clearTimeout(timeout);
+        resolveUrl(line.slice(gatewayUrlEnvVarName.length + 1));
+
+        return;
       }
-    });
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+
+      failIfIdle();
     });
     child.once('error', error => {
       clearTimeout(timeout);
-      rejectExit(error);
+      rejectUrl(error);
     });
     child.once('exit', code => {
       clearTimeout(timeout);
-      resolveExit({code, stdout, stderr});
+      rejectUrl(
+        new Error(`serve exited before its URL (${String(code)}): ${stderr}`),
+      );
     });
   });
+
+  return {
+    child,
+    client: createGatewayClient({url}),
+    stop: () =>
+      new Promise(resolveExit => {
+        child.once('exit', code => {
+          resolveExit({code, stderr});
+        });
+        child.kill('SIGINT');
+      }),
+  };
+}
+
+async function chat(
+  client: GatewayClient,
+  characterId: string,
+  text: string,
+): Promise<string> {
+  const opened = await client.openDirectConversation(characterId);
+
+  if (opened.status !== 'opened') {
+    throw new Error(opened.message);
+  }
+
+  const outcome = await client.deliver({
+    conversationId: opened.conversationId,
+    senderId: opened.userParticipantId,
+    text,
+    source: 'test',
+    clientMessageId: `${characterId}-1`,
+  });
+
+  if (outcome.status !== 'completed') {
+    throw new Error(outcome.message);
+  }
+
+  return outcome.messages.at(-1)?.speakerName ?? '';
+}
+
+async function snapshotDurableFiles(
+  root: string,
+  relativeRoot = '',
+): Promise<Readonly<Record<string, string>>> {
+  const directoryPath =
+    relativeRoot.length === 0 ? root : join(root, relativeRoot);
+  const entries = await readdir(directoryPath, {withFileTypes: true});
+  const snapshot: Record<string, string> = {};
+
+  for (const entry of entries.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  )) {
+    const relativePath =
+      relativeRoot.length === 0 ? entry.name : join(relativeRoot, entry.name);
+
+    if (relativePath === '.locks' || relativePath.startsWith('.locks/')) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      Object.assign(snapshot, await snapshotDurableFiles(root, relativePath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      snapshot[relativePath] = await readFile(join(root, relativePath), 'utf8');
+    }
+  }
+
+  return snapshot;
 }
 
 describe('two characters from one home', () => {
@@ -96,22 +183,22 @@ describe('two characters from one home', () => {
     seedNovaPackage(homeRoot);
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const [mira, nova] = await Promise.all([
-      runOneMessageChat(
-        spawnCharacterChat(homeRoot, 'mira'),
-        'hello from the mira terminal',
-      ),
-      runOneMessageChat(
-        spawnCharacterChat(homeRoot, 'nova'),
-        'hello from the nova terminal',
-      ),
-    ]);
+    const daemon = await spawnDaemon(homeRoot);
 
-    expect(mira.code, mira.stderr).toBe(0);
-    expect(nova.code, nova.stderr).toBe(0);
-    expect(mira.stdout).toContain('Mira:');
-    expect(nova.stdout).toContain('Nova:');
-    expect(`${mira.stderr}${nova.stderr}`).not.toContain('busy');
+    try {
+      const [mira, nova] = await Promise.all([
+        chat(daemon.client, 'mira', 'hello from the mira terminal'),
+        chat(daemon.client, 'nova', 'hello from the nova terminal'),
+      ]);
+
+      expect(mira).toBe('Mira');
+      expect(nova).toBe('Nova');
+    } finally {
+      const stopped = await daemon.stop();
+
+      expect(stopped.code, stopped.stderr).toBe(0);
+      expect(stopped.stderr).not.toContain('busy');
+    }
 
     // Leases are released on clean exit; per-segment locks stay in each
     // character's own lock root, while the home holds the conversation locks.
@@ -153,58 +240,32 @@ describe('two characters from one home', () => {
     ).toEqual({version: 'project02.config.v2'});
   }, 60_000);
 
-  it('still lease-blocks a same-character double start', async () => {
+  it('refuses a second daemon the conversation the first holds, without a durable write', async () => {
     const homeRoot = createTestTempRoot('project02-same-character-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const first = spawnCharacterChat(homeRoot, 'mira');
-    const firstReady = new Promise<void>((resolveReady, rejectReady) => {
-      let stdout = '';
-      const timeout = setTimeout(() => {
-        rejectReady(new Error(`Timed out waiting for readiness: ${stdout}`));
-      }, 30_000);
-
-      first.stdout.setEncoding('utf8');
-      first.stdout.on('data', (chunk: string) => {
-        stdout += chunk;
-        if (stdout.includes('is ready.')) {
-          clearTimeout(timeout);
-          resolveReady();
-        }
-      });
-      first.once('exit', () => {
-        clearTimeout(timeout);
-        rejectReady(new Error(`Chat exited before readiness: ${stdout}`));
-      });
-    });
+    const first = await spawnDaemon(homeRoot);
 
     try {
-      await firstReady;
+      await chat(first.client, 'mira', 'hello from the first daemon');
 
-      const second = spawnCharacterChat(homeRoot, 'mira');
-      const contended = await new Promise<{
-        readonly code: number | null;
-        readonly stderr: string;
-      }>((resolveExit, rejectExit) => {
-        let stderr = '';
+      const before = await snapshotDurableFiles(homeRoot);
+      const second = await spawnDaemon(homeRoot);
 
-        second.stderr.setEncoding('utf8');
-        second.stderr.on('data', (chunk: string) => {
-          stderr += chunk;
+      try {
+        await expect(
+          second.client.openDirectConversation('mira'),
+        ).resolves.toMatchObject({
+          status: 'refused',
+          reason: 'conversation_busy',
         });
-        second.once('error', rejectExit);
-        second.once('exit', code => {
-          resolveExit({code, stderr});
-        });
-      });
-
-      expect(contended.code).toBe(1);
-      expect(contended.stderr).toContain('busy: conversation-writer:');
-    } finally {
-      if (first.exitCode === null) {
-        first.kill();
+        expect(await snapshotDurableFiles(homeRoot)).toEqual(before);
+      } finally {
+        expect((await second.stop()).code).toBe(0);
       }
+    } finally {
+      expect((await first.stop()).code).toBe(0);
     }
   }, 60_000);
 });

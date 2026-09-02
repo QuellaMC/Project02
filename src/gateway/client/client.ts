@@ -20,6 +20,9 @@ import {
 import type {GatewayApp} from '../http/app.ts';
 import {createSseFrameSplitter} from './sse.ts';
 
+/** Where a client finds the daemon: the line `serve` prints, exported. */
+export const gatewayUrlEnvVarName = 'PROJECT02_GATEWAY';
+
 export type GatewayClientOptions =
   /** The line `serve` prints: `http://127.0.0.1:<port>/#token=<token>`. */
   {readonly url: string} | {readonly baseUrl: string; readonly token: string};

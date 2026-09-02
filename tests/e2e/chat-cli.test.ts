@@ -1,17 +1,21 @@
 import {chmodSync} from 'node:fs';
 import {join} from 'node:path';
-import {Readable} from 'node:stream';
+import {PassThrough, Readable} from 'node:stream';
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
+import {createGateway} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
+import {
+  startTestGatewayServer,
+  testGatewayToken,
+} from '../support/gateway-http.ts';
 import {collect} from '../support/streams.ts';
-import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(rawOutputText?: string): RoleModelAdapter {
   return {
@@ -27,12 +31,44 @@ function replyAdapter(rawOutputText?: string): RoleModelAdapter {
   };
 }
 
+/** A daemon the way serve runs it: the roster up before any client comes. */
+async function startDaemon(
+  adapter: RoleModelAdapter = replyAdapter(),
+  arrange: (storeRoot: string) => void = () => undefined,
+) {
+  const storeRoot = await createGatewayTestHome('project02-chat-shim-');
+
+  arrange(storeRoot);
+
+  const gateway = createGateway({
+    location: {storeRoot},
+    env: {},
+    roleModelAdapter: adapter,
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
+  });
+
+  await gateway.reconcile();
+
+  const server = await startTestGatewayServer({gateway});
+
+  return {
+    storeRoot,
+    gateway,
+    env: {PROJECT02_GATEWAY: `${server.baseUrl}/#token=${testGatewayToken}`},
+    close: async () => {
+      await server.close();
+      await gateway.stop();
+    },
+  };
+}
+
 async function runChat(
   args: readonly string[],
   options: {
-    readonly input?: string;
-    readonly rawOutputText?: string;
-  } = {},
+    readonly env: NodeJS.ProcessEnv;
+    readonly input?: string | NodeJS.ReadableStream;
+    readonly onStdout?: (stdout: string) => void;
+  },
 ): Promise<{
   readonly exitCode: number;
   readonly stdout: string;
@@ -40,44 +76,78 @@ async function runChat(
 }> {
   let stdout = '';
   let stderr = '';
+  const {input} = options;
 
   const exitCode = await runChatCliFromArgs(args, {
-    stdin: Readable.from([options.input ?? 'hello there\n/exit\n']),
+    stdin:
+      typeof input === 'string' || input === undefined
+        ? Readable.from([input ?? 'hello there\n/exit\n'])
+        : input,
     stdout: collect(chunk => {
       stdout += chunk;
+      options.onStdout?.(stdout);
     }),
     stderr: collect(chunk => {
       stderr += chunk;
     }),
-    env: {},
-    pluginHost: createRuntimePluginHost({plugins: []}),
-    roleModelAdapter: replyAdapter(options.rawOutputText),
+    env: options.env,
   });
 
   return {exitCode, stdout, stderr};
 }
 
 describe('chat shim', () => {
-  it('chats end to end over the gateway and exits cleanly', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-');
+  it('chats over the socket, showing what other surfaces say, and exits cleanly', async () => {
+    const daemon = await startDaemon();
+    const stdin = new PassThrough();
+    let seen = '';
+    const run = runChat([], {
+      env: daemon.env,
+      input: stdin,
+      onStdout: stdout => {
+        seen = stdout;
+      },
+    });
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await vi.waitFor(() => {
+      expect(seen).toContain('mira is ready.');
+    });
+    stdin.write('hello there\n');
+    await vi.waitFor(() => {
+      expect(seen).toContain('Mira: noted');
+    });
 
-    const {exitCode, stdout, stderr} = await runChat(['--store', storeRoot]);
+    // Another surface's message rides the same stream into this terminal.
+    const opened = await daemon.gateway.openDirectConversation('mira');
+
+    if (opened.status !== 'opened') {
+      expect.fail(opened.message);
+    }
+
+    await daemon.gateway.deliver({
+      conversationId: opened.conversationId,
+      senderId: opened.userParticipantId,
+      text: 'typed on the web',
+      source: 'web',
+      clientMessageId: 'web-1',
+    });
+    await vi.waitFor(() => {
+      expect(seen).toContain(': typed on the web');
+    });
+    stdin.write('/exit\n');
+
+    const {exitCode, stderr} = await run;
 
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('mira is ready.');
-    expect(stdout).toContain('Mira: noted');
+    await daemon.close();
   });
 
   it('demands an explicit pick when several characters are enabled, then honors it', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-pick-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    writeTestCharacterPackage(storeRoot, {id: 'zeta', displayName: 'Zeta'});
-
-    const ambiguous = await runChat(['--store', storeRoot]);
+    const daemon = await startDaemon(replyAdapter(), storeRoot => {
+      writeTestCharacterPackage(storeRoot, {id: 'zeta', displayName: 'Zeta'});
+    });
+    const ambiguous = await runChat([], {env: daemon.env});
 
     expect(ambiguous.exitCode).toBe(1);
     expect(ambiguous.stderr).toContain(
@@ -85,100 +155,78 @@ describe('chat shim', () => {
     );
     expect(ambiguous.stderr).toContain('--character');
 
-    const picked = await runChat(['--store', storeRoot, '--character', 'zeta']);
+    const picked = await runChat(['--character', 'zeta'], {env: daemon.env});
 
+    expect(picked.stderr).toBe('');
     expect(picked.exitCode).toBe(0);
     expect(picked.stdout).toContain('Zeta: noted');
+    await daemon.close();
   });
 
-  it('rejects a repeated provider flag', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-provider-');
+  it('refuses a run without the daemon address, a repeated pick, or an unknown character', async () => {
+    const daemon = await startDaemon();
+    const unaddressed = await runChat([], {env: {}});
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    expect(unaddressed.exitCode).toBe(1);
+    expect(unaddressed.stderr).toContain('PROJECT02_GATEWAY is not set');
 
-    const {exitCode, stderr} = await runChat([
-      '--store',
-      storeRoot,
-      '--provider',
-      'local',
-      '--provider',
-      'local',
-    ]);
+    const repeated = await runChat(
+      ['--character', 'mira', '--character', 'mira'],
+      {env: daemon.env},
+    );
 
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('--provider can only be provided once');
-  });
+    expect(repeated.exitCode).toBe(1);
+    expect(repeated.stderr).toContain('--character can only be provided once');
 
-  it('rejects an unknown explicit character naming the discovered ids', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-unknown-');
+    const unknown = await runChat(['--character', 'ghost'], {env: daemon.env});
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const {exitCode, stderr} = await runChat([
-      '--store',
-      storeRoot,
-      '--character',
-      'ghost',
-    ]);
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Character "ghost" was not found');
-    expect(stderr).toContain('mira');
+    expect(unknown.exitCode).toBe(1);
+    expect(unknown.stderr).toContain('ghost');
+    expect(unknown.stderr).toContain('mira');
+    await daemon.close();
   });
 
   it('exits nonzero when a turn dies fatally', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-fatal-');
+    let sessionsRoot = '';
+    const daemon = await startDaemon(
+      {
+        invoke() {
+          // Break the session store mid-turn so the commit fails.
+          chmodSync(sessionsRoot, 0o000);
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const sessionsRoot = join(
-      characterDataDirPath(storeRoot, 'mira'),
-      'sessions',
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+            }),
+          };
+        },
+      },
+      storeRoot => {
+        sessionsRoot = join(
+          characterDataDirPath(storeRoot, 'mira'),
+          'sessions',
+        );
+      },
     );
-    let stderr = '';
-    let exitCode: number;
 
     try {
-      exitCode = await runChatCliFromArgs(['--store', storeRoot], {
-        stdin: Readable.from(['hello there\n/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-        pluginHost: createRuntimePluginHost({plugins: []}),
-        roleModelAdapter: {
-          invoke() {
-            // Break the session store mid-turn so the commit fails.
-            chmodSync(sessionsRoot, 0o000);
+      const {exitCode, stderr} = await runChat([], {env: daemon.env});
 
-            return {
-              rawOutputText: JSON.stringify({
-                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
-              }),
-            };
-          },
-        },
-      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Error:');
     } finally {
       chmodSync(sessionsRoot, 0o755);
+      await daemon.close();
     }
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Error:');
   });
 
   it('reports a rejected turn and keeps the session alive', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-rejected-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const {exitCode, stdout, stderr} = await runChat(['--store', storeRoot], {
-      rawOutputText: 'not json at all',
-    });
+    const daemon = await startDaemon(replyAdapter('not json at all'));
+    const {exitCode, stdout, stderr} = await runChat([], {env: daemon.env});
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain('mira is ready.');
     expect(stderr).toContain('Error:');
+    await daemon.close();
   });
 });

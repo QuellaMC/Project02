@@ -5,8 +5,8 @@ import {PassThrough, Readable} from 'node:stream';
 import {describe, expect, it, onTestFinished} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
+import {runServeCliFromArgs} from '../../src/cli/serve/main.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -303,11 +303,11 @@ describe('store consent gate', () => {
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 
-  it('refuses a chat run before it materializes any character state', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-chat-');
+  it('refuses to serve before it materializes any character state', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-serve-');
     let stderr = '';
 
-    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+    const exitCode = await runServeCliFromArgs(['--store', storeRoot], {
       stdin: pipedStdin(),
       stdout: collect(() => {}),
       stderr: collect(chunk => {
@@ -315,6 +315,8 @@ describe('store consent gate', () => {
       }),
       env: {},
       pluginHost: createRuntimePluginHost({plugins: []}),
+      signal: new AbortController().signal,
+      port: 0,
     });
 
     expect(exitCode).toBe(1);

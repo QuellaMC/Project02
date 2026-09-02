@@ -1,6 +1,7 @@
 export {
   createGatewayClient,
   GatewayClientError,
+  gatewayUrlEnvVarName,
   type GatewayClient,
   type GatewayClientOptions,
   type GatewayEventsOptions,

@@ -8,6 +8,11 @@ export {
   type Project02CharacterSelection,
 } from '../app/index.ts';
 export {
+  createGatewayServer,
+  type GatewayServer,
+  type GatewayServerOptions,
+} from './http/server.ts';
+export {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
   type LocalCharacterRuntimeOptions,
