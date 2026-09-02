@@ -1,3 +1,5 @@
+import {getEventListeners} from 'node:events';
+
 import {Hono} from 'hono';
 import {streamSSE} from 'hono/streaming';
 import {describe, expect, it, vi} from 'vitest';
@@ -102,6 +104,34 @@ describe('gateway reference client', () => {
     await expect(
       createGatewayClient({baseUrl: 'http://127.0.0.1:1', token}).health(),
     ).rejects.toMatchObject({status: 0, code: 'unreachable'});
+    await close();
+  });
+
+  it('lets go of each finished stream, so reconnects never pile up abort listeners', async () => {
+    const {server, client, close} = await startServer();
+    const readies: boolean[] = [];
+    const abort = new AbortController();
+    const following = client.events(() => undefined, {
+      signal: abort.signal,
+      retryMs: 10,
+      onReady: ({reconnected}) => readies.push(reconnected),
+    });
+
+    for (let round = 1; round <= 4; round += 1) {
+      await vi.waitFor(() => {
+        expect(readies).toHaveLength(round);
+      });
+      server.events.closeAll();
+    }
+
+    await vi.waitFor(() => {
+      expect(readies).toHaveLength(5);
+    });
+    expect(getEventListeners(abort.signal, 'abort').length).toBeLessThanOrEqual(
+      1,
+    );
+    abort.abort();
+    await following;
     await close();
   });
 
