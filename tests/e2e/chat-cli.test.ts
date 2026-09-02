@@ -440,6 +440,8 @@ describe('chat shim', () => {
       await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
       await shim.printed('You: landed');
       await shim.printed('Mira: noted');
+      // The line sent into the void is settled from the thread: it never landed.
+      await shim.printed('Your line "did this land?" did not reach');
 
       const {exitCode, stderr} = await shim.exit();
 

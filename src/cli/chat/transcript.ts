@@ -21,6 +21,12 @@ export type Transcript = {
    * never carried them.
    */
   whenShown(messageIds: readonly string[]): Promise<void>;
+  /**
+   * A line whose answer was lost: says at once whether it landed if the
+   * thread already shows it, and otherwise the moment the thread does —
+   * or that it did not, once a catch-up has read the thread without it.
+   */
+  expectLanding(clientMessageId: string, text: string): void;
 };
 
 type ShownMessage = {
@@ -28,6 +34,7 @@ type ShownMessage = {
   readonly speakerName: string;
   readonly text: string;
   readonly source?: string;
+  readonly clientMessageId?: string;
 };
 
 const catchUpPageSize = 100;
@@ -44,7 +51,13 @@ export async function createTranscript(options: {
   readonly stdout: NodeJS.WritableStream;
 }): Promise<Transcript> {
   const shown = new Set<string>();
+  // This terminal's own lines the thread has, by the id it sent them with.
+  const landed = new Set<string>();
+  const uncertain = new Map<string, string>();
   const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
+  const say = (text: string): void => {
+    options.stdout.write(`${text}\n`);
+  };
   const waiting: LocalRuntimeTurnProgressEvent[] = [];
   let buffering = false;
   let inFlight = 0;
@@ -58,6 +71,15 @@ export async function createTranscript(options: {
 
     if (message.source !== options.source) {
       options.stdout.write(`${message.speakerName}: ${message.text}\n`);
+    } else if (message.clientMessageId !== undefined) {
+      landed.add(message.clientMessageId);
+
+      const text = uncertain.get(message.clientMessageId);
+
+      if (text !== undefined) {
+        uncertain.delete(message.clientMessageId);
+        say(`Your line "${text}" did land.`);
+      }
     }
 
     for (const waiter of awaiting.splice(0)) {
@@ -101,6 +123,15 @@ export async function createTranscript(options: {
       }
 
       anchor = missed.at(-1)?.messageId ?? anchor;
+
+      // The thread has been read past every uncertain line's turn: what is
+      // not on it did not land.
+      for (const [id, text] of [...uncertain]) {
+        uncertain.delete(id);
+        say(
+          `Your line "${text}" did not reach the character; send it again if you still want to.`,
+        );
+      }
     } finally {
       inFlight -= 1;
 
@@ -171,6 +202,13 @@ export async function createTranscript(options: {
       return run;
     },
     settled: () => queue,
+    expectLanding(clientMessageId, text) {
+      if (landed.has(clientMessageId)) {
+        say(`Your line "${text}" did land.`);
+      } else {
+        uncertain.set(clientMessageId, text);
+      }
+    },
     whenShown: messageIds =>
       messageIds.every(id => shown.has(id))
         ? Promise.resolve()

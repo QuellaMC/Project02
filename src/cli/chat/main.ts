@@ -338,21 +338,23 @@ async function runChat(
         await ensureAttached().catch(reportError);
       }
 
+      const clientMessageId = randomUUID();
       const outcome = await deliverOrReport(client, {
         conversationId: opened.conversationId,
         senderId: opened.userParticipantId,
         text: line,
         source,
-        clientMessageId: randomUUID(),
+        clientMessageId,
       });
 
       // The daemon could not be reached: the turn may or may not have
-      // landed, and only the daemon can say. The stream comes back with it
-      // and the handshake shows what happened; the person decides then.
+      // landed, and only the thread can say. The transcript keeps the
+      // line's id and says which, as soon as the thread is read again.
       if (outcome === undefined) {
         options.stderr.write(
           `${characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
         );
+        transcript.expectLanding(clientMessageId, line);
         continue;
       }
 
