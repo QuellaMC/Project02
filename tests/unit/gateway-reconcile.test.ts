@@ -19,6 +19,7 @@ function createHarness() {
         enabled: isEnabled,
       }));
     },
+    running: () => [...states.keys()],
     stateOf: id => states.get(id) ?? 'not_started',
     start(id) {
       log.push(`start:${id}`);
@@ -98,5 +99,20 @@ describe('gateway reconciler', () => {
     });
     expect(harness.log).toEqual(['start:failed', 'stop:off']);
     await expect(harness.reconciler.settled()).resolves.toBeUndefined();
+  });
+
+  it('stops a running character whose package left the roster', async () => {
+    const harness = createHarness();
+
+    harness.states.set('gone', 'ready');
+    harness.states.set('long-gone', 'stopped');
+    harness.enabled.set('mira', true);
+    harness.states.set('mira', 'ready');
+
+    await expect(harness.reconciler.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: ['gone'],
+    });
+    expect(harness.log).toEqual(['stop:gone']);
   });
 });
