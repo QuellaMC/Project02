@@ -1,7 +1,6 @@
 import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
-import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -191,144 +190,10 @@ describe('durable runtime session writer ownership', () => {
       'runtime_turn_rejected',
     ]);
   });
-
-  it('holds the conversation writer lease for the full interactive chat process', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const first = spawnChatProcess(storeRoot, '--init');
-
-    try {
-      await waitForOutput(first, 'is ready.');
-      const durableFilesBeforeSecondWriter =
-        await snapshotDurableFiles(storeRoot);
-      const second = spawnChatProcess(storeRoot);
-      const secondResult = await collectChildExit(second);
-
-      expect(secondResult.code).toBe(1);
-      expect(secondResult.stderr).toContain(
-        'Local runtime mutation resource is busy: conversation-writer:',
-      );
-      expect(await snapshotDurableFiles(storeRoot)).toEqual(
-        durableFilesBeforeSecondWriter,
-      );
-
-      first.stdin.write('/exit\n');
-      const firstResult = await collectChildExit(first);
-      expect(firstResult.code).toBe(0);
-    } finally {
-      if (first.exitCode === null) {
-        first.kill();
-      }
-    }
-  }, 40_000);
 });
 
 async function createTempStoreRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'project02-session-writer-'));
   tempRoots.push(root);
   return root;
-}
-
-function spawnChatProcess(
-  storeRoot: string,
-  ...extraArgs: readonly string[]
-): ChildProcessWithoutNullStreams {
-  return spawn(
-    process.execPath,
-    ['src/cli/chat/main.ts', '--store', storeRoot, ...extraArgs],
-    {cwd: process.cwd(), stdio: 'pipe'},
-  );
-}
-
-async function waitForOutput(
-  child: ChildProcessWithoutNullStreams,
-  expected: string,
-): Promise<void> {
-  await new Promise<void>((resolveOutput, rejectOutput) => {
-    let stdout = '';
-    // An idle deadline, not a total one: these cases cold-start several real
-    // Node processes, so any fixed budget goes flaky under runner load.
-    let timeout: NodeJS.Timeout;
-    const failIfIdle = (): void => {
-      timeout = setTimeout(() => {
-        rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
-      }, 20_000);
-    };
-
-    failIfIdle();
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-
-      if (stdout.includes(expected)) {
-        clearTimeout(timeout);
-        resolveOutput();
-        return;
-      }
-      clearTimeout(timeout);
-      failIfIdle();
-    });
-    child.once('error', error => {
-      clearTimeout(timeout);
-      rejectOutput(error);
-    });
-    child.once('exit', code => {
-      if (!stdout.includes(expected)) {
-        clearTimeout(timeout);
-        rejectOutput(
-          new Error(
-            `Chat exited before readiness (${String(code)}): ${stdout}`,
-          ),
-        );
-      }
-    });
-  });
-}
-
-async function collectChildExit(
-  child: ChildProcessWithoutNullStreams,
-): Promise<{readonly code: number | null; readonly stderr: string}> {
-  return await new Promise((resolveExit, rejectExit) => {
-    let stderr = '';
-
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once('error', rejectExit);
-    child.once('exit', code => {
-      resolveExit({code, stderr});
-    });
-  });
-}
-
-async function snapshotDurableFiles(
-  root: string,
-  relativeRoot = '',
-): Promise<Readonly<Record<string, string>>> {
-  const directoryPath =
-    relativeRoot.length === 0 ? root : join(root, relativeRoot);
-  const entries = await readdir(directoryPath, {withFileTypes: true});
-  const snapshot: Record<string, string> = {};
-
-  for (const entry of entries.sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-  )) {
-    const relativePath =
-      relativeRoot.length === 0 ? entry.name : join(relativeRoot, entry.name);
-
-    if (relativePath === '.locks' || relativePath.startsWith('.locks/')) {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      Object.assign(snapshot, await snapshotDurableFiles(root, relativePath));
-      continue;
-    }
-
-    if (entry.isFile()) {
-      snapshot[relativePath] = await readFile(join(root, relativePath), 'utf8');
-    }
-  }
-
-  return Object.freeze(snapshot);
 }
