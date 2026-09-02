@@ -104,6 +104,9 @@ describe('gateway reference client', () => {
     expect(() =>
       createGatewayClient({baseUrl: 'https://127.0.0.1:4310', token}),
     ).toThrow(/http:\/\//u);
+    expect(() =>
+      createGatewayClient({url: `http://example.com:4310/#token=${token}`}),
+    ).toThrow(/this machine/u);
     await expect(
       createGatewayClient({baseUrl: 'http://127.0.0.1:1', token}).health(),
     ).rejects.toMatchObject({status: 0, code: 'unreachable'});

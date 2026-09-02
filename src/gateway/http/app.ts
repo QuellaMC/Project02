@@ -5,7 +5,7 @@ import {bodyLimit} from 'hono/body-limit';
 import {HTTPException} from 'hono/http-exception';
 import {relative} from 'node:path';
 
-import type {Gateway} from '../api/contract.ts';
+import {gatewayLoopbackHostnames, type Gateway} from '../api/contract.ts';
 import {createApiRouter, errorBody} from './api.ts';
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
@@ -26,8 +26,6 @@ export type CreateGatewayAppOptions = {
 
 /** A message is a few KiB; a body past this is not a message. */
 const maxBodyBytes = 64 * 1024;
-
-const loopbackHostnames = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 const codeByStatus: Readonly<Record<number, string>> = Object.freeze({
   400: 'invalid_request',
@@ -128,7 +126,7 @@ function assertLoopbackOrigin(c: Context<ApiEnv>): void {
     ? host.slice(0, host.indexOf(']') + 1)
     : (host.split(':')[0] ?? '');
 
-  if (!loopbackHostnames.has(hostname)) {
+  if (!gatewayLoopbackHostnames.has(hostname)) {
     throw new HTTPException(421, {
       message: `Host "${host}" is not this daemon; it answers on 127.0.0.1.`,
     });
