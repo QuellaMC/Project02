@@ -135,7 +135,7 @@ Content-Type: application/json
 
     <p>
       <code>source</code> is the client's stamp on the message — <code>web</code>,
-      <code>chat-shim:&lt;pid&gt;</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and
+      <code>chat-shim:&lt;run id&gt;</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and
       for a surface to suppress the echo of its own messages. It is never a permission input.
       Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are persisted on the
       user's commit record, and come back in history. A stamp that fails the pattern is a
