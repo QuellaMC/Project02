@@ -97,6 +97,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   });
   const reconciler = createReconciler({
     roster: () => listProject02Characters(loadHome()).characters,
+    running: () => [...runtimes.keys()],
     stateOf: characterId =>
       runtimes.get(characterId)?.health().state ?? 'not_started',
     start: startCharacter,

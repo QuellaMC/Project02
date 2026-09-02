@@ -4,6 +4,8 @@ import type {CharacterRuntimeState, ReconcilePlan} from './api/contract.ts';
 export type ReconcileSeams = {
   /** The installed roster as config says it is now. */
   readonly roster: () => readonly Project02CharacterListing[];
+  /** Every character a runtime was ever built for, whatever its state. */
+  readonly running: () => readonly string[];
   readonly stateOf: (
     characterId: string,
   ) => CharacterRuntimeState | 'not_started';
@@ -25,8 +27,9 @@ export type Reconciler = {
 /**
  * One rule for boot and for every config change: an enabled character that
  * is not running starts; a disabled one that is running — or failed, still
- * holding what it could not release — stops. Whatever is mid-flight settles
- * on its own and the next pass sees the result.
+ * holding what it could not release — stops, and so does one whose package
+ * left the roster. Whatever is mid-flight settles on its own and the next
+ * pass sees the result.
  */
 export function createReconciler(seams: ReconcileSeams): Reconciler {
   let running: Promise<ReconcilePlan> | undefined;
@@ -72,8 +75,13 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
     const starting: string[] = [];
     const stopping: string[] = [];
     const work: Promise<unknown>[] = [];
+    const roster = seams.roster();
+    const stop = (characterId: string): void => {
+      stopping.push(characterId);
+      work.push(seams.stop(characterId));
+    };
 
-    for (const character of seams.roster()) {
+    for (const character of roster) {
       const state = seams.stateOf(character.id);
 
       if (character.enabled) {
@@ -85,13 +93,19 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
           starting.push(character.id);
           work.push(seams.start(character.id));
         }
-      } else if (
-        state === 'ready' ||
-        state === 'starting' ||
-        state === 'failed'
+      } else if (holdsResources(state)) {
+        stop(character.id);
+      }
+    }
+
+    // A package removed while the daemon runs is a character no one can
+    // reach any more; its runtime must not keep its leases and its host.
+    for (const characterId of seams.running()) {
+      if (
+        !roster.some(character => character.id === characterId) &&
+        holdsResources(seams.stateOf(characterId))
       ) {
-        stopping.push(character.id);
-        work.push(seams.stop(character.id));
+        stop(characterId);
       }
     }
 
@@ -102,6 +116,10 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
       stopping: Object.freeze(stopping),
     });
   }
+}
+
+function holdsResources(state: CharacterRuntimeState | 'not_started'): boolean {
+  return state === 'ready' || state === 'starting' || state === 'failed';
 }
 
 function mergePlans(
