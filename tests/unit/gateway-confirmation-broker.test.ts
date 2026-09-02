@@ -12,12 +12,16 @@ const request = {
 
 function createBrokerHarness() {
   const events: Extract<GatewayEvent, {kind: 'confirmation_requested'}>[] = [];
+  const settled: string[] = [];
   const broker = createConfirmationBroker({
     characterId: 'mira',
     emit(event) {
       if (event.kind === 'confirmation_requested') {
         events.push(event);
       }
+    },
+    onSettled(id, decision) {
+      settled.push(`${id}:${decision}`);
     },
   });
   const ask = (signal?: AbortSignal, deadlineAt = Date.now() + 60_000) =>
@@ -26,12 +30,12 @@ function createBrokerHarness() {
       deadlineAt,
     });
 
-  return {broker, events, ask};
+  return {broker, events, settled, ask};
 }
 
 describe('gateway confirmation broker', () => {
   it('parks a request behind a unique id and resolves it by that id alone', async () => {
-    const {broker, events, ask} = createBrokerHarness();
+    const {broker, events, settled, ask} = createBrokerHarness();
     const first = ask();
     const second = ask();
 
@@ -39,6 +43,10 @@ describe('gateway confirmation broker', () => {
     expect(events[0]?.id).not.toBe(events[1]?.id);
     expect(events[0]).toMatchObject({characterId: 'mira', request});
     expect(events[0]?.deadlineAt).toBeTypeOf('number');
+    expect(broker.pending().map(parked => parked.id)).toEqual(
+      events.map(event => event.id),
+    );
+    expect(broker.pending()[0]).toMatchObject({request});
 
     expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('answered');
     expect(broker.answer(events[1]?.id ?? '', 'denied')).toBe('answered');
@@ -46,10 +54,15 @@ describe('gateway confirmation broker', () => {
 
     await expect(first).resolves.toEqual({status: 'approved'});
     await expect(second).resolves.toEqual({status: 'denied'});
+    expect(broker.pending()).toEqual([]);
+    expect(settled).toEqual([
+      `${events[0]?.id ?? ''}:approved`,
+      `${events[1]?.id ?? ''}:denied`,
+    ]);
   });
 
   it("settles as cancelled when the host's deadline aborts, and a late answer is a no-op", async () => {
-    const {broker, events, ask} = createBrokerHarness();
+    const {broker, events, settled, ask} = createBrokerHarness();
     const abort = new AbortController();
     const decision = ask(abort.signal);
 
@@ -58,6 +71,7 @@ describe('gateway confirmation broker', () => {
     await expect(decision).resolves.toEqual({status: 'cancelled'});
     expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('unknown');
     await expect(decision).resolves.toEqual({status: 'cancelled'});
+    expect(settled).toEqual([`${events[0]?.id ?? ''}:cancelled`]);
   });
 
   it('refuses an answer at the deadline even before the host aborts', async () => {

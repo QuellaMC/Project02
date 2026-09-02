@@ -1,6 +1,9 @@
 import {randomUUID} from 'node:crypto';
 
-import type {RuntimePluginToolConfirmationHandler} from '../../plugins/index.ts';
+import type {
+  RuntimePluginToolConfirmationHandler,
+  RuntimePluginToolConfirmationRequest,
+} from '../../plugins/index.ts';
 import type {
   ConfirmationAnswerStatus,
   GatewayConfirmationDecision,
@@ -10,13 +13,22 @@ import type {
 type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
 
 type ParkedRequest = {
+  readonly request: RuntimePluginToolConfirmationRequest;
   readonly deadlineAt: number;
   readonly settle: (decision: Decision) => void;
+};
+
+export type ParkedConfirmation = {
+  readonly id: string;
+  readonly request: RuntimePluginToolConfirmationRequest;
+  readonly deadlineAt: number;
 };
 
 export type ConfirmationBroker = {
   /** Plugs into the host's tool-confirmation seam; nothing else changes there. */
   readonly handler: RuntimePluginToolConfirmationHandler;
+  /** Everything parked right now, oldest first. */
+  pending(): readonly ParkedConfirmation[];
   /**
    * Unknown or already-settled ids are `unknown`: a late answer is benign.
    * An answer at or past the deadline settles the request as cancelled and
@@ -42,6 +54,8 @@ export type ConfirmationBroker = {
 export function createConfirmationBroker(options: {
   readonly characterId: string;
   readonly emit: (event: GatewayEvent) => void;
+  /** Fires once per parked request, however it settled. */
+  readonly onSettled?: (id: string, decision: Decision['status']) => void;
 }): ConfirmationBroker {
   const pending = new Map<string, ParkedRequest>();
   let cancelling = false;
@@ -62,10 +76,11 @@ export function createConfirmationBroker(options: {
         const settle = (decision: Decision): void => {
           if (pending.delete(id)) {
             resolve(decision);
+            options.onSettled?.(id, decision.status);
           }
         };
 
-        pending.set(id, {deadlineAt: context.deadlineAt, settle});
+        pending.set(id, {request, deadlineAt: context.deadlineAt, settle});
         context.signal.addEventListener(
           'abort',
           () => {
@@ -81,6 +96,17 @@ export function createConfirmationBroker(options: {
           deadlineAt: context.deadlineAt,
         });
       });
+    },
+    pending() {
+      return Object.freeze(
+        [...pending.entries()].map(([id, parked]) =>
+          Object.freeze({
+            id,
+            request: parked.request,
+            deadlineAt: parked.deadlineAt,
+          }),
+        ),
+      );
     },
     answer(id, decision) {
       const parked = pending.get(id);

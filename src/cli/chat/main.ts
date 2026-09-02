@@ -241,7 +241,11 @@ async function runChat(
           },
         );
       });
-    } else if (event.state === 'failed' && event.message !== undefined) {
+    } else if (
+      event.kind === 'state_changed' &&
+      event.state === 'failed' &&
+      event.message !== undefined
+    ) {
       // Turn failures reach the user through the delivery outcome; this
       // remembers the one failure with no outcome to carry it.
       bootFailure ??= event.message;

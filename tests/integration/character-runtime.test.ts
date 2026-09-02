@@ -71,7 +71,7 @@ async function createStartedRuntime(
   const runtime = createLocalCharacterRuntime({
     loadHome: () => home,
     characterId: 'mira',
-    pluginHost: createRuntimePluginHost({plugins: []}),
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
     roleModelAdapter: replyAdapter(),
     ...overrides,
   });
@@ -179,7 +179,7 @@ describe('local character runtime', () => {
     const unstarted = createLocalCharacterRuntime({
       loadHome: () => home,
       characterId: 'mira',
-      pluginHost: createRuntimePluginHost({plugins: []}),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
       roleModelAdapter: replyAdapter(),
     });
 
@@ -405,10 +405,11 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({
-      pluginHost: createRuntimePluginHost({
-        plugins: [probe],
-        enabledPluginIds: ['session.end.probe'],
-      }),
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.probe'],
+        }),
     });
     const attach = runtime.openDirectConversation();
 
@@ -504,10 +505,11 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({
-      pluginHost: createRuntimePluginHost({
-        plugins: [probe],
-        enabledPluginIds: ['session.end.probe'],
-      }),
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.probe'],
+        }),
       roleModelAdapter: replyAdapter({
         beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
       }),
