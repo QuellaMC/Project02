@@ -34,12 +34,24 @@ export function createConfirmationPrompts(options: {
   const settled = new Map<string, SettledDecision>();
   let showing: {readonly id: string; withdraw(): void} | undefined;
   let chain: Promise<void> = Promise.resolve();
+  // The daemon has the last word: an answer that lands after the deadline,
+  // or after another surface's, is reported, never assumed to have counted.
   const answer = (
-    id: string,
+    pending: PendingConfirmation,
     decision: GatewayConfirmationDecision,
   ): Promise<void> =>
-    options.client.answerConfirmation(id, decision).then(
-      () => undefined,
+    options.client.answerConfirmation(pending.id, decision).then(
+      outcome => {
+        if (outcome.status === 'expired') {
+          options.stdout.write(
+            `${pending.request.toolName} was not ${decision}: the confirmation had expired.\n`,
+          );
+        } else if (outcome.status === 'unknown') {
+          options.stdout.write(
+            `${pending.request.toolName} was not ${decision}: it was settled elsewhere first.\n`,
+          );
+        }
+      },
       (error: unknown) => {
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -54,7 +66,7 @@ export function createConfirmationPrompts(options: {
     // Expired while queued: the daemon already cancelled it, and asking
     // now would feed the answer to the REPL.
     if (Date.now() >= pending.deadlineAt) {
-      await answer(pending.id, 'denied');
+      await answer(pending, 'denied');
 
       return;
     }
@@ -79,7 +91,7 @@ export function createConfirmationPrompts(options: {
       line = await options.lines.promptLine(withdrawn.signal);
     } catch {
       // A failed read is a denial, never a parked confirmation.
-      await answer(pending.id, 'denied');
+      await answer(pending, 'denied');
 
       return;
     } finally {
@@ -98,15 +110,12 @@ export function createConfirmationPrompts(options: {
       options.stderr.write(
         'Confirmation timed out; the answer was discarded.\n',
       );
-      await answer(pending.id, 'denied');
+      await answer(pending, 'denied');
 
       return;
     }
 
-    await answer(
-      pending.id,
-      cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
-    );
+    await answer(pending, cliPromptAnswerIsYes(line) ? 'approved' : 'denied');
   };
 
   return {
