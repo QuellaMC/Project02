@@ -188,6 +188,8 @@ describe('chat shim', () => {
     await vi.waitFor(() => {
       expect(seen).toContain('mira is ready.');
     });
+    // Ready means the stream is listening: no line can run ahead of it.
+    expect(daemon.server.events.openCount()).toBe(1);
     stdin.write('hello there\n');
     await vi.waitFor(() => {
       expect(seen).toContain('Mira: noted');

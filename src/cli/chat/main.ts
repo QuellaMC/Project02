@@ -178,64 +178,22 @@ async function runChat(
       }
     },
   });
-  // A fatal turn — anyone's — costs the character its open threads. This
-  // terminal opens the same one again when the character is back, and on
-  // every handshake, since the stream may have missed the whole episode.
-  let attached = true;
-  const isAttached = (): boolean => attached;
-  // What the stream may have missed while it was down lives in health:
-  // the character's last maintenance failure, and a failed state.
-  let reportedMaintenanceAt: string | undefined;
-  const reportMaintenance = (failure: {at: string; message: string}): void => {
-    if (reportedMaintenanceAt === failure.at) {
-      return;
-    }
-
-    reportedMaintenanceAt = failure.at;
-    options.stderr.write(`Warning: ${failure.message}\n`);
-  };
-  const reportHealth = async (): Promise<void> => {
-    const summary = (await client.health()).characters.find(
-      character => character.id === characterId,
-    );
-
-    if (summary?.maintenance !== undefined) {
-      reportMaintenance(summary.maintenance);
-    }
-
-    if (summary?.state === 'failed' && summary.diagnostic !== undefined) {
-      options.stderr.write(`Warning: ${summary.diagnostic}\n`);
-    }
-  };
-  // The REPL waits for the latest reopen before it delivers, so a line
-  // typed right after a reconnect is never refused for a thread mid-reopen.
-  let attachment: Promise<void> = Promise.resolve();
-  const ensureAttached = (): Promise<void> => {
-    attachment = client.openDirectConversation(characterId).then(
-      outcome => {
-        if (outcome.status === 'opened') {
-          if (!attached) {
-            options.stdout.write(`${characterId} is back.\n`);
-          }
-
-          attached = true;
-        } else {
-          attached = false;
-          options.stderr.write(`Error: ${outcome.message}\n`);
-        }
-      },
-      (error: unknown) => {
-        // Not reached: the thread stays unattached and the next line, or
-        // the next handshake, tries again.
-        attached = false;
-        throw error;
-      },
-    );
-
-    return attachment;
-  };
+  const watch = createCharacterWatch({
+    client,
+    characterId,
+    stdout: options.stdout,
+    stderr: options.stderr,
+    reportError,
+  });
   const streaming = new AbortController();
   let streamFailure: unknown;
+  // Nothing is read until the first handshake is through: a line typed —
+  // or piped — before the stream listens would run a turn whose messages
+  // the stream never carries.
+  let firstHandshake: (() => void) | undefined;
+  const streamListening = new Promise<void>(resolve => {
+    firstHandshake = resolve;
+  });
   const streamEnded = client
     .events(
       event => {
@@ -259,7 +217,7 @@ async function runChat(
           event.kind === 'maintenance_failed' &&
           event.characterId === characterId
         ) {
-          reportMaintenance(event);
+          watch.maintenanceFailed(event);
         } else if (event.kind === 'confirmation_requested') {
           confirmations.ask(event);
         } else if (event.kind === 'confirmation_settled') {
@@ -268,17 +226,7 @@ async function runChat(
           event.kind === 'state_changed' &&
           event.characterId === characterId
         ) {
-          if (event.state === 'failed') {
-            attached = false;
-          }
-
-          if (event.message !== undefined) {
-            options.stderr.write(`Warning: ${event.message}\n`);
-          }
-
-          if (event.state === 'ready' && !attached) {
-            ensureAttached().catch(reportError);
-          }
+          watch.stateChanged(event.state, event.message);
         }
       },
       {
@@ -292,13 +240,16 @@ async function runChat(
         // reports its own failure; the stream itself stays up.
         onReady: () =>
           Promise.all([
-            reportHealth().catch(reportUnlessUnreachable),
-            ensureAttached().catch(reportUnlessUnreachable),
+            watch.reportHealth().catch(reportUnlessUnreachable),
+            watch.ensureAttached().catch(reportUnlessUnreachable),
             client.pendingConfirmations().then(pending => {
               confirmations.reconcile(pending);
             }, reportUnlessUnreachable),
             transcript.catchUp().catch(reportUnlessUnreachable),
-          ]).then(() => undefined),
+          ]).then(() => {
+            firstHandshake?.();
+            firstHandshake = undefined;
+          }),
       },
     )
     .then(
@@ -309,11 +260,17 @@ async function runChat(
         streamFailure = error;
         reportError(error);
         lines.close();
+        firstHandshake?.();
+        firstHandshake = undefined;
       },
     );
 
   try {
-    options.stdout.write(`${characterId} is ready.\n`);
+    await streamListening;
+
+    if (streamFailure === undefined) {
+      options.stdout.write(`${characterId} is ready.\n`);
+    }
 
     for (;;) {
       // The prompt appears only once the confirmation chain is idle, so
@@ -334,11 +291,7 @@ async function runChat(
         continue;
       }
 
-      await attachment.catch(() => undefined);
-
-      if (!isAttached()) {
-        await ensureAttached().catch(reportError);
-      }
+      await watch.attached();
 
       const clientMessageId = randomUUID();
       const outcome = await deliverOrReport(client, {
@@ -357,6 +310,8 @@ async function runChat(
           `${characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
         );
         transcript.expectLanding(clientMessageId, line);
+        // The stream may be fine and bring no handshake: read the thread now.
+        transcript.catchUp().catch(reportError);
         continue;
       }
 
@@ -386,6 +341,102 @@ async function runChat(
     await transcript.settled();
     lines.close();
   }
+}
+
+/**
+ * This terminal's hold on its character: the thread it opened, reopened
+ * when a fatal turn — anyone's — took it away and the character came back,
+ * or on any handshake, since the stream may have missed the episode; and
+ * what health says that the stream may have missed while it was down.
+ */
+function createCharacterWatch(options: {
+  readonly client: GatewayClient;
+  readonly characterId: string;
+  readonly stdout: NodeJS.WritableStream;
+  readonly stderr: NodeJS.WritableStream;
+  readonly reportError: (error: unknown) => void;
+}): {
+  ensureAttached(): Promise<void>;
+  /** Waits for the latest reopen, trying once more if the thread is lost. */
+  attached(): Promise<void>;
+  stateChanged(state: string, message: string | undefined): void;
+  maintenanceFailed(failure: {at: string; message: string}): void;
+  reportHealth(): Promise<void>;
+} {
+  const {client, characterId} = options;
+  let attached = true;
+  let attachment: Promise<void> = Promise.resolve();
+  let reportedMaintenanceAt: string | undefined;
+  const ensureAttached = (): Promise<void> => {
+    attachment = client.openDirectConversation(characterId).then(
+      outcome => {
+        if (outcome.status === 'opened') {
+          if (!attached) {
+            options.stdout.write(`${characterId} is back.\n`);
+          }
+
+          attached = true;
+        } else {
+          attached = false;
+          options.stderr.write(`Error: ${outcome.message}\n`);
+        }
+      },
+      (error: unknown) => {
+        // Not reached: the thread stays unattached and the next line, or
+        // the next handshake, tries again.
+        attached = false;
+        throw error;
+      },
+    );
+
+    return attachment;
+  };
+  const maintenanceFailed = (failure: {at: string; message: string}): void => {
+    if (reportedMaintenanceAt === failure.at) {
+      return;
+    }
+
+    reportedMaintenanceAt = failure.at;
+    options.stderr.write(`Warning: ${failure.message}\n`);
+  };
+
+  return {
+    ensureAttached,
+    async attached() {
+      await attachment.catch(() => undefined);
+
+      if (!attached) {
+        await ensureAttached().catch(options.reportError);
+      }
+    },
+    stateChanged(state, message) {
+      if (state === 'failed') {
+        attached = false;
+      }
+
+      if (message !== undefined) {
+        options.stderr.write(`Warning: ${message}\n`);
+      }
+
+      if (state === 'ready' && !attached) {
+        ensureAttached().catch(options.reportError);
+      }
+    },
+    maintenanceFailed,
+    async reportHealth() {
+      const summary = (await client.health()).characters.find(
+        character => character.id === characterId,
+      );
+
+      if (summary?.maintenance !== undefined) {
+        maintenanceFailed(summary.maintenance);
+      }
+
+      if (summary?.state === 'failed' && summary.diagnostic !== undefined) {
+        options.stderr.write(`Warning: ${summary.diagnostic}\n`);
+      }
+    },
+  };
 }
 
 /** The daemon could not be reached at all, or is stopping. */
