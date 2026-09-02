@@ -9,15 +9,29 @@ import {
   type Gateway,
   type GatewayEvent,
 } from '../../src/gateway/index.ts';
+import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
+import {
+  createDemoConfigPluginManifest,
+  demoConfigPluginId,
+} from '../../src/plugins/packages/demo-config/plugin.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
-import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  ensureInitializedProject02Store,
+  inspectRuntimePluginConfig,
+} from '../../src/runtime/config/index.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  characterDataDirPath,
+} from '../../src/runtime/storage/index.ts';
 import {
   writeTestCharacterPackage,
   testCharacterProfile,
 } from '../support/character-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  runtimeLocationForTest,
+  writeRuntimeConfig,
+} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(
@@ -57,6 +71,74 @@ async function open(gateway: Gateway, characterId: string) {
   }
 
   return outcome;
+}
+
+/**
+ * A gateway whose character runs the bundled demo-config plugin, and an
+ * adapter that asks to change its tone: the one confirmation-gated path in
+ * the runtime, driven through real activation and the runtime's own broker.
+ */
+async function createConfirmationHome(reply = 'done') {
+  const homeRoot = await createGatewayHome();
+  const manifest = createDemoConfigPluginManifest();
+
+  writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    plugins: {[demoConfigPluginId]: {enabled: true}},
+  });
+
+  let expectedFingerprint = '';
+  let invocations = 0;
+  const adapter: RoleModelAdapter = {
+    invoke() {
+      invocations += 1;
+
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls:
+            invocations === 1
+              ? [
+                  {
+                    name: runtimePluginConfigUpdateToolName,
+                    input: {
+                      pluginId: demoConfigPluginId,
+                      fieldName: 'tone',
+                      operation: 'set',
+                      value: 'warm',
+                      expectedFingerprint,
+                    },
+                  },
+                ]
+              : [{name: 'visible_reply', input: {text: reply}}],
+        }),
+      };
+    },
+  };
+  const gateway = createGateway({
+    location: {storeRoot: homeRoot},
+    env: {},
+    roleModelAdapter: adapter,
+  });
+  const inspectTone = () =>
+    inspectRuntimePluginConfig({
+      targetScope: 'character',
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        character: 'mira',
+      }),
+      manifest,
+      pluginManifests: [manifest],
+    });
+
+  await gateway.startCharacter('mira');
+  expectedFingerprint = inspectTone().fingerprint;
+
+  return {gateway, inspectTone};
+}
+
+function authoredTone(
+  inspected: ReturnType<typeof inspectRuntimePluginConfig>,
+): unknown {
+  return inspected.fields.find(field => field.name === 'tone')?.authored.value;
 }
 
 async function createGatewayHome(): Promise<string> {
@@ -875,6 +957,198 @@ describe('gateway façade', () => {
       gateway.deliver({...message, clientMessageId: 'msg-2'}),
     ).resolves.toMatchObject({status: 'completed'});
     expect(adapter.invocations()).toBe(2);
+    await gateway.stop();
+  });
+  it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {
+    const {gateway, inspectTone} = await createConfirmationHome();
+    const first: GatewayEvent[] = [];
+    const second: GatewayEvent[] = [];
+
+    gateway.events(event => first.push(event));
+    gateway.events(event => second.push(event));
+
+    const ref = await open(gateway, 'mira');
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'please be warmer',
+      source: 'test',
+      clientMessageId: randomUUID(),
+    });
+
+    await vi.waitFor(() => {
+      expect(gateway.pendingConfirmations()).toHaveLength(1);
+    });
+
+    const pending = gateway.pendingConfirmations()[0];
+
+    expect(pending).toMatchObject({characterId: 'mira'});
+    expect(pending?.deadlineAt).toBeGreaterThan(Date.now());
+    expect(first).toContainEqual(
+      expect.objectContaining({
+        kind: 'confirmation_requested',
+        id: pending?.id,
+      }),
+    );
+
+    expect(gateway.answerConfirmation(pending?.id ?? '', 'approved')).toEqual({
+      status: 'answered',
+    });
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+
+    for (const events of [first, second]) {
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          kind: 'confirmation_settled',
+          id: pending?.id,
+          decision: 'approved',
+        }),
+      );
+      expect(events.at(-1)).toMatchObject({
+        kind: 'turn_completed',
+        conversationId: ref.conversationId,
+        status: 'completed',
+      });
+    }
+    expect(gateway.pendingConfirmations()).toEqual([]);
+    expect(authoredTone(inspectTone())).toBe('warm');
+    await gateway.stop();
+  });
+
+  it('refuses an answer that arrives after the deadline, whatever the client believes', async () => {
+    const {gateway, inspectTone} = await createConfirmationHome();
+    const events: GatewayEvent[] = [];
+
+    gateway.events(event => events.push(event));
+
+    const ref = await open(gateway, 'mira');
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'please be warmer',
+      source: 'test',
+      clientMessageId: randomUUID(),
+    });
+
+    await vi.waitFor(() => {
+      expect(gateway.pendingConfirmations()).toHaveLength(1);
+    });
+
+    const pending = gateway.pendingConfirmations()[0];
+
+    // Only the clock moves: the host's own timer has not fired yet.
+    vi.useFakeTimers({toFake: ['Date']});
+
+    try {
+      vi.setSystemTime(pending?.deadlineAt ?? 0);
+      expect(gateway.answerConfirmation(pending?.id ?? '', 'approved')).toEqual(
+        {status: 'expired'},
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: 'confirmation_settled',
+        id: pending?.id,
+        decision: 'cancelled',
+      }),
+    );
+    expect(authoredTone(inspectTone())).toBeUndefined();
+    await gateway.stop();
+  });
+
+  it('tells every surface how a turn ended, with the reason when it did not complete', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: {invoke: () => ({rawOutputText: 'not json at all'})},
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const events: GatewayEvent[] = [];
+
+    gateway.events(event => events.push(event));
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+        source: 'test',
+        clientMessageId: randomUUID(),
+      }),
+    ).resolves.toMatchObject({status: 'rejected'});
+    expect(events.at(-1)).toMatchObject({
+      kind: 'turn_completed',
+      characterId: 'mira',
+      conversationId: ref.conversationId,
+      status: 'rejected',
+      reason: 'malformed_output',
+    });
+    await gateway.stop();
+  });
+
+  it('reports a failed segment rotation as maintenance while the turn stays completed', async () => {
+    const homeRoot = await createGatewayHome();
+
+    // A window this small rotates after a few turns.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100},
+    });
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const events: GatewayEvent[] = [];
+
+    gateway.events(event => events.push(event));
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+    // Hold the next segment's writer lease from outside, so the rotation
+    // fails after planning and the current segment stays in place.
+    const blocker = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot: characterDataDirPath(homeRoot, 'mira'),
+      sessionId: `${ref.conversationId}.2`,
+    });
+
+    try {
+      for (const text of ['one', 'two', 'three', 'four']) {
+        await expect(
+          gateway.deliver({
+            conversationId: ref.conversationId,
+            senderId: ref.userParticipantId,
+            text,
+            source: 'test',
+            clientMessageId: randomUUID(),
+          }),
+        ).resolves.toMatchObject({status: 'completed'});
+      }
+    } finally {
+      await blocker.release();
+    }
+
+    const maintenance = gateway.health().characters[0]?.maintenance;
+
+    expect(maintenance?.message).toContain('busy');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: 'maintenance_failed',
+        characterId: 'mira',
+        at: maintenance?.at,
+        message: maintenance?.message,
+      }),
+    );
+    expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
   });
 });

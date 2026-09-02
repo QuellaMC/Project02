@@ -8,7 +8,10 @@ import {
   type Project02HomeOptions,
 } from '../app/index.ts';
 import {isValidClientStamp} from '../core/index.ts';
-import type {RuntimePluginHost} from '../plugins/index.ts';
+import type {
+  RuntimePluginHost,
+  RuntimePluginToolConfirmationHandler,
+} from '../plugins/index.ts';
 import type {ChatProviderName, RoleModelAdapter} from '../role-model/index.ts';
 import {
   gatewayProtocolVersion,
@@ -21,6 +24,7 @@ import {
   type GatewayHealth,
   type GatewayMessage,
   type OpenOutcome,
+  type PendingConfirmation,
   type StartOutcome,
   type TurnOutcome,
   type Unsubscribe,
@@ -35,7 +39,11 @@ export type CreateGatewayOptions = Project02HomeOptions & {
   /** Test and dev injection, applied to every character this gateway starts. */
   readonly provider?: ChatProviderName;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly createPluginHost?: (characterId: string) => RuntimePluginHost;
+  /** Receives the character's confirmation seam, so injected hosts park confirmations too. */
+  readonly createPluginHost?: (
+    characterId: string,
+    confirmations: RuntimePluginToolConfirmationHandler,
+  ) => RuntimePluginHost;
 };
 
 type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
@@ -83,6 +91,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       return existing;
     }
 
+    const {createPluginHost} = options;
     const runtime = createLocalCharacterRuntime({
       loadHome,
       characterId,
@@ -90,9 +99,13 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),
-      ...(options.createPluginHost === undefined
+      ...(createPluginHost === undefined
         ? {}
-        : {pluginHost: options.createPluginHost(characterId)}),
+        : {
+            createPluginHost: (
+              confirmations: RuntimePluginToolConfirmationHandler,
+            ) => createPluginHost(characterId, confirmations),
+          }),
     });
 
     runtime.events(event => {
@@ -203,7 +216,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       const runtime =
         characterId === undefined ? undefined : runtimes.get(characterId);
 
-      if (runtime === undefined) {
+      if (characterId === undefined || runtime === undefined) {
         return refusedTurn(
           'unknown_conversation',
           'The gateway holds no open conversation ' +
@@ -214,7 +227,19 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       return submissions.submit(
         message.conversationId,
         message.clientMessageId,
-        () => runtime.deliver(message),
+        () =>
+          runtime.deliver(message).then(outcome => {
+            emit(turnCompleted(characterId, message.conversationId, outcome));
+
+            return outcome;
+          }),
+      );
+    },
+    pendingConfirmations(): readonly PendingConfirmation[] {
+      return Object.freeze(
+        [...runtimes.values()].flatMap(runtime =>
+          runtime.pendingConfirmations(),
+        ),
       );
     },
     answerConfirmation(id, decision): AnswerOutcome {
@@ -308,6 +333,27 @@ function summarize(
     enabled: character.enabled,
     state: health?.state ?? ('not_started' as const),
     ...(health?.failure === undefined ? {} : {diagnostic: health.failure}),
+    ...(health?.maintenance === undefined
+      ? {}
+      : {maintenance: health.maintenance}),
+  });
+}
+
+/** The sender has the outcome; every other surface hears how the turn ended. */
+function turnCompleted(
+  characterId: string,
+  conversationId: string,
+  outcome: TurnOutcome,
+): GatewayEvent {
+  return Object.freeze({
+    kind: 'turn_completed' as const,
+    characterId,
+    conversationId,
+    status: outcome.status,
+    ...(outcome.status === 'rejected' || outcome.status === 'refused'
+      ? {reason: outcome.reason, message: outcome.message}
+      : {}),
+    ...(outcome.status === 'failed' ? {message: outcome.message} : {}),
   });
 }
 

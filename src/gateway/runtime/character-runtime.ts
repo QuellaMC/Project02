@@ -11,6 +11,7 @@ import {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
   type RuntimePluginHost,
+  type RuntimePluginToolConfirmationHandler,
 } from '../../plugins/index.ts';
 import {
   createSelectedRoleModelAdapter,
@@ -24,6 +25,7 @@ import {
   endSession,
   openConversation,
   type ActiveConversation,
+  type SegmentRotation,
   type UserMessageDelivery,
 } from '../../runtime/index.ts';
 import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
@@ -35,7 +37,9 @@ import type {
   GatewayEventListener,
   GatewayMessage,
   GatewayRefusalReason,
+  MaintenanceFailure,
   OpenOutcome,
+  PendingConfirmation,
   TurnOutcome,
   Unsubscribe,
 } from '../api/contract.ts';
@@ -48,8 +52,14 @@ export type LocalCharacterRuntimeOptions = {
   /** Loaded fresh per assembly, so config fixes reach retries. */
   readonly loadHome: () => Project02Home;
   readonly characterId: string;
-  /** Test and dev injection; a production start constructs everything. */
-  readonly pluginHost?: RuntimePluginHost;
+  /**
+   * Test and dev injection; a production start constructs everything. The
+   * factory receives this runtime's confirmation seam, so an injected host
+   * parks confirmations exactly like a constructed one.
+   */
+  readonly createPluginHost?: (
+    confirmations: RuntimePluginToolConfirmationHandler,
+  ) => RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly provider?: ChatProviderName;
 };
@@ -79,6 +89,7 @@ type RuntimeContext = {
   readonly broker: ConfirmationBroker;
   state: CharacterRuntimeState;
   failure: string | undefined;
+  maintenance: MaintenanceFailure | undefined;
   assembled: AssembledCharacter | undefined;
   queue: Promise<unknown>;
   opening: Promise<OpenOutcome> | undefined;
@@ -112,9 +123,18 @@ export function createLocalCharacterRuntime(
       emit: event => {
         emit(listeners, event);
       },
+      onSettled: (id, decision) => {
+        emit(listeners, {
+          kind: 'confirmation_settled',
+          characterId,
+          id,
+          decision,
+        });
+      },
     }),
     state: 'stopped',
     failure: undefined,
+    maintenance: undefined,
     assembled: undefined,
     queue: Promise.resolve(),
     opening: undefined,
@@ -131,6 +151,13 @@ export function createLocalCharacterRuntime(
     },
     reactivate: () => reactivateRuntime(context),
     deliver: (message: GatewayMessage) => deliverMessage(context, message),
+    pendingConfirmations(): readonly PendingConfirmation[] {
+      return Object.freeze(
+        context.broker
+          .pending()
+          .map(parked => Object.freeze({characterId, ...parked})),
+      );
+    },
     answerConfirmation(id, decision) {
       return context.broker.answer(id, decision);
     },
@@ -140,6 +167,9 @@ export function createLocalCharacterRuntime(
         state: context.state,
         openConversationIds: Object.freeze([...context.conversations.keys()]),
         ...(context.failure === undefined ? {} : {failure: context.failure}),
+        ...(context.maintenance === undefined
+          ? {}
+          : {maintenance: context.maintenance}),
       });
     },
     events(listener: GatewayEventListener): Unsubscribe {
@@ -301,7 +331,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
 
   const startup = await activateProject02Character(home, {
     characterId,
-    continueAfterActivationErrors: options.pluginHost !== undefined,
+    continueAfterActivationErrors: options.createPluginHost !== undefined,
     // Runs in the planning phase, so a bad provider value is refused
     // before any durable character state is written.
     validateRuntimeEnv: env => {
@@ -345,11 +375,11 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     ) ?? options.roleModelAdapter;
   const adapterOption = adapter === undefined ? {} : {adapter};
 
-  if (options.pluginHost !== undefined) {
+  if (options.createPluginHost !== undefined) {
     return {
       ...shared,
       ...adapterOption,
-      host: options.pluginHost,
+      host: options.createPluginHost(context.broker.handler),
       ownsHost: false,
     };
   }
@@ -540,6 +570,8 @@ async function runTurn(
   }
 
   if (delivery.status === 'completed') {
+    recordMaintenance(context, delivery.rotation);
+
     return Object.freeze({
       status: 'completed' as const,
       characterId: context.characterId,
@@ -561,6 +593,38 @@ async function runTurn(
     conversationId: message.conversationId,
     reason: delivery.turn.reason,
     message: delivery.turn.message,
+  });
+}
+
+/**
+ * Rotation is the character's memory management, invisible to the
+ * conversation: a failed rotation is planned again next turn, and a closed
+ * segment's failed session end is already in its log. What the person can
+ * do about either is know — through health and the stream, never as the
+ * turn's outcome, which stays completed.
+ */
+function recordMaintenance(
+  context: RuntimeContext,
+  rotation: SegmentRotation | undefined,
+): void {
+  const message =
+    rotation === undefined
+      ? undefined
+      : rotation.status === 'failed'
+        ? rotation.message
+        : rotation.endFailure;
+
+  if (message === undefined) {
+    return;
+  }
+
+  const failure = Object.freeze({at: new Date().toISOString(), message});
+
+  context.maintenance = failure;
+  emit(context.listeners, {
+    kind: 'maintenance_failed',
+    characterId: context.characterId,
+    ...failure,
   });
 }
 

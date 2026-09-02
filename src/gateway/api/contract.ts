@@ -120,6 +120,25 @@ export type ConfirmationAnswerStatus = 'answered' | 'expired' | 'unknown';
 
 export type AnswerOutcome = {readonly status: ConfirmationAnswerStatus};
 
+/** A parked tool confirmation, as the stream announced it and the list shows it. */
+export type PendingConfirmation = {
+  readonly characterId: string;
+  /** Unique across the whole gateway; answerConfirmation routes by it alone. */
+  readonly id: string;
+  readonly request: RuntimePluginToolConfirmationRequest;
+  readonly deadlineAt: number;
+};
+
+/**
+ * A background problem the conversation never sees: a segment rotation that
+ * failed (the plan is simply made again next turn) or a closed segment's
+ * session-end hooks that did not finish. Health keeps the latest.
+ */
+export type MaintenanceFailure = {
+  readonly at: string;
+  readonly message: string;
+};
+
 export type GatewayEvent =
   | {
       readonly kind: 'turn_progress';
@@ -128,12 +147,20 @@ export type GatewayEvent =
       readonly progress: LocalRuntimeTurnProgressEvent;
     }
   | {
-      readonly kind: 'confirmation_requested';
+      readonly kind: 'turn_completed';
       readonly characterId: string;
-      /** Unique across the whole gateway; answerConfirmation routes by it alone. */
+      readonly conversationId: string;
+      readonly status: TurnOutcome['status'];
+      /** The terminal explanation every surface can show, not only the sender. */
+      readonly reason?: string;
+      readonly message?: string;
+    }
+  | ({readonly kind: 'confirmation_requested'} & PendingConfirmation)
+  | {
+      readonly kind: 'confirmation_settled';
+      readonly characterId: string;
       readonly id: string;
-      readonly request: RuntimePluginToolConfirmationRequest;
-      readonly deadlineAt: number;
+      readonly decision: 'approved' | 'denied' | 'cancelled';
     }
   | {
       readonly kind: 'state_changed';
@@ -141,7 +168,11 @@ export type GatewayEvent =
       readonly state: CharacterRuntimeState;
       /** Present when a failure caused the change. */
       readonly message?: string;
-    };
+    }
+  | ({
+      readonly kind: 'maintenance_failed';
+      readonly characterId: string;
+    } & MaintenanceFailure);
 
 export type GatewayEventListener = (event: GatewayEvent) => void;
 
@@ -153,6 +184,7 @@ export type CharacterRuntimeHealth = {
   readonly openConversationIds: readonly string[];
   /** Why the runtime is failed, when it is. */
   readonly failure?: string;
+  readonly maintenance?: MaintenanceFailure;
 };
 
 /** One installed character, as health reports it. */
@@ -163,6 +195,8 @@ export type CharacterSummary = {
   readonly state: CharacterRuntimeState | 'not_started';
   /** Boot or activation problem, when one exists. */
   readonly diagnostic?: string;
+  /** The latest background failure, when one has happened since boot. */
+  readonly maintenance?: MaintenanceFailure;
 };
 
 /** The daemon's whole state in one read: the roster and what it could not load. */
@@ -191,6 +225,7 @@ export type CharacterRuntime = {
   /** Fresh start after a fatal turn; the registry calls it once per failure. */
   reactivate(): Promise<void>;
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
+  pendingConfirmations(): readonly PendingConfirmation[];
   answerConfirmation(
     id: string,
     decision: GatewayConfirmationDecision,
@@ -209,6 +244,8 @@ export type Gateway = {
   health(): GatewayHealth;
   openDirectConversation(characterId: string): Promise<OpenOutcome>;
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
+  /** What is parked right now; a client that missed the event reads this. */
+  pendingConfirmations(): readonly PendingConfirmation[];
   answerConfirmation(
     id: string,
     decision: GatewayConfirmationDecision,
