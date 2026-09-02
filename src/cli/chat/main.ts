@@ -145,6 +145,16 @@ async function runChat(
       `Error: ${error instanceof Error ? error.message : String(error)}\n`,
     );
   };
+  // A snapshot the daemon could not answer leaves the bootstrap incomplete;
+  // rethrown, it makes the stream reconnect and run the whole handshake
+  // again. Any other failure is reported and the stream carries on.
+  const reportUnlessUnreachable = (error: unknown): void => {
+    if (isUnreachable(error)) {
+      throw error;
+    }
+
+    reportError(error);
+  };
   const transcript = await createTranscript({
     client,
     conversationId: opened.conversationId,
@@ -170,22 +180,34 @@ async function runChat(
   // terminal opens the same one again when the character is back, and on
   // every handshake, since the stream may have missed the whole episode.
   let attached = true;
+  const isAttached = (): boolean => attached;
+  // Whose turn the thread is on: turns run one at a time, so the source
+  // stamped on the last user message names the owner of what follows.
+  let turnOwner: string | undefined;
   // The REPL waits for the latest reopen before it delivers, so a line
   // typed right after a reconnect is never refused for a thread mid-reopen.
   let attachment: Promise<void> = Promise.resolve();
   const ensureAttached = (): Promise<void> => {
-    attachment = client.openDirectConversation(characterId).then(outcome => {
-      if (outcome.status === 'opened') {
-        if (!attached) {
-          options.stdout.write(`${characterId} is back.\n`);
-        }
+    attachment = client.openDirectConversation(characterId).then(
+      outcome => {
+        if (outcome.status === 'opened') {
+          if (!attached) {
+            options.stdout.write(`${characterId} is back.\n`);
+          }
 
-        attached = true;
-      } else {
+          attached = true;
+        } else {
+          attached = false;
+          options.stderr.write(`Error: ${outcome.message}\n`);
+        }
+      },
+      (error: unknown) => {
+        // Not reached: the thread stays unattached and the next line, or
+        // the next handshake, tries again.
         attached = false;
-        options.stderr.write(`Error: ${outcome.message}\n`);
-      }
-    }, reportError);
+        throw error;
+      },
+    );
 
     return attachment;
   };
@@ -195,8 +217,29 @@ async function runChat(
       event => {
         if (event.kind === 'turn_progress') {
           if (event.conversationId === opened.conversationId) {
+            if (event.progress.kind === 'user_message') {
+              turnOwner = event.progress.source;
+            }
+
             transcript.showProgress(event.progress);
           }
+        } else if (event.kind === 'turn_completed') {
+          if (event.conversationId === opened.conversationId) {
+            // This terminal's own turn reports through its answer; another
+            // surface's turn has only the stream to say how it ended.
+            if (event.status !== 'completed' && turnOwner !== source) {
+              options.stderr.write(
+                `Warning: a turn on this thread was ${event.status}${event.message === undefined ? '' : `: ${event.message}`}\n`,
+              );
+            }
+
+            turnOwner = undefined;
+          }
+        } else if (
+          event.kind === 'maintenance_failed' &&
+          event.characterId === characterId
+        ) {
+          options.stderr.write(`Warning: ${event.message}\n`);
         } else if (event.kind === 'confirmation_requested') {
           confirmations.ask(event);
         } else if (event.kind === 'confirmation_settled') {
@@ -214,8 +257,7 @@ async function runChat(
           }
 
           if (event.state === 'ready' && !attached) {
-            // Reports its own failure; nothing here waits on it.
-            void ensureAttached();
+            ensureAttached().catch(reportError);
           }
         }
       },
@@ -230,11 +272,11 @@ async function runChat(
         // reports its own failure; the stream itself stays up.
         onReady: () =>
           Promise.all([
-            ensureAttached(),
+            ensureAttached().catch(reportUnlessUnreachable),
             client.pendingConfirmations().then(pending => {
               confirmations.reconcile(pending);
-            }, reportError),
-            transcript.catchUp().catch(reportError),
+            }, reportUnlessUnreachable),
+            transcript.catchUp().catch(reportUnlessUnreachable),
           ]).then(() => undefined),
       },
     )
@@ -262,7 +304,11 @@ async function runChat(
         continue;
       }
 
-      await attachment;
+      await attachment.catch(() => undefined);
+
+      if (!isAttached()) {
+        await ensureAttached().catch(reportError);
+      }
 
       const outcome = await deliverOrReport(client, {
         conversationId: opened.conversationId,
@@ -310,6 +356,14 @@ async function runChat(
   }
 }
 
+/** The daemon could not be reached at all, or is stopping. */
+function isUnreachable(error: unknown): boolean {
+  return (
+    error instanceof GatewayClientError &&
+    (error.status === 0 || error.status === 503)
+  );
+}
+
 /** A turn's outcome, or undefined when the daemon could not be reached. */
 async function deliverOrReport(
   client: GatewayClient,
@@ -318,7 +372,7 @@ async function deliverOrReport(
   try {
     return await client.deliver(message);
   } catch (error: unknown) {
-    if (error instanceof GatewayClientError && error.status === 0) {
+    if (isUnreachable(error)) {
       return undefined;
     }
 
