@@ -310,6 +310,10 @@ describe('chat shim', () => {
     await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
     expect(authoredTone(home.inspectTone())).toBe('warm');
     await shim.printed('Mira: done');
+    // The interrupted REPL gets its prompt back once the [y/N] is gone.
+    await vi.waitFor(() => {
+      expect(shim.seen().match(/> /gu)).toHaveLength(2);
+    });
     await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
 
     // One turn on the thread: the web's. "yes" answered, it was never sent.

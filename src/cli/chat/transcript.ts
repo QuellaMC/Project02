@@ -15,6 +15,12 @@ export type Transcript = {
   catchUp(): Promise<void>;
   /** Resolves once no catch-up is in flight and nothing waits on one. */
   settled(): Promise<void>;
+  /**
+   * Resolves once every one of these messages has reached the screen (or
+   * was this terminal's own), or after the grace period if the stream
+   * never carried them.
+   */
+  whenShown(messageIds: readonly string[]): Promise<void>;
 };
 
 type ShownMessage = {
@@ -25,6 +31,8 @@ type ShownMessage = {
 };
 
 const catchUpPageSize = 100;
+/** How long a settled turn may take to show up on the stream. */
+const echoTimeoutMs = 5_000;
 
 export async function createTranscript(options: {
   readonly client: Pick<GatewayClient, 'history'>;
@@ -34,6 +42,7 @@ export async function createTranscript(options: {
   readonly stdout: NodeJS.WritableStream;
 }): Promise<Transcript> {
   const shown = new Set<string>();
+  const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
   const waiting: LocalRuntimeTurnProgressEvent[] = [];
   let buffering = false;
   let inFlight = 0;
@@ -47,6 +56,14 @@ export async function createTranscript(options: {
 
     if (message.source !== options.source) {
       options.stdout.write(`${message.speakerName}: ${message.text}\n`);
+    }
+
+    for (const waiter of awaiting.splice(0)) {
+      if (waiter.ids.every(id => shown.has(id))) {
+        waiter.resolve();
+      } else {
+        awaiting.push(waiter);
+      }
     }
   };
   const render = (progress: LocalRuntimeTurnProgressEvent): void => {
@@ -137,5 +154,19 @@ export async function createTranscript(options: {
       return run;
     },
     settled: () => queue,
+    whenShown: messageIds =>
+      messageIds.every(id => shown.has(id))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            const timer = setTimeout(resolve, echoTimeoutMs);
+
+            awaiting.push({
+              ids: messageIds,
+              resolve() {
+                clearTimeout(timer);
+                resolve();
+              },
+            });
+          }),
   };
 }

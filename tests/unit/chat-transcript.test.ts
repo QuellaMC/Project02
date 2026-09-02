@@ -147,6 +147,36 @@ describe('chat transcript', () => {
     );
   });
 
+  it('reports a turn shown once its own messages are on the screen, own lines included', async () => {
+    const harness = createHarness([]);
+    const transcript = await createTranscript({
+      client: harness.client,
+      conversationId: 'conv',
+      source: 'chat-shim:1',
+      stdout: harness.stdout,
+    });
+    let shown = false;
+    const waiting = transcript.whenShown([
+      'conv.1:message-1',
+      'conv.1:message-2',
+    ]);
+
+    void waiting.then(() => {
+      shown = true;
+    });
+    // Another client's turn on the thread does not count for this one.
+    transcript.showProgress(message(3, 'someone else'));
+    transcript.showProgress(message(1, 'mine', 'chat-shim:1'));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(shown).toBe(false);
+
+    transcript.showProgress(message(2, 'reply'));
+    await waiting;
+    await expect(
+      transcript.whenShown(['conv.1:message-2']),
+    ).resolves.toBeUndefined();
+  });
+
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
     const harness = createHarness([]);
     const transcript = await createTranscript({

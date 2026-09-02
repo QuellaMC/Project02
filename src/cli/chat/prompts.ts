@@ -34,6 +34,8 @@ export function createConfirmationPrompts(options: {
   readonly lines: Pick<LineDispatcher, 'promptLine'>;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  /** Runs once a prompt has left the screen, answered or withdrawn. */
+  readonly afterPrompt?: () => void;
 }): ConfirmationPrompts {
   const asked = new Set<string>();
   // Asked and not yet through the prompt: showing, or queued behind one.
@@ -138,6 +140,7 @@ export function createConfirmationPrompts(options: {
     chain = chain.then(() =>
       prompt(pending).finally(() => {
         outstanding.delete(pending.id);
+        options.afterPrompt?.();
       }),
     );
   };
