@@ -4,6 +4,7 @@ import {join} from 'node:path';
 
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
+import {agePackageSourceRoot} from '../support/package-source-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   bundledCharacterPackagesRoot,
@@ -300,6 +301,8 @@ describe('character package discovery', () => {
     const parkedPackageRoot = join(parentRoot, 'parked');
     let swapped = false;
 
+    agePackageSourceRoot(sourceRoot);
+
     vi.resetModules();
     vi.doMock('node:fs', async () => {
       const actual = await vi.importActual<typeof NodeFs>('node:fs');
@@ -473,6 +476,8 @@ describe('character package discovery', () => {
     });
     const parkedPackageRoot = join(parentRoot, 'parked');
     let packageRootInspected = false;
+
+    agePackageSourceRoot(sourceRoot);
 
     vi.resetModules();
     vi.doMock('node:fs', async () => {
