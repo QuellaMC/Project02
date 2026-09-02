@@ -78,8 +78,13 @@ export async function createTranscript(options: {
       recent.add(key);
     }
   };
-  const verdict = (text: string, status: string): string =>
-    `Your line "${text}" did reach the character; its turn ${status === 'completed' ? 'completed' : `was ${status}`}.`;
+  // A turn's end says how it ended, not that the line reached the thread;
+  // only the line's own record says that. Without it, the turn is over
+  // and the line is not on the thread, so sending it again is safe.
+  const verdict = (id: string, text: string, status: string): string =>
+    landed.has(id)
+      ? `Your line "${text}" did reach the character; its turn ${status === 'completed' ? 'completed' : `was ${status}`}.`
+      : `Your line "${text}" was ${status} before it reached the thread; send it again if you still want to.`;
   const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
   const say = (text: string): void => {
     options.stdout.write(`${text}\n`);
@@ -234,7 +239,7 @@ export async function createTranscript(options: {
       const status = ended.get(clientMessageId);
 
       if (status !== undefined) {
-        say(verdict(text, status));
+        say(verdict(clientMessageId, text, status));
       } else if (landed.has(clientMessageId)) {
         say(`Your line "${text}" did land.`);
       } else {
@@ -246,7 +251,7 @@ export async function createTranscript(options: {
 
       if (text !== undefined) {
         uncertain.delete(clientMessageId);
-        say(verdict(text, status));
+        say(verdict(clientMessageId, text, status));
 
         return;
       }
