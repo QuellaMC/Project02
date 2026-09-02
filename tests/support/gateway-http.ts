@@ -71,12 +71,14 @@ export async function startTestGatewayServer(options: {
   readonly streams?: EventStreamsOptions;
   /** A port to come back on, for a daemon that goes away and returns. */
   readonly port?: number;
+  /** Another token, for a daemon that came back as a different run. */
+  readonly token?: string;
 }): Promise<TestGatewayServer> {
   const events = createEventStreams(options.gateway, options.streams ?? {});
   const lifecycle = {stopping: false};
   const app = createGatewayApp({
     gateway: options.gateway,
-    token: testGatewayToken,
+    token: options.token ?? testGatewayToken,
     events,
     lifecycle: {stopping: () => lifecycle.stopping},
     ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),

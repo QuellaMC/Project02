@@ -9,8 +9,12 @@ import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {createGateway, type Gateway} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  characterDataDirPath,
+} from '../../src/runtime/storage/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {
   authoredTone,
   createConfirmationHome,
@@ -441,6 +445,85 @@ describe('chat shim', () => {
 
       expect(exitCode).toBe(0);
       expect(stderr).toContain('could not be reached');
+    } finally {
+      await returned.close();
+      await daemon.gateway.stop();
+    }
+  }, 20_000);
+
+  it('reports a maintenance failure that happened while its stream was down', async () => {
+    // A window this small rotates after a few turns.
+    const daemon = await startDaemon(replyAdapter(), storeRoot => {
+      writeRuntimeConfig(join(storeRoot, 'config.json'), {
+        project02: {contextWindowTokens: 100},
+      });
+    });
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    await vi.waitFor(() => {
+      expect(daemon.server.events.openCount()).toBe(1);
+    });
+
+    const web = await deliverFromWeb(daemon.gateway, 'mira', 'one');
+
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+
+    // Hold the next segment's writer lease from outside, so the rotation
+    // fails after planning — while this terminal's stream is down.
+    const blocker = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot: characterDataDirPath(daemon.storeRoot, 'mira'),
+      sessionId: `${web.conversationId}.2`,
+    });
+
+    try {
+      daemon.server.events.closeAll();
+
+      for (const text of ['two', 'three', 'four']) {
+        const turn = await deliverFromWeb(daemon.gateway, 'mira', text);
+
+        await expect(turn.outcome).resolves.toMatchObject({
+          status: 'completed',
+        });
+      }
+
+      const failure = daemon.gateway.health().characters[0]?.maintenance;
+
+      expect(failure).toBeDefined();
+      await vi.waitFor(
+        () => {
+          expect(shim.errors()).toContain(`Warning: ${failure?.message ?? ''}`);
+        },
+        {timeout: 10_000},
+      );
+      expect(shim.errors().match(/Warning:/gu)).toHaveLength(1);
+      await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    } finally {
+      await blocker.release();
+      await daemon.close();
+    }
+  }, 20_000);
+
+  it('ends, nonzero, when its stream can never come back', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    await daemon.server.close();
+
+    // The daemon comes back as another run, with another token: this
+    // terminal's stream is refused for good.
+    const returned = await startTestGatewayServer({
+      gateway: daemon.gateway,
+      port: daemon.server.port,
+      token: 'another-run-0123456789abcdef',
+    });
+
+    try {
+      const {exitCode, stderr} = await shim.run;
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toMatch(/^Error: .*token/mu);
     } finally {
       await returned.close();
       await daemon.gateway.stop();
