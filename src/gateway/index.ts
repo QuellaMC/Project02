@@ -34,6 +34,7 @@ export {
   type MaintenanceFailure,
   type OpenOutcome,
   type PendingConfirmation,
+  type ReconcilePlan,
   type StartOutcome,
   type StorageFailure,
   type TurnOutcome,
