@@ -277,7 +277,15 @@ async function followStream(
 
   try {
     for (;;) {
-      const {value, done} = await reader.read();
+      // A connection the daemon severed is the daemon going away, not a
+      // fault of this client's: it is retried like a refused connection.
+      const {value, done} = await reader.read().catch((error: unknown) => {
+        throw new GatewayClientError(
+          0,
+          'unreachable',
+          `The stream from the daemon broke: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
 
       if (done) {
         return;
