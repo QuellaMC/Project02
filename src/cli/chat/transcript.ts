@@ -71,19 +71,25 @@ export async function createTranscript(options: {
       show(progress);
     }
   };
-  // The thread before this terminal joined stays where it was.
+  // The thread before this terminal joined stays where it was. The anchor
+  // then moves up with each catch-up, so a reconnect late in a long
+  // session reads one page, not the whole session again.
   const newest = await options.client.history(options.conversationId, {
     limit: 1,
   });
-  const startAfter =
+  let anchor: string | null =
     newest.status === 'ok' ? (newest.messages.at(-1)?.messageId ?? null) : null;
   const readBack = async (): Promise<void> => {
     buffering = true;
 
     try {
-      for (const message of await readSince(startAfter)) {
+      const missed = await readSince(anchor);
+
+      for (const message of missed) {
         show(message);
       }
+
+      anchor = missed.at(-1)?.messageId ?? anchor;
     } finally {
       inFlight -= 1;
 
@@ -102,7 +108,7 @@ export async function createTranscript(options: {
   // Pages walk backward until the anchor, or the thread's start, is on one;
   // what comes back is everything after the anchor, oldest first.
   const readSince = async (
-    anchor: string | null,
+    after: string | null,
   ): Promise<readonly HistoryMessage[]> => {
     const collected: HistoryMessage[] = [];
     let before: string | undefined;
@@ -118,9 +124,9 @@ export async function createTranscript(options: {
       }
 
       const at =
-        anchor === null
+        after === null
           ? -1
-          : page.messages.findIndex(message => message.messageId === anchor);
+          : page.messages.findIndex(message => message.messageId === after);
 
       collected.unshift(...page.messages.slice(at + 1));
 
