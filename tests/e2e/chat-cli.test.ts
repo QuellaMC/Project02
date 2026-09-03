@@ -617,6 +617,23 @@ describe('chat shim', () => {
     }
   }, 20_000);
 
+  it('knows a line refused by a stopping daemon was never sent', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    daemon.server.lifecycle.stopping = true;
+    shim.stdin.write('too late\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('is stopping; your line was not sent');
+    });
+    expect(shim.seen()).not.toContain('not on the thread yet');
+
+    daemon.server.lifecycle.stopping = false;
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    await daemon.close();
+  });
+
   it('opens on the recent tail of the thread, so a reply to a terminal that is gone is not lost', async () => {
     const daemon = await startDaemon();
     const earlier = await deliverFromWeb(daemon.gateway, 'mira', 'from before');

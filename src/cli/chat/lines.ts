@@ -69,7 +69,10 @@ export function createLineDispatcher(
       const newest = queued.at(-1)?.seq ?? seq;
 
       for (const prompt of prompts.splice(0)) {
-        if (closed || prompt.since > newest) {
+        if (failure !== undefined) {
+          // A failed input is a failure, not a no.
+          prompt.reject(failure);
+        } else if (closed || prompt.since > newest) {
           prompt.resolve(undefined);
         } else {
           prompts.push(prompt);

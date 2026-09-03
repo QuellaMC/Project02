@@ -92,9 +92,12 @@ describe('chat line dispatcher', () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
     const read = lines.replLine();
+    const prompt = lines.promptLine();
 
     stdin.destroy(new Error('the pipe broke'));
 
+    // A failed input is a failure for a prompt too, never a quiet no.
+    await expect(prompt).rejects.toThrow('the pipe broke');
     await expect(read).rejects.toThrow('the pipe broke');
     await expect(lines.replLine()).resolves.toBeUndefined();
   });

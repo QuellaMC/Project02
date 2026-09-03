@@ -564,10 +564,19 @@ async function sendLine(
       clientMessageId,
     });
 
+    // Refused before any turn: the line certainly did not land.
+    if (outcome === 'stopping') {
+      options.stderr.write(
+        `${context.characterId}'s daemon is stopping; your line was not sent.\n`,
+      );
+
+      return 'dropped';
+    }
+
     // The daemon could not be reached: the turn may or may not have
     // landed, and only the thread can say. The transcript keeps the
     // line's id and says which, as soon as the thread is read again.
-    if (outcome === undefined) {
+    if (outcome === 'unreachable') {
       options.stderr.write(
         `${context.characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
       );
@@ -626,16 +635,26 @@ function isUnreachable(error: unknown): boolean {
   );
 }
 
-/** A turn's outcome, or undefined when the daemon could not be reached. */
+/**
+ * A turn's outcome; `unreachable` when the daemon could not be reached at
+ * all, so whether the line landed is unknown; `stopping` when the daemon
+ * refused it before the turn, so it certainly did not.
+ */
 async function deliverOrReport(
   client: GatewayClient,
   message: Parameters<GatewayClient['deliver']>[0],
-): Promise<Awaited<ReturnType<GatewayClient['deliver']>> | undefined> {
+): Promise<
+  Awaited<ReturnType<GatewayClient['deliver']>> | 'unreachable' | 'stopping'
+> {
   try {
     return await client.deliver(message);
   } catch (error: unknown) {
-    if (isUnreachable(error)) {
-      return undefined;
+    if (error instanceof GatewayClientError && error.status === 503) {
+      return 'stopping';
+    }
+
+    if (error instanceof GatewayClientError && error.status === 0) {
+      return 'unreachable';
     }
 
     throw error;
