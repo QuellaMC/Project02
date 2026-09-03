@@ -28,6 +28,10 @@ export type ConfirmationPrompts = {
 
 export type SettledDecision = GatewayConfirmationDecision | 'cancelled';
 
+/** How often, and how patiently, a lost answer's request is looked up. */
+const recoveryAttempts = 3;
+const recoveryPauseMs = 1_000;
+
 export function createConfirmationPrompts(options: {
   readonly client: Pick<
     GatewayClient,
@@ -67,32 +71,50 @@ export function createConfirmationPrompts(options: {
         }
       },
       (error: unknown) => {
-        // The daemon never heard the answer. If it still holds the request,
-        // ask again now — the stream may be fine and bring no handshake.
-        // Only this request: a list read now may predate what the stream
-        // just delivered, and must not retire it.
+        // Whether the daemon heard the answer is unknown; only its list
+        // says. Only this request is looked up: a list read now may predate
+        // what the stream just delivered, and must not retire it.
         asked.delete(pending.id);
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
         );
-        options.client
-          .pendingConfirmations(
-            options.signal === undefined ? {} : {signal: options.signal},
-          )
-          .then(
-            stillPending => {
-              const again = stillPending.find(
-                request => request.id === pending.id,
-              );
-
-              if (again !== undefined) {
-                ask(again);
-              }
-            },
-            () => undefined,
-          );
+        recover(pending, decision, 1);
       },
     );
+  // Reads the daemon's list until it answers: a request still there is
+  // asked again; one no longer there may have taken the answer that was
+  // sent, which the person must know. A daemon that stays unreachable
+  // brings the stream down, and the handshake after it asks afresh.
+  const recover = (
+    pending: PendingConfirmation,
+    decision: GatewayConfirmationDecision,
+    attempt: number,
+  ): void => {
+    options.client
+      .pendingConfirmations(
+        options.signal === undefined ? {} : {signal: options.signal},
+      )
+      .then(
+        stillPending => {
+          const again = stillPending.find(request => request.id === pending.id);
+
+          if (again !== undefined) {
+            ask(again);
+          } else {
+            options.stdout.write(
+              `${pending.request.toolName} is no longer waiting: the ${decision} answer may have reached the character after all.\n`,
+            );
+          }
+        },
+        () => {
+          if (attempt < recoveryAttempts && options.signal?.aborted !== true) {
+            setTimeout(() => {
+              recover(pending, decision, attempt + 1);
+            }, recoveryPauseMs);
+          }
+        },
+      );
+  };
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
     if (settled.has(pending.id)) {
       return;

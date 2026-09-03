@@ -235,15 +235,7 @@ export async function createTranscript(options: {
 
       return run;
     },
-    settled: () =>
-      inFlight === 0
-        ? Promise.resolve()
-        : Promise.race([
-            queue,
-            new Promise<void>(resolve => {
-              setTimeout(resolve, echoTimeoutMs);
-            }),
-          ]),
+    settled: () => (inFlight === 0 ? Promise.resolve() : withinGrace(queue)),
     expectLanding(clientMessageId, text) {
       ownLines.expect(clientMessageId, text);
     },
@@ -262,6 +254,21 @@ export async function createTranscript(options: {
             });
           }),
   };
+}
+
+/**
+ * Waits for the read-back, or the grace period, whichever ends first; a
+ * timer that lost the race is cleared, so it cannot keep the process up.
+ */
+function withinGrace(pending: Promise<void>): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const grace = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, echoTimeoutMs);
+  });
+
+  return Promise.race([pending, grace]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 /**
