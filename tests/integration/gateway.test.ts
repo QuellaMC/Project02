@@ -325,6 +325,41 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('answers unknown_character for a package removed after its character ran', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeTestCharacterPackage(homeRoot, {id: 'zeta', displayName: 'Zeta'});
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('zeta');
+    await expect(gateway.openDirectConversation('zeta')).resolves.toMatchObject(
+      {
+        status: 'opened',
+      },
+    );
+
+    // The package goes while the daemon runs; reconcile stops the runtime.
+    rmSync(join(homeRoot, 'characters', 'zeta'), {recursive: true});
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      stopping: ['zeta'],
+    });
+
+    // A retained, stopped runtime is not a character anyone can reach.
+    await expect(gateway.openDirectConversation('zeta')).resolves.toMatchObject(
+      {
+        status: 'refused',
+        reason: 'unknown_character',
+      },
+    );
+    await gateway.stop();
+  });
+
   it('reports a broken package by its diagnostic, not as missing', async () => {
     const homeRoot = await createGatewayHome();
     const packageRoot = join(homeRoot, 'characters', 'broken');

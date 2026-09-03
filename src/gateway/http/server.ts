@@ -18,10 +18,11 @@ export type GatewayServer = {
   readonly port: number;
   /**
    * Stops in the order that loses nothing. New API requests answer 503 at
-   * once, event streams end, the gateway drains its turns and releases its
-   * leases with the socket still open — so an accepted turn still receives
-   * its outcome — and only then does the listener close, giving a response
-   * still being written a moment to finish before its socket is cut.
+   * once; the gateway drains its turns and releases its leases with the
+   * socket and the event streams still open — so an accepted turn still
+   * receives its outcome, and the stream still carries its reply; then the
+   * streams end, and only then does the listener close, letting an answer
+   * still being written finish before its socket is cut.
    */
   close(): Promise<void>;
 };
@@ -49,8 +50,8 @@ export async function createGatewayServer(
     port,
     async close() {
       stopping = true;
-      events.closeAll();
       await options.gateway.stop();
+      events.closeAll();
       await new Promise<void>(resolve => {
         server.close(() => {
           resolve();
