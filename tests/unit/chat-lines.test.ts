@@ -88,6 +88,17 @@ describe('chat line dispatcher', () => {
     await expect(lines.replLine()).resolves.toBeUndefined();
   });
 
+  it('rejects a pending read when the input fails, instead of crashing', async () => {
+    const stdin = new PassThrough();
+    const lines = createLineDispatcher(stdin);
+    const read = lines.replLine();
+
+    stdin.destroy(new Error('the pipe broke'));
+
+    await expect(read).rejects.toThrow('the pipe broke');
+    await expect(lines.replLine()).resolves.toBeUndefined();
+  });
+
   it('settles every waiter once the input ends', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
