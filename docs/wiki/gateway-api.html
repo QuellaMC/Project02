@@ -138,8 +138,11 @@ Content-Type: application/json
       <code>chat-shim:&lt;run id&gt;</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and
       for a surface to suppress the echo of its own messages. It is never a permission input.
       Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are persisted on the
-      user's commit record, and come back in history. A stamp that fails the pattern is a
-      <code>refused</code> outcome (<code>invalid_message</code>) before anything is written.
+      user's commit record, and come back in history. A stamp that fails the pattern never
+      reaches a turn: on the wire the body schema answers <code>400</code>
+      <code>invalid_request</code>, and a caller holding the façade in-process gets a
+      <code>refused</code> outcome (<code>invalid_message</code>) — the same rule, checked at
+      whichever boundary the message crosses first.
     </p>
 
     <h2>The event stream</h2>
