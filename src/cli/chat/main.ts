@@ -20,7 +20,11 @@ import {runtimeConfigDiagnosticAttribution} from '../../runtime/config/index.ts'
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
-import {createLineDispatcher, type LineDispatcher} from './lines.ts';
+import {
+  createLineDispatcher,
+  createReadAhead,
+  type ReadAhead,
+} from './lines.ts';
 import {createConfirmationPrompts} from './prompts.ts';
 import {createTranscript} from './transcript.ts';
 
@@ -301,8 +305,12 @@ async function runChat(
 
     for (;;) {
       // The prompt appears only once the confirmation chain is idle, so
-      // every keystroke answers the prompt that is actually on screen.
-      await confirmations.idle();
+      // every keystroke answers the prompt that is actually on screen — but
+      // an exit typed while an answer hangs still gets through.
+      if ((await later.holdUntil(confirmations.idle())).kind === 'exit') {
+        break;
+      }
+
       options.stdout.write('> ');
       replWaiting = true;
 
@@ -504,7 +512,7 @@ function createCharacterWatch(options: {
 type SendContext = {
   readonly client: GatewayClient;
   readonly watch: ReturnType<typeof createCharacterWatch>;
-  readonly later: ReturnType<typeof createReadAhead>;
+  readonly later: ReadAhead;
   readonly transcript: Awaited<ReturnType<typeof createTranscript>>;
   readonly opened: {
     readonly conversationId: string;
@@ -530,16 +538,16 @@ async function sendLine(
     // Only a thread that is lost holds the line; an attached one sends it
     // at once, with no read run ahead of it.
     const held = watch.isAttached()
-      ? 'attached'
+      ? {kind: 'done' as const, value: true}
       : await later.holdUntil(watch.attached());
 
-    if (held === 'exit') {
+    if (held.kind === 'exit') {
       watch.giveUp();
 
       return 'exit';
     }
 
-    if (held === 'gone') {
+    if (!held.value) {
       options.stderr.write(
         `Your line was not sent: ${context.characterId} is gone.\n`,
       );
@@ -608,58 +616,6 @@ async function sendLine(
   }
 
   return 'dropped';
-}
-
-/**
- * The REPL's reads, with one read kept ahead while a line is held for the
- * thread: an exit typed meanwhile ends the hold and leaves the held line
- * unsent; any other line waits its turn.
- */
-function createReadAhead(lines: Pick<LineDispatcher, 'replLine'>): {
-  next(): Promise<string | undefined>;
-  holdUntil(attached: Promise<boolean>): Promise<'attached' | 'gone' | 'exit'>;
-} {
-  const queued: (string | undefined)[] = [];
-  let ahead: Promise<string | undefined> | undefined;
-
-  return {
-    next() {
-      const read =
-        queued.length > 0
-          ? Promise.resolve(queued.shift())
-          : (ahead ?? lines.replLine());
-
-      ahead = undefined;
-
-      return read;
-    },
-    async holdUntil(attached) {
-      const outcome = attached.then((ok): 'attached' | 'gone' =>
-        ok ? 'attached' : 'gone',
-      );
-
-      for (;;) {
-        ahead ??= lines.replLine();
-
-        const first = await Promise.race([
-          outcome,
-          ahead.then(line => ({line})),
-        ]);
-
-        if (typeof first === 'string') {
-          return first;
-        }
-
-        ahead = undefined;
-
-        if (first.line === undefined || first.line.trim() === '/exit') {
-          return 'exit';
-        }
-
-        queued.push(first.line);
-      }
-    },
-  };
 }
 
 /** The daemon could not be reached at all, or is stopping. */

@@ -2,7 +2,10 @@ import {PassThrough} from 'node:stream';
 
 import {describe, expect, it} from 'vitest';
 
-import {createLineDispatcher} from '../../src/cli/chat/lines.ts';
+import {
+  createLineDispatcher,
+  createReadAhead,
+} from '../../src/cli/chat/lines.ts';
 
 describe('chat line dispatcher', () => {
   it('hands a line to the prompt ahead of the REPL, then the next one to the REPL', async () => {
@@ -71,6 +74,20 @@ describe('chat line dispatcher', () => {
     await expect(lines.promptLine()).resolves.toBeUndefined();
   });
 
+  it('answers a prompt nothing when the input ended before it appeared, leaving older lines to the REPL', async () => {
+    const stdin = new PassThrough();
+    const lines = createLineDispatcher(stdin);
+
+    stdin.write('a chat line\n');
+    stdin.end();
+    await new Promise(resolve => setImmediate(resolve));
+
+    // Silence is no: the prompt wants a newer line, and none can come.
+    await expect(lines.promptLine()).resolves.toBeUndefined();
+    await expect(lines.replLine()).resolves.toBe('a chat line');
+    await expect(lines.replLine()).resolves.toBeUndefined();
+  });
+
   it('settles every waiter once the input ends', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
@@ -82,5 +99,39 @@ describe('chat line dispatcher', () => {
     await expect(prompt).resolves.toBeUndefined();
     await expect(repl).resolves.toBeUndefined();
     await expect(lines.replLine()).resolves.toBeUndefined();
+  });
+});
+
+describe('chat read-ahead', () => {
+  it('lets an exit end a wait, keeps other lines in order, and never drops a pending read', async () => {
+    const stdin = new PassThrough();
+    const lines = createLineDispatcher(stdin);
+    const later = createReadAhead(lines);
+    let release: () => void = () => undefined;
+    const waited = new Promise<string>(resolve => {
+      release = () => {
+        resolve('back');
+      };
+    });
+    const holding = later.holdUntil(waited);
+
+    // Typed while waiting: queued behind the wait, in order.
+    stdin.write('first\n');
+    await new Promise(resolve => setImmediate(resolve));
+    release();
+    await expect(holding).resolves.toEqual({kind: 'done', value: 'back'});
+
+    // The read kept ahead is still pending; a line served from the queue
+    // must not discard it.
+    await expect(later.next()).resolves.toBe('first');
+    stdin.write('second\n');
+    await expect(later.next()).resolves.toBe('second');
+
+    // An exit typed during a wait ends it.
+    const forever = later.holdUntil(new Promise<never>(() => undefined));
+
+    stdin.write('/exit\n');
+    await expect(forever).resolves.toEqual({kind: 'exit'});
+    lines.close();
   });
 });
