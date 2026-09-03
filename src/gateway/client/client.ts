@@ -300,17 +300,20 @@ function resolveOptions(options: GatewayClientOptions): {
     );
   }
 
-  if ('baseUrl' in options) {
-    return {baseUrl: url.origin, token: options.token};
-  }
+  const token =
+    'baseUrl' in options
+      ? options.token
+      : new URLSearchParams(url.hash.slice(1)).get('token');
 
-  const token = new URLSearchParams(url.hash.slice(1)).get('token');
-
-  if (token === null || token.length === 0) {
+  // The token rides a header, so it must be one line of printable ASCII;
+  // anything else could not even be sent, and would fail as a raw throw.
+  if (token === null || !/^[\x21-\x7E]+$/u.test(token)) {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `The gateway URL carries no #token: ${options.url}`,
+      token === null || token.length === 0
+        ? `The gateway URL carries no #token: ${given}`
+        : `The gateway token is not a usable header value: ${given}`,
     );
   }
 
@@ -516,9 +519,14 @@ function fetchWithoutTimeouts(
   // signal reused across reconnects must not collect one per stream.
   const {signal: given, ...rest} = init ?? {};
   const signal = given ?? undefined;
-  const request = new Request(input, rest);
 
   return new Promise((resolve, reject) => {
+    const target =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
     const fail = (error: unknown): void => {
       reject(
         error instanceof GatewayClientError
@@ -526,10 +534,21 @@ function fetchWithoutTimeouts(
           : new GatewayClientError(
               0,
               'unreachable',
-              `The daemon at ${request.url} could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+              `The daemon at ${target} could not be reached: ${error instanceof Error ? error.message : String(error)}`,
             ),
       );
     };
+    let request: Request;
+
+    // Building the request can throw — a header value that cannot be sent
+    // — and that fails like a request that never connected.
+    try {
+      request = new Request(input, rest);
+    } catch (error: unknown) {
+      fail(error);
+
+      return;
+    }
 
     request.text().then(body => {
       try {
