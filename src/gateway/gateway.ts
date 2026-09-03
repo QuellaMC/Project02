@@ -124,12 +124,15 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const runtime = runtimes.get(characterId);
+      // The roster is the truth about what is installed: a runtime kept
+      // after its package left is stopped, not a character to reach.
+      const roster = listProject02Characters(loadHome()).characters;
 
-      if (runtime === undefined) {
-        return notStartedOutcome(
-          characterId,
-          listProject02Characters(loadHome()).characters,
-        );
+      if (
+        runtime === undefined ||
+        !roster.some(character => character.id === characterId)
+      ) {
+        return notStartedOutcome(characterId, roster);
       }
 
       // A start or automatic recovery in flight is joined first, so an

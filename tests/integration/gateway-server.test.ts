@@ -134,7 +134,7 @@ describe('gateway server lifecycle', () => {
     stalled.destroy();
   });
 
-  it('drains an accepted turn behind a 503 for newcomers, ending the streams first', async () => {
+  it('drains an accepted turn behind a 503 for newcomers, with the stream still carrying its reply', async () => {
     const homeRoot = await createGatewayTestHome();
     const held = heldAdapter();
     const gateway = gatewayOver(homeRoot, held.adapter);
@@ -166,9 +166,8 @@ describe('gateway server lifecycle', () => {
 
     const closing = server.close();
 
-    // The stream ends at once; the socket stays up while the turn drains.
-    await events.ended;
-
+    // Newcomers are refused at once; the socket and the stream stay up
+    // while the turn drains.
     const late = await fetch(`${baseUrl}/api/health`, {headers});
 
     expect(late.status).toBe(503);
@@ -180,6 +179,9 @@ describe('gateway server lifecycle', () => {
     await expect((await turn).json()).resolves.toMatchObject({
       status: 'completed',
     });
+    // The reply rode the stream, which ends only after the turn is done.
+    await events.next(frame => frame.event === 'turn_completed');
+    await events.ended;
     await closing;
     await expect(fetch(`${baseUrl}/api/health`, {headers})).rejects.toThrow();
 
