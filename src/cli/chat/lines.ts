@@ -36,6 +36,9 @@ export function createLineDispatcher(
   const prompts: PromptWaiter[] = [];
   let repl: Waiter | undefined;
   let seq = 0;
+  // The input ended: what is queued still serves, then every read answers
+  // nothing. Closed by the terminal: nothing queued serves either.
+  let ended = false;
   let closed = false;
   let failure: unknown;
 
@@ -60,7 +63,7 @@ export function createLineDispatcher(
       waiter.resolve(entry?.line);
     }
 
-    if (closed) {
+    if ((ended || closed) && queued.length === 0) {
       settleAll();
     }
   };
@@ -90,12 +93,13 @@ export function createLineDispatcher(
     dispatch();
   });
   lines.once('close', () => {
-    closed = true;
+    ended = true;
     dispatch();
   });
   input.once('error', (error: unknown) => {
     failure = error;
-    closed = true;
+    ended = true;
+    queued.length = 0;
     dispatch();
   });
 
@@ -104,7 +108,7 @@ export function createLineDispatcher(
     withdraw: (waiter: Waiter) => void,
     signal?: AbortSignal,
   ): Promise<string | undefined> => {
-    if (signal?.aborted === true) {
+    if (closed || signal?.aborted === true || (ended && queued.length === 0)) {
       return Promise.resolve(undefined);
     }
 
@@ -148,8 +152,12 @@ export function createLineDispatcher(
         },
         signal,
       ),
+    // Closed by the terminal, not by the input: what was typed and not yet
+    // read goes with it, so nothing is sent once there is no one to show
+    // the reply to.
     close: () => {
       closed = true;
+      queued.length = 0;
       settleAll();
       lines.close();
     },

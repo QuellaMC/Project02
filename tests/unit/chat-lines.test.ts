@@ -60,6 +60,17 @@ describe('chat line dispatcher', () => {
     lines.close();
   });
 
+  it('drops what was typed and not yet read when the terminal closes it', async () => {
+    const stdin = new PassThrough();
+    const lines = createLineDispatcher(stdin);
+
+    stdin.write('first\nsecond\n');
+    await expect(lines.replLine()).resolves.toBe('first');
+    lines.close();
+    await expect(lines.replLine()).resolves.toBeUndefined();
+    await expect(lines.promptLine()).resolves.toBeUndefined();
+  });
+
   it('settles every waiter once the input ends', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);

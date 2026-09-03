@@ -573,12 +573,19 @@ describe('chat shim', () => {
     }
   }, 20_000);
 
-  it('ends, nonzero, when its stream can never come back', async () => {
+  it('ends, nonzero, when its stream can never come back, sending nothing typed ahead', async () => {
     const daemon = await startDaemon();
     const shim = openShim([], daemon.env);
 
     await shim.printed('mira is ready.');
     await daemon.server.close();
+
+    // Typed while the daemon is away: a line that cannot be answered now,
+    // and one queued behind it that must never go once the stream is gone.
+    shim.stdin.write('while away\ntyped ahead\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('could not be reached');
+    });
 
     // The daemon comes back as another run, with another token: this
     // terminal's stream is refused for good.
@@ -593,6 +600,17 @@ describe('chat shim', () => {
 
       expect(exitCode).toBe(1);
       expect(stderr).toMatch(/^Error: .*token/mu);
+
+      const opened = await daemon.gateway.openDirectConversation('mira');
+      const history =
+        opened.status === 'opened'
+          ? await daemon.gateway.history(opened.conversationId)
+          : undefined;
+
+      expect(
+        history?.status === 'ok' &&
+          history.messages.map(message => message.text),
+      ).not.toContain('typed ahead');
     } finally {
       await returned.close();
       await daemon.gateway.stop();

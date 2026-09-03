@@ -310,7 +310,13 @@ async function runChat(
 
       replWaiting = false;
 
-      if (line === undefined || line.trim() === '/exit') {
+      // Without the stream there is no one to show a reply to: nothing
+      // more is sent, whatever was typed ahead.
+      if (
+        streamFailure !== undefined ||
+        line === undefined ||
+        line.trim() === '/exit'
+      ) {
         break;
       }
 
