@@ -110,12 +110,21 @@ export function createLineDispatcher(
     ended = true;
     dispatch();
   });
-  input.once('error', (error: unknown) => {
+  // A failing input errors on the stream and on the interface alike; the
+  // first is the failure, the second is the same one again.
+  const failed = (error: unknown): void => {
+    if (failure !== undefined) {
+      return;
+    }
+
     failure = error;
     ended = true;
     queued.length = 0;
     dispatch();
-  });
+  };
+
+  input.once('error', failed);
+  lines.on('error', failed);
 
   const take = (
     register: (waiter: Waiter) => void,
