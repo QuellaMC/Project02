@@ -1,4 +1,4 @@
-import {Server} from 'node:http';
+import {Server, type IncomingMessage, type ServerResponse} from 'node:http';
 
 import {createAdaptorServer, type ServerType} from '@hono/node-server';
 
@@ -73,36 +73,50 @@ export async function createGatewayServer(
   });
 }
 
-/** Counts answers still being written, so shutdown can wait for them. */
+/**
+ * Tracks the exchanges in flight, so shutdown can wait for the answers
+ * still being written. An exchange whose request never fully arrived — a
+ * client that stalled mid-body — has no answer on the way and is not
+ * waited for; the cut that follows the drain ends it.
+ */
 function trackResponses(server: ServerType): {drained(): Promise<void>} {
-  let active = 0;
+  const active = new Set<{
+    readonly request: IncomingMessage;
+    readonly response: ServerResponse;
+  }>();
   const waiting: (() => void)[] = [];
+  const answering = (): boolean =>
+    [...active].some(exchange => exchange.request.complete);
+  const settle = (): void => {
+    if (!answering()) {
+      for (const resolve of waiting.splice(0)) {
+        resolve();
+      }
+    }
+  };
 
   // The adaptor is built on node:http here; the type allows more.
   if (!(server instanceof Server)) {
     return {drained: () => Promise.resolve()};
   }
 
-  server.on('request', (_request, response) => {
-    active += 1;
-    response.once('close', () => {
-      active -= 1;
+  server.on('request', (request, response) => {
+    const exchange = {request, response};
 
-      if (active === 0) {
-        for (const resolve of waiting.splice(0)) {
-          resolve();
-        }
-      }
+    active.add(exchange);
+    response.once('close', () => {
+      active.delete(exchange);
+      settle();
     });
   });
 
   return {
     drained: () =>
-      active === 0
-        ? Promise.resolve()
-        : new Promise(resolve => {
+      answering()
+        ? new Promise(resolve => {
             waiting.push(resolve);
-          }),
+          })
+        : Promise.resolve(),
   };
 }
 

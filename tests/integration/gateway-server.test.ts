@@ -1,4 +1,4 @@
-import {createServer} from 'node:net';
+import {connect, createServer} from 'node:net';
 
 import {describe, expect, it, vi} from 'vitest';
 
@@ -106,6 +106,32 @@ describe('gateway server lifecycle', () => {
         resolve();
       });
     });
+  });
+
+  it('does not wait on a client that stalled mid-body when it shuts down', async () => {
+    const gateway = gatewayOver(
+      await createGatewayTestHome(),
+      heldAdapter().adapter,
+    );
+    const server = await createGatewayServer({gateway, token, port: 0});
+    const stalled = connect(server.port, '127.0.0.1');
+
+    await new Promise<void>(resolve => {
+      stalled.once('connect', () => {
+        resolve();
+      });
+    });
+    // Headers promise a body that never fully comes.
+    stalled.write(
+      `POST /api/turns HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"conv`,
+    );
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const started = Date.now();
+
+    await server.close();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    stalled.destroy();
   });
 
   it('drains an accepted turn behind a 503 for newcomers, ending the streams first', async () => {
