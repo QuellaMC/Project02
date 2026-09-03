@@ -153,6 +153,27 @@ describe('serve', () => {
     await expect(serve.stop()).resolves.toBe(0);
   });
 
+  it('advertises nothing when it was stopped before the roster came up', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-stopped-');
+    let stdout = '';
+    const exitCode = await runServeCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from([]),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(() => undefined),
+      env: {},
+      pluginHost: createRuntimePluginHost({plugins: []}),
+      roleModelAdapter: adapter,
+      signal: AbortSignal.abort(),
+      port: 0,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Gateway listening on');
+    expect(stdout).not.toContain('PROJECT02_GATEWAY=');
+  });
+
   it('refuses the options a client owns', async () => {
     for (const [args, message] of [
       [['--help'], 'Unknown serve option: --help.'],

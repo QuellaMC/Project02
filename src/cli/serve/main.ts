@@ -157,8 +157,16 @@ async function serve(
     options.stdout.write(`Gateway listening on ${origin}\n`);
     reportStartupProblems(gateway.health(), options.stderr);
     await gateway.reconcile();
-    options.stdout.write(`${gatewayUrlEnvVarName}=${origin}#token=${token}\n`);
-    await aborted(options.signal);
+
+    // Stopped while the roster came up: nothing is advertised that a
+    // launcher would take for a daemon it can use.
+    if (!options.signal.aborted) {
+      options.stdout.write(
+        `${gatewayUrlEnvVarName}=${origin}#token=${token}\n`,
+      );
+      await aborted(options.signal);
+    }
+
     stopping = true;
     await server.close();
 
