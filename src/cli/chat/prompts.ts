@@ -58,29 +58,35 @@ export function createConfirmationPrompts(options: {
     pending: PendingConfirmation,
     decision: GatewayConfirmationDecision,
   ): Promise<void> =>
-    options.client.answerConfirmation(pending.id, decision).then(
-      outcome => {
-        if (outcome.status === 'expired') {
-          options.stdout.write(
-            `${pending.request.toolName} was not ${decision}: the confirmation had expired.\n`,
+    options.client
+      .answerConfirmation(
+        pending.id,
+        decision,
+        options.signal === undefined ? {} : {signal: options.signal},
+      )
+      .then(
+        outcome => {
+          if (outcome.status === 'expired') {
+            options.stdout.write(
+              `${pending.request.toolName} was not ${decision}: the confirmation had expired.\n`,
+            );
+          } else if (outcome.status === 'unknown') {
+            options.stdout.write(
+              `${pending.request.toolName} was not ${decision}: it was settled elsewhere first.\n`,
+            );
+          }
+        },
+        (error: unknown) => {
+          // Whether the daemon heard the answer is unknown; only its list
+          // says. Only this request is looked up: a list read now may predate
+          // what the stream just delivered, and must not retire it.
+          asked.delete(pending.id);
+          options.stderr.write(
+            `Error: ${error instanceof Error ? error.message : String(error)}\n`,
           );
-        } else if (outcome.status === 'unknown') {
-          options.stdout.write(
-            `${pending.request.toolName} was not ${decision}: it was settled elsewhere first.\n`,
-          );
-        }
-      },
-      (error: unknown) => {
-        // Whether the daemon heard the answer is unknown; only its list
-        // says. Only this request is looked up: a list read now may predate
-        // what the stream just delivered, and must not retire it.
-        asked.delete(pending.id);
-        options.stderr.write(
-          `Error: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
-        recover(pending, decision, 1);
-      },
-    );
+          recover(pending, decision, 1);
+        },
+      );
   // Reads the daemon's list until it answers: a request still there is
   // asked again; one no longer there may have taken the answer that was
   // sent, which the person must know. A daemon that stays unreachable

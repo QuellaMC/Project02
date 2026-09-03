@@ -63,8 +63,22 @@ export function createLineDispatcher(
       waiter.resolve(entry?.line);
     }
 
-    if ((ended || closed) && queued.length === 0) {
-      settleAll();
+    if (ended || closed) {
+      // The input ended: a prompt that wants a line newer than any queued
+      // will never get one — silence is no. Older lines stay the REPL's.
+      const newest = queued.at(-1)?.seq ?? seq;
+
+      for (const prompt of prompts.splice(0)) {
+        if (closed || prompt.since > newest) {
+          prompt.resolve(undefined);
+        } else {
+          prompts.push(prompt);
+        }
+      }
+
+      if (queued.length === 0) {
+        settleAll();
+      }
     }
   };
   const settleAll = (): void => {
@@ -160,6 +174,69 @@ export function createLineDispatcher(
       queued.length = 0;
       settleAll();
       lines.close();
+    },
+  };
+}
+
+export type ReadAhead = {
+  /** The REPL's next line: one queued behind a hold first, else a fresh read. */
+  next(): Promise<string | undefined>;
+  /**
+   * Waits for `pending` with one read kept ahead: an exit typed meanwhile
+   * ends the wait, and any other line waits its turn behind whatever the
+   * wait was for.
+   */
+  holdUntil<T>(
+    pending: Promise<T>,
+  ): Promise<{kind: 'done'; value: T} | {kind: 'exit'}>;
+};
+
+/** The REPL's reads over the dispatcher, with a read kept ahead while it waits. */
+export function createReadAhead(
+  lines: Pick<LineDispatcher, 'replLine'>,
+): ReadAhead {
+  const queued: string[] = [];
+  let ahead: Promise<string | undefined> | undefined;
+
+  return {
+    next() {
+      const queuedLine = queued.shift();
+
+      if (queuedLine !== undefined) {
+        return Promise.resolve(queuedLine);
+      }
+
+      // Only a read handed over is let go of; one still pending stays
+      // ahead, so the line it brings is never lost.
+      const read = ahead ?? lines.replLine();
+
+      ahead = undefined;
+
+      return read;
+    },
+    async holdUntil(pending) {
+      const done = pending.then(value => ({kind: 'done' as const, value}));
+
+      for (;;) {
+        ahead ??= lines.replLine();
+
+        const first = await Promise.race([
+          done,
+          ahead.then(line => ({kind: 'line' as const, line})),
+        ]);
+
+        if (first.kind === 'done') {
+          return first;
+        }
+
+        ahead = undefined;
+
+        if (first.line === undefined || first.line.trim() === '/exit') {
+          return {kind: 'exit'};
+        }
+
+        queued.push(first.line);
+      }
     },
   };
 }
