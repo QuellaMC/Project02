@@ -26,6 +26,8 @@ function createHarness(
   const answers: string[] = [];
   const reads: {resolve(line: string | undefined): void}[] = [];
   const stillPending: PendingConfirmation[] = [];
+  let listFailures = 0;
+  let listReads = 0;
   const prompts = createConfirmationPrompts({
     client: {
       answerConfirmation(id, decision) {
@@ -35,7 +37,13 @@ function createHarness(
           ? Promise.reject(new Error('The daemon could not be reached.'))
           : Promise.resolve({status: taken});
       },
-      pendingConfirmations: () => Promise.resolve([...stillPending]),
+      pendingConfirmations: () => {
+        listReads += 1;
+
+        return listFailures > 0 && listFailures-- > 0
+          ? Promise.reject(new Error('The daemon could not be reached.'))
+          : Promise.resolve([...stillPending]);
+      },
     },
     characterId: 'mira',
     lines: {
@@ -60,6 +68,10 @@ function createHarness(
     answers,
     reads,
     stillPending,
+    failNextListReads: (count: number) => {
+      listFailures = count;
+    },
+    listReads: () => listReads,
     stdout: () => stdout,
     stderr: () => stderr,
     shown: () => (stdout.match(/\[y\/N\]/gu) ?? []).length,
@@ -127,6 +139,47 @@ describe('chat confirmation prompts', () => {
       'newer:denied',
       'lost:denied',
     ]);
+  });
+
+  it('says a lost answer may have landed when the request is no longer waiting', async () => {
+    const harness = createHarness('unreachable');
+
+    harness.prompts.ask(pending('taken'));
+    await new Promise(resolve => setImmediate(resolve));
+    harness.reads[0]?.resolve('y');
+    await harness.prompts.idle();
+    await vi.waitFor(() => {
+      expect(harness.stdout()).toContain(
+        'demo_tool is no longer waiting: the approved answer may have reached the character after all.',
+      );
+    });
+    expect(harness.shown()).toBe(1);
+  });
+
+  it('keeps looking up a lost answer when the list itself fails to read', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const harness = createHarness('unreachable');
+
+      harness.stillPending.push(pending('lost'));
+      harness.failNextListReads(2);
+      harness.prompts.ask(pending('lost'));
+      await vi.advanceTimersByTimeAsync(0);
+      harness.reads[0]?.resolve('y');
+      await harness.prompts.idle();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.listReads()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(harness.listReads()).toBe(2);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(harness.listReads()).toBe(3);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.shown()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retires what the pending list no longer holds, showing or queued', async () => {

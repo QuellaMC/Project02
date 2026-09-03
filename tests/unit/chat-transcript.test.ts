@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {createTranscript} from '../../src/cli/chat/transcript.ts';
 import type {HistoryMessage, HistoryOutcome} from '../../src/gateway/index.ts';
@@ -292,6 +292,30 @@ describe('chat transcript', () => {
     transcript.showProgress(own(7, 'seventh', 'c7'));
     transcript.turnEnded('c7', 'completed');
     expect(harness.printed()).not.toContain('"seventh": its turn');
+  });
+
+  it('leaves no timer behind when a read-back settles before the grace period', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const harness = createHarness([], {hold: true});
+      const transcript = await createTranscript({
+        client: harness.client,
+        conversationId: 'conv',
+        source: 'chat-shim:1',
+        stdout: harness.stdout,
+      });
+      const catchingUp = transcript.catchUp();
+      const settled = transcript.settled();
+
+      expect(vi.getTimerCount()).toBe(1);
+      harness.release();
+      await catchingUp;
+      await settled;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
