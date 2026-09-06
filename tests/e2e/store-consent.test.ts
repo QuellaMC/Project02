@@ -2,7 +2,7 @@ import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
 
-import {describe, expect, it, onTestFinished} from 'vitest';
+import {describe, expect, it, onTestFinished, vi} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
@@ -323,5 +323,34 @@ describe('store consent gate', () => {
     expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
     expect(readdirSync(storeRoot)).toEqual([]);
     expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
+  });
+
+  it('lets a stop reach serve at the consent question, and takes it as a no', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-serve-stop-');
+    const abort = new AbortController();
+    let stdout = '';
+    let stderr = '';
+
+    const run = runServeCliFromArgs(['--store', storeRoot], {
+      stdin: interactiveStdin(),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+      pluginHost: createRuntimePluginHost({plugins: []}),
+      signal: abort.signal,
+      port: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(stdout).toContain('Create one there? [y/N]');
+    });
+    abort.abort();
+    await expect(run).resolves.toBe(1);
+    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
+    expect(readdirSync(storeRoot)).toEqual([]);
   });
 });
