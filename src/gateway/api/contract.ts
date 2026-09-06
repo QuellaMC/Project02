@@ -60,7 +60,8 @@ export type GatewayRefusalReason =
   | 'conversation_busy'
   | 'sender_not_supported'
   | 'character_unavailable'
-  | 'invalid_message';
+  | 'invalid_message'
+  | 'duplicate_submission';
 
 export type TurnOutcome =
   | {

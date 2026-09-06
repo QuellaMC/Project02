@@ -15,7 +15,8 @@ persist anything. `history.ts` reads one conversation's scrollback as
 cursor-paged messages across its segments; `reconcile.ts` brings the
 running set in line with the roster (boot, and the enabled toggle);
 `submissions.ts` is the turn ledger that makes a resubmitted message join
-its turn instead of starting another.
+its turn instead of starting another, and refuses one that an earlier run
+of the daemon already put on the thread.
 
 `http/` is the transport, on Hono: the app (auth, origin, body limits, the
 error envelope, static UI files), the API router (one route per verb, each
