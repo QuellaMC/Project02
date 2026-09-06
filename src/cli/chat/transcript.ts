@@ -16,8 +16,6 @@ export type Transcript = {
   showProgress(progress: LocalRuntimeTurnProgressEvent): void;
   /** Reads back and shows what this terminal has not shown yet. */
   catchUp(): Promise<void>;
-  /** Whether a line this terminal sent is on the thread. */
-  onThread(clientMessageId: string): Promise<boolean>;
   /**
    * Resolves once every one of these messages has reached the screen (or
    * was this terminal's own), or after the grace period if the stream
@@ -103,11 +101,6 @@ export function createTranscript(options: {
       for (const message of messages.slice(from)) {
         show(message);
       }
-    },
-    async onThread(clientMessageId) {
-      return (await newestPage()).some(
-        message => message.clientMessageId === clientMessageId,
-      );
     },
     whenShown: messageIds =>
       messageIds.every(id => shown.has(id))

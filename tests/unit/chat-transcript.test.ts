@@ -9,7 +9,6 @@ function message(
   id: number,
   text: string,
   source?: string,
-  clientMessageId?: string,
 ): HistoryMessage & LocalRuntimeTurnProgressEvent {
   return {
     kind: 'user_message',
@@ -20,7 +19,6 @@ function message(
     text,
     committedAt: '2026-09-02T00:00:00.000Z',
     ...(source === undefined ? {} : {source}),
-    ...(clientMessageId === undefined ? {} : {clientMessageId}),
   };
 }
 
@@ -103,12 +101,5 @@ describe('chat transcript', () => {
 
     harness.transcript.showProgress(message(2, 'reply'));
     await waiting;
-  });
-
-  it('tells whether a line it sent is on the thread', async () => {
-    const harness = createHarness([message(1, 'mine', 'chat-shim:1', 'c1')]);
-
-    await expect(harness.transcript.onThread('c1')).resolves.toBe(true);
-    await expect(harness.transcript.onThread('c2')).resolves.toBe(false);
   });
 });
