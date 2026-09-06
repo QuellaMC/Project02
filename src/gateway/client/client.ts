@@ -7,6 +7,7 @@ import {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
   type AnswerOutcome,
+  type GatewayReady,
   type GatewayConfirmationDecision,
   type GatewayEvent,
   type GatewayHealth,
@@ -36,13 +37,15 @@ export type GatewayCallOptions = {
 export type GatewayEventsOptions = {
   readonly signal: AbortSignal;
   /**
-   * Runs on every `ready` frame; the caller reads its snapshots here. The
-   * stream waits for a returned promise, so the snapshots are installed
-   * before any event that followed the handshake is handed on — and a
-   * bootstrap that fails ends the stream with its error.
+   * Runs on every `ready` frame with the daemon's snapshot at that moment.
+   * The stream waits for a returned promise, so whatever the caller
+   * installs from it is in place before any event that followed the
+   * handshake is handed on — and a bootstrap that fails ends the stream
+   * with its error.
    */
   readonly onReady?: (info: {
     readonly reconnected: boolean;
+    readonly snapshot: GatewayReady;
   }) => void | Promise<void>;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
@@ -192,11 +195,14 @@ export function createGatewayClient(
           await followStream(
             response,
             listener,
-            async () => {
+            async snapshot => {
               const wasReconnect = reconnected;
 
               reconnected = true;
-              await eventsOptions.onReady?.({reconnected: wasReconnect});
+              await eventsOptions.onReady?.({
+                reconnected: wasReconnect,
+                snapshot,
+              });
             },
             signal,
           );
@@ -324,7 +330,7 @@ function resolveOptions(options: GatewayClientOptions): {
 async function followStream(
   response: Response,
   listener: (event: GatewayEvent) => void,
-  onReady: () => void | Promise<void>,
+  onReady: (snapshot: GatewayReady) => void | Promise<void>,
   signal: AbortSignal,
 ): Promise<void> {
   if (response.body === null) {
@@ -359,7 +365,9 @@ async function followStream(
 
         if (frame.event === 'ready') {
           assertProtocol(data);
-          await bootstrapOrAbort(onReady, signal);
+          // The daemon is this codebase: past the protocol check, the
+          // snapshot is the contract's shape.
+          await bootstrapOrAbort(() => onReady(data as GatewayReady), signal);
         } else if (isGatewayEvent(data)) {
           listener(data);
         }
