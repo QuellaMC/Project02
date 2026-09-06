@@ -131,6 +131,7 @@ export function createGatewayClient(
     async health(callOptions) {
       const health = await readOutcome<GatewayHealth>(
         await api.health.$get(undefined, requestInit(callOptions)),
+        callOptions,
       );
 
       // Typed as this build's version; another daemon build answers here.
@@ -144,6 +145,7 @@ export function createGatewayClient(
           {param: {id: characterId}},
           requestInit(callOptions),
         ),
+        callOptions,
       ),
     openDirectConversation: async (characterId, callOptions) =>
       readOutcome<OpenOutcome>(
@@ -151,6 +153,7 @@ export function createGatewayClient(
           {json: {characterId}},
           requestInit(callOptions),
         ),
+        callOptions,
       ),
     deliver: async message =>
       readOutcome<TurnOutcome>(await api.turns.$post({json: message})),
@@ -166,10 +169,12 @@ export function createGatewayClient(
           },
           requestInit(callOptions),
         ),
+        callOptions,
       ),
     pendingConfirmations: async callOptions =>
       readOutcome<readonly PendingConfirmation[]>(
         await api.confirmations.$get(undefined, requestInit(callOptions)),
+        callOptions,
       ),
     answerConfirmation: async (id, decision, callOptions) =>
       readOutcome<AnswerOutcome>(
@@ -177,6 +182,7 @@ export function createGatewayClient(
           {param: {id}, json: {decision}},
           requestInit(callOptions),
         ),
+        callOptions,
       ),
     async events(listener, eventsOptions) {
       const {signal} = eventsOptions;
@@ -247,15 +253,29 @@ function requestInit(
  * typed on the server by the façade. That is the one trust this client
  * places in the wire, and it lives here alone.
  */
-async function readOutcome<T>(response: Response): Promise<T> {
+async function readOutcome<T>(
+  response: Response,
+  options?: GatewayCallOptions,
+): Promise<T> {
   await rejectUnlessOk(response);
 
-  return JSON.parse(await readBody(response)) as T;
+  return JSON.parse(await readBody(response, options?.signal)) as T;
 }
 
-/** A body cut short or not JSON is a transport failure, never a raw throw. */
-async function readBody(response: Response): Promise<string> {
+/**
+ * A body cut short or not JSON is a transport failure, never a raw throw —
+ * unless the caller cut it short itself, which is its abort and not the
+ * daemon's fault.
+ */
+async function readBody(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<string> {
   const text = await response.text().catch((error: unknown) => {
+    if (signal?.aborted === true) {
+      throw abortedRequest();
+    }
+
     throw new GatewayClientError(
       response.status,
       'malformed_response',
@@ -551,6 +571,11 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  * chunks; a turn that waits on a person can outlast both, and this client
  * never retries a turn.
  */
+/** The caller's own abort, whenever in the exchange it lands. */
+function abortedRequest(): GatewayClientError {
+  return new GatewayClientError(0, 'aborted', 'The request was aborted.');
+}
+
 function fetchWithoutTimeouts(
   input: string | URL | Request,
   init?: RequestInit,
@@ -569,6 +594,12 @@ function fetchWithoutTimeouts(
           ? input.href
           : input.url;
     const fail = (error: unknown): void => {
+      if (signal?.aborted === true) {
+        reject(abortedRequest());
+
+        return;
+      }
+
       reject(
         error instanceof GatewayClientError
           ? error
@@ -594,9 +625,7 @@ function fetchWithoutTimeouts(
     request.text().then(body => {
       try {
         if (signal?.aborted === true) {
-          reject(
-            new GatewayClientError(0, 'aborted', 'The request was aborted.'),
-          );
+          reject(abortedRequest());
 
           return;
         }

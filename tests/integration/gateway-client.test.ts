@@ -1,7 +1,7 @@
 import {getEventListeners} from 'node:events';
 
 import {Hono} from 'hono';
-import {streamSSE} from 'hono/streaming';
+import {stream, streamSSE} from 'hono/streaming';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -328,6 +328,34 @@ describe('gateway reference client error boundary', () => {
     await expect(health).rejects.toMatchObject({
       name: 'GatewayClientError',
       status: 0,
+      code: 'aborted',
+    });
+    await server.close();
+  });
+
+  it("reports an abort as the caller's own, even once the headers had arrived", async () => {
+    let answering = false;
+    const app = new Hono().get('/api/health', c =>
+      stream(c, async body => {
+        answering = true;
+        await body.write('{');
+        await new Promise<void>(() => undefined);
+      }),
+    );
+    const server = await listen(app);
+    const client = createGatewayClient({baseUrl: server.baseUrl, token});
+    const abort = new AbortController();
+    const health = client.health({signal: abort.signal});
+
+    await vi.waitFor(() => {
+      expect(answering).toBe(true);
+    });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    abort.abort();
+    await expect(health).rejects.toMatchObject({
+      name: 'GatewayClientError',
+      status: 0,
+      code: 'aborted',
     });
     await server.close();
   });
