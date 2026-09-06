@@ -26,6 +26,7 @@ import {
 import type {ActiveConversation, OpenConversationOptions} from './contracts.ts';
 import {
   openSegment,
+  userLinesOfSegmentBefore,
   type ConversationSegment,
   type SegmentContext,
 } from './segment.ts';
@@ -35,6 +36,8 @@ export type ActiveConversationState = {
   readonly context: SegmentContext;
   readonly conversationLease: LocalRuntimeMutationLockLease;
   segment: ConversationSegment;
+  /** User lines of the segment before the current one, by client id. */
+  earlierLines: ReadonlyMap<string, string>;
   queue: Promise<void>;
   closing: Promise<void> | undefined;
 };
@@ -114,6 +117,7 @@ export async function openConversation(
       context,
       conversationLease,
       segment,
+      earlierLines: userLinesOfSegmentBefore(context, metadata.sessionId),
       queue: Promise.resolve(),
       closing: undefined,
     });
