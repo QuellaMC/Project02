@@ -51,7 +51,7 @@ export async function createGatewayServer(
     async close() {
       stopping = true;
       await options.gateway.stop();
-      events.closeAll();
+      await events.closeAll();
       await new Promise<void>(resolve => {
         server.close(() => {
           resolve();

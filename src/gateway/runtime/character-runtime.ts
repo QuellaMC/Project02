@@ -265,6 +265,8 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 
   context.stopping = undefined;
+  // A failure belongs to the boot it happened in.
+  context.maintenance = undefined;
   // A fresh boot re-arms the broker that the previous stop left cancelling.
   context.broker.arm();
 

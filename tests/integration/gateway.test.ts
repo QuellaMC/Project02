@@ -1180,6 +1180,20 @@ describe('gateway façade', () => {
       }),
     );
     expect(gateway.health().characters[0]?.state).toBe('ready');
+    // The failure belongs to that boot: off and on again, health is clean.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100, enabled: false},
+    });
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      stopping: ['mira'],
+    });
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100, enabled: true},
+    });
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      starting: ['mira'],
+    });
+    expect(gateway.health().characters[0]?.maintenance).toBeUndefined();
     await gateway.stop();
   });
   it('reads a conversation as one scrollback, newest page first, back across segments', async () => {

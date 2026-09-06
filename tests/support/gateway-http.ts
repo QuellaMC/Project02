@@ -89,10 +89,9 @@ export async function startTestGatewayServer(options: {
     ...server,
     events,
     lifecycle,
-    close() {
-      events.closeAll();
-
-      return server.close();
+    async close() {
+      await events.closeAll();
+      await server.close();
     },
   };
 }
