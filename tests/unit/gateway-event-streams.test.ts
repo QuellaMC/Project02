@@ -38,23 +38,41 @@ describe('gateway event stream frames', () => {
     expect(releases).toHaveLength(1);
     expect(queue.pending()).toBe(3);
 
-    let drained = false;
+    let drained: boolean | undefined;
 
-    void queue.drained().then(() => {
-      drained = true;
+    void queue.drain(1_000).then(written => {
+      drained = written;
     });
     releases[0]?.();
     await new Promise(resolve => setImmediate(resolve));
     releases[1]?.();
     await new Promise(resolve => setImmediate(resolve));
     // A close that waits on the drain still has the last frame ahead of it.
-    expect(drained).toBe(false);
+    expect(drained).toBeUndefined();
     releases[2]?.();
     await new Promise(resolve => setImmediate(resolve));
 
     expect(written).toEqual(['first', 'second', 'third']);
     expect(queue.pending()).toBe(0);
     expect(drained).toBe(true);
+  });
+
+  it('drops a client that has not taken its frames within the drain grace', async () => {
+    let drops = 0;
+    const queue = createFrameQueue({
+      write: () => new Promise(() => undefined),
+      drop: () => {
+        drops += 1;
+      },
+      maxPendingFrames: 8,
+    });
+
+    queue.push('stuck');
+    await expect(queue.drain(10)).resolves.toBe(false);
+    expect(drops).toBe(1);
+    // Dropped once; a later drain has nothing to wait for.
+    await expect(queue.drain(10)).resolves.toBe(false);
+    expect(drops).toBe(1);
   });
 
   it('drops a client that stops taking frames, once, and discards the rest', () => {
