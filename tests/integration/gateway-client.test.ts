@@ -202,7 +202,7 @@ describe('gateway reference client', () => {
   });
 
   it('lets go of each finished stream, so reconnects never pile up abort listeners', async () => {
-    const {server, client, close} = await startServer();
+    const {gateway, server: first, client} = await startServer();
     const readies: boolean[] = [];
     const abort = new AbortController();
     const following = client.events(() => undefined, {
@@ -212,12 +212,15 @@ describe('gateway reference client', () => {
         readies.push(reconnected);
       },
     });
+    let server = first;
 
+    // The daemon goes away and comes back on its port, four times over.
     for (let round = 1; round <= 4; round += 1) {
       await vi.waitFor(() => {
         expect(readies).toHaveLength(round);
       });
-      await server.events.closeAll();
+      await server.close();
+      server = await startTestGatewayServer({gateway, port: server.port});
     }
 
     await vi.waitFor(() => {
@@ -228,11 +231,12 @@ describe('gateway reference client', () => {
     );
     abort.abort();
     await following;
-    await close();
+    await server.close();
+    await gateway.stop();
   });
 
   it('follows the stream across a reconnect and bootstraps on every ready', async () => {
-    const {gateway, server, client, close} = await startServer();
+    const {gateway, server, client} = await startServer();
     const readies: boolean[] = [];
     const events: GatewayEvent[] = [];
     const abort = new AbortController();
@@ -248,8 +252,12 @@ describe('gateway reference client', () => {
       expect(readies).toEqual([false]);
     });
 
-    // The daemon ends every stream; the client comes back on its own.
-    await server.events.closeAll();
+    // The daemon ends every stream and returns; the client comes back on
+    // its own.
+    await server.close();
+
+    const returned = await startTestGatewayServer({gateway, port: server.port});
+
     await vi.waitFor(() => {
       expect(readies).toEqual([false, true]);
     });
@@ -261,7 +269,8 @@ describe('gateway reference client', () => {
 
     abort.abort();
     await expect(following).resolves.toBeUndefined();
-    await close();
+    await returned.close();
+    await gateway.stop();
   });
 });
 

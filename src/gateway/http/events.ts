@@ -23,8 +23,10 @@ export type EventStreams = {
   /**
    * Ends every open stream once the frames already queued for it are
    * written, dropping a client that does not take them within the drain
-   * grace; shutdown awaits it after the gateway drained its turns, so the
-   * last reply rides out before the stream ends.
+   * grace, and ends at once any stream that arrives later: a request can
+   * pass the stopping guard before it is set and reach its stream after.
+   * Shutdown awaits it after the gateway drained its turns, so the last
+   * reply rides out before the stream ends.
    */
   readonly closeAll: () => Promise<void>;
 };
@@ -129,6 +131,7 @@ export function createEventStreams(
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
   const maxPendingFrames = options.maxPendingFrames ?? defaultMaxPendingFrames;
   const closers = new Set<() => Promise<void>>();
+  let closed = false;
 
   return Object.freeze({
     handler(c) {
@@ -140,14 +143,23 @@ export function createEventStreams(
       return response;
     },
     openCount: () => closers.size,
-    closeAll: () =>
-      Promise.all([...closers].map(close => close())).then(() => undefined),
+    closeAll: () => {
+      closed = true;
+
+      return Promise.all([...closers].map(close => close())).then(
+        () => undefined,
+      );
+    },
   });
 
   async function runStream(
     c: Context<ApiEnv>,
     stream: SSEStreamingApi,
   ): Promise<void> {
+    if (closed) {
+      return;
+    }
+
     const heartbeat = createHeartbeatClock();
     const close = async (): Promise<void> => {
       heartbeat.stop();

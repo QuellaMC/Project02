@@ -20,6 +20,7 @@ import {
 } from '../support/gateway-fixtures.ts';
 import {
   startTestGatewayServer,
+  type TestGatewayServer,
   testGatewayToken,
 } from '../support/gateway-http.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -430,9 +431,10 @@ describe('chat shim', () => {
       storeRoot: characterDataDirPath(daemon.storeRoot, 'mira'),
       sessionId: `${first.conversationId}.2`,
     });
+    let returned: TestGatewayServer | undefined;
 
     try {
-      await daemon.server.events.closeAll();
+      await daemon.server.close();
 
       for (const text of ['two', 'three', 'four']) {
         const turn = await deliverFromWeb(daemon.gateway, 'mira', text);
@@ -445,6 +447,10 @@ describe('chat shim', () => {
       const failure = daemon.gateway.health().characters[0]?.maintenance;
 
       expect(failure).toBeDefined();
+      returned = await startTestGatewayServer({
+        gateway: daemon.gateway,
+        port: daemon.server.port,
+      });
       await shim.printed('You: four');
       await vi.waitFor(
         () => {
@@ -456,8 +462,9 @@ describe('chat shim', () => {
       expect(shim.seen().match(/Mira: noted/gu)).toHaveLength(4);
       await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     } finally {
+      await returned?.close();
       await blocker.release();
-      await daemon.close();
+      await daemon.gateway.stop();
     }
   }, 20_000);
 
