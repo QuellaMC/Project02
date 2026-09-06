@@ -47,8 +47,12 @@ export const readyEvent = 'ready';
 
 const defaultHeartbeatMs = 15_000;
 const defaultMaxPendingFrames = 64;
-/** A reading client takes the last frames in milliseconds; this is for one that stopped. */
-const drainGraceMs = 2_000;
+/**
+ * How long shutdown waits for a client to take what it was sent, frames or
+ * an answer. A reading client takes it in milliseconds; this only ever
+ * meets one that stopped.
+ */
+export const drainGraceMs = 2_000;
 const heartbeatFrame = ': ping\n\n';
 
 /** SSE framing: the event name, one line of JSON, a blank line. */

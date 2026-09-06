@@ -1,4 +1,6 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
 import {connect, createServer} from 'node:net';
+import {join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
@@ -14,6 +16,7 @@ import {
   subscribeToEvents,
   testGatewayToken as token,
 } from '../support/gateway-http.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 const headers = {
   authorization: `Bearer ${token}`,
@@ -133,6 +136,44 @@ describe('gateway server lifecycle', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     stalled.destroy();
   });
+
+  it('cuts a client that stopped taking a large answer once the grace is up', async () => {
+    const uiRoot = join(createTestTempRoot('project02-gateway-drain-'), 'ui');
+
+    mkdirSync(uiRoot, {recursive: true});
+    // Far more than the socket buffers hold, so an unread answer stalls.
+    writeFileSync(join(uiRoot, 'big.bin'), Buffer.alloc(16 * 1024 * 1024));
+
+    const gateway = gatewayOver(
+      await createGatewayTestHome(),
+      heldAdapter().adapter,
+    );
+    const server = await createGatewayServer({gateway, token, port: 0, uiRoot});
+    const stalled = connect(server.port, '127.0.0.1');
+
+    // A complete request, and then not one byte of the answer is read.
+    stalled.pause();
+    await new Promise<void>(resolve => {
+      stalled.once('connect', () => {
+        resolve();
+      });
+    });
+    stalled.write(
+      `GET /big.bin HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\n\r\n`,
+    );
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    const started = Date.now();
+
+    await server.close();
+
+    const waited = Date.now() - started;
+
+    // The answer was given its grace, and then the socket was cut.
+    expect(waited).toBeGreaterThanOrEqual(1_900);
+    expect(waited).toBeLessThan(5_000);
+    stalled.destroy();
+  }, 10_000);
 
   it('drains an accepted turn behind a 503 for newcomers, with the stream still carrying its reply', async () => {
     const homeRoot = await createGatewayTestHome();
