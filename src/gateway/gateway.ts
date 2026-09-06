@@ -182,20 +182,13 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         await startsInFlight.get(characterId)?.catch(() => undefined);
 
         const held = await runtime.openDirectConversation();
+        const outcome =
+          held.status === 'opened'
+            ? await runtime.deliver(message)
+            : turnNotRun(characterId, message, held);
 
-        if (held.status !== 'opened') {
-          return held.status === 'refused'
-            ? refusedTurn(held.reason, held.message)
-            : Object.freeze({
-                status: 'failed' as const,
-                characterId,
-                conversationId: message.conversationId,
-                message: held.message,
-              });
-        }
-
-        const outcome = await runtime.deliver(message);
-
+        // How the turn ended reaches every surface, whether the character
+        // ran it or the thread could not be held for it.
         emit(turnCompleted(characterId, message, outcome));
 
         return outcome;
@@ -409,6 +402,22 @@ function summarize(
       ? {}
       : {maintenance: health.maintenance}),
   });
+}
+
+/** A turn whose thread could not be held again ends the way the open did. */
+function turnNotRun(
+  characterId: string,
+  message: GatewayMessage,
+  held: Exclude<OpenOutcome, {status: 'opened'}>,
+): TurnOutcome {
+  return held.status === 'refused'
+    ? refusedTurn(held.reason, held.message)
+    : Object.freeze({
+        status: 'failed' as const,
+        characterId,
+        conversationId: message.conversationId,
+        message: held.message,
+      });
 }
 
 /** The sender has the outcome; every other surface hears how the turn ended. */
