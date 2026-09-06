@@ -1012,8 +1012,40 @@ describe('gateway façade', () => {
       gateway.deliver({...message, text: 'something else entirely'}),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid_message'});
     expect(adapter.invocations()).toBe(2);
+    // The daemon comes back as a new run with an empty memory: the thread
+    // itself says the line was taken, and it is not run again.
     await gateway.stop();
+
+    const restarted = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: adapter,
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await restarted.startCharacter('mira');
+    await expect(
+      restarted.openDirectConversation('mira'),
+    ).resolves.toMatchObject({
+      status: 'opened',
+      conversationId: ref.conversationId,
+    });
+    await expect(restarted.deliver(message)).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'duplicate_submission',
+    });
+
+    const history = await restarted.history(ref.conversationId);
+
+    expect(
+      history.status === 'ok' &&
+        history.messages.filter(
+          committed => committed.clientMessageId === 'msg-1',
+        ),
+    ).toHaveLength(1);
+    await restarted.stop();
   });
+
   it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {
     const {gateway, inspectTone} = await createConfirmationHome();
     const first: GatewayEvent[] = [];

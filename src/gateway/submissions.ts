@@ -10,9 +10,11 @@ type Submission = {
 export type SubmissionLedger = {
   /**
    * Runs `turn` once per submission id within a conversation: a repeat
-   * joins the run in flight, and a repeat of a finished one gets its
-   * outcome back instead of a second turn. An id reused for a different
-   * line is refused, so no line is ever silently swallowed by an old one.
+   * joins the run in flight, a repeat of a finished one gets its outcome
+   * back instead of a second turn, and an id the thread already holds from
+   * a run before this one is refused as a duplicate. An id reused for a
+   * different line is refused, so no line is ever silently swallowed by an
+   * old one.
    */
   submit(
     message: GatewayMessage,
@@ -20,15 +22,24 @@ export type SubmissionLedger = {
   ): Promise<TurnOutcome>;
 };
 
+export type SubmissionLedgerOptions = {
+  /** Whether the thread already holds this line: a run before this one took it. */
+  readonly committed: (message: GatewayMessage) => Promise<boolean>;
+};
+
 /** Finished submissions a conversation remembers; older ones are just turns. */
 const recentSubmissionsPerConversation = 32;
 
 /**
  * A connection can drop after the daemon accepted a turn and before the
- * caller heard the outcome. The submission id is what lets the caller ask
- * again without saying it twice.
+ * caller heard the outcome, and the daemon itself can go down between the
+ * two. The submission id is what lets the caller ask again without saying
+ * it twice: this run remembers what it ran, and for an id it never saw,
+ * the thread says whether a run before it took the line.
  */
-export function createSubmissionLedger(): SubmissionLedger {
+export function createSubmissionLedger(
+  options: SubmissionLedgerOptions,
+): SubmissionLedger {
   const conversations = new Map<string, Map<string, Submission>>();
 
   return Object.freeze({
@@ -51,12 +62,17 @@ export function createSubmissionLedger(): SubmissionLedger {
 
       const submission: Submission = {
         fingerprint,
-        outcome: turn().then(outcome => {
-          submission.settled = outcome;
-          forget(submissions, recentSubmissionsPerConversation);
+        outcome: options
+          .committed(message)
+          .then(taken =>
+            taken ? alreadyTaken(message.clientMessageId) : turn(),
+          )
+          .then(outcome => {
+            submission.settled = outcome;
+            forget(submissions, recentSubmissionsPerConversation);
 
-          return outcome;
-        }),
+            return outcome;
+          }),
         settled: undefined,
       };
 
@@ -78,6 +94,16 @@ function reusedId(clientMessageId: string): TurnOutcome {
     message:
       `clientMessageId "${clientMessageId}" was already used for a ` +
       'different message on this conversation; give each message its own.',
+  });
+}
+
+function alreadyTaken(clientMessageId: string): TurnOutcome {
+  return Object.freeze({
+    status: 'refused' as const,
+    reason: 'duplicate_submission' as const,
+    message:
+      `clientMessageId "${clientMessageId}" is already on this conversation, ` +
+      'taken by an earlier run of the daemon; read the thread for its reply.',
   });
 }
 

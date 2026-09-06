@@ -73,7 +73,23 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const conversationRoutes = new Map<string, string>();
   const listeners = new Set<GatewayEventListener>();
   const startsInFlight = new Map<string, Promise<void>>();
-  const submissions = createSubmissionLedger();
+  // A line an earlier run took is found on the thread, within its newest
+  // page; history returns the id for exactly this.
+  const submissions = createSubmissionLedger({
+    committed: async message => {
+      const page = await readConversationHistory({
+        homeRoot: loadHome().runtimeLocation.homeRoot,
+        conversationId: message.conversationId,
+      });
+
+      return (
+        page.status === 'ok' &&
+        page.messages.some(
+          committed => committed.clientMessageId === message.clientMessageId,
+        )
+      );
+    },
+  });
   let stopped = false;
 
   // A client rendering bug must not break a character's turn: listener
