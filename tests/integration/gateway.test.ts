@@ -25,6 +25,7 @@ import {
   createLocalRuntimeStorageLayout,
   ensureCharacterDataDir,
   listConversationSegments,
+  readCommittedConversationMessages,
 } from '../../src/runtime/storage/index.ts';
 import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
 import {
@@ -1093,6 +1094,87 @@ describe('gateway façade', () => {
     await expect(restarted.history(ref.conversationId)).resolves.toMatchObject({
       status: 'failed',
       code: 'malformed_record',
+    });
+    await restarted.stop();
+  });
+
+  it('refuses a line committed just before a rotation when it is sent again after a restart', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100},
+    });
+
+    const options = {
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const gateway = createGateway(options);
+
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+    const storeRoot = characterDataDirPath(homeRoot, 'mira');
+    let rotatedAfter: string | undefined;
+
+    // A rotation follows the turn that fills the window; the newest
+    // segment then holds no user line, and the last one sits in the
+    // segment before it.
+    for (const text of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      await expect(
+        gateway.deliver({
+          conversationId: ref.conversationId,
+          senderId: ref.userParticipantId,
+          text,
+          source: 'web',
+          clientMessageId: `msg-${text}`,
+        }),
+      ).resolves.toMatchObject({status: 'completed'});
+
+      const newest = listConversationSegments({
+        storeRoot,
+        characterId: 'mira',
+        conversationId: ref.conversationId,
+      }).segments.at(-1);
+
+      if (
+        newest !== undefined &&
+        !readCommittedConversationMessages({
+          storeRoot,
+          characterId: 'mira',
+          sessionId: newest.sessionId,
+        }).messages.some(record => record.clientMessageId === `msg-${text}`)
+      ) {
+        rotatedAfter = text;
+        break;
+      }
+    }
+
+    if (rotatedAfter === undefined) {
+      throw new Error('Expected a rotation within six turns.');
+    }
+
+    await gateway.stop();
+
+    const restarted = createGateway(options);
+
+    await restarted.startCharacter('mira');
+    await expect(
+      restarted.openDirectConversation('mira'),
+    ).resolves.toMatchObject({status: 'opened'});
+    await expect(
+      restarted.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: rotatedAfter,
+        source: 'web',
+        clientMessageId: `msg-${rotatedAfter}`,
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'duplicate_submission',
     });
     await restarted.stop();
   });

@@ -16,7 +16,7 @@ import type {
   SegmentRotation,
   UserMessageDelivery,
 } from './contracts.ts';
-import {openContinuedSegment} from './segment.ts';
+import {openContinuedSegment, userLinesOf} from './segment.ts';
 import {endSession} from './session-end.ts';
 
 /**
@@ -54,20 +54,21 @@ async function deliverThroughSegment(
   const {clientMessageId} = options;
   // A run before this one may have taken the line — the daemon can go
   // down after committing it and before answering — and the segment's
-  // own record says so at no cost. Nothing runs twice for one id.
+  // own record, or the one before it, says so at no cost. Nothing runs
+  // twice for one id.
   const earlier =
     clientMessageId === undefined
       ? undefined
-      : logStore
+      : (logStore
           .conversationMessages()
           .find(
             record =>
               record.role === 'user' &&
               record.clientMessageId === clientMessageId,
-          );
+          )?.id ?? state.earlierLines.get(clientMessageId));
 
   if (earlier !== undefined && clientMessageId !== undefined) {
-    return {status: 'duplicate', clientMessageId, messageId: earlier.id};
+    return {status: 'duplicate', clientMessageId, messageId: earlier};
   }
 
   const identity = createRuntimeEventIdentity();
@@ -196,9 +197,11 @@ async function rotateIfNeeded(
   }
 
   // The continuation is committed: the conversation is in the new segment
-  // from here on, however closing the old one goes.
+  // from here on, however closing the old one goes; the old one's lines
+  // stay known to the new one.
   const previous = state.segment;
 
+  state.earlierLines = userLinesOf(previous.logStore.conversationMessages());
   state.segment = next;
 
   let endFailure: string | undefined;

@@ -16,8 +16,9 @@ cursor-paged messages across its segments; `reconcile.ts` brings the
 running set in line with the roster (boot, and the enabled toggle);
 `submissions.ts` is the turn ledger that makes a resubmitted message join
 its turn instead of starting another; a line an earlier run of the daemon
-already put on the segment the character is on is refused by the runtime
-itself, from the segment's record, before anything runs.
+already put on the segment the character is on, or the one before it, is
+refused by the runtime itself, from those segments' records, before
+anything runs.
 
 `http/` is the transport, on Hono: the app (auth, origin, body limits, the
 error envelope, static UI files), the API router (one route per verb, each
