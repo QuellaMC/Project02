@@ -12,7 +12,7 @@ describe('gateway event stream frames', () => {
     );
   });
 
-  it('writes frames in order, one at a time, even when a write is slow', async () => {
+  it('writes frames in order, one at a time, and reports the drain once the last one is out', async () => {
     const written: string[] = [];
     const releases: (() => void)[] = [];
     const queue = createFrameQueue({
@@ -38,15 +38,23 @@ describe('gateway event stream frames', () => {
     expect(releases).toHaveLength(1);
     expect(queue.pending()).toBe(3);
 
+    let drained = false;
+
+    void queue.drained().then(() => {
+      drained = true;
+    });
     releases[0]?.();
     await new Promise(resolve => setImmediate(resolve));
     releases[1]?.();
     await new Promise(resolve => setImmediate(resolve));
+    // A close that waits on the drain still has the last frame ahead of it.
+    expect(drained).toBe(false);
     releases[2]?.();
     await new Promise(resolve => setImmediate(resolve));
 
     expect(written).toEqual(['first', 'second', 'third']);
     expect(queue.pending()).toBe(0);
+    expect(drained).toBe(true);
   });
 
   it('drops a client that stops taking frames, once, and discards the rest', () => {
