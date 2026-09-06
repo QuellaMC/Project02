@@ -124,12 +124,12 @@ export function createConfirmationPrompts(options: {
     );
 
     // Not heard while a person is still here to answer: the daemon holds
-    // the request, so it is asked once more at once, and if the daemon is
-    // down its next handshake lists it. Once the input ended, or on this
-    // terminal's own exit, nobody can answer again.
+    // the request, so it is asked once more at once — within this same
+    // turn of the chain, so a REPL waiting for the chain to go idle waits
+    // through the retry too. Once the input ended, or on this terminal's
+    // own exit, nobody can answer again.
     if (!taken && line !== undefined && !(options.signal?.aborted ?? false)) {
-      asked.delete(pending.id);
-      ask(pending);
+      await prompt(pending);
     }
   };
   const settle = (id: string): void => {
