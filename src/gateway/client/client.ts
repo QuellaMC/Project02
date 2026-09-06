@@ -211,8 +211,13 @@ export function createGatewayClient(
             return;
           }
 
-          // A daemon that is down or stopping comes back; a refused token,
-          // a wrong protocol, or a listener's own failure does not.
+          // The caller's own failure is the caller's, whatever it threw.
+          // A daemon that is down or stopping comes back; a refused token
+          // or a wrong protocol does not.
+          if (error instanceof CallbackFailure) {
+            throw error.cause;
+          }
+
           if (
             !(error instanceof GatewayClientError) ||
             (error.status !== 0 && error.status !== 503)
@@ -329,6 +334,26 @@ function resolveOptions(options: GatewayClientOptions): {
   return {baseUrl: url.origin, token};
 }
 
+/**
+ * What the caller's listener or bootstrap threw, told apart from what the
+ * stream did: a bootstrap's own request may fail with the same shape the
+ * transport uses, and that is never a reason to reconnect.
+ */
+class CallbackFailure extends Error {
+  constructor(cause: unknown) {
+    super('A stream callback failed.', {cause});
+  }
+}
+
+/** Runs the caller's code; what it throws is its own, never the stream's. */
+async function ownFailure<T>(run: () => T | Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error: unknown) {
+    throw new CallbackFailure(error);
+  }
+}
+
 /** Reads the stream until the daemon ends it, handing each event on. */
 async function followStream(
   response: Response,
@@ -370,9 +395,14 @@ async function followStream(
           assertProtocol(data);
           // The daemon is this codebase: past the protocol check, the
           // snapshot is the contract's shape.
-          await bootstrapOrAbort(() => onReady(data as GatewayReady), signal);
+          await bootstrapOrAbort(
+            () => ownFailure(() => onReady(data as GatewayReady)),
+            signal,
+          );
         } else if (isGatewayEvent(data)) {
-          listener(data);
+          await ownFailure(() => {
+            listener(data);
+          });
         }
       }
     }
