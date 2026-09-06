@@ -1,130 +1,310 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Project02 Gateway API</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #17202a; }
-    code, pre { font-family: ui-monospace, monospace; }
-    pre { overflow-x: auto; padding: 1rem; background: #f4f6f7; border-radius: 0.4rem; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.55rem; border: 1px solid #ccd1d1; text-align: left; vertical-align: top; }
-    .rule { padding: 0.8rem 1rem; border-left: 4px solid #2874a6; background: #ebf5fb; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Project02 Gateway API</h1>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project02 Gateway API</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.55;
+        color: #17202a;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 1rem;
+        background: #f4f6f7;
+        border-radius: 0.4rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 0.55rem;
+        border: 1px solid #ccd1d1;
+        text-align: left;
+        vertical-align: top;
+      }
+      .rule {
+        padding: 0.8rem 1rem;
+        border-left: 4px solid #2874a6;
+        background: #ebf5fb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Project02 Gateway API</h1>
 
-    <p>
-      The daemon (<code>pnpm serve</code>) holds every character runtime behind one gateway and
-      speaks HTTP plus server-sent events on a loopback port. Every surface — the web UI, the
-      terminal chat, a messaging connector — is a client of this API and nothing else, so what
-      one surface sends, every surface sees. The contract's types live in
-      <code>src/gateway/api/contract.ts</code>; this page is the wire.
-    </p>
+      <p>
+        The daemon (<code>pnpm serve</code>) holds every character runtime
+        behind one gateway and speaks HTTP plus server-sent events on a loopback
+        port. Every surface — the web UI, the terminal chat, a messaging
+        connector — is a client of this API and nothing else, so what one
+        surface sends, every surface sees. The contract's types live in
+        <code>src/gateway/api/contract.ts</code>; this page is the wire.
+      </p>
 
-    <p class="rule">
-      The model proposes; the daemon commits. A client submits a message and reads outcomes and
-      events. It never holds a runtime, a store, or a lease.
-    </p>
+      <p class="rule">
+        The model proposes; the daemon commits. A client submits a message and
+        reads outcomes and events. It never holds a runtime, a store, or a
+        lease.
+      </p>
 
-    <h2>Finding the daemon</h2>
+      <h2>Finding the daemon</h2>
 
-    <p>
-      <code>serve</code> binds <code>127.0.0.1</code> on port 4310, or a free port when that one is
-      taken, prints <code>Gateway listening on http://127.0.0.1:&lt;port&gt;/</code>, brings the
-      roster up, and only then prints the line a client reads:
-    </p>
+      <p>
+        <code>serve</code> binds <code>127.0.0.1</code> on port 4310, or a free
+        port when that one is taken, prints
+        <code>Gateway listening on http://127.0.0.1:&lt;port&gt;/</code>, brings
+        the roster up, and only then prints the line a client reads:
+      </p>
 
-    <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:4310/#token=&lt;token&gt;</code></pre>
+      <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:4310/#token=&lt;token&gt;</code></pre>
 
-    <p>
-      The token is minted per run and travels in the URL fragment, so it never reaches a
-      server log or a referrer. Nothing that connects before that line is printed can find a
-      half-started daemon.
-    </p>
+      <p>
+        The token is minted per run and travels in the URL fragment, so it never
+        reaches a server log or a referrer. Nothing that connects before that
+        line is printed can find a half-started daemon.
+      </p>
 
-    <h2>The four wire rules</h2>
+      <h2>The four wire rules</h2>
 
-    <table>
-      <thead><tr><th>Rule</th><th>What it means on the wire</th></tr></thead>
-      <tbody>
-        <tr>
-          <td>Status codes describe the transport</td>
-          <td>A domain outcome — a refused open, a rejected turn, a storage failure — is a
-            <code>200</code> whose body says <code>status</code> first. A non-200 means the
-            request itself did not get through, and the body is always the one envelope
-            <code>{"error": {"code", "message"}}</code>.</td>
-        </tr>
-        <tr>
-          <td>The stream is a hint; the verbs are the truth</td>
-          <td>Every stream opens with a <code>ready</code> frame that carries the daemon's
-            snapshot — health and the confirmations still waiting — taken the instant the
-            stream's listener was registered, so every later event moves on from exactly that
-            state. A client installs the snapshot and reads on; what it wants of a
-            conversation's history it reads as one page, deduplicated by message id. There
-            are no event ids and no replay.</td>
-        </tr>
-        <tr>
-          <td>One way in</td>
-          <td>Loopback only: the daemon binds <code>127.0.0.1</code>. <code>Authorization: Bearer &lt;token&gt;</code>,
-            compared in constant time. The <code>Host</code> hostname must be <code>127.0.0.1</code>
-            or <code>localhost</code>; an <code>Origin</code>, when present, must be
-            <code>http://</code> plus that host. No CORS headers, no cookie, no query token. One
-            events stream per tab.</td>
-        </tr>
-        <tr>
-          <td>Every submission has an identity</td>
-          <td><code>clientMessageId</code> is required on a turn. A repeat with the same
-            <code>(conversationId, clientMessageId)</code> and the same content joins the turn
-            in flight or returns the recent outcome; the same id with different content is
-            refused. That is what lets a client whose answer was lost send the line again under
-            the same id once the daemon is back, without saying it twice — checking history
-            first, which returns the id, for a daemon that came back as a new run.</td>
-        </tr>
-      </tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th>Rule</th>
+            <th>What it means on the wire</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Status codes describe the transport</td>
+            <td>
+              A domain outcome — a refused open, a rejected turn, a storage
+              failure — is a <code>200</code> whose body says
+              <code>status</code> first. A non-200 means the request itself did
+              not get through, and the body is always the one envelope
+              <code>{"error": {"code", "message"}}</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>The stream is a hint; the verbs are the truth</td>
+            <td>
+              Every stream opens with a <code>ready</code> frame that carries
+              the daemon's snapshot — health and the confirmations still waiting
+              — taken the instant the stream's listener was registered, so every
+              later event moves on from exactly that state. A client installs
+              the snapshot and reads on; what it wants of a conversation's
+              history it reads as one page, deduplicated by message id. There
+              are no event ids and no replay.
+            </td>
+          </tr>
+          <tr>
+            <td>One way in</td>
+            <td>
+              Loopback only: the daemon binds <code>127.0.0.1</code>.
+              <code>Authorization: Bearer &lt;token&gt;</code>, compared in
+              constant time. The <code>Host</code> hostname must be
+              <code>127.0.0.1</code> or <code>localhost</code>; an
+              <code>Origin</code>, when present, must be
+              <code>http://</code> plus that host. No CORS headers, no cookie,
+              no query token. One events stream per tab.
+            </td>
+          </tr>
+          <tr>
+            <td>Every submission has an identity</td>
+            <td>
+              <code>clientMessageId</code> is required on a turn. A repeat with
+              the same <code>(conversationId, clientMessageId)</code> and the
+              same content joins the turn in flight or returns the recent
+              outcome; the same id with different content is refused. That is
+              what lets a client whose answer was lost send the line again at
+              once under the same id, without saying it twice; history returns
+              the id too, for a surface that wants to know whether a line
+              landed.
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-    <h2>Transport status codes</h2>
+      <h2>Transport status codes</h2>
 
-    <table>
-      <thead><tr><th>Status</th><th><code>error.code</code></th><th>When</th></tr></thead>
-      <tbody>
-        <tr><td>400</td><td><code>invalid_request</code></td><td>Unreadable or mis-shaped body, or malformed <code>Authorization</code> syntax.</td></tr>
-        <tr><td>401</td><td><code>unauthorized</code></td><td>Missing or wrong token.</td></tr>
-        <tr><td>403</td><td><code>forbidden_origin</code></td><td>A foreign <code>Origin</code>.</td></tr>
-        <tr><td>404</td><td><code>not_found</code></td><td>Unknown route, including an unknown <code>/api/*</code> — never a static fallthrough.</td></tr>
-        <tr><td>413</td><td><code>payload_too_large</code></td><td>Body over 64 KiB.</td></tr>
-        <tr><td>421</td><td><code>misdirected_host</code></td><td>A <code>Host</code> that is not loopback.</td></tr>
-        <tr><td>503</td><td><code>unavailable</code></td><td>The daemon is stopping.</td></tr>
-        <tr><td>500</td><td><code>internal</code></td><td>A bug. A storage failure is never a 500; it is an outcome.</td></tr>
-      </tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th><code>error.code</code></th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>400</td>
+            <td><code>invalid_request</code></td>
+            <td>
+              Unreadable or mis-shaped body, or malformed
+              <code>Authorization</code> syntax.
+            </td>
+          </tr>
+          <tr>
+            <td>401</td>
+            <td><code>unauthorized</code></td>
+            <td>Missing or wrong token.</td>
+          </tr>
+          <tr>
+            <td>403</td>
+            <td><code>forbidden_origin</code></td>
+            <td>A foreign <code>Origin</code>.</td>
+          </tr>
+          <tr>
+            <td>404</td>
+            <td><code>not_found</code></td>
+            <td>
+              Unknown route, including an unknown <code>/api/*</code> — never a
+              static fallthrough.
+            </td>
+          </tr>
+          <tr>
+            <td>413</td>
+            <td><code>payload_too_large</code></td>
+            <td>Body over 64 KiB.</td>
+          </tr>
+          <tr>
+            <td>421</td>
+            <td><code>misdirected_host</code></td>
+            <td>A <code>Host</code> that is not loopback.</td>
+          </tr>
+          <tr>
+            <td>503</td>
+            <td><code>unavailable</code></td>
+            <td>The daemon is stopping.</td>
+          </tr>
+          <tr>
+            <td>500</td>
+            <td><code>internal</code></td>
+            <td>A bug. A storage failure is never a 500; it is an outcome.</td>
+          </tr>
+        </tbody>
+      </table>
 
-    <p>Every <code>/api/*</code> response carries <code>Cache-Control: no-store</code>. Static UI files are served for <code>GET</code> and <code>HEAD</code> only, without auth.</p>
+      <p>
+        Every <code>/api/*</code> response carries
+        <code>Cache-Control: no-store</code>. Static UI files are served for
+        <code>GET</code> and <code>HEAD</code> only, without auth.
+      </p>
 
-    <h2>Routes</h2>
+      <h2>Routes</h2>
 
-    <table>
-      <thead><tr><th>Verb</th><th>Route</th><th>Body → 200 body</th></tr></thead>
-      <tbody>
-        <tr><td>health</td><td><code>GET /api/health</code></td><td>→ <code>GatewayHealth</code>: protocol version, home root, config and package diagnostics, the roster with each character's state and last maintenance failure.</td></tr>
-        <tr><td>start</td><td><code>POST /api/characters/:id/start</code></td><td>→ <code>StartOutcome</code>: <code>settled</code> with the character's summary (its state says ready or failed), or <code>refused</code> (<code>unknown_character</code>, <code>gateway_stopped</code>). The operator's retry; the daemon boots the roster itself.</td></tr>
-        <tr><td>open</td><td><code>POST /api/conversations/open</code></td><td><code>{characterId}</code> → <code>OpenOutcome</code>: <code>opened</code> with the conversation and user participant ids, <code>refused</code> (<code>unknown_character</code>, <code>character_unavailable</code>, <code>conversation_busy</code>), or a storage failure.</td></tr>
-        <tr><td>turn</td><td><code>POST /api/turns</code></td><td><code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks until the turn ends — a turn waiting on a confirmation can take minutes, so the reference client sends it over <code>node:http</code> with no timeout.</td></tr>
-        <tr><td>history</td><td><code>GET /api/conversations/:id/messages?before=&amp;limit=</code></td><td>→ <code>HistoryOutcome</code>: the newest page without a cursor, chronological within the page, with <code>earlier</code> when older messages remain. <code>limit</code> is 1..500 (default 100); <code>before</code> is the opaque cursor from a previous page.</td></tr>
-        <tr><td>pending</td><td><code>GET /api/confirmations</code></td><td>→ <code>PendingConfirmation[]</code>: every tool confirmation still waiting, with its deadline.</td></tr>
-        <tr><td>answer</td><td><code>POST /api/confirmations/:id</code></td><td><code>{decision: "approved" | "denied"}</code> → <code>AnswerOutcome</code>: <code>answered</code>, <code>expired</code>, or <code>unknown</code>.</td></tr>
-        <tr><td>events</td><td><code>GET /api/events</code></td><td>SSE, described below.</td></tr>
-        <tr><td>UI</td><td><code>GET /</code>, <code>GET /&lt;file&gt;</code></td><td>Static files from the UI root when the daemon has one; otherwise a plain-text 404 naming <code>/api</code>.</td></tr>
-      </tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th>Verb</th>
+            <th>Route</th>
+            <th>Body → 200 body</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>health</td>
+            <td><code>GET /api/health</code></td>
+            <td>
+              → <code>GatewayHealth</code>: protocol version, home root, config
+              and package diagnostics, the roster with each character's state
+              and last maintenance failure.
+            </td>
+          </tr>
+          <tr>
+            <td>start</td>
+            <td><code>POST /api/characters/:id/start</code></td>
+            <td>
+              → <code>StartOutcome</code>: <code>settled</code> with the
+              character's summary (its state says ready or failed), or
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>gateway_stopped</code>). The operator's retry; the daemon
+              boots the roster itself.
+            </td>
+          </tr>
+          <tr>
+            <td>open</td>
+            <td><code>POST /api/conversations/open</code></td>
+            <td>
+              <code>{characterId}</code> → <code>OpenOutcome</code>:
+              <code>opened</code> with the conversation and user participant
+              ids, <code>refused</code> (<code>unknown_character</code>,
+              <code>character_unavailable</code>,
+              <code>conversation_busy</code>), or a storage failure.
+            </td>
+          </tr>
+          <tr>
+            <td>turn</td>
+            <td><code>POST /api/turns</code></td>
+            <td>
+              <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
+              until the turn ends — a turn waiting on a confirmation can take
+              minutes, so the reference client sends it over
+              <code>node:http</code> with no timeout.
+            </td>
+          </tr>
+          <tr>
+            <td>history</td>
+            <td>
+              <code
+                >GET /api/conversations/:id/messages?before=&amp;limit=</code
+              >
+            </td>
+            <td>
+              → <code>HistoryOutcome</code>: the newest page without a cursor,
+              chronological within the page, with <code>earlier</code> when
+              older messages remain. <code>limit</code> is 1..500 (default 100);
+              <code>before</code> is the opaque cursor from a previous page.
+            </td>
+          </tr>
+          <tr>
+            <td>pending</td>
+            <td><code>GET /api/confirmations</code></td>
+            <td>
+              → <code>PendingConfirmation[]</code>: every tool confirmation
+              still waiting, with its deadline.
+            </td>
+          </tr>
+          <tr>
+            <td>answer</td>
+            <td><code>POST /api/confirmations/:id</code></td>
+            <td>
+              <code>{decision: "approved" | "denied"}</code> →
+              <code>AnswerOutcome</code>: <code>answered</code>,
+              <code>expired</code>, or <code>unknown</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>events</td>
+            <td><code>GET /api/events</code></td>
+            <td>SSE, described below.</td>
+          </tr>
+          <tr>
+            <td>UI</td>
+            <td><code>GET /</code>, <code>GET /&lt;file&gt;</code></td>
+            <td>
+              Static files from the UI root when the daemon has one; otherwise a
+              plain-text 404 naming <code>/api</code>.
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-    <h2>A turn</h2>
+      <h2>A turn</h2>
 
-    <pre><code>POST /api/turns
+      <pre><code>POST /api/turns
 Authorization: Bearer &lt;token&gt;
 Content-Type: application/json
 
@@ -136,29 +316,32 @@ Content-Type: application/json
   "clientMessageId": "8b1f…"
 }</code></pre>
 
-    <p>
-      <code>source</code> is the client's stamp on the message — <code>web</code>,
-      <code>chat-shim:&lt;run id&gt;</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and
-      for a surface to suppress the echo of its own messages. It is never a permission input.
-      Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are persisted on the
-      user's commit record, and come back in history. A stamp that fails the pattern never
-      reaches a turn: on the wire the body schema answers <code>400</code>
-      <code>invalid_request</code>, and a caller holding the façade in-process gets a
-      <code>refused</code> outcome (<code>invalid_message</code>) — the same rule, checked at
-      whichever boundary the message crosses first.
-    </p>
+      <p>
+        <code>source</code> is the client's stamp on the message —
+        <code>web</code>, <code>chat-shim:&lt;run id&gt;</code>,
+        <code>telegram:&lt;bot&gt;</code> — for rendering and for a surface to
+        suppress the echo of its own messages. It is never a permission input.
+        Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are
+        persisted on the user's commit record, and come back in history. A stamp
+        that fails the pattern never reaches a turn: on the wire the body schema
+        answers <code>400</code> <code>invalid_request</code>, and a caller
+        holding the façade in-process gets a <code>refused</code> outcome
+        (<code>invalid_message</code>) — the same rule, checked at whichever
+        boundary the message crosses first.
+      </p>
 
-    <h2>The event stream</h2>
+      <h2>The event stream</h2>
 
-    <p>
-      <code>GET /api/events</code> answers <code>text/event-stream</code>. Frames are
-      <code>event: &lt;kind&gt;</code> plus one <code>data:</code> line of JSON; a comment
-      <code>: ping</code> arrives every 15 seconds so an idle connection survives client
-      timeouts. A client that stops reading is dropped once the frames it left behind pass a
-      bound; the daemon never buffers for a client that is gone.
-    </p>
+      <p>
+        <code>GET /api/events</code> answers <code>text/event-stream</code>.
+        Frames are <code>event: &lt;kind&gt;</code> plus one
+        <code>data:</code> line of JSON; a comment <code>: ping</code> arrives
+        every 15 seconds so an idle connection survives client timeouts. A
+        client that stops reading is dropped once the frames it left behind pass
+        a bound; the daemon never buffers for a client that is gone.
+      </p>
 
-    <pre><code>event: ready
+      <pre><code>event: ready
 data: {"protocolVersion":1,"health":{…},"confirmations":[…]}
 
 event: turn_progress
@@ -170,52 +353,109 @@ data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","
 event: turn_completed
 data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed"}</code></pre>
 
-    <table>
-      <thead><tr><th>Event</th><th>Carries</th></tr></thead>
-      <tbody>
-        <tr><td><code>ready</code></td><td>The protocol version and the daemon's snapshot at that instant: <code>health</code> (the roster, each character's state and last maintenance failure) and <code>confirmations</code> still waiting. A client installs it on every one it sees.</td></tr>
-        <tr><td><code>turn_progress</code></td><td>A turn's progress, including both committed roles: <code>user_message</code> (with <code>source</code> and <code>clientMessageId</code>) and <code>visible_reply</code>.</td></tr>
-        <tr><td><code>turn_completed</code></td><td>The turn's terminal status, with the reason and message when it was not completed, stamped with the submission's <code>source</code> and <code>clientMessageId</code> so every surface knows whose turn ended — even one that committed nothing.</td></tr>
-        <tr><td><code>confirmation_requested</code></td><td>A tool asking for approval: id, request, deadline, and the <code>turn</code> that raised it (its <code>conversationId</code>, <code>source</code>, <code>clientMessageId</code>), so a surface answers for its own turns and leaves the rest to the surface that sent them. The same shape the pending list returns.</td></tr>
-        <tr><td><code>confirmation_settled</code></td><td>The decision: approved, denied, or cancelled.</td></tr>
-        <tr><td><code>state_changed</code></td><td>A character's runtime state, with a message when something went wrong.</td></tr>
-        <tr><td><code>maintenance_failed</code></td><td>A segment rotation that failed after a completed turn; health shows the same <code>at</code>.</td></tr>
-      </tbody>
-    </table>
+      <table>
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Carries</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ready</code></td>
+            <td>
+              The protocol version and the daemon's snapshot at that instant:
+              <code>health</code> (the roster, each character's state and last
+              maintenance failure) and <code>confirmations</code> still waiting.
+              A client installs it on every one it sees.
+            </td>
+          </tr>
+          <tr>
+            <td><code>turn_progress</code></td>
+            <td>
+              A turn's progress, including both committed roles:
+              <code>user_message</code> (with <code>source</code> and
+              <code>clientMessageId</code>) and <code>visible_reply</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>turn_completed</code></td>
+            <td>
+              The turn's terminal status, with the reason and message when it
+              was not completed, stamped with the submission's
+              <code>source</code> and <code>clientMessageId</code> so every
+              surface knows whose turn ended — even one that committed nothing.
+            </td>
+          </tr>
+          <tr>
+            <td><code>confirmation_requested</code></td>
+            <td>
+              A tool asking for approval: id, request, deadline, and the
+              <code>turn</code> that raised it (its <code>conversationId</code>,
+              <code>source</code>, <code>clientMessageId</code>), so a surface
+              answers for its own turns and leaves the rest to the surface that
+              sent them. The same shape the pending list returns.
+            </td>
+          </tr>
+          <tr>
+            <td><code>confirmation_settled</code></td>
+            <td>The decision: approved, denied, or cancelled.</td>
+          </tr>
+          <tr>
+            <td><code>state_changed</code></td>
+            <td>
+              A character's runtime state, with a message when something went
+              wrong.
+            </td>
+          </tr>
+          <tr>
+            <td><code>maintenance_failed</code></td>
+            <td>
+              A segment rotation that failed after a completed turn; health
+              shows the same <code>at</code>.
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-    <h2>The sync rule</h2>
+      <h2>The sync rule</h2>
 
-    <p class="rule">
-      Every committed message rides the stream once it reached disk — the user's and the
-      character's alike — and surfaces render from the stream. A turn's HTTP answer is for
-      status only.
-    </p>
+      <p class="rule">
+        Every committed message rides the stream once it reached disk — the
+        user's and the character's alike — and surfaces render from the stream.
+        A turn's HTTP answer is for status only.
+      </p>
 
-    <p>
-      Because both roles are emitted from one post-persist seam, the stream and history never
-      disagree: a reply whose write failed is a failed turn, never a message shown that history
-      lacks. A message typed on the phone appears in the open browser tab and the terminal at
-      once, each suppressing only what it sent itself by <code>source</code>.
-    </p>
+      <p>
+        Because both roles are emitted from one post-persist seam, the stream
+        and history never disagree: a reply whose write failed is a failed turn,
+        never a message shown that history lacks. A message typed on the phone
+        appears in the open browser tab and the terminal at once, each
+        suppressing only what it sent itself by <code>source</code>.
+      </p>
 
-    <h2>What a client never has to notice</h2>
+      <h2>What a client never has to notice</h2>
 
-    <p>
-      The daemon keeps the hard parts on its side, once, so every surface stays small. A
-      character's automatic recovery after a fatal turn lets its threads go; a delivery on a
-      conversation the runtime let go of holds it again before running, so a client keeps its
-      conversation id through the episode. A reconnect gets its whole world in the
-      <code>ready</code> frame. A confirmation names the turn that raised it. And a turn whose
-      answer was lost is safe to send again under its id.
-    </p>
+      <p>
+        The daemon keeps the hard parts on its side, once, so every surface
+        stays small. A character's automatic recovery after a fatal turn lets
+        its threads go; a delivery on a conversation the runtime let go of holds
+        it again before running, so a client keeps its conversation id through
+        the episode. A reconnect gets its whole world in the
+        <code>ready</code> frame. A confirmation names the turn that raised it.
+        And a turn whose answer was lost is safe to send again under its id.
+      </p>
 
-    <h2>Storage failures are outcomes</h2>
+      <h2>Storage failures are outcomes</h2>
 
-    <p>
-      A read-only store, a busy lease, a damaged segment: the daemon answers
-      <code>{"status": "failed", "code": &lt;storage code&gt;, "message"}</code> with a 200. A
-      non-technical user is told what broke and what to do next; a 500 is reserved for a bug.
-    </p>
-  </main>
-</body>
+      <p>
+        A read-only store, a busy lease, a damaged segment: the daemon answers
+        <code
+          >{"status": "failed", "code": &lt;storage code&gt;, "message"}</code
+        >
+        with a 200. A non-technical user is told what broke and what to do next;
+        a 500 is reserved for a bug.
+      </p>
+    </main>
+  </body>
 </html>

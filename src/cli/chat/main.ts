@@ -25,7 +25,7 @@ import {isMainModule} from '../shared/main-module.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
 import {createLineDispatcher} from './lines.ts';
 import {createConfirmationPrompts} from './prompts.ts';
-import {createTranscript, type Transcript} from './transcript.ts';
+import {createTranscript} from './transcript.ts';
 
 export type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -181,8 +181,6 @@ async function runChat(
   // answers for it.
   const own = (pending: PendingConfirmation): boolean =>
     pending.turn?.source === source;
-  // Lines the daemon did not take, waiting for its next handshake.
-  const unsent: GatewayMessage[] = [];
   let characterReady = false;
   const isCharacterReady = (): boolean => characterReady;
   let streamFailure: unknown;
@@ -252,9 +250,6 @@ async function runChat(
           await transcript.catchUp().catch(reportError);
           firstHandshake?.();
           firstHandshake = undefined;
-          await sendUnsent(client, transcript, unsent, options).catch(
-            reportError,
-          );
         },
       },
     )
@@ -309,7 +304,6 @@ async function runChat(
           source,
           clientMessageId: randomUUID(),
         },
-        unsent,
         options,
       );
 
@@ -340,16 +334,14 @@ async function runChat(
 /**
  * Delivers a line. A daemon that could not be reached is tried once more
  * at once — the daemon's ledger answers a repeat under the same id with
- * the turn's outcome rather than running it twice — and a line the daemon
- * still did not take, or refused because it is stopping, is kept for the
- * next handshake: the stream comes back when the daemon does, and the line
- * goes then. Nothing here waits for the daemon, so the person is never
- * stuck behind it.
+ * the turn's outcome rather than running it twice. A line the daemon still
+ * did not take, or refused because it is stopping, is said to have gone
+ * unsent, and the person sends it again when the daemon is back: this
+ * terminal keeps no line and never waits for the daemon.
  */
 async function send(
   client: GatewayClient,
   message: GatewayMessage,
-  unsent: GatewayMessage[],
   options: ChatCliOptions,
 ): Promise<TurnOutcome | undefined> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -361,7 +353,11 @@ async function send(
       }
 
       if (error.status === 503) {
-        break;
+        options.stderr.write(
+          'The daemon is stopping and did not take your line. Send it again once the daemon is back.\n',
+        );
+
+        return undefined;
       }
 
       if (error.status !== 0) {
@@ -370,37 +366,11 @@ async function send(
     }
   }
 
-  unsent.push(message);
   options.stderr.write(
-    'The daemon could not take your line; it goes when the daemon is back.\n',
+    'The daemon could not be reached and may not have taken your line. Send it again once the daemon is back.\n',
   );
 
   return undefined;
-}
-
-/**
- * Sends the lines the daemon did not take, in order, once it is back —
- * unless the thread already has one, from a daemon that came back as a
- * new run after taking it.
- */
-async function sendUnsent(
-  client: GatewayClient,
-  transcript: Transcript,
-  unsent: GatewayMessage[],
-  options: ChatCliOptions,
-): Promise<void> {
-  for (const message of unsent.splice(0)) {
-    if (await transcript.onThread(message.clientMessageId)) {
-      options.stdout.write(`Your line "${message.text}" did land.\n`);
-      continue;
-    }
-
-    const outcome = await send(client, message, unsent, options);
-
-    if (outcome !== undefined && outcome.status !== 'completed') {
-      options.stderr.write(`Error: ${outcome.message}\n`);
-    }
-  }
 }
 
 if (isMainModule(import.meta.url)) {

@@ -461,40 +461,43 @@ describe('chat shim', () => {
     }
   }, 20_000);
 
-  it('waits for a daemon that cannot be reached and sends the line again once it is back', async () => {
+  it('says a line the daemon could not take went unsent, and takes the next one when the daemon is back', async () => {
     const daemon = await startDaemon();
     const shim = openShim([], daemon.env);
 
     await shim.printed('mira is ready.');
 
-    // The daemon's socket goes away with a line in flight: the line is
-    // kept for the next handshake, and the prompt comes back at once.
+    // The daemon's socket goes away with a line in flight: the person is
+    // told, and the prompt comes back at once.
     await daemon.server.close();
     shim.stdin.write('did this land?\n');
     await vi.waitFor(() => {
-      expect(shim.errors()).toContain('could not take your line');
+      expect(shim.errors()).toContain('may not have taken your line');
     });
     await vi.waitFor(() => {
       expect(shim.seen().match(/> /gu)).toHaveLength(2);
     });
 
-    // It comes back on the same address: the line goes again, once.
+    // It comes back on the same address: the stream returns on its own and
+    // the next line is taken; the unsent one is the person's to send again.
     const returned = await startTestGatewayServer({
       gateway: daemon.gateway,
       port: daemon.server.port,
     });
 
     try {
+      shim.stdin.write('and now?\n');
       await shim.printed('Mira: noted');
 
       const history = await daemon.gateway.history(
         await conversationOf(daemon.gateway),
       );
-
-      expect(
+      const texts =
         history.status === 'ok' &&
-          history.messages.filter(message => message.text === 'did this land?'),
-      ).toHaveLength(1);
+        history.messages.map(message => message.text);
+
+      expect(texts).toContain('and now?');
+      expect(texts).not.toContain('did this land?');
       await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     } finally {
       await returned.close();
@@ -502,7 +505,7 @@ describe('chat shim', () => {
     }
   }, 20_000);
 
-  it('keeps a line refused by a stopping daemon for its next handshake', async () => {
+  it('says a line refused by a stopping daemon was not taken', async () => {
     const daemon = await startDaemon();
     const shim = openShim([], daemon.env);
 
@@ -510,11 +513,9 @@ describe('chat shim', () => {
     daemon.server.lifecycle.stopping = true;
     shim.stdin.write('too late\n');
     await vi.waitFor(() => {
-      expect(shim.errors()).toContain('could not take your line');
+      expect(shim.errors()).toContain('did not take your line');
     });
     daemon.server.lifecycle.stopping = false;
-
-    // No handshake came: the line was never sent.
     await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
 
     const history = await daemon.gateway.history(
