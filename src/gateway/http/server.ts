@@ -4,7 +4,7 @@ import {createAdaptorServer, type ServerType} from '@hono/node-server';
 
 import type {Gateway} from '../api/contract.ts';
 import {createGatewayApp} from './app.ts';
-import {createEventStreams} from './events.ts';
+import {createEventStreams, drainGraceMs} from './events.ts';
 
 export type GatewayServerOptions = {
   readonly gateway: Gateway;
@@ -22,7 +22,8 @@ export type GatewayServer = {
    * socket and the event streams still open — so an accepted turn still
    * receives its outcome, and the stream still carries its reply; then the
    * streams end, and only then does the listener close, letting an answer
-   * still being written finish before its socket is cut.
+   * still being written finish, within a short grace, before its socket is
+   * cut.
    */
   close(): Promise<void>;
 };
@@ -59,12 +60,13 @@ export async function createGatewayServer(
 
         // An outcome the gateway just produced may still be leaving on a
         // slow socket. Idle connections go now; every answer still being
-        // written is waited for, and only then is whatever remains cut.
+        // written is waited for, up to the grace, and only then is whatever
+        // remains cut.
         if ('closeIdleConnections' in server) {
           server.closeIdleConnections();
         }
 
-        void responses.drained().then(() => {
+        void responses.drained(drainGraceMs).then(() => {
           if ('closeAllConnections' in server) {
             server.closeAllConnections();
           }
@@ -76,11 +78,15 @@ export async function createGatewayServer(
 
 /**
  * Tracks the exchanges in flight, so shutdown can wait for the answers
- * still being written. An exchange whose request never fully arrived — a
- * client that stalled mid-body — has no answer on the way and is not
- * waited for; the cut that follows the drain ends it.
+ * still being written, up to a grace: a client that has not taken its
+ * answer by then is not slow, it is gone. An exchange whose request never
+ * fully arrived — a client that stalled mid-body — has no answer on the
+ * way and is not waited for at all. The cut that follows the drain ends
+ * both.
  */
-function trackResponses(server: ServerType): {drained(): Promise<void>} {
+function trackResponses(server: ServerType): {
+  drained(graceMs: number): Promise<void>;
+} {
   const active = new Set<{
     readonly request: IncomingMessage;
     readonly response: ServerResponse;
@@ -112,10 +118,15 @@ function trackResponses(server: ServerType): {drained(): Promise<void>} {
   });
 
   return {
-    drained: () =>
+    drained: graceMs =>
       answering()
         ? new Promise(resolve => {
-            waiting.push(resolve);
+            const timer = setTimeout(resolve, graceMs);
+
+            waiting.push(() => {
+              clearTimeout(timer);
+              resolve();
+            });
           })
         : Promise.resolve(),
   };
