@@ -40,6 +40,7 @@ import type {
   MaintenanceFailure,
   OpenOutcome,
   PendingConfirmation,
+  TurnIdentity,
   TurnOutcome,
   Unsubscribe,
 } from '../api/contract.ts';
@@ -92,6 +93,8 @@ type RuntimeContext = {
   maintenance: MaintenanceFailure | undefined;
   assembled: AssembledCharacter | undefined;
   queue: Promise<unknown>;
+  /** The submission whose turn runs right now; the broker stamps it. */
+  turn: TurnIdentity | undefined;
   opening: Promise<OpenOutcome> | undefined;
   stopping: Promise<void> | undefined;
   releasing: Promise<string[]> | undefined;
@@ -123,6 +126,7 @@ export function createLocalCharacterRuntime(
       emit: event => {
         emit(listeners, event);
       },
+      turnOf: () => context.turn,
       onSettled: (id, decision) => {
         emit(listeners, {
           kind: 'confirmation_settled',
@@ -137,6 +141,7 @@ export function createLocalCharacterRuntime(
     maintenance: undefined,
     assembled: undefined,
     queue: Promise.resolve(),
+    turn: undefined,
     opening: undefined,
     stopping: undefined,
     releasing: undefined,
@@ -539,6 +544,12 @@ async function runTurn(
 
   let delivery: UserMessageDelivery;
 
+  context.turn = {
+    conversationId: message.conversationId,
+    source: message.source,
+    clientMessageId: message.clientMessageId,
+  };
+
   try {
     delivery = await deliverUserMessage({
       conversation: active,
@@ -563,6 +574,8 @@ async function runTurn(
     });
   } catch (error: unknown) {
     return fatalOutcome(context, message.conversationId, error);
+  } finally {
+    context.turn = undefined;
   }
 
   if (delivery.status === 'failed') {

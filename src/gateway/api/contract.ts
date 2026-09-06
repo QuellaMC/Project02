@@ -57,6 +57,7 @@ export type GatewayVisibleMessage = {
 export type GatewayRefusalReason =
   | 'unknown_character'
   | 'unknown_conversation'
+  | 'conversation_busy'
   | 'sender_not_supported'
   | 'character_unavailable'
   | 'invalid_message';
@@ -181,12 +182,36 @@ export type ConfirmationAnswerStatus = 'answered' | 'expired' | 'unknown';
 export type AnswerOutcome = {readonly status: ConfirmationAnswerStatus};
 
 /** A parked tool confirmation, as the stream announced it and the list shows it. */
+/** The submission a turn ran for: enough for any surface to know whose it is. */
+export type TurnIdentity = {
+  readonly conversationId: string;
+  readonly source: string;
+  readonly clientMessageId: string;
+};
+
 export type PendingConfirmation = {
   readonly characterId: string;
   /** Unique across the whole gateway; answerConfirmation routes by it alone. */
   readonly id: string;
   readonly request: RuntimePluginToolConfirmationRequest;
   readonly deadlineAt: number;
+  /**
+   * The turn that raised it, so a surface can answer for its own turns
+   * and leave the rest to the surface that sent them. Absent for a
+   * request raised outside any turn.
+   */
+  readonly turn?: TurnIdentity;
+};
+
+/**
+ * The first frame on every event stream: the daemon's state at the moment
+ * the stream started listening, so a client that connects — or comes back
+ * — installs it and then reads events, with nothing to fetch and order.
+ */
+export type GatewayReady = {
+  readonly protocolVersion: typeof gatewayProtocolVersion;
+  readonly health: GatewayHealth;
+  readonly confirmations: readonly PendingConfirmation[];
 };
 
 /**

@@ -2,7 +2,11 @@ import type {HttpBindings} from '@hono/node-server';
 import type {Context} from 'hono';
 import {streamSSE, type SSEStreamingApi} from 'hono/streaming';
 
-import {gatewayProtocolVersion, type Gateway} from '../api/contract.ts';
+import {
+  gatewayProtocolVersion,
+  type Gateway,
+  type GatewayReady,
+} from '../api/contract.ts';
 import type {ApiEnv} from './env.ts';
 
 export type EventStreamsOptions = {
@@ -81,12 +85,13 @@ export function createFrameQueue(options: {
 
 /**
  * One SSE stream per connection over the gateway's event fan-out. The
- * daemon's listener is registered before `ready` is written, so nothing
- * between the handshake and the client's first snapshot can be missed —
- * the stream stays a hint, and the verbs the truth.
+ * daemon's listener is registered and the snapshot taken in one breath,
+ * so `ready` is exactly the state every later event moves on from: a
+ * client installs it and reads on, with nothing to fetch and nothing to
+ * order — the stream stays a hint, and the verbs the truth.
  */
 export function createEventStreams(
-  source: Pick<Gateway, 'events'>,
+  source: Pick<Gateway, 'events' | 'health' | 'pendingConfirmations'>,
   options: EventStreamsOptions = {},
 ): EventStreams {
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
@@ -139,14 +144,14 @@ export function createEventStreams(
     const unsubscribe = source.events(event => {
       queue.push(formatEventFrame(event.kind, JSON.stringify(event)));
     });
+    const snapshot: GatewayReady = {
+      protocolVersion: gatewayProtocolVersion,
+      health: source.health(),
+      confirmations: source.pendingConfirmations(),
+    };
 
     try {
-      queue.push(
-        formatEventFrame(
-          readyEvent,
-          JSON.stringify({protocolVersion: gatewayProtocolVersion}),
-        ),
-      );
+      queue.push(formatEventFrame(readyEvent, JSON.stringify(snapshot)));
 
       while (await heartbeat.tick(heartbeatMs)) {
         queue.push(heartbeatFrame);

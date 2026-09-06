@@ -8,6 +8,7 @@ import type {
   ConfirmationAnswerStatus,
   GatewayConfirmationDecision,
   GatewayEvent,
+  TurnIdentity,
 } from '../api/contract.ts';
 
 type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
@@ -15,6 +16,7 @@ type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
 type ParkedRequest = {
   readonly request: RuntimePluginToolConfirmationRequest;
   readonly deadlineAt: number;
+  readonly turn: TurnIdentity | undefined;
   readonly settle: (decision: Decision) => void;
 };
 
@@ -22,6 +24,7 @@ export type ParkedConfirmation = {
   readonly id: string;
   readonly request: RuntimePluginToolConfirmationRequest;
   readonly deadlineAt: number;
+  readonly turn?: TurnIdentity;
 };
 
 export type ConfirmationBroker = {
@@ -54,6 +57,8 @@ export type ConfirmationBroker = {
 export function createConfirmationBroker(options: {
   readonly characterId: string;
   readonly emit: (event: GatewayEvent) => void;
+  /** The turn running right now, whose tool is asking; none outside a turn. */
+  readonly turnOf: () => TurnIdentity | undefined;
   /** Fires once per parked request, however it settled. */
   readonly onSettled?: (id: string, decision: Decision['status']) => void;
 }): ConfirmationBroker {
@@ -80,7 +85,14 @@ export function createConfirmationBroker(options: {
           }
         };
 
-        pending.set(id, {request, deadlineAt: context.deadlineAt, settle});
+        const turn = options.turnOf();
+
+        pending.set(id, {
+          request,
+          deadlineAt: context.deadlineAt,
+          turn,
+          settle,
+        });
         context.signal.addEventListener(
           'abort',
           () => {
@@ -94,6 +106,7 @@ export function createConfirmationBroker(options: {
           id,
           request,
           deadlineAt: context.deadlineAt,
+          ...(turn === undefined ? {} : {turn}),
         });
       });
     },
@@ -104,6 +117,7 @@ export function createConfirmationBroker(options: {
             id,
             request: parked.request,
             deadlineAt: parked.deadlineAt,
+            ...(parked.turn === undefined ? {} : {turn: parked.turn}),
           }),
         ),
       );
