@@ -277,8 +277,8 @@ function resolveOptions(options: GatewayClientOptions): {
 } {
   const given = 'baseUrl' in options ? options.baseUrl : options.url;
   // The token rides the fragment to stay out of logs; an error about the
-  // URL must not put it there.
-  const shown = given.replace(/#.*$/u, '');
+  // URL must not put it there, whatever the fragment holds.
+  const shown = given.split('#', 1)[0] ?? given;
   let url: URL;
 
   try {

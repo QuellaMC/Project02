@@ -111,6 +111,13 @@ describe('gateway reference client', () => {
     expect(() =>
       createGatewayClient({url: `http://example.com:4310/#token=${token}`}),
     ).not.toThrow(new RegExp(token, 'u'));
+    // The URL parser drops a newline; the message must not keep what
+    // followed it either.
+    expect(() =>
+      createGatewayClient({
+        url: `http://example.com:4310/#token=${token}\nmore`,
+      }),
+    ).not.toThrow(new RegExp(token, 'u'));
     expect(() =>
       createGatewayClient({baseUrl: server.baseUrl, token: 'bad\ntoken'}),
     ).toThrow(/not a usable header value/u);
