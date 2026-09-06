@@ -28,11 +28,16 @@ path into the daemon.
 
 Four wire rules, stated once in `docs/wiki/gateway-api.html`: status codes
 describe the transport and domain outcomes are 200; the stream is a hint
-with a `ready` handshake and the verbs are the truth; one way in (loopback,
-bearer token, `Host` and `Origin` checks, no CORS); every submission has an
-identity (`clientMessageId`). The sync rule: every committed message rides
-the stream after it reached disk, stamped with its `source`, and surfaces
-render from the stream — so every platform shows the same thread.
+whose `ready` frame carries the daemon's snapshot, and the verbs are the
+truth; one way in (loopback, bearer token, `Host` and `Origin` checks, no
+CORS); every submission has an identity (`clientMessageId`), which is what
+makes a repeat safe. The sync rule: every committed message rides the
+stream after it reached disk, stamped with its `source`, and surfaces
+render from the stream — so every platform shows the same thread. The
+daemon keeps the hard parts on its side, once: a delivery holds a thread
+the runtime's recovery let go of, a reconnect gets its world in `ready`,
+and a confirmation names the turn that raised it — so every surface stays
+small.
 
 Nothing below this module — app, runtime, plugins, core — may import it
 (arch rule `nothing-imports-gateway`), and only the gateway imports `app`
