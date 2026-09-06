@@ -1046,6 +1046,57 @@ describe('gateway façade', () => {
     await restarted.stop();
   });
 
+  it('keeps chatting on the newest segment when an older one is damaged', async () => {
+    const {homeRoot, gateway, ref, segments} = await createRotatedChat([
+      'one',
+      'two',
+      'three',
+      'four',
+    ]);
+    const oldest = segments[0];
+
+    if (oldest === undefined) {
+      throw new Error('Expected a rotated chat.');
+    }
+
+    await gateway.stop();
+    appendFileSync(
+      createLocalRuntimeSessionPaths({
+        storeRoot: characterDataDirPath(homeRoot, 'mira'),
+        sessionId: oldest.sessionId,
+      }).rawEventsPath,
+      '{"eventId": "evt_torn"}\n',
+    );
+
+    // The character starts on the newest segment and runs; only the page
+    // of history that reaches the damaged segment fails.
+    const restarted = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await restarted.startCharacter('mira');
+    await expect(
+      restarted.openDirectConversation('mira'),
+    ).resolves.toMatchObject({status: 'opened'});
+    await expect(
+      restarted.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'five',
+        source: 'web',
+        clientMessageId: 'msg-five',
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+    await expect(restarted.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'failed',
+      code: 'malformed_record',
+    });
+    await restarted.stop();
+  });
+
   it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {
     const {gateway, inspectTone} = await createConfirmationHome();
     const first: GatewayEvent[] = [];

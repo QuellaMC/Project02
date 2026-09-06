@@ -584,6 +584,15 @@ async function runTurn(
     return fatalOutcome(context, message.conversationId, delivery.error);
   }
 
+  if (delivery.status === 'duplicate') {
+    return refusedOutcome(
+      'duplicate_submission',
+      `clientMessageId "${delivery.clientMessageId}" is already on this ` +
+        `conversation as message ${delivery.messageId}, taken by an ` +
+        'earlier run of the daemon; read the thread for its reply.',
+    );
+  }
+
   if (delivery.status === 'completed') {
     recordMaintenance(context, delivery.rotation);
 

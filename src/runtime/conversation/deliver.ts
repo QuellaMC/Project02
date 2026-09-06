@@ -51,6 +51,25 @@ async function deliverThroughSegment(
   options: DeliverUserMessageOptions,
 ): Promise<UserMessageDelivery> {
   const {session, logStore} = state.segment;
+  const {clientMessageId} = options;
+  // A run before this one may have taken the line — the daemon can go
+  // down after committing it and before answering — and the segment's
+  // own record says so at no cost. Nothing runs twice for one id.
+  const earlier =
+    clientMessageId === undefined
+      ? undefined
+      : logStore
+          .conversationMessages()
+          .find(
+            record =>
+              record.role === 'user' &&
+              record.clientMessageId === clientMessageId,
+          );
+
+  if (earlier !== undefined && clientMessageId !== undefined) {
+    return {status: 'duplicate', clientMessageId, messageId: earlier.id};
+  }
+
   const identity = createRuntimeEventIdentity();
 
   try {

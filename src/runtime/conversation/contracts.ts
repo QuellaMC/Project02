@@ -81,6 +81,12 @@ export type UserMessageDelivery =
       readonly rotation?: SegmentRotation;
     }
   | {
+      /** The line is already on this segment: a run before this one took it. */
+      readonly status: 'duplicate';
+      readonly clientMessageId: string;
+      readonly messageId: string;
+    }
+  | {
       readonly status: 'rejected';
       readonly turn: LocalRuntimeUserMessageRejectedResult;
     }
