@@ -181,6 +181,10 @@ async function runChat(
   // answers for it.
   const own = (pending: PendingConfirmation): boolean =>
     pending.turn?.source === source;
+  // Lines the daemon did not take, waiting for its next handshake.
+  const unsent: GatewayMessage[] = [];
+  let characterReady = false;
+  const isCharacterReady = (): boolean => characterReady;
   let streamFailure: unknown;
   // Nothing is read until the first handshake is through: a line typed —
   // or piped — before the stream listens would run a turn whose messages
@@ -243,10 +247,14 @@ async function runChat(
             warn(summary.diagnostic);
           }
 
+          characterReady = summary?.state === 'ready';
           prompts.reconcile(snapshot.confirmations.filter(own));
           await transcript.catchUp().catch(reportError);
           firstHandshake?.();
           firstHandshake = undefined;
+          await sendUnsent(client, transcript, unsent, options).catch(
+            reportError,
+          );
         },
       },
     )
@@ -266,7 +274,9 @@ async function runChat(
   try {
     await streamListening;
 
-    if (streamFailure === undefined) {
+    // Ready is said only of a character that is: one that failed between
+    // the open and the handshake has had its diagnostic said instead.
+    if (streamFailure === undefined && isCharacterReady()) {
       options.stdout.write(`${characterId} is ready.\n`);
     }
 
@@ -292,7 +302,6 @@ async function runChat(
 
       const outcome = await send(
         client,
-        transcript,
         {
           conversationId: opened.conversationId,
           senderId: opened.userParticipantId,
@@ -300,8 +309,8 @@ async function runChat(
           source,
           clientMessageId: randomUUID(),
         },
+        unsent,
         options,
-        streaming.signal,
       );
 
       if (outcome === undefined) {
@@ -329,21 +338,21 @@ async function runChat(
 }
 
 /**
- * Delivers a line. A daemon that cannot be reached is waited for, and the
- * line goes again under the same id once it is back — the daemon's ledger
- * answers a repeat with the turn's outcome rather than running it twice —
- * unless the thread already has it, from a daemon that came back as a new
- * run. A daemon that is stopping refused the line before any turn: not
- * sent, and said so.
+ * Delivers a line. A daemon that could not be reached is tried once more
+ * at once — the daemon's ledger answers a repeat under the same id with
+ * the turn's outcome rather than running it twice — and a line the daemon
+ * still did not take, or refused because it is stopping, is kept for the
+ * next handshake: the stream comes back when the daemon does, and the line
+ * goes then. Nothing here waits for the daemon, so the person is never
+ * stuck behind it.
  */
 async function send(
   client: GatewayClient,
-  transcript: Transcript,
   message: GatewayMessage,
+  unsent: GatewayMessage[],
   options: ChatCliOptions,
-  signal: AbortSignal,
 ): Promise<TurnOutcome | undefined> {
-  for (;;) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       return await client.deliver(message);
     } catch (error: unknown) {
@@ -352,52 +361,45 @@ async function send(
       }
 
       if (error.status === 503) {
-        options.stderr.write(
-          'The daemon is stopping; your line was not sent.\n',
-        );
-
-        return undefined;
+        break;
       }
 
       if (error.status !== 0) {
         throw error;
       }
-
-      options.stderr.write(
-        'The daemon could not be reached; your line waits for it to be back.\n',
-      );
-      await untilReachable(client, signal);
-
-      if (await transcript.onThread(message.clientMessageId)) {
-        options.stdout.write('Your line did land.\n');
-
-        return undefined;
-      }
     }
   }
+
+  unsent.push(message);
+  options.stderr.write(
+    'The daemon could not take your line; it goes when the daemon is back.\n',
+  );
+
+  return undefined;
 }
 
-/** Resolves once the daemon answers health again; a second apart. */
-async function untilReachable(
+/**
+ * Sends the lines the daemon did not take, in order, once it is back —
+ * unless the thread already has one, from a daemon that came back as a
+ * new run after taking it.
+ */
+async function sendUnsent(
   client: GatewayClient,
-  signal: AbortSignal,
+  transcript: Transcript,
+  unsent: GatewayMessage[],
+  options: ChatCliOptions,
 ): Promise<void> {
-  for (;;) {
-    try {
-      await client.health({signal});
-
-      return;
-    } catch (error: unknown) {
-      if (
-        signal.aborted ||
-        !(error instanceof GatewayClientError) ||
-        error.status !== 0
-      ) {
-        throw error;
-      }
+  for (const message of unsent.splice(0)) {
+    if (await transcript.onThread(message.clientMessageId)) {
+      options.stdout.write(`Your line "${message.text}" did land.\n`);
+      continue;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1_000));
+    const outcome = await send(client, message, unsent, options);
+
+    if (outcome !== undefined && outcome.status !== 'completed') {
+      options.stderr.write(`Error: ${outcome.message}\n`);
+    }
   }
 }
 

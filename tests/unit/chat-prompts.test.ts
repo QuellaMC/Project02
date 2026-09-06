@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {createConfirmationPrompts} from '../../src/cli/chat/prompts.ts';
 import type {PendingConfirmation} from '../../src/gateway/index.ts';
@@ -94,10 +94,12 @@ describe('chat confirmation prompts', () => {
     lost.prompts.ask(pending('lost'));
     await tick();
     lost.reads[0]?.resolve('y');
-    await lost.prompts.idle();
-    expect(lost.stderr()).toContain('could not be reached');
-
-    // A handshake lists it again: asked once more.
+    await vi.waitFor(() => {
+      expect(lost.stderr()).toContain('could not be reached');
+    });
+    // Asked again at once; a handshake listing it adds no third prompt.
+    await tick();
+    expect(lost.shown()).toBe(2);
     lost.prompts.reconcile([pending('lost')]);
     await tick();
     expect(lost.shown()).toBe(2);
