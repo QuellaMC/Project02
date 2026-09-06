@@ -103,19 +103,28 @@ describe('chat confirmation prompts', () => {
     expect(unknown.stdout()).not.toContain('was not approved');
 
     const lost = createHarness('unreachable');
+    let idle = false;
 
     lost.prompts.ask(pending('lost'));
+    void lost.prompts.idle().then(() => {
+      idle = true;
+    });
     await tick();
     lost.reads[0]?.resolve('y');
     await vi.waitFor(() => {
       expect(lost.stderr()).toContain('could not be reached');
     });
-    // Asked again at once; a handshake listing it adds no third prompt.
+    // Asked again at once; a handshake listing it adds no third prompt,
+    // and a REPL waiting for the chain keeps waiting through the retry.
     await tick();
     expect(lost.shown()).toBe(2);
     lost.prompts.reconcile([pending('lost')]);
     await tick();
     expect(lost.shown()).toBe(2);
+    expect(idle).toBe(false);
+    lost.prompts.settle('lost');
+    await lost.prompts.idle();
+    expect(idle).toBe(true);
 
     // Once the input ended nobody can answer again: the denial is tried
     // once, and the chain settles instead of asking into the void.
