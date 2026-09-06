@@ -53,11 +53,13 @@ export function createConfirmationPrompts(options: {
         );
       }
     } catch (error: unknown) {
-      // Not heard: the daemon still holds it, and a handshake lists it again.
-      asked.delete(pending.id);
+      // Not heard: the daemon still holds the request, so it is asked once
+      // more at once; if the daemon is down, its next handshake lists it.
       options.stderr.write(
         `Error: ${error instanceof Error ? error.message : String(error)}\n`,
       );
+      asked.delete(pending.id);
+      ask(pending);
     }
   };
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
@@ -118,15 +120,17 @@ export function createConfirmationPrompts(options: {
     }
   };
 
-  return {
-    ask(pending) {
-      if (asked.has(pending.id)) {
-        return;
-      }
+  const ask = (pending: PendingConfirmation): void => {
+    if (asked.has(pending.id)) {
+      return;
+    }
 
-      asked.add(pending.id);
-      chain = chain.then(() => prompt(pending));
-    },
+    asked.add(pending.id);
+    chain = chain.then(() => prompt(pending));
+  };
+
+  return {
+    ask,
     settle,
     reconcile(pending) {
       const present = new Set(pending.map(request => request.id));
@@ -138,7 +142,7 @@ export function createConfirmationPrompts(options: {
       }
 
       for (const request of pending) {
-        this.ask(request);
+        ask(request);
       }
     },
     idle: () => chain,
