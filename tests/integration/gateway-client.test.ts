@@ -213,7 +213,7 @@ describe('gateway reference client', () => {
       await vi.waitFor(() => {
         expect(readies).toHaveLength(round);
       });
-      server.events.closeAll();
+      await server.events.closeAll();
     }
 
     await vi.waitFor(() => {
@@ -245,7 +245,7 @@ describe('gateway reference client', () => {
     });
 
     // The daemon ends every stream; the client comes back on its own.
-    server.events.closeAll();
+    await server.events.closeAll();
     await vi.waitFor(() => {
       expect(readies).toEqual([false, true]);
     });

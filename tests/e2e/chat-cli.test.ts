@@ -422,7 +422,7 @@ describe('chat shim', () => {
     });
 
     try {
-      daemon.server.events.closeAll();
+      await daemon.server.events.closeAll();
 
       for (const text of ['two', 'three', 'four']) {
         const turn = await deliverFromWeb(daemon.gateway, 'mira', text);

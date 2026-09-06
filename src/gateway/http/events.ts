@@ -20,13 +20,19 @@ export type EventStreams = {
   readonly handler: (c: Context<ApiEnv>) => Response;
   /** Streams open right now. */
   readonly openCount: () => number;
-  /** Ends every open stream; shutdown calls it before the gateway stops. */
-  readonly closeAll: () => void;
+  /**
+   * Ends every open stream once the frames already queued for it are
+   * written; shutdown awaits it after the gateway drained its turns, so the
+   * last reply rides out before the stream ends.
+   */
+  readonly closeAll: () => Promise<void>;
 };
 
 export type FrameQueue = {
   push(frame: string): void;
   pending(): number;
+  /** Settles once every frame pushed so far has been written or dropped. */
+  drained(): Promise<void>;
 };
 
 /** The first frame on every stream; a client bootstraps on each one it sees. */
@@ -80,6 +86,11 @@ export function createFrameQueue(options: {
         );
     },
     pending: () => pending,
+    drained: () =>
+      chain.then(
+        () => undefined,
+        () => undefined,
+      ),
   });
 }
 
@@ -96,7 +107,7 @@ export function createEventStreams(
 ): EventStreams {
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
   const maxPendingFrames = options.maxPendingFrames ?? defaultMaxPendingFrames;
-  const closers = new Set<() => void>();
+  const closers = new Set<() => Promise<void>>();
 
   return Object.freeze({
     handler(c) {
@@ -108,11 +119,8 @@ export function createEventStreams(
       return response;
     },
     openCount: () => closers.size,
-    closeAll() {
-      for (const close of [...closers]) {
-        close();
-      }
-    },
+    closeAll: () =>
+      Promise.all([...closers].map(close => close())).then(() => undefined),
   });
 
   async function runStream(
@@ -120,9 +128,10 @@ export function createEventStreams(
     stream: SSEStreamingApi,
   ): Promise<void> {
     const heartbeat = createHeartbeatClock();
-    const close = (): void => {
+    const close = async (): Promise<void> => {
       heartbeat.stop();
-      void stream.close();
+      await queue.drained();
+      await stream.close();
     };
     const queue = createFrameQueue({
       write: frame => stream.write(frame),
