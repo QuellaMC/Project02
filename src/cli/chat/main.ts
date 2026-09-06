@@ -344,6 +344,10 @@ async function send(
   message: GatewayMessage,
   options: ChatCliOptions,
 ): Promise<TurnOutcome | undefined> {
+  // A connection that broke may have carried the line before it did; a
+  // refusal after that says nothing about the earlier attempt.
+  let uncertain = false;
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       return await client.deliver(message);
@@ -353,21 +357,21 @@ async function send(
       }
 
       if (error.status === 503) {
-        options.stderr.write(
-          'The daemon is stopping and did not take your line. Send it again once the daemon is back.\n',
-        );
-
-        return undefined;
+        break;
       }
 
       if (error.status !== 0) {
         throw error;
       }
+
+      uncertain = true;
     }
   }
 
   options.stderr.write(
-    'The daemon could not be reached and may not have taken your line. Send it again once the daemon is back.\n',
+    uncertain
+      ? 'The daemon could not be reached and may not have taken your line. Send it again once the daemon is back.\n'
+      : 'The daemon is stopping and did not take your line. Send it again once the daemon is back.\n',
   );
 
   return undefined;
