@@ -402,9 +402,17 @@ describe('gateway over HTTP', () => {
     ]);
     expect(server.events.openCount()).toBe(1);
 
-    await server.close();
+    // Shutdown ends the stream, and a stream arriving after that ends at
+    // once: its request passed the stopping guard before the guard was set.
+    await server.events.closeAll();
     await events.ended;
     expect(server.events.openCount()).toBe(0);
+
+    const late = await subscribeToEvents(server.baseUrl);
+
+    await late.ended;
+    expect(late.frames).toEqual([]);
+    await server.close();
     await gateway.stop();
   });
 
