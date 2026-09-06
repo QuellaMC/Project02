@@ -1311,7 +1311,7 @@ describe('gateway façade', () => {
     });
   });
 
-  it('keeps a thread readable beside a damaged catalog row and refuses a damaged segment', async () => {
+  it('keeps a thread readable beside a damaged catalog row and refuses a damaged or missing segment', async () => {
     const {homeRoot, gateway, ref, segments} = await createRotatedChat([
       'one',
       'two',
@@ -1335,14 +1335,23 @@ describe('gateway façade', () => {
       throw new Error('Expected a rotated chat.');
     }
 
-    appendFileSync(
-      createLocalRuntimeSessionPaths({storeRoot, sessionId: latest.sessionId})
-        .rawEventsPath,
-      '{"eventId": "evt_torn"}\n',
-    );
+    const paths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: latest.sessionId,
+    });
+
+    appendFileSync(paths.rawEventsPath, '{"eventId": "evt_torn"}\n');
     await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
       status: 'failed',
       code: 'malformed_record',
+    });
+
+    // A segment the catalog names but the disk lacks is damage, not an
+    // empty stretch of the thread.
+    rmSync(paths.sessionRoot, {recursive: true});
+    await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'failed',
+      code: 'missing_file',
     });
   });
   it('reconcile boots every enabled character and leaves a disabled one offline', async () => {

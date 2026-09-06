@@ -96,7 +96,10 @@ export type CommittedConversationMessages = {
 /**
  * One segment's committed visible messages, whole, through the same
  * tolerant read the plugin feed uses: torn tails invisible, damaged records
- * counted and skipped. The gateway's history is built on this.
+ * counted and skipped. A segment the catalog names has its directory —
+ * the directory is made before the row and removed after it — so a
+ * missing one is damage, never an empty segment. The gateway's history is
+ * built on this.
  */
 export function readCommittedConversationMessages(options: {
   readonly storeRoot: string;
@@ -114,7 +117,7 @@ export function readCommittedConversationMessages(options: {
     storeRoot: options.storeRoot,
   });
 
-  assertSessionDirectoryReadable(layout, options.sessionId, 'allow');
+  assertSessionDirectoryReadable(layout, options.sessionId);
 
   return committedMessagesFromTail(
     readCommittedTranscriptTail(
