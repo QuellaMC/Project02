@@ -154,6 +154,20 @@ describe('gateway reference client', () => {
         onReady: () => Promise.reject(new Error('snapshot failed')),
       }),
     ).rejects.toThrow('snapshot failed');
+    // A bootstrap's own request can fail with the transport's shape; that
+    // is the bootstrap's failure, and no reconnect hides it.
+    await expect(
+      client.events(() => undefined, {
+        signal: new AbortController().signal,
+        onReady: () =>
+          Promise.reject(
+            new GatewayClientError(0, 'unreachable', 'a verb of the bootstrap'),
+          ),
+      }),
+    ).rejects.toMatchObject({
+      code: 'unreachable',
+      message: 'a verb of the bootstrap',
+    });
     await close();
   });
 
