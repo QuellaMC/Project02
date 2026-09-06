@@ -163,11 +163,13 @@ describe('gateway server lifecycle', () => {
     );
     await new Promise(resolve => setTimeout(resolve, 200));
 
-    const started = Date.now();
+    // Measured on the monotonic clock: the wall clock is adjusted under
+    // WSL2 and has read a two-second wait as less.
+    const started = performance.now();
 
     await server.close();
 
-    const waited = Date.now() - started;
+    const waited = performance.now() - started;
 
     // The answer was given its grace, and then the socket was cut.
     expect(waited).toBeGreaterThanOrEqual(1_900);
