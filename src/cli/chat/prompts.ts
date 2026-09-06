@@ -25,7 +25,7 @@ export type ConfirmationPrompts = {
 
 export function createConfirmationPrompts(options: {
   readonly client: Pick<GatewayClient, 'answerConfirmation'>;
-  readonly lines: Pick<LineDispatcher, 'promptLine'>;
+  readonly lines: Pick<LineDispatcher, 'promptLine' | 'close'>;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly signal?: AbortSignal;
@@ -114,6 +114,15 @@ export function createConfirmationPrompts(options: {
       options.stderr.write(
         'Confirmation timed out; the answer was discarded.\n',
       );
+
+      return;
+    }
+
+    // Leaving at the prompt is a denial, said once, and then the terminal
+    // leaves: nothing is asked again of a person who is going.
+    if (line?.trim() === '/exit') {
+      await answer(pending, 'denied');
+      options.lines.close();
 
       return;
     }
