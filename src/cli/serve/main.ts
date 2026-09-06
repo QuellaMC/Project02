@@ -225,15 +225,21 @@ function aborted(signal: AbortSignal): Promise<void> {
 
 if (isMainModule(import.meta.url)) {
   const abort = new AbortController();
+  const signals = ['SIGINT', 'SIGTERM'] as const;
+  // The first signal of either kind starts the stop; a second of either
+  // kind ends the process the default way — the escape hatch when shutdown
+  // itself hangs.
+  const onSignal = (): void => {
+    for (const signal of signals) {
+      process.off(signal, onSignal);
+    }
 
-  // A second signal, once this handler has fired, ends the process the
-  // default way — the escape hatch when shutdown itself hangs.
-  process.once('SIGINT', () => {
     abort.abort();
-  });
-  process.once('SIGTERM', () => {
-    abort.abort();
-  });
+  };
+
+  for (const signal of signals) {
+    process.on(signal, onSignal);
+  }
 
   process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
     stdin: process.stdin,
