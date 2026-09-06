@@ -89,6 +89,19 @@ describe('chat confirmation prompts', () => {
       'demo_tool was not approved: the confirmation had expired.',
     );
 
+    // Unknown to the daemon is settled already — maybe by this terminal's
+    // own earlier answer whose reply was lost — never a refusal.
+    const unknown = createHarness('unknown');
+
+    unknown.prompts.ask(pending('gone'));
+    await tick();
+    unknown.reads[0]?.resolve('y');
+    await unknown.prompts.idle();
+    expect(unknown.stdout()).toContain(
+      'demo_tool was settled before this answer.',
+    );
+    expect(unknown.stdout()).not.toContain('was not approved');
+
     const lost = createHarness('unreachable');
 
     lost.prompts.ask(pending('lost'));
@@ -105,7 +118,7 @@ describe('chat confirmation prompts', () => {
     expect(lost.shown()).toBe(2);
   });
 
-  it('withdraws a showing prompt settled elsewhere, and retires what a handshake no longer lists', async () => {
+  it('withdraws a showing prompt settled meanwhile, and retires what a handshake no longer lists', async () => {
     const harness = createHarness();
 
     harness.prompts.ask(pending('showing'));
@@ -118,7 +131,7 @@ describe('chat confirmation prompts', () => {
     harness.prompts.settle('showing');
     harness.prompts.reconcile([]);
     await harness.prompts.idle();
-    expect(harness.stdout()).toContain('demo_tool was settled elsewhere.');
+    expect(harness.stdout()).toContain('demo_tool was settled meanwhile.');
     expect(harness.shown()).toBe(1);
     expect(harness.answers).toEqual([]);
   });

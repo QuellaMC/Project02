@@ -47,9 +47,16 @@ export function createConfirmationPrompts(options: {
       );
 
       // The daemon has the last word: an answer it did not take is said.
-      if (outcome.status !== 'answered') {
+      // Unknown to it means settled before this answer — elsewhere, or by
+      // an answer of this terminal's whose reply was lost — so nothing
+      // here says what that settlement was.
+      if (outcome.status === 'expired') {
         options.stdout.write(
-          `${pending.request.toolName} was not ${decision}: ${outcome.status === 'expired' ? 'the confirmation had expired' : 'it was settled elsewhere first'}.\n`,
+          `${pending.request.toolName} was not ${decision}: the confirmation had expired.\n`,
+        );
+      } else if (outcome.status === 'unknown') {
+        options.stdout.write(
+          `${pending.request.toolName} was settled before this answer.\n`,
         );
       }
     } catch (error: unknown) {
@@ -96,7 +103,7 @@ export function createConfirmationPrompts(options: {
 
     if (withdrawn.signal.aborted) {
       options.stdout.write(
-        `\n${pending.request.toolName} was settled elsewhere.\n`,
+        `\n${pending.request.toolName} was settled meanwhile.\n`,
       );
 
       return;
