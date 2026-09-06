@@ -104,9 +104,13 @@ describe('gateway reference client', () => {
     expect(() =>
       createGatewayClient({baseUrl: 'https://127.0.0.1:4310', token}),
     ).toThrow(/http:\/\//u);
+    // A URL in an error never carries its token.
     expect(() =>
       createGatewayClient({url: `http://example.com:4310/#token=${token}`}),
-    ).toThrow(/this machine/u);
+    ).toThrow(/this machine.*example\.com:4310\/$/u);
+    expect(() =>
+      createGatewayClient({url: `http://example.com:4310/#token=${token}`}),
+    ).not.toThrow(new RegExp(token, 'u'));
     expect(() =>
       createGatewayClient({baseUrl: server.baseUrl, token: 'bad\ntoken'}),
     ).toThrow(/not a usable header value/u);

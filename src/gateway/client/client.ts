@@ -276,6 +276,9 @@ function resolveOptions(options: GatewayClientOptions): {
   token: string;
 } {
   const given = 'baseUrl' in options ? options.baseUrl : options.url;
+  // The token rides the fragment to stay out of logs; an error about the
+  // URL must not put it there.
+  const shown = given.replace(/#.*$/u, '');
   let url: URL;
 
   try {
@@ -284,7 +287,7 @@ function resolveOptions(options: GatewayClientOptions): {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `Not a gateway URL: ${given}`,
+      `Not a gateway URL: ${shown}`,
     );
   }
 
@@ -294,7 +297,7 @@ function resolveOptions(options: GatewayClientOptions): {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `A gateway URL starts with http://, not ${url.protocol}//: ${given}`,
+      `A gateway URL starts with http://, not ${url.protocol}//: ${shown}`,
     );
   }
 
@@ -302,7 +305,7 @@ function resolveOptions(options: GatewayClientOptions): {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `A gateway URL points at this machine (127.0.0.1 or localhost), not ${url.hostname}: ${given}`,
+      `A gateway URL points at this machine (127.0.0.1 or localhost), not ${url.hostname}: ${shown}`,
     );
   }
 
@@ -318,8 +321,8 @@ function resolveOptions(options: GatewayClientOptions): {
       0,
       'invalid_url',
       token === null || token.length === 0
-        ? `The gateway URL carries no #token: ${given}`
-        : `The gateway token is not a usable header value: ${given}`,
+        ? `The gateway URL carries no #token: ${shown}`
+        : `The gateway token is not a usable header value: ${shown}`,
     );
   }
 
