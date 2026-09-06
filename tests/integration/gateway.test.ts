@@ -461,6 +461,36 @@ describe('gateway façade', () => {
       chmodSync(sessionsRoot, 0o755);
     }
 
+    // The thread cannot be held again while its store is unreadable: the
+    // turn ends as the open did, and every surface hears that it ended.
+    const events: GatewayEvent[] = [];
+    const conversationsRoot = join(homeRoot, 'conversations');
+    const unheld = randomUUID();
+
+    gateway.events(event => events.push(event));
+    chmodSync(conversationsRoot, 0o000);
+
+    try {
+      await expect(
+        gateway.deliver({
+          conversationId: ref.conversationId,
+          senderId: ref.userParticipantId,
+          source: 'test',
+          clientMessageId: unheld,
+          text: 'anyone?',
+        }),
+      ).resolves.toMatchObject({status: 'failed'});
+    } finally {
+      chmodSync(conversationsRoot, 0o755);
+    }
+
+    expect(events.at(-1)).toMatchObject({
+      kind: 'turn_completed',
+      conversationId: ref.conversationId,
+      clientMessageId: unheld,
+      status: 'failed',
+    });
+
     // The recovery let the thread go; the next delivery holds it again on
     // its own, joining the recovery first, and runs.
     await expect(
