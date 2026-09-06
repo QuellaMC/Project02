@@ -65,6 +65,7 @@ export async function runServeCliFromArgs(
       init: flags.init,
       stdout: options.stdout,
       stdin: options.stdin,
+      signal: options.signal,
       ...(options.env === undefined ? {} : {env: options.env}),
     });
 

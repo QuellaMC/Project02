@@ -8,7 +8,8 @@
 import {createInterface} from 'node:readline/promises';
 
 export type CliPromptAdapter = {
-  question(prompt: string): Promise<string | undefined>;
+  /** An aborted signal abandons the question; that answers `undefined`. */
+  question(prompt: string, signal?: AbortSignal): Promise<string | undefined>;
 };
 
 export type OwnedCliPrompt = {
@@ -47,8 +48,11 @@ export function createCliPrompt(
 
   return {
     prompt: Object.freeze({
-      question(prompt: string): Promise<string | undefined> {
-        if (closed) {
+      question(
+        prompt: string,
+        signal?: AbortSignal,
+      ): Promise<string | undefined> {
+        if (closed || signal?.aborted === true) {
           return Promise.resolve(undefined);
         }
 
@@ -86,8 +90,19 @@ export function createCliPrompt(
           readline.once('close', handleClose);
           void (async () => {
             try {
-              settle(await readline.question(prompt));
+              settle(
+                await readline.question(
+                  prompt,
+                  signal === undefined ? {} : {signal},
+                ),
+              );
             } catch (error: unknown) {
+              if (signal?.aborted === true) {
+                settle(undefined);
+
+                return;
+              }
+
               rejectQuestion(
                 error instanceof Error
                   ? error
