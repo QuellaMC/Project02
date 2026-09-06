@@ -128,12 +128,12 @@
               the same <code>(conversationId, clientMessageId)</code> and the
               same content joins the turn in flight or returns the recent
               outcome; the same id with different content is refused; and an id
-              already on the thread's newest page from an earlier run of the
-              daemon is refused as <code>duplicate_submission</code>. That is
-              what lets a client whose answer was lost send the line again under
-              the same id, at once or after the daemon came back, without saying
-              it twice; history returns the id too, for a surface that wants to
-              know whether a line landed.
+              the character's current memory already holds from an earlier run
+              of the daemon is refused as <code>duplicate_submission</code>.
+              That is what lets a client whose answer was lost send the line
+              again under the same id, at once or after the daemon came back,
+              without saying it twice; history returns the id too, for a surface
+              that wants to know whether a line landed.
             </td>
           </tr>
         </tbody>
