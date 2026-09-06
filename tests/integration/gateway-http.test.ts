@@ -363,7 +363,12 @@ describe('gateway over HTTP', () => {
 
     const ready = await events.next(frame => frame.event === 'ready');
 
-    expect(frameData(ready)).toEqual({protocolVersion: 1});
+    // The daemon's state as the stream started listening, in one frame.
+    expect(frameData(ready)).toMatchObject({
+      protocolVersion: 1,
+      health: {characters: [{id: 'mira', state: 'not_started'}]},
+      confirmations: [],
+    });
     expect(events.frames[0]).toBe(ready);
     await events.next(frame => frame.comment === 'ping');
 
@@ -426,18 +431,20 @@ describe('gateway over HTTP', () => {
     await first.next(frame => frame.event === 'confirmation_requested');
     await first.cancel();
 
-    // The second connection missed the request; the list has it.
+    // The second connection missed the request; its ready frame has it,
+    // stamped with the turn that raised it.
     const second = await subscribeToEvents(server.baseUrl);
-
-    await second.next(frame => frame.event === 'ready');
-
-    const pending = (await (
-      await fetch(`${server.baseUrl}/api/confirmations`, {
-        headers: {authorization: `Bearer ${token}`},
-      })
-    ).json()) as {id: string}[];
+    const ready = await second.next(frame => frame.event === 'ready');
+    const pending = (
+      frameData(ready) as {confirmations: {id: string; turn?: unknown}[]}
+    ).confirmations;
 
     expect(pending).toHaveLength(1);
+    expect(pending[0]?.turn).toEqual({
+      conversationId: ref.conversationId,
+      source: 'web',
+      clientMessageId: 'msg-confirm',
+    });
 
     const answered = await fetch(
       `${server.baseUrl}/api/confirmations/${pending[0]?.id ?? ''}`,
@@ -480,6 +487,14 @@ describe('gateway over HTTP', () => {
             listeners.delete(listener);
           };
         },
+        health: () => ({
+          protocolVersion: 1,
+          homeRoot: '/nowhere',
+          config: {diagnostics: []},
+          packages: {diagnostics: []},
+          characters: [],
+        }),
+        pendingConfirmations: () => [],
       },
       {maxPendingFrames: 8},
     );

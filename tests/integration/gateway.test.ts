@@ -430,7 +430,7 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('joins the automatic recovery so a retry lands on the restarted character', async () => {
+  it('lands a delivery after a fatal turn on the recovered character without a reopen', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
@@ -461,11 +461,17 @@ describe('gateway façade', () => {
       chmodSync(sessionsRoot, 0o755);
     }
 
-    await gateway.startCharacter('mira');
-
-    const reopened = await open(gateway, 'mira');
-
-    expect(reopened.conversationId).toBe(ref.conversationId);
+    // The recovery let the thread go; the next delivery holds it again on
+    // its own, joining the recovery first, and runs.
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'still here?',
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
     await gateway.stop();
   });
 

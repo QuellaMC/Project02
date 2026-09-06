@@ -173,13 +173,33 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         );
       }
 
-      return submissions.submit(message, () =>
-        runtime.deliver(message).then(outcome => {
-          emit(turnCompleted(characterId, message, outcome));
+      return submissions.submit(message, async () => {
+        // A recovery lets the thread go; a client that opened it must not
+        // have to notice. The thread is held again here, joining a start
+        // or recovery in flight first, so the turn lands on the character
+        // that is back — the open is memoized, so a held thread costs
+        // nothing.
+        await startsInFlight.get(characterId)?.catch(() => undefined);
 
-          return outcome;
-        }),
-      );
+        const held = await runtime.openDirectConversation();
+
+        if (held.status !== 'opened') {
+          return held.status === 'refused'
+            ? refusedTurn(held.reason, held.message)
+            : Object.freeze({
+                status: 'failed' as const,
+                characterId,
+                conversationId: message.conversationId,
+                message: held.message,
+              });
+        }
+
+        const outcome = await runtime.deliver(message);
+
+        emit(turnCompleted(characterId, message, outcome));
+
+        return outcome;
+      });
     },
     pendingConfirmations(): readonly PendingConfirmation[] {
       return Object.freeze(

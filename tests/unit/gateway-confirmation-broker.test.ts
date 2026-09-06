@@ -10,11 +10,14 @@ const request = {
   preview: {},
 };
 
+const turn = {conversationId: 'conv-1', source: 'web', clientMessageId: 'm-1'};
+
 function createBrokerHarness() {
   const events: Extract<GatewayEvent, {kind: 'confirmation_requested'}>[] = [];
   const settled: string[] = [];
   const broker = createConfirmationBroker({
     characterId: 'mira',
+    turnOf: () => turn,
     emit(event) {
       if (event.kind === 'confirmation_requested') {
         events.push(event);
@@ -41,12 +44,13 @@ describe('gateway confirmation broker', () => {
 
     expect(events).toHaveLength(2);
     expect(events[0]?.id).not.toBe(events[1]?.id);
-    expect(events[0]).toMatchObject({characterId: 'mira', request});
+    // Stamped with the turn that raised it, on the event and in the list.
+    expect(events[0]).toMatchObject({characterId: 'mira', request, turn});
     expect(events[0]?.deadlineAt).toBeTypeOf('number');
     expect(broker.pending().map(parked => parked.id)).toEqual(
       events.map(event => event.id),
     );
-    expect(broker.pending()[0]).toMatchObject({request});
+    expect(broker.pending()[0]).toMatchObject({request, turn});
 
     expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('answered');
     expect(broker.answer(events[1]?.id ?? '', 'denied')).toBe('answered');
