@@ -23,6 +23,7 @@ function createHarness(
 ) {
   let stdout = '';
   let stderr = '';
+  let closed = false;
   const answers: string[] = [];
   const reads: {resolve(line: string | undefined): void}[] = [];
   const prompts = createConfirmationPrompts({
@@ -43,6 +44,9 @@ function createHarness(
             resolve(undefined);
           });
         }),
+      close() {
+        closed = true;
+      },
     },
     stdout: collect(chunk => {
       stdout += chunk;
@@ -58,6 +62,7 @@ function createHarness(
     reads,
     stdout: () => stdout,
     stderr: () => stderr,
+    closed: () => closed,
     shown: () => (stdout.match(/\[y\/N\]/gu) ?? []).length,
   };
 }
@@ -122,8 +127,14 @@ describe('chat confirmation prompts', () => {
     await tick();
     expect(lost.shown()).toBe(2);
     expect(idle).toBe(false);
-    lost.prompts.settle('lost');
+
+    // Leaving at the prompt: one denial, said once, and the terminal goes,
+    // whether or not the daemon heard it.
+    lost.reads[1]?.resolve('/exit');
     await lost.prompts.idle();
+    expect(lost.answers).toEqual(['lost:approved', 'lost:denied']);
+    expect(lost.closed()).toBe(true);
+    expect(lost.shown()).toBe(2);
     expect(idle).toBe(true);
 
     // Once the input ended nobody can answer again: the denial is tried
