@@ -35,10 +35,11 @@ export function createConfirmationPrompts(options: {
   const settled = new Set<string>();
   let showing: {readonly id: string; withdraw(): void} | undefined;
   let chain: Promise<void> = Promise.resolve();
+  /** Whether the daemon took the answer. */
   const answer = async (
     pending: PendingConfirmation,
     decision: GatewayConfirmationDecision,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     try {
       const outcome = await options.client.answerConfirmation(
         pending.id,
@@ -59,14 +60,14 @@ export function createConfirmationPrompts(options: {
           `${pending.request.toolName} was settled before this answer.\n`,
         );
       }
+
+      return true;
     } catch (error: unknown) {
-      // Not heard: the daemon still holds the request, so it is asked once
-      // more at once; if the daemon is down, its next handshake lists it.
       options.stderr.write(
         `Error: ${error instanceof Error ? error.message : String(error)}\n`,
       );
-      asked.delete(pending.id);
-      ask(pending);
+
+      return false;
     }
   };
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
@@ -117,7 +118,19 @@ export function createConfirmationPrompts(options: {
       return;
     }
 
-    await answer(pending, cliPromptAnswerIsYes(line) ? 'approved' : 'denied');
+    const taken = await answer(
+      pending,
+      cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
+    );
+
+    // Not heard while a person is still here to answer: the daemon holds
+    // the request, so it is asked once more at once, and if the daemon is
+    // down its next handshake lists it. Once the input ended, or on this
+    // terminal's own exit, nobody can answer again.
+    if (!taken && line !== undefined && !(options.signal?.aborted ?? false)) {
+      asked.delete(pending.id);
+      ask(pending);
+    }
   };
   const settle = (id: string): void => {
     settled.add(id);

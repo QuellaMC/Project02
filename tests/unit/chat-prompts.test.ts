@@ -116,6 +116,17 @@ describe('chat confirmation prompts', () => {
     lost.prompts.reconcile([pending('lost')]);
     await tick();
     expect(lost.shown()).toBe(2);
+
+    // Once the input ended nobody can answer again: the denial is tried
+    // once, and the chain settles instead of asking into the void.
+    const ended = createHarness('unreachable');
+
+    ended.prompts.ask(pending('eof'));
+    await tick();
+    ended.reads[0]?.resolve(undefined);
+    await ended.prompts.idle();
+    expect(ended.answers).toEqual(['eof:denied']);
+    expect(ended.shown()).toBe(1);
   });
 
   it('withdraws a showing prompt settled meanwhile, and retires what a handshake no longer lists', async () => {
