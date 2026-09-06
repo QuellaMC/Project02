@@ -2,30 +2,14 @@ import {PassThrough} from 'node:stream';
 
 import {describe, expect, it} from 'vitest';
 
-import {
-  createLineDispatcher,
-  createReadAhead,
-} from '../../src/cli/chat/lines.ts';
+import {createLineDispatcher} from '../../src/cli/chat/lines.ts';
 
 describe('chat line dispatcher', () => {
-  it('hands a line to the prompt ahead of the REPL, then the next one to the REPL', async () => {
-    const stdin = new PassThrough();
-    const lines = createLineDispatcher(stdin);
-    const repl = lines.replLine();
-    const prompt = lines.promptLine();
-
-    stdin.write('yes\nhello\n');
-
-    await expect(prompt).resolves.toBe('yes');
-    await expect(repl).resolves.toBe('hello');
-    lines.close();
-  });
-
-  it('leaves a line typed before the prompt appeared to the REPL, and takes only a later one', async () => {
+  it('gives a prompt only a line typed after it appeared, and the REPL the rest in order', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
 
-    // Typed while a turn was running, before anyone read.
+    // Typed while a turn was running, before any prompt.
     stdin.write('yes I will\n');
     await new Promise(resolve => setImmediate(resolve));
 
@@ -38,13 +22,14 @@ describe('chat line dispatcher', () => {
     await new Promise(resolve => setImmediate(resolve));
     expect(answered).toBe(false);
 
-    stdin.write('n\n');
+    stdin.write('n\nhello\n');
     await expect(prompt).resolves.toBe('n');
     await expect(lines.replLine()).resolves.toBe('yes I will');
+    await expect(lines.replLine()).resolves.toBe('hello');
     lines.close();
   });
 
-  it('withdraws a prompt on abort and keeps a line read for it for the next reader', async () => {
+  it('withdraws a prompt on abort, leaving the next line to the REPL', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
     const withdrawn = new AbortController();
@@ -52,10 +37,7 @@ describe('chat line dispatcher', () => {
 
     withdrawn.abort();
     await expect(prompt).resolves.toBeUndefined();
-
-    // Nothing typed is lost: the next line is the REPL's.
     stdin.write('hello\n');
-    await new Promise(resolve => setImmediate(resolve));
     await expect(lines.replLine()).resolves.toBe('hello');
     await expect(
       lines.promptLine(AbortSignal.abort()),
@@ -63,18 +45,7 @@ describe('chat line dispatcher', () => {
     lines.close();
   });
 
-  it('drops what was typed and not yet read when the terminal closes it', async () => {
-    const stdin = new PassThrough();
-    const lines = createLineDispatcher(stdin);
-
-    stdin.write('first\nsecond\n');
-    await expect(lines.replLine()).resolves.toBe('first');
-    lines.close();
-    await expect(lines.replLine()).resolves.toBeUndefined();
-    await expect(lines.promptLine()).resolves.toBeUndefined();
-  });
-
-  it('answers a prompt nothing when the input ended before it appeared, leaving older lines to the REPL', async () => {
+  it('serves what a piped input left queued, then answers nothing; a late prompt gets nothing', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
 
@@ -88,64 +59,22 @@ describe('chat line dispatcher', () => {
     await expect(lines.replLine()).resolves.toBeUndefined();
   });
 
-  it('rejects a pending read when the input fails, instead of crashing', async () => {
-    const stdin = new PassThrough();
-    const lines = createLineDispatcher(stdin);
-    const read = lines.replLine();
-    const prompt = lines.promptLine();
+  it('rejects pending reads when the input fails, and drops the queue when the terminal closes', async () => {
+    const failing = new PassThrough();
+    const failed = createLineDispatcher(failing);
+    const read = failed.replLine();
+    const prompt = failed.promptLine();
 
-    stdin.destroy(new Error('the pipe broke'));
-
-    // A failed input is a failure for a prompt too, never a quiet no.
+    failing.destroy(new Error('the pipe broke'));
     await expect(prompt).rejects.toThrow('the pipe broke');
     await expect(read).rejects.toThrow('the pipe broke');
-    await expect(lines.replLine()).resolves.toBeUndefined();
-  });
 
-  it('settles every waiter once the input ends', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
-    const repl = lines.replLine();
-    const prompt = lines.promptLine();
 
-    stdin.end();
-
-    await expect(prompt).resolves.toBeUndefined();
-    await expect(repl).resolves.toBeUndefined();
-    await expect(lines.replLine()).resolves.toBeUndefined();
-  });
-});
-
-describe('chat read-ahead', () => {
-  it('lets an exit end a wait, keeps other lines in order, and never drops a pending read', async () => {
-    const stdin = new PassThrough();
-    const lines = createLineDispatcher(stdin);
-    const later = createReadAhead(lines);
-    let release: () => void = () => undefined;
-    const waited = new Promise<string>(resolve => {
-      release = () => {
-        resolve('back');
-      };
-    });
-    const holding = later.holdUntil(waited);
-
-    // Typed while waiting: queued behind the wait, in order.
-    stdin.write('first\n');
-    await new Promise(resolve => setImmediate(resolve));
-    release();
-    await expect(holding).resolves.toEqual({kind: 'done', value: 'back'});
-
-    // The read kept ahead is still pending; a line served from the queue
-    // must not discard it.
-    await expect(later.next()).resolves.toBe('first');
-    stdin.write('second\n');
-    await expect(later.next()).resolves.toBe('second');
-
-    // An exit typed during a wait ends it.
-    const forever = later.holdUntil(new Promise<never>(() => undefined));
-
-    stdin.write('/exit\n');
-    await expect(forever).resolves.toEqual({kind: 'exit'});
+    stdin.write('first\nsecond\n');
+    await expect(lines.replLine()).resolves.toBe('first');
     lines.close();
+    await expect(lines.replLine()).resolves.toBeUndefined();
   });
 });

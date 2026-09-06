@@ -1,12 +1,12 @@
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {createConfirmationPrompts} from '../../src/cli/chat/prompts.ts';
 import type {PendingConfirmation} from '../../src/gateway/index.ts';
 import {collect} from '../support/streams.ts';
 
-function pending(id: string, characterId = 'mira'): PendingConfirmation {
+function pending(id: string): PendingConfirmation {
   return {
-    characterId,
+    characterId: 'mira',
     id,
     request: {
       pluginId: 'demo.plugin',
@@ -25,9 +25,6 @@ function createHarness(
   let stderr = '';
   const answers: string[] = [];
   const reads: {resolve(line: string | undefined): void}[] = [];
-  const stillPending: PendingConfirmation[] = [];
-  let listFailures = 0;
-  let listReads = 0;
   const prompts = createConfirmationPrompts({
     client: {
       answerConfirmation(id, decision) {
@@ -37,15 +34,7 @@ function createHarness(
           ? Promise.reject(new Error('The daemon could not be reached.'))
           : Promise.resolve({status: taken});
       },
-      pendingConfirmations: () => {
-        listReads += 1;
-
-        return listFailures > 0 && listFailures-- > 0
-          ? Promise.reject(new Error('The daemon could not be reached.'))
-          : Promise.resolve([...stillPending]);
-      },
     },
-    characterId: 'mira',
     lines: {
       promptLine: signal =>
         new Promise(resolve => {
@@ -67,156 +56,68 @@ function createHarness(
     prompts,
     answers,
     reads,
-    stillPending,
-    failNextListReads: (count: number) => {
-      listFailures = count;
-    },
-    listReads: () => listReads,
     stdout: () => stdout,
     stderr: () => stderr,
     shown: () => (stdout.match(/\[y\/N\]/gu) ?? []).length,
   };
 }
 
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
 describe('chat confirmation prompts', () => {
-  it('asks once per request, for this character only, and answers from the line it reads', async () => {
+  it('asks once per request and answers from the line it reads', async () => {
     const harness = createHarness();
 
     harness.prompts.ask(pending('one'));
     harness.prompts.ask(pending('one'));
-    harness.prompts.ask(pending('other', 'zeta'));
-    await new Promise(resolve => setImmediate(resolve));
-
+    await tick();
     expect(harness.shown()).toBe(1);
+
     harness.reads[0]?.resolve('y');
     await harness.prompts.idle();
     expect(harness.answers).toEqual(['one:approved']);
   });
 
-  it('says so when the daemon did not take the answer', async () => {
-    const harness = createHarness('expired');
+  it('says so when the daemon did not take the answer, and lets a lost answer be asked again', async () => {
+    const expired = createHarness('expired');
 
-    harness.prompts.ask(pending('late'));
-    await new Promise(resolve => setImmediate(resolve));
-    harness.reads[0]?.resolve('y');
-    await harness.prompts.idle();
-
-    expect(harness.answers).toEqual(['late:approved']);
-    expect(harness.stdout()).toContain(
+    expired.prompts.ask(pending('late'));
+    await tick();
+    expired.reads[0]?.resolve('y');
+    await expired.prompts.idle();
+    expect(expired.stdout()).toContain(
       'demo_tool was not approved: the confirmation had expired.',
     );
+
+    const lost = createHarness('unreachable');
+
+    lost.prompts.ask(pending('lost'));
+    await tick();
+    lost.reads[0]?.resolve('y');
+    await lost.prompts.idle();
+    expect(lost.stderr()).toContain('could not be reached');
+
+    // A handshake lists it again: asked once more.
+    lost.prompts.reconcile([pending('lost')]);
+    await tick();
+    expect(lost.shown()).toBe(2);
   });
 
-  it('asks again at once when the daemon never heard the answer but still holds the request', async () => {
-    const harness = createHarness('unreachable');
-
-    harness.stillPending.push(pending('lost'));
-    harness.prompts.ask(pending('lost'));
-    await new Promise(resolve => setImmediate(resolve));
-    harness.reads[0]?.resolve('y');
-    // A newer request the stream delivered meanwhile is not on that list
-    // yet; it must survive the recovery read.
-    harness.prompts.ask(pending('newer'));
-    await vi.waitFor(() => {
-      expect(harness.stderr()).toContain('could not be reached');
-    });
-
-    // No handshake needed: the daemon's list was read right away, and the
-    // newer request was not retired by it.
-    await vi.waitFor(() => {
-      expect(harness.reads).toHaveLength(2);
-    });
-    harness.reads[1]?.resolve('n');
-    await vi.waitFor(() => {
-      expect(harness.reads).toHaveLength(3);
-    });
-    harness.reads[2]?.resolve('n');
-    await harness.prompts.idle();
-    expect(harness.shown()).toBe(3);
-    expect(harness.stdout()).not.toContain('settled elsewhere');
-    expect(harness.answers).toEqual([
-      'lost:approved',
-      'newer:denied',
-      'lost:denied',
-    ]);
-  });
-
-  it('says a lost answer may have landed when the request is no longer waiting', async () => {
-    const harness = createHarness('unreachable');
-
-    harness.prompts.ask(pending('taken'));
-    await new Promise(resolve => setImmediate(resolve));
-    harness.reads[0]?.resolve('y');
-    await harness.prompts.idle();
-    await vi.waitFor(() => {
-      expect(harness.stdout()).toContain(
-        'demo_tool is no longer waiting: the approved answer may have reached the character after all.',
-      );
-    });
-    expect(harness.shown()).toBe(1);
-  });
-
-  it('keeps looking up a lost answer when the list itself fails to read', async () => {
-    vi.useFakeTimers();
-
-    try {
-      const harness = createHarness('unreachable');
-
-      harness.stillPending.push(pending('lost'));
-      harness.failNextListReads(2);
-      harness.prompts.ask(pending('lost'));
-      await vi.advanceTimersByTimeAsync(0);
-      harness.reads[0]?.resolve('y');
-      await harness.prompts.idle();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(harness.listReads()).toBe(1);
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(harness.listReads()).toBe(2);
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(harness.listReads()).toBe(3);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(harness.shown()).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('retires what the pending list no longer holds, showing or queued', async () => {
+  it('withdraws a showing prompt settled elsewhere, and retires what a handshake no longer lists', async () => {
     const harness = createHarness();
 
     harness.prompts.ask(pending('showing'));
     harness.prompts.ask(pending('queued'));
-    harness.prompts.ask(pending('kept'));
-    await new Promise(resolve => setImmediate(resolve));
+    await tick();
     expect(harness.shown()).toBe(1);
 
-    harness.prompts.reconcile([pending('kept')]);
-    await new Promise(resolve => setImmediate(resolve));
-
-    // "showing" was withdrawn, "queued" never showed, "kept" is up now.
+    // Settled elsewhere while showing, and gone from the daemon's list
+    // while queued: the first is withdrawn, the second never shows.
+    harness.prompts.settle('showing');
+    harness.prompts.reconcile([]);
+    await harness.prompts.idle();
     expect(harness.stdout()).toContain('demo_tool was settled elsewhere.');
-    expect(harness.shown()).toBe(2);
-    harness.reads[1]?.resolve('n');
-    await harness.prompts.idle();
-    expect(harness.answers).toEqual(['kept:denied']);
-  });
-
-  it('withdraws a showing prompt settled elsewhere and never shows a queued one', async () => {
-    const harness = createHarness();
-
-    harness.prompts.ask(pending('showing'));
-    harness.prompts.ask(pending('queued'));
-    await new Promise(resolve => setImmediate(resolve));
     expect(harness.shown()).toBe(1);
-
-    harness.prompts.settle('queued', 'denied');
-    harness.prompts.settle('showing', 'approved');
-    await harness.prompts.idle();
-
-    expect(harness.shown()).toBe(1);
-    expect(harness.stdout()).toContain('demo_tool was approved elsewhere.');
     expect(harness.answers).toEqual([]);
-    expect(harness.stderr()).toBe('');
   });
 });

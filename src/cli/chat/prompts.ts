@@ -1,9 +1,9 @@
 /**
- * Confirmation prompts chain: each prints only when it is next and consumes
- * its own line, so one keystroke never approves two proposed effects. The
- * person approves exactly what will happen — the summary and the full
- * change — only for the character this terminal talks to, and a prompt
- * answered on another surface is withdrawn here rather than answered twice.
+ * Confirmation prompts for this terminal's own turns. A turn's tool may ask
+ * for approval while the REPL is blocked in that turn, so the prompt is the
+ * only reader then; the person approves exactly what will happen — the
+ * summary and the full change — with a line typed after the prompt. A
+ * prompt settled elsewhere is withdrawn rather than answered twice.
  */
 import type {GatewayClient} from '../../gateway/client/index.ts';
 import type {
@@ -16,121 +16,52 @@ import type {LineDispatcher} from './lines.ts';
 export type ConfirmationPrompts = {
   ask(pending: PendingConfirmation): void;
   /** The daemon settled it — here or elsewhere; nothing to ask any more. */
-  settle(id: string, decision?: SettledDecision): void;
-  /**
-   * The daemon's pending list, read on a handshake, is the whole truth:
-   * what it holds is asked, and what it no longer holds is retired.
-   */
+  settle(id: string): void;
+  /** The daemon's list on a handshake: what it lacks was settled meanwhile. */
   reconcile(pending: readonly PendingConfirmation[]): void;
   /** Resolves once no prompt is showing or queued. */
   idle(): Promise<void>;
 };
 
-export type SettledDecision = GatewayConfirmationDecision | 'cancelled';
-
-/** How often, and how patiently, a lost answer's request is looked up. */
-const recoveryAttempts = 3;
-const recoveryPauseMs = 1_000;
-
 export function createConfirmationPrompts(options: {
-  readonly client: Pick<
-    GatewayClient,
-    'answerConfirmation' | 'pendingConfirmations'
-  >;
-  readonly characterId: string;
+  readonly client: Pick<GatewayClient, 'answerConfirmation'>;
   readonly lines: Pick<LineDispatcher, 'promptLine'>;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
-  /** Runs once a prompt has left the screen, answered or withdrawn. */
-  readonly afterPrompt?: () => void;
-  /** Ends any read of the pending list still in flight when the terminal leaves. */
   readonly signal?: AbortSignal;
 }): ConfirmationPrompts {
+  const call = options.signal === undefined ? {} : {signal: options.signal};
   const asked = new Set<string>();
-  // Asked and not yet through the prompt: showing, or queued behind one.
-  const outstanding = new Set<string>();
-  const settled = new Map<string, SettledDecision | undefined>();
+  const settled = new Set<string>();
   let showing: {readonly id: string; withdraw(): void} | undefined;
   let chain: Promise<void> = Promise.resolve();
-  // The daemon has the last word: an answer that lands after the deadline,
-  // or after another surface's, is reported, never assumed to have counted.
-  const answer = (
+  const answer = async (
     pending: PendingConfirmation,
     decision: GatewayConfirmationDecision,
-  ): Promise<void> =>
-    options.client
-      .answerConfirmation(
+  ): Promise<void> => {
+    try {
+      const outcome = await options.client.answerConfirmation(
         pending.id,
         decision,
-        options.signal === undefined ? {} : {signal: options.signal},
-      )
-      .then(
-        outcome => {
-          if (outcome.status === 'expired') {
-            options.stdout.write(
-              `${pending.request.toolName} was not ${decision}: the confirmation had expired.\n`,
-            );
-          } else if (outcome.status === 'unknown') {
-            options.stdout.write(
-              `${pending.request.toolName} was not ${decision}: it was settled elsewhere first.\n`,
-            );
-          }
-        },
-        (error: unknown) => {
-          // Whether the daemon heard the answer is unknown; only its list
-          // says. Only this request is looked up: a list read now may predate
-          // what the stream just delivered, and must not retire it.
-          asked.delete(pending.id);
-          options.stderr.write(
-            `Error: ${error instanceof Error ? error.message : String(error)}\n`,
-          );
-          recover(pending, decision, 1);
-        },
+        call,
       );
-  // Reads the daemon's list until it answers: a request still there is
-  // asked again; one no longer there may have taken the answer that was
-  // sent, which the person must know. A daemon that stays unreachable
-  // brings the stream down, and the handshake after it asks afresh.
-  const recover = (
-    pending: PendingConfirmation,
-    decision: GatewayConfirmationDecision,
-    attempt: number,
-  ): void => {
-    options.client
-      .pendingConfirmations(
-        options.signal === undefined ? {} : {signal: options.signal},
-      )
-      .then(
-        stillPending => {
-          const again = stillPending.find(request => request.id === pending.id);
 
-          if (again !== undefined) {
-            ask(again);
-          } else {
-            options.stdout.write(
-              `${pending.request.toolName} is no longer waiting: the ${decision} answer may have reached the character after all.\n`,
-            );
-          }
-        },
-        () => {
-          if (attempt < recoveryAttempts && options.signal?.aborted !== true) {
-            setTimeout(() => {
-              recover(pending, decision, attempt + 1);
-            }, recoveryPauseMs);
-          }
-        },
+      // The daemon has the last word: an answer it did not take is said.
+      if (outcome.status !== 'answered') {
+        options.stdout.write(
+          `${pending.request.toolName} was not ${decision}: ${outcome.status === 'expired' ? 'the confirmation had expired' : 'it was settled elsewhere first'}.\n`,
+        );
+      }
+    } catch (error: unknown) {
+      // Not heard: the daemon still holds it, and a handshake lists it again.
+      asked.delete(pending.id);
+      options.stderr.write(
+        `Error: ${error instanceof Error ? error.message : String(error)}\n`,
       );
+    }
   };
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
-    if (settled.has(pending.id)) {
-      return;
-    }
-
-    // Expired while queued: the daemon already cancelled it, and asking
-    // now would feed the answer to the REPL.
-    if (Date.now() >= pending.deadlineAt) {
-      await answer(pending, 'denied');
-
+    if (settled.has(pending.id) || Date.now() >= pending.deadlineAt) {
       return;
     }
 
@@ -163,7 +94,7 @@ export function createConfirmationPrompts(options: {
 
     if (withdrawn.signal.aborted) {
       options.stdout.write(
-        `\n${pending.request.toolName} was ${settled.get(pending.id) ?? 'settled'} elsewhere.\n`,
+        `\n${pending.request.toolName} was settled elsewhere.\n`,
       );
 
       return;
@@ -173,48 +104,43 @@ export function createConfirmationPrompts(options: {
       options.stderr.write(
         'Confirmation timed out; the answer was discarded.\n',
       );
-      await answer(pending, 'denied');
 
       return;
     }
 
     await answer(pending, cliPromptAnswerIsYes(line) ? 'approved' : 'denied');
   };
-
-  const ask = (pending: PendingConfirmation): void => {
-    if (pending.characterId !== options.characterId || asked.has(pending.id)) {
-      return;
-    }
-
-    asked.add(pending.id);
-    outstanding.add(pending.id);
-    chain = chain.then(() =>
-      prompt(pending).finally(() => {
-        outstanding.delete(pending.id);
-        options.afterPrompt?.();
-      }),
-    );
-  };
-  const settle = (id: string, decision?: SettledDecision): void => {
-    settled.set(id, decision);
+  const settle = (id: string): void => {
+    settled.add(id);
 
     if (showing?.id === id) {
       showing.withdraw();
     }
   };
-  const reconcile = (pending: readonly PendingConfirmation[]): void => {
-    const present = new Set(pending.map(request => request.id));
 
-    for (const id of outstanding) {
-      if (!present.has(id)) {
-        settle(id);
+  return {
+    ask(pending) {
+      if (asked.has(pending.id)) {
+        return;
       }
-    }
 
-    for (const request of pending) {
-      ask(request);
-    }
+      asked.add(pending.id);
+      chain = chain.then(() => prompt(pending));
+    },
+    settle,
+    reconcile(pending) {
+      const present = new Set(pending.map(request => request.id));
+
+      for (const id of asked) {
+        if (!present.has(id)) {
+          settle(id);
+        }
+      }
+
+      for (const request of pending) {
+        this.ask(request);
+      }
+    },
+    idle: () => chain,
   };
-
-  return {ask, settle, reconcile, idle: () => chain};
 }

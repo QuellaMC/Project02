@@ -60,11 +60,12 @@
         </tr>
         <tr>
           <td>The stream is a hint; the verbs are the truth</td>
-          <td>Every stream opens with a <code>ready</code> frame written after the daemon's
-            listener is registered. On each <code>ready</code> the client bootstraps: buffer
-            events, read health, pending confirmations, and the newest history page, install
-            them, then drain the buffer in order. Message ids and confirmation ids make buffered
-            duplicates harmless. There are no event ids and no replay.</td>
+          <td>Every stream opens with a <code>ready</code> frame that carries the daemon's
+            snapshot — health and the confirmations still waiting — taken the instant the
+            stream's listener was registered, so every later event moves on from exactly that
+            state. A client installs the snapshot and reads on; what it wants of a
+            conversation's history it reads as one page, deduplicated by message id. There
+            are no event ids and no replay.</td>
         </tr>
         <tr>
           <td>One way in</td>
@@ -77,9 +78,11 @@
         <tr>
           <td>Every submission has an identity</td>
           <td><code>clientMessageId</code> is required on a turn. A repeat with the same
-            <code>(conversationId, clientMessageId)</code> joins the turn in flight or returns
-            the recent outcome. The reference client never retries a turn on its own; after a
-            daemon restart it correlates through history, which returns the id.</td>
+            <code>(conversationId, clientMessageId)</code> and the same content joins the turn
+            in flight or returns the recent outcome; the same id with different content is
+            refused. That is what lets a client whose answer was lost send the line again under
+            the same id once the daemon is back, without saying it twice — checking history
+            first, which returns the id, for a daemon that came back as a new run.</td>
         </tr>
       </tbody>
     </table>
@@ -156,7 +159,7 @@ Content-Type: application/json
     </p>
 
     <pre><code>event: ready
-data: {"protocolVersion":1}
+data: {"protocolVersion":1,"health":{…},"confirmations":[…]}
 
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
@@ -170,10 +173,10 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
     <table>
       <thead><tr><th>Event</th><th>Carries</th></tr></thead>
       <tbody>
-        <tr><td><code>ready</code></td><td>The protocol version. The client bootstraps on every one it sees.</td></tr>
+        <tr><td><code>ready</code></td><td>The protocol version and the daemon's snapshot at that instant: <code>health</code> (the roster, each character's state and last maintenance failure) and <code>confirmations</code> still waiting. A client installs it on every one it sees.</td></tr>
         <tr><td><code>turn_progress</code></td><td>A turn's progress, including both committed roles: <code>user_message</code> (with <code>source</code> and <code>clientMessageId</code>) and <code>visible_reply</code>.</td></tr>
         <tr><td><code>turn_completed</code></td><td>The turn's terminal status, with the reason and message when it was not completed, stamped with the submission's <code>source</code> and <code>clientMessageId</code> so every surface knows whose turn ended — even one that committed nothing.</td></tr>
-        <tr><td><code>confirmation_requested</code></td><td>A tool asking for approval: id, request, deadline. The same shape the pending list returns.</td></tr>
+        <tr><td><code>confirmation_requested</code></td><td>A tool asking for approval: id, request, deadline, and the <code>turn</code> that raised it (its <code>conversationId</code>, <code>source</code>, <code>clientMessageId</code>), so a surface answers for its own turns and leaves the rest to the surface that sent them. The same shape the pending list returns.</td></tr>
         <tr><td><code>confirmation_settled</code></td><td>The decision: approved, denied, or cancelled.</td></tr>
         <tr><td><code>state_changed</code></td><td>A character's runtime state, with a message when something went wrong.</td></tr>
         <tr><td><code>maintenance_failed</code></td><td>A segment rotation that failed after a completed turn; health shows the same <code>at</code>.</td></tr>
@@ -193,6 +196,17 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
       disagree: a reply whose write failed is a failed turn, never a message shown that history
       lacks. A message typed on the phone appears in the open browser tab and the terminal at
       once, each suppressing only what it sent itself by <code>source</code>.
+    </p>
+
+    <h2>What a client never has to notice</h2>
+
+    <p>
+      The daemon keeps the hard parts on its side, once, so every surface stays small. A
+      character's automatic recovery after a fatal turn lets its threads go; a delivery on a
+      conversation the runtime let go of holds it again before running, so a client keeps its
+      conversation id through the episode. A reconnect gets its whole world in the
+      <code>ready</code> frame. A confirmation names the turn that raised it. And a turn whose
+      answer was lost is safe to send again under its id.
     </p>
 
     <h2>Storage failures are outcomes</h2>
