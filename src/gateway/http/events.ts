@@ -22,7 +22,8 @@ export type EventStreams = {
   readonly openCount: () => number;
   /**
    * Ends every open stream once the frames already queued for it are
-   * written; shutdown awaits it after the gateway drained its turns, so the
+   * written, dropping a client that does not take them within the drain
+   * grace; shutdown awaits it after the gateway drained its turns, so the
    * last reply rides out before the stream ends.
    */
   readonly closeAll: () => Promise<void>;
@@ -31,8 +32,12 @@ export type EventStreams = {
 export type FrameQueue = {
   push(frame: string): void;
   pending(): number;
-  /** Settles once every frame pushed so far has been written or dropped. */
-  drained(): Promise<void>;
+  /**
+   * Settles true once every frame pushed so far has been written. A client
+   * that has not taken them within the grace is dropped, and it settles
+   * false.
+   */
+  drain(graceMs: number): Promise<boolean>;
 };
 
 /** The first frame on every stream; a client bootstraps on each one it sees. */
@@ -40,6 +45,8 @@ export const readyEvent = 'ready';
 
 const defaultHeartbeatMs = 15_000;
 const defaultMaxPendingFrames = 64;
+/** A reading client takes the last frames in milliseconds; this is for one that stopped. */
+const drainGraceMs = 2_000;
 const heartbeatFrame = ': ping\n\n';
 
 /** SSE framing: the event name, one line of JSON, a blank line. */
@@ -49,8 +56,9 @@ export function formatEventFrame(event: string, data: string): string {
 
 /**
  * Writes frames in order and counts the ones the socket has not taken yet.
- * Past the bound the client is not slow, it is gone: `drop` ends it, and
- * every later frame is discarded rather than buffered without limit.
+ * Past the bound, or past the drain grace, the client is not slow, it is
+ * gone: `drop` ends it, and every later frame is discarded rather than
+ * buffered without limit.
  */
 export function createFrameQueue(options: {
   readonly write: (frame: string) => Promise<unknown>;
@@ -60,6 +68,10 @@ export function createFrameQueue(options: {
   let chain: Promise<unknown> = Promise.resolve();
   let pending = 0;
   let dropped = false;
+  const abandon = (): void => {
+    dropped = true;
+    options.drop();
+  };
 
   return Object.freeze({
     push(frame) {
@@ -68,8 +80,7 @@ export function createFrameQueue(options: {
       }
 
       if (pending >= options.maxPendingFrames) {
-        dropped = true;
-        options.drop();
+        abandon();
         return;
       }
 
@@ -86,11 +97,21 @@ export function createFrameQueue(options: {
         );
     },
     pending: () => pending,
-    drained: () =>
-      chain.then(
-        () => undefined,
-        () => undefined,
-      ),
+    drain: graceMs =>
+      dropped
+        ? Promise.resolve(false)
+        : new Promise<boolean>(resolve => {
+            const timer = setTimeout(() => {
+              abandon();
+              resolve(false);
+            }, graceMs);
+            const written = (): void => {
+              clearTimeout(timer);
+              resolve(true);
+            };
+
+            chain.then(written, written);
+          }),
   });
 }
 
@@ -130,8 +151,10 @@ export function createEventStreams(
     const heartbeat = createHeartbeatClock();
     const close = async (): Promise<void> => {
       heartbeat.stop();
-      await queue.drained();
-      await stream.close();
+
+      if (await queue.drain(drainGraceMs)) {
+        await stream.close();
+      }
     };
     const queue = createFrameQueue({
       write: frame => stream.write(frame),
