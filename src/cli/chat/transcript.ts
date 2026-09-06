@@ -4,9 +4,10 @@
  * other surface shows; its own lines are already on its screen. What the
  * stream did not carry — the thread's tail on joining, anything committed
  * while the stream was down — is read back from history, one page, and
- * nothing shows twice. A live message and a page can cross; ids keep that
- * from repeating a line, and a rare swap of two lines is the terminal's to
- * bear.
+ * nothing shows twice; a thread that moved on by more than a page while
+ * the stream was down is joined at its tail, and said so. A live message
+ * and a page can cross; ids keep that from repeating a line, and a rare
+ * swap of two lines is the terminal's to bear.
  */
 import type {GatewayClient} from '../../gateway/client/index.ts';
 import type {HistoryMessage} from '../../gateway/index.ts';
@@ -97,6 +98,12 @@ export function createTranscript(options: {
         anchor === undefined
           ? 0
           : messages.findIndex(message => message.messageId === anchor) + 1;
+
+      if (anchor !== undefined && from === 0 && messages.length >= pageSize) {
+        options.stdout.write(
+          '(the thread moved on by more than a page while this terminal was away; older lines are not shown)\n',
+        );
+      }
 
       for (const message of messages.slice(from)) {
         show(message);

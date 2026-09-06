@@ -83,6 +83,21 @@ describe('chat transcript', () => {
     );
   });
 
+  it('says so when the thread moved on by more than a page while it was away', async () => {
+    const harness = createHarness([message(1, 'earlier', 'web')]);
+
+    await harness.transcript.catchUp();
+
+    for (let index = 2; index <= 61; index += 1) {
+      harness.thread.push(message(index, `line ${String(index)}`, 'web'));
+    }
+
+    await harness.transcript.catchUp();
+    expect(harness.printed()).toContain('moved on by more than a page');
+    expect(harness.printed()).toContain('You: line 61\n');
+    expect(harness.printed()).not.toContain('You: line 2\n');
+  });
+
   it('reports a turn shown once its own messages are on the screen, own lines included', async () => {
     const harness = createHarness([]);
     let shown = false;
