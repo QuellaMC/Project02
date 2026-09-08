@@ -133,7 +133,7 @@ export default {
       name: 'nothing-imports-gateway',
       comment:
         'src/gateway is the daemon composition layer above app: it holds ' +
-        'the character runtimes and the client façade. Only the public ' +
+        'the character runtimes and the façade behind the socket. Only the ' +
         'barrel and cli may import it; app, runtime, plugins, and core ' +
         'never reach upward into it. Green (zero baseline entries).',
       severity: 'error',

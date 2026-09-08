@@ -54,11 +54,11 @@ export type CreateGatewayOptions = Project02HomeOptions & {
 type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
 
 /**
- * The one object a client holds: the registry of character runtimes and the
- * routing between them. Boot problems are per-character states, visible in
- * health() and the event stream, never throws; a client mistake (opening a
- * character that was never started, starting on a stopped gateway) is a
- * refused outcome.
+ * The façade the daemon holds behind its socket: the registry of character
+ * runtimes and the routing between them. Boot problems are per-character
+ * states, visible in health() and the event stream, never throws; a client
+ * mistake (opening a character that was never started, starting on a
+ * stopped gateway) is a refused outcome.
  */
 export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   // The home identity binds once; only its config document reloads per

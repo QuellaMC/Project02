@@ -304,7 +304,7 @@ export type GatewayHealth = {
 /**
  * One enabled character behind the gateway: its plugin host, model adapter,
  * open conversations, and FIFO turn queue. Constructed and held by the
- * registry; clients hold the Gateway façade and never this.
+ * registry behind the Gateway façade; nothing of it crosses the socket.
  */
 export type CharacterRuntime = {
   readonly characterId: string;
@@ -324,10 +324,10 @@ export type CharacterRuntime = {
 };
 
 /**
- * The one object a client holds. Every verb answers a client-reachable
- * condition with an outcome; a throw is a bug. The client verbs serialize
- * over HTTP unchanged; startCharacter and stop are lifecycle, owned by
- * whoever runs the process.
+ * The façade the daemon holds, and the whole of what its socket exposes.
+ * Every verb answers a client-reachable condition with an outcome; a throw
+ * is a bug. Every verb but reconcile and stop serializes over HTTP
+ * unchanged; those two are the daemon's own lifecycle.
  */
 export type Gateway = {
   health(): GatewayHealth;
