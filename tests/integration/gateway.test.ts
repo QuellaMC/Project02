@@ -13,6 +13,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   createGateway,
+  type ConfigChange,
   type Gateway,
   type GatewayEvent,
 } from '../../src/gateway/index.ts';
@@ -1820,6 +1821,198 @@ describe('gateway façade', () => {
     });
     expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
+  });
+
+  it('views the global scope and a character as one field shape without starting anyone', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const global = gateway.configView({scope: 'global'});
+
+    if (global.status !== 'ok') {
+      expect.fail(global.message);
+    }
+
+    expect(global.project02.map(field => field.name)).toEqual([
+      'defaultMemoryProvider',
+      'enabled',
+      'roleModelProvider',
+      'userDisplayName',
+      'contextWindowTokens',
+    ]);
+    expect(
+      global.project02.find(field => field.name === 'userDisplayName'),
+    ).toMatchObject({
+      authored: {configured: true, value: 'Global Name'},
+      effectiveSource: 'global',
+      editableInScope: true,
+    });
+    expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
+      'demo-config',
+    );
+
+    const character = gateway.configView({
+      scope: 'character',
+      characterId: 'mira',
+    });
+
+    if (character.status !== 'ok') {
+      expect.fail(character.message);
+    }
+
+    expect(
+      character.project02.find(field => field.name === 'userDisplayName'),
+    ).toMatchObject({
+      authored: {configured: false},
+      effectiveSource: 'global',
+      effective: {source: 'config', value: 'Global Name'},
+    });
+    expect(character.fingerprint).not.toBe(global.fingerprint);
+    expect(gateway.health().characters[0]?.state).toBe('not_started');
+    expect(
+      gateway.configView({scope: 'character', characterId: 'nobody'}),
+    ).toMatchObject({status: 'refused', reason: 'unknown_character'});
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
+  });
+
+  it('applies a change through the one transaction, reloads behind the answer, and refuses a stale fingerprint', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const states: string[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'state_changed') {
+        states.push(event.state);
+      }
+    });
+    await gateway.reconcile();
+
+    const target = {scope: 'character', characterId: 'mira'} as const;
+    const before = gateway.configView(target);
+
+    if (before.status !== 'ok') {
+      expect.fail(before.message);
+    }
+
+    const readyAgain = new Promise<void>(resolve => {
+      gateway.events(event => {
+        if (event.kind === 'state_changed' && event.state === 'ready') {
+          resolve();
+        }
+      });
+    });
+    const applied = await gateway.applyConfigChange({
+      target,
+      expectedFingerprint: before.fingerprint,
+      operation: {
+        kind: 'set',
+        path: 'project02.contextWindowTokens',
+        value: 4096,
+      },
+    });
+
+    if (applied.status !== 'applied') {
+      expect.fail(applied.message);
+    }
+
+    await readyAgain;
+    expect(states).toEqual(['starting', 'ready', 'reloading', 'ready']);
+
+    const after = gateway.configView(target);
+
+    expect(after).toMatchObject({
+      status: 'ok',
+      fingerprint: applied.fingerprint,
+    });
+    if (after.status === 'ok') {
+      expect(
+        after.project02.find(field => field.name === 'contextWindowTokens'),
+      ).toMatchObject({authored: {configured: true, value: 4096}});
+    }
+
+    await expect(
+      gateway.applyConfigChange({
+        target,
+        expectedFingerprint: before.fingerprint,
+        operation: {kind: 'unset', path: 'project02.contextWindowTokens'},
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'conflict'});
+    await gateway.stop();
+  });
+
+  it('refuses a change the seam will not take, and fails one it cannot write', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const view = gateway.configView({scope: 'global'});
+
+    if (view.status !== 'ok') {
+      expect.fail(view.message);
+    }
+
+    const change = (operation: ConfigChange['operation']) =>
+      gateway.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: view.fingerprint,
+        operation,
+      });
+
+    await expect(
+      change({
+        kind: 'set',
+        path: 'project02.contextWindowTokens',
+        value: 'many',
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      change({kind: 'set', path: 'project02.storeRoot', value: '/elsewhere'}),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      change({
+        kind: 'plugin_field_set',
+        pluginId: 'nope',
+        field: 'x',
+        value: 1,
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'nobody'},
+        expectedFingerprint: view.fingerprint,
+        operation: {kind: 'set', path: 'project02.enabled', value: false},
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'unknown_character'});
+
+    chmodSync(homeRoot, 0o555);
+
+    try {
+      await expect(
+        change({
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Blocked',
+        }),
+      ).resolves.toMatchObject({status: 'failed'});
+    } finally {
+      chmodSync(homeRoot, 0o755);
+    }
+
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      fingerprint: view.fingerprint,
+    });
   });
 
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {

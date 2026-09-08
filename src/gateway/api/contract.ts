@@ -1,6 +1,11 @@
 import type {CharacterPackageDiagnostic} from '../../characters/index.ts';
 import type {RuntimePluginToolConfirmationRequest} from '../../plugins/index.ts';
-import type {RuntimeConfigDiagnostic} from '../../runtime/config/index.ts';
+import type {
+  RuntimeConfigDiagnostic,
+  RuntimeConfigValue,
+  RuntimePluginConfigFieldInspectShape,
+  RuntimePluginConfigInspectShape,
+} from '../../runtime/config/index.ts';
 import type {
   LocalRuntimeTurnProgressEvent,
   LocalRuntimeUserMessageRejectionReason,
@@ -170,6 +175,87 @@ export type ReconcilePlan = {
   readonly stopping: readonly string[];
   readonly reloading: readonly string[];
 };
+
+/** Which document a config verb reads or writes: the home's, or one character's. */
+export type ConfigTarget =
+  | {readonly scope: 'global'}
+  | {readonly scope: 'character'; readonly characterId: string};
+
+/**
+ * What a settings page renders: the fingerprint a write must present, the
+ * documents' diagnostics, and the host fields and every installed plugin
+ * in one field shape. Defaults are not resolved in — an unauthored field
+ * reads `missing` and its summary names what applies. A document that
+ * does not load is refused with the reason, never rendered as blank fields.
+ */
+export type ConfigView =
+  | {
+      readonly status: 'ok';
+      readonly fingerprint: string;
+      readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+      readonly project02: readonly RuntimePluginConfigFieldInspectShape[];
+      readonly plugins: readonly RuntimePluginConfigInspectShape[];
+    }
+  | {
+      readonly status: 'refused';
+      readonly reason: 'unknown_character' | 'config_unloadable';
+      readonly message: string;
+    };
+
+/**
+ * One change to one document, bound to the fingerprint the view handed
+ * out: a concurrent edit is a conflict, never a clobber. A secret's value
+ * is sent; the daemon names its environment variable.
+ */
+export type ConfigChange = {
+  readonly target: ConfigTarget;
+  readonly expectedFingerprint: string;
+  readonly operation:
+    | {
+        readonly kind: 'set';
+        readonly path: string;
+        readonly value: RuntimeConfigValue;
+      }
+    | {readonly kind: 'unset'; readonly path: string}
+    | {
+        readonly kind: 'plugin_enabled';
+        readonly pluginId: string;
+        /** Absent clears this scope's value instead of deciding it. */
+        readonly enabled?: boolean;
+      }
+    | {
+        readonly kind: 'plugin_field_set';
+        readonly pluginId: string;
+        readonly field: string;
+        readonly value: RuntimeConfigValue;
+      }
+    | {
+        readonly kind: 'plugin_field_unset';
+        readonly pluginId: string;
+        readonly field: string;
+      }
+    | {
+        readonly kind: 'plugin_secret_set';
+        readonly pluginId: string;
+        readonly field: string;
+        readonly value: string;
+      };
+};
+
+/**
+ * `applied` means the bytes are on disk; what the change does to a
+ * running character arrives as states, since a reload can wait on a turn.
+ * `refused` is the change itself — moved fingerprint, unacceptable value,
+ * unknown character; `failed` is a write that could not be made.
+ */
+export type ConfigChangeOutcome =
+  | {readonly status: 'applied'; readonly fingerprint: string}
+  | {
+      readonly status: 'refused';
+      readonly reason: 'conflict' | 'invalid' | 'unknown_character';
+      readonly message: string;
+    }
+  | {readonly status: 'failed'; readonly message: string};
 
 /** `settled` says the start ran; the summary's state says how it ended. */
 export type StartOutcome =
@@ -353,6 +439,9 @@ export type Gateway = {
   ): AnswerOutcome;
   events(listener: GatewayEventListener): Unsubscribe;
   startCharacter(characterId: string): Promise<StartOutcome>;
+  configView(target: ConfigTarget): ConfigView;
+  /** Writes through the one control transaction; reconcile applies it behind the answer. */
+  applyConfigChange(change: ConfigChange): Promise<ConfigChangeOutcome>;
   /** Makes the running set match the config: at boot, and after any change. */
   reconcile(): Promise<ReconcilePlan>;
   stop(): Promise<void>;

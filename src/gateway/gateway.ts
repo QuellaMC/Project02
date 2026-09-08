@@ -36,8 +36,9 @@ import {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
+import {applyConfigChange, readConfigView} from './config.ts';
 import {readConversationHistory} from './history.ts';
-import {createReconciler} from './reconcile.ts';
+import {createReconciler, type Reconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
@@ -129,6 +130,16 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     },
     startCharacter,
     reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
+    configView: target => readConfigView(loadHome(), target),
+    async applyConfigChange(change) {
+      const outcome = await applyConfigChange(loadHome(), change);
+
+      if (outcome.status === 'applied') {
+        reconcileBehind(startsInFlight, reconciler);
+      }
+
+      return outcome;
+    },
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const runtime = runtimes.get(characterId);
       // The roster is the truth about what is installed: a runtime kept
@@ -332,6 +343,24 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
     return reload;
   }
+}
+
+/**
+ * A written change is applied behind the answer: a reload can wait minutes
+ * on a parked confirmation, and a Save button must not wait with it. The
+ * starts in flight are joined first, so a write that lands while a
+ * character boots reaches it once it is ready; and nothing here may take
+ * the daemon down — how the pass went is visible in health and the stream.
+ */
+function reconcileBehind(
+  startsInFlight: ReadonlyMap<string, Promise<void>>,
+  reconciler: Reconciler,
+): void {
+  void Promise.all(
+    [...startsInFlight.values()].map(start => start.catch(() => undefined)),
+  )
+    .then(() => reconciler.reconcile())
+    .catch(() => undefined);
 }
 
 /**
