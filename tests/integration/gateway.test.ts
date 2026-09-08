@@ -1639,6 +1639,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
     });
     expect(
       gateway.health().characters.map(({id, enabled, state}) => ({
@@ -1670,6 +1671,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: [],
       stopping: ['mira'],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: false,
@@ -1680,6 +1682,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: true,
@@ -1709,6 +1712,111 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
+    });
+    expect(gateway.health().characters[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
+  it('reconcile reloads a character only when its assembly would differ, and a delivery sent meanwhile lands on its thread', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const states: string[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'state_changed') {
+        states.push(event.state);
+      }
+    });
+    await gateway.reconcile();
+
+    const ref = await open(gateway, 'mira');
+    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
+
+    writeRuntimeConfig(overlay, {project02: {userDisplayName: 'Mine'}});
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: [],
+      reloading: ['mira'],
+    });
+
+    // The overlay overrides the name, so a global change never reaches
+    // this character: no session end, no rebuild.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Everyone'},
+    });
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: [],
+      reloading: [],
+    });
+
+    writeRuntimeConfig(overlay, {
+      project02: {userDisplayName: 'Mine', contextWindowTokens: 4096},
+    });
+
+    const pass = gateway.reconcile();
+
+    expect(gateway.health().characters[0]?.state).toBe('reloading');
+
+    const delivered = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'still here',
+      source: 'web',
+      clientMessageId: 'msg-mid-reload',
+    });
+
+    await expect(pass).resolves.toMatchObject({reloading: ['mira']});
+    await expect(delivered).resolves.toMatchObject({
+      status: 'completed',
+      conversationId: ref.conversationId,
+    });
+    expect(states).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'ready',
+      'reloading',
+      'ready',
+    ]);
+    await gateway.stop();
+  });
+
+  it('reconcile leaves a reload that cannot assemble failed, and starts it again once fixed', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.reconcile();
+
+    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
+
+    writeRuntimeConfig(overlay, {project02: {contextWindowTokens: -5}});
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      reloading: ['mira'],
+    });
+    expect(gateway.health().characters[0]?.state).toBe('failed');
+    expect(gateway.health().characters[0]?.diagnostic).toContain(
+      'contextWindowTokens',
+    );
+
+    // No automatic recovery: the next operator act is the retry.
+    await new Promise(resolve => setImmediate(resolve));
+    expect(gateway.health().characters[0]?.state).toBe('failed');
+
+    writeRuntimeConfig(overlay, {});
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      starting: ['mira'],
     });
     expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
@@ -1760,6 +1868,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: [],
       stopping: ['mira'],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: false,

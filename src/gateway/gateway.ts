@@ -104,6 +104,13 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     stop: async characterId => {
       await runtimes.get(characterId)?.stop();
     },
+    drifted: characterId =>
+      runtimes.get(characterId)?.assemblyDrifted() ?? false,
+    reload: characterId => {
+      const runtime = runtimes.get(characterId);
+
+      return runtime === undefined ? Promise.resolve() : reloadOrJoin(runtime);
+    },
   });
 
   return Object.freeze({
@@ -300,14 +307,40 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
     return start;
   }
+
+  /**
+   * A reload is joined like a start: an attach or a delivery that lands
+   * meanwhile waits for it, then holds the thread again under the same id.
+   * How it ended is the runtime's state to show.
+   */
+  function reloadOrJoin(runtime: LocalCharacterRuntime): Promise<void> {
+    const pending = startsInFlight.get(runtime.characterId);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    if (stopped || runtime.health().state !== 'ready') {
+      return Promise.resolve();
+    }
+
+    const reload = runtime.reload().finally(() => {
+      startsInFlight.delete(runtime.characterId);
+    });
+
+    startsInFlight.set(runtime.characterId, reload);
+
+    return reload;
+  }
 }
 
 /**
  * Construct-once runtimes, each wired for one automatic restart after a
  * fatal turn: a boot failure arrives from 'starting' and stays failed
- * rather than crash-looping. The recovery is registered like an explicit
- * start, so a retry or attach that lands mid-recovery joins it instead of
- * resolving early.
+ * rather than crash-looping, and a failure arriving from 'reloading' is
+ * the reload's own to report — the next reconcile retries it. The recovery
+ * is registered like an explicit start, so a retry or attach that lands
+ * mid-recovery joins it instead of resolving early.
  */
 function createRuntimeFactory(seams: {
   readonly options: CreateGatewayOptions;

@@ -11,6 +11,9 @@ export type ReconcileSeams = {
   ) => CharacterRuntimeState | 'not_started';
   readonly start: (characterId: string) => Promise<unknown>;
   readonly stop: (characterId: string) => Promise<void>;
+  /** Whether a ready character would assemble differently now. */
+  readonly drifted: (characterId: string) => boolean;
+  readonly reload: (characterId: string) => Promise<unknown>;
 };
 
 export type Reconciler = {
@@ -26,10 +29,11 @@ export type Reconciler = {
 
 /**
  * One rule for boot and for every config change: an enabled character that
- * is not running starts; a disabled one that is running — or failed, still
- * holding what it could not release — stops, and so does one whose package
- * left the roster. Whatever is mid-flight settles on its own and the next
- * pass sees the result.
+ * is not running starts; one that is ready but would assemble differently
+ * now reloads; a disabled one that is running — or failed, still holding
+ * what it could not release — stops, and so does one whose package left
+ * the roster. Whatever is mid-flight settles on its own and the next pass
+ * sees the result.
  */
 export function createReconciler(seams: ReconcileSeams): Reconciler {
   let running: Promise<ReconcilePlan> | undefined;
@@ -74,6 +78,7 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
   async function runPass(): Promise<ReconcilePlan> {
     const starting: string[] = [];
     const stopping: string[] = [];
+    const reloading: string[] = [];
     const work: Promise<unknown>[] = [];
     const roster = seams.roster();
     const stop = (characterId: string): void => {
@@ -92,6 +97,9 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
         ) {
           starting.push(character.id);
           work.push(seams.start(character.id));
+        } else if (state === 'ready' && seams.drifted(character.id)) {
+          reloading.push(character.id);
+          work.push(seams.reload(character.id));
         }
       } else if (holdsResources(state)) {
         stop(character.id);
@@ -114,12 +122,18 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
     return Object.freeze({
       starting: Object.freeze(starting),
       stopping: Object.freeze(stopping),
+      reloading: Object.freeze(reloading),
     });
   }
 }
 
 function holdsResources(state: CharacterRuntimeState | 'not_started'): boolean {
-  return state === 'ready' || state === 'starting' || state === 'failed';
+  return (
+    state === 'ready' ||
+    state === 'starting' ||
+    state === 'reloading' ||
+    state === 'failed'
+  );
 }
 
 function mergePlans(
@@ -132,6 +146,9 @@ function mergePlans(
     ]),
     stopping: Object.freeze([
       ...new Set([...first.stopping, ...second.stopping]),
+    ]),
+    reloading: Object.freeze([
+      ...new Set([...first.reloading, ...second.reloading]),
     ]),
   });
 }

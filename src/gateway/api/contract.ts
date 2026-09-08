@@ -168,6 +168,7 @@ export type GatewayErrorBody = {
 export type ReconcilePlan = {
   readonly starting: readonly string[];
   readonly stopping: readonly string[];
+  readonly reloading: readonly string[];
 };
 
 /** `settled` says the start ran; the summary's state says how it ended. */
