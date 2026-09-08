@@ -1047,36 +1047,39 @@ describe('gateway façade', () => {
     await restarted.stop();
   });
 
-  it('keeps chatting on the newest segment when an older one is damaged', async () => {
+  it('keeps chatting when an older segment is damaged, but not when the segment before the current one is', async () => {
     const {homeRoot, gateway, ref, segments} = await createRotatedChat([
       'one',
       'two',
       'three',
       'four',
+      'five',
+      'six',
+      'seven',
+      'eight',
     ]);
     const oldest = segments[0];
 
-    if (oldest === undefined) {
-      throw new Error('Expected a rotated chat.');
+    if (oldest === undefined || segments.length < 3) {
+      throw new Error('Expected a chat of three segments or more.');
     }
 
-    await gateway.stop();
-    appendFileSync(
-      createLocalRuntimeSessionPaths({
-        storeRoot: characterDataDirPath(homeRoot, 'mira'),
-        sessionId: oldest.sessionId,
-      }).rawEventsPath,
-      '{"eventId": "evt_torn"}\n',
-    );
-
-    // The character starts on the newest segment and runs; only the page
-    // of history that reaches the damaged segment fails.
-    const restarted = createGateway({
+    const storeRoot = characterDataDirPath(homeRoot, 'mira');
+    const rawEventsOf = (sessionId: string): string =>
+      createLocalRuntimeSessionPaths({storeRoot, sessionId}).rawEventsPath;
+    const options = {
       location: {storeRoot: homeRoot},
       env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
-    });
+    };
+
+    await gateway.stop();
+    appendFileSync(rawEventsOf(oldest.sessionId), '{"eventId": "evt_torn"}\n');
+
+    // The character starts on the newest segment and runs; only the page
+    // of history that reaches the damaged segment fails.
+    const restarted = createGateway(options);
 
     await restarted.startCharacter('mira');
     await expect(
@@ -1086,9 +1089,9 @@ describe('gateway façade', () => {
       restarted.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
-        text: 'five',
+        text: 'nine',
         source: 'web',
-        clientMessageId: 'msg-five',
+        clientMessageId: 'msg-nine',
       }),
     ).resolves.toMatchObject({status: 'completed'});
     await expect(restarted.history(ref.conversationId)).resolves.toMatchObject({
@@ -1096,6 +1099,28 @@ describe('gateway façade', () => {
       code: 'malformed_record',
     });
     await restarted.stop();
+
+    // The segment before the current one must be whole: a line it holds
+    // could otherwise run twice.
+    const before = listConversationSegments({
+      storeRoot,
+      characterId: 'mira',
+      conversationId: ref.conversationId,
+    }).segments.at(-2);
+
+    if (before === undefined) {
+      throw new Error('Expected a segment before the newest one.');
+    }
+
+    appendFileSync(rawEventsOf(before.sessionId), '{"eventId": "evt_torn"}\n');
+
+    const damaged = createGateway(options);
+
+    await damaged.startCharacter('mira');
+    await expect(damaged.openDirectConversation('mira')).resolves.toMatchObject(
+      {status: 'failed', code: 'malformed_record'},
+    );
+    await damaged.stop();
   });
 
   it('refuses a line committed just before a rotation when it is sent again after a restart, and fails the open when that segment cannot be read', async () => {
@@ -1145,7 +1170,7 @@ describe('gateway façade', () => {
           storeRoot,
           characterId: 'mira',
           sessionId: newest.sessionId,
-        }).messages.some(record => record.clientMessageId === `msg-${text}`)
+        }).some(record => record.clientMessageId === `msg-${text}`)
       ) {
         rotatedAfter = text;
         break;

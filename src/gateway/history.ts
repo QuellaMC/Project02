@@ -5,7 +5,6 @@ import {
   LocalRuntimeConversationStoreError,
   LocalRuntimeStorageContractError,
   readCommittedConversationMessages,
-  type CommittedConversationMessages,
 } from '../runtime/storage/index.ts';
 import type {
   HistoryMessage,
@@ -13,7 +12,9 @@ import type {
   HistoryPage,
 } from './api/contract.ts';
 
-type CommittedMessage = CommittedConversationMessages['messages'][number];
+type CommittedMessage = ReturnType<
+  typeof readCommittedConversationMessages
+>[number];
 
 /** A boundary inside one segment: `index` messages of it lie before it. */
 type Position = {
@@ -238,22 +239,14 @@ function createSegmentReader(
       return [];
     }
 
-    const committed = readCommittedConversationMessages({
+    const messages = readCommittedConversationMessages({
       ...options,
       sessionId: segment.sessionId,
     });
 
-    if (committed.damagedRecordCount > 0) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Segment "${segment.sessionId}" holds ` +
-          `${String(committed.damagedRecordCount)} damaged record(s).`,
-      );
-    }
+    read.set(index, messages);
 
-    read.set(index, committed.messages);
-
-    return committed.messages;
+    return messages;
   };
 }
 
