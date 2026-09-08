@@ -11,7 +11,6 @@ export type GatewayServerOptions = {
   readonly token: string;
   /** 0 asks the OS for a free port; a busy port falls back to one. */
   readonly port: number;
-  readonly uiRoot?: string;
 };
 
 export type GatewayServer = {
@@ -21,16 +20,15 @@ export type GatewayServer = {
    * once; the gateway drains its turns and releases its leases with the
    * socket and the event streams still open — so an accepted turn still
    * receives its outcome, and the stream still carries its reply; then the
-   * streams end, and only then does the listener close, letting an answer
-   * still being written finish, within a short grace, before its socket is
-   * cut.
+   * streams end, an answer still being written gets a short grace to
+   * finish, and only then does the listener close and cut what remains.
    */
   close(): Promise<void>;
 };
 
 const loopback = '127.0.0.1';
 
-/** The daemon's one socket: the API and the UI on a loopback port. */
+/** The daemon's one socket: the API on a loopback port. */
 export async function createGatewayServer(
   options: GatewayServerOptions,
 ): Promise<GatewayServer> {
@@ -41,7 +39,6 @@ export async function createGatewayServer(
     token: options.token,
     events,
     lifecycle: {stopping: () => stopping},
-    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   const server = createAdaptorServer({fetch: app.fetch});
   const responses = trackResponses(server);
@@ -53,24 +50,20 @@ export async function createGatewayServer(
       stopping = true;
       await options.gateway.stop();
       await events.closeAll();
+      // An outcome the gateway just produced may still be leaving on a
+      // slow socket: every answer still being written is waited for, up to
+      // the grace, before the listener closes — Node's close counts a
+      // connection whose answer is ended but unflushed as idle and cuts it.
+      // Newcomers meanwhile get their 503; then whatever remains is cut.
+      await responses.drained(drainGraceMs);
       await new Promise<void>(resolve => {
         server.close(() => {
           resolve();
         });
 
-        // An outcome the gateway just produced may still be leaving on a
-        // slow socket. Idle connections go now; every answer still being
-        // written is waited for, up to the grace, and only then is whatever
-        // remains cut.
-        if ('closeIdleConnections' in server) {
-          server.closeIdleConnections();
+        if ('closeAllConnections' in server) {
+          server.closeAllConnections();
         }
-
-        void responses.drained(drainGraceMs).then(() => {
-          if ('closeAllConnections' in server) {
-            server.closeAllConnections();
-          }
-        });
       });
     },
   });

@@ -1,11 +1,9 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
 import {connect, createServer} from 'node:net';
-import {join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
 import {createGatewayServer} from '../../src/gateway/http/server.ts';
-import {createGateway} from '../../src/gateway/index.ts';
+import {createGateway, type HistoryOutcome} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {
@@ -16,7 +14,6 @@ import {
   subscribeToEvents,
   testGatewayToken as token,
 } from '../support/gateway-http.ts';
-import {createTestTempRoot} from '../support/temp-root.ts';
 
 const headers = {
   authorization: `Bearer ${token}`,
@@ -138,17 +135,30 @@ describe('gateway server lifecycle', () => {
   });
 
   it('cuts a client that stopped taking a large answer once the grace is up', async () => {
-    const uiRoot = join(createTestTempRoot('project02-gateway-drain-'), 'ui');
-
-    mkdirSync(uiRoot, {recursive: true});
-    // Far more than the socket buffers hold, so an unread answer stalls.
-    writeFileSync(join(uiRoot, 'big.bin'), Buffer.alloc(16 * 1024 * 1024));
-
     const gateway = gatewayOver(
       await createGatewayTestHome(),
       heldAdapter().adapter,
     );
-    const server = await createGatewayServer({gateway, token, port: 0, uiRoot});
+    // A history page far larger than the socket buffers hold, so an unread
+    // answer stalls.
+    const page: HistoryOutcome = {
+      status: 'ok',
+      conversationId: 'conv',
+      characterId: 'mira',
+      messages: Array.from({length: 16}, (_, index) => ({
+        messageId: `conv.1:message-${String(index + 1)}`,
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'x'.repeat(1024 * 1024),
+        committedAt: '2026-09-02T00:00:00.000Z',
+      })),
+    };
+    const server = await createGatewayServer({
+      gateway: {...gateway, history: () => Promise.resolve(page)},
+      token,
+      port: 0,
+    });
     const stalled = connect(server.port, '127.0.0.1');
 
     // A complete request, and then not one byte of the answer is read.
@@ -159,7 +169,7 @@ describe('gateway server lifecycle', () => {
       });
     });
     stalled.write(
-      `GET /big.bin HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\n\r\n`,
+      `GET /api/conversations/conv/messages HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\nAuthorization: Bearer ${token}\r\n\r\n`,
     );
     await new Promise(resolve => setTimeout(resolve, 200));
 
