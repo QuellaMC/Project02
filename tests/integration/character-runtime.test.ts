@@ -16,7 +16,14 @@ import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+
+function states(events: readonly GatewayEvent[]): string[] {
+  return events.flatMap(event =>
+    event.kind === 'state_changed' ? [event.state] : [],
+  );
+}
 
 function replyAdapter(
   options: {
@@ -492,6 +499,115 @@ describe('local character runtime', () => {
     const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
+    await runtime.stop();
+  });
+
+  it('reloads between turns once its assembly drifted, and its thread reopens under the same id', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      roleModelAdapter: replyAdapter({
+        beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
+      }),
+    });
+    const ref = await open(runtime);
+
+    expect(runtime.assemblyDrifted()).toBe(false);
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      {project02: {contextWindowTokens: 4096}},
+    );
+    expect(runtime.assemblyDrifted()).toBe(true);
+
+    const inFlight = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+    const reload = runtime.reload();
+
+    expect(runtime.health().state).toBe('reloading');
+    await reload;
+
+    // The turn accepted first ran first, on the assembly that accepted it.
+    await expect(inFlight).resolves.toMatchObject({status: 'completed'});
+    expect(states(events)).toEqual(['starting', 'ready', 'reloading', 'ready']);
+    expect(
+      events.findLastIndex(event => event.kind === 'turn_progress'),
+    ).toBeLessThan(
+      events.findLastIndex(
+        event => event.kind === 'state_changed' && event.state === 'ready',
+      ),
+    );
+    expect(runtime.assemblyDrifted()).toBe(false);
+    expect((await open(runtime)).conversationId).toBe(ref.conversationId);
+    await runtime.stop();
+  });
+
+  it('lets a stop issued during a reload win', async () => {
+    const {runtime, events} = await createStartedRuntime();
+    let stopping: Promise<void> | undefined;
+
+    await open(runtime);
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'reloading') {
+        stopping = runtime.stop();
+      }
+    });
+
+    await runtime.reload();
+    expect(stopping).toBeDefined();
+    await stopping;
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'stopping',
+      'stopped',
+    ]);
+    expect(runtime.health().openConversationIds).toEqual([]);
+  });
+
+  it('rebuilds after a fatal turn that ran ahead of the reload, once', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime();
+    const ref = await open(runtime);
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    // Restored the instant the turn fails, before the reload releases.
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+    chmodSync(sessionsRoot, 0o000);
+
+    const fatal = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+    const reload = runtime.reload();
+
+    try {
+      await expect(fatal).resolves.toMatchObject({status: 'failed'});
+      await reload;
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'failed',
+      'ready',
+    ]);
     await runtime.stop();
   });
 

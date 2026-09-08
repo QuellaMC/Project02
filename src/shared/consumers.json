@@ -1,5 +1,5 @@
 {
-  "canonical-json.ts": ["app", "plugins", "role-model", "runtime"],
+  "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
   "file-system.ts": ["plugins", "runtime"],
   "identifier.ts": ["characters", "cli", "plugins", "role-model", "runtime"],
   "json-boundary.ts": [

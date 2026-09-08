@@ -42,8 +42,13 @@ export type GatewayMessage = {
 
 export type GatewayConfirmationDecision = 'approved' | 'denied';
 
+/**
+ * `reloading` is a pause, not an outage: the character is assembling
+ * afresh from the config on disk between turns, and a delivery sent
+ * meanwhile waits for it and lands on the same conversation.
+ */
 export type CharacterRuntimeState =
-  'starting' | 'ready' | 'stopping' | 'stopped' | 'failed';
+  'starting' | 'ready' | 'reloading' | 'stopping' | 'stopped' | 'failed';
 
 /** One committed visible message, as a client renders it. */
 export type GatewayVisibleMessage = {
@@ -313,6 +318,10 @@ export type CharacterRuntime = {
   stop(): Promise<void>;
   /** Fresh start after a fatal turn; the registry calls it once per failure. */
   reactivate(): Promise<void>;
+  /** Assembles afresh from the config on disk, once accepted turns have run. */
+  reload(): Promise<void>;
+  /** Whether the character would assemble differently now than it did. */
+  assemblyDrifted(): boolean;
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
   pendingConfirmations(): readonly PendingConfirmation[];
   answerConfirmation(

@@ -3,6 +3,7 @@ import {
   configuredPluginConstructionCleanupSessionId,
   createConfiguredProject02PluginHostFromPlan,
   listProject02Characters,
+  type ActivateProject02CharacterOptions,
   type Project02Home,
   type RuntimeCliStartupResult,
 } from '../../app/index.ts';
@@ -28,7 +29,9 @@ import {
   type SegmentRotation,
   type UserMessageDelivery,
 } from '../../runtime/index.ts';
+import type {ResolvedProject02RuntimeConfig} from '../../runtime/config/index.ts';
 import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
+import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 import type {
   CharacterRuntime,
   CharacterRuntimeHealth,
@@ -80,6 +83,8 @@ type AssembledCharacter = {
   readonly contextWindowTokens: number;
   readonly userDisplayName: string;
   readonly storeRoot: string;
+  /** What this assembly was built from; a later plan that differs is drift. */
+  readonly identity: string;
 };
 
 type RuntimeContext = {
@@ -155,6 +160,8 @@ export function createLocalCharacterRuntime(
       await context.stopping;
     },
     reactivate: () => reactivateRuntime(context),
+    reload: () => reloadRuntime(context),
+    assemblyDrifted: () => assemblyDrifted(context),
     deliver: (message: GatewayMessage) => deliverMessage(context, message),
     pendingConfirmations(): readonly PendingConfirmation[] {
       return Object.freeze(
@@ -273,22 +280,154 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   // Assembly rides the queue — enqueued before 'starting' is announced, so
   // even a stop issued from that event drains it: shutdown never resolves
   // while construction or its discard cleanup is still running.
-  const run = enqueue(context, () => runStart(context));
+  const run = enqueue(context, () =>
+    assembleAndPublish(context, () => lifecycleLeft(context, 'starting')),
+  );
 
   setState(context, 'starting');
 
   return run;
 }
 
-async function runStart(context: RuntimeContext): Promise<void> {
+/**
+ * Assembles afresh from the config on disk. The whole reload rides the
+ * queue: turns already accepted run first, on the assembly they were
+ * accepted for — a parked confirmation among them is waited out, never
+ * cancelled — and a stop's quiesce joins the rebuild. 'reloading' is
+ * published at once, so every surface renders a pause; the gateway holds
+ * deliveries until the reload settles and they land on the same thread.
+ */
+function reloadRuntime(context: RuntimeContext): Promise<void> {
+  if (context.state !== 'ready') {
+    throw new TypeError(
+      `Character "${context.characterId}" cannot reload from state ` +
+        `"${context.state}".`,
+    );
+  }
+
+  const run = enqueue(context, () => runReload(context));
+
+  setState(context, 'reloading');
+
+  return run;
+}
+
+async function runReload(context: RuntimeContext): Promise<void> {
+  // An attachment holds real leases while it opens; joined here, its own
+  // overtake cleanup finishes before release snapshots the conversations.
+  await context.opening?.catch(() => undefined);
+
+  // A fatal turn ahead in the queue left the runtime failed with its
+  // assembly still held; this rebuild is the one-shot recovery that turn
+  // earned, so only a stop has the last word here.
+  if (stopWon(context)) {
+    return;
+  }
+
+  const problems = await releaseResourcesOnce(context);
+
+  if (stopWon(context)) {
+    return;
+  }
+
+  if (problems.length > 0) {
+    setState(
+      context,
+      'failed',
+      `Reload could not release resources: ${problems.join('; ')}`,
+    );
+    return;
+  }
+
+  // Release left the broker cancelling; the new assembly parks again.
+  context.broker.arm();
+  await assembleAndPublish(context, () => stopWon(context));
+}
+
+function stopWon(context: RuntimeContext): boolean {
+  return context.state === 'stopping' || context.state === 'stopped';
+}
+
+/**
+ * True when the character would assemble differently now than it did:
+ * the read-only report stage plans exactly as a start does, and its plan
+ * is compared with the one this assembly was built from. A plan that
+ * cannot be made at all is drift too — the reload then reports why.
+ */
+function assemblyDrifted(context: RuntimeContext): boolean {
+  const {assembled} = context;
+
+  if (context.state !== 'ready' || assembled === undefined) {
+    return false;
+  }
+
+  let startup: RuntimeCliStartupResult;
+
+  try {
+    startup = activateProject02Character(context.options.loadHome(), {
+      ...activationOptions(context),
+      stage: 'report',
+    });
+  } catch {
+    return true;
+  }
+
+  return (
+    startup.status !== 'resolved' ||
+    startup.characterActivation.status !== 'resolved' ||
+    assemblyIdentity(
+      startup.activationPlan.resolvedConfig,
+      startup.characterActivation.characterRef,
+    ) !== assembled.identity
+  );
+}
+
+/**
+ * The parts of a plan that shape the character: the effective config, the
+ * plugin values with their secrets (the authored fingerprint hashes only a
+ * secret's presence, so a re-keyed secret would otherwise go unnoticed),
+ * and the package's version and persona. Held in memory only.
+ */
+function assemblyIdentity(
+  resolvedConfig: ResolvedProject02RuntimeConfig,
+  characterRef: RoleModelCharacterRef,
+): string {
+  return createCanonicalJsonFingerprint({
+    config: resolvedConfig.effectiveConfigFingerprint,
+    plugins: resolvedConfig.pluginConfigs,
+    character: characterRef,
+  });
+}
+
+/** One set of options for the assembly and for the check that it would differ. */
+function activationOptions(
+  context: RuntimeContext,
+): Omit<ActivateProject02CharacterOptions, 'characterConfigRequest'> {
+  const {options, characterId} = context;
+
+  return {
+    characterId,
+    continueAfterActivationErrors: options.createPluginHost !== undefined,
+    // Runs in the planning phase, so a bad provider value is refused
+    // before any durable character state is written.
+    validateRuntimeEnv: env => {
+      selectChatProvider(options.provider, env);
+    },
+  };
+}
+
+async function assembleAndPublish(
+  context: RuntimeContext,
+  overtaken: () => boolean,
+): Promise<void> {
   let assembled: AssembledCharacter;
 
   try {
     assembled = await assemble(context);
   } catch (error: unknown) {
     // A stop that overtook the failing assembly wins: it already published
-    // 'stopped', and a late 'failed' would outlive the shutdown.
-    if (lifecycleLeft(context, 'starting')) {
+    // its state, and a late 'failed' would outlive the shutdown.
+    if (overtaken()) {
       return;
     }
 
@@ -305,7 +444,7 @@ async function runStart(context: RuntimeContext): Promise<void> {
   // A stop that arrived while assembly ran wins: what was built is handed
   // to the draining stop's release, which shuts it down like any assembled
   // host and reports what its cleanup could not free.
-  if (lifecycleLeft(context, 'starting')) {
+  if (overtaken()) {
     return;
   }
 
@@ -336,15 +475,10 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     throw new Error(disabledMessage(characterId));
   }
 
-  const startup = await activateProject02Character(home, {
-    characterId,
-    continueAfterActivationErrors: options.createPluginHost !== undefined,
-    // Runs in the planning phase, so a bad provider value is refused
-    // before any durable character state is written.
-    validateRuntimeEnv: env => {
-      selectChatProvider(options.provider, env);
-    },
-  });
+  const startup = await activateProject02Character(
+    home,
+    activationOptions(context),
+  );
 
   if (
     startup.status !== 'resolved' ||
@@ -369,6 +503,10 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     contextWindowTokens: project02.contextWindowTokens,
     userDisplayName: project02.userDisplayName,
     storeRoot: project02.storeRoot,
+    identity: assemblyIdentity(
+      startup.activationPlan.resolvedConfig,
+      activation.characterRef,
+    ),
   };
   // The selected provider wins; an injected adapter covers the rest.
   const adapter =
@@ -459,10 +597,7 @@ async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
   context.conversations.set(active.conversation.id, active);
 
   if (lifecycleLeft(context, 'ready')) {
-    return refusedOpen(
-      'character_unavailable',
-      `Character "${context.characterId}" stopped while attaching.`,
-    );
+    return unavailableOutcome(context);
   }
 
   return Object.freeze({
