@@ -242,6 +242,8 @@ function createSegmentReader(
     const messages = readCommittedConversationMessages({
       ...options,
       sessionId: segment.sessionId,
+      // Only the newest segment may still be waiting for its first record.
+      onMissing: index === segments.length - 1 ? 'allow' : 'reject',
     });
 
     read.set(index, messages);

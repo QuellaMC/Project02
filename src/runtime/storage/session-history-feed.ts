@@ -100,12 +100,16 @@ type CommittedConversationMessages = {
  * it, and the segment after it refuses the lines it holds. A segment the
  * catalog names has its directory — the directory is made before the row
  * and removed after it — so a missing one is damage, never an empty
- * segment.
+ * segment. Its transcript appears with its first record, so the newest
+ * segment of a conversation may lack one while every segment before it
+ * has one: what a missing transcript means is the caller's to say.
  */
 export function readCommittedConversationMessages(options: {
   readonly storeRoot: string;
   readonly characterId: string;
   readonly sessionId: string;
+  /** A missing transcript: an empty segment, or damage. */
+  readonly onMissing: 'allow' | 'reject';
 }): readonly ConversationLogRecord[] {
   const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
 
@@ -120,15 +124,20 @@ export function readCommittedConversationMessages(options: {
 
   assertSessionDirectoryReadable(layout, options.sessionId);
 
-  const committed = committedMessagesFromTail(
-    readCommittedTranscriptTail(
-      createLocalRuntimeSessionPaths({
-        storeRoot: layout.storeRoot,
-        sessionId: options.sessionId,
-      }).rawEventsPath,
-      0,
-    ),
-  );
+  const rawEventsPath = createLocalRuntimeSessionPaths({
+    storeRoot: layout.storeRoot,
+    sessionId: options.sessionId,
+  }).rawEventsPath;
+  const tail = readCommittedTranscriptTail(rawEventsPath, 0);
+
+  if (tail.kind === 'absent' && options.onMissing === 'reject') {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Required local runtime transcript is missing: ${rawEventsPath}.`,
+    );
+  }
+
+  const committed = committedMessagesFromTail(tail);
 
   if (committed.damagedRecordCount > 0) {
     throw new LocalRuntimeStorageContractError(
