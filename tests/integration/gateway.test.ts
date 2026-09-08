@@ -1550,7 +1550,7 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('reads a stopped character, and an empty thread whose character has no data yet', async () => {
+  it('reads a stopped character, and fails on a thread whose character data is gone', async () => {
     const {homeRoot, gateway, ref} = await createRotatedChat([
       'one',
       'two',
@@ -1566,12 +1566,13 @@ describe('gateway façade', () => {
       ]) as unknown[],
     });
 
+    // The data directory is made before any conversation is recorded, so
+    // a conversation whose character has none is damage, not a thread
+    // that is empty.
     rmSync(characterDataDirPath(homeRoot, 'mira'), {recursive: true});
-    await expect(gateway.history(ref.conversationId)).resolves.toEqual({
-      status: 'ok',
-      conversationId: ref.conversationId,
-      characterId: 'mira',
-      messages: [],
+    await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'failed',
+      code: 'missing_file',
     });
   });
 

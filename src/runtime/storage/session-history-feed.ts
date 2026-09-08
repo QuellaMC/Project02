@@ -13,10 +13,7 @@ import {
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {conversationMessageForRawEvent} from '../evidence/cache.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
-import {
-  assertCharacterDataDirReadable,
-  requireCharacterDataMarker,
-} from './character-data.ts';
+import {requireCharacterDataMarker} from './character-data.ts';
 import {readUndamagedJsonLines} from './json-lines.ts';
 import {
   createLocalRuntimeSessionPaths,
@@ -40,9 +37,10 @@ export type ConversationSegmentListing = {
 
 /**
  * One character's segments of one conversation, read leniently: a damaged
- * or stray catalog row is skipped, and a character without a data directory
- * has no segments yet. The catalog's own order is by creation, so the
- * segment number decides.
+ * or stray catalog row is skipped. The character's data directory is made,
+ * with its marker, before any conversation of its is recorded, so a
+ * missing one is damage, never a character with no segments yet. The
+ * catalog's own order is by creation, so the segment number decides.
  */
 export function listConversationSegments(options: {
   readonly storeRoot: string;
@@ -52,11 +50,7 @@ export function listConversationSegments(options: {
   const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
   const storageOptions = {storeRoot: options.storeRoot};
 
-  if (
-    assertCharacterDataDirReadable({storageOptions, characterId}) === undefined
-  ) {
-    return Object.freeze({segments: Object.freeze([]), damagedEntryCount: 0});
-  }
+  requireCharacterDataMarker({storageOptions, characterId});
 
   const catalog = readLenientSessionCatalog(
     createLocalRuntimeStorageLayout(storageOptions),
