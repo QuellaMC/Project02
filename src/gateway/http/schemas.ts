@@ -1,8 +1,9 @@
-import {Ajv, type JSONSchemaType} from 'ajv';
+import {Ajv, type JSONSchemaType, type SchemaObject} from 'ajv';
 
 import {clientStampPattern} from '../../core/index.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import type {
+  ConfigChange,
   GatewayConfirmationDecision,
   GatewayMessage,
 } from '../api/contract.ts';
@@ -32,6 +33,7 @@ const ajv = new Ajv({
   strict: true,
   ownProperties: true,
   addUsedSchema: false,
+  discriminator: true,
 });
 
 const identifier = {
@@ -74,14 +76,90 @@ const answerConfirmationBodySchema: JSONSchemaType<AnswerConfirmationBody> = {
 };
 
 /**
+ * The change body, a branch per operation kind. A value slot admits any
+ * JSON the boundary admits; the config seam judges it against the field.
+ * Written as a plain schema: the contract's value type is recursive, which
+ * the compile-checked schema type cannot spell.
+ */
+function operationBranch(
+  kind: ConfigChange['operation']['kind'],
+  properties: Record<string, SchemaObject>,
+  optional: readonly string[] = [],
+): SchemaObject {
+  return {
+    type: 'object',
+    properties: {kind: {const: kind}, ...properties},
+    required: [
+      'kind',
+      ...Object.keys(properties).filter(name => !optional.includes(name)),
+    ],
+    additionalProperties: false,
+  };
+}
+
+const anyValue: SchemaObject = {};
+
+const configChangeSchema: SchemaObject = {
+  type: 'object',
+  properties: {
+    target: {
+      oneOf: [
+        {
+          type: 'object',
+          properties: {scope: {const: 'global'}},
+          required: ['scope'],
+          additionalProperties: false,
+        },
+        {
+          type: 'object',
+          properties: {scope: {const: 'character'}, characterId: identifier},
+          required: ['scope', 'characterId'],
+          additionalProperties: false,
+        },
+      ],
+    },
+    expectedFingerprint: identifier,
+    operation: {
+      type: 'object',
+      discriminator: {propertyName: 'kind'},
+      oneOf: [
+        operationBranch('set', {path: identifier, value: anyValue}),
+        operationBranch('unset', {path: identifier}),
+        operationBranch(
+          'plugin_enabled',
+          {pluginId: identifier, enabled: {type: 'boolean'}},
+          ['enabled'],
+        ),
+        operationBranch('plugin_field_set', {
+          pluginId: identifier,
+          field: identifier,
+          value: anyValue,
+        }),
+        operationBranch('plugin_field_unset', {
+          pluginId: identifier,
+          field: identifier,
+        }),
+        operationBranch('plugin_secret_set', {
+          pluginId: identifier,
+          field: identifier,
+          value: {type: 'string', minLength: 1},
+        }),
+      ],
+    },
+  },
+  required: ['target', 'expectedFingerprint', 'operation'],
+  additionalProperties: false,
+};
+
+/**
  * Untrusted JSON meets the boundary's size and depth limits first, then the
  * schema; either failure is the message the client gets back.
  */
 function createBodyValidator<T>(
   field: string,
-  schema: JSONSchemaType<T>,
+  schema: JSONSchemaType<T> | SchemaObject,
 ): BodyValidator<T> {
-  const validate = ajv.compile(schema);
+  const validate = ajv.compile<T>(schema);
 
   return value => {
     let snapshot: unknown;
@@ -119,4 +197,9 @@ export const gatewayMessageBody = createBodyValidator(
 export const answerConfirmationBody = createBodyValidator(
   'The answer',
   answerConfirmationBodySchema,
+);
+
+export const configChangeBody = createBodyValidator<ConfigChange>(
+  'The config change',
+  configChangeSchema,
 );

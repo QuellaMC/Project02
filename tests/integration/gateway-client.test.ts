@@ -85,6 +85,24 @@ describe('gateway reference client', () => {
     await expect(client.answerConfirmation('nope', 'denied')).resolves.toEqual({
       status: 'unknown',
     });
+
+    const view = await client.configView({scope: 'global'});
+
+    if (view.status !== 'ok') {
+      expect.fail(view.message);
+    }
+
+    await expect(
+      client.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: view.fingerprint,
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Web',
+        },
+      }),
+    ).resolves.toMatchObject({status: 'applied'});
     await close();
   });
 

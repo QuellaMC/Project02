@@ -188,6 +188,19 @@ describe('gateway over HTTP', () => {
     });
 
     expect(noContentType.status).toBe(400);
+
+    const badTarget = await request('/api/config?scope=character');
+
+    expect(badTarget.status).toBe(400);
+
+    const badChange = await post('/api/config', {
+      target: {scope: 'global'},
+      expectedFingerprint: 'fp',
+      operation: {kind: 'set', path: 'project02.enabled'},
+    });
+
+    expect(badChange.status).toBe(400);
+    expect(await errorOf(badChange)).toMatchObject({code: 'invalid_request'});
   });
 
   it('answers every verb with its outcome, verbatim, under a 200', async () => {
@@ -270,6 +283,21 @@ describe('gateway over HTTP', () => {
     await expect(
       (await post('/api/confirmations/nope', {decision: 'approved'})).json(),
     ).resolves.toEqual({status: 'unknown'});
+
+    const view = (await (
+      await request('/api/config?scope=character&characterId=mira')
+    ).json()) as {status: string; fingerprint: string};
+
+    expect(view.status).toBe('ok');
+
+    const change = await post('/api/config', {
+      target: {scope: 'character', characterId: 'mira'},
+      expectedFingerprint: view.fingerprint,
+      operation: {kind: 'set', path: 'project02.userDisplayName', value: 'Web'},
+    });
+
+    expect(change.status).toBe(200);
+    await expect(change.json()).resolves.toMatchObject({status: 'applied'});
     await gateway.stop();
   });
 
