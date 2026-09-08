@@ -80,3 +80,14 @@ export function normalizeVisibleMessageText(
 
   return normalizedMessage;
 }
+
+/**
+ * A client's stamp on a message it carried: the surface that said it
+ * (`web`, `telegram:<bot>`) or the submission's own id. One token, so it
+ * rides a URL, a log line, and a JSON body unchanged.
+ */
+export const clientStampPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u;
+
+export function isValidClientStamp(value: unknown): value is string {
+  return typeof value === 'string' && clientStampPattern.test(value);
+}

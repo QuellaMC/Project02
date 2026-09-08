@@ -8,7 +8,7 @@ export const defaultProject02HomeRoot = '.project02';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
-export const localRuntimeStorageSchemaVersion = 13;
+export const localRuntimeStorageSchemaVersion = 14;
 
 const localRuntimeStorageScopeValues = Object.freeze([
   'home',

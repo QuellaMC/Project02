@@ -26,10 +26,9 @@ export {
 export {
   listProject02Characters,
   prepareProject02CharacterActivation,
-  selectProject02CharacterId,
   type Project02CharacterActivation,
   type Project02CharacterListing,
-  type Project02CharacterSelection,
+  type Project02CharacterRoster,
 } from './character.ts';
 export {
   enforceCharacterPluginExpectations,

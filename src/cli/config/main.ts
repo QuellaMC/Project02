@@ -692,7 +692,7 @@ function consoleCatalogLocation(input: {
     return location;
   }
 
-  const characters = listProject02Characters(
+  const {characters} = listProject02Characters(
     loadProject02Home({
       location,
       ...(input.cwdDotEnv === undefined ? {} : {cwdDotEnv: input.cwdDotEnv}),

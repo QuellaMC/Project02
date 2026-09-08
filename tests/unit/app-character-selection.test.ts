@@ -7,51 +7,10 @@ import {selectSoleEnabledCharacterId} from '../../src/app/character.ts';
 import {
   listProject02Characters,
   loadProject02Home,
-  selectProject02CharacterId,
 } from '../../src/app/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
-
-const listing = (id: string, enabled: boolean) => ({
-  id,
-  displayName: id,
-  enabled,
-});
-
-describe('project02 character selection rule', () => {
-  it('an explicit id wins, trimmed, without consulting the enabled set', () => {
-    expect(
-      selectProject02CharacterId([listing('mira', false)], ' zeta '),
-    ).toEqual({status: 'selected', characterId: 'zeta'});
-  });
-
-  it('selects the sole enabled character and refuses none or several', () => {
-    expect(
-      selectProject02CharacterId([
-        listing('mira', true),
-        listing('zeta', false),
-      ]),
-    ).toEqual({status: 'selected', characterId: 'mira'});
-
-    const none = selectProject02CharacterId([listing('mira', false)]);
-
-    expect(none.status).toBe('failed');
-    expect(none.status === 'failed' && none.message).toContain(
-      'No enabled character',
-    );
-
-    const several = selectProject02CharacterId([
-      listing('mira', true),
-      listing('zeta', true),
-    ]);
-
-    expect(several.status).toBe('failed');
-    expect(several.status === 'failed' && several.message).toContain(
-      'Several characters are enabled: mira, zeta.',
-    );
-  });
-});
 
 describe('project02 sole-enabled startup selection', () => {
   it('routes an invalid global config to activation instead of ambiguity', () => {
@@ -65,7 +24,7 @@ describe('project02 sole-enabled startup selection', () => {
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
     expect(selectSoleEnabledCharacterId(home)).toBe(
-      listProject02Characters(home)[0]?.id,
+      listProject02Characters(home).characters[0]?.id,
     );
   });
 });
@@ -79,10 +38,13 @@ describe('project02 character listing', () => {
 
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
-    expect(listProject02Characters(home)).toEqual([
-      {id: 'mira', displayName: 'Mira', enabled: true},
-      {id: 'zeta', displayName: 'Zeta', enabled: true},
-    ]);
+    expect(listProject02Characters(home)).toEqual({
+      characters: [
+        {id: 'mira', displayName: 'Mira', enabled: true},
+        {id: 'zeta', displayName: 'Zeta', enabled: true},
+      ],
+      diagnostics: [],
+    });
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {enabled: false},
@@ -94,7 +56,9 @@ describe('project02 character listing', () => {
     });
 
     expect(
-      listProject02Characters(disabledHome).map(character => character.enabled),
+      listProject02Characters(disabledHome).characters.map(
+        character => character.enabled,
+      ),
     ).toEqual([false, false]);
   });
 
@@ -113,7 +77,7 @@ describe('project02 character listing', () => {
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
     expect(
-      listProject02Characters(home).map(character => character.id),
+      listProject02Characters(home).characters.map(character => character.id),
     ).toEqual(['mira', 'zeta']);
   });
 

@@ -4,7 +4,6 @@ const processSpawningTests = [
   'tests/integration/conversation-store-concurrency.test.ts',
   'tests/integration/layered-control-locking.test.ts',
   'tests/integration/runtime-config-concurrency.test.ts',
-  'tests/integration/runtime-session-writer.test.ts',
   'tests/integration/session-store-concurrency.test.ts',
   'tests/e2e/two-character-concurrency.test.ts',
 ];
@@ -58,7 +57,7 @@ export default defineConfig({
         test: {
           name: 'processes',
           include: processSpawningTests,
-          // Each file launches real chat processes; running files in
+          // Each file launches real daemon processes; running files in
           // parallel starves them of CPU on a two-core CI runner.
           fileParallelism: false,
           testTimeout: 60000,

@@ -6,6 +6,7 @@
     "app",
     "characters",
     "cli",
+    "gateway",
     "plugins",
     "role-model",
     "runtime"

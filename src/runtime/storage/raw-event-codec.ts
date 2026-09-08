@@ -1,4 +1,5 @@
 import {
+  isValidClientStamp,
   type RuntimeEventIdentity,
   type RuntimeEventType,
   runtimeEventTypeValues,
@@ -108,6 +109,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     'visibleMessageIds',
   );
   const committedMessage = optionalCommittedMessage(record);
+  const clientStamps = optionalClientStamps(record);
   const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
   const toolCallId = optionalRecordString(
     record,
@@ -187,6 +189,8 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     message,
     round,
     visibleMessage: committedMessage.visibleMessage,
+    source: clientStamps.source,
+    clientMessageId: clientStamps.clientMessageId,
     payloadSummary,
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot,
@@ -212,6 +216,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(message === undefined ? {} : {message}),
     ...(visibleMessageIds === undefined ? {} : {visibleMessageIds}),
     ...committedMessage,
+    ...clientStamps,
     ...(round === undefined ? {} : {round}),
     ...(toolCallIds === undefined ? {} : {toolCallIds}),
     ...(toolCallId === undefined ? {} : {toolCallId}),
@@ -233,6 +238,33 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       : {runtimePluginTurnEvidence}),
     ...sessionContinuation,
   } satisfies RawEventLogRecord);
+}
+
+/** The same one-token rule the gateway applies before a stamp is written. */
+function optionalClientStamps(record: Record<string, unknown>): {
+  readonly source?: string;
+  readonly clientMessageId?: string;
+} {
+  const source = optionalClientStamp(record, 'source');
+  const clientMessageId = optionalClientStamp(record, 'clientMessageId');
+
+  return {
+    ...(source === undefined ? {} : {source}),
+    ...(clientMessageId === undefined ? {} : {clientMessageId}),
+  };
+}
+
+function optionalClientStamp(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = optionalRecordString(record, key, 'malformed_record');
+
+  if (value !== undefined && !isValidClientStamp(value)) {
+    throwMalformedRecord(key);
+  }
+
+  return value;
 }
 
 function requiredRawEventKind(value: unknown): RawEventLogRecordKind {

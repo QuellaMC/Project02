@@ -306,7 +306,18 @@ async function readConversationsCatalog(
     return Object.freeze([]);
   }
 
-  const entries = await listDirectoryEntries(layout.conversationsRoot);
+  let entries;
+
+  try {
+    entries = await listDirectoryEntries(layout.conversationsRoot);
+  } catch (error: unknown) {
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Conversations root "${layout.conversationsRoot}" could not be read.`,
+      {cause: error},
+    );
+  }
+
   const conversations: Conversation[] = [];
 
   for (const entry of entries) {

@@ -32,6 +32,8 @@ type Project02StoreConsentOptions = {
    * operator pointed at; standalone, that file is no store to consent to.
    */
   readonly creates?: 'home' | 'selected-config';
+  /** A run being stopped abandons the question, which is a no. */
+  readonly signal?: AbortSignal;
 };
 
 /** Returns only when a store exists at the selected home; throws otherwise. */
@@ -96,6 +98,7 @@ async function operatorAgreesToCreateStore(
     return cliPromptAnswerIsYes(
       await owned.prompt.question(
         `No Project02 store at "${homeRoot}". Create one there? [y/N] `,
+        options.signal,
       ),
     );
   } finally {

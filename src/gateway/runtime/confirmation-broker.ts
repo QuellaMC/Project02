@@ -1,18 +1,47 @@
 import {randomUUID} from 'node:crypto';
 
-import type {RuntimePluginToolConfirmationHandler} from '../../plugins/index.ts';
 import type {
+  RuntimePluginToolConfirmationHandler,
+  RuntimePluginToolConfirmationRequest,
+} from '../../plugins/index.ts';
+import type {
+  ConfirmationAnswerStatus,
   GatewayConfirmationDecision,
   GatewayEvent,
+  TurnIdentity,
 } from '../api/contract.ts';
 
 type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
 
+type ParkedRequest = {
+  readonly request: RuntimePluginToolConfirmationRequest;
+  readonly deadlineAt: number;
+  readonly turn: TurnIdentity | undefined;
+  readonly settle: (decision: Decision) => void;
+};
+
+export type ParkedConfirmation = {
+  readonly id: string;
+  readonly request: RuntimePluginToolConfirmationRequest;
+  readonly deadlineAt: number;
+  readonly turn?: TurnIdentity;
+};
+
 export type ConfirmationBroker = {
   /** Plugs into the host's tool-confirmation seam; nothing else changes there. */
   readonly handler: RuntimePluginToolConfirmationHandler;
-  /** Unknown or already-settled ids are a no-op: a late answer is benign. */
-  answer(id: string, decision: GatewayConfirmationDecision): void;
+  /** Everything parked right now, oldest first. */
+  pending(): readonly ParkedConfirmation[];
+  /**
+   * Unknown or already-settled ids are `unknown`: a late answer is benign.
+   * An answer at or past the deadline settles the request as cancelled and
+   * reports `expired` — the deadline is enforced here, never trusted to the
+   * client or to the host's timer having fired first.
+   */
+  answer(
+    id: string,
+    decision: GatewayConfirmationDecision,
+  ): ConfirmationAnswerStatus;
   /** Cancel every parked request, and settle later ones at once. */
   cancelAll(): void;
   /** Re-arm after a cancelAll, so a fresh boot parks confirmations again. */
@@ -28,8 +57,12 @@ export type ConfirmationBroker = {
 export function createConfirmationBroker(options: {
   readonly characterId: string;
   readonly emit: (event: GatewayEvent) => void;
+  /** The turn running right now, whose tool is asking; none outside a turn. */
+  readonly turnOf: () => TurnIdentity | undefined;
+  /** Fires once per parked request, however it settled. */
+  readonly onSettled?: (id: string, decision: Decision['status']) => void;
 }): ConfirmationBroker {
-  const pending = new Map<string, (decision: Decision) => void>();
+  const pending = new Map<string, ParkedRequest>();
   let cancelling = false;
 
   return Object.freeze({
@@ -48,10 +81,18 @@ export function createConfirmationBroker(options: {
         const settle = (decision: Decision): void => {
           if (pending.delete(id)) {
             resolve(decision);
+            options.onSettled?.(id, decision.status);
           }
         };
 
-        pending.set(id, settle);
+        const turn = options.turnOf();
+
+        pending.set(id, {
+          request,
+          deadlineAt: context.deadlineAt,
+          turn,
+          settle,
+        });
         context.signal.addEventListener(
           'abort',
           () => {
@@ -65,16 +106,41 @@ export function createConfirmationBroker(options: {
           id,
           request,
           deadlineAt: context.deadlineAt,
+          ...(turn === undefined ? {} : {turn}),
         });
       });
     },
+    pending() {
+      return Object.freeze(
+        [...pending.entries()].map(([id, parked]) =>
+          Object.freeze({
+            id,
+            request: parked.request,
+            deadlineAt: parked.deadlineAt,
+            ...(parked.turn === undefined ? {} : {turn: parked.turn}),
+          }),
+        ),
+      );
+    },
     answer(id, decision) {
-      pending.get(id)?.({status: decision});
+      const parked = pending.get(id);
+
+      if (parked === undefined) {
+        return 'unknown';
+      }
+
+      if (Date.now() >= parked.deadlineAt) {
+        parked.settle({status: 'cancelled'});
+        return 'expired';
+      }
+
+      parked.settle({status: decision});
+      return 'answered';
     },
     cancelAll() {
       cancelling = true;
-      for (const settle of [...pending.values()]) {
-        settle({status: 'cancelled'});
+      for (const parked of [...pending.values()]) {
+        parked.settle({status: 'cancelled'});
       }
     },
     arm() {

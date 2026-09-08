@@ -374,7 +374,9 @@ if (invokedDirectly) {
     console.log(
       `  3. Enable it: pnpm runtime-config ui  (Plugins -> ${id} -> Enable)`,
     );
-    console.log('  4. pnpm chat');
+    console.log(
+      '  4. pnpm serve, export the PROJECT02_GATEWAY line, pnpm chat',
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
