@@ -7,51 +7,10 @@ import {selectSoleEnabledCharacterId} from '../../src/app/character.ts';
 import {
   listProject02Characters,
   loadProject02Home,
-  selectProject02CharacterId,
 } from '../../src/app/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
-
-const listing = (id: string, enabled: boolean) => ({
-  id,
-  displayName: id,
-  enabled,
-});
-
-describe('project02 character selection rule', () => {
-  it('an explicit id wins, trimmed, without consulting the enabled set', () => {
-    expect(
-      selectProject02CharacterId([listing('mira', false)], ' zeta '),
-    ).toEqual({status: 'selected', characterId: 'zeta'});
-  });
-
-  it('selects the sole enabled character and refuses none or several', () => {
-    expect(
-      selectProject02CharacterId([
-        listing('mira', true),
-        listing('zeta', false),
-      ]),
-    ).toEqual({status: 'selected', characterId: 'mira'});
-
-    const none = selectProject02CharacterId([listing('mira', false)]);
-
-    expect(none.status).toBe('failed');
-    expect(none.status === 'failed' && none.message).toContain(
-      'No enabled character',
-    );
-
-    const several = selectProject02CharacterId([
-      listing('mira', true),
-      listing('zeta', true),
-    ]);
-
-    expect(several.status).toBe('failed');
-    expect(several.status === 'failed' && several.message).toContain(
-      'Several characters are enabled: mira, zeta.',
-    );
-  });
-});
 
 describe('project02 sole-enabled startup selection', () => {
   it('routes an invalid global config to activation instead of ambiguity', () => {

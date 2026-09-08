@@ -16,10 +16,7 @@ import {
 } from '../../gateway/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
 import type {RoleModelAdapter} from '../../role-model/index.ts';
-import {
-  runtimeConfigDiagnosticAttribution,
-  type RuntimeLocationCliState,
-} from '../../runtime/config/index.ts';
+import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {
   matchesRuntimeStoreInitFlag,
@@ -193,9 +190,7 @@ function reportStartupProblems(
 ): void {
   for (const diagnostic of health.config.diagnostics) {
     if (diagnostic.severity === 'error') {
-      stderr.write(
-        `Config: ${runtimeConfigDiagnosticAttribution(diagnostic)}${diagnostic.message}\n`,
-      );
+      stderr.write(`Config: ${diagnostic.message}\n`);
     }
   }
 

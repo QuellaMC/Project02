@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 
 import {createConfirmationPrompts} from '../../src/cli/chat/prompts.ts';
-import type {PendingConfirmation} from '../../src/gateway/index.ts';
+import type {PendingConfirmation} from '../../src/gateway/api/index.ts';
 import {collect} from '../support/streams.ts';
 
 function pending(id: string): PendingConfirmation {

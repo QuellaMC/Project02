@@ -6,7 +6,8 @@ and the socket every client talks to.
 
 `api/` carries the contract — the `Gateway` façade, the per-character
 `CharacterRuntime` interface, and the message/event/outcome shapes that
-serialize over HTTP. `gateway.ts` implements the façade by composing
+serialize over HTTP — behind its own barrel, which is what a client
+imports. `gateway.ts` implements the façade by composing
 existing seams only: `app` builds each character's pieces, the
 conversation driver opens threads and delivers turns, and the plugin host
 confirms tools through its handler seam — the gateway adds lifecycle,
@@ -25,9 +26,9 @@ error envelope, static UI files), the API router (one route per verb, each
 answering its outcome verbatim), the event streams (SSE), and the server
 whose close order loses nothing. `client/` is the reference client in
 Node — the shim and future connectors use it; the web UI has its own in
-the browser. It may value-import only `api/` and itself (arch rule
-`gateway-client-sees-only-the-wire`), so the client never grows a private
-path into the daemon.
+the browser. It may value-import only `api/`, itself, `core`, and
+`shared` (arch rule `clients-see-only-the-wire`, which fences the terminal
+chat the same way), so no client grows a private path into the daemon.
 
 Four wire rules, stated once in `docs/wiki/gateway-api.html`: status codes
 describe the transport and domain outcomes are 200; the stream is a hint

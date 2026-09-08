@@ -6,20 +6,19 @@
  */
 import {randomUUID} from 'node:crypto';
 
+import {selectCharacterId} from '../../core/index.ts';
+import type {
+  GatewayHealth,
+  GatewayMessage,
+  PendingConfirmation,
+  TurnOutcome,
+} from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
   GatewayClientError,
   gatewayUrlEnvVarName,
   type GatewayClient,
 } from '../../gateway/client/index.ts';
-import {
-  selectProject02CharacterId,
-  type GatewayHealth,
-  type GatewayMessage,
-  type PendingConfirmation,
-  type TurnOutcome,
-} from '../../gateway/index.ts';
-import {runtimeConfigDiagnosticAttribution} from '../../runtime/config/index.ts';
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
@@ -55,15 +54,10 @@ export async function runChatCliFromArgs(
     );
 
     if (configError !== undefined) {
-      options.stderr.write(
-        `Warning: ${runtimeConfigDiagnosticAttribution(configError)}${configError.message}\n`,
-      );
+      options.stderr.write(`Warning: ${configError.message}\n`);
     }
 
-    const selection = selectProject02CharacterId(
-      health.characters,
-      explicitCharacterId,
-    );
+    const selection = selectCharacterId(health.characters, explicitCharacterId);
 
     if (selection.status === 'failed') {
       throw new CliUsageError(`${selection.message} (pass --character <id>)`);
