@@ -17,7 +17,6 @@ import {
   parseSegmentSessionId,
   segmentSessionId,
 } from '../storage/layout-contract.ts';
-import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import {readCommittedConversationMessages} from '../storage/session-history-feed.ts';
 import type {
   LocalRuntimeMutationLockLease,
@@ -163,9 +162,9 @@ export function userLinesOf(
 /**
  * The user lines of the segment before this one, so a line committed just
  * before a rotation is known to the segment after it: a daemon can go down
- * between the two and before answering. A first segment has none, and a
- * segment before that cannot be read yields none — reading it is history's
- * job, and this segment runs without it.
+ * between the two and before answering. A first segment has none. One that
+ * cannot be read fails the open, as an unreadable current segment would: a
+ * line it holds could otherwise run twice.
  */
 export function userLinesOfSegmentBefore(
   context: SegmentContext,
@@ -177,20 +176,12 @@ export function userLinesOfSegmentBefore(
     return new Map();
   }
 
-  try {
-    return userLinesOf(
-      readCommittedConversationMessages({
-        ...context.storageOptions,
-        sessionId: segmentSessionId(conversationId, segment - 1),
-      }).messages,
-    );
-  } catch (error: unknown) {
-    if (error instanceof LocalRuntimeStorageContractError) {
-      return new Map();
-    }
-
-    throw error;
-  }
+  return userLinesOf(
+    readCommittedConversationMessages({
+      ...context.storageOptions,
+      sessionId: segmentSessionId(conversationId, segment - 1),
+    }).messages,
+  );
 }
 
 function readDurableConversationEvidence(

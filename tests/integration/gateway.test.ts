@@ -1098,7 +1098,7 @@ describe('gateway façade', () => {
     await restarted.stop();
   });
 
-  it('refuses a line committed just before a rotation when it is sent again after a restart', async () => {
+  it('refuses a line committed just before a rotation when it is sent again after a restart, and fails the open when that segment cannot be read', async () => {
     const homeRoot = await createGatewayHome();
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
@@ -1177,6 +1177,38 @@ describe('gateway façade', () => {
       reason: 'duplicate_submission',
     });
     await restarted.stop();
+
+    // The segment before cannot be read: the open fails closed, as it
+    // would for the current one, since a line that segment holds could
+    // otherwise run twice.
+    const before = listConversationSegments({
+      storeRoot,
+      characterId: 'mira',
+      conversationId: ref.conversationId,
+    }).segments.at(-2);
+
+    if (before === undefined) {
+      throw new Error('Expected a segment before the newest one.');
+    }
+
+    const beforeRoot = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: before.sessionId,
+    }).sessionRoot;
+    const damaged = createGateway(options);
+
+    await damaged.startCharacter('mira');
+    chmodSync(beforeRoot, 0o000);
+
+    try {
+      await expect(
+        damaged.openDirectConversation('mira'),
+      ).resolves.toMatchObject({status: 'failed', code: 'read_failed'});
+    } finally {
+      chmodSync(beforeRoot, 0o755);
+    }
+
+    await damaged.stop();
   });
 
   it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {
