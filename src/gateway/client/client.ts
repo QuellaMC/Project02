@@ -259,7 +259,7 @@ async function readOutcome<T>(
 ): Promise<T> {
   await rejectUnlessOk(response);
 
-  return JSON.parse(await readBody(response, options?.signal)) as T;
+  return (await readJson(response, options?.signal)) as T;
 }
 
 /**
@@ -267,10 +267,10 @@ async function readOutcome<T>(
  * unless the caller cut it short itself, which is its abort and not the
  * daemon's fault.
  */
-async function readBody(
+async function readJson(
   response: Response,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<unknown> {
   const text = await response.text().catch((error: unknown) => {
     if (signal?.aborted === true) {
       throw abortedRequest();
@@ -284,7 +284,7 @@ async function readBody(
   });
 
   try {
-    JSON.parse(text);
+    return JSON.parse(text);
   } catch {
     throw new GatewayClientError(
       response.status,
@@ -292,8 +292,6 @@ async function readBody(
       `The daemon answered ${String(response.status)} with something other than JSON.`,
     );
   }
-
-  return text;
 }
 
 function resolveOptions(options: GatewayClientOptions): {
