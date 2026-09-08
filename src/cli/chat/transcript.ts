@@ -25,6 +25,12 @@ export type Transcript = {
   whenShown(messageIds: readonly string[]): Promise<void>;
 };
 
+type Waiter = {
+  readonly ids: readonly string[];
+  /** Resolves the wait and forgets it: from a delivery or the grace alike. */
+  readonly settle: () => void;
+};
+
 const pageSize = 50;
 /** How long a settled turn may take to show up on the stream. */
 const echoTimeoutMs = 5_000;
@@ -39,7 +45,7 @@ export function createTranscript(options: {
 }): Transcript {
   const call = options.signal === undefined ? {} : {signal: options.signal};
   const shown = new Set<string>();
-  const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
+  const awaiting = new Set<Waiter>();
   // The newest message this terminal knows of; a read-back starts after it.
   let anchor: string | undefined;
   const show = (message: {
@@ -59,11 +65,9 @@ export function createTranscript(options: {
       options.stdout.write(`${message.speakerName}: ${message.text}\n`);
     }
 
-    for (const waiter of awaiting.splice(0)) {
+    for (const waiter of awaiting) {
       if (waiter.ids.every(id => shown.has(id))) {
-        waiter.resolve();
-      } else {
-        awaiting.push(waiter);
+        waiter.settle();
       }
     }
   };
@@ -113,15 +117,17 @@ export function createTranscript(options: {
       messageIds.every(id => shown.has(id))
         ? Promise.resolve()
         : new Promise(resolve => {
-            const timer = setTimeout(resolve, echoTimeoutMs);
-
-            awaiting.push({
+            const waiter: Waiter = {
               ids: messageIds,
-              resolve() {
+              settle: () => {
                 clearTimeout(timer);
+                awaiting.delete(waiter);
                 resolve();
               },
-            });
+            };
+            const timer = setTimeout(waiter.settle, echoTimeoutMs);
+
+            awaiting.add(waiter);
           }),
   };
 }
