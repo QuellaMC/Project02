@@ -22,7 +22,7 @@ refused by the runtime itself, from those segments' records, before
 anything runs.
 
 `http/` is the transport, on Hono: the app (auth, origin, body limits, the
-error envelope, static UI files), the API router (one route per verb, each
+error envelope), the API router (one route per verb, each
 answering its outcome verbatim), the event streams (SSE), and the server
 whose close order loses nothing. `client/` is the reference client in
 Node — the shim and future connectors use it; the web UI has its own in
