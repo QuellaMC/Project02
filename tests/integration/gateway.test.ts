@@ -1170,6 +1170,7 @@ describe('gateway façade', () => {
           storeRoot,
           characterId: 'mira',
           sessionId: newest.sessionId,
+          onMissing: 'allow',
         }).some(record => record.clientMessageId === `msg-${text}`)
       ) {
         rotatedAfter = text;
@@ -1216,23 +1217,34 @@ describe('gateway façade', () => {
       throw new Error('Expected a segment before the newest one.');
     }
 
-    const beforeRoot = createLocalRuntimeSessionPaths({
+    const beforePaths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: before.sessionId,
-    }).sessionRoot;
+    });
     const damaged = createGateway(options);
 
     await damaged.startCharacter('mira');
-    chmodSync(beforeRoot, 0o000);
+    chmodSync(beforePaths.sessionRoot, 0o000);
 
     try {
       await expect(
         damaged.openDirectConversation('mira'),
       ).resolves.toMatchObject({status: 'failed', code: 'read_failed'});
     } finally {
-      chmodSync(beforeRoot, 0o755);
+      chmodSync(beforePaths.sessionRoot, 0o755);
     }
 
+    // Its transcript gone with the directory still there is damage too: a
+    // transcript appears with the first record, and a segment rotated
+    // away after a turn has records. History says the same of it.
+    rmSync(beforePaths.rawEventsPath);
+    await expect(damaged.openDirectConversation('mira')).resolves.toMatchObject(
+      {status: 'failed', code: 'missing_file'},
+    );
+    await expect(damaged.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'failed',
+      code: 'missing_file',
+    });
     await damaged.stop();
   });
 
