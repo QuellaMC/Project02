@@ -110,6 +110,9 @@ export async function openConversation(
       (await context.sessionStore.createSession({
         conversationId: conversation.id,
       }));
+    // Read before this segment opens: an open that fails here holds no
+    // segment lease yet.
+    const earlierLines = userLinesOfSegmentBefore(context, metadata.sessionId);
     const segment = await openSegment(context, metadata.sessionId);
 
     return createActiveConversation({
@@ -117,7 +120,7 @@ export async function openConversation(
       context,
       conversationLease,
       segment,
-      earlierLines: userLinesOfSegmentBefore(context, metadata.sessionId),
+      earlierLines,
       queue: Promise.resolve(),
       closing: undefined,
     });
