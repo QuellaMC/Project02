@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {chmodSync, existsSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
@@ -7,6 +8,7 @@ import {loadProject02Home, type Project02Home} from '../../src/app/index.ts';
 import {
   createLocalCharacterRuntime,
   type GatewayEvent,
+  type LocalCharacterRuntime,
   type LocalCharacterRuntimeOptions,
 } from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
@@ -37,6 +39,16 @@ function replyAdapter(
   };
 }
 
+async function open(runtime: LocalCharacterRuntime) {
+  const outcome = await runtime.openDirectConversation();
+
+  if (outcome.status !== 'opened') {
+    throw new Error(outcome.message);
+  }
+
+  return outcome;
+}
+
 async function createConsentedHome(): Promise<{
   readonly homeRoot: string;
   readonly home: Project02Home;
@@ -59,7 +71,7 @@ async function createStartedRuntime(
   const runtime = createLocalCharacterRuntime({
     loadHome: () => home,
     characterId: 'mira',
-    pluginHost: createRuntimePluginHost({plugins: []}),
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
     roleModelAdapter: replyAdapter(),
     ...overrides,
   });
@@ -89,8 +101,8 @@ describe('local character runtime', () => {
       state: 'ready',
     });
 
-    const ref = await runtime.openDirectConversation();
-    const again = await runtime.openDirectConversation();
+    const ref = await open(runtime);
+    const again = await open(runtime);
 
     expect(again).toEqual(ref);
     expect(ref.characterId).toBe('mira');
@@ -98,6 +110,8 @@ describe('local character runtime', () => {
     const outcome = await runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 
@@ -138,10 +152,12 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({roleModelAdapter: adapter});
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const message = (text: string) => ({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text,
     });
 
@@ -163,22 +179,34 @@ describe('local character runtime', () => {
     const unstarted = createLocalCharacterRuntime({
       loadHome: () => home,
       characterId: 'mira',
-      pluginHost: createRuntimePluginHost({plugins: []}),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
       roleModelAdapter: replyAdapter(),
     });
 
     await expect(
-      unstarted.deliver({conversationId: 'c', senderId: 'u', text: 'hi'}),
+      unstarted.deliver({
+        conversationId: 'c',
+        senderId: 'u',
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'hi',
+      }),
     ).resolves.toMatchObject({
       status: 'refused',
       reason: 'character_unavailable',
     });
 
     const {runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
 
     await expect(
-      runtime.deliver({conversationId: 'no-such', senderId: 'u', text: 'hi'}),
+      runtime.deliver({
+        conversationId: 'no-such',
+        senderId: 'u',
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'hi',
+      }),
     ).resolves.toMatchObject({
       status: 'refused',
       reason: 'unknown_conversation',
@@ -187,6 +215,8 @@ describe('local character runtime', () => {
       runtime.deliver({
         conversationId: ref.conversationId,
         senderId: 'mira',
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hi',
       }),
     ).resolves.toMatchObject({
@@ -200,10 +230,12 @@ describe('local character runtime', () => {
     const {runtime} = await createStartedRuntime({
       roleModelAdapter: replyAdapter({rawOutputText: 'not json at all'}),
     });
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const rejected = await runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 
@@ -217,7 +249,7 @@ describe('local character runtime', () => {
 
   it('fails the character on a fatal turn and comes back through reactivate', async () => {
     const {homeRoot, runtime, events} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -225,6 +257,8 @@ describe('local character runtime', () => {
     const message = {
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     };
 
@@ -249,12 +283,15 @@ describe('local character runtime', () => {
       status: 'refused',
       reason: 'character_unavailable',
     });
-    await expect(runtime.openDirectConversation()).rejects.toThrow('failed');
+    await expect(runtime.openDirectConversation()).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'character_unavailable',
+    });
 
     await runtime.reactivate();
     expect(runtime.health().state).toBe('ready');
 
-    const reopened = await runtime.openDirectConversation();
+    const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await expect(runtime.deliver(message)).resolves.toMatchObject({
@@ -344,12 +381,9 @@ describe('local character runtime', () => {
   it('stop joins an attachment in flight before reporting shutdown complete', async () => {
     const {runtime} = await createStartedRuntime();
     let attachSettled = false;
-    const attach = runtime
-      .openDirectConversation()
-      .catch(() => undefined)
-      .finally(() => {
-        attachSettled = true;
-      });
+    const attach = runtime.openDirectConversation().finally(() => {
+      attachSettled = true;
+    });
 
     await runtime.stop();
 
@@ -371,12 +405,13 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({
-      pluginHost: createRuntimePluginHost({
-        plugins: [probe],
-        enabledPluginIds: ['session.end.probe'],
-      }),
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.probe'],
+        }),
     });
-    const attach = runtime.openDirectConversation().catch(() => undefined);
+    const attach = runtime.openDirectConversation();
 
     await runtime.stop();
     await attach;
@@ -392,7 +427,7 @@ describe('local character runtime', () => {
 
   it('stays failed when stop cannot release a conversation, and stops on retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const locksRoot = join(characterDataDirPath(homeRoot, 'mira'), '.locks');
 
     chmodSync(locksRoot, 0o500);
@@ -419,7 +454,7 @@ describe('local character runtime', () => {
 
   it('holds what recovery could not release and frees it on the retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const sessionsRoot = join(dataRoot, 'sessions');
     const locksRoot = join(dataRoot, '.locks');
@@ -430,6 +465,8 @@ describe('local character runtime', () => {
       await runtime.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -452,7 +489,7 @@ describe('local character runtime', () => {
 
     expect(runtime.health().state).toBe('ready');
 
-    const reopened = await runtime.openDirectConversation();
+    const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await runtime.stop();
@@ -468,18 +505,21 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({
-      pluginHost: createRuntimePluginHost({
-        plugins: [probe],
-        enabledPluginIds: ['session.end.probe'],
-      }),
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.probe'],
+        }),
       roleModelAdapter: replyAdapter({
         beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
       }),
     });
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const inFlight = runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 

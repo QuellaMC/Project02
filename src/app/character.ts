@@ -5,7 +5,7 @@ import {
   type CharacterDefinition,
   type CharacterPackageDiagnostic,
 } from '../characters/index.ts';
-import type {CharacterProfile} from '../core/index.ts';
+import {selectCharacterId, type CharacterProfile} from '../core/index.ts';
 import {
   bindProject02CharacterRuntimeLocation,
   createLayeredProject02RuntimeConfigSnapshot,
@@ -21,25 +21,34 @@ export type Project02CharacterListing = {
   readonly enabled: boolean;
 };
 
+/** The installed roster, plus the packages discovery could not publish. */
+export type Project02CharacterRoster = {
+  readonly characters: readonly Project02CharacterListing[];
+  readonly diagnostics: readonly CharacterPackageDiagnostic[];
+};
+
 /** Installed characters with their effective enabled state. */
 export function listProject02Characters(
   home: Project02Home,
-): readonly Project02CharacterListing[] {
+): Project02CharacterRoster {
   const discovery = discoverCharacterPackages({
     sources: defaultCharacterPackageSources(home.runtimeLocation.homeRoot),
   });
 
-  return Object.freeze(
-    discovery.characters.map(character => {
-      const identity = character.definition.identity;
+  return Object.freeze({
+    characters: Object.freeze(
+      discovery.characters.map(character => {
+        const identity = character.definition.identity;
 
-      return Object.freeze({
-        id: identity.id,
-        displayName: identity.displayName,
-        enabled: characterIsEnabled(home, identity.id),
-      });
-    }),
-  );
+        return Object.freeze({
+          id: identity.id,
+          displayName: identity.displayName,
+          enabled: characterIsEnabled(home, identity.id),
+        });
+      }),
+    ),
+    diagnostics: discovery.diagnostics,
+  });
 }
 
 function characterIsEnabled(home: Project02Home, characterId: string): boolean {
@@ -64,15 +73,11 @@ function characterIsEnabled(home: Project02Home, characterId: string): boolean {
   }
 }
 
-export type Project02CharacterSelection =
-  | {readonly status: 'selected'; readonly characterId: string}
-  | {readonly status: 'failed'; readonly message: string};
-
 /** The CLI-era default: no explicit character means the sole enabled one. */
 export function selectSoleEnabledCharacterId(
   home: Project02Home,
 ): string | Extract<Project02CharacterActivation, {status: 'failed'}> {
-  const characters = listProject02Characters(home);
+  const {characters} = listProject02Characters(home);
   const [first] = characters;
 
   // An unloadable global config defaults every enabled value, so the rule
@@ -87,7 +92,7 @@ export function selectSoleEnabledCharacterId(
     return first.id;
   }
 
-  const selection = selectProject02CharacterId(characters);
+  const selection = selectCharacterId(characters);
 
   return selection.status === 'selected'
     ? selection.characterId
@@ -98,41 +103,6 @@ export function selectSoleEnabledCharacterId(
           `${selection.message} (pass --character <id>)`,
         ]),
       });
-}
-
-/**
- * The one selection rule: an explicit id wins (activation validates it);
- * otherwise exactly one enabled character is the character to talk to.
- */
-export function selectProject02CharacterId(
-  characters: readonly {readonly id: string; readonly enabled: boolean}[],
-  explicitCharacterId?: string,
-): Project02CharacterSelection {
-  if (explicitCharacterId !== undefined) {
-    return Object.freeze({
-      status: 'selected',
-      characterId: explicitCharacterId.trim(),
-    });
-  }
-
-  const enabled = characters.filter(character => character.enabled);
-  const [sole] = enabled;
-
-  if (sole !== undefined && enabled.length === 1) {
-    return Object.freeze({status: 'selected', characterId: sole.id});
-  }
-
-  return Object.freeze({
-    status: 'failed',
-    message:
-      enabled.length === 0
-        ? 'No enabled character. Install a character package, or set ' +
-          'project02.enabled to true for an installed one — a global ' +
-          'project02.enabled of false disables them all.'
-        : 'Several characters are enabled: ' +
-          `${enabled.map(character => character.id).join(', ')}. ` +
-          'Pick one explicitly.',
-  });
 }
 
 export type Project02CharacterActivation =

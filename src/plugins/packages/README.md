@@ -194,5 +194,7 @@ character's package; it is rejected from the home `config.json`.
 1. `pnpm plugin:new <id>`, then shape the manifest and behavior.
 2. `pnpm check` — discovery picks the package up automatically; the schema
    parity suite validates your descriptor.
-3. Enable it (above), then `pnpm chat --store <path>` and exercise it; the
-   `demo-config` package is a worked example of agent-adjustable config.
+3. Enable it (above), start the daemon with `pnpm serve --store <path>`,
+   export the `PROJECT02_GATEWAY=` line it prints, then `pnpm chat` and
+   exercise it; the `demo-config` package is a worked example of
+   agent-adjustable config.

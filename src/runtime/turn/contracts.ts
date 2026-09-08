@@ -49,12 +49,29 @@ export type RunLocalUserMessageEventOptions = {
   readonly timeZone?: string;
   /** The model's context size; replayed history may use half of it. */
   readonly contextWindowTokens?: number;
+  /**
+   * The client's stamps on the message it carried, persisted on the commit
+   * record and echoed on the user_message progress event; the model never
+   * reads them.
+   */
+  readonly source?: string;
+  readonly clientMessageId?: string;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;
 };
 
+/** Emitted once the message is durable, so the stream never says more than the log. */
 export type LocalRuntimeTurnProgressEvent =
+  | {
+      readonly kind: 'user_message';
+      readonly messageId: string;
+      readonly speakerId: string;
+      readonly speakerName: string;
+      readonly text: string;
+      readonly source?: string;
+      readonly clientMessageId?: string;
+    }
   | {
       readonly kind: 'visible_reply';
       readonly messageId: string;

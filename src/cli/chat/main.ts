@@ -1,157 +1,92 @@
 /**
- * The disposable dev chat: a terminal over the gateway façade, and nothing
- * more. It reads a line, delivers it, prints events, and answers tool
- * confirmations; the web UI replaces it at parity and deletes it.
+ * The disposable dev chat: a terminal over the daemon's socket, and nothing
+ * more. It reads a line, delivers it, prints what the stream carries, and
+ * answers its own turns' confirmations; the web UI replaces it at parity
+ * and deletes it.
  */
-import {createInterface} from 'node:readline';
+import {randomUUID} from 'node:crypto';
 
+import {selectCharacterId} from '../../core/index.ts';
+import type {
+  GatewayHealth,
+  GatewayMessage,
+  PendingConfirmation,
+  TurnOutcome,
+} from '../../gateway/api/index.ts';
 import {
-  createGateway,
-  selectProject02CharacterId,
-  type Gateway,
-} from '../../gateway/index.ts';
-import type {RuntimePluginHost} from '../../plugins/index.ts';
-import {
-  selectChatProvider,
-  type RoleModelAdapter,
-} from '../../role-model/index.ts';
-import {
-  roleModelProviderEnvVarName,
-  type RuntimeLocationCliState,
-} from '../../runtime/config/index.ts';
+  createGatewayClient,
+  GatewayClientError,
+  gatewayUrlEnvVarName,
+  type GatewayClient,
+} from '../../gateway/client/index.ts';
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
-import {
-  matchesRuntimeStoreInitFlag,
-  parseRuntimeStoreFlag,
-} from '../shared/runtime-location-flags.ts';
-import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
-import {assertProject02StoreConsent} from '../shared/store-consent.ts';
-import {
-  formatCliTerminalErrorMessage,
-  isCliTerminalError,
-} from '../shared/terminal-errors.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
+import {createLineDispatcher} from './lines.ts';
+import {createConfirmationPrompts} from './prompts.ts';
+import {createTranscript} from './transcript.ts';
 
 export type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
-  /** Test and dev injection, handed through to the gateway. */
-  readonly pluginHost?: RuntimePluginHost;
-  readonly roleModelAdapter?: RoleModelAdapter;
-};
-
-type ChatCliFlags = {
-  readonly location: RuntimeLocationCliState;
-  readonly init: boolean;
-  readonly provider?: string;
 };
 
 export async function runChatCliFromArgs(
   args: readonly string[],
   options: ChatCliOptions,
 ): Promise<number> {
-  let gateway: Gateway | undefined;
-
   try {
-    const flags = parseChatCliFlags(args);
+    const explicitCharacterId = parseChatCliFlags(args);
+    const url = (options.env ?? process.env)[gatewayUrlEnvVarName];
 
-    // The one provider validator runs before consent can create a store,
-    // so a typo never mutates durable state — and its typed result rides
-    // the gateway option, leaving the process env (and its cwd-dotenv
-    // mode) untouched.
-    const provider =
-      flags.provider === undefined
-        ? undefined
-        : selectChatProvider(undefined, {
-            [roleModelProviderEnvVarName]: flags.provider,
-          });
+    if (url === undefined || url.trim().length === 0) {
+      throw new CliUsageError(
+        `${gatewayUrlEnvVarName} is not set. Run \`pnpm serve\` and export the ${gatewayUrlEnvVarName}=... line it prints.`,
+      );
+    }
 
-    await assertProject02StoreConsent({
-      location: flags.location,
-      init: flags.init,
-      stdout: options.stdout,
-      stdin: options.stdin,
-      ...(options.env === undefined ? {} : {env: options.env}),
-    });
-    gateway = createGateway({
-      location: flags.location,
-      ...(options.env === undefined ? {} : {env: options.env}),
-      ...(provider === undefined ? {} : {provider}),
-      ...(options.roleModelAdapter === undefined
-        ? {}
-        : {roleModelAdapter: options.roleModelAdapter}),
-      ...(options.pluginHost === undefined
-        ? {}
-        : {createPluginHost: () => options.pluginHost as RuntimePluginHost}),
-    });
-
-    const selection = selectProject02CharacterId(
-      gateway.characters(),
-      flags.location.character,
+    const client = createGatewayClient({url});
+    const health = await client.health();
+    const configError = health.config.diagnostics.find(
+      diagnostic => diagnostic.severity === 'error',
     );
+
+    if (configError !== undefined) {
+      options.stderr.write(`Warning: ${configError.message}\n`);
+    }
+
+    const selection = selectCharacterId(health.characters, explicitCharacterId);
 
     if (selection.status === 'failed') {
       throw new CliUsageError(`${selection.message} (pass --character <id>)`);
     }
 
-    return await runChat(gateway, selection.characterId, options);
+    await ensureStarted(client, health, selection.characterId);
+
+    return await runChat(client, selection.characterId, options);
   } catch (error: unknown) {
     options.stderr.write(
-      `Error: ${
-        isCliTerminalError(error)
-          ? formatCliTerminalErrorMessage(error)
-          : error instanceof Error
-            ? error.message
-            : String(error)
-      }\n`,
+      `Error: ${error instanceof Error ? error.message : String(error)}\n`,
     );
 
     return 1;
-  } finally {
-    if (gateway !== undefined) {
-      // Shutdown problems ride the event stream only; listen through the
-      // stop so failed plugin cleanup reaches the person leaving.
-      const stopListening = gateway.events(event => {
-        if (event.kind === 'state_changed' && event.message !== undefined) {
-          options.stderr.write(`Warning: ${event.message}\n`);
-        }
-      });
-
-      await gateway.stop();
-      stopListening();
-    }
   }
 }
 
-function parseChatCliFlags(args: readonly string[]): ChatCliFlags {
-  let location: RuntimeLocationCliState = {};
-  let init = false;
-  let provider: string | undefined;
+function parseChatCliFlags(args: readonly string[]): string | undefined {
+  let characterId: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
-    const store = parseRuntimeStoreFlag({args, index, location});
 
-    if (store.status === 'matched') {
-      location = store.location;
-      index = store.nextIndex;
-      continue;
-    }
-
-    if (matchesRuntimeStoreInitFlag(arg, init)) {
-      init = true;
-      continue;
-    }
-
-    if (arg === '--provider') {
-      if (provider !== undefined) {
-        throw new CliUsageError('--provider can only be provided once.');
+    if (arg === '--character') {
+      if (characterId !== undefined) {
+        throw new CliUsageError('--character can only be provided once.');
       }
 
-      provider = readFlagValue(args, index, '--provider');
+      characterId = readFlagValue(args, index, '--character');
       index += 1;
       continue;
     }
@@ -159,114 +94,194 @@ function parseChatCliFlags(args: readonly string[]): ChatCliFlags {
     throw new CliUsageError(`Unknown chat option: ${arg}.`);
   }
 
-  return {location, init, ...(provider === undefined ? {} : {provider})};
+  return characterId;
+}
+
+/** The daemon boots the roster; this is the operator's retry for the rest. */
+async function ensureStarted(
+  client: GatewayClient,
+  health: GatewayHealth,
+  characterId: string,
+): Promise<void> {
+  const summary = health.characters.find(
+    character => character.id === characterId,
+  );
+
+  if (summary?.state === 'ready') {
+    return;
+  }
+
+  const started = await client.startCharacter(characterId);
+
+  if (started.status === 'refused') {
+    throw new CliUsageError(started.message);
+  }
+
+  if (started.character.state !== 'ready') {
+    throw new CliUsageError(
+      started.character.diagnostic ?? `${characterId} did not start.`,
+    );
+  }
 }
 
 async function runChat(
-  gateway: Gateway,
+  client: GatewayClient,
   characterId: string,
   options: ChatCliOptions,
 ): Promise<number> {
-  const lines = createInterface({
-    input: options.stdin,
-    crlfDelay: Infinity,
-    terminal: false,
+  const opened = await client.openDirectConversation(characterId);
+
+  if (opened.status !== 'opened') {
+    throw new CliUsageError(opened.message);
+  }
+
+  // Per invocation, not per process id: a reused pid would make a new
+  // terminal take an earlier one's lines for its own and hide them.
+  const source = `chat-shim:${randomUUID()}`;
+  const streaming = new AbortController();
+  const lines = createLineDispatcher(options.stdin);
+  const transcript = createTranscript({
+    client,
+    conversationId: opened.conversationId,
+    source,
+    stdout: options.stdout,
+    signal: streaming.signal,
   });
-  const lineIterator = lines[Symbol.asyncIterator]();
-  // One shared in-flight read guards against double reads; the REPL waits
-  // out the confirmation chain besides, so a line typed under a visible
-  // [y/N] always answers that prompt and never becomes a chat message.
-  let inFlightLine: Promise<string | undefined> | undefined;
-  const nextLine = (): Promise<string | undefined> => {
-    inFlightLine ??= lineIterator.next().then(next => {
-      inFlightLine = undefined;
-
-      return next.done === true ? undefined : next.value;
-    });
-
-    return inFlightLine;
+  const prompts = createConfirmationPrompts({
+    client,
+    lines,
+    stdout: options.stdout,
+    stderr: options.stderr,
+    signal: streaming.signal,
+  });
+  const warn = (message: string): void => {
+    options.stderr.write(`Warning: ${message}\n`);
   };
-  let bootFailure: string | undefined;
-  // Between a prompt and its answer the REPL is mid-deliver, so a
-  // confirmation is the only reader of the line stream.
-  let confirmations: Promise<void> = Promise.resolve();
-  const stopListening = gateway.events(event => {
-    if (event.kind === 'turn_progress') {
-      if (event.progress.kind === 'visible_reply') {
-        options.stdout.write(
-          `${event.progress.speakerName}: ${event.progress.text}\n`,
-        );
-      }
-    } else if (event.kind === 'confirmation_requested') {
-      // Concurrent requests chain: each prompt prints only when it is next
-      // and consumes its own line, so one keystroke never approves two
-      // proposed effects. The person approves exactly what will happen:
-      // summary and the full proposed change, never the summary alone.
-      confirmations = confirmations.then(() => {
-        // Expired while queued behind earlier prompts: the broker already
-        // cancelled it, and asking now would feed the answer to the REPL.
-        if (Date.now() >= event.deadlineAt) {
-          gateway.answerConfirmation(event.id, 'denied');
-          return;
-        }
-
-        options.stdout.write(
-          `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
-            `${event.request.summary}\n` +
-            `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
-        );
-
-        return nextLine().then(
-          line => {
-            // Landed past the deadline: deny outright rather than trust the
-            // host's timer to have cancelled first — and say the line was
-            // discarded.
-            if (Date.now() >= event.deadlineAt) {
-              options.stderr.write(
-                'Confirmation timed out; the answer was discarded.\n',
-              );
-              gateway.answerConfirmation(event.id, 'denied');
-              return;
-            }
-
-            gateway.answerConfirmation(
-              event.id,
-              cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
-            );
-          },
-          () => {
-            // A failed read is a denial, never a parked confirmation.
-            gateway.answerConfirmation(event.id, 'denied');
-          },
-        );
-      });
-    } else if (event.state === 'failed' && event.message !== undefined) {
-      // Turn failures reach the user through the delivery outcome; this
-      // remembers the one failure with no outcome to carry it.
-      bootFailure ??= event.message;
+  const reportError = (error: unknown): void => {
+    options.stderr.write(
+      `Error: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  };
+  // A maintenance failure is known by its time, so a handshake's health
+  // does not repeat one the stream already carried.
+  let reportedMaintenanceAt: string | undefined;
+  const reportMaintenance = (failure: {at: string; message: string}): void => {
+    if (reportedMaintenanceAt !== failure.at) {
+      reportedMaintenanceAt = failure.at;
+      warn(failure.message);
     }
+  };
+  // This terminal answers for its own turns; the surface that sent a turn
+  // answers for it.
+  const own = (pending: PendingConfirmation): boolean =>
+    pending.turn?.source === source;
+  let characterReady = false;
+  const isCharacterReady = (): boolean => characterReady;
+  let streamFailure: unknown;
+  // Nothing is read until the first handshake is through: a line typed —
+  // or piped — before the stream listens would run a turn whose messages
+  // the stream never carries.
+  let firstHandshake: (() => void) | undefined;
+  const streamListening = new Promise<void>(resolve => {
+    firstHandshake = resolve;
   });
+  const streamEnded = client
+    .events(
+      event => {
+        if (event.kind === 'turn_progress') {
+          if (event.conversationId === opened.conversationId) {
+            transcript.showProgress(event.progress);
+          }
+        } else if (event.kind === 'turn_completed') {
+          // This terminal's own turn reports through its answer; another
+          // surface's turn has only the stream to say how it ended.
+          if (
+            event.conversationId === opened.conversationId &&
+            event.source !== source &&
+            event.status !== 'completed'
+          ) {
+            warn(
+              `a turn on this thread was ${event.status}${event.message === undefined ? '' : `: ${event.message}`}`,
+            );
+          }
+        } else if (event.kind === 'confirmation_requested') {
+          if (own(event)) {
+            prompts.ask(event);
+          }
+        } else if (event.kind === 'confirmation_settled') {
+          prompts.settle(event.id);
+        } else if (event.kind === 'state_changed') {
+          if (
+            event.characterId === characterId &&
+            event.message !== undefined
+          ) {
+            warn(event.message);
+          }
+        } else if (event.characterId === characterId) {
+          reportMaintenance(event);
+        }
+      },
+      {
+        signal: streaming.signal,
+        // The snapshot is the whole handshake: what health says the stream
+        // may have missed, the confirmations still waiting, and then the
+        // thread's tail — nothing to fetch and order.
+        onReady: async ({snapshot}) => {
+          const summary = snapshot.health.characters.find(
+            character => character.id === characterId,
+          );
+
+          if (summary?.maintenance !== undefined) {
+            reportMaintenance(summary.maintenance);
+          }
+
+          if (summary?.state === 'failed' && summary.diagnostic !== undefined) {
+            warn(summary.diagnostic);
+          }
+
+          characterReady = summary?.state === 'ready';
+          prompts.reconcile(snapshot.confirmations.filter(own));
+          await transcript.catchUp().catch(reportError);
+          firstHandshake?.();
+          firstHandshake = undefined;
+        },
+      },
+    )
+    .then(
+      () => undefined,
+      (error: unknown) => {
+        // Replies come only from the stream; without it this terminal would
+        // keep taking lines it can show nothing for.
+        streamFailure = error;
+        reportError(error);
+        lines.close();
+        firstHandshake?.();
+        firstHandshake = undefined;
+      },
+    );
 
   try {
-    await gateway.startCharacter(characterId);
+    await streamListening;
 
-    if (bootFailure !== undefined) {
-      throw new CliUsageError(bootFailure);
+    // Ready is said only of a character that is: one that failed between
+    // the open and the handshake has had its diagnostic said instead.
+    if (streamFailure === undefined && isCharacterReady()) {
+      options.stdout.write(`${characterId} is ready.\n`);
     }
-
-    const ref = await gateway.openDirectConversation(characterId);
-
-    options.stdout.write(`${characterId} is ready.\n`);
 
     for (;;) {
       // The prompt appears only once the confirmation chain is idle, so
       // every keystroke answers the prompt that is actually on screen.
-      await confirmations;
+      await prompts.idle();
       options.stdout.write('> ');
 
-      const line = await nextLine();
+      const line = await lines.replLine();
 
-      if (line === undefined || line.trim() === '/exit') {
+      if (
+        streamFailure !== undefined ||
+        line === undefined ||
+        line.trim() === '/exit'
+      ) {
         break;
       }
 
@@ -274,28 +289,86 @@ async function runChat(
         continue;
       }
 
-      const outcome = await gateway.deliver({
-        conversationId: ref.conversationId,
-        senderId: ref.userParticipantId,
-        text: line,
-      });
+      const outcome = await send(
+        client,
+        {
+          conversationId: opened.conversationId,
+          senderId: opened.userParticipantId,
+          text: line,
+          source,
+          clientMessageId: randomUUID(),
+        },
+        options,
+      );
+
+      if (outcome === undefined) {
+        continue;
+      }
 
       if (outcome.status !== 'completed') {
         options.stderr.write(`Error: ${outcome.message}\n`);
       }
 
-      // The gateway restarts the character, but this terminal's attachment
-      // died with the turn; exiting nonzero beats chatting into the void.
-      if (outcome.status === 'failed') {
-        return 1;
-      }
+      // This turn is done here once its own messages are on the screen.
+      await transcript.whenShown(
+        outcome.status === 'completed'
+          ? outcome.messages.map(message => message.messageId)
+          : [],
+      );
     }
 
-    return 0;
+    return streamFailure === undefined ? 0 : 1;
   } finally {
-    stopListening();
+    streaming.abort();
+    await streamEnded;
     lines.close();
   }
+}
+
+/**
+ * Delivers a line. A daemon that could not be reached is tried once more
+ * at once — the daemon's ledger answers a repeat under the same id with
+ * the turn's outcome rather than running it twice. A line the daemon still
+ * did not take, or refused because it is stopping, is said to have gone
+ * unsent, and the person sends it again when the daemon is back: this
+ * terminal keeps no line and never waits for the daemon.
+ */
+async function send(
+  client: GatewayClient,
+  message: GatewayMessage,
+  options: ChatCliOptions,
+): Promise<TurnOutcome | undefined> {
+  // A connection that broke may have carried the line before it did; a
+  // refusal after that says nothing about the earlier attempt.
+  let uncertain = false;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await client.deliver(message);
+    } catch (error: unknown) {
+      if (!(error instanceof GatewayClientError)) {
+        throw error;
+      }
+
+      if (error.status === 503) {
+        break;
+      }
+
+      if (error.status !== 0) {
+        throw error;
+      }
+
+      uncertain = true;
+    }
+  }
+
+  options.stderr.write(
+    uncertain
+      ? 'The daemon could not be reached and may not have taken your line. Send it again once the daemon is back.\n'
+      : 'The daemon is stopping and did not take your line. Send it again once the daemon is back.\n',
+  );
+
+  return undefined;
 }
 
 if (isMainModule(import.meta.url)) {

@@ -1,17 +1,30 @@
 import {chmodSync} from 'node:fs';
 import {join} from 'node:path';
-import {Readable} from 'node:stream';
+import {PassThrough, Readable} from 'node:stream';
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
+import {createGateway, type Gateway} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  characterDataDirPath,
+} from '../../src/runtime/storage/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
+import {
+  authoredTone,
+  createConfirmationHome,
+  createGatewayTestHome,
+} from '../support/gateway-fixtures.ts';
+import {
+  startTestGatewayServer,
+  type TestGatewayServer,
+  testGatewayToken,
+} from '../support/gateway-http.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
-import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(rawOutputText?: string): RoleModelAdapter {
   return {
@@ -27,12 +40,50 @@ function replyAdapter(rawOutputText?: string): RoleModelAdapter {
   };
 }
 
+/** A daemon the way serve runs it: the roster up before any client comes. */
+async function startDaemon(
+  adapter: RoleModelAdapter = replyAdapter(),
+  arrange: (storeRoot: string) => void = () => undefined,
+) {
+  const storeRoot = await createGatewayTestHome('project02-chat-shim-');
+
+  arrange(storeRoot);
+
+  const gateway = createGateway({
+    location: {storeRoot},
+    env: {},
+    roleModelAdapter: adapter,
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
+  });
+
+  await gateway.reconcile();
+
+  return serveDaemon(gateway, storeRoot);
+}
+
+async function serveDaemon(gateway: Gateway, storeRoot = '') {
+  const server = await startTestGatewayServer({gateway});
+
+  return {
+    storeRoot,
+    gateway,
+    server,
+    env: {PROJECT02_GATEWAY: `${server.baseUrl}/#token=${testGatewayToken}`},
+    close: async () => {
+      await server.close();
+      await gateway.stop();
+    },
+  };
+}
+
 async function runChat(
   args: readonly string[],
   options: {
-    readonly input?: string;
-    readonly rawOutputText?: string;
-  } = {},
+    readonly env: NodeJS.ProcessEnv;
+    readonly input?: string | NodeJS.ReadableStream;
+    readonly onStdout?: (stdout: string) => void;
+    readonly onStderr?: (stderr: string) => void;
+  },
 ): Promise<{
   readonly exitCode: number;
   readonly stdout: string;
@@ -40,44 +91,132 @@ async function runChat(
 }> {
   let stdout = '';
   let stderr = '';
+  const {input} = options;
 
   const exitCode = await runChatCliFromArgs(args, {
-    stdin: Readable.from([options.input ?? 'hello there\n/exit\n']),
+    stdin:
+      typeof input === 'string' || input === undefined
+        ? Readable.from([input ?? 'hello there\n/exit\n'])
+        : input,
     stdout: collect(chunk => {
       stdout += chunk;
+      options.onStdout?.(stdout);
     }),
     stderr: collect(chunk => {
       stderr += chunk;
+      options.onStderr?.(stderr);
     }),
-    env: {},
-    pluginHost: createRuntimePluginHost({plugins: []}),
-    roleModelAdapter: replyAdapter(options.rawOutputText),
+    env: options.env,
   });
 
   return {exitCode, stdout, stderr};
 }
 
+/** A shim on a live stdin, with a view of everything it printed so far. */
+function openShim(args: readonly string[], env: NodeJS.ProcessEnv) {
+  const stdin = new PassThrough();
+  let seen = '';
+  let errors = '';
+  const run = runChat(args, {
+    env,
+    input: stdin,
+    onStdout: stdout => {
+      seen = stdout;
+    },
+    onStderr: stderr => {
+      errors = stderr;
+    },
+  });
+  const printed = (text: string) =>
+    vi.waitFor(
+      () => {
+        expect(seen, `stderr so far:\n${errors}`).toContain(text);
+      },
+      {timeout: 10_000},
+    );
+
+  return {
+    stdin,
+    run,
+    printed,
+    seen: () => seen,
+    errors: () => errors,
+    async exit() {
+      stdin.write('/exit\n');
+
+      return run;
+    },
+  };
+}
+
+/** The DM's id, from an open that sends nothing. */
+async function conversationOf(gateway: Gateway): Promise<string> {
+  const opened = await gateway.openDirectConversation('mira');
+
+  if (opened.status !== 'opened') {
+    expect.fail(opened.message);
+  }
+
+  return opened.conversationId;
+}
+
+async function deliverFromWeb(
+  gateway: Gateway,
+  characterId: string,
+  text: string,
+  clientMessageId = `web-${text.replaceAll(/[^A-Za-z0-9]/gu, '-')}`,
+) {
+  const opened = await gateway.openDirectConversation(characterId);
+
+  if (opened.status !== 'opened') {
+    expect.fail(opened.message);
+  }
+
+  return {
+    conversationId: opened.conversationId,
+    outcome: gateway.deliver({
+      conversationId: opened.conversationId,
+      senderId: opened.userParticipantId,
+      text,
+      source: 'web',
+      clientMessageId,
+    }),
+  };
+}
+
 describe('chat shim', () => {
-  it('chats end to end over the gateway and exits cleanly', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-');
+  it('chats over the socket, showing what other surfaces say, and exits cleanly', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await shim.printed('mira is ready.');
+    // Ready means the stream is listening: no line can run ahead of it.
+    expect(daemon.server.events.openCount()).toBe(1);
+    shim.stdin.write('hello there\n');
+    await shim.printed('Mira: noted');
 
-    const {exitCode, stdout, stderr} = await runChat(['--store', storeRoot]);
+    // Another surface's message rides the same stream into this terminal.
+    const web = await deliverFromWeb(
+      daemon.gateway,
+      'mira',
+      'typed on the web',
+    );
+
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+    await shim.printed(': typed on the web');
+
+    const {exitCode, stderr} = await shim.exit();
 
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('mira is ready.');
-    expect(stdout).toContain('Mira: noted');
+    await daemon.close();
   });
 
   it('demands an explicit pick when several characters are enabled, then honors it', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-pick-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    writeTestCharacterPackage(storeRoot, {id: 'zeta', displayName: 'Zeta'});
-
-    const ambiguous = await runChat(['--store', storeRoot]);
+    const daemon = await startDaemon(replyAdapter(), storeRoot => {
+      writeTestCharacterPackage(storeRoot, {id: 'zeta', displayName: 'Zeta'});
+    });
+    const ambiguous = await runChat([], {env: daemon.env});
 
     expect(ambiguous.exitCode).toBe(1);
     expect(ambiguous.stderr).toContain(
@@ -85,100 +224,358 @@ describe('chat shim', () => {
     );
     expect(ambiguous.stderr).toContain('--character');
 
-    const picked = await runChat(['--store', storeRoot, '--character', 'zeta']);
+    const picked = await runChat(['--character', 'zeta'], {env: daemon.env});
 
+    expect(picked.stderr).toBe('');
     expect(picked.exitCode).toBe(0);
     expect(picked.stdout).toContain('Zeta: noted');
+    await daemon.close();
   });
 
-  it('rejects a repeated provider flag', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-provider-');
+  it('refuses a run without the daemon address, a repeated pick, or an unknown character', async () => {
+    const daemon = await startDaemon();
+    const unaddressed = await runChat([], {env: {}});
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    expect(unaddressed.exitCode).toBe(1);
+    expect(unaddressed.stderr).toContain('PROJECT02_GATEWAY is not set');
 
-    const {exitCode, stderr} = await runChat([
-      '--store',
-      storeRoot,
-      '--provider',
-      'local',
-      '--provider',
-      'local',
-    ]);
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('--provider can only be provided once');
-  });
-
-  it('rejects an unknown explicit character naming the discovered ids', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-unknown-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const {exitCode, stderr} = await runChat([
-      '--store',
-      storeRoot,
-      '--character',
-      'ghost',
-    ]);
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Character "ghost" was not found');
-    expect(stderr).toContain('mira');
-  });
-
-  it('exits nonzero when a turn dies fatally', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-fatal-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const sessionsRoot = join(
-      characterDataDirPath(storeRoot, 'mira'),
-      'sessions',
+    const repeated = await runChat(
+      ['--character', 'mira', '--character', 'mira'],
+      {env: daemon.env},
     );
-    let stderr = '';
-    let exitCode: number;
 
-    try {
-      exitCode = await runChatCliFromArgs(['--store', storeRoot], {
-        stdin: Readable.from(['hello there\n/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-        pluginHost: createRuntimePluginHost({plugins: []}),
-        roleModelAdapter: {
-          invoke() {
+    expect(repeated.exitCode).toBe(1);
+    expect(repeated.stderr).toContain('--character can only be provided once');
+
+    const unknown = await runChat(['--character', 'ghost'], {env: daemon.env});
+
+    expect(unknown.exitCode).toBe(1);
+    expect(unknown.stderr).toContain('ghost');
+    expect(unknown.stderr).toContain('mira');
+    await daemon.close();
+  });
+
+  it('keeps chatting through a fatal turn: the daemon recovers and holds the thread again', async () => {
+    let sessionsRoot = '';
+    let breakNextTurn = true;
+    const daemon = await startDaemon(
+      {
+        invoke() {
+          if (breakNextTurn) {
+            breakNextTurn = false;
             // Break the session store mid-turn so the commit fails.
             chmodSync(sessionsRoot, 0o000);
+          }
 
-            return {
-              rawOutputText: JSON.stringify({
-                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
-              }),
-            };
-          },
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+            }),
+          };
         },
-      });
-    } finally {
-      chmodSync(sessionsRoot, 0o755);
-    }
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Error:');
-  });
-
-  it('reports a rejected turn and keeps the session alive', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-shim-rejected-');
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const {exitCode, stdout, stderr} = await runChat(['--store', storeRoot], {
-      rawOutputText: 'not json at all',
+      },
+      storeRoot => {
+        sessionsRoot = join(
+          characterDataDirPath(storeRoot, 'mira'),
+          'sessions',
+        );
+      },
+    );
+    // The store is mended the moment the failure lands, before recovery.
+    const stopMending = daemon.gateway.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
     });
 
+    try {
+      const shim = openShim([], daemon.env);
+
+      await shim.printed('mira is ready.');
+      shim.stdin.write('boom\n');
+      await vi.waitFor(() => {
+        expect(shim.errors()).toContain('Error:');
+      });
+      await vi.waitFor(() => {
+        expect(daemon.gateway.health().characters[0]?.state).toBe('ready');
+      });
+
+      // Nothing to reattach: the next line lands on the recovered character.
+      shim.stdin.write('hello again\n');
+      await shim.printed('Mira: noted');
+      await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    } finally {
+      stopMending();
+      chmodSync(sessionsRoot, 0o755);
+      await daemon.close();
+    }
+  }, 20_000);
+
+  it("reports a rejected turn once, and another surface's rejected turn from the stream", async () => {
+    const daemon = await startDaemon(replyAdapter('not json at all'));
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    shim.stdin.write('hello there\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('Error:');
+    });
+    await vi.waitFor(() => {
+      expect(shim.seen().match(/> /gu)).toHaveLength(2);
+    });
+    expect(shim.errors().match(/^Error:/gmu)).toHaveLength(1);
+    expect(shim.errors()).not.toContain('Warning');
+
+    const web = await deliverFromWeb(daemon.gateway, 'mira', 'from the web');
+
+    await expect(web.outcome).resolves.toMatchObject({status: 'rejected'});
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain(
+        'Warning: a turn on this thread was rejected',
+      );
+    });
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    await daemon.close();
+  });
+
+  it("answers its own turn's confirmation with a line typed after the prompt, never one typed before", async () => {
+    const home = await createConfirmationHome();
+    const daemon = await serveDaemon(home.gateway);
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    // The turn asks for a tool change; a line typed before the prompt
+    // appears stays a chat line.
+    shim.stdin.write('please be warmer\n');
+    await vi.waitFor(
+      () => {
+        expect(home.gateway.pendingConfirmations()).toHaveLength(1);
+      },
+      {timeout: 10_000},
+    );
+    shim.stdin.write('and one more thing\n');
+    await shim.printed('[y/N] ');
+    shim.stdin.write('yes\n');
+    await shim.printed('Mira: done');
+    expect(authoredTone(home.inspectTone())).toBe('warm');
+
+    // The line typed under no prompt was a chat line, sent after the turn.
+    await shim.printed('> ');
+    await vi.waitFor(
+      async () => {
+        const history = await home.gateway.history(
+          await conversationOf(home.gateway),
+        );
+
+        expect(
+          history.status === 'ok' &&
+            history.messages.map(message => message.text),
+        ).toContain('and one more thing');
+      },
+      {timeout: 10_000},
+    );
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    await daemon.close();
+  });
+
+  it("leaves another surface's confirmation to the surface that sent the turn", async () => {
+    const home = await createConfirmationHome();
+    const daemon = await serveDaemon(home.gateway);
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+
+    const web = await deliverFromWeb(home.gateway, 'mira', 'please be warmer');
+
+    await vi.waitFor(
+      () => {
+        expect(home.gateway.pendingConfirmations()).toHaveLength(1);
+      },
+      {timeout: 10_000},
+    );
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(shim.seen()).not.toContain('Confirm');
+
+    const [pending] = home.gateway.pendingConfirmations();
+
+    expect(pending?.turn).toMatchObject({source: 'web'});
+    expect(
+      home.gateway.answerConfirmation(pending?.id ?? '', 'denied'),
+    ).toEqual({
+      status: 'answered',
+    });
+    await expect(web.outcome).resolves.toMatchObject({status: 'completed'});
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0, stderr: ''});
+    await daemon.close();
+  });
+
+  it('catches up on what the stream missed once it is back, and reports a maintenance failure from the snapshot', async () => {
+    // A window this small rotates after a few turns.
+    const daemon = await startDaemon(replyAdapter(), storeRoot => {
+      writeRuntimeConfig(join(storeRoot, 'config.json'), {
+        project02: {contextWindowTokens: 100},
+      });
+    });
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+
+    const first = await deliverFromWeb(daemon.gateway, 'mira', 'one');
+
+    await expect(first.outcome).resolves.toMatchObject({status: 'completed'});
+    await shim.printed('You: one');
+
+    // Hold the next segment's writer lease from outside, so the rotation
+    // fails after planning — while this terminal's stream is down.
+    const blocker = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot: characterDataDirPath(daemon.storeRoot, 'mira'),
+      sessionId: `${first.conversationId}.2`,
+    });
+    let returned: TestGatewayServer | undefined;
+
+    try {
+      await daemon.server.close();
+
+      for (const text of ['two', 'three', 'four']) {
+        const turn = await deliverFromWeb(daemon.gateway, 'mira', text);
+
+        await expect(turn.outcome).resolves.toMatchObject({
+          status: 'completed',
+        });
+      }
+
+      const failure = daemon.gateway.health().characters[0]?.maintenance;
+
+      expect(failure).toBeDefined();
+      returned = await startTestGatewayServer({
+        gateway: daemon.gateway,
+        port: daemon.server.port,
+      });
+      await shim.printed('You: four');
+      await vi.waitFor(
+        () => {
+          expect(shim.errors()).toContain(`Warning: ${failure?.message ?? ''}`);
+        },
+        {timeout: 10_000},
+      );
+      expect(shim.errors().match(/Warning:/gu)).toHaveLength(1);
+      expect(shim.seen().match(/Mira: noted/gu)).toHaveLength(4);
+      await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    } finally {
+      await returned?.close();
+      await blocker.release();
+      await daemon.gateway.stop();
+    }
+  }, 20_000);
+
+  it('says a line the daemon could not take went unsent, and takes the next one when the daemon is back', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+
+    // The daemon's socket goes away with a line in flight: the person is
+    // told, and the prompt comes back at once.
+    await daemon.server.close();
+    shim.stdin.write('did this land?\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('may not have taken your line');
+    });
+    await vi.waitFor(() => {
+      expect(shim.seen().match(/> /gu)).toHaveLength(2);
+    });
+
+    // It comes back on the same address: the stream returns on its own and
+    // the next line is taken; the unsent one is the person's to send again.
+    const returned = await startTestGatewayServer({
+      gateway: daemon.gateway,
+      port: daemon.server.port,
+    });
+
+    try {
+      shim.stdin.write('and now?\n');
+      await shim.printed('Mira: noted');
+
+      const history = await daemon.gateway.history(
+        await conversationOf(daemon.gateway),
+      );
+      const texts =
+        history.status === 'ok' &&
+        history.messages.map(message => message.text);
+
+      expect(texts).toContain('and now?');
+      expect(texts).not.toContain('did this land?');
+      await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+    } finally {
+      await returned.close();
+      await daemon.gateway.stop();
+    }
+  }, 20_000);
+
+  it('says a line refused by a stopping daemon was not taken', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    daemon.server.lifecycle.stopping = true;
+    shim.stdin.write('too late\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('did not take your line');
+    });
+    daemon.server.lifecycle.stopping = false;
+    await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
+
+    const history = await daemon.gateway.history(
+      await conversationOf(daemon.gateway),
+    );
+
+    expect(
+      history.status === 'ok' && history.messages.map(message => message.text),
+    ).not.toContain('too late');
+    await daemon.close();
+  });
+
+  it('ends, nonzero, when its stream can never come back', async () => {
+    const daemon = await startDaemon();
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    await daemon.server.close();
+
+    // The daemon comes back as another run, with another token: this
+    // terminal's stream is refused for good.
+    const returned = await startTestGatewayServer({
+      gateway: daemon.gateway,
+      port: daemon.server.port,
+      token: 'another-run-0123456789abcdef',
+    });
+
+    try {
+      const {exitCode, stderr} = await shim.run;
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toMatch(/^Error: .*token/mu);
+    } finally {
+      await returned.close();
+      await daemon.gateway.stop();
+    }
+  }, 20_000);
+
+  it('opens on the recent tail of the thread, so a reply to a terminal that is gone is not lost', async () => {
+    const daemon = await startDaemon();
+    const earlier = await deliverFromWeb(daemon.gateway, 'mira', 'from before');
+
+    await expect(earlier.outcome).resolves.toMatchObject({status: 'completed'});
+
+    const {exitCode, stdout} = await runChat([], {env: daemon.env});
+
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('mira is ready.');
-    expect(stderr).toContain('Error:');
+    expect(stdout.indexOf('You: from before')).toBeLessThan(
+      stdout.indexOf('mira is ready.'),
+    );
+    expect(stdout.indexOf('Mira: noted')).toBeLessThan(
+      stdout.indexOf('mira is ready.'),
+    );
+    await daemon.close();
   });
 });

@@ -20,9 +20,129 @@ import {
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeCharacterId,
+  parseSegmentSessionId,
   type LocalRuntimeSessionMetadata,
   type LocalRuntimeStorageLayout,
 } from './layout-contract.ts';
+
+export type ConversationSegmentListing = {
+  /** This conversation's segments in order; the last is the current one. */
+  readonly segments: readonly {
+    readonly sessionId: string;
+    readonly segment: number;
+  }[];
+  /** Catalog rows that would not decode; they are nobody's segment. */
+  readonly damagedEntryCount: number;
+};
+
+/**
+ * One character's segments of one conversation, read leniently: a damaged
+ * or stray catalog row is skipped. The character's data directory is made,
+ * with its marker, before any conversation of its is recorded, so a
+ * missing one is damage, never a character with no segments yet. The
+ * catalog's own order is by creation, so the segment number decides.
+ */
+export function listConversationSegments(options: {
+  readonly storeRoot: string;
+  readonly characterId: string;
+  readonly conversationId: string;
+}): ConversationSegmentListing {
+  const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
+  const storageOptions = {storeRoot: options.storeRoot};
+
+  requireCharacterDataMarker({storageOptions, characterId});
+
+  const catalog = readLenientSessionCatalog(
+    createLocalRuntimeStorageLayout(storageOptions),
+  );
+  const segments: {readonly sessionId: string; readonly segment: number}[] = [];
+
+  for (const metadata of catalog.sessions) {
+    let parsed;
+
+    try {
+      parsed = parseSegmentSessionId(metadata.sessionId);
+    } catch {
+      continue;
+    }
+
+    if (parsed.conversationId === options.conversationId) {
+      segments.push(
+        Object.freeze({sessionId: metadata.sessionId, segment: parsed.segment}),
+      );
+    }
+  }
+
+  segments.sort((left, right) => left.segment - right.segment);
+
+  return Object.freeze({
+    segments: Object.freeze(segments),
+    damagedEntryCount: catalog.damagedEntryCount,
+  });
+}
+
+type CommittedConversationMessages = {
+  readonly messages: readonly ConversationLogRecord[];
+  /** Lines that would not decode; the tolerant read skips them. */
+  readonly damagedRecordCount: number;
+};
+
+/**
+ * One segment's committed visible messages, whole. A torn tail is
+ * invisible, as it is to the plugin feed; a damaged record is a failure,
+ * because every reader of a whole segment needs it whole — history pages
+ * it, and the segment after it refuses the lines it holds. A segment the
+ * catalog names has its directory — the directory is made before the row
+ * and removed after it — so a missing one is damage, never an empty
+ * segment. Its transcript appears with its first record, so the newest
+ * segment of a conversation may lack one while every segment before it
+ * has one: what a missing transcript means is the caller's to say.
+ */
+export function readCommittedConversationMessages(options: {
+  readonly storeRoot: string;
+  readonly characterId: string;
+  readonly sessionId: string;
+  /** A missing transcript: an empty segment, or damage. */
+  readonly onMissing: 'allow' | 'reject';
+}): readonly ConversationLogRecord[] {
+  const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
+
+  requireCharacterDataMarker({
+    storageOptions: {storeRoot: options.storeRoot},
+    characterId,
+  });
+
+  const layout = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  });
+
+  assertSessionDirectoryReadable(layout, options.sessionId);
+
+  const rawEventsPath = createLocalRuntimeSessionPaths({
+    storeRoot: layout.storeRoot,
+    sessionId: options.sessionId,
+  }).rawEventsPath;
+  const tail = readCommittedTranscriptTail(rawEventsPath, 0);
+
+  if (tail.kind === 'absent' && options.onMissing === 'reject') {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Required local runtime transcript is missing: ${rawEventsPath}.`,
+    );
+  }
+
+  const committed = committedMessagesFromTail(tail);
+
+  if (committed.damagedRecordCount > 0) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Segment "${options.sessionId}" holds ` +
+        `${String(committed.damagedRecordCount)} damaged record(s).`,
+    );
+  }
+
+  return committed.messages;
+}
 import {decodeRawEventLogRecord} from './raw-event-codec.ts';
 import {
   assertSessionDirectoryReadable,
@@ -241,7 +361,35 @@ function sessionHistoryBatch(
     return emptySessionHistoryBatch(reset);
   }
 
-  const messages: RuntimePluginSessionHistoryMessage[] = [];
+  const committed = committedMessagesFromTail(tail);
+  const messages: RuntimePluginSessionHistoryMessage[] = committed.messages.map(
+    record =>
+      Object.freeze({
+        sessionId,
+        messageId: record.id,
+        role: record.role,
+        speakerName: record.speakerName,
+        text: record.text,
+        committedAt: record.committedAt,
+      }),
+  );
+
+  return Object.freeze({
+    messages: Object.freeze(messages),
+    nextCursor: encodeSessionHistoryCursor(fromOffset + tail.consumedBytes),
+    damagedRecordCount: committed.damagedRecordCount,
+    reset,
+  });
+}
+
+function committedMessagesFromTail(
+  tail: CommittedTranscriptTail,
+): CommittedConversationMessages {
+  if (tail.kind !== 'lines') {
+    return Object.freeze({messages: Object.freeze([]), damagedRecordCount: 0});
+  }
+
+  const messages: ConversationLogRecord[] = [];
   let damagedRecordCount = 0;
 
   for (const line of tail.lines) {
@@ -254,28 +402,12 @@ function sessionHistoryBatch(
       continue;
     }
 
-    if (record === undefined) {
-      continue;
+    if (record !== undefined) {
+      messages.push(record);
     }
-
-    messages.push(
-      Object.freeze({
-        sessionId,
-        messageId: record.id,
-        role: record.role,
-        speakerName: record.speakerName,
-        text: record.text,
-        committedAt: record.committedAt,
-      }),
-    );
   }
 
-  return Object.freeze({
-    messages: Object.freeze(messages),
-    nextCursor: encodeSessionHistoryCursor(fromOffset + tail.consumedBytes),
-    damagedRecordCount,
-    reset,
-  });
+  return Object.freeze({messages: Object.freeze(messages), damagedRecordCount});
 }
 
 function emptySessionHistoryBatch(reset: boolean): SessionHistoryMessageBatch {

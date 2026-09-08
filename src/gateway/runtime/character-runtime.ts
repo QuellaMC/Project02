@@ -11,6 +11,7 @@ import {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
   type RuntimePluginHost,
+  type RuntimePluginToolConfirmationHandler,
 } from '../../plugins/index.ts';
 import {
   createSelectedRoleModelAdapter,
@@ -24,17 +25,22 @@ import {
   endSession,
   openConversation,
   type ActiveConversation,
+  type SegmentRotation,
   type UserMessageDelivery,
 } from '../../runtime/index.ts';
+import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
 import type {
   CharacterRuntime,
   CharacterRuntimeHealth,
   CharacterRuntimeState,
-  ConversationRef,
   GatewayEvent,
   GatewayEventListener,
   GatewayMessage,
   GatewayRefusalReason,
+  MaintenanceFailure,
+  OpenOutcome,
+  PendingConfirmation,
+  TurnIdentity,
   TurnOutcome,
   Unsubscribe,
 } from '../api/contract.ts';
@@ -47,15 +53,21 @@ export type LocalCharacterRuntimeOptions = {
   /** Loaded fresh per assembly, so config fixes reach retries. */
   readonly loadHome: () => Project02Home;
   readonly characterId: string;
-  /** Test and dev injection; a production start constructs everything. */
-  readonly pluginHost?: RuntimePluginHost;
+  /**
+   * Test and dev injection; a production start constructs everything. The
+   * factory receives this runtime's confirmation seam, so an injected host
+   * parks confirmations exactly like a constructed one.
+   */
+  readonly createPluginHost?: (
+    confirmations: RuntimePluginToolConfirmationHandler,
+  ) => RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly provider?: ChatProviderName;
 };
 
 export type LocalCharacterRuntime = CharacterRuntime & {
   /** Open-or-resume the user DM; idempotent while the runtime is ready. */
-  openDirectConversation(): Promise<ConversationRef>;
+  openDirectConversation(): Promise<OpenOutcome>;
 };
 
 type AssembledCharacter = {
@@ -78,9 +90,12 @@ type RuntimeContext = {
   readonly broker: ConfirmationBroker;
   state: CharacterRuntimeState;
   failure: string | undefined;
+  maintenance: MaintenanceFailure | undefined;
   assembled: AssembledCharacter | undefined;
   queue: Promise<unknown>;
-  opening: Promise<ConversationRef> | undefined;
+  /** The submission whose turn runs right now; the broker stamps it. */
+  turn: TurnIdentity | undefined;
+  opening: Promise<OpenOutcome> | undefined;
   stopping: Promise<void> | undefined;
   releasing: Promise<string[]> | undefined;
 };
@@ -111,11 +126,22 @@ export function createLocalCharacterRuntime(
       emit: event => {
         emit(listeners, event);
       },
+      turnOf: () => context.turn,
+      onSettled: (id, decision) => {
+        emit(listeners, {
+          kind: 'confirmation_settled',
+          characterId,
+          id,
+          decision,
+        });
+      },
     }),
     state: 'stopped',
     failure: undefined,
+    maintenance: undefined,
     assembled: undefined,
     queue: Promise.resolve(),
+    turn: undefined,
     opening: undefined,
     stopping: undefined,
     releasing: undefined,
@@ -130,8 +156,15 @@ export function createLocalCharacterRuntime(
     },
     reactivate: () => reactivateRuntime(context),
     deliver: (message: GatewayMessage) => deliverMessage(context, message),
+    pendingConfirmations(): readonly PendingConfirmation[] {
+      return Object.freeze(
+        context.broker
+          .pending()
+          .map(parked => Object.freeze({characterId, ...parked})),
+      );
+    },
     answerConfirmation(id, decision) {
-      context.broker.answer(id, decision);
+      return context.broker.answer(id, decision);
     },
     health(): CharacterRuntimeHealth {
       return Object.freeze({
@@ -139,6 +172,9 @@ export function createLocalCharacterRuntime(
         state: context.state,
         openConversationIds: Object.freeze([...context.conversations.keys()]),
         ...(context.failure === undefined ? {} : {failure: context.failure}),
+        ...(context.maintenance === undefined
+          ? {}
+          : {maintenance: context.maintenance}),
       });
     },
     events(listener: GatewayEventListener): Unsubscribe {
@@ -148,17 +184,28 @@ export function createLocalCharacterRuntime(
         listeners.delete(listener);
       };
     },
-    openDirectConversation(): Promise<ConversationRef> {
+    openDirectConversation(): Promise<OpenOutcome> {
       // A cached attachment is only as alive as the runtime: off ready,
-      // openDirect explains the state instead of handing back a stale ref.
+      // the outcome explains the state instead of handing back a stale ref.
       if (lifecycleLeft(context, 'ready')) {
-        return openDirect(context);
+        return Promise.resolve(unavailableOutcome(context));
       }
 
-      context.opening ??= openDirect(context).catch((error: unknown) => {
-        context.opening = undefined;
-        throw error;
-      });
+      // Only an opened thread is worth remembering: a refusal or a failure
+      // clears the memo so the next attach tries again.
+      context.opening ??= openDirect(context).then(
+        outcome => {
+          if (outcome.status !== 'opened') {
+            context.opening = undefined;
+          }
+
+          return outcome;
+        },
+        (error: unknown) => {
+          context.opening = undefined;
+          throw error;
+        },
+      );
 
       return context.opening;
     },
@@ -218,6 +265,8 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 
   context.stopping = undefined;
+  // A failure belongs to the boot it happened in.
+  context.maintenance = undefined;
   // A fresh boot re-arms the broker that the previous stop left cancelling.
   context.broker.arm();
 
@@ -279,7 +328,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   // The enabled decision lives on this seam so reactivation honors a
   // disable that landed while the character was running — and it runs
   // before activation, which materializes durable character state.
-  const listed = listProject02Characters(home).find(
+  const listed = listProject02Characters(home).characters.find(
     character => character.id === characterId,
   );
 
@@ -289,7 +338,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
 
   const startup = await activateProject02Character(home, {
     characterId,
-    continueAfterActivationErrors: options.pluginHost !== undefined,
+    continueAfterActivationErrors: options.createPluginHost !== undefined,
     // Runs in the planning phase, so a bad provider value is refused
     // before any durable character state is written.
     validateRuntimeEnv: env => {
@@ -333,11 +382,11 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     ) ?? options.roleModelAdapter;
   const adapterOption = adapter === undefined ? {} : {adapter};
 
-  if (options.pluginHost !== undefined) {
+  if (options.createPluginHost !== undefined) {
     return {
       ...shared,
       ...adapterOption,
-      host: options.pluginHost,
+      host: options.createPluginHost(context.broker.handler),
       ownsHost: false,
     };
   }
@@ -373,21 +422,36 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   return {...shared, ...adapterOption, host: configured.host, ownsHost: true};
 }
 
-async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
+async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
   const {assembled} = context;
 
   if (context.state !== 'ready' || assembled === undefined) {
-    throw new TypeError(
-      `Character "${context.characterId}" has no open runtime (state ` +
-        `"${context.state}").`,
-    );
+    return unavailableOutcome(context);
   }
 
-  const active = await openConversation({
-    homeRoot: assembled.storeRoot,
-    character: assembled.profile,
-    userDisplayName: assembled.userDisplayName,
-  });
+  let active: ActiveConversation;
+
+  try {
+    active = await openConversation({
+      homeRoot: assembled.storeRoot,
+      character: assembled.profile,
+      userDisplayName: assembled.userDisplayName,
+    });
+  } catch (error: unknown) {
+    // Another process holds the thread, or the store itself is broken:
+    // both are the caller's to hear about, and neither is a bug.
+    if (error instanceof LocalRuntimeStorageContractError) {
+      return error.code === 'conversation_busy'
+        ? refusedOpen('conversation_busy', error.message)
+        : Object.freeze({
+            status: 'failed' as const,
+            code: error.code,
+            message: error.message,
+          });
+    }
+
+    throw error;
+  }
 
   // Registered before the overtake check: a stop that arrived while the
   // thread opened releases it through the one release path, which retains
@@ -395,16 +459,33 @@ async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
   context.conversations.set(active.conversation.id, active);
 
   if (lifecycleLeft(context, 'ready')) {
-    throw new TypeError(
+    return refusedOpen(
+      'character_unavailable',
       `Character "${context.characterId}" stopped while attaching.`,
     );
   }
 
   return Object.freeze({
+    status: 'opened' as const,
     conversationId: active.conversation.id,
     characterId: context.characterId,
     userParticipantId: active.session.userSpeaker.id,
   });
+}
+
+function unavailableOutcome(context: RuntimeContext): OpenOutcome {
+  return refusedOpen(
+    'character_unavailable',
+    `Character "${context.characterId}" is not ready (state ` +
+      `"${context.state}").`,
+  );
+}
+
+function refusedOpen(
+  reason: Extract<OpenOutcome, {status: 'refused'}>['reason'],
+  message: string,
+): OpenOutcome {
+  return Object.freeze({status: 'refused' as const, reason, message});
 }
 
 function deliverMessage(
@@ -465,10 +546,18 @@ async function runTurn(
 
   let delivery: UserMessageDelivery;
 
+  context.turn = {
+    conversationId: message.conversationId,
+    source: message.source,
+    clientMessageId: message.clientMessageId,
+  };
+
   try {
     delivery = await deliverUserMessage({
       conversation: active,
       line: message.text,
+      source: message.source,
+      clientMessageId: message.clientMessageId,
       pluginHost: assembled.host,
       ...(assembled.adapter === undefined
         ? {}
@@ -487,13 +576,26 @@ async function runTurn(
     });
   } catch (error: unknown) {
     return fatalOutcome(context, message.conversationId, error);
+  } finally {
+    context.turn = undefined;
   }
 
   if (delivery.status === 'failed') {
     return fatalOutcome(context, message.conversationId, delivery.error);
   }
 
+  if (delivery.status === 'duplicate') {
+    return refusedOutcome(
+      'duplicate_submission',
+      `clientMessageId "${delivery.clientMessageId}" is already on this ` +
+        `conversation as message ${delivery.messageId}, taken by an ` +
+        'earlier run of the daemon; read the thread for its reply.',
+    );
+  }
+
   if (delivery.status === 'completed') {
+    recordMaintenance(context, delivery.rotation);
+
     return Object.freeze({
       status: 'completed' as const,
       characterId: context.characterId,
@@ -515,6 +617,38 @@ async function runTurn(
     conversationId: message.conversationId,
     reason: delivery.turn.reason,
     message: delivery.turn.message,
+  });
+}
+
+/**
+ * Rotation is the character's memory management, invisible to the
+ * conversation: a failed rotation is planned again next turn, and a closed
+ * segment's failed session end is already in its log. What the person can
+ * do about either is know — through health and the stream, never as the
+ * turn's outcome, which stays completed.
+ */
+function recordMaintenance(
+  context: RuntimeContext,
+  rotation: SegmentRotation | undefined,
+): void {
+  const message =
+    rotation === undefined
+      ? undefined
+      : rotation.status === 'failed'
+        ? rotation.message
+        : rotation.endFailure;
+
+  if (message === undefined) {
+    return;
+  }
+
+  const failure = Object.freeze({at: new Date().toISOString(), message});
+
+  context.maintenance = failure;
+  emit(context.listeners, {
+    kind: 'maintenance_failed',
+    characterId: context.characterId,
+    ...failure,
   });
 }
 

@@ -26,6 +26,7 @@
     "chat": "node src/cli/chat/main.ts",
     "runtime-config": "node src/cli/config/main.ts",
     "inspect": "node src/cli/inspect/main.ts",
+    "serve": "node src/cli/serve/main.ts",
     "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
@@ -40,10 +41,12 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage"
   },
   "dependencies": {
+    "@hono/node-server": "2.1.1",
     "ajv": "^8.20.0",
     "better-sqlite3": "^12.11.1",
     "compromise": "14.16.0",
     "drizzle-orm": "^0.45.2",
+    "hono": "4.13.5",
     "mem0ai": "^3.1.6",
     "natural": "8.1.1",
     "pg": "8.11.3"

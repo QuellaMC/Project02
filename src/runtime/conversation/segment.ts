@@ -11,7 +11,13 @@ import {
 } from '../evidence/records.ts';
 import {createRuntimeEventIdentity} from '../../core/index.ts';
 import {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
+import type {ConversationLogRecord} from '../evidence/records.ts';
 import {createFileRuntimeLogStore} from '../storage/file-runtime-log-store.ts';
+import {
+  parseSegmentSessionId,
+  segmentSessionId,
+} from '../storage/layout-contract.ts';
+import {readCommittedConversationMessages} from '../storage/session-history-feed.ts';
 import type {
   LocalRuntimeMutationLockLease,
   LocalRuntimeMutationLockOwnerToken,
@@ -136,6 +142,47 @@ export async function openContinuedSegment(
 
     throw error;
   }
+}
+
+/** The client ids of the user lines among these records, each with its message id. */
+export function userLinesOf(
+  records: readonly ConversationLogRecord[],
+): ReadonlyMap<string, string> {
+  const lines = new Map<string, string>();
+
+  for (const record of records) {
+    if (record.role === 'user' && record.clientMessageId !== undefined) {
+      lines.set(record.clientMessageId, record.id);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * The user lines of the segment before this one, so a line committed just
+ * before a rotation is known to the segment after it: a daemon can go down
+ * between the two and before answering. A first segment has none. One that
+ * cannot be read fails the open, as an unreadable current segment would: a
+ * line it holds could otherwise run twice.
+ */
+export function userLinesOfSegmentBefore(
+  context: SegmentContext,
+  sessionId: string,
+): ReadonlyMap<string, string> {
+  const {conversationId, segment} = parseSegmentSessionId(sessionId);
+
+  if (segment <= 1) {
+    return new Map();
+  }
+
+  return userLinesOf(
+    readCommittedConversationMessages({
+      ...context.storageOptions,
+      sessionId: segmentSessionId(conversationId, segment - 1),
+      onMissing: 'reject',
+    }),
+  );
 }
 
 function readDurableConversationEvidence(

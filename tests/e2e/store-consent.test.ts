@@ -2,11 +2,11 @@ import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
 
-import {describe, expect, it, onTestFinished} from 'vitest';
+import {describe, expect, it, onTestFinished, vi} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
+import {runServeCliFromArgs} from '../../src/cli/serve/main.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -303,11 +303,11 @@ describe('store consent gate', () => {
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 
-  it('refuses a chat run before it materializes any character state', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-chat-');
+  it('refuses to serve before it materializes any character state', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-serve-');
     let stderr = '';
 
-    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+    const exitCode = await runServeCliFromArgs(['--store', storeRoot], {
       stdin: pipedStdin(),
       stdout: collect(() => {}),
       stderr: collect(chunk => {
@@ -315,11 +315,42 @@ describe('store consent gate', () => {
       }),
       env: {},
       pluginHost: createRuntimePluginHost({plugins: []}),
+      signal: new AbortController().signal,
+      port: 0,
     });
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
     expect(readdirSync(storeRoot)).toEqual([]);
     expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
+  });
+
+  it('lets a stop reach serve at the consent question, and takes it as a no', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-serve-stop-');
+    const abort = new AbortController();
+    let stdout = '';
+    let stderr = '';
+
+    const run = runServeCliFromArgs(['--store', storeRoot], {
+      stdin: interactiveStdin(),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+      pluginHost: createRuntimePluginHost({plugins: []}),
+      signal: abort.signal,
+      port: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(stdout).toContain('Create one there? [y/N]');
+    });
+    abort.abort();
+    await expect(run).resolves.toBe(1);
+    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
+    expect(readdirSync(storeRoot)).toEqual([]);
   });
 });
