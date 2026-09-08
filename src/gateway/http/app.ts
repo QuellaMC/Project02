@@ -1,9 +1,7 @@
-import {serveStatic} from '@hono/node-server/serve-static';
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {bearerAuth} from 'hono/bearer-auth';
 import {bodyLimit} from 'hono/body-limit';
 import {HTTPException} from 'hono/http-exception';
-import {relative} from 'node:path';
 
 import {gatewayLoopbackHostnames, type Gateway} from '../api/contract.ts';
 import {createApiRouter, errorBody} from './api.ts';
@@ -20,8 +18,6 @@ export type CreateGatewayAppOptions = {
   readonly token: string;
   readonly events: EventStreams;
   readonly lifecycle: GatewayLifecycle;
-  /** Static files for the web UI, served without auth; absent until PR 4 ships one. */
-  readonly uiRoot?: string;
 };
 
 /** A message is a few KiB; a body past this is not a message. */
@@ -99,17 +95,10 @@ export function createGatewayApp(options: CreateGatewayAppOptions) {
     ),
   );
 
-  if (options.uiRoot === undefined) {
-    routes.get('/', c =>
-      c.text('No web UI is installed here. The API is under /api.', 404),
-    );
-  } else {
-    // The Node adapter resolves the root against the working directory.
-    routes.get(
-      '/*',
-      serveStatic({root: relative(process.cwd(), options.uiRoot)}),
-    );
-  }
+  // A person who opens the printed address in a browser lands here.
+  routes.get('/', c =>
+    c.text('No web UI is installed here. The API is under /api.', 404),
+  );
 
   return routes;
 }

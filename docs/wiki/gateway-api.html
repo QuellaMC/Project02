@@ -173,8 +173,8 @@
             <td>404</td>
             <td><code>not_found</code></td>
             <td>
-              Unknown route, including an unknown <code>/api/*</code> — never a
-              static fallthrough.
+              Unknown route, including an unknown <code>/api/*</code>, which
+              answers behind the same auth.
             </td>
           </tr>
           <tr>
@@ -202,8 +202,7 @@
 
       <p>
         Every <code>/api/*</code> response carries
-        <code>Cache-Control: no-store</code>. Static UI files are served for
-        <code>GET</code> and <code>HEAD</code> only, without auth.
+        <code>Cache-Control: no-store</code>.
       </p>
 
       <h2>Routes</h2>
@@ -295,11 +294,11 @@
             <td>SSE, described below.</td>
           </tr>
           <tr>
-            <td>UI</td>
-            <td><code>GET /</code>, <code>GET /&lt;file&gt;</code></td>
+            <td>root</td>
+            <td><code>GET /</code></td>
             <td>
-              Static files from the UI root when the daemon has one; otherwise a
-              plain-text 404 naming <code>/api</code>.
+              A plain-text 404 naming <code>/api</code>, until a web UI is
+              installed.
             </td>
           </tr>
         </tbody>

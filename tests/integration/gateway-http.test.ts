@@ -1,4 +1,3 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
 import {connect} from 'node:net';
 import {join} from 'node:path';
 
@@ -46,7 +45,7 @@ type RequestOptions = {
 };
 
 async function createHttpHarness(
-  options: {readonly uiRoot?: string; readonly stopping?: () => boolean} = {},
+  options: {readonly stopping?: () => boolean} = {},
 ) {
   const homeRoot = join(createTestTempRoot('project02-gateway-http-'), 'home');
 
@@ -63,7 +62,6 @@ async function createHttpHarness(
     token,
     events: createEventStreams(gateway),
     lifecycle: {stopping: options.stopping ?? (() => false)},
-    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   // Every request names the loopback host and carries the token unless a
   // case overrides one of them.
@@ -275,20 +273,8 @@ describe('gateway over HTTP', () => {
     await gateway.stop();
   });
 
-  it('keeps unknown API routes inside the API and static files out of it', async () => {
-    const outside = createTestTempRoot('project02-gateway-ui-');
-    const uiRoot = join(outside, 'ui');
-
-    mkdirSync(uiRoot, {recursive: true});
-    writeFileSync(join(uiRoot, 'index.html'), '<h1>ui ok</h1>', 'utf8');
-    writeFileSync(join(outside, 'secret.txt'), 'not for the browser', 'utf8');
-
-    const {request} = await createHttpHarness({uiRoot});
-
-    const page = await request('/', {headers: {authorization: ''}});
-
-    expect(page.status).toBe(200);
-    expect(await page.text()).toContain('ui ok');
+  it('answers an unknown API route with the envelope, behind the same auth', async () => {
+    const {request} = await createHttpHarness();
 
     const missingApi = await request('/api/missing');
 
@@ -305,22 +291,6 @@ describe('gateway over HTTP', () => {
     });
 
     expect(apiRootNoToken.status).toBe(401);
-
-    const postedFile = await request('/index.html', {method: 'POST'});
-
-    expect(postedFile.status).toBe(404);
-
-    // A path that climbs out of the UI root reaches nothing: encoded or not.
-    for (const path of [
-      '/%2e%2e/secret.txt',
-      '/../secret.txt',
-      '/ui/../../secret.txt',
-    ]) {
-      const escape = await request(path, {headers: {authorization: ''}});
-
-      expect(escape.status, path).toBe(404);
-      expect(await escape.text()).not.toContain('not for the browser');
-    }
   });
 
   it('answers a plain 404 at the root without a UI, and 503 once stopping', async () => {

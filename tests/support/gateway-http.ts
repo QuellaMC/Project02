@@ -67,7 +67,6 @@ export async function listen(
 /** A real socket on an ephemeral port over a gateway the test already holds. */
 export async function startTestGatewayServer(options: {
   readonly gateway: Gateway;
-  readonly uiRoot?: string;
   readonly streams?: EventStreamsOptions;
   /** A port to come back on, for a daemon that goes away and returns. */
   readonly port?: number;
@@ -81,7 +80,6 @@ export async function startTestGatewayServer(options: {
     token: options.token ?? testGatewayToken,
     events,
     lifecycle: {stopping: () => lifecycle.stopping},
-    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   const server = await listen(app, options.port ?? 0);
 

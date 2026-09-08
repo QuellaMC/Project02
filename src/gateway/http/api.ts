@@ -41,7 +41,7 @@ const historyQuery = validator(
  * Every route returns its verb's outcome verbatim with a 200: the status
  * codes describe the transport, and `status` in the body describes what
  * happened. An unknown `/api` route is a 404 envelope here, behind the same
- * auth, so it can never fall through to the static files.
+ * auth, so nothing outside the API ever answers for one.
  */
 export function createApiRouter(
   gateway: Gateway,
