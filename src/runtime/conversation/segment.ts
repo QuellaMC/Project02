@@ -180,7 +180,7 @@ export function userLinesOfSegmentBefore(
     readCommittedConversationMessages({
       ...context.storageOptions,
       sessionId: segmentSessionId(conversationId, segment - 1),
-    }).messages,
+    }),
   );
 }
 

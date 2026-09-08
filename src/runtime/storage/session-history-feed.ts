@@ -87,25 +87,26 @@ export function listConversationSegments(options: {
   });
 }
 
-export type CommittedConversationMessages = {
+type CommittedConversationMessages = {
   readonly messages: readonly ConversationLogRecord[];
   /** Lines that would not decode; the tolerant read skips them. */
   readonly damagedRecordCount: number;
 };
 
 /**
- * One segment's committed visible messages, whole, through the same
- * tolerant read the plugin feed uses: torn tails invisible, damaged records
- * counted and skipped. A segment the catalog names has its directory —
- * the directory is made before the row and removed after it — so a
- * missing one is damage, never an empty segment. The gateway's history is
- * built on this.
+ * One segment's committed visible messages, whole. A torn tail is
+ * invisible, as it is to the plugin feed; a damaged record is a failure,
+ * because every reader of a whole segment needs it whole — history pages
+ * it, and the segment after it refuses the lines it holds. A segment the
+ * catalog names has its directory — the directory is made before the row
+ * and removed after it — so a missing one is damage, never an empty
+ * segment.
  */
 export function readCommittedConversationMessages(options: {
   readonly storeRoot: string;
   readonly characterId: string;
   readonly sessionId: string;
-}): CommittedConversationMessages {
+}): readonly ConversationLogRecord[] {
   const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
 
   requireCharacterDataMarker({
@@ -119,7 +120,7 @@ export function readCommittedConversationMessages(options: {
 
   assertSessionDirectoryReadable(layout, options.sessionId);
 
-  return committedMessagesFromTail(
+  const committed = committedMessagesFromTail(
     readCommittedTranscriptTail(
       createLocalRuntimeSessionPaths({
         storeRoot: layout.storeRoot,
@@ -128,6 +129,16 @@ export function readCommittedConversationMessages(options: {
       0,
     ),
   );
+
+  if (committed.damagedRecordCount > 0) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Segment "${options.sessionId}" holds ` +
+        `${String(committed.damagedRecordCount)} damaged record(s).`,
+    );
+  }
+
+  return committed.messages;
 }
 import {decodeRawEventLogRecord} from './raw-event-codec.ts';
 import {

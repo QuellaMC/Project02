@@ -41,7 +41,6 @@ export {
   createLocalRuntimeSessionHistoryFeed,
   listConversationSegments,
   readCommittedConversationMessages,
-  type CommittedConversationMessages,
   type ConversationSegmentListing,
 } from './session-history-feed.ts';
 export {
