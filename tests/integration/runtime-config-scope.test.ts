@@ -29,10 +29,13 @@ import {
   bindProject02CharacterRuntimeLocation,
   characterOverlayConfigPath,
   characterSecretsEnvPath,
+  createLayeredProject02RuntimeConfigSnapshot,
+  createProject02ConfigFieldInspectShapes,
   readCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
+  type RuntimePluginConfigFieldInspectShape,
   loadProject02RuntimeConfigWithLocation,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
@@ -1179,6 +1182,70 @@ describe('plugin manifest config scope policy', () => {
     expect(
       fallthrough.pluginConfigs['scope.layered-secrets']?.['apiKey'],
     ).toMatchObject({resolved: true, value: 'operator-account'});
+  });
+
+  it('inspects the host fields in the plugin field shape, per scope', async () => {
+    const {homeRoot, dataRoot} = seededHome();
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {contextWindowTokens: 4096},
+    });
+
+    const loadedConfig = loadRuntimeConfigForTest({
+      storeRoot: homeRoot,
+      env: {},
+    });
+    const fieldsOf = (
+      targetScope: 'global' | 'character',
+    ): Record<string, RuntimePluginConfigFieldInspectShape> =>
+      Object.fromEntries(
+        createProject02ConfigFieldInspectShapes({
+          layeredConfig: createLayeredProject02RuntimeConfigSnapshot({
+            loadedConfig,
+            ...(targetScope === 'global'
+              ? {}
+              : {
+                  overlayConfig: readCharacterOverlayForScope({
+                    characterId: 'mira',
+                    dataRoot,
+                  }).overlay,
+                }),
+          }),
+          targetScope,
+        }).map(field => [field.name, field]),
+      );
+    const character = fieldsOf('character');
+    const global = fieldsOf('global');
+
+    expect(character['contextWindowTokens']).toMatchObject({
+      authored: {configured: true, value: 4096},
+      effectiveSource: 'character',
+      effective: {source: 'config', value: 4096},
+      editableInScope: true,
+      reloadRequired: true,
+    });
+    expect(character['userDisplayName']).toMatchObject({
+      authored: {configured: false},
+      effectiveSource: 'global',
+      effective: {source: 'config', value: 'Global Name'},
+    });
+    expect(character['roleModelProvider']).toMatchObject({
+      authored: {configured: false},
+      effectiveSource: 'default',
+      effective: {source: 'missing'},
+      defaultValueSummary: 'local',
+      allowedValues: ['local', 'nvidia'],
+    });
+    expect(character['storeRoot']?.editableInScope).toBe(false);
+    expect(global['userDisplayName']).toMatchObject({
+      authored: {configured: true, value: 'Global Name'},
+      effectiveSource: 'global',
+    });
+    expect(global['storeRoot']?.editableInScope).toBe(true);
   });
 
   it('uses the same policy for manifest-aware activation and field controls', async () => {

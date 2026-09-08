@@ -5,6 +5,7 @@ import type {
 import {
   applyRuntimeConfigControlOperation,
   inspectRuntimePluginConfig,
+  pluginSecretEnvVarName,
   redactRuntimeConfigValue,
   resolveRuntimeConfigScopeTarget,
   runtimePluginScopeViolation,
@@ -580,7 +581,7 @@ function writeSecretConfigInstructions(
   field: RuntimePluginConfigField,
   snapshot: RuntimeConfigConsoleSnapshot,
 ): void {
-  const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
+  const envVar = pluginSecretEnvVarName(manifest.id, field);
   const commandArgs = [
     // At character scope the value lands in this character's own secrets
     // file, so two characters can hold different accounts for one plugin.
@@ -608,10 +609,4 @@ function writeSecretConfigInstructions(
     context.stdout,
     `${context.secretSetCommandPrefix} -- ${commandArgs.join(' ')}`,
   );
-}
-
-function suggestedSecretEnvVar(pluginId: string, fieldName: string): string {
-  return `${pluginId}_${fieldName}`
-    .replaceAll(/[^A-Za-z0-9]+/g, '_')
-    .toUpperCase();
 }

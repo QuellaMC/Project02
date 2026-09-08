@@ -7,6 +7,8 @@ import {describe, expect, it} from 'vitest';
 import {
   applyRuntimeConfigControlOperation,
   createLayeredRuntimeConfigFingerprint,
+  createRuntimeConfigAuthoredSnapshot,
+  createRuntimeConfigFingerprint,
   prepareRuntimeConfigControlOperation,
   RuntimeConfigConflictError,
   runtimeConfigEnvVarName,
@@ -27,6 +29,8 @@ import {
 } from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
+  configLocationForTest,
+  loadRuntimeConfigForTest,
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
@@ -330,6 +334,45 @@ describe('runtime plugin config control', () => {
 
     expect(unsetResult.config).toEqual(expectedAfterUnset);
     expect(readConfigFile(fixture.configPath)).toEqual(expectedAfterUnset);
+  });
+
+  it('writes a global plugin field from a target bound to no character', () => {
+    const fixture = createSeededControlFixture();
+    const configLocation = configLocationForTest({
+      configPath: fixture.configPath,
+      env: {},
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: configLocation,
+      env: {},
+      scope: 'global',
+    });
+
+    // With no character lens, the fingerprint is the global document's
+    // alone — the one a daemon's global view hands out.
+    const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [fixture.manifest],
+      target,
+      expectedFingerprint: createRuntimeConfigFingerprint(
+        createRuntimeConfigAuthoredSnapshot(
+          loadRuntimeConfigForTest({configPath: fixture.configPath, env: {}}),
+        ).document,
+        [fixture.manifest],
+      ),
+      request: {
+        kind: 'plugin_config',
+        manifest: fixture.manifest,
+        actor: 'operator',
+        fieldOperation: {kind: 'set', fieldName: 'label', value: 'after'},
+      },
+    });
+
+    expect(target.characterRuntimeLocation).toBeUndefined();
+    expect(result.config.plugins?.[fixturePluginId]?.config).toEqual({
+      mode: 'local',
+      label: 'after',
+    });
+    expect(readConfigFile(fixture.configPath)).toEqual(result.config);
   });
 
   it('rejects fields not declared by the target plugin', () => {

@@ -135,6 +135,8 @@ type ApplyRuntimeConfigControlTransactionOptions<T> = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly expectedFingerprint?: string;
   readonly secretMutation: boolean;
+  /** How long to wait for a file another writer holds; the lock's default otherwise. */
+  readonly lockWaitTimeoutMs?: number;
   readonly prepare: (
     snapshot: RuntimeConfigControlSnapshot,
   ) => RuntimeConfigControlTransactionPreparation<T>;
@@ -148,7 +150,10 @@ export function applyRuntimeConfigControlTransaction<T>(
     target,
     options.secretMutation,
   );
-  const lease = acquireRuntimeConfigControlLocks(lockPlan);
+  const lease = acquireRuntimeConfigControlLocks(
+    lockPlan,
+    options.lockWaitTimeoutMs,
+  );
 
   try {
     assertRuntimeConfigTargetStillBound(target);
@@ -627,10 +632,12 @@ function runtimeConfigEnvPathForTarget(
 
 function acquireRuntimeConfigControlLocks(
   plan: RuntimeConfigControlLockPlan,
+  waitTimeoutMs: number | undefined,
 ): LocalRuntimeMutationLocksLeaseSync {
   try {
     return acquireLocalRuntimeMutationLocksSync({
       targets: plan.targets,
+      ...(waitTimeoutMs === undefined ? {} : {waitTimeoutMs}),
     });
   } catch (error: unknown) {
     const failedTarget =

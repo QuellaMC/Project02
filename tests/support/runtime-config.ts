@@ -8,6 +8,7 @@ import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigCharacterScope,
   type SelectedLoadedProject02RuntimeConfig,
@@ -182,6 +183,22 @@ function selectedRuntimeLocationInputsForTest(
         selection: {...selection, storeRoot: dirname(loadedConfig.path)},
         env: env ?? {},
       };
+}
+
+/** The location half of the one production load, bound to no character. */
+export function configLocationForTest(
+  options: {
+    readonly configPath?: string;
+    readonly storeRoot?: string;
+    readonly env?: NodeJS.ProcessEnv;
+  } = {},
+): ResolvedProject02ConfigLocation {
+  const {env, ...selection} = options;
+
+  return loadProject02RuntimeConfigWithLocation({
+    selection,
+    ...(env === undefined ? {} : {env}),
+  }).configLocation;
 }
 
 /** The loaded half of the one production load; the other half is the location. */

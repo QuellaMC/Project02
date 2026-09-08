@@ -31,6 +31,7 @@ export {
 } from './location.ts';
 export {
   inspectRuntimePluginConfig,
+  pluginSecretEnvVarName,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
@@ -44,7 +45,9 @@ export {
   createRuntimeConfigFingerprint,
 } from './fingerprint.ts';
 export {
+  createProject02ConfigFieldInspectShapes,
   createRuntimeConfigInspectShape,
+  createRuntimePluginConfigInspectShape,
   inspectConfiguredPlugins,
   type InspectConfiguredPlugin,
 } from './inspect.ts';

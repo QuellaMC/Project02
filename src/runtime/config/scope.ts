@@ -22,7 +22,6 @@ import {
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
   requireResolvedRuntimeConfigScopeTarget,
-  type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
 } from './location.ts';
 import {
@@ -34,9 +33,13 @@ import {
 } from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
+  loadCharacterSecretsEnv,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
-import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
+import {
+  mergeCharacterOverlayDocument,
+  runtimeConfigEnvWithCharacterSecrets,
+} from './resolve-layered.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldAcceptsValue,
@@ -94,6 +97,8 @@ export function applyRuntimeConfigControlOperation(options: {
   readonly expectedFingerprint?: string;
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+  /** How long to wait for a file another writer holds; the lock's default otherwise. */
+  readonly lockWaitTimeoutMs?: number;
 }): RuntimeConfigControlApplyResult {
   const target = requireResolvedRuntimeConfigScopeTarget(options.target);
 
@@ -127,6 +132,9 @@ export function applyRuntimeConfigControlOperation(options: {
     ...(options.expectedFingerprint === undefined
       ? {}
       : {expectedFingerprint: options.expectedFingerprint}),
+    ...(options.lockWaitTimeoutMs === undefined
+      ? {}
+      : {lockWaitTimeoutMs: options.lockWaitTimeoutMs}),
     secretMutation: mutation.operation?.kind === 'secret_set',
     prepare: snapshot =>
       prepareScopedRuntimeConfigControlCandidate({
@@ -304,27 +312,26 @@ function normalizedControlMutation(
     manifest: request.manifest,
     actor: request.actor,
     operation: request.fieldOperation,
-    runtimeLocation: runtimeConfigControlCharacterLocation(target),
     authoredScope: target.scope,
-    env: target.env,
+    env: runtimeConfigControlEnv(target),
   });
 }
 
-function runtimeConfigControlCharacterLocation(
+/**
+ * What the target's scope resolves with. A character's own secrets ride
+ * over the shared env, as they do when that character runs; a global
+ * value resolves globally, never through one character's secrets.
+ */
+function runtimeConfigControlEnv(
   target: ResolvedRuntimeConfigScopeTarget,
-): ResolvedProject02RuntimeLocation {
-  const runtimeLocation =
-    target.scope === 'character'
-      ? target.runtimeLocation
-      : target.characterRuntimeLocation;
-
-  if (runtimeLocation === undefined) {
-    throw new TypeError(
-      'Plugin config control requires an activated character runtime.',
-    );
-  }
-
-  return runtimeLocation;
+): NodeJS.ProcessEnv {
+  return target.scope === 'character'
+    ? runtimeConfigEnvWithCharacterSecrets(
+        target.env,
+        loadCharacterSecretsEnv(target.runtimeLocation.characterScope.dataRoot)
+          .env,
+      )
+    : target.env;
 }
 
 /** Rejects before any ensure step materializes a marker or data directory. */
