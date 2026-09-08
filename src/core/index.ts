@@ -60,3 +60,7 @@ export {
   type CharacterAgent,
   type Session,
 } from './conversation/session.ts';
+export {
+  selectCharacterId,
+  type CharacterSelection,
+} from './character/selection.ts';

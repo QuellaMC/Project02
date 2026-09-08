@@ -5,11 +5,11 @@
  * summary and the full change — with a line typed after the prompt. A
  * prompt settled elsewhere is withdrawn rather than answered twice.
  */
-import type {GatewayClient} from '../../gateway/client/index.ts';
 import type {
   GatewayConfirmationDecision,
   PendingConfirmation,
-} from '../../gateway/index.ts';
+} from '../../gateway/api/index.ts';
+import type {GatewayClient} from '../../gateway/client/index.ts';
 import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import type {LineDispatcher} from './lines.ts';
 

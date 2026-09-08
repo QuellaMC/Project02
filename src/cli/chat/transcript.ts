@@ -9,8 +9,8 @@
  * and a page can cross; ids keep that from repeating a line, and a rare
  * swap of two lines is the terminal's to bear.
  */
+import type {HistoryMessage} from '../../gateway/api/index.ts';
 import type {GatewayClient} from '../../gateway/client/index.ts';
-import type {HistoryMessage} from '../../gateway/index.ts';
 import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 
 export type Transcript = {

@@ -1,7 +1,10 @@
 import {describe, expect, it} from 'vitest';
 
 import {createTranscript} from '../../src/cli/chat/transcript.ts';
-import type {HistoryMessage, HistoryOutcome} from '../../src/gateway/index.ts';
+import type {
+  HistoryMessage,
+  HistoryOutcome,
+} from '../../src/gateway/api/index.ts';
 import type {LocalRuntimeTurnProgressEvent} from '../../src/runtime/index.ts';
 import {collect} from '../support/streams.ts';
 

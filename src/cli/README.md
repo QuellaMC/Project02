@@ -9,4 +9,6 @@ discovered here gets extracted downward, not grown here.
 every client, and prints the `PROJECT02_GATEWAY=` line a client reads only
 once the roster is up. `chat/` is the disposable dev terminal on the far
 side of that line — an HTTP client like any other surface, with no store
-of its own.
+of its own and no path into the daemon: it value-imports the reference
+client, the contract, and `core` only (arch rule
+`clients-see-only-the-wire`).
