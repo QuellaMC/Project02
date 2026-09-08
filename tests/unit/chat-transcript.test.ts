@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {createTranscript} from '../../src/cli/chat/transcript.ts';
 import type {
@@ -119,5 +119,32 @@ describe('chat transcript', () => {
 
     harness.transcript.showProgress(message(2, 'reply'));
     await waiting;
+  });
+
+  it('gives up on a turn the stream never shows once the grace is up, and keeps no timer past any wait', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const harness = createHarness([]);
+      let shown = false;
+
+      void harness.transcript.whenShown(['conv.1:message-1']).then(() => {
+        shown = true;
+      });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(shown).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(shown).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+
+      const answered = harness.transcript.whenShown(['conv.1:message-2']);
+
+      harness.transcript.showProgress(message(2, 'reply'));
+      await answered;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
