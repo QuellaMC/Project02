@@ -76,6 +76,7 @@ type ScopeResolution = {
   >[0]['pluginResolution'];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
+  readonly env: NodeJS.ProcessEnv;
   readonly activationByPluginId?: Readonly<
     Record<string, RuntimePluginActivationStatusShape>
   >;
@@ -183,11 +184,12 @@ function resolveGlobalScope(
     classificationConfig: layeredConfig.effective,
   });
   const manifests = manifestsOf(catalog.catalogEntries);
+  const env = runtimeEnv(home);
   // Location-free: the global document resolves through no character.
   const pluginResolution = resolveRuntimePluginConfigs({
     config: layeredConfig.effective.config,
     pluginManifests: manifests,
-    env: runtimeEnv(home),
+    env,
     validateInactivePluginConfigs: true,
     defaultEnabledPluginIds: new Set(catalog.defaultEnabledPluginIds),
   });
@@ -197,6 +199,7 @@ function resolveGlobalScope(
     targetScope: 'global',
     manifests,
     pluginResolution,
+    env,
     diagnostics: [
       ...loaded.diagnostics,
       ...catalog.diagnostics,
@@ -266,6 +269,7 @@ function resolveCharacterScope(
     targetScope: 'character',
     manifests,
     pluginResolution: plan.resolvedConfig,
+    env: runtimeEnv(home),
     // The activation's diagnostics carry the resolution's plus what the
     // catalog could not publish — the errors the runtime itself acts on.
     diagnostics: plan.activation.diagnostics,
@@ -295,6 +299,7 @@ function viewOf(resolution: ScopeResolution): ConfigView {
       createProject02ConfigFieldInspectShapes({
         layeredConfig,
         targetScope,
+        env: resolution.env,
       }).filter(field => wireFields.some(wire => wire.name === field.name)),
     ),
     plugins: Object.freeze(

@@ -1216,6 +1216,7 @@ describe('plugin manifest config scope policy', () => {
                 }),
           }),
           targetScope,
+          env: {},
         }).map(field => [field.name, field]),
       );
     const character = fieldsOf('character');

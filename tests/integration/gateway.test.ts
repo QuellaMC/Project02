@@ -1904,6 +1904,21 @@ describe('gateway façade', () => {
     expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
       'demo-config',
     );
+    // A provider chosen in the environment wins over either document, and
+    // the view says so rather than reporting the document's value.
+    const overridden = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'},
+    }).configView({scope: 'global'});
+
+    expect(
+      overridden.status === 'ok' &&
+        overridden.project02.find(field => field.name === 'roleModelProvider')
+          ?.effective,
+    ).toMatchObject({
+      source: 'env:PROJECT02_ROLE_MODEL_PROVIDER',
+      value: 'nvidia',
+    });
 
     const character = gateway.configView({
       scope: 'character',
