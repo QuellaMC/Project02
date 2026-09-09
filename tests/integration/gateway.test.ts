@@ -2090,11 +2090,11 @@ describe('gateway façade', () => {
         value: 1,
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
-    // A secret whose variable the daemon was launched with would be written
-    // to a file the launch env shadows.
+    // A secret whose variable the daemon was launched with — even empty —
+    // would be written to a file the launch env shadows.
     const shadowed = await createGateway({
       location: {storeRoot: homeRoot},
-      env: {DEMO_CONFIG_TONE: 'shadowing'},
+      env: {DEMO_CONFIG_TONE: ''},
     }).applyConfigChange({
       target: {scope: 'global'},
       expectedFingerprint: view.fingerprint,
