@@ -379,6 +379,7 @@ function assemblyDrifted(context: RuntimeContext): boolean {
     assemblyIdentity(
       startup.activationPlan,
       startup.characterActivation.characterRef,
+      startup.runtimeEnv,
     ) !== assembled.identity
   );
 }
@@ -387,16 +388,19 @@ function assemblyDrifted(context: RuntimeContext): boolean {
  * The parts of a plan that shape the character: the effective config, the
  * plugin values with their secrets (the authored fingerprint hashes only a
  * secret's presence, so a re-keyed secret would otherwise go unnoticed),
- * the versions of the plugin packages it enables, and the character
- * package's version and persona. Held in memory only.
+ * the versions of the plugin packages it enables, the runtime env the
+ * provider adapter is built from, and the character package's version and
+ * persona. Held in memory only.
  */
 function assemblyIdentity(
   plan: PreparedProject02PluginActivationPlan,
   characterRef: RoleModelCharacterRef,
+  runtimeEnv: NodeJS.ProcessEnv,
 ): string {
   return createCanonicalJsonFingerprint({
     config: plan.resolvedConfig.effectiveConfigFingerprint,
     plugins: plan.resolvedConfig.pluginConfigs,
+    env: runtimeEnv,
     packages: Object.fromEntries(
       plan.activation.enabledPluginIds.map(pluginId => [
         pluginId,
@@ -512,7 +516,11 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     contextWindowTokens: project02.contextWindowTokens,
     userDisplayName: project02.userDisplayName,
     storeRoot: project02.storeRoot,
-    identity: assemblyIdentity(startup.activationPlan, activation.characterRef),
+    identity: assemblyIdentity(
+      startup.activationPlan,
+      activation.characterRef,
+      startup.runtimeEnv,
+    ),
   };
   // The selected provider wins; an injected adapter covers the rest.
   const adapter =

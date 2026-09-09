@@ -14,7 +14,10 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  createProject02HomeLayout,
+} from '../../src/runtime/storage/index.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
 import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -545,7 +548,7 @@ describe('local character runtime', () => {
     await runtime.stop();
   });
 
-  it('counts an upgraded plugin package as drift', async () => {
+  it('counts an upgraded plugin package and a changed home env as drift', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-'), 'home');
     const manifest = {
       ...firstPartyPlugin('operator.versioned').manifest,
@@ -588,6 +591,14 @@ describe('local character runtime', () => {
     expect(runtime.assemblyDrifted()).toBe(false);
 
     writePackage('1.1.0');
+    expect(runtime.assemblyDrifted()).toBe(true);
+
+    writePackage('1.0.0');
+    expect(runtime.assemblyDrifted()).toBe(false);
+    writeFileSync(
+      createProject02HomeLayout({homeRoot}).envPath,
+      'NVIDIA_API_KEY=rotated\n',
+    );
     expect(runtime.assemblyDrifted()).toBe(true);
     await runtime.stop();
   });
