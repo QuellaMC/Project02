@@ -1305,6 +1305,36 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('stops promptly with a reload queued behind a parked confirmation', async () => {
+    const {homeRoot, gateway} = await createConfirmationHome();
+    const ref = await open(gateway, 'mira');
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'please be warmer',
+      source: 'test',
+      clientMessageId: randomUUID(),
+    });
+
+    await vi.waitFor(() => {
+      expect(gateway.pendingConfirmations()).toHaveLength(1);
+    });
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      {project02: {contextWindowTokens: 4096}},
+    );
+
+    const pass = gateway.reconcile();
+
+    expect(gateway.health().characters[0]?.state).toBe('reloading');
+    // The stop cancels the parked confirmation the reload was waiting
+    // behind; neither the pass nor the turn holds shutdown to the deadline.
+    await gateway.stop();
+    await pass;
+    await turn;
+    expect(gateway.health().characters[0]?.state).toBe('stopped');
+  });
+
   it('refuses an answer that arrives after the deadline, whatever the client believes', async () => {
     const {gateway, inspectTone} = await createConfirmationHome();
     const events: GatewayEvent[] = [];
@@ -1873,6 +1903,28 @@ describe('gateway façade', () => {
     });
     expect(character.fingerprint).not.toBe(global.fingerprint);
     expect(gateway.health().characters[0]?.state).toBe('not_started');
+
+    // A package the catalog cannot publish is an error the runtime acts on,
+    // so both views name it.
+    mkdirSync(join(homeRoot, 'plugins', 'broken'), {recursive: true});
+    writeFileSync(
+      join(homeRoot, 'plugins', 'broken', 'project02.plugin.json'),
+      '{not json',
+      'utf8',
+    );
+    for (const target of [
+      {scope: 'global'} as const,
+      {scope: 'character', characterId: 'mira'} as const,
+    ]) {
+      const view = gateway.configView(target);
+
+      expect(
+        view.status === 'ok' &&
+          view.diagnostics.some(diagnostic =>
+            diagnostic.code.startsWith('runtime_plugin_package_'),
+          ),
+      ).toBe(true);
+    }
     expect(
       gateway.configView({scope: 'character', characterId: 'nobody'}),
     ).toMatchObject({status: 'refused', reason: 'unknown_character'});
@@ -1995,6 +2047,20 @@ describe('gateway façade', () => {
         operation: {kind: 'set', path: 'project02.enabled', value: false},
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'unknown_character'});
+    // A refused change to a character that never started leaves no data
+    // directory behind.
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'mira'},
+        expectedFingerprint: view.fingerprint,
+        operation: {
+          kind: 'set',
+          path: 'project02.contextWindowTokens',
+          value: 'many',
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
 
     chmodSync(homeRoot, 0o555);
 

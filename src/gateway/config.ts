@@ -26,6 +26,7 @@ import {
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   resolveRuntimePluginConfigs,
+  simulateCharacterOverlayCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
   RuntimeConfigMutationError,
@@ -122,18 +123,22 @@ export async function applyConfigChange(
       return refusedChange('invalid', prepared);
     }
 
-    const target = await resolveWriteTarget(home, change.target, {
-      ...runtimeEnv(home),
-      ...prepared.env,
+    const pluginManifests = manifestsOf(catalog.catalogEntries);
+    const target = await resolveWriteTarget({
+      home,
+      target: change.target,
+      env: {...runtimeEnv(home), ...prepared.env},
+      pluginManifests,
+      request: prepared.request,
     });
 
-    if (typeof target === 'string') {
-      return refusedChange('unknown_character', target);
+    if ('status' in target) {
+      return target;
     }
 
     const result = applyRuntimeConfigControlOperation({
       target,
-      pluginManifests: manifestsOf(catalog.catalogEntries),
+      pluginManifests,
       expectedFingerprint: change.expectedFingerprint,
       request: prepared.request,
       lockWaitTimeoutMs: writeLockWaitMs,
@@ -182,7 +187,11 @@ function resolveGlobalScope(
     targetScope: 'global',
     manifests,
     pluginResolution,
-    diagnostics: [...loaded.diagnostics, ...pluginResolution.diagnostics],
+    diagnostics: [
+      ...loaded.diagnostics,
+      ...catalog.diagnostics,
+      ...pluginResolution.diagnostics,
+    ],
     fingerprint: createRuntimeConfigFingerprint(
       createRuntimeConfigAuthoredSnapshot(loaded).document,
       manifests,
@@ -233,7 +242,9 @@ function resolveCharacterScope(
     targetScope: 'character',
     manifests,
     pluginResolution: plan.resolvedConfig,
-    diagnostics: plan.resolvedConfig.diagnostics,
+    // The activation's diagnostics carry the resolution's plus what the
+    // catalog could not publish — the errors the runtime itself acts on.
+    diagnostics: plan.activation.diagnostics,
     fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: createRuntimeConfigAuthoredSnapshot(home.loadedConfig)
         .document,
@@ -373,11 +384,15 @@ function prepareControlRequest(
   }
 }
 
-async function resolveWriteTarget(
-  home: Project02Home,
-  target: ConfigTarget,
-  env: NodeJS.ProcessEnv,
-): Promise<ResolvedRuntimeConfigScopeTarget | string> {
+async function resolveWriteTarget(options: {
+  readonly home: Project02Home;
+  readonly target: ConfigTarget;
+  readonly env: NodeJS.ProcessEnv;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly request: RuntimeConfigControlRequest;
+}): Promise<ResolvedRuntimeConfigScopeTarget | RefusedChange> {
+  const {home, target, env} = options;
+
   if (target.scope === 'global') {
     return resolveRuntimeConfigScopeTarget({
       runtimeLocation: home.runtimeLocation,
@@ -387,17 +402,13 @@ async function resolveWriteTarget(
   }
 
   if (!installed(home, target.characterId)) {
-    return notInstalledMessage(target.characterId);
+    return refusedChange(
+      'unknown_character',
+      notInstalledMessage(target.characterId),
+    );
   }
 
-  // A character's first write claims its data directory, as the console's
-  // does; the transaction then verifies the marker under its own lock.
-  await ensureCharacterDataDir({
-    homeRoot: home.runtimeLocation.homeRoot,
-    characterId: target.characterId,
-  });
-
-  return resolveRuntimeConfigScopeTarget({
+  const scopeTarget = resolveRuntimeConfigScopeTarget({
     runtimeLocation: bindProject02CharacterRuntimeLocation({
       configLocation: home.runtimeLocation,
       characterId: target.characterId,
@@ -405,6 +416,27 @@ async function resolveWriteTarget(
     scope: 'character',
     env,
   });
+  // The commit's own preparation, run without locking or writing, so a
+  // change the seam will refuse creates no data directory for a character
+  // that never started.
+  const candidate = simulateCharacterOverlayCandidate({
+    target: scopeTarget,
+    pluginManifests: options.pluginManifests,
+    request: options.request,
+  });
+
+  if (candidate.status === 'invalid') {
+    return refusedChange('invalid', candidate.message);
+  }
+
+  // A character's first valid write claims its data directory, as the
+  // console's does; the transaction then verifies the marker under its lock.
+  await ensureCharacterDataDir({
+    homeRoot: home.runtimeLocation.homeRoot,
+    characterId: target.characterId,
+  });
+
+  return scopeTarget;
 }
 
 /**
@@ -482,10 +514,12 @@ function refusedView(
   return Object.freeze({status: 'refused' as const, reason, message});
 }
 
+type RefusedChange = Extract<ConfigChangeOutcome, {status: 'refused'}>;
+
 function refusedChange(
-  reason: Extract<ConfigChangeOutcome, {status: 'refused'}>['reason'],
+  reason: RefusedChange['reason'],
   message: string,
-): ConfigChangeOutcome {
+): RefusedChange {
   return Object.freeze({status: 'refused' as const, reason, message});
 }
 

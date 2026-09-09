@@ -240,15 +240,19 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       };
     },
     async stop(): Promise<void> {
-      // Terminal by design: no new starts. A reconcile pass in flight sees
-      // its starts refused and finishes its stops first; then the runtimes
-      // are signalled, so a start or recovery in flight is overtaken —
-      // refused at the door, drained, discarded — never finished into a
-      // ready character during shutdown; the joins then confirm those
-      // promises settled.
+      // Terminal by design: no new starts. The runtimes are signalled
+      // first — a stop cancels a parked confirmation, which a reload queued
+      // behind that turn would otherwise wait out — so a start, recovery,
+      // or reload in flight is overtaken: refused at the door, drained,
+      // discarded, never finished into a ready character during shutdown.
+      // A reconcile pass in flight then sees its starts refused and its
+      // stops joined; the joins confirm every promise settled.
       stopped = true;
+
+      const stops = [...runtimes.values()].map(runtime => runtime.stop());
+
       await reconciler.settled();
-      await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
+      await Promise.all(stops);
       await Promise.all(
         [...startsInFlight.values()].map(start => start.catch(() => undefined)),
       );
