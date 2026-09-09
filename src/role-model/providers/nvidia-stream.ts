@@ -5,8 +5,11 @@ import {providerErrorMessageFromBody} from './nvidia-transport.ts';
 export type NvidiaStreamObserver = {
   /** A piece of the assistant's content, as it arrives. */
   readonly onContent?: (text: string) => void;
-  /** A piece of one tool call's arguments, once the call's name is known. */
-  readonly onToolCallArguments?: (fragment: {
+  /**
+   * A named tool call: once, the moment its name is known, with whatever
+   * arguments arrived so far (possibly none), then each piece after.
+   */
+  readonly onToolCall?: (fragment: {
     readonly index: number;
     readonly name: string;
     readonly text: string;
@@ -103,20 +106,27 @@ function createCompletionAssembly(observer: NvidiaStreamObserver): {
       return undefined;
     }
 
-    if (typeof fn['name'] === 'string' && fn['name'].length > 0) {
-      call.name ??= fn['name'];
+    const incomingName =
+      typeof fn['name'] === 'string' && fn['name'].length > 0
+        ? fn['name']
+        : undefined;
+    let named = false;
+
+    if (call.name === undefined && incomingName !== undefined) {
+      call.name = incomingName;
+      named = true;
     }
 
-    if (typeof fn['arguments'] === 'string' && fn['arguments'].length > 0) {
-      call.arguments += fn['arguments'];
+    const piece = typeof fn['arguments'] === 'string' ? fn['arguments'] : '';
 
-      if (call.name !== undefined) {
-        observer.onToolCallArguments?.({
-          index,
-          name: call.name,
-          text: fn['arguments'],
-        });
-      }
+    call.arguments += piece;
+
+    if (call.name !== undefined && (named || piece.length > 0)) {
+      observer.onToolCall?.({
+        index,
+        name: call.name,
+        text: named ? call.arguments : piece,
+      });
     }
 
     return undefined;

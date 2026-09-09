@@ -266,7 +266,7 @@ export function createNvidiaReplyDrafts(options: {
         content ??= begin();
         speakPassed(content, text);
       },
-      onToolCallArguments(fragment) {
+      onToolCall(fragment) {
         anyCall = true;
 
         if (

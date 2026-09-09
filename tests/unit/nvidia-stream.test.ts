@@ -59,7 +59,7 @@ describe('NVIDIA chat completion stream', () => {
       ),
       {
         onContent: text => content.push(text),
-        onToolCallArguments: fragment => calls.push(fragment),
+        onToolCall: fragment => calls.push(fragment),
       },
     );
 
@@ -97,6 +97,51 @@ describe('NVIDIA chat completion stream', () => {
       {index: 0, name: 'visible_reply', text: 'xt":"x"}'},
       {index: 1, name: 'memory_search', text: 'uery":"y"}'},
     ]);
+  });
+
+  it('announces a call the moment it is named, with what arrived before the name', async () => {
+    const calls: {index: number; name: string; text: string}[] = [];
+    const result = await readNvidiaChatCompletionStream(
+      bytes(
+        sseText([
+          delta({
+            tool_calls: [{index: 0, id: 'a', function: {arguments: '{"te'}}],
+          }),
+          delta({tool_calls: [{index: 0, function: {arguments: 'xt":'}}]}),
+          delta({tool_calls: [{index: 0, function: {name: 'visible_reply'}}]}),
+          delta({tool_calls: [{index: 0, function: {arguments: '"x"}'}}]}),
+          delta({
+            tool_calls: [{index: 1, id: 'b', function: {name: 'memory_list'}}],
+          }),
+          delta({}, 'tool_calls'),
+          '[DONE]',
+        ]),
+      ),
+      {onToolCall: fragment => calls.push(fragment)},
+    );
+
+    expect(calls).toEqual([
+      {index: 0, name: 'visible_reply', text: '{"text":'},
+      {index: 0, name: 'visible_reply', text: '"x"}'},
+      {index: 1, name: 'memory_list', text: ''},
+    ]);
+    expect(result).toMatchObject({
+      response: {
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  id: 'a',
+                  function: {name: 'visible_reply', arguments: '{"text":"x"}'},
+                },
+                {id: 'b', function: {name: 'memory_list', arguments: ''}},
+              ],
+            },
+          },
+        ],
+      },
+    });
   });
 
   it('carries no finish reason when none came, no content when none came, and ignores reasoning and pings', async () => {

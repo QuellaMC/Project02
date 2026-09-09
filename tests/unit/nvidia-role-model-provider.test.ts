@@ -1509,6 +1509,50 @@ describe('NVIDIA role-model provider streaming', () => {
     );
 
     expect(alone.output.replyDrafts).toEqual([0]);
+
+    // A call named only after its arguments is still a call: the note is
+    // not the reply, and the reply's draft hears what arrived before the name.
+    const late = await invokeStreaming(
+      sseResponse([
+        contentChunk('thinking aloud'),
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_late',
+                    function: {arguments: '{"text": "Hi"}'},
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [{index: 0, function: {name: 'visible_reply'}}],
+              },
+              finish_reason: null,
+            },
+          ],
+        },
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(late.heard).toEqual([
+      {reply: 0, text: 'thinking aloud'},
+      {reply: 1, text: 'Hi'},
+    ]);
+    expect(late.output.replyDrafts).toEqual([1]);
   });
 
   it('starts the silence bound over when the headers arrive', async () => {
