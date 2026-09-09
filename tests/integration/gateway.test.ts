@@ -1968,6 +1968,27 @@ describe('gateway façade', () => {
     expect(
       gateway.configView({scope: 'character', characterId: 'nobody'}),
     ).toMatchObject({status: 'refused', reason: 'unknown_character'});
+    // A package that fails discovery is refused by its own diagnostic,
+    // never as a character that is missing.
+    mkdirSync(join(homeRoot, 'characters', 'broken'), {recursive: true});
+    writeFileSync(
+      join(homeRoot, 'characters', 'broken', 'project02.character.json'),
+      '{not json',
+      'utf8',
+    );
+
+    const broken = gateway.configView({
+      scope: 'character',
+      characterId: 'broken',
+    });
+
+    expect(broken).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+    expect(broken.status === 'refused' && broken.message).toContain(
+      'invalid_descriptor',
+    );
 
     // A document that now names another home describes a daemon that is
     // not this one.

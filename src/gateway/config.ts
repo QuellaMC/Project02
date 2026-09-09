@@ -2,7 +2,7 @@ import {
   activateProject02Character,
   classifyRuntimePluginCatalogDiscovery,
   discoverRuntimePluginCatalog,
-  listProject02Characters,
+  prepareProject02CharacterActivation,
   type Project02Home,
 } from '../app/index.ts';
 import {
@@ -237,8 +237,10 @@ function resolveCharacterScope(
   home: Project02Home,
   characterId: string,
 ): ScopeResolution | RefusedView {
-  if (!installed(home, characterId)) {
-    return refusedView('unknown_character', notInstalledMessage(characterId));
+  const missing = notInstalled(home, characterId);
+
+  if (missing !== undefined) {
+    return refusedView('unknown_character', missing);
   }
 
   const runtimeLocation = bindProject02CharacterRuntimeLocation({
@@ -272,7 +274,7 @@ function resolveCharacterScope(
       'config_unloadable',
       startup.characterActivation.status === 'failed'
         ? startup.characterActivation.messages.join(' ')
-        : notInstalledMessage(characterId),
+        : `Character "${characterId}" could not be resolved.`,
     );
   }
 
@@ -451,11 +453,10 @@ async function resolveWriteTarget(options: {
     });
   }
 
-  if (!installed(home, target.characterId)) {
-    return refusedChange(
-      'unknown_character',
-      notInstalledMessage(target.characterId),
-    );
+  const missing = notInstalled(home, target.characterId);
+
+  if (missing !== undefined) {
+    return refusedChange('unknown_character', missing);
   }
 
   const scopeTarget = resolveRuntimeConfigScopeTarget({
@@ -536,14 +537,22 @@ function runtimeEnv(home: Project02Home): NodeJS.ProcessEnv {
   });
 }
 
-function installed(home: Project02Home, characterId: string): boolean {
-  return listProject02Characters(home).characters.some(
-    character => character.id === characterId,
-  );
-}
+/**
+ * The resolution a start uses, so a package that fails discovery is
+ * reported by its own diagnostic, never as a character that is missing.
+ */
+function notInstalled(
+  home: Project02Home,
+  characterId: string,
+): string | undefined {
+  const resolution = prepareProject02CharacterActivation({
+    storeRoot: home.runtimeLocation.homeRoot,
+    configuredCharacterId: characterId,
+  });
 
-function notInstalledMessage(characterId: string): string {
-  return `Character "${characterId}" is not installed.`;
+  return resolution.status === 'failed'
+    ? resolution.messages.join(' ')
+    : undefined;
 }
 
 function manifestsOf(
