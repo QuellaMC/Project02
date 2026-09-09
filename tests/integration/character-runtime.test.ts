@@ -603,6 +603,49 @@ describe('local character runtime', () => {
     await runtime.stop();
   });
 
+  it('reloads past a session-end record the log refused, noting it as maintenance', async () => {
+    // A hook that fails makes session end write a record; a log that
+    // cannot take it is a release problem without a retained lease.
+    const probe = createSessionEndFileStoreProbePlugin({
+      pluginId: 'session.end.failing',
+      requestedAccess: {},
+      onSessionEnd() {
+        throw new Error('session end hook failed');
+      },
+    });
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.failing'],
+        }),
+    });
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    await open(runtime);
+    // Restored the instant the failure is noted, before the rebuild.
+    runtime.events(event => {
+      if (event.kind === 'maintenance_failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await runtime.reload();
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual(['starting', 'ready', 'reloading', 'ready']);
+    expect(runtime.health().maintenance?.message).toBeDefined();
+    expect(runtime.health().openConversationIds).toEqual([]);
+    await runtime.stop();
+  });
+
   it('lets a stop issued during a reload win', async () => {
     const {runtime, events} = await createStartedRuntime();
     let stopping: Promise<void> | undefined;

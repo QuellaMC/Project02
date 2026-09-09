@@ -325,24 +325,40 @@ async function runReload(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  const problems = await releaseResourcesOnce(context);
+  const released = await releasedForRebuild(context);
 
-  if (stopWon(context)) {
-    return;
-  }
-
-  if (problems.length > 0) {
-    setState(
-      context,
-      'failed',
-      `Reload could not release resources: ${problems.join('; ')}`,
-    );
+  if (stopWon(context) || !released) {
     return;
   }
 
   // Release left the broker cancelling; the new assembly parks again.
   context.broker.arm();
   await assembleAndPublish(context, () => stopWon(context));
+}
+
+/**
+ * Only a conversation still held blocks a rebuild: assembling over it
+ * would report ready with the thread still locked. A session-end record
+ * the log refused, or a shutdown hook that did not finish, is the
+ * character's memory management — noted as maintenance, as after a turn.
+ */
+async function releasedForRebuild(context: RuntimeContext): Promise<boolean> {
+  const problems = await releaseResourcesOnce(context);
+
+  if (context.conversations.size > 0) {
+    setState(
+      context,
+      'failed',
+      `The rebuild could not release resources: ${problems.join('; ')}`,
+    );
+    return false;
+  }
+
+  if (problems.length > 0) {
+    noteMaintenance(context, problems.join('; '));
+  }
+
+  return true;
 }
 
 function stopWon(context: RuntimeContext): boolean {
@@ -787,10 +803,12 @@ function recordMaintenance(
         ? rotation.message
         : rotation.endFailure;
 
-  if (message === undefined) {
-    return;
+  if (message !== undefined) {
+    noteMaintenance(context, message);
   }
+}
 
+function noteMaintenance(context: RuntimeContext, message: string): void {
   const failure = Object.freeze({at: new Date().toISOString(), message});
 
   context.maintenance = failure;
@@ -877,21 +895,11 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  const problems = await releaseResourcesOnce(context);
+  const released = await releasedForRebuild(context);
 
-  // The same rule holds across the release await.
-  if (lifecycleLeft(context, 'failed')) {
-    return;
-  }
-
-  // A restart over unreleased resources would report ready with its DM
-  // still locked; staying failed keeps the one-shot policy honest.
-  if (problems.length > 0) {
-    setState(
-      context,
-      'failed',
-      `Recovery could not release resources: ${problems.join('; ')}`,
-    );
+  // The same rule holds across the release await; staying failed over a
+  // held conversation keeps the one-shot policy honest.
+  if (lifecycleLeft(context, 'failed') || !released) {
     return;
   }
 
