@@ -46,6 +46,7 @@ export {
   createRoleModelAdapterRawOutput,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
+  type RoleModelReplyDelta,
   type RoleModelTextCompletionRequest,
   type RoleModelTextCompletionResult,
   type RoleModelAdapterRawOutput,
@@ -80,6 +81,8 @@ export {
   type RoleModelPluginToolCallStartedEvent,
   type RoleModelPluginToolHost,
   type RoleModelPluginToolRoutingEvidence,
+  type RoleModelReplyDeltaEvent,
+  type RoleModelReplyWithdrawnEvent,
   runRoleModelLoop,
   type RunRoleModelLoopOptions,
 } from './loop/loop.ts';

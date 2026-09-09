@@ -28,6 +28,12 @@ export function createRoleModelAdapterFromCharacterAgent(
       });
       const characterReply = validateCharacterAgentReply(reply);
 
+      // Spoken in word-sized pieces first, so the reply streams the way a
+      // model's does; the whole of it still arrives as the decision.
+      for (const piece of characterReply.text.split(/(?<=\s)/u)) {
+        invocation.onReplyDelta?.({reply: 0, text: piece});
+      }
+
       return createRoleModelAdapterRawOutput(
         JSON.stringify({
           toolCalls: [createVisibleReplyModelToolCall(characterReply.text)],

@@ -793,3 +793,200 @@ describe('role-model loop routing and policy', () => {
     ]);
   });
 });
+
+describe('role-model loop reply drafts', () => {
+  const visibleReply = (text: string) => ({
+    name: visibleReplyModelToolName,
+    input: {text},
+  });
+  const searchCall = {name: 'memory.search', input: {query: 'first'}};
+
+  /** Every draft event and commit in the order the loop raised them. */
+  function draftLog(log: string[]) {
+    return {
+      ...testLoopCallbacks(),
+      onReplyDelta(event: {draftId: string; text: string}) {
+        log.push(`delta ${event.draftId} ${event.text}`);
+      },
+      onReplyWithdrawn(event: {draftId: string}) {
+        log.push(`withdrawn ${event.draftId}`);
+      },
+      onVisibleReply(event: {draftId: string; text: string}) {
+        log.push(`reply ${event.draftId} ${event.text}`);
+
+        return {
+          id: `session-loop:message-${String(log.length)}`,
+          role: 'character' as const,
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: event.text,
+        };
+      },
+      onPluginToolCallsRequested() {
+        log.push('tools requested');
+      },
+    };
+  }
+
+  function runWith(
+    log: string[],
+    adapter: RoleModelAdapter,
+    eventId: string,
+    options: {readonly maxToolRounds?: number} = {},
+  ) {
+    return runRoleModelLoop({
+      ...draftLog(log),
+      event: createTestEvent('hello', eventId),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost: acceptingPluginToolHost,
+      runtimePluginContext: createTestPluginContext(eventId),
+      adapter,
+      ...options,
+    });
+  }
+
+  it('speaks a reply as a draft the commit then names', async () => {
+    const log: string[] = [];
+    const result = await runWith(
+      log,
+      createSequencedAdapter(
+        [{toolCalls: [visibleReply('hello')]}],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'hel'},
+            {reply: 0, text: 'lo'},
+          ],
+        ],
+      ),
+      'evt_draft_named_by_commit',
+    );
+
+    expect(result.status).toBe('accepted');
+    expect(log).toEqual(['delta 1.0 hel', 'delta 1.0 lo', 'reply 1.0 hello']);
+  });
+
+  it("gives each of a round's replies its own draft, all settled by their commits", async () => {
+    const log: string[] = [];
+
+    await runWith(
+      log,
+      createSequencedAdapter(
+        [{toolCalls: [visibleReply('one'), visibleReply('two')]}],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'one'},
+            {reply: 1, text: 'two'},
+          ],
+        ],
+      ),
+      'evt_two_drafts',
+    );
+
+    expect(log).toEqual([
+      'delta 1.0 one',
+      'delta 1.1 two',
+      'reply 1.0 one',
+      'reply 1.1 two',
+    ]);
+  });
+
+  it("withdraws a refused round's draft and drafts the next round afresh", async () => {
+    const log: string[] = [];
+    const result = await runWith(
+      log,
+      createSequencedAdapter(
+        [{toolCalls: 'not an array'}, {toolCalls: [visibleReply('ok')]}],
+        undefined,
+        [[{reply: 0, text: 'oops'}], [{reply: 0, text: 'ok'}]],
+      ),
+      'evt_refused_round_withdraws',
+    );
+
+    expect(result.status).toBe('accepted');
+    expect(log).toEqual([
+      'delta 1.0 oops',
+      'withdrawn 1.0',
+      'delta 2.0 ok',
+      'reply 2.0 ok',
+    ]);
+  });
+
+  it('withdraws what the decision did not name before the tool round runs', async () => {
+    const log: string[] = [];
+
+    await runWith(
+      log,
+      createSequencedAdapter(
+        [{toolCalls: [searchCall]}, {toolCalls: [visibleReply('done')]}],
+        undefined,
+        [[{reply: 0, text: 'a note beside the call'}]],
+      ),
+      'evt_unnamed_draft_withdrawn',
+    );
+
+    expect(log).toEqual([
+      'delta 1.0 a note beside the call',
+      'withdrawn 1.0',
+      'tools requested',
+      'reply 2.0 done',
+    ]);
+  });
+
+  it('withdraws the drafts of a round the budget refuses, and of a round whose commit throws', async () => {
+    const exhausted: string[] = [];
+    const spent = await runWith(
+      exhausted,
+      createSequencedAdapter(
+        [{toolCalls: [visibleReply('interim'), searchCall]}],
+        undefined,
+        [[{reply: 0, text: 'interim'}]],
+      ),
+      'evt_budget_refusal_withdraws',
+      {maxToolRounds: 0},
+    );
+
+    expect(spent).toMatchObject({
+      status: 'rejected',
+      rejection: {reason: 'tool_rounds_exhausted'},
+    });
+    expect(exhausted).toEqual(['delta 1.0 interim', 'withdrawn 1.0']);
+
+    const failing: string[] = [];
+    const eventId = 'evt_commit_throws_withdraws';
+
+    await expect(
+      runRoleModelLoop({
+        ...draftLog(failing),
+        onVisibleReply() {
+          throw new Error('the disk is full');
+        },
+        event: createTestEvent('hello', eventId),
+        decisionContext: createTestDecisionContext(),
+        pluginToolDefinitions: [],
+        pluginToolHost: acceptingPluginToolHost,
+        runtimePluginContext: createTestPluginContext(eventId),
+        adapter: createSequencedAdapter(
+          [{toolCalls: [visibleReply('hello')]}],
+          undefined,
+          [[{reply: 0, text: 'hello'}]],
+        ),
+      }),
+    ).rejects.toThrow('the disk is full');
+    expect(failing).toEqual(['delta 1.0 hello', 'withdrawn 1.0']);
+  });
+
+  it('raises no draft event for an adapter that never speaks, and still names the commit', async () => {
+    const log: string[] = [];
+
+    await runWith(
+      log,
+      createSequencedAdapter([{toolCalls: [visibleReply('quiet')]}]),
+      'evt_silent_adapter',
+    );
+
+    expect(log).toEqual(['reply 1.0 quiet']);
+  });
+});
