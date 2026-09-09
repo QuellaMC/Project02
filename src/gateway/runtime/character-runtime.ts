@@ -401,12 +401,14 @@ function assemblyDrifted(context: RuntimeContext): boolean {
 }
 
 /**
- * The parts of a plan that shape the character: the effective config, the
- * plugin values with their secrets (the authored fingerprint hashes only a
- * secret's presence, so a re-keyed secret would otherwise go unnoticed),
- * the versions of the plugin packages it enables, the runtime env the
- * provider adapter is built from, and the character package's version and
- * persona. Held in memory only.
+ * The parts of a plan that shape the character: the host settings, and
+ * for each plugin it enables — a disabled one is not constructed, so
+ * configuring it ahead of enabling it changes nothing running — its
+ * values with their secrets (the authored fingerprint hashes only a
+ * secret's presence, so a re-keyed secret would otherwise go unnoticed)
+ * and its package version; the runtime env the provider adapter is built
+ * from; and the character package's version and persona. Held in memory
+ * only.
  */
 function assemblyIdentity(
   plan: PreparedProject02PluginActivationPlan,
@@ -414,16 +416,20 @@ function assemblyIdentity(
   runtimeEnv: NodeJS.ProcessEnv,
 ): string {
   return createCanonicalJsonFingerprint({
-    config: plan.resolvedConfig.effectiveConfigFingerprint,
-    plugins: plan.resolvedConfig.pluginConfigs,
-    env: runtimeEnv,
-    packages: Object.fromEntries(
+    host: plan.resolvedConfig.project02,
+    plugins: Object.fromEntries(
       plan.activation.enabledPluginIds.map(pluginId => [
         pluginId,
-        installedRuntimePluginCatalogEntry(plan.catalogEntries, pluginId)
-          ?.manifest.version,
+        {
+          config: plan.resolvedConfig.pluginConfigs[pluginId],
+          version: installedRuntimePluginCatalogEntry(
+            plan.catalogEntries,
+            pluginId,
+          )?.manifest.version,
+        },
       ]),
     ),
+    env: runtimeEnv,
     character: characterRef,
   });
 }
