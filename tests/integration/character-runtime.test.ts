@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {chmodSync, existsSync} from 'node:fs';
+import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -16,6 +16,7 @@ import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
+import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -541,6 +542,53 @@ describe('local character runtime', () => {
     );
     expect(runtime.assemblyDrifted()).toBe(false);
     expect((await open(runtime)).conversationId).toBe(ref.conversationId);
+    await runtime.stop();
+  });
+
+  it('counts an upgraded plugin package as drift', async () => {
+    const homeRoot = join(createTestTempRoot('project02-gateway-'), 'home');
+    const manifest = {
+      ...firstPartyPlugin('operator.versioned').manifest,
+      firstParty: false,
+    };
+    const packageRoot = join(homeRoot, 'plugins', manifest.id);
+    const writePackage = (version: string): void => {
+      mkdirSync(packageRoot, {recursive: true});
+      writeFileSync(join(packageRoot, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        join(packageRoot, 'project02.plugin.json'),
+        `${JSON.stringify({
+          format: 'project02.plugin.v1',
+          entry: './index.mjs',
+          manifest: {...manifest, version},
+        })}\n`,
+      );
+      writeFileSync(
+        join(packageRoot, 'index.mjs'),
+        "throw new Error('never imported: the host is injected');\n",
+      );
+    };
+
+    await ensureInitializedProject02Store({homeRoot});
+    writePackage('1.0.0');
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const runtime = createLocalCharacterRuntime({
+      loadHome: () => home,
+      characterId: 'mira',
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+      roleModelAdapter: replyAdapter(),
+    });
+
+    await runtime.start();
+    expect(runtime.health().state).toBe('ready');
+    expect(runtime.assemblyDrifted()).toBe(false);
+
+    writePackage('1.1.0');
+    expect(runtime.assemblyDrifted()).toBe(true);
     await runtime.stop();
   });
 

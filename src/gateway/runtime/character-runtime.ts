@@ -4,11 +4,13 @@ import {
   createConfiguredProject02PluginHostFromPlan,
   listProject02Characters,
   type ActivateProject02CharacterOptions,
+  type PreparedProject02PluginActivationPlan,
   type Project02Home,
   type RuntimeCliStartupResult,
 } from '../../app/index.ts';
 import type {CharacterProfile} from '../../core/index.ts';
 import {
+  installedRuntimePluginCatalogEntry,
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
   type RuntimePluginHost,
@@ -29,7 +31,6 @@ import {
   type SegmentRotation,
   type UserMessageDelivery,
 } from '../../runtime/index.ts';
-import type {ResolvedProject02RuntimeConfig} from '../../runtime/config/index.ts';
 import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 import type {
@@ -376,7 +377,7 @@ function assemblyDrifted(context: RuntimeContext): boolean {
     startup.status !== 'resolved' ||
     startup.characterActivation.status !== 'resolved' ||
     assemblyIdentity(
-      startup.activationPlan.resolvedConfig,
+      startup.activationPlan,
       startup.characterActivation.characterRef,
     ) !== assembled.identity
   );
@@ -386,15 +387,23 @@ function assemblyDrifted(context: RuntimeContext): boolean {
  * The parts of a plan that shape the character: the effective config, the
  * plugin values with their secrets (the authored fingerprint hashes only a
  * secret's presence, so a re-keyed secret would otherwise go unnoticed),
- * and the package's version and persona. Held in memory only.
+ * the versions of the plugin packages it enables, and the character
+ * package's version and persona. Held in memory only.
  */
 function assemblyIdentity(
-  resolvedConfig: ResolvedProject02RuntimeConfig,
+  plan: PreparedProject02PluginActivationPlan,
   characterRef: RoleModelCharacterRef,
 ): string {
   return createCanonicalJsonFingerprint({
-    config: resolvedConfig.effectiveConfigFingerprint,
-    plugins: resolvedConfig.pluginConfigs,
+    config: plan.resolvedConfig.effectiveConfigFingerprint,
+    plugins: plan.resolvedConfig.pluginConfigs,
+    packages: Object.fromEntries(
+      plan.activation.enabledPluginIds.map(pluginId => [
+        pluginId,
+        installedRuntimePluginCatalogEntry(plan.catalogEntries, pluginId)
+          ?.manifest.version,
+      ]),
+    ),
     character: characterRef,
   });
 }
@@ -503,10 +512,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     contextWindowTokens: project02.contextWindowTokens,
     userDisplayName: project02.userDisplayName,
     storeRoot: project02.storeRoot,
-    identity: assemblyIdentity(
-      startup.activationPlan.resolvedConfig,
-      activation.characterRef,
-    ),
+    identity: assemblyIdentity(startup.activationPlan, activation.characterRef),
   };
   // The selected provider wins; an injected adapter covers the rest.
   const adapter =
