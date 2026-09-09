@@ -18,6 +18,7 @@ import {
 } from '../../plugins/index.ts';
 import {
   createSelectedRoleModelAdapter,
+  roleModelEnvironment,
   selectChatProvider,
   type ChatProviderName,
   type RoleModelAdapter,
@@ -406,9 +407,9 @@ function assemblyDrifted(context: RuntimeContext): boolean {
  * configuring it ahead of enabling it changes nothing running — its
  * values with their secrets (the authored fingerprint hashes only a
  * secret's presence, so a re-keyed secret would otherwise go unnoticed)
- * and its package version; the runtime env the provider adapter is built
- * from; and the character package's version and persona. Held in memory
- * only.
+ * and its package version; the part of the runtime env the provider
+ * selection and adapter read; and the character package's version and
+ * persona. Held in memory only.
  */
 function assemblyIdentity(
   plan: PreparedProject02PluginActivationPlan,
@@ -429,7 +430,7 @@ function assemblyIdentity(
         },
       ]),
     ),
-    env: runtimeEnv,
+    env: roleModelEnvironment(runtimeEnv),
     character: characterRef,
   });
 }

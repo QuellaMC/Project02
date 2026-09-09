@@ -595,10 +595,14 @@ describe('local character runtime', () => {
 
     writePackage('1.0.0');
     expect(runtime.assemblyDrifted()).toBe(false);
-    writeFileSync(
-      createProject02HomeLayout({homeRoot}).envPath,
-      'NVIDIA_API_KEY=rotated\n',
-    );
+
+    // Only what the provider reads counts; a secret for something else
+    // in the home env is not a reason to rebuild.
+    const envPath = createProject02HomeLayout({homeRoot}).envPath;
+
+    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\n');
+    expect(runtime.assemblyDrifted()).toBe(false);
+    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\nNVIDIA_API_KEY=rotated\n');
     expect(runtime.assemblyDrifted()).toBe(true);
     await runtime.stop();
   });

@@ -145,6 +145,7 @@ export {
   createSelectedRoleModelAdapter,
   parseProviderName,
   providerOption,
+  roleModelEnvironment,
   RoleModelProviderSelectionError,
   selectChatProvider,
   type ChatProviderName,
