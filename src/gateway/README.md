@@ -42,6 +42,9 @@ CORS); every submission has an identity (`clientMessageId`), which is what
 makes a repeat safe. The sync rule: every committed message rides the
 stream after it reached disk, stamped with its `source`, and surfaces
 render from the stream — so every platform shows the same thread. The
+stream also carries the reply's draft ahead of its commit, marked as a
+draft by its kind (`reply_delta`, `reply_withdrawn`), and the commit
+names the draft it replaces; drafts never touch the log. The
 daemon keeps the hard parts on its side, once: a delivery holds a thread
 the runtime's recovery let go of, a reconnect gets its world in `ready`,
 and a confirmation names the turn that raised it — so every surface stays
