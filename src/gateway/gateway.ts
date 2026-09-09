@@ -153,11 +153,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         return notStartedOutcome(characterId, roster);
       }
 
-      // A start or automatic recovery in flight is joined first, so an
-      // attach that follows a fatal turn lands on the restarted character.
-      await startsInFlight.get(characterId)?.catch(() => undefined);
-
-      const outcome = await runtime.openDirectConversation();
+      const outcome = await onHeldThread(startsInFlight, runtime, held => held);
 
       if (outcome.status === 'opened') {
         conversationRoutes.set(outcome.conversationId, characterId);
@@ -192,18 +188,15 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       }
 
       return submissions.submit(message, async () => {
-        // A recovery lets the thread go; a client that opened it must not
-        // have to notice. The thread is held again here, joining a start
-        // or recovery in flight first, so the turn lands on the character
-        // that is back — the open is memoized, so a held thread costs
-        // nothing.
-        await startsInFlight.get(characterId)?.catch(() => undefined);
-
-        const held = await runtime.openDirectConversation();
-        const outcome =
+        // A recovery or a reload lets the thread go; a client that opened
+        // it must not have to notice. The thread is held again here, on the
+        // character that is back — the open is memoized, so a held thread
+        // costs nothing.
+        const outcome = await onHeldThread(startsInFlight, runtime, held =>
           held.status === 'opened'
-            ? await runtime.deliver(message)
-            : turnNotRun(characterId, message, held);
+            ? runtime.deliver(message)
+            : turnNotRun(characterId, message, held),
+        );
 
         // How the turn ended reaches every surface, whether the character
         // ran it or the thread could not be held for it.
@@ -346,6 +339,35 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     startsInFlight.set(runtime.characterId, reload);
 
     return reload;
+  }
+}
+
+/**
+ * Holds the DM once every start, recovery, or reload in flight has been
+ * joined, then runs `use` on it in the same tick as the last check — so a
+ * lifecycle registered while the thread was being held is joined too,
+ * never met as a refusal, and a turn enqueued here is ordered ahead of a
+ * reload registered after it. No join yields when nothing is in flight.
+ */
+async function onHeldThread<T>(
+  startsInFlight: ReadonlyMap<string, Promise<void>>,
+  runtime: LocalCharacterRuntime,
+  use: (held: OpenOutcome) => T,
+): Promise<Awaited<T>> {
+  for (;;) {
+    for (
+      let pending = startsInFlight.get(runtime.characterId);
+      pending !== undefined;
+      pending = startsInFlight.get(runtime.characterId)
+    ) {
+      await pending.catch(() => undefined);
+    }
+
+    const held = await runtime.openDirectConversation();
+
+    if (!startsInFlight.has(runtime.characterId)) {
+      return await use(held);
+    }
   }
 }
 

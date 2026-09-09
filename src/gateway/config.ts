@@ -130,6 +130,7 @@ export async function applyConfigChange(
       env: {...runtimeEnv(home), ...prepared.env},
       pluginManifests,
       request: prepared.request,
+      expectedFingerprint: change.expectedFingerprint,
     });
 
     if ('status' in target) {
@@ -390,6 +391,7 @@ async function resolveWriteTarget(options: {
   readonly env: NodeJS.ProcessEnv;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request: RuntimeConfigControlRequest;
+  readonly expectedFingerprint: string;
 }): Promise<ResolvedRuntimeConfigScopeTarget | RefusedChange> {
   const {home, target, env} = options;
 
@@ -416,17 +418,18 @@ async function resolveWriteTarget(options: {
     scope: 'character',
     env,
   });
-  // The commit's own preparation, run without locking or writing, so a
-  // change the seam will refuse creates no data directory for a character
-  // that never started.
+  // The commit's own preparation and expectation check, run without
+  // locking or writing, so a change the seam will refuse creates no data
+  // directory for a character that never started.
   const candidate = simulateCharacterOverlayCandidate({
     target: scopeTarget,
     pluginManifests: options.pluginManifests,
     request: options.request,
+    expectedFingerprint: options.expectedFingerprint,
   });
 
-  if (candidate.status === 'invalid') {
-    return refusedChange('invalid', candidate.message);
+  if (candidate.status !== 'valid') {
+    return refusedChange(candidate.status, candidate.message);
   }
 
   // A character's first valid write claims its data directory, as the

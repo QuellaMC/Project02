@@ -1791,9 +1791,19 @@ describe('gateway façade', () => {
       project02: {userDisplayName: 'Mine', contextWindowTokens: 4096},
     });
 
+    // Sent in the tick the reload is registered: it runs ahead of the
+    // reload, never into a refusal.
+    const early = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'before the reload',
+      source: 'web',
+      clientMessageId: 'msg-before-reload',
+    });
     const pass = gateway.reconcile();
 
     expect(gateway.health().characters[0]?.state).toBe('reloading');
+    await expect(early).resolves.toMatchObject({status: 'completed'});
 
     const delivered = gateway.deliver({
       conversationId: ref.conversationId,
@@ -2060,6 +2070,17 @@ describe('gateway façade', () => {
         },
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'mira'},
+        expectedFingerprint: 'stale',
+        operation: {
+          kind: 'set',
+          path: 'project02.contextWindowTokens',
+          value: 4096,
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'conflict'});
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
 
     chmodSync(homeRoot, 0o555);

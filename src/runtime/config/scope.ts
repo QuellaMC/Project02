@@ -27,6 +27,7 @@ import {
 import {
   assertOverlayLocatedCandidateStaysCharacterScoped,
   prepareRuntimeConfigMutationCandidate,
+  RuntimeConfigConflictError,
   RuntimeConfigMutationError,
   type PreparedRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult,
@@ -162,17 +163,20 @@ export type SimulatedCharacterOverlayCandidate =
       readonly document: Project02RuntimeConfig;
       readonly autoEnabledPluginIds: readonly string[];
     }
-  | {readonly status: 'invalid'; readonly message: string};
+  | {readonly status: 'invalid'; readonly message: string}
+  | {readonly status: 'conflict'; readonly message: string};
 
 /**
  * Runs the commit's own preparation, so a plan and its commit cannot disagree.
- * It never locks or writes, and the data directory need not exist yet.
+ * It never locks or writes, and the data directory need not exist yet. Given
+ * an expectation, it verifies it as the commit will, lock-free.
  */
 export function simulateCharacterOverlayCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+  readonly expectedFingerprint?: string;
 }): SimulatedCharacterOverlayCandidate {
   const target = requireResolvedRuntimeConfigScopeTarget(options.target);
 
@@ -185,12 +189,21 @@ export function simulateCharacterOverlayCandidate(options: {
   const mutation = normalizedControlMutation(target, options.request);
 
   try {
+    const snapshot = readRuntimeConfigControlSnapshot(target, {
+      pluginManifests: options.pluginManifests,
+      requireCharacterMarker: false,
+    });
+
+    if (options.expectedFingerprint !== undefined) {
+      verifyRuntimeConfigControlExpectation(
+        snapshot,
+        options.expectedFingerprint,
+      );
+    }
+
     const prepared = prepareScopedRuntimeConfigControlCandidate({
       target,
-      snapshot: readRuntimeConfigControlSnapshot(target, {
-        pluginManifests: options.pluginManifests,
-        requireCharacterMarker: false,
-      }),
+      snapshot,
       ...(mutation.operation === undefined
         ? {}
         : {operation: mutation.operation}),
@@ -208,6 +221,10 @@ export function simulateCharacterOverlayCandidate(options: {
       autoEnabledPluginIds: prepared.context.autoEnabledPluginIds,
     });
   } catch (error: unknown) {
+    if (error instanceof RuntimeConfigConflictError) {
+      return Object.freeze({status: 'conflict', message: error.message});
+    }
+
     // These two mean unacceptable config; anything else is a real fault.
     if (
       error instanceof RuntimeConfigMutationError ||
