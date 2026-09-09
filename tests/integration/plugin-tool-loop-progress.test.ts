@@ -377,6 +377,49 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toEqual(['needs tool', 'checking', 'finished']);
   });
 
+  it('lets an observer that awaits hear a draft ahead of its commit, and before the turn ends', async () => {
+    const session = createSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore();
+    const heard: string[] = [];
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello there', 'evt_slow_observer'),
+      session,
+      logStore,
+      roleModelAdapter: createSequencedAdapter(
+        [{toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}]}],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'not'},
+            {reply: 0, text: 'ed'},
+          ],
+        ],
+      ),
+      async onProgress(event) {
+        // A slow ear: the draft takes longer to hear than the commit would.
+        if (event.kind === 'reply_delta') {
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+
+        heard.push(
+          event.kind === 'reply_delta' || event.kind === 'visible_reply'
+            ? `${event.kind} ${event.text}`
+            : event.kind,
+        );
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(heard).toEqual([
+      'user_message',
+      'reply_delta not',
+      'reply_delta ed',
+      'visible_reply noted',
+    ]);
+  });
+
   it('withdraws a reply that never reached disk, having only ever called it a draft', async () => {
     const session = createSession({
       character: testCharacterProfile,

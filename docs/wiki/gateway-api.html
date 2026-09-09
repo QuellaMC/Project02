@@ -542,11 +542,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         conversation runs one turn at a time, so a surface keys drafts by
         conversation. The committed text is the draft after the runtime's
         normalization (line endings, trim), which is why the commit replaces
-        the draft rather than confirming it. A note the model writes before a
-        tool call streams as draft <code>1.0</code> and is replaced by the
-        call's commit — a rare flash, corrected at the commit. Pacing is
-        each surface's own: a page renders every delta, a connector edits its
-        message on a timer.
+        the draft rather than confirming it. A note the model writes beside a
+        tool call is its own draft, withdrawn once the round's commits are
+        done; it never becomes the reply's bubble. Pacing is each surface's
+        own: a page renders every delta, a connector edits its message on a
+        timer.
       </p>
 
       <h2>What a client never has to notice</h2>

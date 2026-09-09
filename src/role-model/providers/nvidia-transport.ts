@@ -231,6 +231,9 @@ export async function performNvidiaTransportRequest(options: {
     }
 
     if (response.ok) {
+      // Headers in: the silence bound starts over for the body.
+      options.requestDeadline.touch();
+
       return {
         status: 'accepted',
         httpStatus: response.status,

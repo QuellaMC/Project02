@@ -167,6 +167,8 @@ export type RuntimeTurnState = {
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly finishedToolCallIds: string[];
+  /** Every announcement of this turn, in the order made; the turn ends after the last is heard. */
+  progress: Promise<void>;
 };
 
 export type AppendVisibleReplyOptions = {

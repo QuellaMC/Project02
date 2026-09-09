@@ -201,14 +201,15 @@ export function createNvidiaRoleModelProviderAdapter(
 
         // The body streams whether or not anyone listens: one reader, one
         // reassembly, and the same judge the whole body always had.
+        const drafts = createNvidiaReplyDrafts({
+          toolNameMappings,
+          ...(invocation.onReplyDelta === undefined
+            ? {}
+            : {onReplyDelta: invocation.onReplyDelta}),
+        });
         const streamed = await readNvidiaChatCompletionStream(
           readResponseChunks(transport.response, requestDeadline),
-          createNvidiaReplyDrafts({
-            toolNameMappings,
-            ...(invocation.onReplyDelta === undefined
-              ? {}
-              : {onReplyDelta: invocation.onReplyDelta}),
-          }),
+          drafts.observer,
         );
 
         if (streamed.status === 'rejected') {
@@ -238,8 +239,11 @@ export function createNvidiaRoleModelProviderAdapter(
           });
         }
 
+        const replyDrafts = drafts.replyDrafts();
+
         return Object.freeze({
           rawOutputText: rawOutput.rawOutputText,
+          ...(replyDrafts === undefined ? {} : {replyDrafts}),
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({

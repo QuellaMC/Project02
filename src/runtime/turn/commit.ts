@@ -83,15 +83,25 @@ export function appendRawEvent(
   return rawEvent;
 }
 
-export async function emitProgress(
+/**
+ * Announcements go out on one chain per turn, so an observer that awaits
+ * hears them in the order they were made — a draft's deltas before the
+ * commit that replaces it — whether or not the announcer waited. Observers
+ * are observers: a failure in one changes nothing about the commit.
+ */
+export function emitProgress(
   state: RuntimeTurnState,
   progressEvent: LocalRuntimeTurnProgressEvent,
 ): Promise<void> {
-  try {
-    await state.options.onProgress?.(progressEvent);
-  } catch {
-    // Progress callbacks are observers; they must not change runtime commit semantics.
-  }
+  const announced = state.progress
+    .then(() => state.options.onProgress?.(progressEvent))
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+
+  state.progress = announced;
+  return announced;
 }
 
 export async function commitUserMessage(

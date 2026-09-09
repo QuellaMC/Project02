@@ -1449,6 +1449,69 @@ describe('NVIDIA role-model provider streaming', () => {
     });
   });
 
+  it("keeps the model's note out of the reply: content beside a visible_reply call is its own draft", async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        contentChunk('thinking aloud'),
+        argumentsChunk('{"text": "Hi"}', true),
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(heard).toEqual([
+      {reply: 0, text: 'thinking aloud'},
+      {reply: 1, text: 'Hi'},
+    ]);
+    expect(output.replyDrafts).toEqual([1]);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hi'}}],
+      text: 'thinking aloud',
+    });
+
+    const alone = await invokeStreaming(
+      sseResponse([contentChunk('Hello'), finishChunk('stop'), '[DONE]']),
+    );
+
+    expect(alone.output.replyDrafts).toEqual([0]);
+  });
+
+  it('starts the silence bound over when the headers arrive', async () => {
+    const wait = (ms: number) =>
+      new Promise<void>(resolve => setTimeout(resolve, ms));
+    const {output} = await invokeStreaming(
+      async () => {
+        await wait(200);
+
+        return new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await wait(200);
+              controller.enqueue(
+                new TextEncoder().encode(
+                  sseText([
+                    contentChunk('late'),
+                    finishChunk('stop'),
+                    '[DONE]',
+                  ]),
+                ),
+              );
+              controller.close();
+            },
+          }),
+        );
+      },
+      {requestTimeoutMs: 300},
+    );
+
+    // Headers after 200 ms and the first chunk 200 ms later: neither wait
+    // reached the bound, though together they passed it.
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'late'}}],
+    });
+  });
+
   it('reports a stream that breaks mid-reply as a provider error with no raw text', async () => {
     const {output, heard} = await invokeStreaming(
       new Response(

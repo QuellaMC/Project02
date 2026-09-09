@@ -100,6 +100,9 @@ export async function runSerializedLocalUserMessageEvent(
     return await runPreparedLocalRuntimeTurn(state);
   } catch (error: unknown) {
     return await handleRuntimeTurnFailure(state, error);
+  } finally {
+    // The turn is over once everything it announced has been heard.
+    await state.progress;
   }
 }
 

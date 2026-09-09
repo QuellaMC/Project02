@@ -978,6 +978,49 @@ describe('role-model loop reply drafts', () => {
     expect(failing).toEqual(['delta 1.0 hello', 'withdrawn 1.0']);
   });
 
+  it("names the commit by the adapter's word on which draft became the reply, and withdraws the rest", async () => {
+    const log: string[] = [];
+
+    await runWith(
+      log,
+      createSequencedAdapter(
+        [{toolCalls: [visibleReply('Hi')], text: 'a note'}],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'a note'},
+            {reply: 1, text: 'Hi'},
+          ],
+        ],
+        [[1]],
+      ),
+      'evt_reply_drafts_mapping',
+    );
+
+    expect(log).toEqual([
+      'delta 1.0 a note',
+      'delta 1.1 Hi',
+      'reply 1.1 Hi',
+      'withdrawn 1.0',
+    ]);
+
+    const ignored: string[] = [];
+
+    await runWith(
+      ignored,
+      createSequencedAdapter(
+        [{toolCalls: [visibleReply('Hi')]}],
+        undefined,
+        [[{reply: 0, text: 'Hi'}]],
+        [[1.5]],
+      ),
+      'evt_reply_drafts_unusable',
+    );
+
+    // A mapping that is not draft numbers is no mapping: draft n is reply n.
+    expect(ignored).toEqual(['delta 1.0 Hi', 'reply 1.0 Hi']);
+  });
+
   it('raises no draft event for an adapter that never speaks, and still names the commit', async () => {
     const log: string[] = [];
 
