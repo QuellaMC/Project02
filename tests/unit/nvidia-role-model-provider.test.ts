@@ -1512,6 +1512,38 @@ describe('NVIDIA role-model provider streaming', () => {
     });
   });
 
+  it("starts the silence bound over at an error's headers too, so its body reads as the provider's error", async () => {
+    const wait = (ms: number) =>
+      new Promise<void>(resolve => setTimeout(resolve, ms));
+    const {output} = await invokeStreaming(
+      async () => {
+        await wait(200);
+
+        return new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await wait(200);
+              controller.enqueue(
+                new TextEncoder().encode(
+                  JSON.stringify({error: {message: 'bad request'}}),
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {status: 400},
+        );
+      },
+      {requestTimeoutMs: 300},
+    );
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA provider error: bad request',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('http_error');
+  });
+
   it('reports a stream that breaks mid-reply as a provider error with no raw text', async () => {
     const {output, heard} = await invokeStreaming(
       new Response(

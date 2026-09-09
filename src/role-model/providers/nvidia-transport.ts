@@ -191,8 +191,8 @@ type NvidiaTransportResult =
 
 /**
  * Retries only transport-class failures (network throws, HTTP 408/429/5xx),
- * all before a body is read. Retries share the request deadline and never
- * extend it.
+ * all before a body is read. Headers of any status are the provider
+ * speaking, so they move the silence bound; retries wait under it.
  */
 export async function performNvidiaTransportRequest(options: {
   readonly fetchClient: NvidiaFetchClient;
@@ -230,10 +230,10 @@ export async function performNvidiaTransportRequest(options: {
       continue;
     }
 
-    if (response.ok) {
-      // Headers in: the silence bound starts over for the body.
-      options.requestDeadline.touch();
+    // Headers in: the silence bound starts over for the body, whatever the status.
+    options.requestDeadline.touch();
 
+    if (response.ok) {
       return {
         status: 'accepted',
         httpStatus: response.status,
