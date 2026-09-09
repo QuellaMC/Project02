@@ -104,7 +104,10 @@ export function validateRoleModelAdapterRawOutput(
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
-/** A mapping that is not draft numbers is no mapping: draft n is then reply n. */
+/**
+ * A mapping that is not distinct draft numbers is no mapping: draft n is
+ * then reply n. Two replies named as one draft would end that draft twice.
+ */
 function replyDraftsOption(value: unknown): {
   readonly replyDrafts?: readonly number[];
 } {
@@ -117,7 +120,8 @@ function replyDraftsOption(value: unknown): {
       typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0,
   );
 
-  return drafts.length === value.length
+  return drafts.length === value.length &&
+    new Set(drafts).size === drafts.length
     ? {replyDrafts: Object.freeze(drafts)}
     : {};
 }

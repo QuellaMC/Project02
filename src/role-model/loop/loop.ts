@@ -380,6 +380,11 @@ async function invokeRoleModelLoopRound(options: {
     };
   }
 
+  const replyDrafts = replyDraftsFor(
+    decisionResult.decision,
+    rawOutputValidation.replyDrafts,
+  );
+
   return {
     status: 'accepted',
     decision: decisionResult.decision,
@@ -387,10 +392,23 @@ async function invokeRoleModelLoopRound(options: {
       decisionResult.decision.toolCalls,
     ),
     pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
-    ...(rawOutputValidation.replyDrafts === undefined
-      ? {}
-      : {replyDrafts: rawOutputValidation.replyDrafts}),
+    ...(replyDrafts === undefined ? {} : {replyDrafts}),
   };
+}
+
+/**
+ * The adapter's mapping counts only when it names a draft for every visible
+ * reply: a shorter one would leave a reply to fall back on a number the
+ * mapping may already have given away.
+ */
+function replyDraftsFor(
+  decision: CharacterDecision,
+  replyDrafts: readonly number[] | undefined,
+): readonly number[] | undefined {
+  return replyDrafts !== undefined &&
+    replyDrafts.length === executionVisibleReplyTexts(decision).length
+    ? replyDrafts
+    : undefined;
 }
 
 async function routeRoleModelLoopToolCalls(options: {

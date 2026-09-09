@@ -14,9 +14,10 @@ export type RoleModelAdapterRawOutput = {
   readonly rejection?: RoleModelDecisionRejection;
   /**
    * For each visible reply of the decision, in order, the draft it was
-   * spoken as. Absent, draft n is reply n. A draft named here is replaced
-   * by its commit; every other draft the adapter spoke — a note the model
-   * wrote beside a tool call — is withdrawn. Never recorded.
+   * spoken as: distinct draft numbers, one per reply. Absent — or not that
+   * — draft n is reply n. A draft named here is replaced by its commit;
+   * every other draft the adapter spoke, such as a note the model wrote
+   * beside a tool call, is withdrawn. Never recorded.
    */
   readonly replyDrafts?: readonly number[];
 };

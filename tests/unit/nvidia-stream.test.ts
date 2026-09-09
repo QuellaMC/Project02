@@ -124,23 +124,34 @@ describe('NVIDIA chat completion stream', () => {
   });
 
   it.each([
-    ['{oops', 'NVIDIA stream chunk must be JSON.'],
-    ['[]', 'NVIDIA stream chunk must be an object.'],
+    ['{oops', 'malformed_response', 'NVIDIA stream chunk must be JSON.'],
+    ['[]', 'malformed_response', 'NVIDIA stream chunk must be an object.'],
     [
       JSON.stringify({choices: 'nope'}),
-      'NVIDIA stream chunk choices must be an array.',
+      'malformed_response',
+      'NVIDIA stream chunk must carry choices.',
+    ],
+    [
+      JSON.stringify({object: 'chat.completion.chunk'}),
+      'malformed_response',
+      'NVIDIA stream chunk must carry choices.',
     ],
     [
       JSON.stringify({choices: [{delta: {tool_calls: [{}]}}]}),
+      'malformed_response',
       'NVIDIA stream chunk tool_calls[] must carry a numeric index.',
     ],
-  ])('refuses a chunk that is not a completion: %s', async (data, message) => {
-    await expect(
-      readNvidiaChatCompletionStream(bytes(`data: ${data}\n\n`)),
-    ).resolves.toEqual({
-      status: 'rejected',
-      code: 'malformed_response',
-      message,
-    });
-  });
+    [
+      JSON.stringify({error: {message: 'model overloaded', type: 'server'}}),
+      'provider_error',
+      'NVIDIA provider error: model overloaded',
+    ],
+  ])(
+    "refuses a chunk that is not a completion, naming the provider's own error when it sent one: %s",
+    async (data, code, message) => {
+      await expect(
+        readNvidiaChatCompletionStream(bytes(`data: ${data}\n\n`)),
+      ).resolves.toEqual({status: 'rejected', code, message});
+    },
+  );
 });

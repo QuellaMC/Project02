@@ -320,7 +320,9 @@ async function responseErrorMessage(
   return `NVIDIA provider HTTP ${String(response.status)}.`;
 }
 
-function providerErrorMessageFromBody(body: unknown): string | undefined {
+export function providerErrorMessageFromBody(
+  body: unknown,
+): string | undefined {
   if (!isJsonRecord(body)) {
     return undefined;
   }

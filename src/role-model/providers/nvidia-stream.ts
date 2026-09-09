@@ -1,5 +1,6 @@
 import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {createSseFrameSplitter} from '../../shared/sse.ts';
+import {providerErrorMessageFromBody} from './nvidia-transport.ts';
 
 export type NvidiaStreamObserver = {
   /** A piece of the assistant's content, as it arrives. */
@@ -20,7 +21,7 @@ export type NvidiaStreamedCompletion =
     }
   | {
       readonly status: 'rejected';
-      readonly code: 'malformed_response';
+      readonly code: 'malformed_response' | 'provider_error';
       readonly message: string;
     };
 
@@ -162,18 +163,25 @@ function createCompletionAssembly(observer: NvidiaStreamObserver): {
   const takeChunk = (
     chunk: Readonly<Record<string, unknown>>,
   ): Rejection | undefined => {
+    // A 200 can still carry the provider's error, as a chunk of its own.
+    const providerError = providerErrorMessageFromBody(chunk);
+
+    if (providerError !== undefined) {
+      return Object.freeze({
+        status: 'rejected',
+        code: 'provider_error',
+        message: providerError,
+      });
+    }
+
     if (chunk['usage'] !== undefined && chunk['usage'] !== null) {
       usage = chunk['usage'];
     }
 
     const choices = chunk['choices'];
 
-    if (choices === undefined || choices === null) {
-      return undefined;
-    }
-
     if (!Array.isArray(choices)) {
-      return rejectStream('NVIDIA stream chunk choices must be an array.');
+      return rejectStream('NVIDIA stream chunk must carry choices.');
     }
 
     const choice: unknown = choices[0];
