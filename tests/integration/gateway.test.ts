@@ -13,6 +13,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   createGateway,
+  type ConfigChange,
   type Gateway,
   type GatewayEvent,
 } from '../../src/gateway/index.ts';
@@ -1304,6 +1305,36 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('stops promptly with a reload queued behind a parked confirmation', async () => {
+    const {homeRoot, gateway} = await createConfirmationHome();
+    const ref = await open(gateway, 'mira');
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'please be warmer',
+      source: 'test',
+      clientMessageId: randomUUID(),
+    });
+
+    await vi.waitFor(() => {
+      expect(gateway.pendingConfirmations()).toHaveLength(1);
+    });
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      {project02: {contextWindowTokens: 4096}},
+    );
+
+    const pass = gateway.reconcile();
+
+    expect(gateway.health().characters[0]?.state).toBe('reloading');
+    // The stop cancels the parked confirmation the reload was waiting
+    // behind; neither the pass nor the turn holds shutdown to the deadline.
+    await gateway.stop();
+    await pass;
+    await turn;
+    expect(gateway.health().characters[0]?.state).toBe('stopped');
+  });
+
   it('refuses an answer that arrives after the deadline, whatever the client believes', async () => {
     const {gateway, inspectTone} = await createConfirmationHome();
     const events: GatewayEvent[] = [];
@@ -1639,6 +1670,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
     });
     expect(
       gateway.health().characters.map(({id, enabled, state}) => ({
@@ -1670,6 +1702,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: [],
       stopping: ['mira'],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: false,
@@ -1680,6 +1713,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: true,
@@ -1709,9 +1743,444 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: ['mira'],
       stopping: [],
+      reloading: [],
     });
     expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
+  });
+
+  it('reconcile reloads a character only when its assembly would differ, and a delivery sent meanwhile lands on its thread', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const states: string[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'state_changed') {
+        states.push(event.state);
+      }
+    });
+    await gateway.reconcile();
+
+    const ref = await open(gateway, 'mira');
+    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
+
+    writeRuntimeConfig(overlay, {project02: {userDisplayName: 'Mine'}});
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: [],
+      reloading: ['mira'],
+    });
+
+    // The overlay overrides the name, so a global change never reaches
+    // this character: no session end, no rebuild.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Everyone'},
+    });
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: [],
+      reloading: [],
+    });
+
+    // Configuring a plugin ahead of enabling it constructs nothing, so it
+    // reloads nothing.
+    writeRuntimeConfig(overlay, {
+      project02: {userDisplayName: 'Mine'},
+      plugins: {'demo-config': {config: {tone: 'warm'}}},
+    });
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      reloading: [],
+    });
+
+    writeRuntimeConfig(overlay, {
+      project02: {userDisplayName: 'Mine', contextWindowTokens: 4096},
+    });
+
+    // Sent in the tick the reload is registered: it runs ahead of the
+    // reload, never into a refusal.
+    const early = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'before the reload',
+      source: 'web',
+      clientMessageId: 'msg-before-reload',
+    });
+    const pass = gateway.reconcile();
+
+    expect(gateway.health().characters[0]?.state).toBe('reloading');
+    await expect(early).resolves.toMatchObject({status: 'completed'});
+
+    const delivered = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'still here',
+      source: 'web',
+      clientMessageId: 'msg-mid-reload',
+    });
+
+    await expect(pass).resolves.toMatchObject({reloading: ['mira']});
+    await expect(delivered).resolves.toMatchObject({
+      status: 'completed',
+      conversationId: ref.conversationId,
+    });
+    expect(states).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'ready',
+      'reloading',
+      'ready',
+    ]);
+    await gateway.stop();
+  });
+
+  it('reconcile leaves a reload that cannot assemble failed, and starts it again once fixed', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.reconcile();
+
+    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
+
+    writeRuntimeConfig(overlay, {project02: {contextWindowTokens: -5}});
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      reloading: ['mira'],
+    });
+    expect(gateway.health().characters[0]?.state).toBe('failed');
+    expect(gateway.health().characters[0]?.diagnostic).toContain(
+      'contextWindowTokens',
+    );
+
+    // No automatic recovery: the next operator act is the retry.
+    await new Promise(resolve => setImmediate(resolve));
+    expect(gateway.health().characters[0]?.state).toBe('failed');
+
+    writeRuntimeConfig(overlay, {});
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      starting: ['mira'],
+    });
+    expect(gateway.health().characters[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
+  it('views the global scope and a character as one field shape without starting anyone', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const global = gateway.configView({scope: 'global'});
+
+    if (global.status !== 'ok') {
+      expect.fail(global.message);
+    }
+
+    expect(global.project02.map(field => field.name)).toEqual([
+      'defaultMemoryProvider',
+      'enabled',
+      'roleModelProvider',
+      'userDisplayName',
+      'contextWindowTokens',
+    ]);
+    expect(
+      global.project02.find(field => field.name === 'userDisplayName'),
+    ).toMatchObject({
+      authored: {configured: true, value: 'Global Name'},
+      effectiveSource: 'global',
+      editableInScope: true,
+    });
+    expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
+      'demo-config',
+    );
+    // A provider chosen in the environment wins over either document, and
+    // the view says so rather than reporting the document's value.
+    const overridden = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'},
+    }).configView({scope: 'global'});
+
+    expect(
+      overridden.status === 'ok' &&
+        overridden.project02.find(field => field.name === 'roleModelProvider')
+          ?.effective,
+    ).toMatchObject({
+      source: 'env:PROJECT02_ROLE_MODEL_PROVIDER',
+      value: 'nvidia',
+    });
+
+    const character = gateway.configView({
+      scope: 'character',
+      characterId: 'mira',
+    });
+
+    if (character.status !== 'ok') {
+      expect.fail(character.message);
+    }
+
+    expect(
+      character.project02.find(field => field.name === 'userDisplayName'),
+    ).toMatchObject({
+      authored: {configured: false},
+      effectiveSource: 'global',
+      effective: {source: 'config', value: 'Global Name'},
+    });
+    expect(character.fingerprint).not.toBe(global.fingerprint);
+    expect(gateway.health().characters[0]?.state).toBe('not_started');
+    // Never started, yet the view says what a start will run: the plugin
+    // her package requires is active, not waiting to be materialized.
+    expect(
+      character.plugins.find(plugin => plugin.pluginId === 'character-state'),
+    ).toMatchObject({enabled: true, activation: {status: 'active'}});
+
+    // A package the catalog cannot publish is an error the runtime acts on,
+    // so both views name it.
+    mkdirSync(join(homeRoot, 'plugins', 'broken'), {recursive: true});
+    writeFileSync(
+      join(homeRoot, 'plugins', 'broken', 'project02.plugin.json'),
+      '{not json',
+      'utf8',
+    );
+    for (const target of [
+      {scope: 'global'} as const,
+      {scope: 'character', characterId: 'mira'} as const,
+    ]) {
+      const view = gateway.configView(target);
+
+      expect(
+        view.status === 'ok' &&
+          view.diagnostics.some(diagnostic =>
+            diagnostic.code.startsWith('runtime_plugin_package_'),
+          ),
+      ).toBe(true);
+    }
+    expect(
+      gateway.configView({scope: 'character', characterId: 'nobody'}),
+    ).toMatchObject({status: 'refused', reason: 'unknown_character'});
+    // A package that fails discovery is refused by its own diagnostic,
+    // never as a character that is missing.
+    mkdirSync(join(homeRoot, 'characters', 'broken'), {recursive: true});
+    writeFileSync(
+      join(homeRoot, 'characters', 'broken', 'project02.character.json'),
+      '{not json',
+      'utf8',
+    );
+
+    const broken = gateway.configView({
+      scope: 'character',
+      characterId: 'broken',
+    });
+
+    expect(broken).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+    expect(broken.status === 'refused' && broken.message).toContain(
+      'invalid_descriptor',
+    );
+
+    // A document that now names another home describes a daemon that is
+    // not this one.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {storeRoot: join(homeRoot, '..', 'elsewhere')},
+    });
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
+  });
+
+  it('applies a change through the one transaction, reloads behind the answer, and refuses a stale fingerprint', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const states: string[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'state_changed') {
+        states.push(event.state);
+      }
+    });
+    await gateway.reconcile();
+
+    const target = {scope: 'character', characterId: 'mira'} as const;
+    const before = gateway.configView(target);
+
+    if (before.status !== 'ok') {
+      expect.fail(before.message);
+    }
+
+    const readyAgain = new Promise<void>(resolve => {
+      gateway.events(event => {
+        if (event.kind === 'state_changed' && event.state === 'ready') {
+          resolve();
+        }
+      });
+    });
+    const applied = await gateway.applyConfigChange({
+      target,
+      expectedFingerprint: before.fingerprint,
+      operation: {
+        kind: 'set',
+        path: 'project02.contextWindowTokens',
+        value: 4096,
+      },
+    });
+
+    if (applied.status !== 'applied') {
+      expect.fail(applied.message);
+    }
+
+    await readyAgain;
+    expect(states).toEqual(['starting', 'ready', 'reloading', 'ready']);
+
+    const after = gateway.configView(target);
+
+    expect(after).toMatchObject({
+      status: 'ok',
+      fingerprint: applied.fingerprint,
+    });
+    if (after.status === 'ok') {
+      expect(
+        after.project02.find(field => field.name === 'contextWindowTokens'),
+      ).toMatchObject({authored: {configured: true, value: 4096}});
+    }
+
+    await expect(
+      gateway.applyConfigChange({
+        target,
+        expectedFingerprint: before.fingerprint,
+        operation: {kind: 'unset', path: 'project02.contextWindowTokens'},
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'conflict'});
+    await gateway.stop();
+  });
+
+  it('refuses a change the seam will not take, and fails one it cannot write', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const view = gateway.configView({scope: 'global'});
+
+    if (view.status !== 'ok') {
+      expect.fail(view.message);
+    }
+
+    const change = (operation: ConfigChange['operation']) =>
+      gateway.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: view.fingerprint,
+        operation,
+      });
+
+    await expect(
+      change({
+        kind: 'set',
+        path: 'project02.contextWindowTokens',
+        value: 'many',
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      change({kind: 'set', path: 'project02.storeRoot', value: '/elsewhere'}),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      change({
+        kind: 'plugin_field_set',
+        pluginId: 'nope',
+        field: 'x',
+        value: 1,
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    // A secret whose variable the daemon was launched with — even empty —
+    // would be written to a file the launch env shadows.
+    const shadowed = await createGateway({
+      location: {storeRoot: homeRoot},
+      env: {DEMO_CONFIG_TONE: ''},
+    }).applyConfigChange({
+      target: {scope: 'global'},
+      expectedFingerprint: view.fingerprint,
+      operation: {
+        kind: 'plugin_secret_set',
+        pluginId: 'demo-config',
+        field: 'tone',
+        value: 'secret',
+      },
+    });
+
+    expect(shadowed).toMatchObject({status: 'refused', reason: 'invalid'});
+    expect(shadowed.status === 'refused' && shadowed.message).toContain(
+      'DEMO_CONFIG_TONE',
+    );
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'nobody'},
+        expectedFingerprint: view.fingerprint,
+        operation: {kind: 'set', path: 'project02.enabled', value: false},
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'unknown_character'});
+    // A refused change to a character that never started leaves no data
+    // directory behind.
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'mira'},
+        expectedFingerprint: view.fingerprint,
+        operation: {
+          kind: 'set',
+          path: 'project02.contextWindowTokens',
+          value: 'many',
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'character', characterId: 'mira'},
+        expectedFingerprint: 'stale',
+        operation: {
+          kind: 'set',
+          path: 'project02.contextWindowTokens',
+          value: 4096,
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'conflict'});
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+
+    chmodSync(homeRoot, 0o555);
+
+    try {
+      await expect(
+        change({
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Blocked',
+        }),
+      ).resolves.toMatchObject({status: 'failed'});
+    } finally {
+      chmodSync(homeRoot, 0o755);
+    }
+
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      fingerprint: view.fingerprint,
+    });
   });
 
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {
@@ -1760,6 +2229,7 @@ describe('gateway façade', () => {
     await expect(gateway.reconcile()).resolves.toEqual({
       starting: [],
       stopping: ['mira'],
+      reloading: [],
     });
     expect(gateway.health().characters[0]).toMatchObject({
       enabled: false,

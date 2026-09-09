@@ -6,6 +6,7 @@ import {createReconciler} from '../../src/gateway/reconcile.ts';
 function createHarness() {
   const states = new Map<string, CharacterRuntimeState | 'not_started'>();
   const enabled = new Map<string, boolean>();
+  const drifted = new Set<string>();
   const log: string[] = [];
   let rosterReads = 0;
   let releaseStart: (() => void) | undefined;
@@ -38,12 +39,20 @@ function createHarness() {
 
       return Promise.resolve();
     },
+    drifted: id => drifted.has(id),
+    reload(id) {
+      log.push(`reload:${id}`);
+      drifted.delete(id);
+
+      return Promise.resolve();
+    },
   });
 
   return {
     reconciler,
     states,
     enabled,
+    drifted,
     log,
     rosterReads: () => rosterReads,
     release: () => releaseStart?.(),
@@ -71,23 +80,32 @@ describe('gateway reconciler', () => {
     await expect(first).resolves.toEqual({
       starting: ['mira'],
       stopping: ['mira'],
+      reloading: [],
     });
     expect(harness.rosterReads()).toBe(2);
     expect(harness.log).toEqual(['start:mira', 'stop:mira']);
     expect(harness.states.get('mira')).toBe('stopped');
   });
 
-  it('leaves settled and in-flight characters alone and retries a failed one', async () => {
+  it('leaves settled and in-flight characters alone, retries a failed one, and reloads a drifted one', async () => {
     const harness = createHarness();
 
     harness.enabled.set('ready', true);
     harness.states.set('ready', 'ready');
+    harness.enabled.set('drifted', true);
+    harness.states.set('drifted', 'ready');
+    harness.drifted.add('drifted');
+    harness.enabled.set('reloading', true);
+    harness.states.set('reloading', 'reloading');
+    harness.drifted.add('reloading');
     harness.enabled.set('stopping', false);
     harness.states.set('stopping', 'stopping');
     harness.enabled.set('failed', true);
     harness.states.set('failed', 'failed');
     harness.enabled.set('off', false);
     harness.states.set('off', 'failed');
+    harness.enabled.set('off-mid-reload', false);
+    harness.states.set('off-mid-reload', 'reloading');
 
     const pass = harness.reconciler.reconcile();
 
@@ -95,9 +113,15 @@ describe('gateway reconciler', () => {
 
     await expect(pass).resolves.toEqual({
       starting: ['failed'],
-      stopping: ['off'],
+      stopping: ['off', 'off-mid-reload'],
+      reloading: ['drifted'],
     });
-    expect(harness.log).toEqual(['start:failed', 'stop:off']);
+    expect(harness.log).toEqual([
+      'reload:drifted',
+      'start:failed',
+      'stop:off',
+      'stop:off-mid-reload',
+    ]);
     await expect(harness.reconciler.settled()).resolves.toBeUndefined();
   });
 
@@ -112,6 +136,7 @@ describe('gateway reconciler', () => {
     await expect(harness.reconciler.reconcile()).resolves.toEqual({
       starting: [],
       stopping: ['gone'],
+      reloading: [],
     });
     expect(harness.log).toEqual(['stop:gone']);
   });

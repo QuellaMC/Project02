@@ -1,7 +1,6 @@
 import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
 } from './overlay.ts';
 import {
@@ -9,13 +8,10 @@ import {
   loadProject02RuntimeConfigForLocation,
   type ResolvedProject02RuntimeLocation,
 } from './location.ts';
-import {
-  resolveLayeredProject02RuntimeConfigWithSnapshot,
-  runtimeConfigEnvWithCharacterSecrets,
-} from './resolve-layered.ts';
+import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
-import {resolveProject02RuntimeConfig} from './resolve.ts';
+import {resolveRuntimePluginConfigs} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
@@ -29,7 +25,6 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
-  LoadedProject02RuntimeConfig,
   RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
@@ -122,7 +117,7 @@ export function inspectRuntimePluginConfig(options: {
   return createRuntimePluginConfigInspectShape({
     layeredConfig,
     targetScope: options.targetScope,
-    resolvedConfig,
+    pluginResolution: resolvedConfig,
     manifest: options.manifest,
     ...(options.activation === undefined
       ? {}
@@ -137,6 +132,21 @@ export function inspectRuntimePluginConfig(options: {
       pluginManifests: manifests,
     }),
   });
+}
+
+/**
+ * The one rule naming a plugin secret's environment variable: the
+ * manifest's own, else the plugin and field upper-cased. Every writer of a
+ * secret — the console's printed command, the daemon — derives it here.
+ */
+export function pluginSecretEnvVarName(
+  pluginId: string,
+  field: RuntimePluginConfigField,
+): string {
+  return (
+    field.envVar ??
+    `${pluginId}_${field.name}`.replaceAll(/[^A-Za-z0-9]+/g, '_').toUpperCase()
+  );
 }
 
 function layeredControlFingerprint(options: {
@@ -155,8 +165,8 @@ function layeredControlFingerprint(options: {
 }
 
 export function runtimePluginConfigControlMutation(options: {
-  readonly env?: NodeJS.ProcessEnv;
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  /** What this scope resolves with: a character's secrets over the shared env. */
+  readonly env: NodeJS.ProcessEnv;
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
@@ -197,9 +207,8 @@ export function runtimePluginConfigControlMutation(options: {
       assertRuntimePluginConfigCandidateValid({
         config,
         manifest: options.manifest,
-        runtimeLocation: options.runtimeLocation,
         operation: options.operation,
-        ...(options.env === undefined ? {} : {env: options.env}),
+        env: options.env,
       });
     },
   };
@@ -243,32 +252,17 @@ function runtimePluginConfigMutationOperation(
 function assertRuntimePluginConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly operation: RuntimePluginConfigFieldControlOperation;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly env: NodeJS.ProcessEnv;
 }): void {
-  const loadedConfig: LoadedProject02RuntimeConfig = Object.freeze({
-    source: options.runtimeLocation.selectedConfig.source,
-    path: options.runtimeLocation.selectedConfig.path,
+  const resolved = resolveRuntimePluginConfigs({
     config: options.config,
-    diagnostics: Object.freeze([]),
-  });
-  const resolved = resolveProject02RuntimeConfig({
-    loadedConfig,
-    runtimeLocation: options.runtimeLocation,
     pluginManifests: [options.manifest],
     skipPluginScopeValidation: true,
-    // The runtime resolves this document with the character's env
-    // overlaid; validating a write against anything narrower would
-    // reject an edit the runtime itself accepts. The pending secret sits
-    // on top of both: the file this is validated against is the one this
-    // mutation is about to write.
+    // The pending secret sits on top of the scope's env: the file this is
+    // validated against is the one this mutation is about to write.
     env: {
-      ...runtimeConfigEnvWithCharacterSecrets(
-        options.env,
-        loadCharacterSecretsEnv(options.runtimeLocation.characterScope.dataRoot)
-          .env,
-      ),
+      ...options.env,
       ...(options.operation.kind === 'secret_set'
         ? {[options.operation.envVar]: options.operation.secretValue}
         : {}),

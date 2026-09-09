@@ -36,8 +36,9 @@ import {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
+import {applyConfigChange, readConfigView} from './config.ts';
 import {readConversationHistory} from './history.ts';
-import {createReconciler} from './reconcile.ts';
+import {createReconciler, type Reconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
@@ -104,6 +105,13 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     stop: async characterId => {
       await runtimes.get(characterId)?.stop();
     },
+    drifted: characterId =>
+      runtimes.get(characterId)?.assemblyDrifted() ?? false,
+    reload: characterId => {
+      const runtime = runtimes.get(characterId);
+
+      return runtime === undefined ? Promise.resolve() : reloadOrJoin(runtime);
+    },
   });
 
   return Object.freeze({
@@ -122,6 +130,16 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     },
     startCharacter,
     reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
+    configView: target => readConfigView(loadHome(), target),
+    async applyConfigChange(change) {
+      const outcome = await applyConfigChange(loadHome(), change);
+
+      if (outcome.status === 'applied') {
+        reconcileBehind(startsInFlight, reconciler);
+      }
+
+      return outcome;
+    },
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const runtime = runtimes.get(characterId);
       // The roster is the truth about what is installed: a runtime kept
@@ -135,11 +153,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         return notStartedOutcome(characterId, roster);
       }
 
-      // A start or automatic recovery in flight is joined first, so an
-      // attach that follows a fatal turn lands on the restarted character.
-      await startsInFlight.get(characterId)?.catch(() => undefined);
-
-      const outcome = await runtime.openDirectConversation();
+      const outcome = await onHeldThread(startsInFlight, runtime, held => held);
 
       if (outcome.status === 'opened') {
         conversationRoutes.set(outcome.conversationId, characterId);
@@ -174,18 +188,15 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       }
 
       return submissions.submit(message, async () => {
-        // A recovery lets the thread go; a client that opened it must not
-        // have to notice. The thread is held again here, joining a start
-        // or recovery in flight first, so the turn lands on the character
-        // that is back — the open is memoized, so a held thread costs
-        // nothing.
-        await startsInFlight.get(characterId)?.catch(() => undefined);
-
-        const held = await runtime.openDirectConversation();
-        const outcome =
+        // A recovery or a reload lets the thread go; a client that opened
+        // it must not have to notice. The thread is held again here, on the
+        // character that is back — the open is memoized, so a held thread
+        // costs nothing.
+        const outcome = await onHeldThread(startsInFlight, runtime, held =>
           held.status === 'opened'
-            ? await runtime.deliver(message)
-            : turnNotRun(characterId, message, held);
+            ? runtime.deliver(message)
+            : turnNotRun(characterId, message, held),
+        );
 
         // How the turn ended reaches every surface, whether the character
         // ran it or the thread could not be held for it.
@@ -222,15 +233,19 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       };
     },
     async stop(): Promise<void> {
-      // Terminal by design: no new starts. A reconcile pass in flight sees
-      // its starts refused and finishes its stops first; then the runtimes
-      // are signalled, so a start or recovery in flight is overtaken —
-      // refused at the door, drained, discarded — never finished into a
-      // ready character during shutdown; the joins then confirm those
-      // promises settled.
+      // Terminal by design: no new starts. The runtimes are signalled
+      // first — a stop cancels a parked confirmation, which a reload queued
+      // behind that turn would otherwise wait out — so a start, recovery,
+      // or reload in flight is overtaken: refused at the door, drained,
+      // discarded, never finished into a ready character during shutdown.
+      // A reconcile pass in flight then sees its starts refused and its
+      // stops joined; the joins confirm every promise settled.
       stopped = true;
+
+      const stops = [...runtimes.values()].map(runtime => runtime.stop());
+
       await reconciler.settled();
-      await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
+      await Promise.all(stops);
       await Promise.all(
         [...startsInFlight.values()].map(start => start.catch(() => undefined)),
       );
@@ -300,14 +315,87 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
     return start;
   }
+
+  /**
+   * A reload is joined like a start: an attach or a delivery that lands
+   * meanwhile waits for it, then holds the thread again under the same id.
+   * How it ended is the runtime's state to show.
+   */
+  function reloadOrJoin(runtime: LocalCharacterRuntime): Promise<void> {
+    const pending = startsInFlight.get(runtime.characterId);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    if (stopped || runtime.health().state !== 'ready') {
+      return Promise.resolve();
+    }
+
+    const reload = runtime.reload().finally(() => {
+      startsInFlight.delete(runtime.characterId);
+    });
+
+    startsInFlight.set(runtime.characterId, reload);
+
+    return reload;
+  }
+}
+
+/**
+ * Holds the DM once every start, recovery, or reload in flight has been
+ * joined, then runs `use` on it in the same tick as the last check — so a
+ * lifecycle registered while the thread was being held is joined too,
+ * never met as a refusal, and a turn enqueued here is ordered ahead of a
+ * reload registered after it. No join yields when nothing is in flight.
+ */
+async function onHeldThread<T>(
+  startsInFlight: ReadonlyMap<string, Promise<void>>,
+  runtime: LocalCharacterRuntime,
+  use: (held: OpenOutcome) => T,
+): Promise<Awaited<T>> {
+  for (;;) {
+    for (
+      let pending = startsInFlight.get(runtime.characterId);
+      pending !== undefined;
+      pending = startsInFlight.get(runtime.characterId)
+    ) {
+      await pending.catch(() => undefined);
+    }
+
+    const held = await runtime.openDirectConversation();
+
+    if (!startsInFlight.has(runtime.characterId)) {
+      return await use(held);
+    }
+  }
+}
+
+/**
+ * A written change is applied behind the answer: a reload can wait minutes
+ * on a parked confirmation, and a Save button must not wait with it. The
+ * starts in flight are joined first, so a write that lands while a
+ * character boots reaches it once it is ready; and nothing here may take
+ * the daemon down — how the pass went is visible in health and the stream.
+ */
+function reconcileBehind(
+  startsInFlight: ReadonlyMap<string, Promise<void>>,
+  reconciler: Reconciler,
+): void {
+  void Promise.all(
+    [...startsInFlight.values()].map(start => start.catch(() => undefined)),
+  )
+    .then(() => reconciler.reconcile())
+    .catch(() => undefined);
 }
 
 /**
  * Construct-once runtimes, each wired for one automatic restart after a
  * fatal turn: a boot failure arrives from 'starting' and stays failed
- * rather than crash-looping. The recovery is registered like an explicit
- * start, so a retry or attach that lands mid-recovery joins it instead of
- * resolving early.
+ * rather than crash-looping, and a failure arriving from 'reloading' is
+ * the reload's own to report — the next reconcile retries it. The recovery
+ * is registered like an explicit start, so a retry or attach that lands
+ * mid-recovery joins it instead of resolving early.
  */
 function createRuntimeFactory(seams: {
   readonly options: CreateGatewayOptions;

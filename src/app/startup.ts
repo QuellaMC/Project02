@@ -768,8 +768,9 @@ function simulateCharacterMaterialization(
     ),
   );
 
-  if (simulated.status === 'invalid') {
-    return simulated;
+  // No expectation is passed here, so only a document can be refused.
+  if (simulated.status !== 'valid') {
+    return {status: 'invalid', message: simulated.message};
   }
 
   // This overlay describes a file that has not been written yet; the

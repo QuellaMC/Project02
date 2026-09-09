@@ -2,6 +2,8 @@ import type {RoleModelAdapter} from '../api/adapter.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
   createNvidiaRoleModelProviderConfigFromEnv,
+  nvidiaApiKeyEnvName,
+  nvidiaModelEnvName,
 } from './nvidia.ts';
 import {roleModelProviderEnvVarName} from '../../runtime/config/index.ts';
 
@@ -54,6 +56,23 @@ export function selectChatProvider(
   configuredProvider?: ChatProviderName,
 ): ChatProviderName | undefined {
   return provider ?? providerFromEnvironment(env) ?? configuredProvider;
+}
+
+/**
+ * The env the provider selection and the adapters read, and nothing else:
+ * what a character's assembly depends on, so a change anywhere else in
+ * the environment is not a reason to rebuild it.
+ */
+export function roleModelEnvironment(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    [
+      roleModelProviderEnvVarName,
+      nvidiaApiKeyEnvName,
+      nvidiaModelEnvName,
+    ].flatMap(name => (env[name] === undefined ? [] : [[name, env[name]]])),
+  );
 }
 
 export function createSelectedRoleModelAdapter(

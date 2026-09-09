@@ -6,6 +6,7 @@ import type {
   RuntimeConfigEffectiveSource,
   RuntimeConfigFieldScope,
   RuntimePluginActivationStatusShape,
+  RuntimePluginConfigFieldInspectShape,
   RuntimePluginConfigInspectShape,
   RuntimeConfigValue,
 } from './types.ts';
@@ -16,8 +17,13 @@ import {
   type RuntimePluginScopeOperation,
 } from './plugin-scope.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import {runtimeConfigDiagnosticMatchesPlugin} from './resolve.ts';
+import {
+  runtimeConfigDiagnosticMatchesPlugin,
+  type ResolvedRuntimePluginConfigs,
+} from './resolve.ts';
+import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
 
 export function createRuntimeConfigInspectShape(
   resolvedConfig: ResolvedProject02RuntimeConfig,
@@ -34,7 +40,11 @@ export function createRuntimeConfigInspectShape(
 export function createRuntimePluginConfigInspectShape(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  /** The plugin half of a resolution; a location-free one serves too. */
+  readonly pluginResolution: Pick<
+    ResolvedRuntimePluginConfigs,
+    'redactedPluginConfigs' | 'diagnostics'
+  >;
   readonly manifest: RuntimePluginManifest;
   readonly fingerprint: string;
   readonly activation?: RuntimePluginActivationStatusShape;
@@ -53,7 +63,7 @@ export function createRuntimePluginConfigInspectShape(options: {
     options.manifest.id,
   );
   const effectiveFields = ownJsonRecordValue(
-    options.resolvedConfig.redactedPluginConfigs,
+    options.pluginResolution.redactedPluginConfigs,
     options.manifest.id,
   );
 
@@ -70,7 +80,7 @@ export function createRuntimePluginConfigInspectShape(options: {
     options.defaultEnabled ??
     options.manifest.activation.defaultEnabled;
   const diagnostics = Object.freeze(
-    options.resolvedConfig.diagnostics.filter(
+    options.pluginResolution.diagnostics.filter(
       diagnostic =>
         diagnostic.scope === 'global' ||
         runtimeConfigDiagnosticMatchesPlugin({
@@ -157,6 +167,84 @@ export function createRuntimePluginConfigInspectShape(options: {
     diagnostics,
     fingerprint: options.fingerprint,
   } satisfies RuntimePluginConfigInspectShape);
+}
+
+/**
+ * The host fields in the shape plugin fields already take, so a settings
+ * page renders one component for both. Defaults are not resolved here: an
+ * unauthored field reads `missing`, and `defaultValueSummary` names what
+ * applies — the runtime applies it, a page only shows it.
+ */
+export function createProject02ConfigFieldInspectShapes(options: {
+  readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
+  readonly targetScope: RuntimeConfigFieldScope;
+  /** What the scope resolves with; a field's declared env var wins in it. */
+  readonly env: NodeJS.ProcessEnv;
+}): readonly RuntimePluginConfigFieldInspectShape[] {
+  const {globalConfig, characterConfig} = options.layeredConfig;
+  const targetConfig =
+    options.targetScope === 'global' ? globalConfig : characterConfig;
+
+  return Object.freeze(
+    project02RuntimeConfigFieldDefinitions().map(field => {
+      const authoredValue = getRedactedRuntimeConfigValueAtPath(
+        targetConfig,
+        field.path,
+      );
+      const characterValue = getRedactedRuntimeConfigValueAtPath(
+        characterConfig,
+        field.path,
+      );
+      const globalValue = getRedactedRuntimeConfigValueAtPath(
+        globalConfig,
+        field.path,
+      );
+      const envValue =
+        field.envVar === undefined ? undefined : options.env[field.envVar];
+      const overriddenByEnv = envValue !== undefined && envValue.length > 0;
+      const effectiveValue = overriddenByEnv
+        ? envValue
+        : (characterValue ?? globalValue);
+
+      return Object.freeze({
+        name: field.name,
+        description: field.description,
+        required: field.required,
+        secret: field.secret,
+        ...(field.valueType === undefined ? {} : {valueType: field.valueType}),
+        ...(field.defaultValueSummary === undefined
+          ? {}
+          : {defaultValueSummary: field.defaultValueSummary}),
+        ...(field.allowedValues === undefined
+          ? {}
+          : {allowedValues: Object.freeze([...field.allowedValues])}),
+        agentMutable: field.agentMutable,
+        editableInScope: field.scopes.includes(options.targetScope),
+        reloadRequired: field.reloadRequired,
+        authored: Object.freeze({
+          configured: authoredValue !== undefined,
+          ...(authoredValue === undefined ? {} : {value: authoredValue}),
+        }),
+        effectiveSource:
+          characterValue !== undefined
+            ? 'character'
+            : globalValue !== undefined
+              ? 'global'
+              : 'default',
+        effective: Object.freeze({
+          name: field.name,
+          secret: false,
+          source: overriddenByEnv
+            ? (`env:${field.envVar ?? ''}` as const)
+            : effectiveValue === undefined
+              ? 'missing'
+              : 'config',
+          resolved: true,
+          ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
+        }),
+      } satisfies RuntimePluginConfigFieldInspectShape);
+    }),
+  );
 }
 
 function effectivePluginConfigFieldSource(options: {
