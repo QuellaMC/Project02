@@ -1,8 +1,8 @@
 import {
+  activateProject02Character,
   classifyRuntimePluginCatalogDiscovery,
   discoverRuntimePluginCatalog,
   listProject02Characters,
-  prepareConfiguredProject02PluginActivation,
   type Project02Home,
 } from '../app/index.ts';
 import {
@@ -12,6 +12,7 @@ import {
 } from '../plugins/index.ts';
 import {
   applyRuntimeConfigControlOperation,
+  assertProject02ReloadedConfigUsesBoundHome,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
@@ -86,6 +87,14 @@ export function readConfigView(
   target: ConfigTarget,
 ): ConfigView {
   try {
+    // A document that now names another home describes a daemon that is
+    // not this one; a view over it would mix its fields with this home's
+    // catalog, and every save would refuse anyway.
+    assertProject02ReloadedConfigUsesBoundHome({
+      configLocation: home.runtimeLocation,
+      loadedConfig: home.loadedConfig,
+    });
+
     const resolution =
       target.scope === 'global'
         ? resolveGlobalScope(home)
@@ -224,15 +233,27 @@ function resolveCharacterScope(
     return refusedView('config_unloadable', blocking.message);
   }
 
-  // The console's own composition: one activation plan resolves the
-  // merged config and every plugin's status; the overlay on disk is the
-  // document a write will verify against.
-  const plan = prepareConfiguredProject02PluginActivation({
-    loadedConfig: home.loadedConfig,
-    runtimeLocation,
-    overlayConfig: overlay,
-    env: runtimeEnv(home),
+  // The plan a start would make, without the write: for a character that
+  // never started it carries what its package materializes — the plugins
+  // it requires, the defaults it supplies — so the view says what will
+  // run. What is authored, and the fingerprint a write verifies against,
+  // stay the overlay on disk.
+  const startup = activateProject02Character(home, {
+    characterId,
+    stage: 'report',
+    continueAfterActivationErrors: true,
   });
+
+  if (startup.status === 'character_invalid') {
+    return refusedView(
+      'config_unloadable',
+      startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages.join(' ')
+        : notInstalledMessage(characterId),
+    );
+  }
+
+  const plan = startup.activationPlan;
   const manifests = manifestsOf(plan.catalogEntries);
 
   return {

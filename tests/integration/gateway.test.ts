@@ -1787,6 +1787,16 @@ describe('gateway façade', () => {
       reloading: [],
     });
 
+    // Configuring a plugin ahead of enabling it constructs nothing, so it
+    // reloads nothing.
+    writeRuntimeConfig(overlay, {
+      project02: {userDisplayName: 'Mine'},
+      plugins: {'demo-config': {config: {tone: 'warm'}}},
+    });
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      reloading: [],
+    });
+
     writeRuntimeConfig(overlay, {
       project02: {userDisplayName: 'Mine', contextWindowTokens: 4096},
     });
@@ -1913,6 +1923,12 @@ describe('gateway façade', () => {
     });
     expect(character.fingerprint).not.toBe(global.fingerprint);
     expect(gateway.health().characters[0]?.state).toBe('not_started');
+    // Never started, yet the view says what a start will run: the plugin
+    // her package requires is active, not waiting to be materialized.
+    expect(
+      character.plugins.find(plugin => plugin.pluginId === 'character-state')
+        ?.activation.status,
+    ).toBe('active');
 
     // A package the catalog cannot publish is an error the runtime acts on,
     // so both views name it.
@@ -1938,6 +1954,16 @@ describe('gateway façade', () => {
     expect(
       gateway.configView({scope: 'character', characterId: 'nobody'}),
     ).toMatchObject({status: 'refused', reason: 'unknown_character'});
+
+    // A document that now names another home describes a daemon that is
+    // not this one.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {storeRoot: join(homeRoot, '..', 'elsewhere')},
+    });
+    expect(gateway.configView({scope: 'global'})).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
 
     writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
     expect(gateway.configView({scope: 'global'})).toMatchObject({

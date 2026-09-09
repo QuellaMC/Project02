@@ -4,8 +4,8 @@ import {
   loadProject02RuntimeConfigWithLocation,
   readDefaultDotEnvFile,
   shouldReadDefaultDotEnvForRuntimeLocation,
-  type LoadedProject02RuntimeConfig,
   type ResolvedProject02ConfigLocation,
+  type SelectedLoadedProject02RuntimeConfig,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
 
@@ -25,7 +25,7 @@ export type Project02Home = {
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly loadedConfig: SelectedLoadedProject02RuntimeConfig;
 };
 
 export function loadProject02Home(

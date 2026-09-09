@@ -13,6 +13,7 @@ export {
   shouldReadDefaultDotEnvForRuntimeLocation,
 } from './env-file.ts';
 export {
+  assertProject02ReloadedConfigUsesBoundHome,
   assertResolvedProject02HomeAdoptable,
   assertResolvedProject02HomeCurrent,
   assertSelectedProject02HomeAdoptable,
