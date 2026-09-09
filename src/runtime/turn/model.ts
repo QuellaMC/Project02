@@ -271,6 +271,13 @@ async function runRuntimeModel(
     async onVisibleReply(event) {
       return await commitVisibleReply(state, prepared, event);
     },
+    onReplyDelta(event) {
+      // A draft is fired, never awaited: the model keeps writing meanwhile.
+      void emitProgress(state, {kind: 'reply_delta', ...event});
+    },
+    onReplyWithdrawn(event) {
+      void emitProgress(state, {kind: 'reply_withdrawn', ...event});
+    },
     ...roleModelLoopAdapterOption(state.options),
   });
 
@@ -318,6 +325,7 @@ async function commitVisibleReply(
     sessionId: prepared.decisionContext.sessionId,
     round: event.round,
     text: event.text,
+    draftId: event.draftId,
   });
 }
 

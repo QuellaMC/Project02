@@ -13,7 +13,10 @@ import {
   type GatewayEventListener,
 } from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
-import type {RoleModelAdapter} from '../../src/role-model/index.ts';
+import {
+  createDeterministicLocalRoleModelAdapter,
+  type RoleModelAdapter,
+} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {
   createConfirmationHome,
@@ -337,15 +340,17 @@ describe('gateway over HTTP', () => {
     expect(late.status).toBe(503);
     expect(await errorOf(late)).toMatchObject({code: 'unavailable'});
   });
-  it('opens every stream with ready, then carries the turn in order once durable', async () => {
+  it('opens every stream with ready, then carries the turn in order — the draft ahead of the durable reply', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-sse-'), 'home');
 
     await ensureInitializedProject02Store({homeRoot});
 
+    // The local adapter speaks its reply in word-sized pieces: seven for
+    // its first line, each one frame on the wire.
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
       env: {},
-      roleModelAdapter: replyAdapter(),
+      roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
     const server = await startTestGatewayServer({
@@ -395,6 +400,7 @@ describe('gateway over HTTP', () => {
       'state_changed',
       'state_changed',
       'user_message',
+      ...Array<string>(7).fill('reply_delta'),
       'visible_reply',
       'turn_completed',
     ]);
@@ -532,6 +538,7 @@ describe('gateway over HTTP', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'x'.repeat(256 * 1024),
+        draftId: '1.0',
       },
     } satisfies GatewayEvent;
 
