@@ -71,20 +71,21 @@ export {
   NvidiaRequestTimeoutError,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
-  type NvidiaFetchResponse,
 } from './nvidia-transport.ts';
 import {
   terminalNvidiaFinishReasons,
   createNvidiaRequestDeadline,
-  defaultFetchClient,
   normalizeNvidiaRequestTimeoutMs,
   normalizeNvidiaTransportRetryDelays,
   NvidiaRequestTimeoutError,
   performNvidiaTransportRequest,
+  readResponseChunks,
   redactProviderSecret,
   type NvidiaFetchClient,
 } from './nvidia-transport.ts';
 import {createNvidiaTextCompletion} from './nvidia-completion.ts';
+import {readNvidiaChatCompletionStream} from './nvidia-stream.ts';
+import {createNvidiaReplyDrafts} from './reply-draft.ts';
 
 export type CreateNvidiaRoleModelProviderAdapterOptions =
   NvidiaRoleModelProviderConfig & {
@@ -118,7 +119,7 @@ export function createNvidiaRoleModelProviderAdapter(
   const endpoint =
     options.endpoint ?? 'https://integrate.api.nvidia.com/v1/chat/completions';
   const model = options.model ?? 'nvidia/nemotron-3-nano-30b-a3b';
-  const fetchClient = options.fetchClient ?? defaultFetchClient;
+  const fetchClient: NvidiaFetchClient = options.fetchClient ?? fetch;
   const requestTimeoutMs = normalizeNvidiaRequestTimeoutMs(
     options.requestTimeoutMs,
   );
@@ -198,9 +199,31 @@ export function createNvidiaRoleModelProviderAdapter(
           });
         }
 
-        const responseBody = transport.responseBody;
+        // The body streams whether or not anyone listens: one reader, one
+        // reassembly, and the same judge the whole body always had.
+        const streamed = await readNvidiaChatCompletionStream(
+          readResponseChunks(transport.response, requestDeadline),
+          createNvidiaReplyDrafts({
+            toolNameMappings,
+            ...(invocation.onReplyDelta === undefined
+              ? {}
+              : {onReplyDelta: invocation.onReplyDelta}),
+          }),
+        );
+
+        if (streamed.status === 'rejected') {
+          return createProviderRejectedOutput({
+            code: streamed.code,
+            endpoint,
+            message: streamed.message,
+            model,
+            status: transport.httpStatus,
+            providerExchange: baseProviderExchange,
+          });
+        }
+
         const rawOutput = parseNvidiaResponseMessage(
-          responseBody,
+          streamed.response,
           toolNameMappings,
         );
 
@@ -277,7 +300,8 @@ function createNvidiaRequestBody(options: {
           tool_choice: 'auto',
           parallel_tool_calls: true,
         }),
-    stream: false,
+    stream: true,
+    stream_options: {include_usage: true},
     temperature: 1,
     top_p: 1,
     max_tokens: 16384,
@@ -480,7 +504,6 @@ function createProviderMetadata(options: {
       ...(options.messageCount === undefined
         ? {}
         : {messageCount: options.messageCount}),
-      stream: false,
     }),
     ...(options.status === undefined
       ? {}

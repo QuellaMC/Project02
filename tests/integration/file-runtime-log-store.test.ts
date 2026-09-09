@@ -4,6 +4,7 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {streamed} from '../support/nvidia-fixtures.ts';
 
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
@@ -896,30 +897,23 @@ describe('file runtime log store plugin tool event validation', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'Hello.',
-                },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Hello.',
               },
-            ],
-            usage: {
-              api_key: credentialSentinel,
-              safe: 'preserved',
             },
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+          ],
+          usage: {
+            api_key: credentialSentinel,
+            safe: 'preserved',
+          },
+        }),
+      );
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'hello',

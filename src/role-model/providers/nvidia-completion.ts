@@ -5,6 +5,7 @@ import {
   createNvidiaRequestDeadline,
   NvidiaRequestTimeoutError,
   performNvidiaTransportRequest,
+  readResponseText,
   redactProviderSecret,
   terminalNvidiaFinishReasons,
   type NvidiaFetchClient,
@@ -62,7 +63,9 @@ export function createNvidiaTextCompletion(options: {
         };
       }
 
-      const completion = completionText(transport.responseBody);
+      const completion = completionText(
+        JSON.parse(await readResponseText(transport.response, requestDeadline)),
+      );
 
       return 'reason' in completion
         ? {status: 'failed', reason: completion.reason}

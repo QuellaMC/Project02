@@ -530,7 +530,6 @@ describe('role-model loop evidence and boundary validation', () => {
           provider: 'nvidia',
           request: Object.freeze({
             messageCount: Number.NaN,
-            stream: false,
           }),
           response: Object.freeze({
             status: Number.POSITIVE_INFINITY,

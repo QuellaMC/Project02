@@ -56,16 +56,9 @@ function optionalProviderRequestMetadata(
     throwMalformedRecord('providerMetadata.request.messageCount');
   }
 
-  requiredLiteralBooleanFalse(
-    value,
-    'stream',
-    'providerMetadata.request.stream',
-  );
-
   return Object.freeze({
     ...(endpoint === undefined ? {} : {endpoint}),
     ...(messageCount === undefined ? {} : {messageCount}),
-    stream: false,
   });
 }
 
@@ -106,14 +99,4 @@ function optionalProviderErrorMetadata(
     code: requiredRecordString(value, 'code', 'malformed_record'),
     message: requiredRecordString(value, 'message', 'malformed_record'),
   });
-}
-
-function requiredLiteralBooleanFalse(
-  record: Record<string, unknown>,
-  key: string,
-  errorField: string,
-): void {
-  if (record[key] !== false) {
-    throwMalformedRecord(errorField);
-  }
 }

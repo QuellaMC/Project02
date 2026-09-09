@@ -139,7 +139,6 @@ export {
   nvidiaApiKeyEnvName,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
-  type NvidiaFetchResponse,
   nvidiaModelEnvName,
   nvidiaRoleModelProviderCapabilities,
   type NvidiaRoleModelProviderConfig,

@@ -1,15 +1,11 @@
 import {describe, expect, it} from 'vitest';
+import {jsonResponse as jsonBody} from '../support/nvidia-fixtures.ts';
 
 import {createNvidiaRoleModelProviderAdapter} from '../../src/role-model/providers/nvidia.ts';
 import type {NvidiaFetchClient} from '../../src/role-model/providers/nvidia-transport.ts';
 
-function jsonResponse(body: unknown, status = 200) {
-  return Promise.resolve({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(JSON.stringify(body)),
-  });
+function jsonResponse(body: unknown, status = 200): Promise<Response> {
+  return Promise.resolve(jsonBody(body, status));
 }
 
 describe('NVIDIA plain text completion', () => {
