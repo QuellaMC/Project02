@@ -1,11 +1,17 @@
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {validator} from 'hono/validator';
 
-import type {Gateway, GatewayErrorBody, HistoryPage} from '../api/contract.ts';
+import type {
+  ConfigTarget,
+  Gateway,
+  GatewayErrorBody,
+  HistoryPage,
+} from '../api/contract.ts';
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
 import {
   answerConfirmationBody,
+  configChangeBody,
   gatewayMessageBody,
   openConversationBody,
   type BodyValidator,
@@ -35,6 +41,31 @@ const historyQuery = validator(
     ...(typeof value['before'] === 'string' ? {before: value['before']} : {}),
     ...(typeof value['limit'] === 'string' ? {limit: value['limit']} : {}),
   }),
+);
+
+/** The document a config verb targets, spelled in the query; anything else is a 400. */
+const configTargetQuery = validator(
+  'query',
+  (value: Record<string, string | string[]>, c: Context<ApiEnv>) => {
+    const scope = value['scope'];
+    const characterId = value['characterId'];
+
+    if (scope === 'global') {
+      return {scope: 'global'} as const satisfies ConfigTarget;
+    }
+
+    if (scope === 'character' && typeof characterId === 'string') {
+      return {scope: 'character', characterId} as const satisfies ConfigTarget;
+    }
+
+    return c.json(
+      errorBody(
+        'invalid_request',
+        'A config target is ?scope=global or ?scope=character&characterId=<id>.',
+      ),
+      400,
+    );
+  },
 );
 
 /**
@@ -83,6 +114,12 @@ export function createApiRouter(
         ),
         200,
       ),
+    )
+    .get('/config', configTargetQuery, c =>
+      c.json(gateway.configView(c.req.valid('query')), 200),
+    )
+    .post('/config', jsonBody(configChangeBody), async c =>
+      c.json(await gateway.applyConfigChange(c.req.valid('json')), 200),
     )
     .get('/events', c => events.handler(c))
     .all('/*', c =>

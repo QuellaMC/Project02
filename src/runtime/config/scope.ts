@@ -22,21 +22,25 @@ import {
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
   requireResolvedRuntimeConfigScopeTarget,
-  type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
 } from './location.ts';
 import {
   assertOverlayLocatedCandidateStaysCharacterScoped,
   prepareRuntimeConfigMutationCandidate,
+  RuntimeConfigConflictError,
   RuntimeConfigMutationError,
   type PreparedRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
+  loadCharacterSecretsEnv,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
-import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
+import {
+  mergeCharacterOverlayDocument,
+  runtimeConfigEnvWithCharacterSecrets,
+} from './resolve-layered.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldAcceptsValue,
@@ -94,6 +98,8 @@ export function applyRuntimeConfigControlOperation(options: {
   readonly expectedFingerprint?: string;
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+  /** How long to wait for a file another writer holds; the lock's default otherwise. */
+  readonly lockWaitTimeoutMs?: number;
 }): RuntimeConfigControlApplyResult {
   const target = requireResolvedRuntimeConfigScopeTarget(options.target);
 
@@ -127,6 +133,9 @@ export function applyRuntimeConfigControlOperation(options: {
     ...(options.expectedFingerprint === undefined
       ? {}
       : {expectedFingerprint: options.expectedFingerprint}),
+    ...(options.lockWaitTimeoutMs === undefined
+      ? {}
+      : {lockWaitTimeoutMs: options.lockWaitTimeoutMs}),
     secretMutation: mutation.operation?.kind === 'secret_set',
     prepare: snapshot =>
       prepareScopedRuntimeConfigControlCandidate({
@@ -154,17 +163,20 @@ export type SimulatedCharacterOverlayCandidate =
       readonly document: Project02RuntimeConfig;
       readonly autoEnabledPluginIds: readonly string[];
     }
-  | {readonly status: 'invalid'; readonly message: string};
+  | {readonly status: 'invalid'; readonly message: string}
+  | {readonly status: 'conflict'; readonly message: string};
 
 /**
  * Runs the commit's own preparation, so a plan and its commit cannot disagree.
- * It never locks or writes, and the data directory need not exist yet.
+ * It never locks or writes, and the data directory need not exist yet. Given
+ * an expectation, it verifies it as the commit will, lock-free.
  */
 export function simulateCharacterOverlayCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+  readonly expectedFingerprint?: string;
 }): SimulatedCharacterOverlayCandidate {
   const target = requireResolvedRuntimeConfigScopeTarget(options.target);
 
@@ -177,12 +189,21 @@ export function simulateCharacterOverlayCandidate(options: {
   const mutation = normalizedControlMutation(target, options.request);
 
   try {
+    const snapshot = readRuntimeConfigControlSnapshot(target, {
+      pluginManifests: options.pluginManifests,
+      requireCharacterMarker: false,
+    });
+
+    if (options.expectedFingerprint !== undefined) {
+      verifyRuntimeConfigControlExpectation(
+        snapshot,
+        options.expectedFingerprint,
+      );
+    }
+
     const prepared = prepareScopedRuntimeConfigControlCandidate({
       target,
-      snapshot: readRuntimeConfigControlSnapshot(target, {
-        pluginManifests: options.pluginManifests,
-        requireCharacterMarker: false,
-      }),
+      snapshot,
       ...(mutation.operation === undefined
         ? {}
         : {operation: mutation.operation}),
@@ -200,6 +221,10 @@ export function simulateCharacterOverlayCandidate(options: {
       autoEnabledPluginIds: prepared.context.autoEnabledPluginIds,
     });
   } catch (error: unknown) {
+    if (error instanceof RuntimeConfigConflictError) {
+      return Object.freeze({status: 'conflict', message: error.message});
+    }
+
     // These two mean unacceptable config; anything else is a real fault.
     if (
       error instanceof RuntimeConfigMutationError ||
@@ -304,27 +329,26 @@ function normalizedControlMutation(
     manifest: request.manifest,
     actor: request.actor,
     operation: request.fieldOperation,
-    runtimeLocation: runtimeConfigControlCharacterLocation(target),
     authoredScope: target.scope,
-    env: target.env,
+    env: runtimeConfigControlEnv(target),
   });
 }
 
-function runtimeConfigControlCharacterLocation(
+/**
+ * What the target's scope resolves with. A character's own secrets ride
+ * over the shared env, as they do when that character runs; a global
+ * value resolves globally, never through one character's secrets.
+ */
+function runtimeConfigControlEnv(
   target: ResolvedRuntimeConfigScopeTarget,
-): ResolvedProject02RuntimeLocation {
-  const runtimeLocation =
-    target.scope === 'character'
-      ? target.runtimeLocation
-      : target.characterRuntimeLocation;
-
-  if (runtimeLocation === undefined) {
-    throw new TypeError(
-      'Plugin config control requires an activated character runtime.',
-    );
-  }
-
-  return runtimeLocation;
+): NodeJS.ProcessEnv {
+  return target.scope === 'character'
+    ? runtimeConfigEnvWithCharacterSecrets(
+        target.env,
+        loadCharacterSecretsEnv(target.runtimeLocation.characterScope.dataRoot)
+          .env,
+      )
+    : target.env;
 }
 
 /** Rejects before any ensure step materializes a marker or data directory. */

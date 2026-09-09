@@ -6,6 +6,7 @@ import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {defaultRuntimeConfigEnvPath} from './load.ts';
 import {
   assertResolvedProject02HomeAdoptable,
+  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
 } from './location.ts';
 import {runtimeConfigEnvVarName} from './types.ts';
@@ -27,7 +28,7 @@ export function runtimeConfigEnvPathForLocation(
 }
 
 export function loadRuntimeConfigEnvFile(options: {
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly env?: NodeJS.ProcessEnv;
   readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {

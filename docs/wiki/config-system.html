@@ -162,6 +162,15 @@
     </ul>
 
     <p>
+      The daemon is the config owner: <code>GET /api/config</code> renders a scope's settings
+      from the declared fields and <code>POST /api/config</code> writes one change through the
+      same control transaction the console uses, bound to the fingerprint the view handed out,
+      and applies it to the running character by a reload between turns
+      (<a href="gateway-api.html">Gateway API</a>). The console stays until the web UI reaches
+      parity; a console or hand edit made while the daemon runs is applied at its next reconcile.
+    </p>
+
+    <p>
       Add <code>--character &lt;id&gt;</code> to target an overlay. Character-targeted
       <code>path</code>, <code>get</code>, <code>check</code>, mutation, and UI commands all run the
       same initializer, so even a read may intentionally create or upgrade the selected overlay.

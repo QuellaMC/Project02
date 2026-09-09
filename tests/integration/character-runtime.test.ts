@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {chmodSync, existsSync} from 'node:fs';
+import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -14,9 +14,20 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  createProject02HomeLayout,
+} from '../../src/runtime/storage/index.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
+import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+
+function states(events: readonly GatewayEvent[]): string[] {
+  return events.flatMap(event =>
+    event.kind === 'state_changed' ? [event.state] : [],
+  );
+}
 
 function replyAdapter(
   options: {
@@ -492,6 +503,266 @@ describe('local character runtime', () => {
     const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
+    await runtime.stop();
+  });
+
+  it('reloads between turns once its assembly drifted, and its thread reopens under the same id', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      roleModelAdapter: replyAdapter({
+        beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
+      }),
+    });
+    const ref = await open(runtime);
+
+    expect(runtime.assemblyDrifted()).toBe(false);
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      {project02: {contextWindowTokens: 4096}},
+    );
+    expect(runtime.assemblyDrifted()).toBe(true);
+
+    const inFlight = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+    const reload = runtime.reload();
+
+    expect(runtime.health().state).toBe('reloading');
+    await reload;
+
+    // The turn accepted first ran first, on the assembly that accepted it.
+    await expect(inFlight).resolves.toMatchObject({status: 'completed'});
+    expect(states(events)).toEqual(['starting', 'ready', 'reloading', 'ready']);
+    expect(
+      events.findLastIndex(event => event.kind === 'turn_progress'),
+    ).toBeLessThan(
+      events.findLastIndex(
+        event => event.kind === 'state_changed' && event.state === 'ready',
+      ),
+    );
+    expect(runtime.assemblyDrifted()).toBe(false);
+    expect((await open(runtime)).conversationId).toBe(ref.conversationId);
+    await runtime.stop();
+  });
+
+  it('counts an upgraded plugin package and a changed home env as drift', async () => {
+    const homeRoot = join(createTestTempRoot('project02-gateway-'), 'home');
+    const manifest = {
+      ...firstPartyPlugin('operator.versioned').manifest,
+      firstParty: false,
+    };
+    const packageRoot = join(homeRoot, 'plugins', manifest.id);
+    const writePackage = (version: string): void => {
+      mkdirSync(packageRoot, {recursive: true});
+      writeFileSync(join(packageRoot, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        join(packageRoot, 'project02.plugin.json'),
+        `${JSON.stringify({
+          format: 'project02.plugin.v1',
+          entry: './index.mjs',
+          manifest: {...manifest, version},
+        })}\n`,
+      );
+      writeFileSync(
+        join(packageRoot, 'index.mjs'),
+        "throw new Error('never imported: the host is injected');\n",
+      );
+    };
+
+    await ensureInitializedProject02Store({homeRoot});
+    writePackage('1.0.0');
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const runtime = createLocalCharacterRuntime({
+      loadHome: () => home,
+      characterId: 'mira',
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+      roleModelAdapter: replyAdapter(),
+    });
+
+    await runtime.start();
+    expect(runtime.health().state).toBe('ready');
+    expect(runtime.assemblyDrifted()).toBe(false);
+
+    writePackage('1.1.0');
+    expect(runtime.assemblyDrifted()).toBe(true);
+
+    writePackage('1.0.0');
+    expect(runtime.assemblyDrifted()).toBe(false);
+
+    // Only what the provider reads counts; a secret for something else
+    // in the home env is not a reason to rebuild.
+    const envPath = createProject02HomeLayout({homeRoot}).envPath;
+
+    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\n');
+    expect(runtime.assemblyDrifted()).toBe(false);
+    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\nNVIDIA_API_KEY=rotated\n');
+    expect(runtime.assemblyDrifted()).toBe(true);
+    await runtime.stop();
+  });
+
+  it('reloads past a session-end record the log refused, noting it as maintenance', async () => {
+    // A hook that fails makes session end write a record; a log that
+    // cannot take it is a release problem without a retained lease.
+    const probe = createSessionEndFileStoreProbePlugin({
+      pluginId: 'session.end.failing',
+      requestedAccess: {},
+      onSessionEnd() {
+        throw new Error('session end hook failed');
+      },
+    });
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      createPluginHost: () =>
+        createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: ['session.end.failing'],
+        }),
+    });
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    await open(runtime);
+    // Restored the instant the failure is noted, before the rebuild.
+    runtime.events(event => {
+      if (event.kind === 'maintenance_failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await runtime.reload();
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual(['starting', 'ready', 'reloading', 'ready']);
+    expect(runtime.health().maintenance?.message).toBeDefined();
+    expect(runtime.health().openConversationIds).toEqual([]);
+    await runtime.stop();
+  });
+
+  it('lets a stop issued during a reload win', async () => {
+    const {runtime, events} = await createStartedRuntime();
+    let stopping: Promise<void> | undefined;
+
+    await open(runtime);
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'reloading') {
+        stopping = runtime.stop();
+      }
+    });
+
+    await runtime.reload();
+    expect(stopping).toBeDefined();
+    await stopping;
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'stopping',
+      'stopped',
+    ]);
+    expect(runtime.health().openConversationIds).toEqual([]);
+  });
+
+  it('keeps a stop the last word when the turn ahead of a reload fails while it drains', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      roleModelAdapter: replyAdapter({
+        beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
+      }),
+    });
+    const ref = await open(runtime);
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+
+    const turn = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+
+    // Past its user commit, waiting on the model: the reply's commit fails.
+    await new Promise(resolve => setTimeout(resolve, 5));
+    chmodSync(sessionsRoot, 0o000);
+
+    const reload = runtime.reload();
+    const stop = runtime.stop();
+
+    try {
+      await Promise.all([turn, reload, stop]);
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'stopping',
+      'failed',
+      'stopped',
+    ]);
+  });
+
+  it('rebuilds after a fatal turn that ran ahead of the reload, once', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime();
+    const ref = await open(runtime);
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    // Restored the instant the turn fails, before the reload releases.
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+    chmodSync(sessionsRoot, 0o000);
+
+    const fatal = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+    const reload = runtime.reload();
+
+    try {
+      await expect(fatal).resolves.toMatchObject({status: 'failed'});
+      await reload;
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'failed',
+      'ready',
+    ]);
     await runtime.stop();
   });
 

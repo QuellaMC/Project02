@@ -7,6 +7,10 @@ import {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
   type AnswerOutcome,
+  type ConfigChange,
+  type ConfigChangeOutcome,
+  type ConfigTarget,
+  type ConfigView,
   type GatewayReady,
   type GatewayConfirmationDecision,
   type GatewayEvent,
@@ -81,6 +85,14 @@ export type GatewayClient = {
     decision: GatewayConfirmationDecision,
     options?: GatewayCallOptions,
   ): Promise<AnswerOutcome>;
+  configView(
+    target: ConfigTarget,
+    options?: GatewayCallOptions,
+  ): Promise<ConfigView>;
+  applyConfigChange(
+    change: ConfigChange,
+    options?: GatewayCallOptions,
+  ): Promise<ConfigChangeOutcome>;
   /**
    * Follows the event stream until the signal aborts, reconnecting after
    * the daemon closes it. A refused token or a wrong protocol rejects; a
@@ -182,6 +194,24 @@ export function createGatewayClient(
           {param: {id}, json: {decision}},
           requestInit(callOptions),
         ),
+        callOptions,
+      ),
+    configView: async (target, callOptions) =>
+      readOutcome<ConfigView>(
+        await api.config.$get(
+          {
+            query:
+              target.scope === 'global'
+                ? {scope: 'global'}
+                : {scope: 'character', characterId: target.characterId},
+          },
+          requestInit(callOptions),
+        ),
+        callOptions,
+      ),
+    applyConfigChange: async (change, callOptions) =>
+      readOutcome<ConfigChangeOutcome>(
+        await api.config.$post({json: change}, requestInit(callOptions)),
         callOptions,
       ),
     async events(listener, eventsOptions) {
