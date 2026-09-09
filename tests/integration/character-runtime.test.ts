@@ -675,6 +675,55 @@ describe('local character runtime', () => {
     expect(runtime.health().openConversationIds).toEqual([]);
   });
 
+  it('keeps a stop the last word when the turn ahead of a reload fails while it drains', async () => {
+    const {homeRoot, runtime, events} = await createStartedRuntime({
+      roleModelAdapter: replyAdapter({
+        beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
+      }),
+    });
+    const ref = await open(runtime);
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'failed') {
+        chmodSync(sessionsRoot, 0o755);
+      }
+    });
+
+    const turn = runtime.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
+      text: 'hello there',
+    });
+
+    // Past its user commit, waiting on the model: the reply's commit fails.
+    await new Promise(resolve => setTimeout(resolve, 5));
+    chmodSync(sessionsRoot, 0o000);
+
+    const reload = runtime.reload();
+    const stop = runtime.stop();
+
+    try {
+      await Promise.all([turn, reload, stop]);
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(states(events)).toEqual([
+      'starting',
+      'ready',
+      'reloading',
+      'stopping',
+      'failed',
+      'stopped',
+    ]);
+  });
+
   it('rebuilds after a fatal turn that ran ahead of the reload, once', async () => {
     const {homeRoot, runtime, events} = await createStartedRuntime();
     const ref = await open(runtime);

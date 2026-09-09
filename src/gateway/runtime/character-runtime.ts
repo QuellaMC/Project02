@@ -362,8 +362,12 @@ async function releasedForRebuild(context: RuntimeContext): Promise<boolean> {
   return true;
 }
 
+/**
+ * A stop in flight, or one that completed: the memo says so even after a
+ * turn that failed while it drained published `failed` over `stopping`.
+ */
 function stopWon(context: RuntimeContext): boolean {
-  return context.state === 'stopping' || context.state === 'stopped';
+  return context.stopping !== undefined;
 }
 
 /**
