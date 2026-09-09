@@ -2090,6 +2090,26 @@ describe('gateway façade', () => {
         value: 1,
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    // A secret whose variable the daemon was launched with would be written
+    // to a file the launch env shadows.
+    const shadowed = await createGateway({
+      location: {storeRoot: homeRoot},
+      env: {DEMO_CONFIG_TONE: 'shadowing'},
+    }).applyConfigChange({
+      target: {scope: 'global'},
+      expectedFingerprint: view.fingerprint,
+      operation: {
+        kind: 'plugin_secret_set',
+        pluginId: 'demo-config',
+        field: 'tone',
+        value: 'secret',
+      },
+    });
+
+    expect(shadowed).toMatchObject({status: 'refused', reason: 'invalid'});
+    expect(shadowed.status === 'refused' && shadowed.message).toContain(
+      'DEMO_CONFIG_TONE',
+    );
     await expect(
       gateway.applyConfigChange({
         target: {scope: 'character', characterId: 'nobody'},

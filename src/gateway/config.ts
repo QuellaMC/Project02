@@ -133,6 +133,26 @@ export async function applyConfigChange(
       return refusedChange('invalid', prepared);
     }
 
+    // The env the daemon was launched with wins over the home's env file,
+    // so a secret written there under a name the launch env already sets
+    // would be applied to nothing; a character's own secrets file wins
+    // over both, so only a global write can be shadowed.
+    const shadowed =
+      change.target.scope === 'global'
+        ? Object.keys(prepared.env).find(
+            name => (home.suppliedEnv[name] ?? '') !== '',
+          )
+        : undefined;
+
+    if (shadowed !== undefined) {
+      return refusedChange(
+        'invalid',
+        `${shadowed} is set in the daemon's own environment, which wins ` +
+          "over the home's env file; unset it and restart the daemon " +
+          'before writing this secret.',
+      );
+    }
+
     const pluginManifests = manifestsOf(catalog.catalogEntries);
     const target = await resolveWriteTarget({
       home,
