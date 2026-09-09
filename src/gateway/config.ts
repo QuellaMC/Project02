@@ -257,9 +257,11 @@ function resolveCharacterScope(
   const manifests = manifestsOf(plan.catalogEntries);
 
   return {
+    // The overlay the plan was made from — for a never-started character
+    // the one its first start writes — so a toggle and its status agree.
     layeredConfig: createLayeredProject02RuntimeConfigSnapshot({
       loadedConfig: home.loadedConfig,
-      overlayConfig: overlay,
+      overlayConfig: startup.overlayLoadedConfig ?? overlay,
     }),
     targetScope: 'character',
     manifests,

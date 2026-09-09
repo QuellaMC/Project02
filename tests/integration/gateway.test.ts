@@ -1926,9 +1926,8 @@ describe('gateway façade', () => {
     // Never started, yet the view says what a start will run: the plugin
     // her package requires is active, not waiting to be materialized.
     expect(
-      character.plugins.find(plugin => plugin.pluginId === 'character-state')
-        ?.activation.status,
-    ).toBe('active');
+      character.plugins.find(plugin => plugin.pluginId === 'character-state'),
+    ).toMatchObject({enabled: true, activation: {status: 'active'}});
 
     // A package the catalog cannot publish is an error the runtime acts on,
     // so both views name it.
