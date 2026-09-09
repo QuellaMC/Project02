@@ -216,7 +216,7 @@ export function createNvidiaRoleModelProviderAdapter(
           return createProviderRejectedOutput({
             code: streamed.code,
             endpoint,
-            message: streamed.message,
+            message: redactProviderSecret(streamed.message, options.apiKey),
             model,
             status: transport.httpStatus,
             providerExchange: baseProviderExchange,
@@ -239,7 +239,7 @@ export function createNvidiaRoleModelProviderAdapter(
           });
         }
 
-        const replyDrafts = drafts.replyDrafts();
+        const replyDrafts = drafts.finish();
 
         return Object.freeze({
           rawOutputText: rawOutput.rawOutputText,

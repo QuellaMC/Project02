@@ -210,12 +210,14 @@ type Draft = {
 export type NvidiaReplyDrafts = {
   readonly observer: NvidiaStreamObserver;
   /**
-   * For each visible reply of the reassembled decision, in order, the draft
-   * it was spoken as: content alone is the one reply; beside any tool call
-   * it is the model's note, and the visible_reply calls are the replies.
+   * The message is whole: what each draft's filter still held goes out —
+   * a `<` that never became a tag is text — and the mapping is known. For
+   * each visible reply of the reassembled decision, in order, the draft it
+   * was spoken as: content alone is the one reply; beside any tool call it
+   * is the model's note, and the visible_reply calls are the replies.
    * Undefined when nothing could be spoken.
    */
-  readonly replyDrafts: () => readonly number[] | undefined;
+  readonly finish: () => readonly number[] | undefined;
 };
 
 /**
@@ -233,7 +235,7 @@ export function createNvidiaReplyDrafts(options: {
   const speak = options.onReplyDelta;
 
   if (speak === undefined) {
-    return {observer: {}, replyDrafts: () => undefined};
+    return {observer: {}, finish: () => undefined};
   }
 
   let begun = 0;
@@ -286,7 +288,18 @@ export function createNvidiaReplyDrafts(options: {
         speakPassed(draft, draft.scanner?.push(fragment.text) ?? '');
       },
     },
-    replyDrafts() {
+    finish() {
+      for (const draft of [
+        ...(content === undefined ? [] : [content]),
+        ...calls.values(),
+      ]) {
+        const ended = draft.filter.end();
+
+        if (ended.status === 'accepted' && ended.text.length > 0) {
+          speak({reply: draft.number, text: ended.text});
+        }
+      }
+
       if (anyCall) {
         return [...calls.entries()]
           .sort(([left], [right]) => left - right)

@@ -1449,6 +1449,41 @@ describe('NVIDIA role-model provider streaming', () => {
     });
   });
 
+  it('releases what a draft still held once the message is whole', async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        contentChunk('Hello '),
+        contentChunk('<thin'),
+        finishChunk('stop'),
+        '[DONE]',
+      ]),
+    );
+
+    // The `<` could have opened a tag until the stream ended; then it is text.
+    expect(heard).toEqual([
+      {reply: 0, text: 'Hello '},
+      {reply: 0, text: '<thin'},
+    ]);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {name: visibleReplyModelToolName, input: {text: 'Hello <thin'}},
+      ],
+    });
+  });
+
+  it('redacts the key from a provider error the stream carried, as every other error path does', async () => {
+    const {output} = await invokeStreaming(
+      sseResponse([{error: {message: 'rejected key secret for this route'}}]),
+    );
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA provider error: rejected key [redacted] for this route',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('provider_error');
+    expect(JSON.stringify(output)).not.toContain('secret');
+  });
+
   it("keeps the model's note out of the reply: content beside a visible_reply call is its own draft", async () => {
     const {output, heard} = await invokeStreaming(
       sseResponse([
