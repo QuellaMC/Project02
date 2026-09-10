@@ -100,6 +100,9 @@ export async function runSerializedLocalUserMessageEvent(
     return await runPreparedLocalRuntimeTurn(state);
   } catch (error: unknown) {
     return await handleRuntimeTurnFailure(state, error);
+  } finally {
+    // The turn is over once everything it announced has been heard.
+    await state.progress;
   }
 }
 
@@ -271,6 +274,13 @@ async function runRuntimeModel(
     async onVisibleReply(event) {
       return await commitVisibleReply(state, prepared, event);
     },
+    onReplyDelta(event) {
+      // A draft is fired, never awaited: the model keeps writing meanwhile.
+      void emitProgress(state, {kind: 'reply_delta', ...event});
+    },
+    onReplyWithdrawn(event) {
+      void emitProgress(state, {kind: 'reply_withdrawn', ...event});
+    },
     ...roleModelLoopAdapterOption(state.options),
   });
 
@@ -318,6 +328,7 @@ async function commitVisibleReply(
     sessionId: prepared.decisionContext.sessionId,
     round: event.round,
     text: event.text,
+    draftId: event.draftId,
   });
 }
 

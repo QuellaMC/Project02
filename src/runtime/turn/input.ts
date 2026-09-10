@@ -74,6 +74,7 @@ export function createRuntimeTurnState(
     terminalRawEventMayBeDurable: false,
     committedVisibleMessages: [],
     finishedToolCallIds: [],
+    progress: Promise.resolve(),
   } satisfies RuntimeTurnState;
 }
 

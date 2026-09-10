@@ -1,6 +1,12 @@
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it, vi} from 'vitest';
+import {
+  sseResponse,
+  sseText,
+  streamed,
+  textResponse,
+} from '../support/nvidia-fixtures.ts';
 
 import {
   createDecisionContext,
@@ -41,26 +47,19 @@ describe('NVIDIA role-model provider', () => {
     let requestBody = '';
     const fetchClient: NvidiaFetchClient = (_url, request) => {
       requestBody = request.body;
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'api_key=reply-secret',
-                },
+      return Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'api_key=reply-secret',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     };
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
@@ -93,16 +92,7 @@ describe('NVIDIA role-model provider', () => {
       fetchCalls += 1;
 
       if (fetchCalls === 1) {
-        return Promise.resolve({
-          ok: false,
-          status: 503,
-          json() {
-            return Promise.resolve({});
-          },
-          text() {
-            return Promise.resolve('upstream unavailable');
-          },
-        });
+        return Promise.resolve(textResponse('upstream unavailable', 503));
       }
 
       return Promise.resolve(successfulReplyResponse('recovered'));
@@ -154,16 +144,7 @@ describe('NVIDIA role-model provider', () => {
     const fetchClient: NvidiaFetchClient = () => {
       fetchCalls += 1;
 
-      return Promise.resolve({
-        ok: false,
-        status: 401,
-        json() {
-          return Promise.resolve({});
-        },
-        text() {
-          return Promise.resolve('unauthorized');
-        },
-      });
+      return Promise.resolve(textResponse('unauthorized', 401));
     };
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
@@ -187,16 +168,7 @@ describe('NVIDIA role-model provider', () => {
     const fetchClient: NvidiaFetchClient = () => {
       fetchCalls += 1;
 
-      return Promise.resolve({
-        ok: false,
-        status: 429,
-        json() {
-          return Promise.resolve({});
-        },
-        text() {
-          return Promise.resolve('rate limited');
-        },
-      });
+      return Promise.resolve(textResponse('rate limited', 429));
     };
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
@@ -216,26 +188,19 @@ describe('NVIDIA role-model provider', () => {
 
   it('normalizes empty assistant content into an empty decision', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: '',
-                },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: '',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
       fetchClient,
@@ -252,36 +217,29 @@ describe('NVIDIA role-model provider', () => {
 
   it('passes native tool arguments that are not a JSON object to the parser as written', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 'call_bad_reply_args',
-                      type: 'function',
-                      function: {
-                        name: 'visible_reply',
-                        arguments: '{"text": not-json',
-                      },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_bad_reply_args',
+                    type: 'function',
+                    function: {
+                      name: 'visible_reply',
+                      arguments: '{"text": not-json',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
       fetchClient,
@@ -324,36 +282,29 @@ describe('NVIDIA role-model provider', () => {
 
   it('preserves native tool-call identities and arguments for execution', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 'call_token=id-secret',
-                      type: 'function',
-                      function: {
-                        name: 'visible_reply',
-                        arguments: '{"text":"Cookie: reply-cookie"}',
-                      },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_token=id-secret',
+                    type: 'function',
+                    function: {
+                      name: 'visible_reply',
+                      arguments: '{"text":"Cookie: reply-cookie"}',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
       fetchClient,
@@ -396,33 +347,26 @@ describe('NVIDIA role-model provider', () => {
     const credentialSentinel = 'provider-response-credential-sentinel';
     const nestedCredentialSentinel = 'provider-response-nested-sentinel';
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'Hello.',
-                },
-              },
-            ],
-            usage: {
-              api_key: credentialSentinel,
-              nested: {
-                access_token: nestedCredentialSentinel,
-                safe: 'preserved',
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Hello.',
               },
             },
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+          ],
+          usage: {
+            api_key: credentialSentinel,
+            nested: {
+              access_token: nestedCredentialSentinel,
+              safe: 'preserved',
+            },
+          },
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -559,52 +503,45 @@ describe('NVIDIA role-model provider', () => {
     const fetchClient: NvidiaFetchClient = (_url, request) => {
       capturedBody = JSON.parse(request.body);
 
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: 'call_memory_search_dot',
-                      type: 'function',
-                      function: {
-                        name: 'memory_search',
-                        arguments: '{}',
-                      },
+      return Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_memory_search_dot',
+                    type: 'function',
+                    function: {
+                      name: 'memory_search',
+                      arguments: '{}',
                     },
-                    {
-                      id: 'call_memory_search_plain',
-                      type: 'function',
-                      function: {
-                        name: 'memory_search_2',
-                        arguments: '{}',
-                      },
+                  },
+                  {
+                    id: 'call_memory_search_plain',
+                    type: 'function',
+                    function: {
+                      name: 'memory_search_2',
+                      arguments: '{}',
                     },
-                    {
-                      id: 'call_memory_search_two',
-                      type: 'function',
-                      function: {
-                        name: 'memory_search_2_2',
-                        arguments: '{}',
-                      },
+                  },
+                  {
+                    id: 'call_memory_search_two',
+                    type: 'function',
+                    function: {
+                      name: 'memory_search_2_2',
+                      arguments: '{}',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     };
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
@@ -708,27 +645,19 @@ describe('NVIDIA role-model provider', () => {
     const fetchClient: NvidiaFetchClient = (_url, request) => {
       capturedBody = JSON.parse(request.body);
 
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content:
-                    'Hello from assistant content.\n- runtime.plugin.list',
-                },
+      return Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Hello from assistant content.\n- runtime.plugin.list',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     };
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
@@ -743,7 +672,8 @@ describe('NVIDIA role-model provider', () => {
 
     expect(capturedBody).toMatchObject({
       model: 'nvidia/test-model',
-      stream: false,
+      stream: true,
+      stream_options: {include_usage: true},
       tool_choice: 'auto',
       parallel_tool_calls: true,
       reasoning_budget: defaultNvidiaRoleModelReasoningBudget,
@@ -784,26 +714,19 @@ describe('NVIDIA role-model provider', () => {
 
   it('scrubs leaked think blocks before visible_reply normalization', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: '<think>secret</think>Hello',
-                },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: '<think>secret</think>Hello',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -835,26 +758,19 @@ describe('NVIDIA role-model provider', () => {
 
   it('passes a reply with an unterminated reasoning block to the parser as the model wrote it', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: '<think>still thinking about it',
-                },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: '<think>still thinking about it',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -875,26 +791,19 @@ describe('NVIDIA role-model provider', () => {
 
   it('rejects length-finished assistant content as partial output', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'length',
-                message: {
-                  role: 'assistant',
-                  content: 'This reply was truncated mid-sentence',
-                },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'length',
+              message: {
+                role: 'assistant',
+                content: 'This reply was truncated mid-sentence',
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -920,26 +829,19 @@ describe('NVIDIA role-model provider', () => {
     'rejects missing terminal finish_reason %s',
     async finishReason => {
       const fetchClient: NvidiaFetchClient = () =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          json() {
-            return Promise.resolve({
-              choices: [
-                {
-                  finish_reason: finishReason,
-                  message: {
-                    role: 'assistant',
-                    content: 'Unconfirmed terminal output.',
-                  },
+        Promise.resolve(
+          streamed({
+            choices: [
+              {
+                finish_reason: finishReason,
+                message: {
+                  role: 'assistant',
+                  content: 'Unconfirmed terminal output.',
                 },
-              ],
-            });
-          },
-          text() {
-            return Promise.resolve('');
-          },
-        });
+              },
+            ],
+          }),
+        );
       const adapter = createNvidiaRoleModelProviderAdapter({
         apiKey: 'secret',
         fetchClient,
@@ -982,18 +884,17 @@ describe('NVIDIA role-model provider', () => {
     expect(defaultNvidiaRoleModelRequestTimeoutMs).toBe(30_000);
   });
 
-  it('keeps the request deadline active while decoding the response body', async () => {
+  it('keeps the deadline active while the body streams: a chunk that never comes is a timeout', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return new Promise(() => undefined);
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            pull() {
+              return new Promise(() => undefined);
+            },
+          }),
+        ),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -1010,29 +911,31 @@ describe('NVIDIA role-model provider', () => {
     );
   });
 
-  it('rejects a body decoder that blocks past the deadline before resolving', async () => {
+  it('refuses a body that blocked the loop past the deadline before its first chunk', async () => {
+    const late = sseText([
+      {
+        choices: [
+          {
+            index: 0,
+            delta: {content: 'This late response must not be accepted.'},
+            finish_reason: 'stop',
+          },
+        ],
+      },
+      '[DONE]',
+    ]);
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'This late response must not be accepted.',
-                },
-              },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+              controller.enqueue(new TextEncoder().encode(late));
+              controller.close();
+            },
+          }),
+        ),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -1052,44 +955,37 @@ describe('NVIDIA role-model provider', () => {
 
   it('keeps assistant content next to native tool calls as the decision text', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: 'Checking the available plugins.',
-                  tool_calls: [
-                    {
-                      id: 'call_runtime_plugin_list',
-                      type: 'function',
-                      function: {
-                        name: 'runtime_plugin_list',
-                        arguments: '{}',
-                      },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: 'Checking the available plugins.',
+                tool_calls: [
+                  {
+                    id: 'call_runtime_plugin_list',
+                    type: 'function',
+                    function: {
+                      name: 'runtime_plugin_list',
+                      arguments: '{}',
                     },
-                    {
-                      id: 'call_character_state_patch',
-                      type: 'function',
-                      function: {
-                        name: 'character_state_patch',
-                        arguments: '{"mood":"curious"}',
-                      },
+                  },
+                  {
+                    id: 'call_character_state_patch',
+                    type: 'function',
+                    function: {
+                      name: 'character_state_patch',
+                      arguments: '{"mood":"curious"}',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -1137,36 +1033,29 @@ describe('NVIDIA role-model provider', () => {
 
   it('keeps content next to a native visible_reply as text, not as a second reply', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: 'Extra assistant content.',
-                  tool_calls: [
-                    {
-                      id: 'call_visible_reply',
-                      type: 'function',
-                      function: {
-                        name: visibleReplyModelToolName,
-                        arguments: '{"text":"Native visible reply."}',
-                      },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: 'Extra assistant content.',
+                tool_calls: [
+                  {
+                    id: 'call_visible_reply',
+                    type: 'function',
+                    function: {
+                      name: visibleReplyModelToolName,
+                      arguments: '{"text":"Native visible reply."}',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -1193,36 +1082,29 @@ describe('NVIDIA role-model provider', () => {
 
   it('carries a non-finite native tool argument through as null', async () => {
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: 'Checking the available plugins.',
-                  tool_calls: [
-                    {
-                      id: 'call_runtime_plugin_list',
-                      type: 'function',
-                      function: {
-                        name: 'runtime_plugin_list',
-                        arguments: '{"score":1e999}',
-                      },
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: 'Checking the available plugins.',
+                tool_calls: [
+                  {
+                    id: 'call_runtime_plugin_list',
+                    type: 'function',
+                    function: {
+                      name: 'runtime_plugin_list',
+                      arguments: '{"score":1e999}',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       fetchClient,
@@ -1423,40 +1305,417 @@ function createAliasCollisionToolDefinition(options: {
   } satisfies RoleModelPluginToolDefinition);
 }
 
-function successfulReplyResponse(text: string): {
-  readonly ok: boolean;
-  readonly status: number;
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-} {
-  return {
-    ok: true,
-    status: 200,
-    json() {
-      return Promise.resolve({
-        choices: [
-          {
-            finish_reason: 'tool_calls',
-            message: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_reply',
-                  type: 'function',
-                  function: {
-                    name: 'visible_reply',
-                    arguments: JSON.stringify({text}),
-                  },
-                },
-              ],
+function successfulReplyResponse(text: string): Response {
+  return streamed({
+    choices: [
+      {
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_reply',
+              type: 'function',
+              function: {
+                name: 'visible_reply',
+                arguments: JSON.stringify({text}),
+              },
             },
-          },
-        ],
-      });
-    },
-    text() {
-      return Promise.resolve('');
-    },
-  };
+          ],
+        },
+      },
+    ],
+  });
 }
+
+describe('NVIDIA role-model provider streaming', () => {
+  const contentChunk = (content: string) => ({
+    choices: [{index: 0, delta: {content}, finish_reason: null}],
+  });
+  const finishChunk = (finishReason: string) => ({
+    choices: [{index: 0, delta: {}, finish_reason: finishReason}],
+  });
+  const argumentsChunk = (text: string, first = false) => ({
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            {
+              index: 0,
+              ...(first ? {id: 'call_reply', type: 'function'} : {}),
+              function: {
+                ...(first ? {name: 'visible_reply'} : {}),
+                arguments: text,
+              },
+            },
+          ],
+        },
+        finish_reason: null,
+      },
+    ],
+  });
+
+  async function invokeStreaming(
+    response: Response | (() => Promise<Response>),
+    options: {readonly requestTimeoutMs?: number} = {},
+  ) {
+    const heard: {reply: number; text: string}[] = [];
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient:
+        typeof response === 'function'
+          ? response
+          : () => Promise.resolve(response),
+      ...options,
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(inputEnvelope, {
+      ...testInvocation(inputEnvelope),
+      onReplyDelta(delta) {
+        heard.push(delta);
+      },
+    });
+
+    return {output, heard};
+  }
+
+  it('never speaks plain content: alone it is the reply, whole at the commit, usage and all', async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        contentChunk('Hel'),
+        contentChunk('lo'),
+        finishChunk('stop'),
+        {choices: [], usage: {total_tokens: 3}},
+        '[DONE]',
+      ]),
+    );
+
+    expect(heard).toEqual([]);
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hello'}}],
+    });
+    expect(output.providerExchange).toMatchObject({
+      finishReason: 'stop',
+      usage: {total_tokens: 3},
+    });
+  });
+
+  it("follows a visible_reply call's arguments as they arrive, escapes decoded", async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        argumentsChunk('{"te', true),
+        argumentsChunk('xt": "Hi'),
+        argumentsChunk(' there\\u0021"}'),
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(heard).toEqual([
+      {reply: 0, text: 'Hi'},
+      {reply: 0, text: ' there!'},
+    ]);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {name: visibleReplyModelToolName, input: {text: 'Hi there!'}},
+      ],
+    });
+  });
+
+  it('holds reasoning back and never speaks it, whole or split', async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        argumentsChunk('{"text": "<thi', true),
+        argumentsChunk('nk>secret</think>Hel'),
+        argumentsChunk('lo"}'),
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(heard).toEqual([
+      {reply: 0, text: 'Hel'},
+      {reply: 0, text: 'lo'},
+    ]);
+    // Handed to the parser as written: it scrubs argument text with the
+    // same grammar the draft's filter read ahead with.
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {text: '<think>secret</think>Hello'},
+        },
+      ],
+    });
+  });
+
+  it('releases what a draft still held once the message is whole', async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        argumentsChunk('{"text": "Hello ', true),
+        argumentsChunk('<thin"}'),
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    // The `<` could have opened a tag until the stream ended; then it is text.
+    expect(heard).toEqual([
+      {reply: 0, text: 'Hello '},
+      {reply: 0, text: '<thin'},
+    ]);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [
+        {name: visibleReplyModelToolName, input: {text: 'Hello <thin'}},
+      ],
+    });
+  });
+
+  it('redacts the key from a provider error the stream carried, as every other error path does', async () => {
+    const {output} = await invokeStreaming(
+      sseResponse([{error: {message: 'rejected key secret for this route'}}]),
+    );
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA provider error: rejected key [redacted] for this route',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('provider_error');
+    expect(JSON.stringify(output)).not.toContain('secret');
+  });
+
+  it("keeps the model's note to itself: content beside a visible_reply call is never spoken, before or after the call", async () => {
+    const {output, heard} = await invokeStreaming(
+      sseResponse([
+        contentChunk('NOTE-BEFORE '),
+        argumentsChunk('{"text": "Hi"}', true),
+        contentChunk('NOTE-AFTER'),
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(heard).toEqual([{reply: 0, text: 'Hi'}]);
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hi'}}],
+      text: 'NOTE-BEFORE NOTE-AFTER',
+    });
+
+    // A call named only after its arguments is still the reply's draft,
+    // and it hears what arrived before the name.
+    const late = await invokeStreaming(
+      sseResponse([
+        contentChunk('NOTE-BEFORE'),
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_late',
+                    function: {arguments: '{"text": "Hi"}'},
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [{index: 0, function: {name: 'visible_reply'}}],
+              },
+              finish_reason: null,
+            },
+          ],
+        },
+        finishChunk('tool_calls'),
+        '[DONE]',
+      ]),
+    );
+
+    expect(late.heard).toEqual([{reply: 0, text: 'Hi'}]);
+  });
+
+  it('starts the silence bound over when the headers arrive', async () => {
+    const wait = (ms: number) =>
+      new Promise<void>(resolve => setTimeout(resolve, ms));
+    const {output} = await invokeStreaming(
+      async () => {
+        await wait(200);
+
+        return new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await wait(200);
+              controller.enqueue(
+                new TextEncoder().encode(
+                  sseText([
+                    contentChunk('late'),
+                    finishChunk('stop'),
+                    '[DONE]',
+                  ]),
+                ),
+              );
+              controller.close();
+            },
+          }),
+        );
+      },
+      {requestTimeoutMs: 300},
+    );
+
+    // Headers after 200 ms and the first chunk 200 ms later: neither wait
+    // reached the bound, though together they passed it.
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'late'}}],
+    });
+  });
+
+  it("starts the silence bound over at an error's headers too, so its body reads as the provider's error", async () => {
+    const wait = (ms: number) =>
+      new Promise<void>(resolve => setTimeout(resolve, ms));
+    const {output} = await invokeStreaming(
+      async () => {
+        await wait(200);
+
+        return new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await wait(200);
+              controller.enqueue(
+                new TextEncoder().encode(
+                  JSON.stringify({error: {message: 'bad request'}}),
+                ),
+              );
+              controller.close();
+            },
+          }),
+          {status: 400},
+        );
+      },
+      {requestTimeoutMs: 300},
+    );
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA provider error: bad request',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('http_error');
+  });
+
+  it('reports a stream that breaks mid-reply as a provider error with no raw text', async () => {
+    const {output, heard} = await invokeStreaming(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                sseText([argumentsChunk('{"text": "Hel', true)]),
+              ),
+            );
+          },
+          pull(controller) {
+            controller.error(new Error('connection reset'));
+          },
+        }),
+      ),
+    );
+
+    expect(heard).toEqual([{reply: 0, text: 'Hel'}]);
+    expect(output.rawOutputText).toBe('');
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'connection reset',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('provider_error');
+  });
+
+  it('names a timeout that the abort delivers ahead of the timer', async () => {
+    const {output} = await invokeStreaming(
+      (request?: unknown) => {
+        const signal = (request as {signal?: AbortSignal} | undefined)?.signal;
+
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                signal?.addEventListener('abort', () => {
+                  controller.error(new Error('aborted by the client'));
+                });
+              },
+              pull() {
+                return new Promise(() => undefined);
+              },
+            }),
+          ),
+        );
+      },
+      {requestTimeoutMs: 5},
+    );
+
+    expect(output.rejection?.details).toBe(
+      'NVIDIA provider request timed out after 5ms.',
+    );
+    expect(output.providerMetadata?.error?.code).toBe('request_timeout');
+  });
+
+  it('bounds silence, not the exchange: a slow but steady stream completes past the old whole-request bound', async () => {
+    const pieces = [
+      contentChunk('a'),
+      contentChunk('b'),
+      contentChunk('c'),
+      contentChunk('d'),
+      finishChunk('stop'),
+      '[DONE]',
+    ];
+    let next = 0;
+    const {output} = await invokeStreaming(
+      new Response(
+        new ReadableStream({
+          async pull(controller) {
+            await new Promise(resolve => setTimeout(resolve, 30));
+
+            const piece = pieces[next];
+
+            next += 1;
+
+            if (piece === undefined) {
+              controller.close();
+              return;
+            }
+
+            controller.enqueue(new TextEncoder().encode(sseText([piece])));
+          },
+        }),
+      ),
+      {requestTimeoutMs: 100},
+    );
+
+    expect(output.rejection).toBeUndefined();
+    expect(JSON.parse(output.rawOutputText)).toEqual({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'abcd'}}],
+    });
+  });
+
+  it('refuses a stream cut before its finish reason as a malformed response', async () => {
+    const {output} = await invokeStreaming(
+      sseResponse([contentChunk('Hel'), '[DONE]']),
+    );
+
+    expect(output.rejection).toEqual({
+      reason: roleModelProviderErrorRejectionReason,
+      details: 'NVIDIA response choice.finish_reason is required.',
+    });
+    expect(output.providerMetadata?.error?.code).toBe('malformed_response');
+  });
+});

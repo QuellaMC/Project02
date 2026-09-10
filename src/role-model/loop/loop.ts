@@ -25,19 +25,11 @@ import {
   parseRoleModelExecutionDecision,
 } from './decision-parser.ts';
 import {
-  createToolBatchLock,
-  type ToolBatchLockMode,
-} from './tool-batch-lock.ts';
-import {
   providerExchangeOption,
   providerMetadataOption,
   validateRoleModelAdapterRawOutput,
 } from './adapter-raw-output.ts';
-import {
-  createRejectedToolRoutingEvidence,
-  undeclaredToolRejection,
-  type RoleModelPluginToolRoutingEvidence,
-} from './routing-rejections.ts';
+import {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
 import type {RoleModelAdapter} from '../api/adapter.ts';
 import {type ModelToolCall} from '../api/model-tools.ts';
 import {measureRoleModelPromptSize} from '../prompt/prompt-size.ts';
@@ -47,14 +39,19 @@ import {
   createConversationToolRound,
   type ConversationTurn,
 } from '../api/conversation-history.ts';
+import {type RuntimePluginContext} from '../../plugins/api/index.ts';
 import {
-  createRuntimePluginToolCallResultSnapshot,
-  type RuntimePluginToolCall,
-  type RuntimePluginToolCallResult,
-  type RuntimePluginContext,
-} from '../../plugins/api/index.ts';
-import {runtimePluginToolResultHasBlockingEvidence} from '../../plugins/api/index.ts';
-import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+  createReplyDrafts,
+  type ReplyDrafts,
+  type RoleModelReplyDeltaEvent,
+  type RoleModelReplyWithdrawnEvent,
+} from './reply-drafts.ts';
+import {
+  routeExecutableToolCalls,
+  type RoleModelPluginToolCallCompletedEvent,
+  type RoleModelPluginToolCallStartedEvent,
+  type RoleModelPluginToolHost,
+} from './tool-routing.ts';
 
 export type RunRoleModelLoopOptions = {
   readonly event: UserMessageRuntimeEvent;
@@ -66,7 +63,8 @@ export type RunRoleModelLoopOptions = {
   /**
    * Fires once per model round, accepted or refused, as soon as the output
    * is parsed and before anything is delivered or dispatched: the round is
-   * on record before its consequences are.
+   * on record before its consequences are. Only the reply's draft precedes
+   * it, spoken through onReplyDelta while the model is still writing.
    */
   readonly onRound: (event: RoleModelRoundEvent) => Promise<void> | void;
   readonly onPluginToolCallStarted?: (
@@ -87,6 +85,10 @@ export type RunRoleModelLoopOptions = {
   readonly onVisibleReply: (
     event: RoleModelVisibleReplyEvent,
   ) => Promise<VisibleMessage> | VisibleMessage;
+  /** Hears the reply as the model writes it: a draft, never a message. */
+  readonly onReplyDelta?: (event: RoleModelReplyDeltaEvent) => void;
+  /** A draft that ended with nothing said: no commit named it before the round moved on. */
+  readonly onReplyWithdrawn?: (event: RoleModelReplyWithdrawnEvent) => void;
   readonly runtimePluginContext: RuntimePluginContext;
   readonly personaSections?: readonly string[];
   /** The person's name, when configured; the prompt then addresses them by it. */
@@ -96,14 +98,16 @@ export type RunRoleModelLoopOptions = {
   readonly characterRef?: RoleModelCharacterRef;
 };
 
-export type RoleModelPluginToolHost = {
-  readonly handleToolCall: (
-    call: RuntimePluginToolCall,
-    context: RuntimePluginContext,
-  ) => RuntimePluginToolCallResult | Promise<RuntimePluginToolCallResult>;
-};
-
 export {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
+export {
+  type RoleModelReplyDeltaEvent,
+  type RoleModelReplyWithdrawnEvent,
+} from './reply-drafts.ts';
+export {
+  type RoleModelPluginToolCallCompletedEvent,
+  type RoleModelPluginToolCallStartedEvent,
+  type RoleModelPluginToolHost,
+} from './tool-routing.ts';
 
 export type RoleModelRoundEvent = {
   readonly round: number;
@@ -114,27 +118,13 @@ export type RoleModelRoundEvent = {
 export type RoleModelVisibleReplyEvent = {
   readonly round: number;
   readonly text: string;
+  /** The draft this reply replaces: the id its deltas carried, if any were spoken. */
+  readonly draftId: string;
 };
 
 export type RoleModelPluginToolCallsRequestedEvent = {
   readonly round: number;
   readonly toolNames: readonly string[];
-};
-
-export type RoleModelPluginToolCallStartedEvent = {
-  readonly callId: string;
-  readonly round: number;
-  readonly call: RuntimePluginToolCall;
-};
-
-export type RoleModelPluginToolCallCompletedEvent = {
-  readonly callId: string;
-  readonly dispatchedToHost: boolean;
-  readonly pluginId: string;
-  readonly round: number;
-  readonly status: RuntimePluginToolCallResult['status'];
-  readonly toolName: string;
-  readonly result: RuntimePluginToolCallResult;
 };
 
 export {
@@ -185,64 +175,83 @@ export async function runRoleModelLoop(
   };
 
   for (let round = 1; ; round += 1) {
-    const invokedRound = await invokeRoleModelLoopRound({
-      options,
-      adapter,
-      identity,
-      sessionId,
+    // One ledger per round: every draft the round opens is settled by its
+    // commit or withdrawn before the round moves on, whichever way it exits.
+    const drafts = createReplyDrafts({
       round,
-      state,
+      ...(options.onReplyDelta === undefined
+        ? {}
+        : {onReplyDelta: options.onReplyDelta}),
+      ...(options.onReplyWithdrawn === undefined
+        ? {}
+        : {onReplyWithdrawn: options.onReplyWithdrawn}),
     });
 
-    if (invokedRound.status === 'rejected') {
-      const settled = settleRejectedRound({
+    try {
+      const invokedRound = await invokeRoleModelLoopRound({
+        options,
+        adapter,
+        identity,
+        sessionId,
+        round,
         state,
-        rejection: invokedRound.rejection,
-        modelOutput: invokedRound.modelOutput,
+        drafts,
+      });
+
+      if (invokedRound.status === 'rejected') {
+        const settled = settleRejectedRound({
+          state,
+          rejection: invokedRound.rejection,
+          modelOutput: invokedRound.modelOutput,
+          round,
+          maxToolRounds,
+        });
+
+        if (settled === 'continue') {
+          continue;
+        }
+
+        return settled;
+      }
+
+      const terminalResult = terminalRoleModelLoopResult({
+        state,
+        decision: invokedRound.decision,
+        executableToolCalls: invokedRound.executableToolCalls,
         round,
         maxToolRounds,
       });
 
-      if (settled === 'continue') {
-        continue;
+      if (terminalResult !== undefined) {
+        if (terminalResult.status === 'accepted') {
+          await deliverVisibleReply({
+            options,
+            round,
+            decision: invokedRound.decision,
+            drafts,
+          });
+        }
+
+        return terminalResult;
       }
 
-      return settled;
+      const routed = await routeRoleModelLoopToolCalls({
+        options,
+        identity,
+        invokedRound,
+        round,
+        drafts,
+      });
+
+      recordRoleModelLoopToolRound({
+        state,
+        invokedRound,
+        ...routed,
+        round,
+      });
+    } finally {
+      drafts.close();
     }
-
-    const terminalResult = terminalRoleModelLoopResult({
-      state,
-      decision: invokedRound.decision,
-      executableToolCalls: invokedRound.executableToolCalls,
-      round,
-      maxToolRounds,
-    });
-
-    if (terminalResult !== undefined) {
-      if (terminalResult.status === 'accepted') {
-        await deliverVisibleReply({
-          options,
-          round,
-          decision: invokedRound.decision,
-        });
-      }
-
-      return terminalResult;
-    }
-
-    const routed = await routeRoleModelLoopToolCalls({
-      options,
-      identity,
-      invokedRound,
-      round,
-    });
-
-    recordRoleModelLoopToolRound({
-      state,
-      invokedRound,
-      ...routed,
-      round,
-    });
   }
 }
 
@@ -250,14 +259,26 @@ async function deliverVisibleReply(delivery: {
   readonly options: RunRoleModelLoopOptions;
   readonly round: number;
   readonly decision: CharacterDecision;
+  readonly drafts: ReplyDrafts;
 }): Promise<readonly VisibleMessage[]> {
   const committed: VisibleMessage[] = [];
 
-  for (const text of executionVisibleReplyTexts(delivery.decision)) {
+  for (const [reply, text] of executionVisibleReplyTexts(
+    delivery.decision,
+  ).entries()) {
     committed.push(
-      await delivery.options.onVisibleReply({round: delivery.round, text}),
+      await delivery.options.onVisibleReply({
+        round: delivery.round,
+        text,
+        draftId: delivery.drafts.draftId(reply),
+      }),
     );
+    delivery.drafts.settle(reply);
   }
+
+  // What the round drafted and did not commit ends here, before anything
+  // else the round decided goes on.
+  delivery.drafts.close();
 
   return Object.freeze(committed);
 }
@@ -283,6 +304,7 @@ async function invokeRoleModelLoopRound(options: {
   readonly sessionId: string;
   readonly round: number;
   readonly state: RoleModelLoopState;
+  readonly drafts: ReplyDrafts;
 }): Promise<InvokedRoleModelLoopRound> {
   const inputEnvelope = createRoleModelInputEnvelope({
     event: options.options.event,
@@ -309,6 +331,9 @@ async function invokeRoleModelLoopRound(options: {
   const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
     turnContext,
     conversationHistory,
+    onReplyDelta: delta => {
+      options.drafts.speak(delta);
+    },
   });
   const rawOutputValidation = validateRoleModelAdapterRawOutput(rawOutput);
   const ioSnapshot = createRoleModelIOSnapshot({
@@ -365,6 +390,7 @@ async function routeRoleModelLoopToolCalls(options: {
     {status: 'accepted'}
   >;
   readonly round: number;
+  readonly drafts: ReplyDrafts;
 }): Promise<{
   readonly interimReplies: readonly VisibleMessage[];
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
@@ -373,6 +399,7 @@ async function routeRoleModelLoopToolCalls(options: {
     options: options.options,
     round: options.round,
     decision: options.invokedRound.decision,
+    drafts: options.drafts,
   });
 
   await options.options.onPluginToolCallsRequested?.({
@@ -450,312 +477,6 @@ function conversationToolCallFromRouting(
             message: routing.result.message,
           },
   };
-}
-
-async function routeExecutableToolCalls(options: {
-  readonly toolCalls: readonly ModelToolCall[];
-  readonly identity: RuntimeEventIdentity;
-  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
-  readonly round: number;
-  readonly pluginToolHost: RoleModelPluginToolHost;
-  readonly onPluginToolCallStarted?: (
-    event: RoleModelPluginToolCallStartedEvent,
-  ) => Promise<void> | void;
-  readonly onPluginToolCallCompleted?: (
-    event: RoleModelPluginToolCallCompletedEvent,
-  ) => Promise<void> | void;
-  readonly runtimePluginContext: RuntimePluginContext;
-}): Promise<readonly RoleModelPluginToolRoutingEvidence[]> {
-  // Admission runs in call order: tool_call_started records must land in
-  // the order the model asked so the terminal event's toolCallIds match.
-  const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
-  const admitted: {
-    readonly slot: number;
-    readonly toolName: string;
-    readonly mode: ToolBatchLockMode;
-    readonly run: () => Promise<RoleModelPluginToolRoutingEvidence>;
-  }[] = [];
-
-  const report = createSettledToolCallReporter({
-    round: options.round,
-    ...(options.onPluginToolCallCompleted === undefined
-      ? {}
-      : {onPluginToolCallCompleted: options.onPluginToolCallCompleted}),
-  });
-
-  for (const [index, toolCall] of options.toolCalls.entries()) {
-    const slot = results.push(undefined) - 1;
-    const toolDefinition = findPluginToolDefinition(
-      options.pluginToolDefinitions,
-      toolCall.name,
-    );
-    const callId = createToolCallId({
-      eventId: options.identity.eventId,
-      traceId: options.identity.traceId,
-      index,
-      round: options.round,
-      toolName: toolCall.name,
-    });
-    const {routedCall, executionCall} = createRuntimePluginToolCallViews({
-      callId,
-      identity: options.identity,
-      pluginId:
-        toolDefinition?.pluginId ?? undeclaredToolPluginId(toolCall.name),
-      toolCall,
-    });
-
-    await options.onPluginToolCallStarted?.({
-      callId,
-      round: options.round,
-      call: routedCall,
-    });
-
-    if (toolDefinition === undefined) {
-      results[slot] = await report(
-        undeclaredToolRejection({
-          callId,
-          call: routedCall,
-          toolName: toolCall.name,
-          context: options.runtimePluginContext,
-        }),
-      );
-      continue;
-    }
-
-    const executionMode: ToolBatchLockMode =
-      toolDefinition.concurrency === 'shared' ? 'shared' : 'exclusive';
-    const {pluginToolHost, runtimePluginContext} = options;
-
-    admitted.push({
-      slot,
-      toolName: toolCall.name,
-      mode: executionMode,
-      async run() {
-        let hostResult: RuntimePluginToolCallResult;
-
-        try {
-          hostResult = await pluginToolHost.handleToolCall(
-            executionCall,
-            runtimePluginContext,
-          );
-        } catch (error: unknown) {
-          return createRejectedToolRoutingEvidence({
-            callId,
-            call: routedCall,
-            dispatchedToHost: true,
-            context: runtimePluginContext,
-            reason: 'handler_failed',
-            message:
-              error instanceof Error
-                ? error.message
-                : `Tool "${toolCall.name}" handler failed.`,
-            evidenceStatus: 'failed',
-            policyOutcome: 'handler_rejected',
-          });
-        }
-
-        try {
-          const routableHostResult = normalizeRoutablePluginToolResult({
-            result: freezeRuntimePluginToolCallResult(hostResult, {
-              call: executionCall,
-            }),
-            toolName: toolCall.name,
-          });
-
-          return Object.freeze({
-            callId,
-            call: routedCall,
-            dispatchedToHost: true,
-            result: routableHostResult,
-          } satisfies RoleModelPluginToolRoutingEvidence);
-        } catch (error: unknown) {
-          return createRejectedToolRoutingEvidence({
-            callId,
-            call: routedCall,
-            dispatchedToHost: true,
-            context: runtimePluginContext,
-            reason: 'invalid_tool_output',
-            message:
-              error instanceof Error
-                ? error.message
-                : `Tool "${toolCall.name}" returned invalid output.`,
-            evidenceStatus: 'failed',
-            policyOutcome: 'handler_rejected',
-          });
-        }
-      },
-    });
-  }
-
-  const lock = createToolBatchLock();
-
-  // Settled, not all: no call outruns the turn, and no failure cancels a sibling.
-  const settled = await Promise.allSettled(
-    admitted.map(async entry => {
-      results[entry.slot] = await report(await lock.run(entry.mode, entry.run));
-    }),
-  );
-  // Every cause, not the first: concurrent calls fail independently.
-  const failures = settled.flatMap((outcome): unknown[] =>
-    outcome.status === 'rejected' ? [outcome.reason] : [],
-  );
-
-  if (failures.length === 1) {
-    throw failures[0];
-  }
-
-  if (failures.length > 1) {
-    throw new AggregateError(
-      failures,
-      `${String(failures.length)} tool calls in one batch failed.`,
-    );
-  }
-
-  return Object.freeze(results.filter(result => result !== undefined));
-}
-
-// Reported when the call settles, not the batch: its write is already durable.
-function createSettledToolCallReporter(options: {
-  readonly round: number;
-  readonly onPluginToolCallCompleted?: (
-    event: RoleModelPluginToolCallCompletedEvent,
-  ) => Promise<void> | void;
-}): (
-  result: RoleModelPluginToolRoutingEvidence,
-) => Promise<RoleModelPluginToolRoutingEvidence> {
-  return async result => {
-    await options.onPluginToolCallCompleted?.({
-      round: options.round,
-      callId: result.callId,
-      dispatchedToHost: result.dispatchedToHost,
-      pluginId: result.call.pluginId,
-      toolName: result.call.toolName,
-      status: result.result.status,
-      result: result.result,
-    });
-
-    return result;
-  };
-}
-
-function normalizeRoutablePluginToolResult(options: {
-  readonly result: RuntimePluginToolCallResult;
-  readonly toolName: string;
-}): RuntimePluginToolCallResult {
-  if (
-    options.result.status === 'accepted' &&
-    runtimePluginToolResultHasBlockingEvidence(options.result)
-  ) {
-    return Object.freeze({
-      status: 'rejected',
-      reason: 'blocking_tool_invocation_evidence',
-      message: `Tool "${options.toolName}" returned accepted output with blocking tool invocation evidence.`,
-      evidence: options.result.evidence,
-    } satisfies RuntimePluginToolCallResult);
-  }
-
-  return options.result;
-}
-
-function findPluginToolDefinition(
-  definitions: readonly RoleModelPluginToolDefinition[],
-  toolName: string,
-): RoleModelPluginToolDefinition | undefined {
-  return definitions.find(definition => definition.name === toolName);
-}
-
-// The routed view is redacted because hooks, rejections, and evidence carry
-// it; the execution view keeps real values or the tool runs on placeholders.
-function createRuntimePluginToolCallViews(options: {
-  readonly callId: string;
-  readonly identity: RuntimeEventIdentity;
-  readonly pluginId: string;
-  readonly toolCall: ModelToolCall;
-}): {
-  readonly routedCall: RuntimePluginToolCall;
-  readonly executionCall: RuntimePluginToolCall;
-} {
-  const sharedIdentity = {
-    toolCallId: options.callId,
-    eventId: options.identity.eventId,
-    traceId: options.identity.traceId,
-    createdAt: options.identity.createdAt,
-    pluginId: options.pluginId,
-    toolName: options.toolCall.name,
-  };
-
-  return Object.freeze({
-    routedCall: Object.freeze({
-      ...sharedIdentity,
-      input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
-        field: 'Plugin tool input',
-        redact: true,
-      }),
-    } satisfies RuntimePluginToolCall),
-    executionCall: Object.freeze({
-      ...sharedIdentity,
-      input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
-        field: 'Plugin tool execution input',
-      }),
-    } satisfies RuntimePluginToolCall),
-  });
-}
-
-function undeclaredToolPluginId(toolName: string): string {
-  return `undeclared.${toolName}`;
-}
-
-function createToolCallId(options: {
-  readonly eventId: string;
-  readonly index: number;
-  readonly round: number;
-  readonly traceId: string;
-  readonly toolName: string;
-}): string {
-  return `${options.eventId}.${options.traceId}.round-${String(options.round)}.${String(options.index + 1)}.${options.toolName}`;
-}
-
-function freezeRuntimePluginToolCallResult(
-  result: RuntimePluginToolCallResult,
-  options: {readonly call: RuntimePluginToolCall},
-): RuntimePluginToolCallResult {
-  let boundedResult: RuntimePluginToolCallResult;
-
-  try {
-    boundedResult = createRuntimePluginToolCallResultSnapshot(result);
-  } catch (error: unknown) {
-    if (
-      error instanceof TypeError &&
-      error.message.includes('JSON serializable')
-    ) {
-      throw new TypeError('Plugin tool output must be JSON serializable.', {
-        cause: error,
-      });
-    }
-
-    throw error;
-  }
-
-  assertRoutedPluginEvidenceIdentity(boundedResult.evidence, options.call);
-  return boundedResult;
-}
-
-function assertRoutedPluginEvidenceIdentity(
-  evidence: readonly RuntimePluginToolCallResult['evidence'][number][],
-  call: RuntimePluginToolCall,
-): void {
-  for (const snapshot of evidence) {
-    if (
-      snapshot.eventId !== call.eventId ||
-      snapshot.traceId !== call.traceId ||
-      snapshot.createdAt !== call.createdAt ||
-      snapshot.pluginId !== call.pluginId
-    ) {
-      throw new TypeError(
-        'Plugin tool evidence identity must match the routed call.',
-      );
-    }
-  }
 }
 
 function createSnapshotIdentity(

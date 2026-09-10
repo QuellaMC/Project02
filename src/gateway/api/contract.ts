@@ -319,6 +319,11 @@ export type MaintenanceFailure = {
 
 export type GatewayEvent =
   | {
+      /**
+       * A turn's progress: both committed roles once durable, and the
+       * reply's draft ahead of its commit — `reply_delta` and
+       * `reply_withdrawn`, said before the log and marked as such by kind.
+       */
       readonly kind: 'turn_progress';
       readonly characterId: string;
       readonly conversationId: string;

@@ -24,7 +24,7 @@ import {
   type TurnOutcome,
 } from '../api/contract.ts';
 import type {GatewayApp} from '../http/app.ts';
-import {createSseFrameSplitter} from './sse.ts';
+import {createSseFrameSplitter} from '../../shared/sse.ts';
 
 /** Where a client finds the daemon: the line `serve` prints, exported. */
 export const gatewayUrlEnvVarName = 'PROJECT02_GATEWAY';

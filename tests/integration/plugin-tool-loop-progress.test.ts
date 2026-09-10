@@ -175,6 +175,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'Authorization: Bearer interim-secret',
+        draftId: '1.0',
       },
       {
         kind: 'tool_calls_requested',
@@ -193,6 +194,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'finished',
+        draftId: '2.0',
       },
     ]);
     const reloadedRawEvents = reloadedLogStore.rawEvents();
@@ -280,6 +282,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'checking',
+        draftId: '1.0',
       },
       {
         kind: 'tool_calls_requested',
@@ -298,6 +301,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'finished',
+        draftId: '2.0',
       },
     ]);
     expect(
@@ -307,7 +311,116 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toBe(false);
   });
 
-  it('shows a reply only once it is durable', async () => {
+  it('carries the reply as a draft ahead of its commit, and ends every draft before the round moves on', async () => {
+    const session = createSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore();
+    const progress: unknown[] = [];
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('needs tool', 'evt_reply_drafts'),
+      session,
+      logStore,
+      roleModelAdapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'visible_reply', input: {text: 'checking'}},
+              {name: 'character_state.patch', input: {energy: 'high'}},
+            ],
+          },
+          {toolCalls: [{name: 'visible_reply', input: {text: 'finished'}}]},
+        ],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'check'},
+            {reply: 0, text: 'ing'},
+            {reply: 1, text: 'a draft the round never committed'},
+          ],
+          [{reply: 0, text: 'finished'}],
+        ],
+      ),
+      onProgress(event) {
+        progress.push(event);
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(progress).toEqual([
+      expect.objectContaining({kind: 'user_message', text: 'needs tool'}),
+      {kind: 'reply_delta', draftId: '1.0', text: 'check'},
+      {kind: 'reply_delta', draftId: '1.0', text: 'ing'},
+      {
+        kind: 'reply_delta',
+        draftId: '1.1',
+        text: 'a draft the round never committed',
+      },
+      expect.objectContaining({
+        kind: 'visible_reply',
+        text: 'checking',
+        draftId: '1.0',
+      }),
+      {kind: 'reply_withdrawn', draftId: '1.1'},
+      expect.objectContaining({kind: 'tool_calls_requested', round: 1}),
+      expect.objectContaining({kind: 'tool_call_completed', round: 1}),
+      {kind: 'reply_delta', draftId: '2.0', text: 'finished'},
+      expect.objectContaining({
+        kind: 'visible_reply',
+        text: 'finished',
+        draftId: '2.0',
+      }),
+    ]);
+    // Drafts never reach the log: the record of the turn is the committed messages alone.
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['needs tool', 'checking', 'finished']);
+  });
+
+  it('lets an observer that awaits hear a draft ahead of its commit, and before the turn ends', async () => {
+    const session = createSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore();
+    const heard: string[] = [];
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('hello there', 'evt_slow_observer'),
+      session,
+      logStore,
+      roleModelAdapter: createSequencedAdapter(
+        [{toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}]}],
+        undefined,
+        [
+          [
+            {reply: 0, text: 'not'},
+            {reply: 0, text: 'ed'},
+          ],
+        ],
+      ),
+      async onProgress(event) {
+        // A slow ear: the draft takes longer to hear than the commit would.
+        if (event.kind === 'reply_delta') {
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+
+        heard.push(
+          event.kind === 'reply_delta' || event.kind === 'visible_reply'
+            ? `${event.kind} ${event.text}`
+            : event.kind,
+        );
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(heard).toEqual([
+      'user_message',
+      'reply_delta not',
+      'reply_delta ed',
+      'visible_reply noted',
+    ]);
+  });
+
+  it('withdraws a reply that never reached disk, having only ever called it a draft', async () => {
     const session = createSession({
       character: testCharacterProfile,
     });
@@ -324,9 +437,11 @@ describe('plugin-driven tool loop progress and evidence', () => {
         event: createTestEvent('hello there', 'evt_reply_persist_fails'),
         session,
         logStore,
-        roleModelAdapter: createSequencedAdapter([
-          {toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}]},
-        ]),
+        roleModelAdapter: createSequencedAdapter(
+          [{toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}]}],
+          undefined,
+          [[{reply: 0, text: 'noted'}]],
+        ),
         onProgress(event) {
           progress.push(event);
         },
@@ -334,9 +449,12 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).rejects.toThrow('the disk is full');
 
     // The person's message landed and was announced; the reply that never
-    // reached disk was never announced either.
+    // reached disk was drafted, then withdrawn, and never announced as a
+    // message.
     expect(progress).toEqual([
       expect.objectContaining({kind: 'user_message', text: 'hello there'}),
+      {kind: 'reply_delta', draftId: '1.0', text: 'noted'},
+      {kind: 'reply_withdrawn', draftId: '1.0'},
     ]);
     expect(
       logStore.conversationMessages().map(message => message.text),

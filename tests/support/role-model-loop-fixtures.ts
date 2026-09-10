@@ -6,6 +6,7 @@ import {
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
   type RoleModelProviderMetadata,
+  type RoleModelReplyDelta,
   type RoleModelRoundEvent,
   type RunRoleModelLoopOptions,
 } from '../../src/role-model/index.ts';
@@ -118,9 +119,14 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
   });
 }
 
+/**
+ * One decision per round, the last one repeating; `deltas[round]` is what the
+ * adapter speaks through the ear before it returns that round's decision.
+ */
 export function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
   onInvoke?: (invocation: RoleModelAdapterInvocation) => void,
+  deltas: readonly (readonly RoleModelReplyDelta[])[] = [],
 ): RoleModelAdapter {
   let index = 0;
 
@@ -132,12 +138,14 @@ export function createSequencedAdapter(
         throw new Error('Sequenced adapter needs at least one decision.');
       }
 
+      for (const delta of deltas[index] ?? []) {
+        invocation.onReplyDelta?.(delta);
+      }
+
       index += 1;
       onInvoke?.(invocation);
 
-      return {
-        rawOutputText: JSON.stringify(decision),
-      };
+      return {rawOutputText: JSON.stringify(decision)};
     },
   } satisfies RoleModelAdapter);
 }

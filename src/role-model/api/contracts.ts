@@ -41,7 +41,6 @@ export type RoleModelProviderMetadata = {
   readonly request?: {
     readonly endpoint?: string;
     readonly messageCount?: number;
-    readonly stream: false;
   };
   readonly response?: {
     readonly status?: number;

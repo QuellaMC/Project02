@@ -298,7 +298,6 @@ export function freezeProviderMetadata(
               ? {}
               : {endpoint: metadata.request.endpoint}),
             ...(messageCount === undefined ? {} : {messageCount}),
-            stream: false,
           }),
         }),
     ...(metadata.response === undefined

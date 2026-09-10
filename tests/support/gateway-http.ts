@@ -1,9 +1,6 @@
 import {serve} from '@hono/node-server';
 
-import {
-  createSseFrameSplitter,
-  type SseFrame,
-} from '../../src/gateway/client/index.ts';
+import {createSseFrameSplitter, type SseFrame} from '../../src/shared/sse.ts';
 import {createGatewayApp} from '../../src/gateway/http/app.ts';
 import {
   createEventStreams,
