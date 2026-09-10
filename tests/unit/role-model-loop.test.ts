@@ -5,6 +5,7 @@ import {
   type RoleModelChatMessage,
   type RoleModelPluginToolHost,
   type RoleModelRoundEvent,
+  createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
@@ -976,6 +977,37 @@ describe('role-model loop reply drafts', () => {
       }),
     ).rejects.toThrow('the disk is full');
     expect(failing).toEqual(['delta 1.0 hello', 'withdrawn 1.0']);
+  });
+
+  it("drafts a local agent's reply after the scrub the parser applies, so a draft never shows what the commit hides", async () => {
+    const log: string[] = [];
+
+    await runWith(
+      log,
+      createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: '<think>hidden</think>Hello there'}),
+      }),
+      'evt_local_draft_scrubbed',
+    );
+
+    expect(log).toEqual([
+      'delta 1.0 Hello ',
+      'delta 1.0 there',
+      'reply 1.0 Hello there',
+    ]);
+
+    // A block left open is refused by the parser; nothing of it is drafted.
+    const refused: string[] = [];
+    const result = await runWith(
+      refused,
+      createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: '<think>never closed'}),
+      }),
+      'evt_local_draft_unterminated',
+    );
+
+    expect(result.status).toBe('rejected');
+    expect(refused.filter(line => line.startsWith('delta'))).toEqual([]);
   });
 
   it('raises no draft event for an adapter that never speaks, and still names the commit', async () => {
