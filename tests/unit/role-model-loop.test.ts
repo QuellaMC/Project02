@@ -922,13 +922,13 @@ describe('role-model loop reply drafts', () => {
       createSequencedAdapter(
         [{toolCalls: [searchCall]}, {toolCalls: [visibleReply('done')]}],
         undefined,
-        [[{reply: 0, text: 'a note beside the call'}]],
+        [[{reply: 0, text: 'unnamed'}]],
       ),
       'evt_unnamed_draft_withdrawn',
     );
 
     expect(log).toEqual([
-      'delta 1.0 a note beside the call',
+      'delta 1.0 unnamed',
       'withdrawn 1.0',
       'tools requested',
       'reply 2.0 done',
@@ -976,82 +976,6 @@ describe('role-model loop reply drafts', () => {
       }),
     ).rejects.toThrow('the disk is full');
     expect(failing).toEqual(['delta 1.0 hello', 'withdrawn 1.0']);
-  });
-
-  it("names the commit by the adapter's word on which draft became the reply, and withdraws the rest", async () => {
-    const log: string[] = [];
-
-    await runWith(
-      log,
-      createSequencedAdapter(
-        [{toolCalls: [visibleReply('Hi')], text: 'a note'}],
-        undefined,
-        [
-          [
-            {reply: 0, text: 'a note'},
-            {reply: 1, text: 'Hi'},
-          ],
-        ],
-        [[1]],
-      ),
-      'evt_reply_drafts_mapping',
-    );
-
-    expect(log).toEqual([
-      'delta 1.0 a note',
-      'delta 1.1 Hi',
-      'reply 1.1 Hi',
-      'withdrawn 1.0',
-    ]);
-
-    const ignored: string[] = [];
-
-    await runWith(
-      ignored,
-      createSequencedAdapter(
-        [{toolCalls: [visibleReply('Hi')]}],
-        undefined,
-        [[{reply: 0, text: 'Hi'}]],
-        [[1.5]],
-      ),
-      'evt_reply_drafts_unusable',
-    );
-
-    // A mapping that is not draft numbers is no mapping: draft n is reply n.
-    expect(ignored).toEqual(['delta 1.0 Hi', 'reply 1.0 Hi']);
-
-    // Nor is one that names a draft twice, or leaves a reply unnamed: two
-    // replies would end one draft, or a reply would fall back on a number
-    // the mapping gave away.
-    for (const [mapping, eventId] of [
-      [[0, 0], 'evt_reply_drafts_duplicate'],
-      [[1], 'evt_reply_drafts_short'],
-    ] as const) {
-      const twice: string[] = [];
-
-      await runWith(
-        twice,
-        createSequencedAdapter(
-          [{toolCalls: [visibleReply('one'), visibleReply('two')]}],
-          undefined,
-          [
-            [
-              {reply: 0, text: 'one'},
-              {reply: 1, text: 'two'},
-            ],
-          ],
-          [mapping],
-        ),
-        eventId,
-      );
-
-      expect(twice).toEqual([
-        'delta 1.0 one',
-        'delta 1.1 two',
-        'reply 1.0 one',
-        'reply 1.1 two',
-      ]);
-    }
   });
 
   it('raises no draft event for an adapter that never speaks, and still names the commit', async () => {

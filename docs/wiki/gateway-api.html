@@ -364,8 +364,9 @@ Content-Type: application/json
         Frames are <code>event: &lt;kind&gt;</code> plus one
         <code>data:</code> line of JSON; a comment <code>: ping</code> arrives
         every 15 seconds so an idle connection survives client timeouts. A
-        client that stops reading is dropped once the frames it left behind pass
-        a bound; the daemon never buffers for a client that is gone.
+        client that does not take a frame within two seconds is dropped; the
+        daemon never buffers for a client that is gone, and never judges one
+        by how many frames a burst left waiting.
       </p>
 
       <pre><code>event: ready
@@ -492,8 +493,8 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         ways: the <code>visible_reply</code> that names its
         <code>draftId</code> replaces it with the committed message, or a
         <code>reply_withdrawn {draftId}</code> ends it with nothing said — a
-        round the parser refused, a note the model wrote beside a tool call,
-        a reply whose write failed. The daemon closes every draft a round
+        round the parser refused, a reply whose write failed. The daemon
+        closes every draft a round
         opened before the round moves on, so none is open at
         <code>turn_completed</code>, and a client never infers an ending from
         another event.
@@ -542,11 +543,10 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         conversation runs one turn at a time, so a surface keys drafts by
         conversation. The committed text is the draft after the runtime's
         normalization (line endings, trim), which is why the commit replaces
-        the draft rather than confirming it. A note the model writes beside a
-        tool call is its own draft, withdrawn once the round's commits are
-        done; it never becomes the reply's bubble. Pacing is each surface's
-        own: a page renders every delta, a connector edits its message on a
-        timer.
+        the draft rather than confirming it. Only the reply is ever drafted:
+        what a model writes to itself beside a tool call is never on the
+        stream. Pacing is each surface's own: a page renders every delta, a
+        connector edits its message on a timer.
       </p>
 
       <h2>What a client never has to notice</h2>

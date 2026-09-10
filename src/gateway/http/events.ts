@@ -12,8 +12,8 @@ import type {ApiEnv} from './env.ts';
 export type EventStreamsOptions = {
   /** Keeps an idle connection alive through client body timeouts; tests shorten it. */
   readonly heartbeatMs?: number;
-  /** Frames a client may leave unread before it is treated as gone. */
-  readonly maxPendingFrames?: number;
+  /** How long a client may leave one frame untaken before it is treated as gone; tests shorten it. */
+  readonly graceMs?: number;
 };
 
 export type EventStreams = {
@@ -22,37 +22,32 @@ export type EventStreams = {
   readonly openCount: () => number;
   /**
    * Ends every open stream once the frames already queued for it are
-   * written, dropping a client that does not take them within the drain
-   * grace, and ends at once any stream that arrives later: a request can
-   * pass the stopping guard before it is set and reach its stream after.
-   * Shutdown awaits it after the gateway drained its turns, so the last
-   * reply rides out before the stream ends.
+   * written — a client that does not take them within the grace is
+   * dropped — and ends at once any stream that arrives later: a request
+   * can pass the stopping guard before it is set and reach its stream
+   * after. Shutdown awaits it after the gateway drained its turns, so the
+   * last reply rides out before the stream ends.
    */
   readonly closeAll: () => Promise<void>;
 };
 
 export type FrameQueue = {
   push(frame: string): void;
-  pending(): number;
-  /**
-   * Settles true once every frame pushed so far has been written. A client
-   * that has not taken them within the grace is dropped, and it settles
-   * false.
-   */
-  drain(graceMs: number): Promise<boolean>;
+  /** Settles once every frame pushed so far is written: true, or false for a client dropped on the way. */
+  drain(): Promise<boolean>;
 };
 
 /** The first frame on every stream; a client bootstraps on each one it sees. */
 export const readyEvent = 'ready';
 
 const defaultHeartbeatMs = 15_000;
-const defaultMaxPendingFrames = 64;
 /**
- * How long shutdown waits for a client to take what it was sent, frames or
- * an answer. A reading client takes it in milliseconds; this only ever
- * meets one that stopped.
+ * How long a client may take to take what it was sent — a frame, or at
+ * shutdown an answer — before it is gone. A reading client takes it in
+ * milliseconds, whatever burst it arrives in; this only ever meets one
+ * that stopped.
  */
-export const drainGraceMs = 2_000;
+export const clientGraceMs = 2_000;
 const heartbeatFrame = ': ping\n\n';
 
 /** SSE framing: the event name, one line of JSON, a blank line. */
@@ -61,23 +56,33 @@ export function formatEventFrame(event: string, data: string): string {
 }
 
 /**
- * Writes frames in order and counts the ones the socket has not taken yet.
- * Past the bound, or past the drain grace, the client is not slow, it is
- * gone: `drop` ends it, and every later frame is discarded rather than
- * buffered without limit.
+ * Writes frames in order, each given the grace to be taken. A client that
+ * has not taken a frame within it is not slow, it is gone: `drop` ends it,
+ * and every later frame is discarded rather than buffered without limit.
+ * How many frames wait their turn says nothing about the client — a reply
+ * spoken in one breath queues hundreds — so nothing is judged by it.
  */
 export function createFrameQueue(options: {
   readonly write: (frame: string) => Promise<unknown>;
   readonly drop: () => void;
-  readonly maxPendingFrames: number;
+  readonly graceMs: number;
 }): FrameQueue {
   let chain: Promise<unknown> = Promise.resolve();
-  let pending = 0;
   let dropped = false;
-  const abandon = (): void => {
-    dropped = true;
-    options.drop();
-  };
+  const writeWithinGrace = (frame: string): Promise<void> =>
+    new Promise(resolve => {
+      const timer = setTimeout(() => {
+        dropped = true;
+        options.drop();
+        resolve();
+      }, options.graceMs);
+      const taken = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+
+      options.write(frame).then(taken, taken);
+    });
 
   return Object.freeze({
     push(frame) {
@@ -85,39 +90,9 @@ export function createFrameQueue(options: {
         return;
       }
 
-      if (pending >= options.maxPendingFrames) {
-        abandon();
-        return;
-      }
-
-      pending += 1;
-      chain = chain
-        .then(() => options.write(frame))
-        .then(
-          () => {
-            pending -= 1;
-          },
-          () => {
-            pending -= 1;
-          },
-        );
+      chain = chain.then(() => (dropped ? undefined : writeWithinGrace(frame)));
     },
-    pending: () => pending,
-    drain: graceMs =>
-      dropped
-        ? Promise.resolve(false)
-        : new Promise<boolean>(resolve => {
-            const timer = setTimeout(() => {
-              abandon();
-              resolve(false);
-            }, graceMs);
-            const written = (): void => {
-              clearTimeout(timer);
-              resolve(true);
-            };
-
-            chain.then(written, written);
-          }),
+    drain: () => chain.then(() => !dropped),
   });
 }
 
@@ -133,7 +108,7 @@ export function createEventStreams(
   options: EventStreamsOptions = {},
 ): EventStreams {
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
-  const maxPendingFrames = options.maxPendingFrames ?? defaultMaxPendingFrames;
+  const graceMs = options.graceMs ?? clientGraceMs;
   const closers = new Set<() => Promise<void>>();
   let closed = false;
 
@@ -168,7 +143,7 @@ export function createEventStreams(
     const close = async (): Promise<void> => {
       heartbeat.stop();
 
-      if (await queue.drain(drainGraceMs)) {
+      if (await queue.drain()) {
         await stream.close();
       }
     };
@@ -181,7 +156,7 @@ export function createEventStreams(
         (c.env as HttpBindings | undefined)?.outgoing.destroy();
         stream.abort();
       },
-      maxPendingFrames,
+      graceMs,
     });
 
     stream.onAbort(() => {

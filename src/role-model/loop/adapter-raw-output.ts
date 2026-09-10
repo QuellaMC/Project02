@@ -18,14 +18,12 @@ type RoleModelAdapterRawOutputValidationResult =
       readonly rawOutputText: string;
       readonly providerMetadata?: RoleModelProviderMetadata;
       readonly providerExchange?: RoleModelProviderExchangeSnapshot;
-      readonly replyDrafts?: readonly number[];
     }
   | {
       readonly status: 'rejected';
       readonly rawOutputText: string;
       readonly providerMetadata?: RoleModelProviderMetadata;
       readonly providerExchange?: RoleModelProviderExchangeSnapshot;
-      readonly replyDrafts?: readonly number[];
       readonly decisionResult: RejectedRoleModelDecisionResult;
     };
 
@@ -100,30 +98,7 @@ export function validateRoleModelAdapterRawOutput(
     rawOutputText,
     ...providerMetadataOption(providerMetadata),
     ...providerExchangeOption(providerExchange),
-    ...replyDraftsOption(rawOutput['replyDrafts']),
   } satisfies RoleModelAdapterRawOutputValidationResult);
-}
-
-/**
- * A mapping that is not distinct draft numbers is no mapping: draft n is
- * then reply n. Two replies named as one draft would end that draft twice.
- */
-function replyDraftsOption(value: unknown): {
-  readonly replyDrafts?: readonly number[];
-} {
-  if (!Array.isArray(value)) {
-    return {};
-  }
-
-  const drafts = value.filter(
-    (entry): entry is number =>
-      typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0,
-  );
-
-  return drafts.length === value.length &&
-    new Set(drafts).size === drafts.length
-    ? {replyDrafts: Object.freeze(drafts)}
-    : {};
 }
 
 function createProviderFailureResult(

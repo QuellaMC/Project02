@@ -1381,7 +1381,7 @@ describe('NVIDIA role-model provider streaming', () => {
     return {output, heard};
   }
 
-  it('speaks content as it arrives and ends in the decision the parser accepts, usage and all', async () => {
+  it('never speaks plain content: alone it is the reply, whole at the commit, usage and all', async () => {
     const {output, heard} = await invokeStreaming(
       sseResponse([
         contentChunk('Hel'),
@@ -1392,10 +1392,7 @@ describe('NVIDIA role-model provider streaming', () => {
       ]),
     );
 
-    expect(heard).toEqual([
-      {reply: 0, text: 'Hel'},
-      {reply: 0, text: 'lo'},
-    ]);
+    expect(heard).toEqual([]);
     expect(output.rejection).toBeUndefined();
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hello'}}],
@@ -1431,10 +1428,10 @@ describe('NVIDIA role-model provider streaming', () => {
   it('holds reasoning back and never speaks it, whole or split', async () => {
     const {output, heard} = await invokeStreaming(
       sseResponse([
-        contentChunk('<thi'),
-        contentChunk('nk>secret</think>Hel'),
-        contentChunk('lo'),
-        finishChunk('stop'),
+        argumentsChunk('{"text": "<thi', true),
+        argumentsChunk('nk>secret</think>Hel'),
+        argumentsChunk('lo"}'),
+        finishChunk('tool_calls'),
         '[DONE]',
       ]),
     );
@@ -1443,18 +1440,24 @@ describe('NVIDIA role-model provider streaming', () => {
       {reply: 0, text: 'Hel'},
       {reply: 0, text: 'lo'},
     ]);
-    expect(output.rawOutputText).not.toContain('secret');
+    // Handed to the parser as written: it scrubs argument text with the
+    // same grammar the draft's filter read ahead with.
     expect(JSON.parse(output.rawOutputText)).toEqual({
-      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hello'}}],
+      toolCalls: [
+        {
+          name: visibleReplyModelToolName,
+          input: {text: '<think>secret</think>Hello'},
+        },
+      ],
     });
   });
 
   it('releases what a draft still held once the message is whole', async () => {
     const {output, heard} = await invokeStreaming(
       sseResponse([
-        contentChunk('Hello '),
-        contentChunk('<thin'),
-        finishChunk('stop'),
+        argumentsChunk('{"text": "Hello ', true),
+        argumentsChunk('<thin"}'),
+        finishChunk('tool_calls'),
         '[DONE]',
       ]),
     );
@@ -1484,37 +1487,28 @@ describe('NVIDIA role-model provider streaming', () => {
     expect(JSON.stringify(output)).not.toContain('secret');
   });
 
-  it("keeps the model's note out of the reply: content beside a visible_reply call is its own draft", async () => {
+  it("keeps the model's note to itself: content beside a visible_reply call is never spoken, before or after the call", async () => {
     const {output, heard} = await invokeStreaming(
       sseResponse([
-        contentChunk('thinking aloud'),
+        contentChunk('NOTE-BEFORE '),
         argumentsChunk('{"text": "Hi"}', true),
+        contentChunk('NOTE-AFTER'),
         finishChunk('tool_calls'),
         '[DONE]',
       ]),
     );
 
-    expect(heard).toEqual([
-      {reply: 0, text: 'thinking aloud'},
-      {reply: 1, text: 'Hi'},
-    ]);
-    expect(output.replyDrafts).toEqual([1]);
+    expect(heard).toEqual([{reply: 0, text: 'Hi'}]);
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Hi'}}],
-      text: 'thinking aloud',
+      text: 'NOTE-BEFORE NOTE-AFTER',
     });
 
-    const alone = await invokeStreaming(
-      sseResponse([contentChunk('Hello'), finishChunk('stop'), '[DONE]']),
-    );
-
-    expect(alone.output.replyDrafts).toEqual([0]);
-
-    // A call named only after its arguments is still a call: the note is
-    // not the reply, and the reply's draft hears what arrived before the name.
+    // A call named only after its arguments is still the reply's draft,
+    // and it hears what arrived before the name.
     const late = await invokeStreaming(
       sseResponse([
-        contentChunk('thinking aloud'),
+        contentChunk('NOTE-BEFORE'),
         {
           choices: [
             {
@@ -1548,11 +1542,7 @@ describe('NVIDIA role-model provider streaming', () => {
       ]),
     );
 
-    expect(late.heard).toEqual([
-      {reply: 0, text: 'thinking aloud'},
-      {reply: 1, text: 'Hi'},
-    ]);
-    expect(late.output.replyDrafts).toEqual([1]);
+    expect(late.heard).toEqual([{reply: 0, text: 'Hi'}]);
   });
 
   it('starts the silence bound over when the headers arrive', async () => {
@@ -1629,7 +1619,9 @@ describe('NVIDIA role-model provider streaming', () => {
         new ReadableStream({
           start(controller) {
             controller.enqueue(
-              new TextEncoder().encode(sseText([contentChunk('Hel')])),
+              new TextEncoder().encode(
+                sseText([argumentsChunk('{"text": "Hel', true)]),
+              ),
             );
           },
           pull(controller) {

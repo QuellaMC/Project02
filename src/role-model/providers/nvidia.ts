@@ -239,11 +239,10 @@ export function createNvidiaRoleModelProviderAdapter(
           });
         }
 
-        const replyDrafts = drafts.finish();
+        drafts.finish();
 
         return Object.freeze({
           rawOutputText: rawOutput.rawOutputText,
-          ...(replyDrafts === undefined ? {} : {replyDrafts}),
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({

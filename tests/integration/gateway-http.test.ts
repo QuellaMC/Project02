@@ -14,7 +14,7 @@ import {
 } from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {
-  createDeterministicLocalRoleModelAdapter,
+  createRoleModelAdapterFromCharacterAgent,
   type RoleModelAdapter,
 } from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
@@ -340,17 +340,26 @@ describe('gateway over HTTP', () => {
     expect(late.status).toBe(503);
     expect(await errorOf(late)).toMatchObject({code: 'unavailable'});
   });
-  it('opens every stream with ready, then carries the turn in order — the draft ahead of the durable reply', async () => {
+  it('opens every stream with ready, then carries the turn in order — the draft ahead of the durable reply, whatever breath it comes in', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-sse-'), 'home');
 
     await ensureInitializedProject02Store({homeRoot});
 
-    // The local adapter speaks its reply in word-sized pieces: seven for
-    // its first line, each one frame on the wire.
+    // The local adapter speaks its reply in word-sized pieces, all in one
+    // breath: three hundred frames queued at once, each one frame on the
+    // wire, which a reading client takes in order — the stream judges a
+    // client by the grace it gives a frame, never by what a burst left
+    // waiting.
+    const text = Array.from(
+      {length: 300},
+      (_, word) => `word${String(word)}`,
+    ).join(' ');
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
       env: {},
-      roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text}),
+      }),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
     const server = await startTestGatewayServer({
@@ -389,21 +398,30 @@ describe('gateway over HTTP', () => {
     });
     await events.next(frame => frame.event === 'turn_completed');
 
-    const kinds = events.frames
+    const progress = events.frames
       .filter(frame => frame.event !== undefined && frame.event !== 'ready')
       .map(
-        frame => frameData(frame) as {kind: string; progress?: {kind: string}},
-      )
-      .map(event => event.progress?.kind ?? event.kind);
+        frame =>
+          frameData(frame) as {
+            kind: string;
+            progress?: {kind: string; text?: string};
+          },
+      );
 
-    expect(kinds).toEqual([
+    expect(progress.map(event => event.progress?.kind ?? event.kind)).toEqual([
       'state_changed',
       'state_changed',
       'user_message',
-      ...Array<string>(7).fill('reply_delta'),
+      ...Array<string>(300).fill('reply_delta'),
       'visible_reply',
       'turn_completed',
     ]);
+    expect(
+      progress
+        .filter(event => event.progress?.kind === 'reply_delta')
+        .map(event => event.progress?.text)
+        .join(''),
+    ).toBe(text);
     expect(server.events.openCount()).toBe(1);
 
     // Shutdown ends the stream, and a stream arriving after that ends at
@@ -487,7 +505,7 @@ describe('gateway over HTTP', () => {
     await gateway.stop();
   });
 
-  it('drops a client that stops reading once the frames it left behind pass the bound', async () => {
+  it('drops a client that has stopped taking frames, within the grace', async () => {
     // Only the stream is under test: a fan-out the test drives directly.
     const listeners = new Set<GatewayEventListener>();
     const streams = createEventStreams(
@@ -508,7 +526,7 @@ describe('gateway over HTTP', () => {
         }),
         pendingConfirmations: () => [],
       },
-      {maxPendingFrames: 8},
+      {graceMs: 200},
     );
     const app = new Hono<ApiEnv>().get('/api/events', c => streams.handler(c));
     const server = await listen(app);

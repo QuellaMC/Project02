@@ -229,9 +229,6 @@ export async function runRoleModelLoop(
             round,
             decision: invokedRound.decision,
             drafts,
-            ...(invokedRound.replyDrafts === undefined
-              ? {}
-              : {replyDrafts: invokedRound.replyDrafts}),
           });
         }
 
@@ -263,24 +260,20 @@ async function deliverVisibleReply(delivery: {
   readonly round: number;
   readonly decision: CharacterDecision;
   readonly drafts: ReplyDrafts;
-  /** The adapter's word on which draft each reply was spoken as; draft n is reply n without it. */
-  readonly replyDrafts?: readonly number[];
 }): Promise<readonly VisibleMessage[]> {
   const committed: VisibleMessage[] = [];
 
   for (const [reply, text] of executionVisibleReplyTexts(
     delivery.decision,
   ).entries()) {
-    const draft = delivery.replyDrafts?.[reply] ?? reply;
-
     committed.push(
       await delivery.options.onVisibleReply({
         round: delivery.round,
         text,
-        draftId: delivery.drafts.draftId(draft),
+        draftId: delivery.drafts.draftId(reply),
       }),
     );
-    delivery.drafts.settle(draft);
+    delivery.drafts.settle(reply);
   }
 
   // What the round drafted and did not commit ends here, before anything
@@ -302,7 +295,6 @@ type InvokedRoleModelLoopRound =
       readonly decision: CharacterDecision;
       readonly executableToolCalls: readonly ModelToolCall[];
       readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
-      readonly replyDrafts?: readonly number[];
     };
 
 async function invokeRoleModelLoopRound(options: {
@@ -380,11 +372,6 @@ async function invokeRoleModelLoopRound(options: {
     };
   }
 
-  const replyDrafts = replyDraftsFor(
-    decisionResult.decision,
-    rawOutputValidation.replyDrafts,
-  );
-
   return {
     status: 'accepted',
     decision: decisionResult.decision,
@@ -392,23 +379,7 @@ async function invokeRoleModelLoopRound(options: {
       decisionResult.decision.toolCalls,
     ),
     pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
-    ...(replyDrafts === undefined ? {} : {replyDrafts}),
   };
-}
-
-/**
- * The adapter's mapping counts only when it names a draft for every visible
- * reply: a shorter one would leave a reply to fall back on a number the
- * mapping may already have given away.
- */
-function replyDraftsFor(
-  decision: CharacterDecision,
-  replyDrafts: readonly number[] | undefined,
-): readonly number[] | undefined {
-  return replyDrafts !== undefined &&
-    replyDrafts.length === executionVisibleReplyTexts(decision).length
-    ? replyDrafts
-    : undefined;
 }
 
 async function routeRoleModelLoopToolCalls(options: {
@@ -429,9 +400,6 @@ async function routeRoleModelLoopToolCalls(options: {
     round: options.round,
     decision: options.invokedRound.decision,
     drafts: options.drafts,
-    ...(options.invokedRound.replyDrafts === undefined
-      ? {}
-      : {replyDrafts: options.invokedRound.replyDrafts}),
   });
 
   await options.options.onPluginToolCallsRequested?.({

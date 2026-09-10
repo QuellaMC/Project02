@@ -20,8 +20,7 @@ const delta = (
 ) => ({choices: [{index: 0, delta, finish_reason: finishReason}]});
 
 describe('NVIDIA chat completion stream', () => {
-  it('reassembles content, tool calls by index, the finish reason, and usage, speaking each piece as it arrives', async () => {
-    const content: string[] = [];
+  it('reassembles content, tool calls by index, the finish reason, and usage, speaking each tool call piece as it arrives', async () => {
     const calls: {index: number; name: string; text: string}[] = [];
     const result = await readNvidiaChatCompletionStream(
       bytes(
@@ -57,10 +56,7 @@ describe('NVIDIA chat completion stream', () => {
           delta({content: 'not read'}),
         ]),
       ),
-      {
-        onContent: text => content.push(text),
-        onToolCall: fragment => calls.push(fragment),
-      },
+      {onToolCall: fragment => calls.push(fragment)},
     );
 
     expect(result).toEqual({
@@ -90,7 +86,6 @@ describe('NVIDIA chat completion stream', () => {
         usage: {total_tokens: 9},
       },
     });
-    expect(content).toEqual(['Hé', 'llo']);
     expect(calls).toEqual([
       {index: 0, name: 'visible_reply', text: '{"te'},
       {index: 1, name: 'memory_search', text: '{"q'},
@@ -145,7 +140,6 @@ describe('NVIDIA chat completion stream', () => {
   });
 
   it('carries no finish reason when none came, no content when none came, and ignores reasoning and pings', async () => {
-    const content: string[] = [];
     const result = await readNvidiaChatCompletionStream(
       bytes(
         ': ping\n\n' +
@@ -154,7 +148,6 @@ describe('NVIDIA chat completion stream', () => {
             '[DONE]',
           ]),
       ),
-      {onContent: text => content.push(text)},
     );
 
     expect(result).toEqual({
@@ -165,7 +158,6 @@ describe('NVIDIA chat completion stream', () => {
         ],
       },
     });
-    expect(content).toEqual([]);
   });
 
   it.each([

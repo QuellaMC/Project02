@@ -204,29 +204,27 @@ export function createJsonStringFieldScanner(
 type Draft = {
   readonly number: number;
   readonly filter: ReasoningBlockFilter;
-  readonly scanner?: JsonStringFieldScanner;
+  readonly scanner: JsonStringFieldScanner;
 };
 
 export type NvidiaReplyDrafts = {
   readonly observer: NvidiaStreamObserver;
   /**
    * The message is whole: what each draft's filter still held goes out —
-   * a `<` that never became a tag is text — and the mapping is known. For
-   * each visible reply of the reassembled decision, in order, the draft it
-   * was spoken as: content alone is the one reply; beside any tool call it
-   * is the model's note, and the visible_reply calls are the replies.
-   * Undefined when nothing could be spoken.
+   * a `<` that never became a tag is text.
    */
-  readonly finish: () => readonly number[] | undefined;
+  readonly finish: () => void;
 };
 
 /**
- * What the NVIDIA adapter speaks while the model writes, numbered in the
- * order drafts begin: content, and each native visible_reply call's
- * arguments, each behind its own reasoning filter, as the parser will
- * filter the whole. Which drafts became the decision's replies is known
- * only once the message is whole, and said then. Silent when no one
- * listens.
+ * What the NVIDIA adapter speaks while the model writes: each native
+ * visible_reply call's arguments, the n-th such call in the order they
+ * begin as reply n, each behind its own reasoning filter, as the parser
+ * will filter the whole. Content is never spoken: alone it is the reply
+ * and arrives whole at the commit; beside a tool call it is the model's
+ * note to itself, which the prompt promises the person never hears — and
+ * which of the two it is cannot be known while it arrives. Silent when no
+ * one listens.
  */
 export function createNvidiaReplyDrafts(options: {
   readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
@@ -238,20 +236,7 @@ export function createNvidiaReplyDrafts(options: {
     return {observer: {}, finish: () => undefined};
   }
 
-  let begun = 0;
-  let content: Draft | undefined;
-  let anyCall = false;
-  const calls = new Map<number, Draft>();
-  const begin = (scanner?: JsonStringFieldScanner): Draft => {
-    const draft: Draft = {
-      number: begun,
-      filter: createReasoningBlockFilter(),
-      ...(scanner === undefined ? {} : {scanner}),
-    };
-
-    begun += 1;
-    return draft;
-  };
+  const drafts = new Map<number, Draft>();
   const speakPassed = (draft: Draft, text: string): void => {
     const passed = draft.filter.push(text);
 
@@ -262,13 +247,7 @@ export function createNvidiaReplyDrafts(options: {
 
   return {
     observer: {
-      onContent(text) {
-        content ??= begin();
-        speakPassed(content, text);
-      },
       onToolCall(fragment) {
-        anyCall = true;
-
         if (
           runtimeToolNameForProviderToolName(
             fragment.name,
@@ -278,35 +257,28 @@ export function createNvidiaReplyDrafts(options: {
           return;
         }
 
-        let draft = calls.get(fragment.index);
+        let draft = drafts.get(fragment.index);
 
         if (draft === undefined) {
-          draft = begin(createJsonStringFieldScanner('text'));
-          calls.set(fragment.index, draft);
+          draft = {
+            number: drafts.size,
+            filter: createReasoningBlockFilter(),
+            scanner: createJsonStringFieldScanner('text'),
+          };
+          drafts.set(fragment.index, draft);
         }
 
-        speakPassed(draft, draft.scanner?.push(fragment.text) ?? '');
+        speakPassed(draft, draft.scanner.push(fragment.text));
       },
     },
     finish() {
-      for (const draft of [
-        ...(content === undefined ? [] : [content]),
-        ...calls.values(),
-      ]) {
+      for (const draft of drafts.values()) {
         const ended = draft.filter.end();
 
         if (ended.status === 'accepted' && ended.text.length > 0) {
           speak({reply: draft.number, text: ended.text});
         }
       }
-
-      if (anyCall) {
-        return [...calls.entries()]
-          .sort(([left], [right]) => left - right)
-          .map(([, draft]) => draft.number);
-      }
-
-      return content === undefined ? [] : [content.number];
     },
   };
 }

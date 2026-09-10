@@ -121,14 +121,12 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
 
 /**
  * One decision per round, the last one repeating; `deltas[round]` is what the
- * adapter speaks through the ear before it returns that round's decision,
- * and `replyDrafts[round]` its word on which drafts became the replies.
+ * adapter speaks through the ear before it returns that round's decision.
  */
 export function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
   onInvoke?: (invocation: RoleModelAdapterInvocation) => void,
   deltas: readonly (readonly RoleModelReplyDelta[])[] = [],
-  replyDrafts: readonly (readonly number[] | undefined)[] = [],
 ): RoleModelAdapter {
   let index = 0;
 
@@ -144,15 +142,10 @@ export function createSequencedAdapter(
         invocation.onReplyDelta?.(delta);
       }
 
-      const mapping = replyDrafts[index];
-
       index += 1;
       onInvoke?.(invocation);
 
-      return {
-        rawOutputText: JSON.stringify(decision),
-        ...(mapping === undefined ? {} : {replyDrafts: mapping}),
-      };
+      return {rawOutputText: JSON.stringify(decision)};
     },
   } satisfies RoleModelAdapter);
 }

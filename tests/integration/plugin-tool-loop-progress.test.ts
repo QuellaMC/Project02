@@ -336,7 +336,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
           [
             {reply: 0, text: 'check'},
             {reply: 0, text: 'ing'},
-            {reply: 1, text: 'a note the round never committed'},
+            {reply: 1, text: 'a draft the round never committed'},
           ],
           [{reply: 0, text: 'finished'}],
         ],
@@ -354,7 +354,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       {
         kind: 'reply_delta',
         draftId: '1.1',
-        text: 'a note the round never committed',
+        text: 'a draft the round never committed',
       },
       expect.objectContaining({
         kind: 'visible_reply',

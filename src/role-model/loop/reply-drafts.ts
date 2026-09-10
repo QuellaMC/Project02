@@ -24,8 +24,8 @@ export type ReplyDrafts = {
  * The drafts one model round speaks, and their endings. A draft opens with
  * its first delta and ends exactly once: the commit that names its id
  * settles it, and close() withdraws whatever the round opened and did not
- * commit — a note the model wrote beside a tool call, a refused round's
- * text, a reply whose commit failed.
+ * commit — a refused round's text, a reply whose commit failed, a draft
+ * the decision did not name.
  */
 export function createReplyDrafts(options: {
   readonly round: number;

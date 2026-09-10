@@ -3,8 +3,6 @@ import {createSseFrameSplitter} from '../../shared/sse.ts';
 import {providerErrorMessageFromBody} from './nvidia-transport.ts';
 
 export type NvidiaStreamObserver = {
-  /** A piece of the assistant's content, as it arrives. */
-  readonly onContent?: (text: string) => void;
   /**
    * A named tool call: once, the moment its name is known, with whatever
    * arguments arrived so far (possibly none), then each piece after.
@@ -41,9 +39,9 @@ type Rejection = Extract<NvidiaStreamedCompletion, {status: 'rejected'}>;
  * endpoint speaks — back into the one message the parser reads whole:
  * content pieces joined, each tool call's fragments joined by index with
  * the id and name its first fragment carried, the last finish reason seen,
- * the last usage seen. Every piece is spoken to the observer as it arrives,
- * so a draft can be shown while the model writes; the reassembled message
- * is what gets judged.
+ * the last usage seen. Each tool call's pieces are spoken to the observer
+ * as they arrive, so a draft can be shown while the model writes; the
+ * reassembled message is what gets judged.
  */
 export async function readNvidiaChatCompletionStream(
   chunks: AsyncIterable<Uint8Array>,
@@ -143,10 +141,6 @@ function createCompletionAssembly(observer: NvidiaStreamObserver): {
 
     if (typeof delta['content'] === 'string') {
       content = (content ?? '') + delta['content'];
-
-      if (delta['content'].length > 0) {
-        observer.onContent?.(delta['content']);
-      }
     }
 
     const calls = delta['tool_calls'];

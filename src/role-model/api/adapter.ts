@@ -12,20 +12,12 @@ export type RoleModelAdapterRawOutput = {
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
   readonly rejection?: RoleModelDecisionRejection;
-  /**
-   * For each visible reply of the decision, in order, the draft it was
-   * spoken as: distinct draft numbers, one per reply. Absent — or not that
-   * — draft n is reply n. A draft named here is replaced by its commit;
-   * every other draft the adapter spoke, such as a note the model wrote
-   * beside a tool call, is withdrawn. Never recorded.
-   */
-  readonly replyDrafts?: readonly number[];
 };
 
 export type RoleModelReplyDelta = {
-  /** The adapter's number for the draft, in the order drafts begin. */
+  /** The index this reply will have among the decision's visible replies. */
   readonly reply: number;
-  /** The next piece of that draft, appended to what came before. */
+  /** The next piece of that reply, appended to what came before. */
   readonly text: string;
 };
 
