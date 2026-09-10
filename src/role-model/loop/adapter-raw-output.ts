@@ -172,7 +172,6 @@ function optionalProviderRequestMetadata(value: unknown):
     request: Object.freeze({
       ...(typeof endpoint === 'string' ? {endpoint: endpoint} : {}),
       ...(typeof messageCount === 'number' ? {messageCount} : {}),
-      stream: false,
     }),
   });
 }

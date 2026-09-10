@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {
   createFrameQueue,
@@ -26,7 +26,7 @@ describe('gateway event stream frames', () => {
       drop: () => {
         throw new Error('nothing should be dropped');
       },
-      maxPendingFrames: 8,
+      graceMs: 1_000,
     });
 
     queue.push('first');
@@ -36,11 +36,10 @@ describe('gateway event stream frames', () => {
 
     // Only the head is in flight; the rest wait their turn.
     expect(releases).toHaveLength(1);
-    expect(queue.pending()).toBe(3);
 
     let drained: boolean | undefined;
 
-    void queue.drain(1_000).then(written => {
+    void queue.drain().then(written => {
       drained = written;
     });
     releases[0]?.();
@@ -53,43 +52,46 @@ describe('gateway event stream frames', () => {
     await new Promise(resolve => setImmediate(resolve));
 
     expect(written).toEqual(['first', 'second', 'third']);
-    expect(queue.pending()).toBe(0);
     expect(drained).toBe(true);
   });
 
-  it('drops a client that has not taken its frames within the drain grace', async () => {
-    let drops = 0;
-    const queue = createFrameQueue({
-      write: () => new Promise(() => undefined),
-      drop: () => {
-        drops += 1;
-      },
-      maxPendingFrames: 8,
-    });
+  it('drops a client that has not taken a frame within the grace, once, and discards the rest', async () => {
+    vi.useFakeTimers();
 
-    queue.push('stuck');
-    await expect(queue.drain(10)).resolves.toBe(false);
-    expect(drops).toBe(1);
-    // Dropped once; a later drain has nothing to wait for.
-    await expect(queue.drain(10)).resolves.toBe(false);
-    expect(drops).toBe(1);
-  });
+    try {
+      let drops = 0;
+      let writes = 0;
+      const queue = createFrameQueue({
+        write: () => {
+          writes += 1;
 
-  it('drops a client that stops taking frames, once, and discards the rest', () => {
-    let drops = 0;
-    const queue = createFrameQueue({
-      write: () => new Promise(() => undefined),
-      drop: () => {
-        drops += 1;
-      },
-      maxPendingFrames: 3,
-    });
+          return new Promise(() => undefined);
+        },
+        drop: () => {
+          drops += 1;
+        },
+        graceMs: 10,
+      });
 
-    for (let index = 0; index < 10; index += 1) {
-      queue.push(`frame ${String(index)}`);
+      for (let index = 0; index < 100; index += 1) {
+        queue.push(`frame ${String(index)}`);
+      }
+
+      // A hundred frames waiting their turn is a burst, not a verdict: the
+      // grace runs for the one frame the client has been handed.
+      await vi.advanceTimersByTimeAsync(9);
+      expect(drops).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(drops).toBe(1);
+      expect(writes).toBe(1);
+
+      // Dropped once; what waited is discarded, and so is what comes later.
+      queue.push('late');
+      await expect(queue.drain()).resolves.toBe(false);
+      expect(writes).toBe(1);
+      expect(drops).toBe(1);
+    } finally {
+      vi.useRealTimers();
     }
-
-    expect(drops).toBe(1);
-    expect(queue.pending()).toBe(3);
   });
 });

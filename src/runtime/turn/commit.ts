@@ -83,15 +83,25 @@ export function appendRawEvent(
   return rawEvent;
 }
 
-export async function emitProgress(
+/**
+ * Announcements go out on one chain per turn, so an observer that awaits
+ * hears them in the order they were made — a draft's deltas before the
+ * commit that replaces it — whether or not the announcer waited. Observers
+ * are observers: a failure in one changes nothing about the commit.
+ */
+export function emitProgress(
   state: RuntimeTurnState,
   progressEvent: LocalRuntimeTurnProgressEvent,
 ): Promise<void> {
-  try {
-    await state.options.onProgress?.(progressEvent);
-  } catch {
-    // Progress callbacks are observers; they must not change runtime commit semantics.
-  }
+  const announced = state.progress
+    .then(() => state.options.onProgress?.(progressEvent))
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+
+  state.progress = announced;
+  return announced;
 }
 
 export async function commitUserMessage(
@@ -145,11 +155,16 @@ export async function appendVisibleReplyForDecision(
     normalizedReply,
   );
 
-  return await commitVisibleMessage(state, message, {
-    round: optionsForReply.round,
-    commitValidation,
-    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
-  });
+  return await commitVisibleMessage(
+    state,
+    message,
+    {
+      round: optionsForReply.round,
+      commitValidation,
+      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
+    },
+    {draftId: optionsForReply.draftId},
+  );
 }
 
 /**
@@ -161,6 +176,7 @@ async function commitVisibleMessage(
   state: RuntimeTurnState,
   message: VisibleMessage,
   evidence: Partial<RawEventLogRecordInput>,
+  draft?: {readonly draftId: string},
 ): Promise<ConversationLogRecord> {
   const rawEvent = state.options.logStore.prepareRawEvent(
     {
@@ -181,6 +197,10 @@ async function commitVisibleMessage(
     throw new TypeError('Visible message commit lost its message.');
   }
 
+  // Built before the write: an announcement that cannot be made must fail
+  // the commit with nothing on disk.
+  const announcement = committedMessageProgress(message, record, draft);
+
   appendCommittedMessage(state.options.session, message);
 
   // Evidence bookkeeping describes the log, so it follows the write: a
@@ -192,29 +212,41 @@ async function commitVisibleMessage(
   state.rawEventLogRecords.push(rawEvent);
   state.committedVisibleMessages.push(record);
 
-  await emitProgress(
-    state,
-    message.role === 'character'
-      ? {
-          kind: 'visible_reply',
-          messageId: message.id,
-          speakerId: message.speakerId,
-          speakerName: message.speakerName,
-          text: message.text,
-        }
-      : {
-          kind: 'user_message',
-          messageId: message.id,
-          speakerId: message.speakerId,
-          speakerName: message.speakerName,
-          text: message.text,
-          ...(record.source === undefined ? {} : {source: record.source}),
-          ...(record.clientMessageId === undefined
-            ? {}
-            : {clientMessageId: record.clientMessageId}),
-        },
-  );
+  await emitProgress(state, announcement);
   return record;
+}
+
+function committedMessageProgress(
+  message: VisibleMessage,
+  record: ConversationLogRecord,
+  draft: {readonly draftId: string} | undefined,
+): LocalRuntimeTurnProgressEvent {
+  if (message.role === 'character') {
+    if (draft === undefined) {
+      throw new TypeError('A character reply commits against its draft.');
+    }
+
+    return {
+      kind: 'visible_reply',
+      messageId: message.id,
+      speakerId: message.speakerId,
+      speakerName: message.speakerName,
+      text: message.text,
+      draftId: draft.draftId,
+    };
+  }
+
+  return {
+    kind: 'user_message',
+    messageId: message.id,
+    speakerId: message.speakerId,
+    speakerName: message.speakerName,
+    text: message.text,
+    ...(record.source === undefined ? {} : {source: record.source}),
+    ...(record.clientMessageId === undefined
+      ? {}
+      : {clientMessageId: record.clientMessageId}),
+  };
 }
 
 export function appendToolCallStarted(

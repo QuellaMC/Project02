@@ -64,13 +64,4 @@ export default tseslint.config(
       ],
     },
   },
-  {
-    files: ['src/role-model/loop/loop.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 674, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
 );

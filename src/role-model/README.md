@@ -43,6 +43,19 @@ loop records it on the round; `inspect` applies the estimator to those
 characters, so the runtime's estimate can be held against the tokens a
 provider reports.
 
+An adapter may speak the reply while the model writes it, through the
+optional `onReplyDelta` ear on its invocation: a draft, never a message.
+The whole output still arrives at the end and it alone is judged. The
+loop gives each draft an id (`round.reply`), names it on the commit, and
+withdraws whatever a round drafted and did not commit before the round
+moves on. An adapter speaks only what is surely the reply: the NVIDIA
+adapter streams a native `visible_reply` call's arguments and never the
+message content, which beside a tool call is the model's note to itself
+— the prompt promises the person never hears it, and whether a call is
+coming cannot be known while the content arrives. `api/reasoning.ts`
+holds the one grammar for the reasoning blocks a model leaks into its
+text, read incrementally for drafts and whole for the parser.
+
 Adapters may also offer `completeText`, a plain completion on the same
 model with no persona or tools; the runtime uses it to condense a
 session's earlier turns when the conversation continues in a new one, and

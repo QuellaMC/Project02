@@ -14,10 +14,23 @@ export type RoleModelAdapterRawOutput = {
   readonly rejection?: RoleModelDecisionRejection;
 };
 
+export type RoleModelReplyDelta = {
+  /** The index this reply will have among the decision's visible replies. */
+  readonly reply: number;
+  /** The next piece of that reply, appended to what came before. */
+  readonly text: string;
+};
+
 export type RoleModelAdapterInvocation = {
   readonly turnContext: RoleModelTurnContext;
   /** The prior turns the window replays, structured; the wire form is in turnContext. */
   readonly conversationHistory: readonly ConversationTurn[];
+  /**
+   * Hears the reply as the model writes it: a draft, synchronous, never
+   * awaited. The whole output still arrives at the end, and it alone is
+   * judged. Absent when no one listens.
+   */
+  readonly onReplyDelta?: (delta: RoleModelReplyDelta) => void;
 };
 
 export type RoleModelTextCompletionRequest = {

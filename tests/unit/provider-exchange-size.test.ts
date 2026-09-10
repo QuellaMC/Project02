@@ -11,6 +11,7 @@ import {
 } from '../../src/role-model/index.ts';
 import {createUserMessageRuntimeEvent} from '../../src/core/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
+import {streamed} from '../support/nvidia-fixtures.ts';
 
 describe('provider exchange evidence size', () => {
   it('records the exchange for a prompt as large as the window admits', async () => {
@@ -56,20 +57,16 @@ describe('provider exchange evidence size', () => {
       conversationHistory,
     });
     const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () =>
-          Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {role: 'assistant', content: 'noted'},
-              },
-            ],
-          }),
-        text: () => Promise.resolve(''),
-      });
+      Promise.resolve(
+        streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {role: 'assistant', content: 'noted'},
+            },
+          ],
+        }),
+      );
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'provider-secret',
       fetchClient,

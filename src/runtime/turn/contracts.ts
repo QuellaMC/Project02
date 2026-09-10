@@ -61,7 +61,12 @@ export type RunLocalUserMessageEventOptions = {
   ) => Promise<void> | void;
 };
 
-/** Emitted once the message is durable, so the stream never says more than the log. */
+/**
+ * Emitted once the message is durable, so the stream never says more than
+ * the log — except a draft, which says so by its kind: a reply_delta is a
+ * piece of the reply as the model writes it, and it ends exactly once, in
+ * the visible_reply that names its draft or in a reply_withdrawn.
+ */
 export type LocalRuntimeTurnProgressEvent =
   | {
       readonly kind: 'user_message';
@@ -78,6 +83,17 @@ export type LocalRuntimeTurnProgressEvent =
       readonly speakerId: string;
       readonly speakerName: string;
       readonly text: string;
+      /** The draft this message replaces. */
+      readonly draftId: string;
+    }
+  | {
+      readonly kind: 'reply_delta';
+      readonly draftId: string;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'reply_withdrawn';
+      readonly draftId: string;
     }
   | {
       readonly kind: 'tool_calls_requested';
@@ -151,6 +167,8 @@ export type RuntimeTurnState = {
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly finishedToolCallIds: string[];
+  /** Every announcement of this turn, in the order made; the turn ends after the last is heard. */
+  progress: Promise<void>;
 };
 
 export type AppendVisibleReplyOptions = {
@@ -159,6 +177,8 @@ export type AppendVisibleReplyOptions = {
   /** The round whose decision said this; the commit references it. */
   readonly round: number;
   readonly text: string;
+  /** The draft the reply replaces; announced, never recorded. */
+  readonly draftId: string;
 };
 
 export type RuntimeTurnRejectionOptions = {

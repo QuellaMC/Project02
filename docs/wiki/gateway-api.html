@@ -364,8 +364,9 @@ Content-Type: application/json
         Frames are <code>event: &lt;kind&gt;</code> plus one
         <code>data:</code> line of JSON; a comment <code>: ping</code> arrives
         every 15 seconds so an idle connection survives client timeouts. A
-        client that stops reading is dropped once the frames it left behind pass
-        a bound; the daemon never buffers for a client that is gone.
+        client that does not take a frame within two seconds is dropped; the
+        daemon never buffers for a client that is gone, and never judges one
+        by how many frames a burst left waiting.
       </p>
 
       <pre><code>event: ready
@@ -375,7 +376,13 @@ event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
 
 event: turn_progress
-data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply",…}}
+data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"I remember "}}
+
+event: turn_progress
+data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"you said "}}
+
+event: turn_progress
+data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
 
 event: turn_completed
 data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed"}</code></pre>
@@ -400,9 +407,15 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
           <tr>
             <td><code>turn_progress</code></td>
             <td>
-              A turn's progress, including both committed roles:
+              A turn's progress: both committed roles —
               <code>user_message</code> (with <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code>.
+              <code>clientMessageId</code>) and <code>visible_reply</code> —
+              and the reply's draft ahead of its commit:
+              <code>reply_delta</code> (one fragment of a draft, in order)
+              and <code>reply_withdrawn</code>. A committed
+              <code>visible_reply</code> names the <code>draftId</code> it
+              replaces. Drafts are the one thing the stream says before the
+              log, and they say so by their kind.
             </td>
           </tr>
           <tr>
@@ -462,6 +475,78 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         never a message shown that history lacks. A message typed on the phone
         appears in the open browser tab and the terminal at once, each
         suppressing only what it sent itself by <code>source</code>.
+      </p>
+
+      <h2>Streaming replies</h2>
+
+      <p class="rule">
+        The reply reaches every surface as the model writes it, as a draft:
+        a draft is not a message, every draft ends exactly once, and the
+        parser stays the only judge.
+      </p>
+
+      <p>
+        A <code>reply_delta {draftId, text}</code> is a fragment of the
+        character's reply, appended to what came before under the same
+        <code>draftId</code>. It has no message id, it is never persisted,
+        and no surface treats it as history. The draft ends in one of two
+        ways: the <code>visible_reply</code> that names its
+        <code>draftId</code> replaces it with the committed message, or a
+        <code>reply_withdrawn {draftId}</code> ends it with nothing said — a
+        round the parser refused, a reply whose write failed. The daemon
+        closes every draft a round
+        opened before the round moves on, so none is open at
+        <code>turn_completed</code>, and a client never infers an ending from
+        another event.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>On the stream</th>
+            <th>A chat surface</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>reply_delta {draftId, text}</code></td>
+            <td>
+              Opens a bubble for the character keyed by
+              <code>conversationId</code> and <code>draftId</code> on the
+              first delta; appends <code>text</code> on every one.
+            </td>
+          </tr>
+          <tr>
+            <td><code>visible_reply {…, draftId}</code></td>
+            <td>
+              Replaces the bubble keyed <code>draftId</code> with the message
+              keyed <code>messageId</code>, text from the event. No open
+              bubble with that id: shows the message, as always.
+            </td>
+          </tr>
+          <tr>
+            <td><code>reply_withdrawn {draftId}</code></td>
+            <td>Removes the bubble.</td>
+          </tr>
+          <tr>
+            <td><code>ready</code></td>
+            <td>
+              Drops every open draft: the snapshot carries none, the stream
+              is a hint, and the truth is on the newest history page.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        Draft ids are <code>round.reply</code>, unique within the turn; a
+        conversation runs one turn at a time, so a surface keys drafts by
+        conversation. The committed text is the draft after the runtime's
+        normalization (line endings, trim), which is why the commit replaces
+        the draft rather than confirming it. Only the reply is ever drafted:
+        what a model writes to itself beside a tool call is never on the
+        stream. Pacing is each surface's own: a page renders every delta, a
+        connector edits its message on a timer.
       </p>
 
       <h2>What a client never has to notice</h2>
