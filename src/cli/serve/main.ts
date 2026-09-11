@@ -5,6 +5,8 @@
  * the line a client reads, so nothing connects to a half-started daemon.
  */
 import {randomBytes} from 'node:crypto';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 import {gatewayUrlEnvVarName} from '../../gateway/client/index.ts';
 import {
@@ -17,6 +19,7 @@ import {
 import type {RuntimePluginHost} from '../../plugins/index.ts';
 import type {RoleModelAdapter} from '../../role-model/index.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
+import {pathExistsSync} from '../../shared/file-system.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {
   matchesRuntimeStoreInitFlag,
@@ -30,6 +33,9 @@ import {
 import {CliUsageError} from '../shared/usage-error.ts';
 
 export const defaultGatewayPort = 4310;
+
+/** Where `pnpm build:web` puts the page: beside the source, under dist. */
+const uiRoot = fileURLToPath(new URL('../../../dist/web/', import.meta.url));
 
 export type ServeCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -148,6 +154,9 @@ async function serve(
       gateway,
       token,
       port: options.port ?? defaultGatewayPort,
+      // Served only once built: the file handler warns about a root that is
+      // not there, and a daemon run straight from `node` must not.
+      ...(pathExistsSync(join(uiRoot, 'index.html')) ? {uiRoot} : {}),
     });
 
     const origin = `http://127.0.0.1:${String(server.port)}/`;

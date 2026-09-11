@@ -320,11 +320,15 @@
             <td>SSE, described below.</td>
           </tr>
           <tr>
-            <td>root</td>
-            <td><code>GET /</code></td>
+            <td>page</td>
+            <td><code>GET /</code> · <code>GET /assets/…</code></td>
             <td>
-              A plain-text 404 naming <code>/api</code>, until a web UI is
-              installed.
+              The built web page's files: public bytes with no auth (the
+              token reaches the page through the fragment), every one
+              <code>Cache-Control: no-store</code>, served behind the API
+              router so no file answers for an API path. Before the page is
+              built, <code>/</code> is a plain-text 404 naming
+              <code>pnpm build:web</code> and <code>/api</code>.
             </td>
           </tr>
         </tbody>
