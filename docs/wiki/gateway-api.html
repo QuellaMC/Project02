@@ -253,8 +253,9 @@
             <td>
               <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
               until the turn ends — a turn waiting on a confirmation can take
-              minutes, so the reference client sends it over
-              <code>node:http</code> with no timeout.
+              minutes. A browser's fetch waits without limit; Node's gives
+              a response five minutes, so a Node client that parks turns on
+              confirmations brings a fetch without that bound.
             </td>
           </tr>
           <tr>
