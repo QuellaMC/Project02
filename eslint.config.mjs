@@ -11,6 +11,7 @@ export default tseslint.config(
       'tests/**/*.ts',
       'vitest.config.ts',
       'vite.config.ts',
+      'playwright.config.ts',
     ],
     languageOptions: {
       parserOptions: {
@@ -28,6 +29,9 @@ export default tseslint.config(
       // Google TS style (gts) core rules not covered by the presets above.
       'block-scoped-var': 'error',
       eqeqeq: 'error',
+      // Playwright fixtures take their dependencies as a destructured
+      // parameter; one that needs none is spelled `{}`.
+      'no-empty-pattern': ['error', {allowObjectPatternsAsParameters: true}],
       'no-var': 'error',
       'prefer-arrow-callback': 'error',
       'prefer-const': 'error',

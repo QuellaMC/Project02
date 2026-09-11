@@ -27,9 +27,9 @@
     "inspect": "node src/cli/inspect/main.ts",
     "serve": "pnpm build:web && node src/cli/serve/main.ts",
     "build:web": "vite build",
-    "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"src/**/*.tsx\" \"tests/**/*.ts\" \"vitest.config.ts\" \"vite.config.ts\"",
-    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
+    "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"src/**/*.tsx\" \"tests/**/*.ts\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/frontends/web/tsconfig.json --noEmit",
     "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs && node scripts/check-source-text.mjs",
     "plugin:new": "node scripts/create-plugin.mjs",
@@ -37,8 +37,9 @@
     "arch:baseline": "node scripts/arch-check.mjs --baseline",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:browser": "playwright test",
     "test:watch": "vitest",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm build:web && pnpm test:coverage"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm build:web && pnpm test:coverage && pnpm test:browser"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.12.4",
     "@types/react": "19.3.0",
