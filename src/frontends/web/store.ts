@@ -67,8 +67,12 @@ export type WebState = {
   readonly thread?: Thread;
   /** Client message id → a pending line; kept across a switch of threads. */
   readonly pending: ReadonlyMap<string, PendingLine>;
-  /** The composer's text, owned here so a line the daemon did not take can come back. */
-  readonly composer: string;
+  /**
+   * Conversation id → what a person has typed there and not sent. Kept
+   * per conversation, so looking at another character loses nothing and a
+   * line the daemon did not take comes back where it was written.
+   */
+  readonly composers: ReadonlyMap<string, string>;
   /**
    * The page's one notice: how a turn did not complete, a confirmation
    * that expired, a page that could not be read, a verb the daemon
@@ -89,8 +93,15 @@ export const initialState: WebState = {
   connection: {status: 'connecting'},
   confirmations: [],
   pending: new Map(),
-  composer: '',
+  composers: new Map(),
 };
+
+/** What the person has typed in the thread on screen. */
+export function composerText(state: WebState): string {
+  return state.thread === undefined
+    ? ''
+    : (state.composers.get(state.thread.conversationId) ?? '');
+}
 
 /**
  * Every `ready` is the truth: the roster and the waiting confirmations
@@ -120,8 +131,19 @@ export function installSnapshot(
   };
 }
 
+/**
+ * The address will never work again, so nothing can settle a line this tab
+ * sent: every pending line comes back where it was written, and the page
+ * stops taking new ones.
+ */
 export function connectionRefused(state: WebState, message: string): WebState {
-  return {...state, connection: {status: 'refused', message}};
+  let next: WebState = {...state, connection: {status: 'refused', message}};
+
+  for (const [clientMessageId, line] of state.pending) {
+    next = handedBack(next, clientMessageId, line, line.ended ?? message);
+  }
+
+  return next;
 }
 
 export function noticed(state: WebState, notice: string): WebState {
@@ -131,7 +153,6 @@ export function noticed(state: WebState, notice: string): WebState {
 export function threadOpened(state: WebState, opened: Opened): WebState {
   return {
     ...state,
-    composer: '',
     notice: undefined,
     thread: {
       characterId: opened.characterId,
@@ -145,7 +166,9 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
 }
 
 export function composerChanged(state: WebState, text: string): WebState {
-  return state.composer === text ? state : {...state, composer: text};
+  return state.thread === undefined || composerText(state) === text
+    ? state
+    : composing(state, state.thread.conversationId, text);
 }
 
 /**
@@ -224,9 +247,9 @@ export function historyPageRead(
     }
 
     if (carried.has(clientMessageId)) {
-      next = withoutPending(next, clientMessageId);
+      next = settled(next, clientMessageId);
     } else if (line.ended !== undefined) {
-      next = handedBack(next, clientMessageId, line.text, line.ended);
+      next = handedBack(next, clientMessageId, line, line.ended);
     }
   }
 
@@ -235,20 +258,22 @@ export function historyPageRead(
 
 /** The composer's line becomes pending under its id, for the open thread; the notice is spent. */
 export function lineSent(state: WebState, clientMessageId: string): WebState {
-  const text = state.composer.trim();
+  const {thread} = state;
+  const text = composerText(state).trim();
 
-  if (state.thread === undefined || text.length === 0) {
+  if (thread === undefined || text.length === 0) {
     return state;
   }
 
   const pending = new Map(state.pending);
 
-  pending.set(clientMessageId, {
-    conversationId: state.thread.conversationId,
-    text,
-  });
+  pending.set(clientMessageId, {conversationId: thread.conversationId, text});
 
-  return {...state, composer: '', notice: undefined, pending};
+  return {
+    ...composing(state, thread.conversationId, ''),
+    notice: undefined,
+    pending,
+  };
 }
 
 /**
@@ -259,10 +284,9 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * that would show the line, so from the answer only a refusal hands it
  * back — nothing was recorded; a rejection, a failure, or an answer that
  * never came marks the line ended, and the stream or the newest page
- * settles it. A line whose thread is no longer the open one is marked
- * too, and comes back in its own thread. A line on the thread whose turn
- * did not complete sets the notice, as does another surface's.
- * `completed` settles nothing here.
+ * settles it. A line comes back to the thread it was written in, open or
+ * not. A line on the thread whose turn did not complete sets the notice,
+ * as does another surface's. `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
@@ -281,9 +305,7 @@ export function lineEnded(
     return noticed(state, notice);
   }
 
-  const open = state.thread?.conversationId === line.conversationId;
-
-  if (!open || (from === 'answer' && ending.status !== 'refused')) {
+  if (from === 'answer' && ending.status !== 'refused') {
     const pending = new Map(state.pending);
 
     pending.set(clientMessageId, {...line, ended: notice});
@@ -291,7 +313,7 @@ export function lineEnded(
     return {...state, notice, pending};
   }
 
-  return handedBack(state, clientMessageId, line.text, notice);
+  return handedBack(state, clientMessageId, line, notice);
 }
 
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
@@ -325,14 +347,14 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'turn_progress': {
       const {progress} = event;
       // The daemon took the line, whichever thread it went to.
-      const settled =
+      const taken =
         progress.kind === 'user_message' &&
         progress.clientMessageId !== undefined &&
         state.pending.has(progress.clientMessageId)
-          ? withoutPending(state, progress.clientMessageId)
+          ? settled(state, progress.clientMessageId)
           : state;
 
-      return withThread(settled, thread =>
+      return withThread(taken, thread =>
         thread.conversationId === event.conversationId
           ? applyProgress(thread, progress)
           : thread,
@@ -419,26 +441,62 @@ function withThread(
   return thread === state.thread ? state : {...state, thread};
 }
 
-function withoutPending(state: WebState, clientMessageId: string): WebState {
+/**
+ * The daemon took the line after all. An ending announced before that
+ * proof arrived was not the truth, so the notice it set goes with it.
+ */
+function settled(state: WebState, clientMessageId: string): WebState {
+  const line = state.pending.get(clientMessageId);
   const pending = new Map(state.pending);
 
   pending.delete(clientMessageId);
 
-  return {...state, pending};
+  return {
+    ...state,
+    pending,
+    ...(line?.ended !== undefined && state.notice === line.ended
+      ? {notice: undefined}
+      : {}),
+  };
 }
 
-/** The line was never taken: it is the composer's again, with the reason. */
+/** The line was never taken: it is its own thread's composer again, with the reason. */
 function handedBack(
   state: WebState,
   clientMessageId: string,
-  text: string,
+  line: PendingLine,
   notice: string,
 ): WebState {
+  const pending = new Map(state.pending);
+  const typed = state.composers.get(line.conversationId) ?? '';
+
+  pending.delete(clientMessageId);
+
   return {
-    ...withoutPending(state, clientMessageId),
-    composer: state.composer.length === 0 ? text : `${text} ${state.composer}`,
+    ...composing(
+      {...state, pending},
+      line.conversationId,
+      typed.length === 0 ? line.text : `${line.text} ${typed}`,
+    ),
     notice,
   };
+}
+
+/** One conversation's unsent text; empty means nothing is being written there. */
+function composing(
+  state: WebState,
+  conversationId: string,
+  text: string,
+): WebState {
+  const composers = new Map(state.composers);
+
+  if (text.length === 0) {
+    composers.delete(conversationId);
+  } else {
+    composers.set(conversationId, text);
+  }
+
+  return {...state, composers};
 }
 
 function withCharacter(

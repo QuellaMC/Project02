@@ -6,7 +6,7 @@ import type {
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import {webSource, type Session} from './session.ts';
-import type {Thread, WebState} from './store.ts';
+import {composerText, type Thread, type WebState} from './store.ts';
 
 export function stateLabel(state: CharacterSummary['state']): string {
   return state.replace('_', ' ');
@@ -39,6 +39,10 @@ export function ThreadPane({
   const pending = [...state.pending].filter(
     ([, line]) => line.conversationId === thread.conversationId,
   );
+  const typed = composerText(state);
+  // Nothing can be sent into an address that will never work again; the
+  // banner says where to go, and what was typed stays here.
+  const reachable = state.connection.status !== 'refused';
   const scroller = useRef<HTMLDivElement>(null);
   // The view follows the thread's end unless the person scrolled up to read.
   const following = useRef(true);
@@ -116,14 +120,17 @@ export function ThreadPane({
         <input
           aria-label={`Message ${name}`}
           placeholder={`Message ${name}`}
-          value={state.composer}
+          value={typed}
           onChange={event => {
             session.compose(event.currentTarget.value);
           }}
           autoComplete="off"
           autoFocus
         />
-        <button type="submit" disabled={state.composer.trim().length === 0}>
+        <button
+          type="submit"
+          disabled={typed.trim().length === 0 || !reachable}
+        >
           Send
         </button>
       </form>

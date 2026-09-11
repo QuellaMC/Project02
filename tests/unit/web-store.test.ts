@@ -3,6 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {
   applyEvent,
   composerChanged,
+  composerText,
   connectionRefused,
   historyPageRead,
   initialState,
@@ -175,7 +176,7 @@ describe('web store', () => {
   it('shows a line once the daemon says so: the pending bubble becomes the message, and a frame seen twice shows once', () => {
     let state = sent(opened(), 'hello there', 'line-1');
 
-    expect(state.composer).toBe('');
+    expect(composerText(state)).toBe('');
     expect([...state.pending.entries()]).toEqual([
       ['line-1', {conversationId, text: 'hello there'}],
     ]);
@@ -361,7 +362,7 @@ describe('web store', () => {
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
-    expect(fromStream.composer).toBe('hello next thought');
+    expect(composerText(fromStream)).toBe('hello next thought');
     expect(fromStream.pending.size).toBe(0);
     expect(fromStream.thread?.busy).toBe(false);
     expect(fromStream.notice).toBe('The line was blank.');
@@ -371,7 +372,7 @@ describe('web store', () => {
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
-    expect(again.composer).toBe('hello next thought');
+    expect(composerText(again)).toBe('hello next thought');
     expect(again.notice).toBe(fromStream.notice);
 
     const refused = lineEnded(
@@ -381,7 +382,7 @@ describe('web store', () => {
       'answer',
     );
 
-    expect(refused.composer).toBe('hello next thought');
+    expect(composerText(refused)).toBe('hello next thought');
     expect(refused.pending.size).toBe(0);
     expect(refused.notice).toBe('The gateway holds no open conversation.');
 
@@ -399,7 +400,7 @@ describe('web store', () => {
       'answer',
     );
 
-    expect(marked.composer).toBe('');
+    expect(composerText(marked)).toBe('');
     expect(marked.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
@@ -412,7 +413,7 @@ describe('web store', () => {
 
     expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
-    expect(shown.composer).toBe('');
+    expect(composerText(shown)).toBe('');
 
     // The newest page carries it: taken. The newest page lacks it: it
     // comes back. A line the answer never marked stays pending: its turn
@@ -425,12 +426,12 @@ describe('web store', () => {
     );
 
     expect(carried.pending.size).toBe(0);
-    expect(carried.composer).toBe('');
+    expect(composerText(carried)).toBe('');
 
     const absent = historyPageRead(marked, conversationId, 'newest', page([]));
 
     expect(absent.pending.size).toBe(0);
-    expect(absent.composer).toBe('hello');
+    expect(composerText(absent)).toBe('hello');
 
     const queued = historyPageRead(state, conversationId, 'newest', page([]));
 
@@ -467,8 +468,8 @@ describe('web store', () => {
       text: 'hello mira',
     });
 
-    // Mira's daemon-side turn ends while Nova is open: the line is marked,
-    // never dropped into Nova's composer.
+    // Mira's daemon-side turn ends while Nova is open: the line goes back
+    // to Mira's composer, never into Nova's.
     const ended = lineEnded(
       state,
       'line-1',
@@ -476,29 +477,19 @@ describe('web store', () => {
       'answer',
     );
 
-    expect(ended.composer).toBe('');
-    expect(ended.pending.get('line-1')).toEqual({
+    expect(composerText(ended)).toBe('');
+    expect(ended.pending.size).toBe(0);
+    expect(ended.notice).toBe('Mira is away.');
+
+    // Back in Mira's thread, it is where it was written.
+    state = threadOpened(ended, {
+      status: 'opened',
       conversationId,
-      text: 'hello mira',
-      ended: 'Mira is away.',
+      characterId: 'mira',
+      userParticipantId: 'local-user',
     });
 
-    // Back in Mira's thread, the newest page has the last word.
-    state = historyPageRead(
-      threadOpened(ended, {
-        status: 'opened',
-        conversationId,
-        characterId: 'mira',
-        userParticipantId: 'local-user',
-      }),
-      conversationId,
-      'newest',
-      page([]),
-    );
-
-    expect(state.composer).toBe('hello mira');
-    expect(state.pending.size).toBe(0);
-    expect(state.notice).toBe('Mira is away.');
+    expect(composerText(state)).toBe('hello mira');
 
     // The daemon taking the line settles it whichever thread is open.
     const taken = applyEvent(
@@ -508,6 +499,67 @@ describe('web store', () => {
 
     expect(taken.pending.size).toBe(0);
     expect(taken.thread?.messages).toEqual([]);
+  });
+
+  it('keeps what a person typed in each thread, and takes back the false failure of a line that did land', () => {
+    const nova = {
+      status: 'opened' as const,
+      conversationId: 'conv-2',
+      characterId: 'nova',
+      userParticipantId: 'local-user',
+    };
+    const mira = {
+      status: 'opened' as const,
+      conversationId,
+      characterId: 'mira',
+      userParticipantId: 'local-user',
+    };
+    let state = composerChanged(opened(), 'half a thought');
+
+    state = composerChanged(threadOpened(state, nova), 'something for nova');
+
+    expect(composerText(state)).toBe('something for nova');
+    expect(composerText(threadOpened(state, mira))).toBe('half a thought');
+
+    // A send whose answer never came says so, then the stream proves the
+    // daemon had taken the line: the failure was never true.
+    state = lineEnded(
+      sent(threadOpened(state, mira), 'hello', 'line-1'),
+      'line-1',
+      {status: 'unsent', message: 'The daemon could not be reached.'},
+      'answer',
+    );
+
+    expect(state.notice).toBe('The daemon could not be reached.');
+
+    const landed = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
+
+    expect(landed.notice).toBeUndefined();
+    expect(landed.pending.size).toBe(0);
+
+    // And the same when the newest page is what proves it.
+    const read = historyPageRead(
+      state,
+      conversationId,
+      'newest',
+      page([committed('m-1', 'hello', 'line-1')]),
+    );
+
+    expect(read.notice).toBeUndefined();
+  });
+
+  it('gives every pending line back when the address will never work again', () => {
+    const state = connectionRefused(
+      sent(opened(), 'hello', 'line-1'),
+      'A bearer token is required.',
+    );
+
+    expect(state.connection).toEqual({
+      status: 'refused',
+      message: 'A bearer token is required.',
+    });
+    expect(state.pending.size).toBe(0);
+    expect(composerText(state)).toBe('hello');
   });
 
   it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the next send spends the notice", () => {

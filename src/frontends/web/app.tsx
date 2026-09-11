@@ -21,16 +21,19 @@ export function App({session}: {readonly session: Session}) {
 
   return (
     <div className="page">
-      {connection.status === 'refused' ? (
-        <p className="banner banner-refused" role="alert">
-          {connection.message} Open the address <code>pnpm serve</code> printed.
-        </p>
-      ) : null}
-      {configProblems.map(diagnostic => (
-        <p className="banner banner-warning" key={diagnostic.message}>
-          {diagnostic.message}
-        </p>
-      ))}
+      <header className="banners">
+        {connection.status === 'refused' ? (
+          <p className="banner banner-refused" role="alert">
+            {connection.message} Open the address <code>pnpm serve</code>{' '}
+            printed.
+          </p>
+        ) : null}
+        {configProblems.map(diagnostic => (
+          <p className="banner banner-warning" key={diagnostic.message}>
+            {diagnostic.message}
+          </p>
+        ))}
+      </header>
       <aside className="roster" aria-label="Characters">
         <h1 className="roster-title">Characters</h1>
         {health === undefined ? (
@@ -68,7 +71,14 @@ export function App({session}: {readonly session: Session}) {
               : ''}
           </p>
         ) : (
-          <ThreadPane state={state} thread={thread} session={session} />
+          // Keyed by the thread: another character opens at its own end,
+          // not where the last one was read.
+          <ThreadPane
+            key={thread.conversationId}
+            state={state}
+            thread={thread}
+            session={session}
+          />
         )}
       </main>
     </div>

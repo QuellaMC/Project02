@@ -185,7 +185,9 @@ export function createSession(address: string): Session {
     async send() {
       const {thread} = state;
 
-      if (thread === undefined) {
+      // A refused address will never take a line, and nothing could
+      // settle one: what is typed stays in the composer.
+      if (thread === undefined || state.connection.status === 'refused') {
         return;
       }
 
