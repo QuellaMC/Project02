@@ -174,9 +174,9 @@ export function createSession(address: string): Session {
 
       apply(current => lineSent(current, clientMessageId));
 
-      const text = state.thread?.pending.get(clientMessageId);
+      const line = state.thread?.pending.get(clientMessageId);
 
-      if (text === undefined) {
+      if (line === undefined) {
         return;
       }
 
@@ -184,7 +184,7 @@ export function createSession(address: string): Session {
         const outcome = await client.deliver({
           conversationId: thread.conversationId,
           senderId: thread.userParticipantId,
-          text,
+          text: line.text,
           source: webSource,
           clientMessageId,
         });
@@ -196,15 +196,21 @@ export function createSession(address: string): Session {
             outcome.status === 'completed'
               ? {status: 'completed'}
               : {status: outcome.status, message: outcome.message},
+            'answer',
           ),
         );
       } catch (error: unknown) {
         apply(current =>
-          lineEnded(current, clientMessageId, {
-            status: 'unsent',
-            message: problem(error),
-          }),
+          lineEnded(
+            current,
+            clientMessageId,
+            {status: 'unsent', message: problem(error)},
+            'answer',
+          ),
         );
+        // No answer came, and the daemon may never have heard the line: the
+        // newest page says whether it did, when it can be read.
+        await readPage(thread.conversationId, 'newest', {});
       }
     },
     async loadEarlier() {

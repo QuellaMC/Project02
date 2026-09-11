@@ -106,7 +106,7 @@ function confirmation(id: string): PendingConfirmation {
     id,
     request: {
       pluginId: 'demo-config',
-      toolName: 'runtime.plugin_config_update',
+      toolName: 'runtime.plugin.config.update',
       summary: 'Set tone to warm',
       preview: {tone: 'warm'},
     },
@@ -173,7 +173,7 @@ describe('web store', () => {
 
     expect(state.composer).toBe('');
     expect([...(state.thread?.pending.entries() ?? [])]).toEqual([
-      ['line-1', 'hello there'],
+      ['line-1', {text: 'hello there'}],
     ]);
 
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
@@ -288,47 +288,101 @@ describe('web store', () => {
     expect(other).toBe(state);
   });
 
-  it('hands a line the daemon did not take back to the composer with the message, once, from the answer or the event alike', () => {
+  it('hands a line back to the composer at once when the stream ends its turn without having shown it, or when the answer refuses it — once, and never for a completed turn', () => {
     const state = composerChanged(
       sent(opened(), 'hello', 'line-1'),
       'next thought',
     );
-    const fromAnswer = lineEnded(state, 'line-1', {
-      status: 'refused',
-      message: 'The gateway holds no open conversation.',
-    });
-
-    expect(fromAnswer.composer).toBe('hello next thought');
-    expect(fromAnswer.thread?.pending.size).toBe(0);
-    expect(fromAnswer.notice).toBe('The gateway holds no open conversation.');
-
-    const again = applyEvent(
-      fromAnswer,
-      completed('line-1', 'refused', 'The gateway holds no open conversation.'),
-    );
-
-    expect(again.composer).toBe('hello next thought');
-    expect(again.notice).toBe(fromAnswer.notice);
-
-    const fromEvent = applyEvent(
+    const fromStream = applyEvent(
       state,
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
-    expect(fromEvent.composer).toBe('hello next thought');
-    expect(fromEvent.thread?.busy).toBe(false);
+    expect(fromStream.composer).toBe('hello next thought');
+    expect(fromStream.thread?.pending.size).toBe(0);
+    expect(fromStream.thread?.busy).toBe(false);
+    expect(fromStream.notice).toBe('The line was blank.');
 
-    const unsent = lineEnded(state, 'line-1', {
-      status: 'unsent',
-      message: 'The daemon could not be reached.',
+    const again = applyEvent(
+      fromStream,
+      completed('line-1', 'rejected', 'The line was blank.'),
+    );
+
+    expect(again.composer).toBe('hello next thought');
+    expect(again.notice).toBe(fromStream.notice);
+
+    const refused = lineEnded(
+      state,
+      'line-1',
+      {status: 'refused', message: 'The gateway holds no open conversation.'},
+      'answer',
+    );
+
+    expect(refused.composer).toBe('hello next thought');
+    expect(refused.thread?.pending.size).toBe(0);
+    expect(refused.notice).toBe('The gateway holds no open conversation.');
+
+    expect(lineEnded(state, 'line-1', {status: 'completed'}, 'answer')).toBe(
+      state,
+    );
+  });
+
+  it('lets the answer mark a line ended but not hand it back, since its frame may still be on the way: the stream or the newest page settles it', () => {
+    const state = sent(opened(), 'hello', 'line-1');
+    const marked = lineEnded(
+      state,
+      'line-1',
+      {status: 'rejected', message: 'The model wrote nothing it could say.'},
+      'answer',
+    );
+
+    expect(marked.composer).toBe('');
+    expect(marked.thread?.pending.get('line-1')).toEqual({
+      text: 'hello',
+      ended: 'The model wrote nothing it could say.',
     });
+    expect(marked.notice).toBe('The model wrote nothing it could say.');
 
-    expect(unsent.composer).toBe('hello next thought');
-    expect(unsent.notice).toBe('The daemon could not be reached.');
+    // The stream shows the line after all: it was taken.
+    const shown = applyEvent(marked, userMessage('m-1', 'hello', 'line-1'));
 
-    // A completed turn settles nothing here: the stream's user_message
-    // did, or the next page will.
-    expect(lineEnded(state, 'line-1', {status: 'completed'})).toBe(state);
+    expect(shown.thread?.pending.size).toBe(0);
+    expect(shown.thread?.messages).toHaveLength(1);
+    expect(shown.composer).toBe('');
+
+    // The newest page carries it: taken. The newest page lacks it: it
+    // comes back. A line the answer never marked stays pending: its turn
+    // has not run yet.
+    const carried = historyPageRead(
+      marked,
+      conversationId,
+      'newest',
+      page([committed('m-1', 'hello', 'line-1')]),
+    );
+
+    expect(carried.thread?.pending.size).toBe(0);
+    expect(carried.composer).toBe('');
+
+    const absent = historyPageRead(marked, conversationId, 'newest', page([]));
+
+    expect(absent.thread?.pending.size).toBe(0);
+    expect(absent.composer).toBe('hello');
+
+    const queued = historyPageRead(state, conversationId, 'newest', page([]));
+
+    expect(queued.thread?.pending.get('line-1')).toEqual({text: 'hello'});
+
+    const unsent = lineEnded(
+      state,
+      'line-1',
+      {status: 'unsent', message: 'The daemon could not be reached.'},
+      'answer',
+    );
+
+    expect(unsent.thread?.pending.get('line-1')).toEqual({
+      text: 'hello',
+      ended: 'The daemon could not be reached.',
+    });
   });
 
   it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the next send spends the notice", () => {

@@ -32,6 +32,16 @@ export type Message = {
   readonly clientMessageId?: string;
 };
 
+export type PendingLine = {
+  readonly text: string;
+  /**
+   * The turn's answer said it ended, with this message, before the stream
+   * showed the line; the stream or the newest page decides whether the
+   * line was taken.
+   */
+  readonly ended?: string;
+};
+
 export type Thread = {
   readonly characterId: string;
   readonly conversationId: string;
@@ -42,8 +52,8 @@ export type Thread = {
   readonly earlier?: string | undefined;
   /** Draft id → the reply's text so far. */
   readonly drafts: ReadonlyMap<string, string>;
-  /** Client message id → a line the daemon has not yet said it took. */
-  readonly pending: ReadonlyMap<string, string>;
+  /** Client message id → a line the stream has not yet shown. */
+  readonly pending: ReadonlyMap<string, PendingLine>;
   /** A turn runs: the typing indicator until the first delta or the end. */
   readonly busy: boolean;
 };
@@ -138,8 +148,10 @@ export function composerChanged(state: WebState, text: string): WebState {
 
 /**
  * The newest page is the thread; a message that reached the page live
- * meanwhile stays after it, and a pending line the page carries is settled.
- * An earlier page goes in front: cursor pages are disjoint.
+ * meanwhile stays after it. A pending line the page carries is settled; one
+ * it lacks whose turn has ended comes back to the composer; one whose turn
+ * has not run yet stays pending. An earlier page goes in front: cursor
+ * pages are disjoint.
  */
 export function historyPageRead(
   state: WebState,
@@ -147,7 +159,9 @@ export function historyPageRead(
   page: 'newest' | 'earlier',
   outcome: HistoryOutcome,
 ): WebState {
-  if (state.thread?.conversationId !== conversationId) {
+  const {thread} = state;
+
+  if (thread?.conversationId !== conversationId) {
     return state;
   }
 
@@ -157,34 +171,44 @@ export function historyPageRead(
 
   const messages = outcome.messages.map(messageOf);
 
-  return withThread(state, thread => {
-    if (page === 'earlier') {
-      return {
+  if (page === 'earlier') {
+    return {
+      ...state,
+      thread: {
         ...thread,
         messages: [...messages, ...thread.messages],
         earlier: outcome.earlier,
-      };
-    }
+      },
+    };
+  }
 
-    const onPage = new Set(messages.map(message => message.messageId));
-    const pending = new Map(thread.pending);
-
-    for (const message of messages) {
-      if (message.clientMessageId !== undefined) {
-        pending.delete(message.clientMessageId);
-      }
-    }
-
-    return {
+  const onPage = new Set(messages.map(message => message.messageId));
+  const carried = new Set(
+    messages.flatMap(message =>
+      message.clientMessageId === undefined ? [] : [message.clientMessageId],
+    ),
+  );
+  let next: WebState = {
+    ...state,
+    thread: {
       ...thread,
       messages: [
         ...messages,
         ...thread.messages.filter(message => !onPage.has(message.messageId)),
       ],
       earlier: outcome.earlier,
-      pending,
-    };
-  });
+    },
+  };
+
+  for (const [clientMessageId, line] of thread.pending) {
+    if (carried.has(clientMessageId)) {
+      next = withoutPending(next, clientMessageId);
+    } else if (line.ended !== undefined) {
+      next = handedBack(next, clientMessageId, line.text, line.ended);
+    }
+  }
+
+  return next;
 }
 
 /** The composer's line becomes pending under its id; the notice is spent. */
@@ -197,7 +221,7 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 
   const pending = new Map(state.thread.pending);
 
-  pending.set(clientMessageId, text);
+  pending.set(clientMessageId, {text});
 
   return {
     ...state,
@@ -208,17 +232,21 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 }
 
 /**
- * One rule for a line's end, from the turn's answer and from the stream
- * alike. A line still pending goes back to the composer with the message:
- * the daemon did not take it, or refused or rejected it before any commit.
- * A line on the thread whose turn did not complete sets the notice, as
- * does another surface's. `completed` settles nothing here — the stream's
- * `user_message` did, or the next page will.
+ * A line's end. The stream is ordered: a `turn_completed` that finds the
+ * line still pending came without a `user_message` before it, so the line
+ * was never committed and goes back to the composer with the message. The
+ * turn's answer is not ordered against the stream and can beat the frame
+ * that would show the line, so from the answer only a refusal hands it
+ * back — nothing was recorded; a rejection, a failure, or an answer that
+ * never came marks the line ended, and the stream or the newest page
+ * settles it. A line on the thread whose turn did not complete sets the
+ * notice, as does another surface's. `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
   clientMessageId: string,
   ending: LineEnding,
+  from: 'answer' | 'stream',
 ): WebState {
   const {thread} = state;
 
@@ -227,22 +255,21 @@ export function lineEnded(
   }
 
   const notice = ending.message ?? `The turn was ${ending.status}.`;
-  const text = thread.pending.get(clientMessageId);
+  const line = thread.pending.get(clientMessageId);
 
-  if (text === undefined) {
+  if (line === undefined) {
     return noticed(state, notice);
   }
 
-  const pending = new Map(thread.pending);
+  if (from === 'answer' && ending.status !== 'refused') {
+    const pending = new Map(thread.pending);
 
-  pending.delete(clientMessageId);
+    pending.set(clientMessageId, {text: line.text, ended: notice});
 
-  return {
-    ...state,
-    composer: state.composer.length === 0 ? text : `${text} ${state.composer}`,
-    notice,
-    thread: {...thread, pending},
-  };
+    return {...state, notice, thread: {...thread, pending}};
+  }
+
+  return handedBack(state, clientMessageId, line.text, notice);
 }
 
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
@@ -292,6 +319,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
                   : {message: event.reason}
                 : {message: event.message}),
             },
+            'stream',
           )
         : state;
   }
@@ -365,6 +393,30 @@ function withThread(
   const thread = update(state.thread);
 
   return thread === state.thread ? state : {...state, thread};
+}
+
+function withoutPending(state: WebState, clientMessageId: string): WebState {
+  return withThread(state, thread => {
+    const pending = new Map(thread.pending);
+
+    pending.delete(clientMessageId);
+
+    return {...thread, pending};
+  });
+}
+
+/** The line was never taken: it is the composer's again, with the reason. */
+function handedBack(
+  state: WebState,
+  clientMessageId: string,
+  text: string,
+  notice: string,
+): WebState {
+  return {
+    ...withoutPending(state, clientMessageId),
+    composer: state.composer.length === 0 ? text : `${text} ${state.composer}`,
+    notice,
+  };
 }
 
 function withCharacter(

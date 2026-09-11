@@ -120,8 +120,8 @@ export function ThreadPane({
         {thread.busy && thread.drafts.size === 0 ? (
           <p className="typing muted small">{name} is writing…</p>
         ) : null}
-        {[...thread.pending].map(([clientMessageId, text]) => (
-          <Bubble key={clientMessageId} own text={text} pending />
+        {[...thread.pending].map(([clientMessageId, line]) => (
+          <Bubble key={clientMessageId} own text={line.text} pending />
         ))}
         {cards.map(pending => (
           <ConfirmationCard
