@@ -74,7 +74,9 @@
       <p>
         The token is minted per run and travels in the URL fragment, so it never
         reaches a server log or a referrer. Nothing that connects before that
-        line is printed can find a half-started daemon.
+        line is printed can find a half-started daemon. The same address,
+        opened in a browser, is the web page: the daemon serves it from its
+        root, and the page takes the token from the fragment.
       </p>
 
       <h2>The four wire rules</h2>

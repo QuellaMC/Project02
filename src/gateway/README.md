@@ -27,8 +27,10 @@ anything runs.
 
 `http/` is the transport, on Hono: the app (auth, origin, body limits, the
 error envelope), the API router (one route per verb, each
-answering its outcome verbatim), the event streams (SSE), and the server
-whose close order loses nothing. `client/` is the reference client, one
+answering its outcome verbatim), the event streams (SSE), the built web
+page's files at the root (public, uncached, behind the API router so no
+file answers for an API path), and the server whose close order loses
+nothing. `client/` is the reference client, one
 module for Node and for a browser tab — the web page and future
 connectors use it; it speaks the platform's fetch, each request under a
 signal of its own. It may value-import only `api/`, itself, `core`, and
