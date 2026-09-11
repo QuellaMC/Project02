@@ -149,11 +149,14 @@ export function composerChanged(state: WebState, text: string): WebState {
 }
 
 /**
- * The newest page is the thread; a message that reached the page live
- * meanwhile stays after it. A pending line of this thread that the page
- * carries is settled; one it lacks whose turn has ended comes back to the
- * composer; one whose turn has not run yet stays pending. An earlier page
- * goes in front, once — the same cursor read twice is the same page.
+ * The newest page is the thread. What was shown before its first message
+ * — earlier pages — stays before it, and what arrived live after its last
+ * message stays after it; a page that meets nothing shown is the whole
+ * thread, and what was shown came live after it. A pending line of this
+ * thread that the page carries is settled; one it lacks whose turn has
+ * ended comes back to the composer; one whose turn has not run yet stays
+ * pending. An earlier page goes in front, once — the same cursor read
+ * twice is the same page.
  */
 export function historyPageRead(
   state: WebState,
@@ -195,15 +198,23 @@ export function historyPageRead(
       message.clientMessageId === undefined ? [] : [message.clientMessageId],
     ),
   );
+  const first = thread.messages.findIndex(message =>
+    onPage.has(message.messageId),
+  );
+  const last = thread.messages.findLastIndex(message =>
+    onPage.has(message.messageId),
+  );
+  const before = first === -1 ? [] : thread.messages.slice(0, first);
+  const after = (
+    first === -1 ? thread.messages : thread.messages.slice(last + 1)
+  ).filter(message => !onPage.has(message.messageId));
   let next: WebState = {
     ...state,
     thread: {
       ...thread,
-      messages: [
-        ...messages,
-        ...thread.messages.filter(message => !onPage.has(message.messageId)),
-      ],
-      earlier: outcome.earlier,
+      messages: [...before, ...messages, ...after],
+      // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.
+      earlier: before.length === 0 ? outcome.earlier : thread.earlier,
     },
   };
 

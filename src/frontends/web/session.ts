@@ -72,7 +72,9 @@ export function createSession(address: string): Session {
       listener();
     }
   };
-  let opening = false;
+  /** The character an open is waiting for, and how many opens have been asked for. */
+  let opening: string | undefined;
+  let openGeneration = 0;
 
   /** A page that cannot be read is a notice, never the stream's failure. */
   const readPage = async (
@@ -88,28 +90,46 @@ export function createSession(address: string): Session {
       apply(current => noticed(current, problem(error)));
     }
   };
+  /**
+   * An open can wait on a start or a reload, minutes when a turn is parked
+   * on a confirmation; the latest character asked for wins, and an earlier
+   * open that settles later is let go. Asking again for the one already
+   * waited for changes nothing.
+   */
   const open = async (characterId: string): Promise<void> => {
-    if (opening) {
+    if (opening === characterId) {
       return;
     }
 
-    opening = true;
+    opening = characterId;
+    openGeneration += 1;
+
+    const mine = openGeneration;
+    const current = (): boolean => mine === openGeneration;
 
     try {
       const outcome = await client.openDirectConversation(characterId);
 
+      if (!current()) {
+        return;
+      }
+
       if (outcome.status !== 'opened') {
-        apply(current => noticed(current, outcome.message));
+        apply(state => noticed(state, outcome.message));
 
         return;
       }
 
-      apply(current => threadOpened(current, outcome));
+      apply(state => threadOpened(state, outcome));
       await readPage(outcome.conversationId, 'newest', {});
     } catch (error: unknown) {
-      apply(current => noticed(current, problem(error)));
+      if (current()) {
+        apply(state => noticed(state, problem(error)));
+      }
     } finally {
-      opening = false;
+      if (current()) {
+        opening = undefined;
+      }
     }
   };
   /** One character opens itself; a roster of several waits for a click. */

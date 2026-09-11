@@ -292,6 +292,65 @@ describe('web store', () => {
     expect(other).toBe(state);
   });
 
+  it('keeps earlier pages ahead of a refreshed newest page, and what arrived live after it behind', () => {
+    let state = historyPageRead(
+      opened(),
+      conversationId,
+      'newest',
+      page([committed('m-2', 'two'), committed('m-3', 'three')], 'v1:0:2'),
+    );
+
+    state = historyPageRead(
+      state,
+      conversationId,
+      'earlier',
+      page([committed('m-0', 'zero'), committed('m-1', 'one')]),
+    );
+    state = applyEvent(state, userMessage('m-4', 'four', 'line-4'));
+    // A recovery read after a lost answer: the newest page now holds a
+    // line another surface added; the older pages stay in front.
+    state = historyPageRead(
+      state,
+      conversationId,
+      'newest',
+      page(
+        [
+          committed('m-2', 'two'),
+          committed('m-3', 'three'),
+          committed('m-4', 'four', 'line-4'),
+          committed('m-5', 'five'),
+        ],
+        'v1:0:2',
+      ),
+    );
+
+    expect(state.thread?.messages.map(message => message.messageId)).toEqual([
+      'm-0',
+      'm-1',
+      'm-2',
+      'm-3',
+      'm-4',
+      'm-5',
+    ]);
+    expect(state.thread?.earlier).toBeUndefined();
+
+    // A page that meets nothing shown is the thread, and what was shown
+    // came live after it — a fresh open with a message arriving meanwhile.
+    const fresh = historyPageRead(
+      applyEvent(opened(), userMessage('m-9', 'nine', 'line-9')),
+      conversationId,
+      'newest',
+      page([committed('m-7', 'seven'), committed('m-8', 'eight')], 'v1:0:7'),
+    );
+
+    expect(fresh.thread?.messages.map(message => message.messageId)).toEqual([
+      'm-7',
+      'm-8',
+      'm-9',
+    ]);
+    expect(fresh.thread?.earlier).toBe('v1:0:7');
+  });
+
   it('hands a line back to the composer at once when the stream ends its turn without having shown it, or when the answer refuses it — once, and never for a completed turn', () => {
     const state = composerChanged(
       sent(opened(), 'hello', 'line-1'),
