@@ -39,8 +39,6 @@ export type Session = {
     decision: GatewayConfirmationDecision,
   ) => Promise<void>;
   readonly start: (characterId: string) => Promise<void>;
-  /** Ends the stream: the tab is going away. */
-  readonly close: () => void;
 };
 
 /** The stamp every tab puts on its lines; a tab tells its own apart by id, not by it. */
@@ -74,7 +72,6 @@ export function createSession(address: string): Session {
       listener();
     }
   };
-  const abort = new AbortController();
   let opening = false;
 
   /** A page that cannot be read is a notice, never the stream's failure. */
@@ -125,6 +122,8 @@ export function createSession(address: string): Session {
     }
   };
 
+  // The stream lives as long as the page: a tab that goes away takes its
+  // socket with it, and the daemon notices.
   void client
     .events(
       event => {
@@ -132,7 +131,7 @@ export function createSession(address: string): Session {
         openTheOnlyCharacter();
       },
       {
-        signal: abort.signal,
+        signal: new AbortController().signal,
         onReady: async ({snapshot}) => {
           apply(current => installSnapshot(current, snapshot));
 
@@ -174,7 +173,7 @@ export function createSession(address: string): Session {
 
       apply(current => lineSent(current, clientMessageId));
 
-      const line = state.thread?.pending.get(clientMessageId);
+      const line = state.pending.get(clientMessageId);
 
       if (line === undefined) {
         return;
@@ -243,9 +242,6 @@ export function createSession(address: string): Session {
         apply(current => noticed(current, problem(error)));
       }
     },
-    close: () => {
-      abort.abort();
-    },
   };
 }
 
@@ -263,6 +259,5 @@ function refusedSession(message: string): Session {
     loadEarlier: nothing,
     answer: nothing,
     start: nothing,
-    close: () => undefined,
   };
 }

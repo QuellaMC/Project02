@@ -72,16 +72,20 @@ function userMessage(
   messageId: string,
   text: string,
   clientMessageId?: string,
+  conversation = conversationId,
 ): GatewayEvent {
-  return progress({
-    kind: 'user_message',
-    messageId,
-    speakerId: 'local-user',
-    speakerName: 'You',
-    text,
-    source: 'web',
-    ...(clientMessageId === undefined ? {} : {clientMessageId}),
-  });
+  return progress(
+    {
+      kind: 'user_message',
+      messageId,
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text,
+      source: 'web',
+      ...(clientMessageId === undefined ? {} : {clientMessageId}),
+    },
+    conversation,
+  );
 }
 
 function completed(
@@ -172,14 +176,14 @@ describe('web store', () => {
     let state = sent(opened(), 'hello there', 'line-1');
 
     expect(state.composer).toBe('');
-    expect([...(state.thread?.pending.entries() ?? [])]).toEqual([
-      ['line-1', {text: 'hello there'}],
+    expect([...state.pending.entries()]).toEqual([
+      ['line-1', {conversationId, text: 'hello there'}],
     ]);
 
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
 
-    expect(state.thread?.pending.size).toBe(0);
+    expect(state.pending.size).toBe(0);
     expect(state.thread?.busy).toBe(true);
     expect(state.thread?.messages).toEqual([
       {
@@ -241,7 +245,7 @@ describe('web store', () => {
     expect(unchanged).toBe(state);
   });
 
-  it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends earlier pages', () => {
+  it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {
     let state = sent(opened(), 'hello', 'line-1');
 
     state = applyEvent(state, userMessage('m-3', 'meanwhile', 'line-9'));
@@ -260,15 +264,15 @@ describe('web store', () => {
       'm-2',
       'm-3',
     ]);
-    expect(state.thread?.pending.size).toBe(0);
+    expect(state.pending.size).toBe(0);
     expect(state.thread?.earlier).toBe('v1:0:0');
 
-    state = historyPageRead(
-      state,
-      conversationId,
-      'earlier',
-      page([committed('m-0', 'earlier still')]),
-    );
+    const earlier = page([committed('m-0', 'earlier still')]);
+
+    state = historyPageRead(state, conversationId, 'earlier', earlier);
+    // The same cursor read twice — a second click before the first page
+    // came — is the same page, shown once.
+    state = historyPageRead(state, conversationId, 'earlier', earlier);
 
     expect(state.thread?.messages.map(message => message.messageId)).toEqual([
       'm-0',
@@ -299,7 +303,7 @@ describe('web store', () => {
     );
 
     expect(fromStream.composer).toBe('hello next thought');
-    expect(fromStream.thread?.pending.size).toBe(0);
+    expect(fromStream.pending.size).toBe(0);
     expect(fromStream.thread?.busy).toBe(false);
     expect(fromStream.notice).toBe('The line was blank.');
 
@@ -319,7 +323,7 @@ describe('web store', () => {
     );
 
     expect(refused.composer).toBe('hello next thought');
-    expect(refused.thread?.pending.size).toBe(0);
+    expect(refused.pending.size).toBe(0);
     expect(refused.notice).toBe('The gateway holds no open conversation.');
 
     expect(lineEnded(state, 'line-1', {status: 'completed'}, 'answer')).toBe(
@@ -337,7 +341,8 @@ describe('web store', () => {
     );
 
     expect(marked.composer).toBe('');
-    expect(marked.thread?.pending.get('line-1')).toEqual({
+    expect(marked.pending.get('line-1')).toEqual({
+      conversationId,
       text: 'hello',
       ended: 'The model wrote nothing it could say.',
     });
@@ -346,7 +351,7 @@ describe('web store', () => {
     // The stream shows the line after all: it was taken.
     const shown = applyEvent(marked, userMessage('m-1', 'hello', 'line-1'));
 
-    expect(shown.thread?.pending.size).toBe(0);
+    expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
     expect(shown.composer).toBe('');
 
@@ -360,17 +365,20 @@ describe('web store', () => {
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
-    expect(carried.thread?.pending.size).toBe(0);
+    expect(carried.pending.size).toBe(0);
     expect(carried.composer).toBe('');
 
     const absent = historyPageRead(marked, conversationId, 'newest', page([]));
 
-    expect(absent.thread?.pending.size).toBe(0);
+    expect(absent.pending.size).toBe(0);
     expect(absent.composer).toBe('hello');
 
     const queued = historyPageRead(state, conversationId, 'newest', page([]));
 
-    expect(queued.thread?.pending.get('line-1')).toEqual({text: 'hello'});
+    expect(queued.pending.get('line-1')).toEqual({
+      conversationId,
+      text: 'hello',
+    });
 
     const unsent = lineEnded(
       state,
@@ -379,10 +387,68 @@ describe('web store', () => {
       'answer',
     );
 
-    expect(unsent.thread?.pending.get('line-1')).toEqual({
+    expect(unsent.pending.get('line-1')).toEqual({
+      conversationId,
       text: 'hello',
       ended: 'The daemon could not be reached.',
     });
+  });
+
+  it('keeps a line sent to one character while another is open, and hands it back in its own thread', () => {
+    const nova = {
+      status: 'opened' as const,
+      conversationId: 'conv-2',
+      characterId: 'nova',
+      userParticipantId: 'local-user',
+    };
+    let state = threadOpened(sent(opened(), 'hello mira', 'line-1'), nova);
+
+    expect(state.pending.get('line-1')).toEqual({
+      conversationId,
+      text: 'hello mira',
+    });
+
+    // Mira's daemon-side turn ends while Nova is open: the line is marked,
+    // never dropped into Nova's composer.
+    const ended = lineEnded(
+      state,
+      'line-1',
+      {status: 'refused', message: 'Mira is away.'},
+      'answer',
+    );
+
+    expect(ended.composer).toBe('');
+    expect(ended.pending.get('line-1')).toEqual({
+      conversationId,
+      text: 'hello mira',
+      ended: 'Mira is away.',
+    });
+
+    // Back in Mira's thread, the newest page has the last word.
+    state = historyPageRead(
+      threadOpened(ended, {
+        status: 'opened',
+        conversationId,
+        characterId: 'mira',
+        userParticipantId: 'local-user',
+      }),
+      conversationId,
+      'newest',
+      page([]),
+    );
+
+    expect(state.composer).toBe('hello mira');
+    expect(state.pending.size).toBe(0);
+    expect(state.notice).toBe('Mira is away.');
+
+    // The daemon taking the line settles it whichever thread is open.
+    const taken = applyEvent(
+      threadOpened(sent(opened(), 'hello mira', 'line-2'), nova),
+      userMessage('m-1', 'hello mira', 'line-2'),
+    );
+
+    expect(taken.pending.size).toBe(0);
+    expect(taken.thread?.messages).toEqual([]);
   });
 
   it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the next send spends the notice", () => {
@@ -451,7 +517,7 @@ describe('web store', () => {
     );
   });
 
-  it("applies roster events while dropping another conversation's progress", () => {
+  it("applies roster events, clears a maintenance note on a fresh start, and drops another conversation's progress", () => {
     let state = opened();
 
     state = applyEvent(state, {
@@ -485,6 +551,19 @@ describe('web store', () => {
       at: '2026-09-11T00:00:00.000Z',
       message: 'The segment could not rotate.',
     });
+
+    state = applyEvent(state, {
+      kind: 'state_changed',
+      characterId: 'mira',
+      state: 'starting',
+    });
+    state = applyEvent(state, {
+      kind: 'state_changed',
+      characterId: 'mira',
+      state: 'ready',
+    });
+
+    expect(state.health?.characters[0]).toEqual(mira);
 
     const elsewhere = applyEvent(
       state,

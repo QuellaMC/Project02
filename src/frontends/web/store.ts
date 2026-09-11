@@ -32,7 +32,9 @@ export type Message = {
   readonly clientMessageId?: string;
 };
 
+/** A line this tab sent that the stream has not yet shown, whichever thread it went to. */
 export type PendingLine = {
+  readonly conversationId: string;
   readonly text: string;
   /**
    * The turn's answer said it ended, with this message, before the stream
@@ -52,8 +54,6 @@ export type Thread = {
   readonly earlier?: string | undefined;
   /** Draft id → the reply's text so far. */
   readonly drafts: ReadonlyMap<string, string>;
-  /** Client message id → a line the stream has not yet shown. */
-  readonly pending: ReadonlyMap<string, PendingLine>;
   /** A turn runs: the typing indicator until the first delta or the end. */
   readonly busy: boolean;
 };
@@ -65,6 +65,8 @@ export type WebState = {
   readonly confirmations: readonly PendingConfirmation[];
   /** The one open DM. */
   readonly thread?: Thread;
+  /** Client message id → a pending line; kept across a switch of threads. */
+  readonly pending: ReadonlyMap<string, PendingLine>;
   /** The composer's text, owned here so a line the daemon did not take can come back. */
   readonly composer: string;
   /**
@@ -86,6 +88,7 @@ export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 export const initialState: WebState = {
   connection: {status: 'connecting'},
   confirmations: [],
+  pending: new Map(),
   composer: '',
 };
 
@@ -136,7 +139,6 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
       userParticipantId: opened.userParticipantId,
       messages: [],
       drafts: new Map(),
-      pending: new Map(),
       busy: false,
     },
   };
@@ -148,10 +150,10 @@ export function composerChanged(state: WebState, text: string): WebState {
 
 /**
  * The newest page is the thread; a message that reached the page live
- * meanwhile stays after it. A pending line the page carries is settled; one
- * it lacks whose turn has ended comes back to the composer; one whose turn
- * has not run yet stays pending. An earlier page goes in front: cursor
- * pages are disjoint.
+ * meanwhile stays after it. A pending line of this thread that the page
+ * carries is settled; one it lacks whose turn has ended comes back to the
+ * composer; one whose turn has not run yet stays pending. An earlier page
+ * goes in front, once — the same cursor read twice is the same page.
  */
 export function historyPageRead(
   state: WebState,
@@ -172,11 +174,16 @@ export function historyPageRead(
   const messages = outcome.messages.map(messageOf);
 
   if (page === 'earlier') {
+    const shown = new Set(thread.messages.map(message => message.messageId));
+
     return {
       ...state,
       thread: {
         ...thread,
-        messages: [...messages, ...thread.messages],
+        messages: [
+          ...messages.filter(message => !shown.has(message.messageId)),
+          ...thread.messages,
+        ],
         earlier: outcome.earlier,
       },
     };
@@ -200,7 +207,11 @@ export function historyPageRead(
     },
   };
 
-  for (const [clientMessageId, line] of thread.pending) {
+  for (const [clientMessageId, line] of state.pending) {
+    if (line.conversationId !== conversationId) {
+      continue;
+    }
+
     if (carried.has(clientMessageId)) {
       next = withoutPending(next, clientMessageId);
     } else if (line.ended !== undefined) {
@@ -211,7 +222,7 @@ export function historyPageRead(
   return next;
 }
 
-/** The composer's line becomes pending under its id; the notice is spent. */
+/** The composer's line becomes pending under its id, for the open thread; the notice is spent. */
 export function lineSent(state: WebState, clientMessageId: string): WebState {
   const text = state.composer.trim();
 
@@ -219,16 +230,14 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
     return state;
   }
 
-  const pending = new Map(state.thread.pending);
+  const pending = new Map(state.pending);
 
-  pending.set(clientMessageId, {text});
+  pending.set(clientMessageId, {
+    conversationId: state.thread.conversationId,
+    text,
+  });
 
-  return {
-    ...state,
-    composer: '',
-    notice: undefined,
-    thread: {...state.thread, pending},
-  };
+  return {...state, composer: '', notice: undefined, pending};
 }
 
 /**
@@ -239,8 +248,10 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * that would show the line, so from the answer only a refusal hands it
  * back — nothing was recorded; a rejection, a failure, or an answer that
  * never came marks the line ended, and the stream or the newest page
- * settles it. A line on the thread whose turn did not complete sets the
- * notice, as does another surface's. `completed` settles nothing here.
+ * settles it. A line whose thread is no longer the open one is marked
+ * too, and comes back in its own thread. A line on the thread whose turn
+ * did not complete sets the notice, as does another surface's.
+ * `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
@@ -248,25 +259,25 @@ export function lineEnded(
   ending: LineEnding,
   from: 'answer' | 'stream',
 ): WebState {
-  const {thread} = state;
-
-  if (thread === undefined || ending.status === 'completed') {
+  if (ending.status === 'completed') {
     return state;
   }
 
   const notice = ending.message ?? `The turn was ${ending.status}.`;
-  const line = thread.pending.get(clientMessageId);
+  const line = state.pending.get(clientMessageId);
 
   if (line === undefined) {
     return noticed(state, notice);
   }
 
-  if (from === 'answer' && ending.status !== 'refused') {
-    const pending = new Map(thread.pending);
+  const open = state.thread?.conversationId === line.conversationId;
 
-    pending.set(clientMessageId, {text: line.text, ended: notice});
+  if (!open || (from === 'answer' && ending.status !== 'refused')) {
+    const pending = new Map(state.pending);
 
-    return {...state, notice, thread: {...thread, pending}};
+    pending.set(clientMessageId, {...line, ended: notice});
+
+    return {...state, notice, pending};
   }
 
   return handedBack(state, clientMessageId, line.text, notice);
@@ -300,12 +311,22 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ? noticed(settled, 'A confirmation expired before it was answered.')
         : settled;
     }
-    case 'turn_progress':
-      return withThread(state, thread =>
+    case 'turn_progress': {
+      const {progress} = event;
+      // The daemon took the line, whichever thread it went to.
+      const settled =
+        progress.kind === 'user_message' &&
+        progress.clientMessageId !== undefined &&
+        state.pending.has(progress.clientMessageId)
+          ? withoutPending(state, progress.clientMessageId)
+          : state;
+
+      return withThread(settled, thread =>
         thread.conversationId === event.conversationId
-          ? applyProgress(thread, event.progress)
+          ? applyProgress(thread, progress)
           : thread,
       );
+    }
     case 'turn_completed':
       return state.thread?.conversationId === event.conversationId
         ? lineEnded(
@@ -330,20 +351,12 @@ function applyProgress(
   progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
 ): Thread {
   switch (progress.kind) {
-    case 'user_message': {
-      const pending = new Map(thread.pending);
-
-      if (progress.clientMessageId !== undefined) {
-        pending.delete(progress.clientMessageId);
-      }
-
+    case 'user_message':
       return {
         ...thread,
         messages: appendMessage(thread.messages, messageOf(progress)),
-        pending,
         busy: true,
       };
-    }
     case 'visible_reply': {
       const drafts = new Map(thread.drafts);
 
@@ -396,13 +409,11 @@ function withThread(
 }
 
 function withoutPending(state: WebState, clientMessageId: string): WebState {
-  return withThread(state, thread => {
-    const pending = new Map(thread.pending);
+  const pending = new Map(state.pending);
 
-    pending.delete(clientMessageId);
+  pending.delete(clientMessageId);
 
-    return {...thread, pending};
-  });
+  return {...state, pending};
 }
 
 /** The line was never taken: it is the composer's again, with the reason. */
@@ -439,7 +450,11 @@ function withCharacter(
   };
 }
 
-/** A state change names the problem when it is one; a state without a message has none. */
+/**
+ * A state change names the problem when it is one; a state without a
+ * message has none. A fresh start clears the last boot's maintenance
+ * note, as the runtime does.
+ */
 function summaryOf(
   character: CharacterSummary,
   state: CharacterSummary['state'],
@@ -451,7 +466,7 @@ function summaryOf(
     enabled: character.enabled,
     state,
     ...(diagnostic === undefined ? {} : {diagnostic}),
-    ...(character.maintenance === undefined
+    ...(character.maintenance === undefined || state === 'starting'
       ? {}
       : {maintenance: character.maintenance}),
   };

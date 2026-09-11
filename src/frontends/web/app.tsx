@@ -4,6 +4,13 @@ import type {CharacterSummary} from '../../gateway/api/index.ts';
 import type {Session} from './session.ts';
 import {Avatar, stateLabel, ThreadPane} from './thread.tsx';
 
+/** States a line cannot reach; the daemon holds a line through the rest. */
+const blockingStates = new Set<CharacterSummary['state']>([
+  'failed',
+  'stopped',
+  'not_started',
+]);
+
 export function App({session}: {readonly session: Session}) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const {connection, health, thread} = state;
@@ -37,6 +44,9 @@ export function App({session}: {readonly session: Session}) {
             onOpen={characterId => {
               void session.open(characterId);
             }}
+            onStart={characterId => {
+              void session.start(characterId);
+            }}
           />
         )}
         {health?.packages.diagnostics.map(diagnostic => (
@@ -46,6 +56,11 @@ export function App({session}: {readonly session: Session}) {
         ))}
       </aside>
       <main className="main">
+        {state.notice === undefined ? null : (
+          <p className="notice" role="status">
+            {state.notice}
+          </p>
+        )}
         {thread === undefined ? (
           <p className="muted empty">
             {health !== undefined && health.characters.length > 1
@@ -64,10 +79,12 @@ function Roster({
   characters,
   openId,
   onOpen,
+  onStart,
 }: {
   readonly characters: readonly CharacterSummary[];
   readonly openId: string | undefined;
   readonly onOpen: (characterId: string) => void;
+  readonly onStart: (characterId: string) => void;
 }) {
   if (characters.length === 0) {
     return <p className="muted">No characters are installed.</p>;
@@ -76,10 +93,13 @@ function Roster({
   return (
     <ul className="roster-list">
       {characters.map(character => (
-        <li key={character.id}>
+        <li
+          key={character.id}
+          className={`roster-item${character.id === openId ? ' roster-item-open' : ''}`}
+        >
           <button
             type="button"
-            className={`roster-item${character.id === openId ? ' roster-item-open' : ''}`}
+            className="roster-open"
             onClick={() => {
               onOpen(character.id);
             }}
@@ -89,12 +109,26 @@ function Roster({
             <span className={`pill pill-${character.state}`}>
               {stateLabel(character.state)}
             </span>
-            {character.diagnostic === undefined ? null : (
-              <span className="muted small roster-diagnostic">
-                {character.diagnostic}
-              </span>
-            )}
           </button>
+          {blockingStates.has(character.state) ? (
+            <button
+              type="button"
+              className="roster-start"
+              onClick={() => {
+                onStart(character.id);
+              }}
+            >
+              Start
+            </button>
+          ) : null}
+          {character.diagnostic === undefined ? null : (
+            <p className="muted small roster-note">{character.diagnostic}</p>
+          )}
+          {character.maintenance === undefined ? null : (
+            <p className="muted small roster-note">
+              {character.maintenance.message}
+            </p>
+          )}
         </li>
       ))}
     </ul>

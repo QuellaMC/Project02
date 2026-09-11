@@ -438,9 +438,14 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
             <td>
               A tool asking for approval: id, request, deadline, and the
               <code>turn</code> that raised it (its <code>conversationId</code>,
-              <code>source</code>, <code>clientMessageId</code>), so a surface
-              answers for its own turns and leaves the rest to the surface that
-              sent them. The same shape the pending list returns.
+              <code>source</code>, <code>clientMessageId</code>). A
+              contact-shaped surface — a bot in one chat — answers for its own
+              turns and leaves the rest to the surface that sent them; a
+              roster-shaped surface, where the person sees every character,
+              shows them all and names the surface that raised one. The
+              person is the same on every surface, and the daemon settles a
+              confirmation once for all of them. The same shape the pending
+              list returns.
             </td>
           </tr>
           <tr>

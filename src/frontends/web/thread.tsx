@@ -5,15 +5,8 @@ import type {
   GatewayConfirmationDecision,
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
-import type {Session} from './session.ts';
+import {webSource, type Session} from './session.ts';
 import type {Thread, WebState} from './store.ts';
-
-/** States a line cannot reach; the daemon holds a line through the rest. */
-const blockingStates = new Set<CharacterSummary['state']>([
-  'failed',
-  'stopped',
-  'not_started',
-]);
 
 export function stateLabel(state: CharacterSummary['state']): string {
   return state.replace('_', ' ');
@@ -43,6 +36,9 @@ export function ThreadPane({
   const cards = state.confirmations.filter(
     pending => pending.characterId === thread.characterId,
   );
+  const pending = [...state.pending].filter(
+    ([, line]) => line.conversationId === thread.conversationId,
+  );
   const scroller = useRef<HTMLDivElement>(null);
   // The view follows the thread's end unless the person scrolled up to read.
   const following = useRef(true);
@@ -52,7 +48,7 @@ export function ThreadPane({
     if (following.current) {
       scroller.current?.scrollTo({top: scroller.current.scrollHeight});
     }
-  }, [lastMessageId, thread.drafts, thread.pending, cards.length]);
+  }, [lastMessageId, thread.drafts, pending.length, cards.length]);
 
   return (
     <section className="thread">
@@ -65,27 +61,6 @@ export function ThreadPane({
           </span>
         )}
       </header>
-      {character !== undefined && blockingStates.has(character.state) ? (
-        <div className="banner banner-state" role="status">
-          <span>
-            {name} is {stateLabel(character.state)}
-            {character.diagnostic === undefined
-              ? '.'
-              : `: ${character.diagnostic}`}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              void session.start(character.id);
-            }}
-          >
-            Start
-          </button>
-        </div>
-      ) : null}
-      {character?.maintenance === undefined ? null : (
-        <p className="banner banner-warning">{character.maintenance.message}</p>
-      )}
       <div
         className="messages"
         ref={scroller}
@@ -120,24 +95,17 @@ export function ThreadPane({
         {thread.busy && thread.drafts.size === 0 ? (
           <p className="typing muted small">{name} is writing…</p>
         ) : null}
-        {[...thread.pending].map(([clientMessageId, line]) => (
+        {pending.map(([clientMessageId, line]) => (
           <Bubble key={clientMessageId} own text={line.text} pending />
         ))}
-        {cards.map(pending => (
+        {cards.map(card => (
           <ConfirmationCard
-            key={pending.id}
-            pending={pending}
-            onAnswer={decision => {
-              void session.answer(pending.id, decision);
-            }}
+            key={card.id}
+            pending={card}
+            onAnswer={decision => session.answer(card.id, decision)}
           />
         ))}
       </div>
-      {state.notice === undefined ? null : (
-        <p className="notice" role="status">
-          {state.notice}
-        </p>
-      )}
       <form
         className="composer"
         onSubmit={event => {
@@ -197,16 +165,19 @@ function ConfirmationCard({
   onAnswer,
 }: {
   readonly pending: PendingConfirmation;
-  readonly onAnswer: (decision: GatewayConfirmationDecision) => void;
+  readonly onAnswer: (decision: GatewayConfirmationDecision) => Promise<void>;
 }) {
+  // The buttons rest while an answer is on its way; an answer that could
+  // not be delivered gives them back, since the card is still there.
   const [answering, setAnswering] = useState(false);
   const expires = new Date(pending.deadlineAt).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const answer = (decision: GatewayConfirmationDecision): void => {
+  const answer = async (decision: GatewayConfirmationDecision) => {
     setAnswering(true);
-    onAnswer(decision);
+    await onAnswer(decision);
+    setAnswering(false);
   };
 
   return (
@@ -220,12 +191,17 @@ function ConfirmationCard({
         {JSON.stringify(pending.request.preview, null, 2)}
       </pre>
       <div className="card-actions">
-        <span className="muted small">expires at {expires}</span>
+        <span className="muted small">
+          expires at {expires}
+          {pending.turn === undefined || pending.turn.source === webSource
+            ? ''
+            : ` · raised on ${pending.turn.source}`}
+        </span>
         <button
           type="button"
           disabled={answering}
           onClick={() => {
-            answer('approved');
+            void answer('approved');
           }}
         >
           Approve
@@ -235,7 +211,7 @@ function ConfirmationCard({
           className="secondary"
           disabled={answering}
           onClick={() => {
-            answer('denied');
+            void answer('denied');
           }}
         >
           Deny

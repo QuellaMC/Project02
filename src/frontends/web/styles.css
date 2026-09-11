@@ -154,31 +154,46 @@ code {
 }
 
 .roster-item {
-  width: 100%;
   display: grid;
-  grid-template-columns: 32px 1fr auto;
-  column-gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
   align-items: center;
-  text-align: left;
-  padding: 8px 10px;
-  background: transparent;
-  color: var(--ink);
-}
-
-.roster-item:hover {
-  background: var(--accent-soft);
+  padding: 4px 6px;
+  border-radius: 8px;
 }
 
 .roster-item-open {
   background: var(--accent-soft);
 }
 
-.roster-name {
-  font-weight: 600;
+.roster-open {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 4px;
+  background: transparent;
+  color: var(--ink);
 }
 
-.roster-diagnostic {
-  grid-column: 2 / -1;
+.roster-open:hover {
+  background: var(--accent-soft);
+}
+
+.roster-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.roster-start {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.roster-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 4px 46px;
 }
 
 .avatar {
@@ -352,7 +367,7 @@ code {
   padding: 8px 16px;
   background: var(--warning-soft);
   color: var(--warning);
-  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .composer {
