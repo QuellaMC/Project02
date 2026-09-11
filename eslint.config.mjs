@@ -5,7 +5,13 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts', 'vitest.config.ts'],
+    files: [
+      'src/**/*.ts',
+      'src/**/*.tsx',
+      'tests/**/*.ts',
+      'vitest.config.ts',
+      'vite.config.ts',
+    ],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -39,7 +45,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
     rules: {
       complexity: ['error', 20],
       'max-lines': [
