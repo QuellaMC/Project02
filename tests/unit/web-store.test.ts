@@ -300,9 +300,7 @@ describe('web store', () => {
 
     expect(fromAnswer.composer).toBe('hello next thought');
     expect(fromAnswer.thread?.pending.size).toBe(0);
-    expect(fromAnswer.thread?.notice).toBe(
-      'The gateway holds no open conversation.',
-    );
+    expect(fromAnswer.notice).toBe('The gateway holds no open conversation.');
 
     const again = applyEvent(
       fromAnswer,
@@ -310,7 +308,7 @@ describe('web store', () => {
     );
 
     expect(again.composer).toBe('hello next thought');
-    expect(again.thread?.notice).toBe(fromAnswer.thread?.notice);
+    expect(again.notice).toBe(fromAnswer.notice);
 
     const fromEvent = applyEvent(
       state,
@@ -326,7 +324,7 @@ describe('web store', () => {
     });
 
     expect(unsent.composer).toBe('hello next thought');
-    expect(unsent.thread?.notice).toBe('The daemon could not be reached.');
+    expect(unsent.notice).toBe('The daemon could not be reached.');
 
     // A completed turn settles nothing here: the stream's user_message
     // did, or the next page will.
@@ -344,7 +342,7 @@ describe('web store', () => {
 
     expect(state.thread?.messages).toHaveLength(1);
     expect(state.thread?.busy).toBe(false);
-    expect(state.thread?.notice).toBe('The model wrote nothing it could say.');
+    expect(state.notice).toBe('The model wrote nothing it could say.');
 
     state = applyEvent(state, {
       kind: 'turn_completed',
@@ -356,11 +354,11 @@ describe('web store', () => {
       reason: 'provider_error',
     });
 
-    expect(state.thread?.notice).toBe('provider_error');
+    expect(state.notice).toBe('provider_error');
 
     state = sent(state, 'again', 'line-2');
 
-    expect(state.thread?.notice).toBeUndefined();
+    expect(state.notice).toBeUndefined();
   });
 
   it('tracks confirmations by id, whatever surface raised them, and says when one expired', () => {
@@ -384,7 +382,7 @@ describe('web store', () => {
     });
 
     expect(approved.confirmations).toEqual([]);
-    expect(approved.thread?.notice).toBeUndefined();
+    expect(approved.notice).toBeUndefined();
 
     const expired = applyEvent(state, {
       kind: 'confirmation_settled',
@@ -394,7 +392,7 @@ describe('web store', () => {
     });
 
     expect(expired.confirmations).toEqual([]);
-    expect(expired.thread?.notice).toBe(
+    expect(expired.notice).toBe(
       'A confirmation expired before it was answered.',
     );
   });
@@ -462,7 +460,7 @@ describe('web store', () => {
       message: 'The thread could not be read.',
     });
 
-    expect(unread.thread?.notice).toBe('The thread could not be read.');
+    expect(unread.notice).toBe('The thread could not be read.');
     expect(unread.thread?.messages).toEqual([]);
   });
 });

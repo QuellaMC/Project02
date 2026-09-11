@@ -18,3 +18,14 @@ builds it once, `pnpm serve` builds before it runs, and
 `pnpm exec vite build --watch` is the developer's loop, with a reload in
 the browser. The page's own `tsconfig.json` gives it the DOM and the JSX
 transform; the root program excludes the directory.
+
+The page follows the wire page's rules for a surface, stated once in
+`store.ts`: everything a tab shows is one value, and every change to it is
+a pure function of the previous value and one input — the daemon's
+snapshot, an event, a history page, a send, a line's end. It is DOM-free
+and unit-tested in Node. `session.ts` holds the tab's one client and one
+stream and the verbs a page calls, and runs only in a browser; `app.tsx`
+and `thread.tsx` render the store — the roster, the thread with its draft
+bubbles and confirmation cards, the one-line composer. The browser suite
+under `tests/browser` drives the built page in Chromium against a real
+daemon.

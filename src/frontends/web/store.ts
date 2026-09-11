@@ -46,8 +46,6 @@ export type Thread = {
   readonly pending: ReadonlyMap<string, string>;
   /** A turn runs: the typing indicator until the first delta or the end. */
   readonly busy: boolean;
-  /** One line: how a turn did not complete, an expired confirmation, a page that could not be read. */
-  readonly notice?: string | undefined;
 };
 
 export type WebState = {
@@ -59,6 +57,12 @@ export type WebState = {
   readonly thread?: Thread;
   /** The composer's text, owned here so a line the daemon did not take can come back. */
   readonly composer: string;
+  /**
+   * The page's one notice: how a turn did not complete, a confirmation
+   * that expired, a page that could not be read, a verb the daemon
+   * refused. Spent by the next send or open.
+   */
+  readonly notice?: string | undefined;
 };
 
 /** How a line's turn ended, from the answer or the stream; `unsent` is the answer that never came. */
@@ -107,10 +111,15 @@ export function connectionRefused(state: WebState, message: string): WebState {
   return {...state, connection: {status: 'refused', message}};
 }
 
+export function noticed(state: WebState, notice: string): WebState {
+  return state.notice === notice ? state : {...state, notice};
+}
+
 export function threadOpened(state: WebState, opened: Opened): WebState {
   return {
     ...state,
     composer: '',
+    notice: undefined,
     thread: {
       characterId: opened.characterId,
       conversationId: opened.conversationId,
@@ -138,17 +147,17 @@ export function historyPageRead(
   page: 'newest' | 'earlier',
   outcome: HistoryOutcome,
 ): WebState {
+  if (state.thread?.conversationId !== conversationId) {
+    return state;
+  }
+
+  if (outcome.status !== 'ok') {
+    return noticed(state, outcome.message);
+  }
+
+  const messages = outcome.messages.map(messageOf);
+
   return withThread(state, thread => {
-    if (thread.conversationId !== conversationId) {
-      return thread;
-    }
-
-    if (outcome.status !== 'ok') {
-      return {...thread, notice: outcome.message};
-    }
-
-    const messages = outcome.messages.map(messageOf);
-
     if (page === 'earlier') {
       return {
         ...thread,
@@ -193,7 +202,8 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
   return {
     ...state,
     composer: '',
-    thread: {...state.thread, pending, notice: undefined},
+    notice: undefined,
+    thread: {...state.thread, pending},
   };
 }
 
@@ -220,9 +230,7 @@ export function lineEnded(
   const text = thread.pending.get(clientMessageId);
 
   if (text === undefined) {
-    return thread.notice === notice
-      ? state
-      : {...state, thread: {...thread, notice}};
+    return noticed(state, notice);
   }
 
   const pending = new Map(thread.pending);
@@ -232,7 +240,8 @@ export function lineEnded(
   return {
     ...state,
     composer: state.composer.length === 0 ? text : `${text} ${state.composer}`,
-    thread: {...thread, pending, notice},
+    notice,
+    thread: {...thread, pending},
   };
 }
 
@@ -252,21 +261,17 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ? state
         : {...state, confirmations: [...state.confirmations, pendingOf(event)]};
     case 'confirmation_settled': {
-      const confirmations = state.confirmations.filter(
-        pending => pending.id !== event.id,
-      );
-      const expired =
-        event.decision === 'cancelled' &&
-        state.thread?.characterId === event.characterId;
+      const settled = {
+        ...state,
+        confirmations: state.confirmations.filter(
+          pending => pending.id !== event.id,
+        ),
+      };
 
-      return withThread({...state, confirmations}, thread =>
-        expired
-          ? {
-              ...thread,
-              notice: 'A confirmation expired before it was answered.',
-            }
-          : thread,
-      );
+      return event.decision === 'cancelled' &&
+        state.thread?.characterId === event.characterId
+        ? noticed(settled, 'A confirmation expired before it was answered.')
+        : settled;
     }
     case 'turn_progress':
       return withThread(state, thread =>
