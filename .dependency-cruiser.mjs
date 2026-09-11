@@ -115,8 +115,8 @@ export default {
         'src/app is the composition root: it wires runtime, plugins, and ' +
         'role-model together. Only the public barrel, gateway, and the ' +
         'surviving CLIs (config console, inspect, shared helpers) may ' +
-        'import it; the chat shim is a client of the socket. Green (zero ' +
-        'baseline entries).',
+        'import it; every other surface is a client of the socket. Green ' +
+        '(zero baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
@@ -146,14 +146,14 @@ export default {
     {
       name: 'clients-see-only-the-wire',
       comment:
-        'src/gateway/client and src/cli/chat are clients of the wire: they ' +
-        'may value-import only gateway/api (the contract, which value-imports ' +
-        'nothing), gateway/client, core, and shared — never the façade, the ' +
-        'runtimes, app, or the HTTP server — so no client grows a private ' +
-        'path into the daemon. The Hono app type the client derives its ' +
-        'calls from is imported type-only. Green (zero baseline entries).',
+        'src/gateway/client is a client of the wire: it may value-import ' +
+        'only gateway/api (the contract, which value-imports nothing), ' +
+        'itself, core, and shared — never the façade, the runtimes, app, ' +
+        'or the HTTP server — so no client grows a private path into the ' +
+        'daemon. The Hono app type the client derives its calls from is ' +
+        'imported type-only. Green (zero baseline entries).',
       severity: 'error',
-      from: {path: ['^src/gateway/client/', '^src/cli/chat/']},
+      from: {path: ['^src/gateway/client/']},
       to: {
         path: '^src/',
         pathNot: [
@@ -161,7 +161,6 @@ export default {
           '^src/gateway/api/',
           '^src/core/',
           '^src/shared/',
-          '^src/cli/',
         ],
         dependencyTypesNot: ['type-only'],
       },

@@ -29,12 +29,11 @@ anything runs.
 error envelope), the API router (one route per verb, each
 answering its outcome verbatim), the event streams (SSE), and the server
 whose close order loses nothing. `client/` is the reference client, one
-module for Node and for a browser tab — the shim, the web page, and
-future connectors use it; it speaks the platform's fetch, each request
-under a signal of its own. It may value-import only `api/`, itself,
-`core`, and `shared` (arch rule `clients-see-only-the-wire`, which fences
-the terminal chat the same way), so no client grows a private path into
-the daemon.
+module for Node and for a browser tab — the web page and future
+connectors use it; it speaks the platform's fetch, each request under a
+signal of its own. It may value-import only `api/`, itself, `core`, and
+`shared` (arch rule `clients-see-only-the-wire`), so no client grows a
+private path into the daemon.
 
 Four wire rules, stated once in `docs/wiki/gateway-api.html`: status codes
 describe the transport and domain outcomes are 200; the stream is a hint

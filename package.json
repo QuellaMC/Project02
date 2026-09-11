@@ -23,7 +23,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "chat": "node src/cli/chat/main.ts",
     "runtime-config": "node src/cli/config/main.ts",
     "inspect": "node src/cli/inspect/main.ts",
     "serve": "node src/cli/serve/main.ts",

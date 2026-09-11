@@ -1,6 +1,6 @@
 /**
  * The daemon: one process holding the gateway and its loopback socket for
- * every client — the terminal chat, the web UI, a messaging connector.
+ * every client — the web page, a messaging connector.
  * It prints where it listens, brings the roster up, and only then prints
  * the line a client reads, so nothing connects to a half-started daemon.
  */

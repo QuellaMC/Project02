@@ -88,7 +88,8 @@ const project02ConfigFieldDefinitions = Object.freeze([
     path: 'project02.roleModelProvider',
     name: 'roleModelProvider',
     label: 'Role-model provider',
-    description: 'Default role-model provider used by the Project02 chat CLI.',
+    description:
+      'Default role-model provider for every character the daemon runs.',
     invalidValueCode: 'runtime_config_role_model_provider_invalid',
     invalidValueMessage:
       'Project02 roleModelProvider must be "local" or "nvidia".',

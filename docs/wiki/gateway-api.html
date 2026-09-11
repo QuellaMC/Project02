@@ -48,7 +48,7 @@
       <p>
         The daemon (<code>pnpm serve</code>) holds every character runtime
         behind one gateway and speaks HTTP plus server-sent events on a loopback
-        port. Every surface — the web UI, the terminal chat, a messaging
+        port. Every surface — the web page, a messaging
         connector — is a client of this API and nothing else, so what one
         surface sends, every surface sees. The contract's types live in
         <code>src/gateway/api/contract.ts</code>; this page is the wire.
@@ -346,8 +346,7 @@ Content-Type: application/json
 
       <p>
         <code>source</code> is the client's stamp on the message —
-        <code>web</code>, <code>chat-shim:&lt;run id&gt;</code>,
-        <code>telegram:&lt;bot&gt;</code> — for rendering and for a surface to
+        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and for a surface to
         suppress the echo of its own messages. It is never a permission input.
         Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are
         persisted on the user's commit record, and come back in history. A stamp
@@ -474,8 +473,8 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         Because both roles are emitted from one post-persist seam, the stream
         and history never disagree: a reply whose write failed is a failed turn,
         never a message shown that history lacks. A message typed on the phone
-        appears in the open browser tab and the terminal at once, each
-        suppressing only what it sent itself by <code>source</code>.
+        appears in every open browser tab at once, and a surface tells its
+        own lines apart by <code>source</code>.
       </p>
 
       <h2>Streaming replies</h2>
