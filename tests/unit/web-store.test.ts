@@ -548,9 +548,9 @@ describe('web store', () => {
     expect(read.notice).toBeUndefined();
   });
 
-  it('gives every pending line back when the address will never work again', () => {
+  it('gives every pending line back, in the order it was written, when the address will never work again', () => {
     const state = connectionRefused(
-      sent(opened(), 'hello', 'line-1'),
+      sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
       'A bearer token is required.',
     );
 
@@ -559,7 +559,7 @@ describe('web store', () => {
       message: 'A bearer token is required.',
     });
     expect(state.pending.size).toBe(0);
-    expect(composerText(state)).toBe('hello');
+    expect(composerText(state)).toBe('first second');
   });
 
   it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the next send spends the notice", () => {

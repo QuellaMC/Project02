@@ -213,7 +213,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     if (arg === '--init') {
       throw new CliUsageError(
         'inspect never creates a store, so --init does not apply. ' +
-          'Run chat or runtime-config with --init to create one.',
+          'Run serve or runtime-config with --init to create one.',
       );
     }
 

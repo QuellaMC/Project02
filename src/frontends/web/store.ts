@@ -139,11 +139,20 @@ export function installSnapshot(
 export function connectionRefused(state: WebState, message: string): WebState {
   let next: WebState = {...state, connection: {status: 'refused', message}};
 
-  for (const [clientMessageId, line] of state.pending) {
+  for (const [clientMessageId, line] of newestFirst(state)) {
     next = handedBack(next, clientMessageId, line, line.ended ?? message);
   }
 
   return next;
+}
+
+/**
+ * Newest line first, because each one returned goes in front of what is
+ * already in its composer: several returned together land in the order
+ * they were written.
+ */
+function newestFirst(state: WebState): readonly [string, PendingLine][] {
+  return [...state.pending].reverse();
 }
 
 export function noticed(state: WebState, notice: string): WebState {
@@ -241,7 +250,7 @@ export function historyPageRead(
     },
   };
 
-  for (const [clientMessageId, line] of state.pending) {
+  for (const [clientMessageId, line] of newestFirst(state)) {
     if (line.conversationId !== conversationId) {
       continue;
     }
