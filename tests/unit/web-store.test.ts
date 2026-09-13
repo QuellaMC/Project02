@@ -10,6 +10,7 @@ import {
   installSnapshot,
   lineEnded,
   lineSent,
+  pageUnread,
   threadOpened,
   type WebState,
 } from '../../src/frontends/web/store.ts';
@@ -404,16 +405,21 @@ describe('web store', () => {
     expect(marked.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-      ended: 'The model wrote nothing it could say.',
+      ended: {
+        status: 'rejected',
+        notice: 'The model wrote nothing it could say.',
+      },
     });
     expect(marked.notice).toBe('The model wrote nothing it could say.');
 
-    // The stream shows the line after all: it was taken.
+    // The stream shows the line after all: it was taken, and the daemon's
+    // verdict on the turn stands — the line landing does not answer it.
     const shown = applyEvent(marked, userMessage('m-1', 'hello', 'line-1'));
 
     expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
     expect(composerText(shown)).toBe('');
+    expect(shown.notice).toBe('The model wrote nothing it could say.');
 
     // The newest page carries it: taken. The newest page lacks it: it
     // comes back. A line the answer never marked stays pending: its turn
@@ -450,7 +456,10 @@ describe('web store', () => {
     expect(unsent.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-      ended: 'The daemon could not be reached.',
+      ended: {
+        status: 'unsent',
+        notice: 'The daemon could not be reached.',
+      },
     });
   });
 
@@ -459,6 +468,12 @@ describe('web store', () => {
       status: 'opened' as const,
       conversationId: 'conv-2',
       characterId: 'nova',
+      userParticipantId: 'local-user',
+    };
+    const mira = {
+      status: 'opened' as const,
+      conversationId,
+      characterId: 'mira',
       userParticipantId: 'local-user',
     };
     let state = threadOpened(sent(opened(), 'hello mira', 'line-1'), nova);
@@ -482,23 +497,37 @@ describe('web store', () => {
     expect(ended.notice).toBe('Mira is away.');
 
     // Back in Mira's thread, it is where it was written.
-    state = threadOpened(ended, {
-      status: 'opened',
-      conversationId,
-      characterId: 'mira',
-      userParticipantId: 'local-user',
-    });
+    state = threadOpened(ended, mira);
 
     expect(composerText(state)).toBe('hello mira');
 
-    // The daemon taking the line settles it whichever thread is open.
+    // The daemon taking the line settles it whichever thread is open, and
+    // a turn that ends without it ends the line just as well.
+    const elsewhere = threadOpened(
+      sent(opened(), 'hello mira', 'line-2'),
+      nova,
+    );
     const taken = applyEvent(
-      threadOpened(sent(opened(), 'hello mira', 'line-2'), nova),
+      elsewhere,
       userMessage('m-1', 'hello mira', 'line-2'),
     );
 
     expect(taken.pending.size).toBe(0);
     expect(taken.thread?.messages).toEqual([]);
+
+    const failed = applyEvent(
+      elsewhere,
+      completed('line-2', 'failed', 'The store is read-only.'),
+    );
+
+    expect(failed.pending.size).toBe(0);
+    expect(failed.notice).toBe('The store is read-only.');
+    expect(composerText(threadOpened(failed, mira))).toBe('hello mira');
+
+    // Another surface's turn on a thread nobody is reading says nothing.
+    expect(applyEvent(elsewhere, completed('telegram-1', 'failed'))).toBe(
+      elsewhere,
+    );
   });
 
   it('keeps what a person typed in each thread, and takes back the false failure of a line that did land', () => {
@@ -698,13 +727,38 @@ describe('web store', () => {
       message: 'The gateway URL carries no #token.',
     });
 
-    const unread = historyPageRead(opened(), conversationId, 'newest', {
+    const unreadable: HistoryOutcome = {
       status: 'failed',
       code: 'missing_file',
       message: 'The thread could not be read.',
-    });
+    };
+    const unread = historyPageRead(
+      opened(),
+      conversationId,
+      'newest',
+      unreadable,
+    );
 
     expect(unread.notice).toBe('The thread could not be read.');
     expect(unread.thread?.messages).toEqual([]);
+
+    // A read left behind by a switch of characters says nothing about the
+    // thread in front of the person — by either way of failing.
+    const switched = threadOpened(opened(), {
+      status: 'opened',
+      conversationId: 'conv-2',
+      characterId: 'nova',
+      userParticipantId: 'local-user',
+    });
+
+    expect(
+      historyPageRead(switched, conversationId, 'newest', unreadable),
+    ).toBe(switched);
+    expect(
+      pageUnread(switched, conversationId, 'The daemon could not be reached.'),
+    ).toBe(switched);
+    expect(pageUnread(switched, 'conv-2', 'Its own read failed.').notice).toBe(
+      'Its own read failed.',
+    );
   });
 });

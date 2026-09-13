@@ -29,6 +29,11 @@ export async function spawnDaemon(
     cwd: process.cwd(),
     stdio: 'pipe',
   });
+  // Taken now, not at stop: a daemon that died on its own has already
+  // fired its exit, and a listener added afterwards would wait forever.
+  const exited = new Promise<number | null>(resolve => {
+    child.once('exit', resolve);
+  });
   let stderr = '';
 
   child.stderr.setEncoding('utf8');
@@ -86,12 +91,10 @@ export async function spawnDaemon(
   return {
     child,
     url,
-    stop: () =>
-      new Promise(resolveExit => {
-        child.once('exit', code => {
-          resolveExit({code, stderr});
-        });
-        child.kill('SIGINT');
-      }),
+    stop: async () => {
+      child.kill('SIGINT');
+
+      return {code: await exited, stderr};
+    },
   };
 }

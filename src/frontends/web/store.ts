@@ -37,11 +37,15 @@ export type PendingLine = {
   readonly conversationId: string;
   readonly text: string;
   /**
-   * The turn's answer said it ended, with this message, before the stream
-   * showed the line; the stream or the newest page decides whether the
-   * line was taken.
+   * The turn's answer, when it came before the stream showed the line.
+   * Its status matters later: `unsent` is the answer that never came, and
+   * proof that the line landed takes that verdict back; every other one is
+   * the daemon's word on the turn and stands whatever the line did.
    */
-  readonly ended?: string;
+  readonly ended?: {
+    readonly status: LineEnding['status'];
+    readonly notice: string;
+  };
 };
 
 export type Thread = {
@@ -140,7 +144,12 @@ export function connectionRefused(state: WebState, message: string): WebState {
   let next: WebState = {...state, connection: {status: 'refused', message}};
 
   for (const [clientMessageId, line] of newestFirst(state)) {
-    next = handedBack(next, clientMessageId, line, line.ended ?? message);
+    next = handedBack(
+      next,
+      clientMessageId,
+      line,
+      line.ended?.notice ?? message,
+    );
   }
 
   return next;
@@ -157,6 +166,21 @@ function newestFirst(state: WebState): readonly [string, PendingLine][] {
 
 export function noticed(state: WebState, notice: string): WebState {
   return state.notice === notice ? state : {...state, notice};
+}
+
+/**
+ * A page that could not be read, said only for the thread still on
+ * screen: a read left behind by a switch of characters must not tell a
+ * person that the thread in front of them failed.
+ */
+export function pageUnread(
+  state: WebState,
+  conversationId: string,
+  message: string,
+): WebState {
+  return state.thread?.conversationId === conversationId
+    ? noticed(state, message)
+    : state;
 }
 
 export function threadOpened(state: WebState, opened: Opened): WebState {
@@ -203,7 +227,7 @@ export function historyPageRead(
   }
 
   if (outcome.status !== 'ok') {
-    return noticed(state, outcome.message);
+    return pageUnread(state, conversationId, outcome.message);
   }
 
   const messages = outcome.messages.map(messageOf);
@@ -258,7 +282,7 @@ export function historyPageRead(
     if (carried.has(clientMessageId)) {
       next = settled(next, clientMessageId);
     } else if (line.ended !== undefined) {
-      next = handedBack(next, clientMessageId, line, line.ended);
+      next = handedBack(next, clientMessageId, line, line.ended.notice);
     }
   }
 
@@ -317,7 +341,10 @@ export function lineEnded(
   if (from === 'answer' && ending.status !== 'refused') {
     const pending = new Map(state.pending);
 
-    pending.set(clientMessageId, {...line, ended: notice});
+    pending.set(clientMessageId, {
+      ...line,
+      ended: {status: ending.status, notice},
+    });
 
     return {...state, notice, pending};
   }
@@ -369,22 +396,34 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
           : thread,
       );
     }
-    case 'turn_completed':
-      return state.thread?.conversationId === event.conversationId
-        ? lineEnded(
-            {...state, thread: {...state.thread, busy: false}},
-            event.clientMessageId,
-            {
-              status: event.status,
-              ...(event.message === undefined
-                ? event.reason === undefined
-                  ? {}
-                  : {message: event.reason}
-                : {message: event.message}),
-            },
-            'stream',
-          )
-        : state;
+    case 'turn_completed': {
+      // A turn's end reaches this tab's own line wherever it was written;
+      // another surface's turn is news only on the thread being read.
+      if (
+        !state.pending.has(event.clientMessageId) &&
+        state.thread?.conversationId !== event.conversationId
+      ) {
+        return state;
+      }
+
+      return lineEnded(
+        withThread(state, thread =>
+          thread.conversationId === event.conversationId
+            ? {...thread, busy: false}
+            : thread,
+        ),
+        event.clientMessageId,
+        {
+          status: event.status,
+          ...(event.message === undefined
+            ? event.reason === undefined
+              ? {}
+              : {message: event.reason}
+            : {message: event.message}),
+        },
+        'stream',
+      );
+    }
   }
 }
 
@@ -451,11 +490,13 @@ function withThread(
 }
 
 /**
- * The daemon took the line after all. An ending announced before that
- * proof arrived was not the truth, so the notice it set goes with it.
+ * The daemon took the line after all. An answer that never came said
+ * nothing about the turn, so the doubt it raised goes with it; a turn the
+ * daemon judged — rejected, failed — keeps its word, since the line
+ * landing is not a rebuttal of it.
  */
 function settled(state: WebState, clientMessageId: string): WebState {
-  const line = state.pending.get(clientMessageId);
+  const ended = state.pending.get(clientMessageId)?.ended;
   const pending = new Map(state.pending);
 
   pending.delete(clientMessageId);
@@ -463,7 +504,7 @@ function settled(state: WebState, clientMessageId: string): WebState {
   return {
     ...state,
     pending,
-    ...(line?.ended !== undefined && state.notice === line.ended
+    ...(ended?.status === 'unsent' && state.notice === ended.notice
       ? {notice: undefined}
       : {}),
   };

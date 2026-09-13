@@ -22,6 +22,7 @@ import {
   lineEnded,
   lineSent,
   noticed,
+  pageUnread,
   threadOpened,
   type WebState,
 } from './store.ts';
@@ -87,7 +88,7 @@ export function createSession(address: string): Session {
 
       apply(current => historyPageRead(current, conversationId, page, outcome));
     } catch (error: unknown) {
-      apply(current => noticed(current, problem(error)));
+      apply(current => pageUnread(current, conversationId, problem(error)));
     }
   };
   /**
