@@ -37,15 +37,11 @@ export type PendingLine = {
   readonly conversationId: string;
   readonly text: string;
   /**
-   * The turn's answer, when it came before the stream showed the line.
-   * Its status matters later: `unsent` is the answer that never came, and
-   * proof that the line landed takes that verdict back; every other one is
-   * the daemon's word on the turn and stands whatever the line did.
+   * What the line comes back with if the page finds it was never taken:
+   * the daemon's verdict, when the answer came before the stream showed
+   * the line, or the reason the answer never came.
    */
-  readonly ended?: {
-    readonly status: LineEnding['status'];
-    readonly notice: string;
-  };
+  readonly ended?: string;
 };
 
 export type Thread = {
@@ -85,9 +81,9 @@ export type WebState = {
   readonly notice?: string | undefined;
 };
 
-/** How a line's turn ended, from the answer or the stream; `unsent` is the answer that never came. */
+/** How a line's turn ended, from the answer or the stream. */
 export type LineEnding = {
-  readonly status: TurnOutcome['status'] | 'unsent';
+  readonly status: TurnOutcome['status'];
   readonly message?: string;
 };
 
@@ -143,25 +139,11 @@ export function installSnapshot(
 export function connectionRefused(state: WebState, message: string): WebState {
   let next: WebState = {...state, connection: {status: 'refused', message}};
 
-  for (const [clientMessageId, line] of newestFirst(state)) {
-    next = handedBack(
-      next,
-      clientMessageId,
-      line,
-      line.ended?.notice ?? message,
-    );
+  for (const [clientMessageId, line] of state.pending) {
+    next = handedBack(next, clientMessageId, line, line.ended ?? message);
   }
 
   return next;
-}
-
-/**
- * Newest line first, because each one returned goes in front of what is
- * already in its composer: several returned together land in the order
- * they were written.
- */
-function newestFirst(state: WebState): readonly [string, PendingLine][] {
-  return [...state.pending].reverse();
 }
 
 export function noticed(state: WebState, notice: string): WebState {
@@ -274,7 +256,7 @@ export function historyPageRead(
     },
   };
 
-  for (const [clientMessageId, line] of newestFirst(state)) {
+  for (const [clientMessageId, line] of state.pending) {
     if (line.conversationId !== conversationId) {
       continue;
     }
@@ -282,7 +264,7 @@ export function historyPageRead(
     if (carried.has(clientMessageId)) {
       next = settled(next, clientMessageId);
     } else if (line.ended !== undefined) {
-      next = handedBack(next, clientMessageId, line, line.ended.notice);
+      next = handedBack(next, clientMessageId, line, line.ended);
     }
   }
 
@@ -310,16 +292,17 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 }
 
 /**
- * A line's end. The stream is ordered: a `turn_completed` that finds the
- * line still pending came without a `user_message` before it, so the line
- * was never committed and goes back to the composer with the message. The
- * turn's answer is not ordered against the stream and can beat the frame
- * that would show the line, so from the answer only a refusal hands it
- * back — nothing was recorded; a rejection, a failure, or an answer that
- * never came marks the line ended, and the stream or the newest page
- * settles it. A line comes back to the thread it was written in, open or
- * not. A line on the thread whose turn did not complete sets the notice,
- * as does another surface's. `completed` settles nothing here.
+ * A line's end, from the stream or the turn's answer. The stream is
+ * ordered: a `turn_completed` that finds the line still pending came
+ * without a `user_message` before it, so the line was never committed and
+ * goes back to the composer with the message. The answer is not ordered
+ * against the stream and can beat the frame that would show the line, so
+ * from the answer only a refusal hands it back — nothing was recorded; a
+ * rejection or a failure is the daemon's word on the turn, said now, and
+ * marks the line for the stream or the newest page to settle. A line
+ * comes back to the thread it was written in, open or not. A turn that
+ * did not complete sets the notice, this tab's or another surface's.
+ * `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
@@ -338,18 +321,28 @@ export function lineEnded(
     return noticed(state, notice);
   }
 
-  if (from === 'answer' && ending.status !== 'refused') {
-    const pending = new Map(state.pending);
+  return from === 'answer' && ending.status !== 'refused'
+    ? noticed(marked(state, clientMessageId, line, notice), notice)
+    : handedBack(state, clientMessageId, line, notice);
+}
 
-    pending.set(clientMessageId, {
-      ...line,
-      ended: {status: ending.status, notice},
-    });
+/**
+ * The answer never came, and said nothing about the turn: the daemon may
+ * have taken the line or never heard it. A line still pending keeps the
+ * reason, to come back with if the newest page lacks it; a line the page
+ * has already placed — shown by the stream, or returned — is left as it
+ * is, so a lost answer never reads as a failure under a line that landed.
+ */
+export function answerLost(
+  state: WebState,
+  clientMessageId: string,
+  message: string,
+): WebState {
+  const line = state.pending.get(clientMessageId);
 
-    return {...state, notice, pending};
-  }
-
-  return handedBack(state, clientMessageId, line, notice);
+  return line === undefined
+    ? state
+    : marked(state, clientMessageId, line, message);
 }
 
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
@@ -489,28 +482,34 @@ function withThread(
   return thread === state.thread ? state : {...state, thread};
 }
 
-/**
- * The daemon took the line after all. An answer that never came said
- * nothing about the turn, so the doubt it raised goes with it; a turn the
- * daemon judged — rejected, failed — keeps its word, since the line
- * landing is not a rebuttal of it.
- */
+/** The daemon took the line, whichever thread it went to; what its ending said stands. */
 function settled(state: WebState, clientMessageId: string): WebState {
-  const ended = state.pending.get(clientMessageId)?.ended;
   const pending = new Map(state.pending);
 
   pending.delete(clientMessageId);
 
-  return {
-    ...state,
-    pending,
-    ...(ended?.status === 'unsent' && state.notice === ended.notice
-      ? {notice: undefined}
-      : {}),
-  };
+  return {...state, pending};
 }
 
-/** The line was never taken: it is its own thread's composer again, with the reason. */
+/** The line keeps what it would come back with. */
+function marked(
+  state: WebState,
+  clientMessageId: string,
+  line: PendingLine,
+  ended: string,
+): WebState {
+  const pending = new Map(state.pending);
+
+  pending.set(clientMessageId, {...line, ended});
+
+  return {...state, pending};
+}
+
+/**
+ * The line was never taken: it goes back to its own thread's composer,
+ * after what is there, with the reason. Lines come back in the order they
+ * were sent, one at a time from the stream or together from a page.
+ */
 function handedBack(
   state: WebState,
   clientMessageId: string,
@@ -526,7 +525,7 @@ function handedBack(
     ...composing(
       {...state, pending},
       line.conversationId,
-      typed.length === 0 ? line.text : `${line.text} ${typed}`,
+      typed.length === 0 ? line.text : `${typed} ${line.text}`,
     ),
     notice,
   };

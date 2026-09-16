@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  answerLost,
   applyEvent,
   composerChanged,
   composerText,
@@ -353,9 +354,9 @@ describe('web store', () => {
     expect(fresh.thread?.earlier).toBe('v1:0:7');
   });
 
-  it('hands a line back to the composer at once when the stream ends its turn without having shown it, or when the answer refuses it — once, and never for a completed turn', () => {
+  it('hands a line back to the composer at once when the stream ends its turn without having shown it, or when the answer refuses it — after what is typed, in the order sent, once, and never for a completed turn', () => {
     const state = composerChanged(
-      sent(opened(), 'hello', 'line-1'),
+      sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
       'next thought',
     );
     const fromStream = applyEvent(
@@ -363,8 +364,8 @@ describe('web store', () => {
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
-    expect(composerText(fromStream)).toBe('hello next thought');
-    expect(fromStream.pending.size).toBe(0);
+    expect(composerText(fromStream)).toBe('next thought first');
+    expect(fromStream.pending.size).toBe(1);
     expect(fromStream.thread?.busy).toBe(false);
     expect(fromStream.notice).toBe('The line was blank.');
 
@@ -373,8 +374,19 @@ describe('web store', () => {
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
-    expect(composerText(again)).toBe('hello next thought');
+    expect(composerText(again)).toBe('next thought first');
     expect(again.notice).toBe(fromStream.notice);
+
+    // The ordered stream ends the queued line on its own, later: it lands
+    // after the first, as it was sent.
+    const both = applyEvent(
+      again,
+      completed('line-2', 'failed', 'The store is full.'),
+    );
+
+    expect(composerText(both)).toBe('next thought first second');
+    expect(both.pending.size).toBe(0);
+    expect(both.notice).toBe('The store is full.');
 
     const refused = lineEnded(
       state,
@@ -383,8 +395,8 @@ describe('web store', () => {
       'answer',
     );
 
-    expect(composerText(refused)).toBe('hello next thought');
-    expect(refused.pending.size).toBe(0);
+    expect(composerText(refused)).toBe('next thought first');
+    expect(refused.pending.size).toBe(1);
     expect(refused.notice).toBe('The gateway holds no open conversation.');
 
     expect(lineEnded(state, 'line-1', {status: 'completed'}, 'answer')).toBe(
@@ -405,10 +417,7 @@ describe('web store', () => {
     expect(marked.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-      ended: {
-        status: 'rejected',
-        notice: 'The model wrote nothing it could say.',
-      },
+      ended: 'The model wrote nothing it could say.',
     });
     expect(marked.notice).toBe('The model wrote nothing it could say.');
 
@@ -444,22 +453,6 @@ describe('web store', () => {
     expect(queued.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-    });
-
-    const unsent = lineEnded(
-      state,
-      'line-1',
-      {status: 'unsent', message: 'The daemon could not be reached.'},
-      'answer',
-    );
-
-    expect(unsent.pending.get('line-1')).toEqual({
-      conversationId,
-      text: 'hello',
-      ended: {
-        status: 'unsent',
-        notice: 'The daemon could not be reached.',
-      },
     });
   });
 
@@ -530,7 +523,7 @@ describe('web store', () => {
     );
   });
 
-  it('keeps what a person typed in each thread, and takes back the false failure of a line that did land', () => {
+  it('keeps what a person typed in each thread', () => {
     const nova = {
       status: 'opened' as const,
       conversationId: 'conv-2',
@@ -549,32 +542,52 @@ describe('web store', () => {
 
     expect(composerText(state)).toBe('something for nova');
     expect(composerText(threadOpened(state, mira))).toBe('half a thought');
+  });
 
-    // A send whose answer never came says so, then the stream proves the
-    // daemon had taken the line: the failure was never true.
-    state = lineEnded(
-      sent(threadOpened(state, mira), 'hello', 'line-1'),
+  it("says nothing of an answer that never came until the page knows the line's fate: nothing once it landed, the reason when it comes back", () => {
+    const state = sent(opened(), 'hello', 'line-1');
+    const lost = answerLost(
+      state,
       'line-1',
-      {status: 'unsent', message: 'The daemon could not be reached.'},
-      'answer',
+      'The daemon could not be reached.',
     );
 
-    expect(state.notice).toBe('The daemon could not be reached.');
+    expect(lost.notice).toBeUndefined();
+    expect(lost.pending.get('line-1')).toEqual({
+      conversationId,
+      text: 'hello',
+      ended: 'The daemon could not be reached.',
+    });
 
-    const landed = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
+    // The stream proves the daemon took the line, or the newest page does.
+    const landed = applyEvent(lost, userMessage('m-1', 'hello', 'line-1'));
 
     expect(landed.notice).toBeUndefined();
     expect(landed.pending.size).toBe(0);
 
-    // And the same when the newest page is what proves it.
     const read = historyPageRead(
-      state,
+      lost,
       conversationId,
       'newest',
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
     expect(read.notice).toBeUndefined();
+    expect(read.pending.size).toBe(0);
+
+    // The stream showed the line before the answer was lost: nothing to say.
+    const shown = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
+
+    expect(
+      answerLost(shown, 'line-1', 'The daemon could not be reached.'),
+    ).toBe(shown);
+
+    // The newest page lacks it: it comes back, and the reason is said.
+    const absent = historyPageRead(lost, conversationId, 'newest', page([]));
+
+    expect(composerText(absent)).toBe('hello');
+    expect(absent.pending.size).toBe(0);
+    expect(absent.notice).toBe('The daemon could not be reached.');
   });
 
   it('gives every pending line back, in the order it was written, when the address will never work again', () => {

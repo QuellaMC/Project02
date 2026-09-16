@@ -13,6 +13,7 @@ import {
   type GatewayClient,
 } from '../../gateway/client/index.ts';
 import {
+  answerLost,
   applyEvent,
   composerChanged,
   connectionRefused,
@@ -222,14 +223,7 @@ export function createSession(address: string): Session {
           ),
         );
       } catch (error: unknown) {
-        apply(current =>
-          lineEnded(
-            current,
-            clientMessageId,
-            {status: 'unsent', message: problem(error)},
-            'answer',
-          ),
-        );
+        apply(current => answerLost(current, clientMessageId, problem(error)));
         // No answer came, and the daemon may never have heard the line: the
         // newest page says whether it did, when it can be read.
         await readPage(thread.conversationId, 'newest', {});
