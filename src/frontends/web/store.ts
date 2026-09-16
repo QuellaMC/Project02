@@ -48,6 +48,11 @@ export type Thread = {
   readonly characterId: string;
   readonly conversationId: string;
   readonly userParticipantId: string;
+  /**
+   * What was shown before the stream reconnected: still on screen, but
+   * stitched to nothing that comes, until the newest page replaces it.
+   */
+  readonly stale: readonly Message[];
   /** Chronological, unique by message id. */
   readonly messages: readonly Message[];
   /** The cursor while older messages exist. */
@@ -76,7 +81,7 @@ export type WebState = {
   /**
    * The page's one notice: how a turn did not complete, a confirmation
    * that expired, a page that could not be read, a verb the daemon
-   * refused. Spent by the next send or open.
+   * refused. Spent by the person's next act.
    */
   readonly notice?: string | undefined;
 };
@@ -105,8 +110,9 @@ export function composerText(state: WebState): string {
 
 /**
  * Every `ready` is the truth: the roster and the waiting confirmations
- * replace, every open draft drops, and the thread empties for the newest
- * page the session reads next — nothing shown is stitched to it.
+ * replace, every open draft drops, and what the thread shows is set aside
+ * for the newest page the session reads next — kept on screen, stitched
+ * to nothing that comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -122,6 +128,7 @@ export function installSnapshot(
       : {
           thread: {
             ...state.thread,
+            stale: [...state.thread.stale, ...state.thread.messages],
             messages: [],
             earlier: undefined,
             drafts: new Map(),
@@ -150,6 +157,11 @@ export function noticed(state: WebState, notice: string): WebState {
   return state.notice === notice ? state : {...state, notice};
 }
 
+/** The person's next act — a send, an open, an answer, a start — spends the notice. */
+export function noticeSpent(state: WebState): WebState {
+  return state.notice === undefined ? state : {...state, notice: undefined};
+}
+
 /**
  * A page that could not be read, said only for the thread still on
  * screen: a read left behind by a switch of characters must not tell a
@@ -167,12 +179,12 @@ export function pageUnread(
 
 export function threadOpened(state: WebState, opened: Opened): WebState {
   return {
-    ...state,
-    notice: undefined,
+    ...noticeSpent(state),
     thread: {
       characterId: opened.characterId,
       conversationId: opened.conversationId,
       userParticipantId: opened.userParticipantId,
+      stale: [],
       messages: [],
       drafts: new Map(),
       busy: false,
@@ -190,11 +202,11 @@ export function composerChanged(state: WebState, text: string): WebState {
  * The newest page is the thread. What was shown before its first message
  * — earlier pages — stays before it, and what arrived live after its last
  * message stays after it; a page that meets nothing shown is the whole
- * thread, and what was shown came live after it. A pending line of this
- * thread that the page carries is settled; one it lacks whose turn has
- * ended comes back to the composer; one whose turn has not run yet stays
- * pending. An earlier page goes in front, once — the same cursor read
- * twice is the same page.
+ * thread, and what was shown came live after it. What a reconnect set
+ * aside is replaced. A pending line of this thread that the page carries
+ * is settled; one it lacks whose turn has ended comes back to the
+ * composer; one whose turn has not run yet stays pending. An earlier page
+ * goes in front, once — the same cursor read twice is the same page.
  */
 export function historyPageRead(
   state: WebState,
@@ -250,6 +262,7 @@ export function historyPageRead(
     ...state,
     thread: {
       ...thread,
+      stale: [],
       messages: [...before, ...messages, ...after],
       // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.
       earlier: before.length === 0 ? outcome.earlier : thread.earlier,
@@ -271,7 +284,7 @@ export function historyPageRead(
   return next;
 }
 
-/** The composer's line becomes pending under its id, for the open thread; the notice is spent. */
+/** The composer's line becomes pending under its id, for the open thread. */
 export function lineSent(state: WebState, clientMessageId: string): WebState {
   const {thread} = state;
   const text = composerText(state).trim();
@@ -285,8 +298,7 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
   pending.set(clientMessageId, {conversationId: thread.conversationId, text});
 
   return {
-    ...composing(state, thread.conversationId, ''),
-    notice: undefined,
+    ...noticeSpent(composing(state, thread.conversationId, '')),
     pending,
   };
 }

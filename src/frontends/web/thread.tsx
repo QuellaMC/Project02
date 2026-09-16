@@ -46,7 +46,8 @@ export function ThreadPane({
   const scroller = useRef<HTMLDivElement>(null);
   // The view follows the thread's end unless the person scrolled up to read.
   const following = useRef(true);
-  const lastMessageId = thread.messages.at(-1)?.messageId;
+  const shown = [...thread.stale, ...thread.messages];
+  const lastMessageId = shown.at(-1)?.messageId;
 
   useEffect(() => {
     if (following.current) {
@@ -85,7 +86,7 @@ export function ThreadPane({
             Load earlier
           </button>
         )}
-        {thread.messages.map(message => (
+        {shown.map(message => (
           <Bubble
             key={message.messageId}
             own={message.speakerId === thread.userParticipantId}

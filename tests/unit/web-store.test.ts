@@ -11,6 +11,7 @@ import {
   installSnapshot,
   lineEnded,
   lineSent,
+  noticeSpent,
   pageUnread,
   threadOpened,
   type WebState,
@@ -156,7 +157,7 @@ function sent(state: WebState, text: string, clientMessageId: string) {
 }
 
 describe('web store', () => {
-  it('installs every ready as the truth: roster and confirmations replace, drafts drop, the thread empties for its newest page', () => {
+  it('installs every ready as the truth: roster and confirmations replace, drafts drop, and what the thread shows stays on screen until its newest page replaces it', () => {
     let state = applyEvent(
       opened(),
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
@@ -169,10 +170,40 @@ describe('web store', () => {
     expect(state.health?.characters).toEqual([mira]);
     expect(state.confirmations.map(pending => pending.id)).toEqual(['c-1']);
     expect(state.thread).toMatchObject({
+      stale: [{messageId: 'm-1'}],
       messages: [],
       drafts: new Map(),
       busy: false,
     });
+
+    // A page that cannot be read leaves what was shown in place, with the notice.
+    const unread = historyPageRead(state, conversationId, 'newest', {
+      status: 'failed',
+      code: 'missing_file',
+      message: 'The thread could not be read.',
+    });
+
+    expect(unread.thread?.stale.map(message => message.messageId)).toEqual([
+      'm-1',
+    ]);
+    expect(unread.notice).toBe('The thread could not be read.');
+
+    // The newest page replaces what was set aside and keeps what arrived
+    // live after the reconnect.
+    state = applyEvent(state, userMessage('m-3', 'meanwhile', 'line-3'));
+    state = historyPageRead(
+      state,
+      conversationId,
+      'newest',
+      page([committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')]),
+    );
+
+    expect(state.thread?.stale).toEqual([]);
+    expect(state.thread?.messages.map(message => message.messageId)).toEqual([
+      'm-1',
+      'm-2',
+      'm-3',
+    ]);
   });
 
   it('shows a line once the daemon says so: the pending bubble becomes the message, and a frame seen twice shows once', () => {
@@ -604,7 +635,7 @@ describe('web store', () => {
     expect(composerText(state)).toBe('first second');
   });
 
-  it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the next send spends the notice", () => {
+  it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the person's next act spends the notice", () => {
     let state = sent(opened(), 'hello', 'line-1');
 
     state = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
@@ -629,9 +660,11 @@ describe('web store', () => {
 
     expect(state.notice).toBe('provider_error');
 
-    state = sent(state, 'again', 'line-2');
+    const spent = noticeSpent(state);
 
-    expect(state.notice).toBeUndefined();
+    expect(spent.notice).toBeUndefined();
+    expect(noticeSpent(spent)).toBe(spent);
+    expect(sent(state, 'again', 'line-2').notice).toBeUndefined();
   });
 
   it('tracks confirmations by id, whatever surface raised them, and says when one expired', () => {

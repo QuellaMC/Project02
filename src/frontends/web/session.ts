@@ -22,6 +22,7 @@ import {
   installSnapshot,
   lineEnded,
   lineSent,
+  noticeSpent,
   noticed,
   pageUnread,
   threadOpened,
@@ -241,6 +242,8 @@ export function createSession(address: string): Session {
       });
     },
     async answer(id, decision) {
+      apply(noticeSpent);
+
       // The card leaves on the settled event; an expiry is said by it too.
       try {
         await client.answerConfirmation(id, decision);
@@ -249,6 +252,8 @@ export function createSession(address: string): Session {
       }
     },
     async start(characterId) {
+      apply(noticeSpent);
+
       try {
         const outcome = await client.startCharacter(characterId);
 
