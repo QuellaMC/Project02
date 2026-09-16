@@ -39,6 +39,8 @@ export function ThreadPane({
   const pending = [...state.pending].filter(
     ([, line]) => line.conversationId === thread.conversationId,
   );
+  const turn = state.turns.get(thread.conversationId);
+  const drafts = [...(turn?.drafts ?? [])];
   const typed = composerText(state);
   // Nothing can be sent into an address that will never work again; the
   // banner says where to go, and what was typed stays here.
@@ -53,7 +55,7 @@ export function ThreadPane({
     if (following.current) {
       scroller.current?.scrollTo({top: scroller.current.scrollHeight});
     }
-  }, [lastMessageId, thread.drafts, pending.length, cards.length]);
+  }, [lastMessageId, turn?.drafts, pending.length, cards.length]);
 
   return (
     <section className="thread">
@@ -94,10 +96,10 @@ export function ThreadPane({
             text={message.text}
           />
         ))}
-        {[...thread.drafts].map(([draftId, text]) => (
+        {drafts.map(([draftId, text]) => (
           <Bubble key={draftId} name={name} text={text} draft />
         ))}
-        {thread.busy && thread.drafts.size === 0 ? (
+        {turn?.busy === true && drafts.length === 0 ? (
           <p className="typing muted small">{name} is writing…</p>
         ) : null}
         {pending.map(([clientMessageId, line]) => (

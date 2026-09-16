@@ -44,6 +44,7 @@ export type PendingLine = {
   readonly ended?: string;
 };
 
+/** The one open DM as its log shows it. */
 export type Thread = {
   readonly characterId: string;
   readonly conversationId: string;
@@ -57,10 +58,20 @@ export type Thread = {
   readonly messages: readonly Message[];
   /** The cursor while older messages exist. */
   readonly earlier?: string | undefined;
+};
+
+/**
+ * What a conversation has to show that its log does not, kept for every
+ * conversation because only the stream says it: a turn running there —
+ * the typing indicator until the first delta or the end — each draft's
+ * text so far, and how its last turn ended, held for a thread not on
+ * screen until it is opened.
+ */
+export type TurnState = {
+  readonly busy: boolean;
   /** Draft id → the reply's text so far. */
   readonly drafts: ReadonlyMap<string, string>;
-  /** A turn runs: the typing indicator until the first delta or the end. */
-  readonly busy: boolean;
+  readonly ended?: string;
 };
 
 export type WebState = {
@@ -78,10 +89,12 @@ export type WebState = {
    * line the daemon did not take comes back where it was written.
    */
   readonly composers: ReadonlyMap<string, string>;
+  /** Conversation id → its turn's news; absent when there is none. */
+  readonly turns: ReadonlyMap<string, TurnState>;
   /**
-   * The page's one notice: how a turn did not complete, a confirmation
-   * that expired, a page that could not be read, a verb the daemon
-   * refused. Spent by the person's next act.
+   * The page's one notice: how a turn on the thread on screen did not
+   * complete, a confirmation that expired, a page that could not be read,
+   * a verb the daemon refused. Spent by the person's next act.
    */
   readonly notice?: string | undefined;
 };
@@ -94,11 +107,14 @@ export type LineEnding = {
 
 export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 
+const noTurn: TurnState = {busy: false, drafts: new Map()};
+
 export const initialState: WebState = {
   connection: {status: 'connecting'},
   confirmations: [],
   pending: new Map(),
   composers: new Map(),
+  turns: new Map(),
 };
 
 /** What the person has typed in the thread on screen. */
@@ -110,9 +126,9 @@ export function composerText(state: WebState): string {
 
 /**
  * Every `ready` is the truth: the roster and the waiting confirmations
- * replace, every open draft drops, and what the thread shows is set aside
- * for the newest page the session reads next — kept on screen, stitched
- * to nothing that comes.
+ * replace, every turn's news drops, and what the thread shows is set
+ * aside for the newest page the session reads next — kept on screen,
+ * stitched to nothing that comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -123,6 +139,7 @@ export function installSnapshot(
     connection: {status: 'live'},
     health: snapshot.health,
     confirmations: snapshot.confirmations,
+    turns: new Map(),
     ...(state.thread === undefined
       ? {}
       : {
@@ -131,8 +148,6 @@ export function installSnapshot(
             stale: [...state.thread.stale, ...state.thread.messages],
             messages: [],
             earlier: undefined,
-            drafts: new Map(),
-            busy: false,
           },
         }),
   };
@@ -147,7 +162,11 @@ export function connectionRefused(state: WebState, message: string): WebState {
   let next: WebState = {...state, connection: {status: 'refused', message}};
 
   for (const [clientMessageId, line] of state.pending) {
-    next = handedBack(next, clientMessageId, line, line.ended ?? message);
+    next = told(
+      handedBack(next, clientMessageId, line),
+      line.conversationId,
+      line.ended ?? message,
+    );
   }
 
   return next;
@@ -177,17 +196,22 @@ export function pageUnread(
     : state;
 }
 
+/** The thread opens empty for its newest page, with what its last turn left to say. */
 export function threadOpened(state: WebState, opened: Opened): WebState {
+  const {conversationId} = opened;
+
   return {
-    ...noticeSpent(state),
+    ...withTurn(state, conversationId, turn => ({
+      busy: turn.busy,
+      drafts: turn.drafts,
+    })),
+    notice: state.turns.get(conversationId)?.ended,
     thread: {
       characterId: opened.characterId,
-      conversationId: opened.conversationId,
+      conversationId,
       userParticipantId: opened.userParticipantId,
       stale: [],
       messages: [],
-      drafts: new Map(),
-      busy: false,
     },
   };
 }
@@ -277,7 +301,11 @@ export function historyPageRead(
     if (carried.has(clientMessageId)) {
       next = settled(next, clientMessageId);
     } else if (line.ended !== undefined) {
-      next = handedBack(next, clientMessageId, line, line.ended);
+      next = told(
+        handedBack(next, clientMessageId, line),
+        conversationId,
+        line.ended,
+      );
     }
   }
 
@@ -307,17 +335,17 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * A line's end, from the stream or the turn's answer. The stream is
  * ordered: a `turn_completed` that finds the line still pending came
  * without a `user_message` before it, so the line was never committed and
- * goes back to the composer with the message. The answer is not ordered
- * against the stream and can beat the frame that would show the line, so
- * from the answer only a refusal hands it back — nothing was recorded; a
- * rejection or a failure is the daemon's word on the turn, said now, and
- * marks the line for the stream or the newest page to settle. A line
- * comes back to the thread it was written in, open or not. A turn that
- * did not complete sets the notice, this tab's or another surface's.
- * `completed` settles nothing here.
+ * goes back to the composer. The answer is not ordered against the stream
+ * and can beat the frame that would show the line, so from the answer
+ * only a refusal hands it back — nothing was recorded; a rejection or a
+ * failure marks the line for the stream or the newest page to settle. A
+ * line comes back to the thread it was written in, open or not. A turn
+ * that did not complete is told to its conversation, this tab's or
+ * another surface's. `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
+  conversationId: string,
   clientMessageId: string,
   ending: LineEnding,
   from: 'answer' | 'stream',
@@ -328,14 +356,14 @@ export function lineEnded(
 
   const notice = ending.message ?? `The turn was ${ending.status}.`;
   const line = state.pending.get(clientMessageId);
+  const placed =
+    line === undefined
+      ? state
+      : from === 'answer' && ending.status !== 'refused'
+        ? marked(state, clientMessageId, line, notice)
+        : handedBack(state, clientMessageId, line);
 
-  if (line === undefined) {
-    return noticed(state, notice);
-  }
-
-  return from === 'answer' && ending.status !== 'refused'
-    ? noticed(marked(state, clientMessageId, line, notice), notice)
-    : handedBack(state, clientMessageId, line, notice);
+  return told(placed, conversationId, notice);
 }
 
 /**
@@ -394,29 +422,20 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         state.pending.has(progress.clientMessageId)
           ? settled(state, progress.clientMessageId)
           : state;
-
-      return withThread(taken, thread =>
+      const shown = withThread(taken, thread =>
         thread.conversationId === event.conversationId
-          ? applyProgress(thread, progress)
+          ? committed(thread, progress)
           : thread,
       );
-    }
-    case 'turn_completed': {
-      // A turn's end reaches this tab's own line wherever it was written;
-      // another surface's turn is news only on the thread being read.
-      if (
-        !state.pending.has(event.clientMessageId) &&
-        state.thread?.conversationId !== event.conversationId
-      ) {
-        return state;
-      }
 
+      return withTurn(shown, event.conversationId, turn =>
+        turnProgress(turn, progress),
+      );
+    }
+    case 'turn_completed':
       return lineEnded(
-        withThread(state, thread =>
-          thread.conversationId === event.conversationId
-            ? {...thread, busy: false}
-            : thread,
-        ),
+        withTurn(state, event.conversationId, () => noTurn),
+        event.conversationId,
         event.clientMessageId,
         {
           status: event.status,
@@ -428,56 +447,51 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         },
         'stream',
       );
-    }
   }
 }
 
-function applyProgress(
+/** A committed message of the thread on screen joins it; the log holds the rest. */
+function committed(
   thread: Thread,
   progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
 ): Thread {
+  return progress.kind === 'user_message' || progress.kind === 'visible_reply'
+    ? {...thread, messages: appendMessage(thread.messages, messageOf(progress))}
+    : thread;
+}
+
+function turnProgress(
+  turn: TurnState,
+  progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
+): TurnState {
   switch (progress.kind) {
     case 'user_message':
-      return {
-        ...thread,
-        messages: appendMessage(thread.messages, messageOf(progress)),
-        busy: true,
-      };
-    case 'visible_reply': {
-      const drafts = new Map(thread.drafts);
-
-      drafts.delete(progress.draftId);
-
-      return {
-        ...thread,
-        messages: appendMessage(thread.messages, messageOf(progress)),
-        drafts,
-      };
-    }
+      return turn.busy ? turn : {...turn, busy: true};
     case 'reply_delta': {
-      const drafts = new Map(thread.drafts);
+      const drafts = new Map(turn.drafts);
 
       drafts.set(
         progress.draftId,
         (drafts.get(progress.draftId) ?? '') + progress.text,
       );
 
-      return {...thread, drafts};
+      return {...turn, drafts};
     }
+    case 'visible_reply':
     case 'reply_withdrawn': {
-      if (!thread.drafts.has(progress.draftId)) {
-        return thread;
+      if (!turn.drafts.has(progress.draftId)) {
+        return turn;
       }
 
-      const drafts = new Map(thread.drafts);
+      const drafts = new Map(turn.drafts);
 
       drafts.delete(progress.draftId);
 
-      return {...thread, drafts};
+      return {...turn, drafts};
     }
     case 'tool_calls_requested':
     case 'tool_call_completed':
-      return thread;
+      return turn;
   }
 }
 
@@ -492,6 +506,43 @@ function withThread(
   const thread = update(state.thread);
 
   return thread === state.thread ? state : {...state, thread};
+}
+
+/** A conversation's turn record, kept while it has news and dropped when it has none. */
+function withTurn(
+  state: WebState,
+  conversationId: string,
+  update: (turn: TurnState) => TurnState,
+): WebState {
+  const turn = state.turns.get(conversationId) ?? noTurn;
+  const next = update(turn);
+
+  if (next === turn) {
+    return state;
+  }
+
+  const turns = new Map(state.turns);
+
+  if (next.busy || next.drafts.size > 0 || next.ended !== undefined) {
+    turns.set(conversationId, next);
+  } else if (!turns.delete(conversationId)) {
+    return state;
+  }
+
+  return {...state, turns};
+}
+
+/** A turn's end is told to its conversation: the notice while that thread is on screen, kept for it otherwise. */
+function told(
+  state: WebState,
+  conversationId: string,
+  notice: string,
+): WebState {
+  return state.thread?.conversationId === conversationId
+    ? noticed(state, notice)
+    : withTurn(state, conversationId, turn =>
+        turn.ended === notice ? turn : {...turn, ended: notice},
+      );
 }
 
 /** The daemon took the line, whichever thread it went to; what its ending said stands. */
@@ -519,28 +570,24 @@ function marked(
 
 /**
  * The line was never taken: it goes back to its own thread's composer,
- * after what is there, with the reason. Lines come back in the order they
- * were sent, one at a time from the stream or together from a page.
+ * after what is there. Lines come back in the order they were sent, one
+ * at a time from the stream or together from a page.
  */
 function handedBack(
   state: WebState,
   clientMessageId: string,
   line: PendingLine,
-  notice: string,
 ): WebState {
   const pending = new Map(state.pending);
   const typed = state.composers.get(line.conversationId) ?? '';
 
   pending.delete(clientMessageId);
 
-  return {
-    ...composing(
-      {...state, pending},
-      line.conversationId,
-      typed.length === 0 ? line.text : `${typed} ${line.text}`,
-    ),
-    notice,
-  };
+  return composing(
+    {...state, pending},
+    line.conversationId,
+    typed.length === 0 ? line.text : `${typed} ${line.text}`,
+  );
 }
 
 /** One conversation's unsent text; empty means nothing is being written there. */

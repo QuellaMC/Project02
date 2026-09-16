@@ -157,7 +157,7 @@ function sent(state: WebState, text: string, clientMessageId: string) {
 }
 
 describe('web store', () => {
-  it('installs every ready as the truth: roster and confirmations replace, drafts drop, and what the thread shows stays on screen until its newest page replaces it', () => {
+  it("installs every ready as the truth: roster and confirmations replace, every turn's news drops, and what the thread shows stays on screen until its newest page replaces it", () => {
     let state = applyEvent(
       opened(),
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
@@ -169,11 +169,10 @@ describe('web store', () => {
     expect(state.connection).toEqual({status: 'live'});
     expect(state.health?.characters).toEqual([mira]);
     expect(state.confirmations.map(pending => pending.id)).toEqual(['c-1']);
+    expect(state.turns.size).toBe(0);
     expect(state.thread).toMatchObject({
       stale: [{messageId: 'm-1'}],
       messages: [],
-      drafts: new Map(),
-      busy: false,
     });
 
     // A page that cannot be read leaves what was shown in place, with the notice.
@@ -218,7 +217,7 @@ describe('web store', () => {
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
 
     expect(state.pending.size).toBe(0);
-    expect(state.thread?.busy).toBe(true);
+    expect(state.turns.get(conversationId)?.busy).toBe(true);
     expect(state.thread?.messages).toEqual([
       {
         messageId: 'm-1',
@@ -245,7 +244,7 @@ describe('web store', () => {
       progress({kind: 'reply_delta', draftId: '1.1', text: 'and'}),
     );
 
-    expect([...(state.thread?.drafts.entries() ?? [])]).toEqual([
+    expect([...(state.turns.get(conversationId)?.drafts ?? [])]).toEqual([
       ['1.0', 'I remember you'],
       ['1.1', 'and'],
     ]);
@@ -266,7 +265,7 @@ describe('web store', () => {
       progress({kind: 'reply_withdrawn', draftId: '1.1'}),
     );
 
-    expect(state.thread?.drafts.size).toBe(0);
+    expect(state.turns.has(conversationId)).toBe(false);
     expect(state.thread?.messages.map(message => message.text)).toEqual([
       'I remember you',
     ]);
@@ -277,6 +276,62 @@ describe('web store', () => {
     );
 
     expect(unchanged).toBe(state);
+  });
+
+  it('keeps a reply being written in a thread the person left, whole, with its typing indicator, for when they come back', () => {
+    const nova = {
+      status: 'opened' as const,
+      conversationId: 'conv-2',
+      characterId: 'nova',
+      userParticipantId: 'local-user',
+    };
+    const mira = {
+      status: 'opened' as const,
+      conversationId,
+      characterId: 'mira',
+      userParticipantId: 'local-user',
+    };
+    let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
+
+    state = applyEvent(
+      state,
+      progress({kind: 'reply_delta', draftId: '1.0', text: 'I remember '}),
+    );
+    state = threadOpened(state, nova);
+    state = applyEvent(
+      state,
+      progress({kind: 'reply_delta', draftId: '1.0', text: 'you'}),
+    );
+    state = threadOpened(state, mira);
+
+    expect(state.turns.get(conversationId)).toEqual({
+      busy: true,
+      drafts: new Map([['1.0', 'I remember you']]),
+    });
+
+    // The commit takes the draft wherever the person is, and the turn's
+    // end takes the rest.
+    state = applyEvent(
+      threadOpened(state, nova),
+      progress({
+        kind: 'visible_reply',
+        messageId: 'm-2',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'I remember you',
+        draftId: '1.0',
+      }),
+    );
+
+    expect(state.turns.get(conversationId)).toEqual({
+      busy: true,
+      drafts: new Map(),
+    });
+
+    state = applyEvent(state, completed('line-1'));
+
+    expect(state.turns.has(conversationId)).toBe(false);
+    expect(state.notice).toBeUndefined();
   });
 
   it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {
@@ -397,7 +452,6 @@ describe('web store', () => {
 
     expect(composerText(fromStream)).toBe('next thought first');
     expect(fromStream.pending.size).toBe(1);
-    expect(fromStream.thread?.busy).toBe(false);
     expect(fromStream.notice).toBe('The line was blank.');
 
     const again = applyEvent(
@@ -421,6 +475,7 @@ describe('web store', () => {
 
     const refused = lineEnded(
       state,
+      conversationId,
       'line-1',
       {status: 'refused', message: 'The gateway holds no open conversation.'},
       'answer',
@@ -430,15 +485,22 @@ describe('web store', () => {
     expect(refused.pending.size).toBe(1);
     expect(refused.notice).toBe('The gateway holds no open conversation.');
 
-    expect(lineEnded(state, 'line-1', {status: 'completed'}, 'answer')).toBe(
-      state,
-    );
+    expect(
+      lineEnded(
+        state,
+        conversationId,
+        'line-1',
+        {status: 'completed'},
+        'answer',
+      ),
+    ).toBe(state);
   });
 
   it('lets the answer mark a line ended but not hand it back, since its frame may still be on the way: the stream or the newest page settles it', () => {
     const state = sent(opened(), 'hello', 'line-1');
     const marked = lineEnded(
       state,
+      conversationId,
       'line-1',
       {status: 'rejected', message: 'The model wrote nothing it could say.'},
       'answer',
@@ -487,7 +549,7 @@ describe('web store', () => {
     });
   });
 
-  it('keeps a line sent to one character while another is open, and hands it back in its own thread', () => {
+  it("keeps a line sent to one character while another is open, hands it back in its own thread, and tells a turn's end to its own thread when that thread is opened", () => {
     const nova = {
       status: 'opened' as const,
       conversationId: 'conv-2',
@@ -507,10 +569,11 @@ describe('web store', () => {
       text: 'hello mira',
     });
 
-    // Mira's daemon-side turn ends while Nova is open: the line goes back
-    // to Mira's composer, never into Nova's.
+    // Mira's turn ends while Nova is open: the line goes back to Mira's
+    // composer, never into Nova's, and the reason waits for Mira's thread.
     const ended = lineEnded(
       state,
+      conversationId,
       'line-1',
       {status: 'refused', message: 'Mira is away.'},
       'answer',
@@ -518,12 +581,14 @@ describe('web store', () => {
 
     expect(composerText(ended)).toBe('');
     expect(ended.pending.size).toBe(0);
-    expect(ended.notice).toBe('Mira is away.');
+    expect(ended.notice).toBeUndefined();
 
-    // Back in Mira's thread, it is where it was written.
+    // Back in Mira's thread, it is where it was written, and the reason is said.
     state = threadOpened(ended, mira);
 
     expect(composerText(state)).toBe('hello mira');
+    expect(state.notice).toBe('Mira is away.');
+    expect(state.turns.has(conversationId)).toBe(false);
 
     // The daemon taking the line settles it whichever thread is open, and
     // a turn that ends without it ends the line just as well.
@@ -545,13 +610,17 @@ describe('web store', () => {
     );
 
     expect(failed.pending.size).toBe(0);
-    expect(failed.notice).toBe('The store is read-only.');
-    expect(composerText(threadOpened(failed, mira))).toBe('hello mira');
+    expect(failed.notice).toBeUndefined();
+    expect(threadOpened(failed, mira)).toMatchObject({
+      notice: 'The store is read-only.',
+      composers: new Map([[conversationId, 'hello mira']]),
+    });
 
-    // Another surface's turn on a thread nobody is reading says nothing.
-    expect(applyEvent(elsewhere, completed('telegram-1', 'failed'))).toBe(
-      elsewhere,
-    );
+    // Another surface's turn on a thread nobody is reading waits for it too.
+    const theirs = applyEvent(elsewhere, completed('telegram-1', 'failed'));
+
+    expect(theirs.notice).toBeUndefined();
+    expect(threadOpened(theirs, mira).notice).toBe('The turn was failed.');
   });
 
   it('keeps what a person typed in each thread', () => {
@@ -645,7 +714,7 @@ describe('web store', () => {
     );
 
     expect(state.thread?.messages).toHaveLength(1);
-    expect(state.thread?.busy).toBe(false);
+    expect(state.turns.has(conversationId)).toBe(false);
     expect(state.notice).toBe('The model wrote nothing it could say.');
 
     state = applyEvent(state, {
@@ -703,7 +772,7 @@ describe('web store', () => {
     );
   });
 
-  it("applies roster events, clears a maintenance note on a fresh start, and drops another conversation's progress", () => {
+  it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {
     let state = opened();
 
     state = applyEvent(state, {
@@ -759,7 +828,8 @@ describe('web store', () => {
       ),
     );
 
-    expect(elsewhere).toBe(state);
+    expect(elsewhere.thread).toBe(state.thread);
+    expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
   });
 
   it('reports a refused address and a page that could not be read', () => {

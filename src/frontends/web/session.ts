@@ -216,6 +216,7 @@ export function createSession(address: string): Session {
         apply(current =>
           lineEnded(
             current,
+            thread.conversationId,
             clientMessageId,
             outcome.status === 'completed'
               ? {status: 'completed'}
