@@ -28,7 +28,7 @@ import {
   noticed,
   pageUnread,
   threadOpened,
-  type Thread,
+  type PendingLine,
   type WebState,
 } from './store.ts';
 
@@ -63,7 +63,7 @@ export function createSession(address: string): Session {
     return refusedSession(problem(error));
   }
 
-  let state = {...initialState, composers: writtenAndUnsent()};
+  let state = {...initialState, ...writtenAndUnsent()};
   const listeners = new Set<() => void>();
   const apply = (reduce: (state: WebState) => WebState): void => {
     const next = reduce(state);
@@ -72,12 +72,13 @@ export function createSession(address: string): Session {
       return;
     }
 
-    const typed = next.composers !== state.composers;
+    const written =
+      next.composers !== state.composers || next.pending !== state.pending;
 
     state = next;
 
-    if (typed) {
-      keepWrittenAndUnsent(state.composers);
+    if (written) {
+      keepWrittenAndUnsent(state);
     }
 
     for (const listener of listeners) {
@@ -207,6 +208,15 @@ export function createSession(address: string): Session {
             await readPage(thread.conversationId, {});
           }
 
+          // A connection is the first chance to account for a line this
+          // tab is still holding — one whose send never reached a daemon
+          // that was going away, or one a reload restored. Under its own
+          // id, so the ledger joins what did arrive rather than saying
+          // it twice.
+          for (const [clientMessageId, line] of state.pending) {
+            void deliverOnce(sending(), line, clientMessageId);
+          }
+
           openTheOnlyCharacter();
         },
       },
@@ -214,6 +224,8 @@ export function createSession(address: string): Session {
     .catch((error: unknown) => {
       apply(current => connectionRefused(current, problem(error)));
     });
+
+  const sending = (): Sending => ({client, apply, askTheLog});
 
   return {
     getState: () => state,
@@ -253,16 +265,18 @@ export function createSession(address: string): Session {
       // ledger joins if the first one did arrive: the person's words are
       // either in the thread or on their way, never left in a bubble
       // nothing will ever settle.
-      const sending = {client, apply, askTheLog};
-
-      if (!(await deliverOnce(sending, thread, clientMessageId, line.text))) {
+      if (!(await deliverOnce(sending(), line, clientMessageId))) {
         return;
       }
 
-      await readPage(thread.conversationId, {});
+      // Nothing answered, so the log is asked; a line it does not carry
+      // goes again under the same id, which the daemon's ledger joins if
+      // the first one did arrive. One that nothing answers either waits
+      // for the next connection, which sends it again.
+      await readPage(line.conversationId, {});
 
       if (state.pending.has(clientMessageId)) {
-        await deliverOnce(sending, thread, clientMessageId, line.text);
+        await deliverOnce(sending(), line, clientMessageId);
       }
     },
     async loadEarlier() {
@@ -282,9 +296,11 @@ export function createSession(address: string): Session {
 
         // An answer the daemon took is followed by the settled frame that
         // removes the card. Anything else says the request is not waiting
-        // any more, and no frame is coming to say so.
+        // any more, and no frame is coming to say so — an expiry the
+        // broker cancelled, or one it no longer knows, which another
+        // surface may have answered either way.
         if (outcome.status !== 'answered') {
-          apply(current => confirmationGone(current, id));
+          apply(current => confirmationGone(current, id, outcome.status));
         }
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
@@ -324,15 +340,14 @@ type Sending = {
  */
 async function deliverOnce(
   sending: Sending,
-  thread: Thread,
+  line: PendingLine,
   clientMessageId: string,
-  text: string,
 ): Promise<boolean> {
   try {
     const outcome = await sending.client.deliver({
-      conversationId: thread.conversationId,
-      senderId: thread.userParticipantId,
-      text,
+      conversationId: line.conversationId,
+      senderId: line.senderId,
+      text: line.text,
       source: webSource,
       clientMessageId,
     });
@@ -340,7 +355,7 @@ async function deliverOnce(
     sending.apply(current =>
       lineEnded(
         current,
-        thread.characterId,
+        line.characterId,
         clientMessageId,
         outcome.status === 'completed'
           ? {status: 'completed', committed: true}
@@ -351,7 +366,7 @@ async function deliverOnce(
             },
       ),
     );
-    await sending.askTheLog(thread.conversationId, clientMessageId);
+    await sending.askTheLog(line.conversationId, clientMessageId);
 
     return false;
   } catch (error: unknown) {
@@ -366,7 +381,7 @@ async function deliverOnce(
       error.status !== 500
     ) {
       sending.apply(current =>
-        lineEnded(current, thread.characterId, clientMessageId, {
+        lineEnded(current, line.characterId, clientMessageId, {
           status: 'refused',
           committed: false,
           message: problem(error),
@@ -386,32 +401,69 @@ async function deliverOnce(
  * theirs. The tab's own store, so nothing outlives the tab and no other
  * tab reads it; a browser that refuses it changes nothing else.
  */
-const writtenKey = 'project02.composers';
+const writtenKey = 'project02.written';
 
-function writtenAndUnsent(): ReadonlyMap<string, string> {
+type Written = Pick<WebState, 'composers' | 'pending'>;
+
+function writtenAndUnsent(): Written {
   try {
-    const kept: unknown = JSON.parse(
-      sessionStorage.getItem(writtenKey) ?? '[]',
-    );
+    const kept: unknown = JSON.parse(sessionStorage.getItem(writtenKey) ?? '');
 
-    return new Map(
-      (Array.isArray(kept) ? kept : []).filter(
-        (entry): entry is [string, string] =>
-          Array.isArray(entry) &&
-          entry.length === 2 &&
-          entry.every(part => typeof part === 'string'),
-      ),
-    );
+    if (typeof kept !== 'object' || kept === null) {
+      return {composers: new Map(), pending: new Map()};
+    }
+
+    const {composers, pending} = kept as Record<string, unknown>;
+
+    return {
+      composers: new Map(
+        entriesOf(composers, value => typeof value === 'string'),
+      ) as ReadonlyMap<string, string>,
+      pending: new Map(entriesOf(pending, isPendingLine)) as ReadonlyMap<
+        string,
+        PendingLine
+      >,
+    };
   } catch {
-    return new Map();
+    return {composers: new Map(), pending: new Map()};
   }
 }
 
-function keepWrittenAndUnsent(composers: ReadonlyMap<string, string>): void {
+/** What a browser gave back is data, not this page's shapes: it is read as such. */
+function entriesOf(
+  kept: unknown,
+  holds: (value: unknown) => boolean,
+): readonly [string, unknown][] {
+  return (Array.isArray(kept) ? kept : []).filter(
+    (entry): entry is [string, unknown] =>
+      Array.isArray(entry) &&
+      entry.length === 2 &&
+      typeof entry[0] === 'string' &&
+      holds(entry[1]),
+  );
+}
+
+function isPendingLine(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    ['conversationId', 'characterId', 'senderId', 'text'].every(
+      field => typeof (value as Record<string, unknown>)[field] === 'string',
+    )
+  );
+}
+
+function keepWrittenAndUnsent(state: Written): void {
   try {
-    sessionStorage.setItem(writtenKey, JSON.stringify([...composers]));
+    sessionStorage.setItem(
+      writtenKey,
+      JSON.stringify({
+        composers: [...state.composers],
+        pending: [...state.pending],
+      }),
+    );
   } catch {
-    // A browser that will not keep it still shows what is typed.
+    // A browser that will not keep it still shows what is written.
   }
 }
 

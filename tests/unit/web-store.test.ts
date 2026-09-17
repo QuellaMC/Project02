@@ -246,7 +246,15 @@ describe('web store', () => {
 
     expect(composerText(state)).toBe('');
     expect([...state.pending.entries()]).toEqual([
-      ['line-1', {conversationId, text: 'hello there'}],
+      [
+        'line-1',
+        {
+          conversationId,
+          characterId: 'mira',
+          senderId: 'local-user',
+          text: 'hello there',
+        },
+      ],
     ]);
 
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
@@ -550,6 +558,8 @@ describe('web store', () => {
     expect(composerText(judged)).toBe('next thought');
     expect(judged.pending.get('line-1')).toEqual({
       conversationId,
+      characterId: 'mira',
+      senderId: 'local-user',
       text: 'first',
     });
     expect(judged.notices.at(-1)).toBe('Mira: The line was blank.');
@@ -578,6 +588,8 @@ describe('web store', () => {
     expect(composerText(judged)).toBe('');
     expect(judged.pending.get('line-1')).toEqual({
       conversationId,
+      characterId: 'mira',
+      senderId: 'local-user',
       text: 'hello',
     });
     expect(judged.notices.at(-1)).toBe(
@@ -611,6 +623,8 @@ describe('web store', () => {
 
     expect(absent.pending.get('line-1')).toEqual({
       conversationId,
+      characterId: 'mira',
+      senderId: 'local-user',
       text: 'hello',
     });
     expect(composerText(absent)).toBe('');
@@ -633,6 +647,8 @@ describe('web store', () => {
 
     expect(state.pending.get('line-1')).toEqual({
       conversationId,
+      characterId: 'mira',
+      senderId: 'local-user',
       text: 'hello mira',
     });
 
@@ -682,6 +698,8 @@ describe('web store', () => {
     // for a page of Mira's log to carry it.
     expect(failed.pending.get('line-2')).toEqual({
       conversationId,
+      characterId: 'mira',
+      senderId: 'local-user',
       text: 'hello mira',
     });
     expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
@@ -720,6 +738,8 @@ describe('web store', () => {
 
       expect(read.pending.get('line-1')).toEqual({
         conversationId,
+        characterId: 'mira',
+        senderId: 'local-user',
         text: 'hello',
       });
       expect(composerText(read)).toBe('');
@@ -866,13 +886,20 @@ describe('web store', () => {
     // The daemon can say the request is not waiting when this tab answers
     // it — the deadline passed, or another surface settled it while the
     // stream was away — and then no frame is coming to remove the card.
-    const gone = confirmationGone(state, 'c-1');
+    const gone = confirmationGone(state, 'c-1', 'expired');
 
     expect(gone.confirmations).toEqual([]);
     expect(gone.notices.at(-1)).toBe(
       'Mira: A confirmation was cancelled before it was answered.',
     );
-    expect(confirmationGone(gone, 'c-1')).toBe(gone);
+    expect(confirmationGone(gone, 'c-1', 'expired')).toBe(gone);
+
+    // A request the daemon no longer knows may have been answered
+    // somewhere else, and its tool may have run: the page says only that
+    // it is not waiting, never that it was cancelled.
+    expect(confirmationGone(state, 'c-1', 'unknown').notices.at(-1)).toBe(
+      'Mira: A confirmation is no longer waiting.',
+    );
 
     // A card that ends while the tab is away: the snapshot no longer
     // carries it, and the frame that said how is never replayed.

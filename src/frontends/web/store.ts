@@ -8,6 +8,7 @@
  */
 import type {
   CharacterSummary,
+  ConfirmationAnswerStatus,
   GatewayEvent,
   GatewayHealth,
   GatewayReady,
@@ -33,9 +34,15 @@ export type Message = {
   readonly clientMessageId?: string;
 };
 
-/** A line this tab sent that the log has not yet shown, whichever thread it went to. */
+/**
+ * A line this tab sent that the log has not yet shown, whichever thread
+ * it went to: the submission itself, so it can be sent again under its
+ * own id without a thread being open, and outlive the tab's memory.
+ */
 export type PendingLine = {
   readonly conversationId: string;
+  readonly characterId: string;
+  readonly senderId: string;
   readonly text: string;
 };
 
@@ -400,7 +407,12 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 
   const pending = new Map(state.pending);
 
-  pending.set(clientMessageId, {conversationId: thread.conversationId, text});
+  pending.set(clientMessageId, {
+    conversationId: thread.conversationId,
+    characterId: thread.characterId,
+    senderId: thread.userParticipantId,
+    text,
+  });
 
   return {
     ...noticeSpent(composing(state, thread.conversationId, '')),
@@ -450,10 +462,29 @@ export function lineEnded(
  * cancelled frame carries, said the same way, so whichever reaches the
  * tab first the person hears it once.
  */
-export function confirmationGone(state: WebState, id: string): WebState {
+export function confirmationGone(
+  state: WebState,
+  id: string,
+  outcome: ConfirmationAnswerStatus,
+): WebState {
   const card = state.confirmations.find(pending => pending.id === id);
 
-  return card === undefined ? state : cancelled(state, id, card.characterId);
+  if (card === undefined) {
+    return state;
+  }
+
+  // The broker cancels what expires, so an expiry is the same news the
+  // cancelled frame carries and is said the same way. A request the
+  // daemon does not know is another matter: another surface may have
+  // approved it, and its tool may have run, so the page says only that
+  // it is not waiting — never that it was cancelled, which would invite
+  // a person to do a settled thing again.
+  return outcome === 'expired'
+    ? cancelled(state, id, card.characterId)
+    : noticed(
+        withoutConfirmation(state, id),
+        `${characterName(state, card.characterId)}: A confirmation is no longer waiting.`,
+      );
 }
 
 /** A confirmation that ended without this tab's answer, and why the person's click did nothing. */
