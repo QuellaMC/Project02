@@ -161,7 +161,8 @@ async function serve(
 
     const origin = `http://127.0.0.1:${String(server.port)}/`;
 
-    options.stdout.write(`Gateway listening on ${origin}\n`);
+    // The port, not the root: the one address printed is the one to open.
+    options.stdout.write(`Gateway listening on port ${String(server.port)}\n`);
     reportStartupProblems(gateway.health(), options.stderr);
     await gateway.reconcile();
 

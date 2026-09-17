@@ -79,18 +79,31 @@ export function createSession(address: string): Session {
   let opening: string | undefined;
   let openGeneration = 0;
 
-  /** A page that cannot be read is a notice, never the stream's failure. */
+  /**
+   * A page that cannot be read is a notice, never the stream's failure. A
+   * read serves the open it started under: one left behind by a later
+   * open — of another character, or of the same one again — applies
+   * nothing, whichever way it ends.
+   */
   const readPage = async (
     conversationId: string,
     page: 'newest' | 'earlier',
     request: HistoryPage,
   ): Promise<void> => {
+    const mine = openGeneration;
+
     try {
       const outcome = await client.history(conversationId, request);
 
-      apply(current => historyPageRead(current, conversationId, page, outcome));
+      if (mine === openGeneration) {
+        apply(current =>
+          historyPageRead(current, conversationId, page, outcome),
+        );
+      }
     } catch (error: unknown) {
-      apply(current => pageUnread(current, conversationId, problem(error)));
+      if (mine === openGeneration) {
+        apply(current => pageUnread(current, conversationId, problem(error)));
+      }
     }
   };
   /**

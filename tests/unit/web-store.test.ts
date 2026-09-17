@@ -157,19 +157,31 @@ function sent(state: WebState, text: string, clientMessageId: string) {
 }
 
 describe('web store', () => {
-  it("installs every ready as the truth: roster and confirmations replace, every turn's news drops, and what the thread shows stays on screen until its newest page replaces it", () => {
+  it('installs every ready as the truth: roster and confirmations replace, turns in progress drop while how one ended is kept, and what the thread shows stays on screen until its newest page replaces it', () => {
     let state = applyEvent(
       opened(),
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
     );
 
     state = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
+    // Another thread's turn failed while this one was read: still news after the reconnect.
+    state = applyEvent(state, {
+      kind: 'turn_completed',
+      characterId: 'nova',
+      conversationId: 'conv-2',
+      source: 'web',
+      clientMessageId: 'line-9',
+      status: 'failed',
+      message: 'The store is full.',
+    });
     state = installSnapshot(state, ready([confirmation('c-1')]));
 
     expect(state.connection).toEqual({status: 'live'});
     expect(state.health?.characters).toEqual([mira]);
     expect(state.confirmations.map(pending => pending.id)).toEqual(['c-1']);
-    expect(state.turns.size).toBe(0);
+    expect([...state.turns]).toEqual([
+      ['conv-2', {busy: false, drafts: new Map(), ended: 'The store is full.'}],
+    ]);
     expect(state.thread).toMatchObject({
       stale: [{messageId: 'm-1'}],
       messages: [],

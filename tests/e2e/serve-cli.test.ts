@@ -73,10 +73,13 @@ describe('serve', () => {
     const url = await serve.url;
     const client = createGatewayClient({url});
 
-    // The URL line is the last thing printed, and only once mira is ready.
-    expect(
-      serve.stdout().indexOf('Gateway listening on http://127.0.0.1:'),
-    ).toBe(0);
+    // The URL line is the last thing printed, and only once mira is ready;
+    // the port line before it carries no address a person could open.
+    expect(serve.stdout().indexOf('Gateway listening on port ')).toBe(0);
+    expect(serve.stdout().indexOf('http://')).toBe(
+      serve.stdout().indexOf('PROJECT02_GATEWAY=http://') +
+        'PROJECT02_GATEWAY='.length,
+    );
     expect(url.startsWith('http://127.0.0.1:')).toBe(true);
     expect(url).toContain('/#token=');
     await expect(client.health()).resolves.toMatchObject({

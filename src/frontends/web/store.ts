@@ -126,9 +126,9 @@ export function composerText(state: WebState): string {
 
 /**
  * Every `ready` is the truth: the roster and the waiting confirmations
- * replace, every turn's news drops, and what the thread shows is set
- * aside for the newest page the session reads next — kept on screen,
- * stitched to nothing that comes.
+ * replace, every turn in progress drops — how a turn ended is still news
+ * — and what the thread shows is set aside for the newest page the
+ * session reads next, kept on screen and stitched to nothing that comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -139,7 +139,7 @@ export function installSnapshot(
     connection: {status: 'live'},
     health: snapshot.health,
     confirmations: snapshot.confirmations,
-    turns: new Map(),
+    turns: endingsKept(state.turns),
     ...(state.thread === undefined
       ? {}
       : {
@@ -530,6 +530,19 @@ function withTurn(
   }
 
   return {...state, turns};
+}
+
+/** What the stream said of a turn in progress is gone with the stream; how a turn ended stands. */
+function endingsKept(
+  turns: ReadonlyMap<string, TurnState>,
+): ReadonlyMap<string, TurnState> {
+  return new Map(
+    [...turns].flatMap(([conversationId, turn]): [string, TurnState][] =>
+      turn.ended === undefined
+        ? []
+        : [[conversationId, {...noTurn, ended: turn.ended}]],
+    ),
+  );
 }
 
 /** A turn's end is told to its conversation: the notice while that thread is on screen, kept for it otherwise. */
