@@ -451,11 +451,14 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'confirmation_settled': {
       const settled = withoutConfirmation(state, event.id);
 
-      // The card was on the page whoever raised it, so its expiry is too.
+      // The card was on the page whoever raised it, so its end is too.
+      // The daemon cancels a confirmation for its deadline, for a host
+      // that gave up on it, and for a shutdown, and says only that it
+      // was cancelled — so neither does the page.
       return event.decision === 'cancelled'
         ? noticed(
             settled,
-            `${characterName(state, event.characterId)}: A confirmation expired before it was answered.`,
+            `${characterName(state, event.characterId)}: A confirmation was cancelled before it was answered.`,
           )
         : settled;
     }

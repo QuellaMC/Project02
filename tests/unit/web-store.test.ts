@@ -735,7 +735,7 @@ describe('web store', () => {
     expect(sent(state, 'again', 'line-2').notices).toEqual([]);
   });
 
-  it('tracks confirmations by id, whatever surface raised them, and says when one expired, naming its character', () => {
+  it('tracks confirmations by id, whatever surface raised them, and says when one was cancelled, naming its character', () => {
     let state = applyEvent(opened(), {
       kind: 'confirmation_requested',
       ...confirmation('c-1'),
@@ -767,7 +767,7 @@ describe('web store', () => {
 
     expect(expired.confirmations).toEqual([]);
     expect(expired.notices.at(-1)).toBe(
-      'Mira: A confirmation expired before it was answered.',
+      'Mira: A confirmation was cancelled before it was answered.',
     );
 
     // A card for a character nobody is reading was on the page too, so
@@ -788,7 +788,7 @@ describe('web store', () => {
     );
 
     expect(elsewhere.notices.at(-1)).toBe(
-      'Mira: A confirmation expired before it was answered.',
+      'Mira: A confirmation was cancelled before it was answered.',
     );
 
     // The daemon can say the request is not waiting when this tab answers
