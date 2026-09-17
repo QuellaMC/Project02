@@ -11,6 +11,7 @@ import {dirname, join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
+import {gatewayProtocolVersion} from '../../src/gateway/api/index.ts';
 import {
   createGateway,
   type ConfigChange,
@@ -811,7 +812,7 @@ describe('gateway façade', () => {
       env: {},
     }).health();
 
-    expect(health.protocolVersion).toBe(1);
+    expect(health.protocolVersion).toBe(gatewayProtocolVersion);
     expect(health.homeRoot).toBe(homeRoot);
     expect(health.config.diagnostics).toEqual([
       expect.objectContaining({severity: 'error', path: 'project02.character'}),

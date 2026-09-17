@@ -16,7 +16,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 1;
+export const gatewayProtocolVersion = 2;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be

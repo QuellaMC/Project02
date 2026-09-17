@@ -64,6 +64,8 @@ export function createSession(address: string): Session {
   }
 
   let state = {...initialState, ...writtenAndUnsent()};
+  /** A browser that refuses to keep what is written is said once, not on every keystroke. */
+  let storageSaid = false;
   const listeners = new Set<() => void>();
   const apply = (reduce: (state: WebState) => WebState): void => {
     const next = reduce(state);
@@ -77,8 +79,12 @@ export function createSession(address: string): Session {
 
     state = next;
 
-    if (written) {
-      keepWrittenAndUnsent(state);
+    if (written && !keepWrittenAndUnsent(state) && !storageSaid) {
+      storageSaid = true;
+      state = noticed(
+        state,
+        'This browser is not keeping what you write, so a reload will lose it.',
+      );
     }
 
     for (const listener of listeners) {
@@ -208,15 +214,7 @@ export function createSession(address: string): Session {
             await readPage(thread.conversationId, {});
           }
 
-          // A connection is the first chance to account for a line this
-          // tab is still holding — one whose send never reached a daemon
-          // that was going away, or one a reload restored. Under its own
-          // id, so the ledger joins what did arrive rather than saying
-          // it twice.
-          for (const [clientMessageId, line] of state.pending) {
-            void deliverOnce(sending(), line, clientMessageId);
-          }
-
+          await accountForPending();
           openTheOnlyCharacter();
         },
       },
@@ -226,6 +224,26 @@ export function createSession(address: string): Session {
     });
 
   const sending = (): Sending => ({client, apply, askTheLog});
+  /**
+   * Every line this tab is still holding goes again under its own id —
+   * one whose send never reached a daemon that was going away, one a
+   * reload restored, one a passing failure left behind. The daemon's
+   * ledger joins what did arrive, so this says nothing twice. Its
+   * conversation is opened first: a daemon that has restarted holds no
+   * route to it yet, and would refuse the line as belonging to a
+   * conversation it does not know.
+   */
+  const accountForPending = async (): Promise<void> => {
+    for (const [clientMessageId, line] of state.pending) {
+      const opened = await client
+        .openDirectConversation(line.characterId)
+        .catch(() => undefined);
+
+      if (opened?.status === 'opened') {
+        await deliverOnce(sending(), line, clientMessageId);
+      }
+    }
+  };
 
   return {
     getState: () => state,
@@ -268,6 +286,11 @@ export function createSession(address: string): Session {
       if (!(await deliverOnce(sending(), line, clientMessageId))) {
         return;
       }
+
+      // Nothing answered this one, which is reason to account for every
+      // line still held: a passing failure that left one behind clears
+      // without the stream ever dropping.
+      await accountForPending();
 
       // Nothing answered, so the log is asked; a line it does not carry
       // goes again under the same id, which the daemon's ledger joins if
@@ -453,7 +476,8 @@ function isPendingLine(value: unknown): boolean {
   );
 }
 
-function keepWrittenAndUnsent(state: Written): void {
+/** Whether the browser kept it; one that will not is said once, and shows what is written all the same. */
+function keepWrittenAndUnsent(state: Written): boolean {
   try {
     sessionStorage.setItem(
       writtenKey,
@@ -462,8 +486,10 @@ function keepWrittenAndUnsent(state: Written): void {
         pending: [...state.pending],
       }),
     );
+
+    return true;
   } catch {
-    // A browser that will not keep it still shows what is written.
+    return false;
   }
 }
 

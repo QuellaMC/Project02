@@ -52,7 +52,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 1});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 2});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},
@@ -399,7 +399,8 @@ describe('gateway reference client error boundary', () => {
 
   it('closes the socket when the stream is unusable, for a wrong protocol or a bad frame', async () => {
     for (const [frame, code] of [
-      ['event: ready\ndata: {"protocolVersion":2}\n\n', 'protocol_mismatch'],
+      // The version before this one: a daemon that has not been restarted.
+      ['event: ready\ndata: {"protocolVersion":1}\n\n', 'protocol_mismatch'],
       ['event: ready\ndata: not json\n\n', 'malformed_event'],
     ] as const) {
       let aborted = 0;
