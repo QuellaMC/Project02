@@ -127,15 +127,15 @@ export function createSession(address: string): Session {
     try {
       const outcome = await client.history(conversationId, request);
 
+      // What a page says of this tab's lines is the daemon's word and
+      // does not go stale: a line the log carried is committed whether
+      // or not this page is the one the thread ends up showing, and
+      // whichever thread that is.
+      apply(current => linesTaken(current, outcome));
+
       if (reads.get(key) === mine) {
-        // What the page says of this tab's lines holds whichever thread
-        // is on screen, or none: a reload reads a conversation nobody is
-        // looking at yet, and its page still says the daemon took them.
         apply(current =>
-          linesTaken(
-            historyPageRead(current, conversationId, request, outcome),
-            outcome,
-          ),
+          historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
@@ -171,6 +171,7 @@ export function createSession(address: string): Session {
         return;
       }
 
+      reads.clear();
       apply(state => threadOpened(state, outcome));
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
@@ -232,6 +233,9 @@ export function createSession(address: string): Session {
       {
         signal: new AbortController().signal,
         onReady: async ({snapshot}) => {
+          // The thread is set aside for the page read next, so no read
+          // already in flight for it says what it shows any more.
+          reads.clear();
           apply(current => installSnapshot(current, snapshot));
 
           const {thread} = state;
