@@ -95,6 +95,26 @@ test('keeps a line whose turn the daemon rejected on the thread and says why', a
   await expect(composer).toHaveValue('');
 });
 
+test('gives a line the daemon refuses back to the composer, with what it said', async ({
+  daemon,
+  page,
+}) => {
+  await page.goto(daemon.url);
+
+  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+  // Longer than the wire takes, as a paste can be: the daemon refuses it
+  // before any turn runs, so the line is the person's again.
+  const tooLong = 'x'.repeat(17 * 1024);
+
+  await composer.fill(tooLong);
+  await composer.press('Enter');
+  await expect(page.locator('.notice')).toContainText(
+    'Mira: The message.text exceeds',
+  );
+  await expect(composer).toHaveValue(tooLong);
+  await expect(page.locator('[data-pending]')).toHaveCount(0);
+});
+
 test.describe('a roster with a character that is not running', () => {
   test.use({disabledCharacters: ['nova']});
 

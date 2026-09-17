@@ -10,6 +10,7 @@ import type {
 } from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
+  GatewayClientError,
   type GatewayClient,
 } from '../../gateway/client/index.ts';
 import {
@@ -75,34 +76,32 @@ export function createSession(address: string): Session {
     }
   };
   /**
-   * Every open and every page read takes charge of what the thread shows,
-   * and only the latest one's result applies — an open of another
-   * character, an open of the same one again, a reconnect's read, a
-   * recovery read: each supersedes whatever was in flight before it.
+   * Only the latest open and the latest read apply; an earlier one that
+   * settles later is let go. They are counted apart because an open says
+   * which thread the person wants and a read only refreshes one: a
+   * recovery read for a thread left behind must not undo a roster click,
+   * and a read that arrives for a thread no longer on screen is no news
+   * about it — the store says so.
    */
-  let charge = 0;
-  const takeCharge = (): (() => boolean) => {
-    const mine = (charge += 1);
-
-    return () => mine === charge;
-  };
+  let opens = 0;
+  let reads = 0;
   /** A page that cannot be read is a notice, never the stream's failure. */
   const readPage = async (
     conversationId: string,
     request: HistoryPage,
   ): Promise<void> => {
-    const mine = takeCharge();
+    const mine = (reads += 1);
 
     try {
       const outcome = await client.history(conversationId, request);
 
-      if (mine()) {
+      if (mine === reads) {
         apply(current =>
           historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
-      if (mine()) {
+      if (mine === reads) {
         apply(current => pageUnread(current, conversationId, problem(error)));
       }
     }
@@ -114,12 +113,12 @@ export function createSession(address: string): Session {
    * already on screen is a refresh: its thread stays until the page comes.
    */
   const open = async (characterId: string): Promise<void> => {
-    const mine = takeCharge();
+    const mine = (opens += 1);
 
     try {
       const outcome = await client.openDirectConversation(characterId);
 
-      if (!mine()) {
+      if (mine !== opens) {
         return;
       }
 
@@ -132,7 +131,7 @@ export function createSession(address: string): Session {
       apply(state => threadOpened(state, outcome));
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
-      if (mine()) {
+      if (mine === opens) {
         apply(state => noticed(state, problem(error)));
       }
     }
@@ -233,11 +232,28 @@ export function createSession(address: string): Session {
             'answer',
           ),
         );
-      } catch {
-        // No answer came, so nothing is known of the turn: the newest page
-        // settles the line if the daemon took it and says the daemon
-        // cannot be reached if that is why no answer came. A line the
-        // daemon may still be holding stays pending for the stream.
+      } catch (error: unknown) {
+        // The daemon answered, refusing the line before any turn ran — it
+        // is longer than the wire takes, or the token has died: nothing
+        // was recorded, so the line comes back with what the daemon said.
+        if (error instanceof GatewayClientError && error.status !== 0) {
+          apply(current =>
+            lineEnded(
+              current,
+              thread.characterId,
+              clientMessageId,
+              {status: 'refused', message: problem(error)},
+              'answer',
+            ),
+          );
+
+          return;
+        }
+
+        // Silence says nothing of the turn: the newest page settles the
+        // line if the daemon took it and says the daemon cannot be
+        // reached if that is why no answer came. A line the daemon may
+        // still be holding stays pending for the stream.
         await readPage(thread.conversationId, {});
       }
     },
