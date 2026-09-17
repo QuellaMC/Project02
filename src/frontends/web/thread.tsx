@@ -41,7 +41,7 @@ export function ThreadPane({
   const scroller = useRef<HTMLDivElement>(null);
   // The view follows the thread's end unless the person scrolled up to read.
   const following = useRef(true);
-  const shown = [...thread.stale, ...thread.messages];
+  const shown = [...(thread.stale ?? []), ...thread.messages];
   const lastMessageId = shown.at(-1)?.messageId;
 
   useEffect(() => {

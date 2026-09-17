@@ -190,7 +190,7 @@ describe('web store', () => {
       },
     );
 
-    expect(unread.thread?.stale.map(message => message.messageId)).toEqual([
+    expect(unread.thread?.stale?.map(message => message.messageId)).toEqual([
       'm-1',
     ]);
     expect(unread.thread?.unread).toBe('The thread could not be read.');
@@ -205,7 +205,10 @@ describe('web store', () => {
       page([committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')]),
     );
 
-    expect(state.thread?.stale).toEqual([]);
+    // The page has landed, so the thread is what it has read: a later
+    // page that meets none of it is a thread this tab has fallen behind,
+    // not a page to put in front of what is shown.
+    expect(state.thread?.stale).toBeUndefined();
     expect(state.thread?.messages.map(message => message.messageId)).toEqual([
       'm-1',
       'm-2',
@@ -222,7 +225,7 @@ describe('web store', () => {
       userParticipantId: 'local-user',
     });
 
-    expect(again.thread?.stale.map(message => message.messageId)).toEqual([
+    expect(again.thread?.stale?.map(message => message.messageId)).toEqual([
       'm-1',
     ]);
     expect(again.thread?.messages).toEqual([]);
@@ -415,6 +418,28 @@ describe('web store', () => {
     expect(other).toBe(state);
   });
 
+  it('replaces a thread it has fallen more than a page behind, rather than placing what it shows against a page with none of it', () => {
+    // No reconnect and no reopen: the thread is simply what it read, and
+    // a recovery read comes back with a hundred newer messages.
+    const behind = historyPageRead(
+      opened(),
+      conversationId,
+      {},
+      page([committed('m-1', 'one'), committed('m-2', 'two')], 'v1:0:0'),
+    );
+    const caught = historyPageRead(
+      behind,
+      conversationId,
+      {},
+      page([committed('m-201', 'two hundred and one')], 'v1:0:200'),
+    );
+
+    expect(caught.thread?.messages.map(message => message.messageId)).toEqual([
+      'm-201',
+    ]);
+    expect(caught.thread?.earlier).toBe('v1:0:200');
+  });
+
   it('keeps earlier pages ahead of a refreshed newest page, and what arrived live after it behind', () => {
     let state = historyPageRead(
       opened(),
@@ -457,8 +482,9 @@ describe('web store', () => {
     ]);
     expect(state.thread?.earlier).toBeUndefined();
 
-    // A page that meets nothing shown is the thread, and what was shown
-    // came live after it — a fresh open with a message arriving meanwhile.
+    // A page that meets nothing shown, on a thread set aside for it, has
+    // what was shown after it: a fresh open with a message arriving
+    // while its page was being read.
     const fresh = historyPageRead(
       applyEvent(opened(), userMessage('m-9', 'nine', 'line-9')),
       conversationId,

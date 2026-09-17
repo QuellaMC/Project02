@@ -45,10 +45,13 @@ export type Thread = {
   readonly conversationId: string;
   readonly userParticipantId: string;
   /**
-   * What was shown before the stream reconnected: still on screen, but
-   * stitched to nothing that comes, until the newest page replaces it.
+   * What was shown before the newest page this thread is waiting for:
+   * still on screen, stitched to nothing that comes, until that page
+   * replaces it. Its presence — empty or not — is what says a page is
+   * replacing the thread, so what `messages` holds arrived after it was
+   * asked for. Absent, the thread is simply what it has read.
    */
-  readonly stale: readonly Message[];
+  readonly stale?: readonly Message[] | undefined;
   /** Chronological, unique by message id. */
   readonly messages: readonly Message[];
   /** The cursor while older messages exist. */
@@ -175,7 +178,7 @@ export function installSnapshot(
 function setAside(thread: Thread): Thread {
   return {
     ...thread,
-    stale: [...thread.stale, ...thread.messages],
+    stale: [...(thread.stale ?? []), ...thread.messages],
     messages: [],
     earlier: undefined,
     unread: undefined,
@@ -351,17 +354,35 @@ function newestPage(
   const first = thread.messages.findIndex(message =>
     onPage.has(message.messageId),
   );
+
+  // Nothing shown is on the page. What the thread shows came after this
+  // page was asked for when the thread was set aside for it, and belongs
+  // after it; otherwise it is history this tab read before falling more
+  // than a page behind, which cannot be placed against the page at all —
+  // so the page is the thread, and Load earlier asks for the rest.
+  if (first === -1) {
+    return {
+      ...thread,
+      stale: undefined,
+      messages:
+        thread.stale === undefined
+          ? messages
+          : [...messages, ...thread.messages],
+      earlier,
+    };
+  }
+
   const last = thread.messages.findLastIndex(message =>
     onPage.has(message.messageId),
   );
-  const before = first === -1 ? [] : thread.messages.slice(0, first);
-  const after = (
-    first === -1 ? thread.messages : thread.messages.slice(last + 1)
-  ).filter(message => !onPage.has(message.messageId));
+  const before = thread.messages.slice(0, first);
+  const after = thread.messages
+    .slice(last + 1)
+    .filter(message => !onPage.has(message.messageId));
 
   return {
     ...thread,
-    stale: [],
+    stale: undefined,
     messages: [...before, ...messages, ...after],
     // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.
     earlier: before.length === 0 ? earlier : thread.earlier,
