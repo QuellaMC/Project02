@@ -199,6 +199,17 @@ describe('web store', () => {
     ]);
     expect(unread.notice).toBe('The thread could not be read.');
 
+    // An earlier page read before the reconnect is not this thread's: its
+    // cursor went with what was set aside.
+    expect(
+      historyPageRead(
+        state,
+        conversationId,
+        'earlier',
+        page([committed('m-0', 'before')]),
+      ),
+    ).toBe(state);
+
     // The newest page replaces what was set aside and keeps what arrived
     // live after the reconnect.
     state = applyEvent(state, userMessage('m-3', 'meanwhile', 'line-3'));

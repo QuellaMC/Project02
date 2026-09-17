@@ -251,6 +251,7 @@ export function createSession(address: string): Session {
         return;
       }
 
+      apply(noticeSpent);
       await readPage(thread.conversationId, 'earlier', {
         before: thread.earlier,
       });

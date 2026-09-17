@@ -230,7 +230,10 @@ export function composerChanged(state: WebState, text: string): WebState {
  * aside is replaced. A pending line of this thread that the page carries
  * is settled; one it lacks whose turn has ended comes back to the
  * composer; one whose turn has not run yet stays pending. An earlier page
- * goes in front, once — the same cursor read twice is the same page.
+ * goes in front, once — the same cursor read twice is the same page —
+ * and only while its cursor stands: a reconnect or a fresh open takes
+ * the cursor with what it set aside, and a page read under it is not
+ * this thread's.
  */
 export function historyPageRead(
   state: WebState,
@@ -251,6 +254,10 @@ export function historyPageRead(
   const messages = outcome.messages.map(messageOf);
 
   if (page === 'earlier') {
+    if (thread.earlier === undefined) {
+      return state;
+    }
+
     const shown = new Set(thread.messages.map(message => message.messageId));
 
     return {
