@@ -74,8 +74,6 @@ export function createSession(address: string): Session {
       listener();
     }
   };
-  /** The character an open is waiting for, so a roster of one asks once. */
-  let opening: string | undefined;
   /**
    * Every open and every page read takes charge of what the thread shows,
    * and only the latest one's result applies — an open of another
@@ -110,19 +108,12 @@ export function createSession(address: string): Session {
     }
   };
   /**
-   * An open can wait on a start or a reload, minutes when a turn is parked
-   * on a confirmation; the latest character asked for wins, and an
-   * earlier open that settles later is let go. While one is in flight the
-   * same character is not asked for again — a roster of one asks on every
-   * event until its thread is open.
+   * An open can wait on a start or a reload, minutes when a turn is
+   * parked on a confirmation; the latest character asked for wins, and an
+   * earlier open that settles later is let go. Asking for the character
+   * already on screen is a refresh: its thread stays until the page comes.
    */
   const open = async (characterId: string): Promise<void> => {
-    if (opening === characterId) {
-      return;
-    }
-
-    opening = characterId;
-
     const mine = takeCharge();
 
     try {
@@ -131,8 +122,6 @@ export function createSession(address: string): Session {
       if (!mine()) {
         return;
       }
-
-      opening = undefined;
 
       if (outcome.status !== 'opened') {
         apply(state => noticed(state, outcome.message));
@@ -144,17 +133,23 @@ export function createSession(address: string): Session {
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
       if (mine()) {
-        opening = undefined;
         apply(state => noticed(state, problem(error)));
       }
     }
   };
-  /** One character opens itself; a roster of several waits for a click. */
+  /**
+   * One character opens itself, once — it may not be ready when the page
+   * connects, so every event is a chance — and a roster of several waits
+   * for a click. Once is enough: a thread outlives a reconnect, and an
+   * open the daemon refuses says why rather than being asked again.
+   */
+  let openedItself = false;
   const openTheOnlyCharacter = (): void => {
     const characters = state.health?.characters ?? [];
     const only = characters.length === 1 ? characters[0] : undefined;
 
-    if (only?.state === 'ready' && state.thread === undefined) {
+    if (!openedItself && only?.state === 'ready') {
+      openedItself = true;
       void open(only.id);
     }
   };
@@ -253,7 +248,6 @@ export function createSession(address: string): Session {
         return;
       }
 
-      apply(noticeSpent);
       await readPage(thread.conversationId, {before: thread.earlier});
     },
     async answer(id, decision) {

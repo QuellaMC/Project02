@@ -668,11 +668,19 @@ describe('web store', () => {
     expect(composerText(threadOpened(state, mira))).toBe('half a thought');
   });
 
-  it('gives every pending line back, in the order it was written, when the address will never work again', () => {
-    const state = connectionRefused(
-      sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
-      'A bearer token is required.',
+  it('gives every pending line back in the order it was written when the address will never work again, and lets go of what it can never settle', () => {
+    let live = sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2');
+
+    live = applyEvent(live, {
+      kind: 'confirmation_requested',
+      ...confirmation('c-1'),
+    });
+    live = applyEvent(
+      live,
+      progress({kind: 'reply_delta', draftId: '1.0', text: 'half a thought'}),
     );
+
+    const state = connectionRefused(live, 'A bearer token is required.');
 
     expect(state.connection).toEqual({
       status: 'refused',
@@ -680,6 +688,9 @@ describe('web store', () => {
     });
     expect(state.pending.size).toBe(0);
     expect(composerText(state)).toBe('first second');
+    // An answer would never reach the daemon, and the draft is never finished.
+    expect(state.confirmations).toEqual([]);
+    expect(state.turns.size).toBe(0);
   });
 
   it("keeps a committed line whose turn did not complete and says why, for its own turns and another surface's; the person's next act spends the notice", () => {
@@ -714,7 +725,7 @@ describe('web store', () => {
     expect(sent(state, 'again', 'line-2').notice).toBeUndefined();
   });
 
-  it('tracks confirmations by id, whatever surface raised them, and says when one expired', () => {
+  it('tracks confirmations by id, whatever surface raised them, and says when one expired, naming its character', () => {
     let state = applyEvent(opened(), {
       kind: 'confirmation_requested',
       ...confirmation('c-1'),
@@ -746,7 +757,28 @@ describe('web store', () => {
 
     expect(expired.confirmations).toEqual([]);
     expect(expired.notice).toBe(
-      'A confirmation expired before it was answered.',
+      'Mira: A confirmation expired before it was answered.',
+    );
+
+    // A card for a character nobody is reading was on the page too, so
+    // its expiry is said as well.
+    const elsewhere = applyEvent(
+      threadOpened(state, {
+        status: 'opened',
+        conversationId: 'conv-2',
+        characterId: 'nova',
+        userParticipantId: 'local-user',
+      }),
+      {
+        kind: 'confirmation_settled',
+        characterId: 'mira',
+        id: 'c-1',
+        decision: 'cancelled',
+      },
+    );
+
+    expect(elsewhere.notice).toBe(
+      'Mira: A confirmation expired before it was answered.',
     );
   });
 
@@ -830,6 +862,15 @@ describe('web store', () => {
 
     expect(unread.notice).toBe('The thread could not be read.');
     expect(unread.thread?.messages).toEqual([]);
+    // The next page that can be read answers it, with no act of the person's.
+    expect(
+      historyPageRead(
+        unread,
+        conversationId,
+        {},
+        page([committed('m-1', 'hello')]),
+      ).notice,
+    ).toBeUndefined();
 
     // A read left behind by a switch of characters says nothing about the
     // thread in front of the person — by either way of failing.

@@ -168,12 +168,19 @@ function setAside(thread: Thread): Thread {
 }
 
 /**
- * The address will never work again, so nothing can settle a line this tab
- * sent: every pending line comes back where it was written, and the page
- * stops taking new ones.
+ * The address will never work again, so nothing it was carrying can ever
+ * settle: every pending line comes back where it was written, the page
+ * stops taking new ones, and every confirmation waiting and every turn in
+ * progress goes — an answer would never reach the daemon, and a draft
+ * would never be finished.
  */
 export function connectionRefused(state: WebState, message: string): WebState {
-  let next: WebState = {...state, connection: {status: 'refused', message}};
+  let next: WebState = {
+    ...state,
+    connection: {status: 'refused', message},
+    confirmations: [],
+    turns: new Map(),
+  };
 
   for (const [clientMessageId, line] of state.pending) {
     next = handedBack(next, clientMessageId, line);
@@ -267,13 +274,17 @@ export function historyPageRead(
     return noticed(state, outcome.message);
   }
 
+  // A page in front of the person answers what the page last said about
+  // reading this thread, and spends whatever else it said, as an act of
+  // the person's does.
+  const read = noticeSpent(state);
   const messages = outcome.messages.map(messageOf);
 
   if (request.before !== undefined) {
     const shown = new Set(thread.messages.map(message => message.messageId));
 
     return {
-      ...state,
+      ...read,
       thread: {
         ...thread,
         messages: [
@@ -302,7 +313,7 @@ export function historyPageRead(
     first === -1 ? thread.messages : thread.messages.slice(last + 1)
   ).filter(message => !onPage.has(message.messageId));
   let next: WebState = {
-    ...state,
+    ...read,
     thread: {
       ...thread,
       stale: [],
@@ -407,9 +418,12 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ),
       };
 
-      return event.decision === 'cancelled' &&
-        state.thread?.characterId === event.characterId
-        ? noticed(settled, 'A confirmation expired before it was answered.')
+      // The card was on the page whoever raised it, so its expiry is too.
+      return event.decision === 'cancelled'
+        ? noticed(
+            settled,
+            `${characterName(state, event.characterId)}: A confirmation expired before it was answered.`,
+          )
         : settled;
     }
     case 'turn_progress': {
