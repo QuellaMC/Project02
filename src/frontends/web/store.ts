@@ -404,6 +404,30 @@ export function lineEnded(
   return noticed(placed, notice);
 }
 
+/**
+ * The daemon says a confirmation is not waiting any more: its deadline
+ * passed, or another surface settled it while this tab's stream was
+ * away, so no settled frame is coming. The card goes and the person
+ * hears why their answer did nothing.
+ */
+export function confirmationGone(state: WebState, id: string): WebState {
+  const card = state.confirmations.find(pending => pending.id === id);
+
+  return card === undefined
+    ? state
+    : noticed(
+        withoutConfirmation(state, id),
+        `${characterName(state, card.characterId)}: The confirmation is no longer waiting.`,
+      );
+}
+
+function withoutConfirmation(state: WebState, id: string): WebState {
+  return {
+    ...state,
+    confirmations: state.confirmations.filter(pending => pending.id !== id),
+  };
+}
+
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
   switch (event.kind) {
     case 'state_changed':
@@ -420,12 +444,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ? state
         : {...state, confirmations: [...state.confirmations, pendingOf(event)]};
     case 'confirmation_settled': {
-      const settled = {
-        ...state,
-        confirmations: state.confirmations.filter(
-          pending => pending.id !== event.id,
-        ),
-      };
+      const settled = withoutConfirmation(state, event.id);
 
       // The card was on the page whoever raised it, so its expiry is too.
       return event.decision === 'cancelled'

@@ -16,6 +16,7 @@ import {
 import {
   applyEvent,
   composerChanged,
+  confirmationGone,
   connectionRefused,
   historyPageRead,
   initialState,
@@ -246,14 +247,15 @@ export function createSession(address: string): Session {
           await readPage(thread.conversationId, {});
         }
       } catch (error: unknown) {
-        // A 4xx is the daemon refusing the request itself — its token, its
-        // route, its shape, its size — so no turn ran and the line comes
-        // back with what the daemon said. Every other answer, including
-        // one whose body was cut short, may have been a turn.
+        // A turn can only have run if the request reached the route, so
+        // every answer the daemon gives here is it refusing the request
+        // itself — its token, its route, its shape, its size, or a
+        // daemon on its way down — but its own internal failure, which
+        // may have been a turn, as may an answer cut short under its 200.
         if (
           error instanceof GatewayClientError &&
           error.status >= 400 &&
-          error.status < 500
+          error.status !== 500
         ) {
           apply(current =>
             lineEnded(
@@ -287,9 +289,15 @@ export function createSession(address: string): Session {
     async answer(id, decision) {
       apply(noticeSpent);
 
-      // The card leaves on the settled event; an expiry is said by it too.
       try {
-        await client.answerConfirmation(id, decision);
+        const outcome = await client.answerConfirmation(id, decision);
+
+        // An answer the daemon took is followed by the settled frame that
+        // removes the card. Anything else says the request is not waiting
+        // any more, and no frame is coming to say so.
+        if (outcome.status !== 'answered') {
+          apply(current => confirmationGone(current, id));
+        }
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
       }

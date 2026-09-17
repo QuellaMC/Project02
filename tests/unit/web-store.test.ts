@@ -4,6 +4,7 @@ import {
   applyEvent,
   composerChanged,
   composerText,
+  confirmationGone,
   connectionRefused,
   historyPageRead,
   initialState,
@@ -780,6 +781,15 @@ describe('web store', () => {
     expect(elsewhere.notice).toBe(
       'Mira: A confirmation expired before it was answered.',
     );
+
+    // The daemon can say the request is not waiting when this tab answers
+    // it — the deadline passed, or another surface settled it while the
+    // stream was away — and then no frame is coming to remove the card.
+    const gone = confirmationGone(state, 'c-1');
+
+    expect(gone.confirmations).toEqual([]);
+    expect(gone.notice).toBe('Mira: The confirmation is no longer waiting.');
+    expect(confirmationGone(gone, 'c-1')).toBe(gone);
   });
 
   it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {
