@@ -33,9 +33,13 @@ export function App({session}: {readonly session: Session}) {
             printed.
           </p>
         ) : null}
-        {configProblems.map(diagnostic => (
-          <p className="banner banner-warning" key={diagnostic.message}>
-            {diagnostic.message}
+        {configProblems.map((diagnostic, problem) => (
+          // Two fields can fail the same way, so the banner names the
+          // field: the message alone says what is wrong, not what to fix.
+          <p className="banner banner-warning" key={problem}>
+            {diagnostic.path === undefined
+              ? diagnostic.message
+              : `${diagnostic.path}: ${diagnostic.message}`}
           </p>
         ))}
       </header>
@@ -57,8 +61,8 @@ export function App({session}: {readonly session: Session}) {
             }}
           />
         )}
-        {health?.packages.diagnostics.map(diagnostic => (
-          <p className="muted small" key={diagnostic.path}>
+        {health?.packages.diagnostics.map((diagnostic, problem) => (
+          <p className="muted small" key={problem}>
             {diagnostic.path}: {diagnostic.message}
           </p>
         ))}

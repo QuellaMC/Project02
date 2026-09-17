@@ -254,7 +254,10 @@ export function composerChanged(state: WebState, text: string): WebState {
 }
 
 /**
- * The newest page is the thread. What was shown before its first message
+ * The newest page is the thread, and the log's word on every line this
+ * tab is waiting for — the session reads it after the daemon's verdict,
+ * so a page begun before one never decides it. What was shown before its
+ * first message
  * — earlier pages — stays before it, and what arrived live after its last
  * message stays after it; a page that meets nothing shown is the whole
  * thread, and what was shown came live after it. What a reconnect set

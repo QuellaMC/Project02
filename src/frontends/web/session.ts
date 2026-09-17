@@ -234,6 +234,17 @@ export function createSession(address: string): Session {
             'answer',
           ),
         );
+
+        // The daemon judged the turn before the stream showed the line, so
+        // the log says whether the line was committed. It is read now, so
+        // that it is read after the verdict: a page begun before one
+        // proves nothing about it, and this read supersedes any such.
+        if (
+          outcome.status !== 'completed' &&
+          state.pending.has(clientMessageId)
+        ) {
+          await readPage(thread.conversationId, {});
+        }
       } catch (error: unknown) {
         // A 4xx is the daemon refusing the request itself — its token, its
         // route, its shape, its size — so no turn ran and the line comes
