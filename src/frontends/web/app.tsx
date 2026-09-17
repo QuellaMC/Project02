@@ -1,7 +1,11 @@
-import {useSyncExternalStore} from 'react';
+import {useState, useSyncExternalStore} from 'react';
 
-import type {CharacterSummary} from '../../gateway/api/index.ts';
-import type {Session} from './session.ts';
+import type {
+  CharacterSummary,
+  GatewayConfirmationDecision,
+  PendingConfirmation,
+} from '../../gateway/api/index.ts';
+import {webSource, type Session} from './session.ts';
 import {Avatar, stateLabel, ThreadPane} from './thread.tsx';
 
 /** States a line cannot reach; the daemon holds a line through the rest. */
@@ -63,6 +67,27 @@ export function App({session}: {readonly session: Session}) {
           <p className="notice" role="status">
             {state.notice}
           </p>
+        )}
+        {state.confirmations.length === 0 ? null : (
+          // Every confirmation waiting is on the page, whichever character
+          // it belongs to and whichever surface raised it: a person who
+          // sees the whole roster answers for the whole roster, and one
+          // raised for a character nobody is reading must not expire
+          // unseen.
+          <div className="cards">
+            {state.confirmations.map(card => (
+              <ConfirmationCard
+                key={card.id}
+                pending={card}
+                characterName={
+                  health?.characters.find(
+                    character => character.id === card.characterId,
+                  )?.displayName ?? card.characterId
+                }
+                onAnswer={decision => session.answer(card.id, decision)}
+              />
+            ))}
+          </div>
         )}
         {thread === undefined ? (
           <p className="muted empty">
@@ -142,5 +167,68 @@ function Roster({
         </li>
       ))}
     </ul>
+  );
+}
+
+function ConfirmationCard({
+  pending,
+  characterName,
+  onAnswer,
+}: {
+  readonly pending: PendingConfirmation;
+  readonly characterName: string;
+  readonly onAnswer: (decision: GatewayConfirmationDecision) => Promise<void>;
+}) {
+  // The buttons rest while an answer is on its way; an answer that could
+  // not be delivered gives them back, since the card is still there.
+  const [answering, setAnswering] = useState(false);
+  const expires = new Date(pending.deadlineAt).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const answer = async (decision: GatewayConfirmationDecision) => {
+    setAnswering(true);
+    await onAnswer(decision);
+    setAnswering(false);
+  };
+
+  return (
+    <div className="card" role="group" aria-label="Confirmation">
+      <p className="card-title">
+        Confirm {pending.request.toolName}{' '}
+        <span className="muted">· {pending.request.pluginId}</span>
+      </p>
+      <p className="card-summary">{pending.request.summary}</p>
+      <pre className="card-preview">
+        {JSON.stringify(pending.request.preview, null, 2)}
+      </pre>
+      <div className="card-actions">
+        <span className="muted small">
+          {characterName} · expires at {expires}
+          {pending.turn === undefined || pending.turn.source === webSource
+            ? ''
+            : ` · raised on ${pending.turn.source}`}
+        </span>
+        <button
+          type="button"
+          disabled={answering}
+          onClick={() => {
+            void answer('approved');
+          }}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          disabled={answering}
+          onClick={() => {
+            void answer('denied');
+          }}
+        >
+          Deny
+        </button>
+      </div>
+    </div>
   );
 }

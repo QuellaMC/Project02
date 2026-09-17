@@ -25,7 +25,7 @@ a pure function of the previous value and one input — the daemon's
 snapshot, an event, a history page, a send, a line's end. It is DOM-free
 and unit-tested in Node. `session.ts` holds the tab's one client and one
 stream and the verbs a page calls, and runs only in a browser; `app.tsx`
-and `thread.tsx` render the store — the roster, the thread with its draft
-bubbles and confirmation cards, the one-line composer. The browser suite
-under `tests/browser` drives the built page in Chromium against a real
-daemon.
+and `thread.tsx` render the store — the roster, every confirmation
+waiting, the thread with its draft bubbles, the one-line composer. The
+browser suite under `tests/browser` drives the built page in Chromium
+against a real daemon.

@@ -38,9 +38,10 @@ export type PendingLine = {
   readonly conversationId: string;
   readonly text: string;
   /**
-   * What the line comes back with if the page finds it was never taken:
-   * the daemon's verdict, when the answer came before the stream showed
-   * the line, or the reason the answer never came.
+   * The daemon's verdict on this line's turn, when the answer came before
+   * the stream showed the line: the line comes back with it once a page
+   * proves it was never committed. An answer that never came is no
+   * verdict — nothing is known of the turn, so the line waits.
    */
   readonly ended?: string;
 };
@@ -141,16 +142,20 @@ export function installSnapshot(
     health: snapshot.health,
     confirmations: snapshot.confirmations,
     turns: endingsKept(state.turns),
-    ...(state.thread === undefined
-      ? {}
-      : {
-          thread: {
-            ...state.thread,
-            stale: [...state.thread.stale, ...state.thread.messages],
-            messages: [],
-            earlier: undefined,
-          },
-        }),
+    ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
+  };
+}
+
+/**
+ * The thread set aside for the newest page read next: still on screen,
+ * stitched to nothing that comes, and past every cursor it held.
+ */
+function setAside(thread: Thread): Thread {
+  return {
+    ...thread,
+    stale: [...thread.stale, ...thread.messages],
+    messages: [],
+    earlier: undefined,
   };
 }
 
@@ -218,9 +223,16 @@ function isPageOf(
   );
 }
 
-/** The thread opens empty for its newest page, with what its last turn left to say. */
+/**
+ * The thread opens for its newest page, with what its last turn left to
+ * say. Opening the thread already on screen — a person clicking the
+ * character they are reading — sets it aside rather than emptying it, as
+ * a reconnect does, so a page that cannot be read leaves the
+ * conversation in front of them.
+ */
 export function threadOpened(state: WebState, opened: Opened): WebState {
   const {conversationId} = opened;
+  const {thread} = state;
 
   return {
     ...withTurn(state, conversationId, turn => ({
@@ -228,13 +240,16 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
       drafts: turn.drafts,
     })),
     notice: state.turns.get(conversationId)?.ended,
-    thread: {
-      characterId: opened.characterId,
-      conversationId,
-      userParticipantId: opened.userParticipantId,
-      stale: [],
-      messages: [],
-    },
+    thread:
+      thread?.conversationId === conversationId
+        ? setAside(thread)
+        : {
+            characterId: opened.characterId,
+            conversationId,
+            userParticipantId: opened.userParticipantId,
+            stale: [],
+            messages: [],
+          },
   };
 }
 
@@ -356,7 +371,8 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * goes back to the composer. The answer is not ordered against the stream
  * and can beat the frame that would show the line, so from the answer
  * only a refusal hands it back — nothing was recorded; a rejection or a
- * failure marks the line for the stream or the newest page to settle. A
+ * failure is a verdict the line keeps until the stream or a page says
+ * whether it was committed. A
  * line comes back to the thread it was written in, open or not. A turn
  * that did not complete is told to its conversation, this tab's or
  * another surface's. `completed` settles nothing here.
@@ -382,25 +398,6 @@ export function lineEnded(
         : handedBack(state, clientMessageId, line);
 
   return told(placed, conversationId, notice);
-}
-
-/**
- * The answer never came, and said nothing about the turn: the daemon may
- * have taken the line or never heard it. A line still pending keeps the
- * reason, to come back with if the newest page lacks it; a line the page
- * has already placed — shown by the stream, or returned — is left as it
- * is, so a lost answer never reads as a failure under a line that landed.
- */
-export function answerLost(
-  state: WebState,
-  clientMessageId: string,
-  message: string,
-): WebState {
-  const line = state.pending.get(clientMessageId);
-
-  return line === undefined
-    ? state
-    : marked(state, clientMessageId, line, message);
 }
 
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {

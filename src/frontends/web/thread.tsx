@@ -1,11 +1,7 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useRef} from 'react';
 
-import type {
-  CharacterSummary,
-  GatewayConfirmationDecision,
-  PendingConfirmation,
-} from '../../gateway/api/index.ts';
-import {webSource, type Session} from './session.ts';
+import type {CharacterSummary} from '../../gateway/api/index.ts';
+import type {Session} from './session.ts';
 import {composerText, type Thread, type WebState} from './store.ts';
 
 export function stateLabel(state: CharacterSummary['state']): string {
@@ -33,9 +29,6 @@ export function ThreadPane({
     summary => summary.id === thread.characterId,
   );
   const name = character?.displayName ?? thread.characterId;
-  const cards = state.confirmations.filter(
-    pending => pending.characterId === thread.characterId,
-  );
   const pending = [...state.pending].filter(
     ([, line]) => line.conversationId === thread.conversationId,
   );
@@ -55,7 +48,7 @@ export function ThreadPane({
     if (following.current) {
       scroller.current?.scrollTo({top: scroller.current.scrollHeight});
     }
-  }, [lastMessageId, turn?.drafts, pending.length, cards.length]);
+  }, [lastMessageId, turn?.drafts, pending.length]);
 
   return (
     <section className="thread">
@@ -104,13 +97,6 @@ export function ThreadPane({
         ) : null}
         {pending.map(([clientMessageId, line]) => (
           <Bubble key={clientMessageId} own text={line.text} pending />
-        ))}
-        {cards.map(card => (
-          <ConfirmationCard
-            key={card.id}
-            pending={card}
-            onAnswer={decision => session.answer(card.id, decision)}
-          />
         ))}
       </div>
       <form
@@ -166,67 +152,6 @@ function Bubble({
         <span className="bubble-name">{name}</span>
       )}
       <span className="bubble-text">{text}</span>
-    </div>
-  );
-}
-
-function ConfirmationCard({
-  pending,
-  onAnswer,
-}: {
-  readonly pending: PendingConfirmation;
-  readonly onAnswer: (decision: GatewayConfirmationDecision) => Promise<void>;
-}) {
-  // The buttons rest while an answer is on its way; an answer that could
-  // not be delivered gives them back, since the card is still there.
-  const [answering, setAnswering] = useState(false);
-  const expires = new Date(pending.deadlineAt).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const answer = async (decision: GatewayConfirmationDecision) => {
-    setAnswering(true);
-    await onAnswer(decision);
-    setAnswering(false);
-  };
-
-  return (
-    <div className="card" role="group" aria-label="Confirmation">
-      <p className="card-title">
-        Confirm {pending.request.toolName}{' '}
-        <span className="muted">· {pending.request.pluginId}</span>
-      </p>
-      <p className="card-summary">{pending.request.summary}</p>
-      <pre className="card-preview">
-        {JSON.stringify(pending.request.preview, null, 2)}
-      </pre>
-      <div className="card-actions">
-        <span className="muted small">
-          expires at {expires}
-          {pending.turn === undefined || pending.turn.source === webSource
-            ? ''
-            : ` · raised on ${pending.turn.source}`}
-        </span>
-        <button
-          type="button"
-          disabled={answering}
-          onClick={() => {
-            void answer('approved');
-          }}
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={answering}
-          onClick={() => {
-            void answer('denied');
-          }}
-        >
-          Deny
-        </button>
-      </div>
     </div>
   );
 }

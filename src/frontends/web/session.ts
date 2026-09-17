@@ -13,7 +13,6 @@ import {
   type GatewayClient,
 } from '../../gateway/client/index.ts';
 import {
-  answerLost,
   applyEvent,
   composerChanged,
   connectionRefused,
@@ -75,32 +74,37 @@ export function createSession(address: string): Session {
       listener();
     }
   };
-  /** The character an open is waiting for, and how many opens have been asked for. */
+  /** The character an open is waiting for, so a roster of one asks once. */
   let opening: string | undefined;
-  let openGeneration = 0;
-
   /**
-   * A page that cannot be read is a notice, never the stream's failure. A
-   * read serves the open it started under: one left behind by a later
-   * open — of another character, or of the same one again — applies
-   * nothing, whichever way it ends.
+   * Every open and every page read takes charge of what the thread shows,
+   * and only the latest one's result applies — an open of another
+   * character, an open of the same one again, a reconnect's read, a
+   * recovery read: each supersedes whatever was in flight before it.
    */
+  let charge = 0;
+  const takeCharge = (): (() => boolean) => {
+    const mine = (charge += 1);
+
+    return () => mine === charge;
+  };
+  /** A page that cannot be read is a notice, never the stream's failure. */
   const readPage = async (
     conversationId: string,
     request: HistoryPage,
   ): Promise<void> => {
-    const mine = openGeneration;
+    const mine = takeCharge();
 
     try {
       const outcome = await client.history(conversationId, request);
 
-      if (mine === openGeneration) {
+      if (mine()) {
         apply(current =>
           historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
-      if (mine === openGeneration) {
+      if (mine()) {
         apply(current =>
           pageUnread(current, conversationId, request, problem(error)),
         );
@@ -109,9 +113,10 @@ export function createSession(address: string): Session {
   };
   /**
    * An open can wait on a start or a reload, minutes when a turn is parked
-   * on a confirmation; the latest character asked for wins, and an earlier
-   * open that settles later is let go. Asking again for the one already
-   * waited for changes nothing.
+   * on a confirmation; the latest character asked for wins, and an
+   * earlier open that settles later is let go. While one is in flight the
+   * same character is not asked for again — a roster of one asks on every
+   * event until its thread is open.
    */
   const open = async (characterId: string): Promise<void> => {
     if (opening === characterId) {
@@ -119,17 +124,17 @@ export function createSession(address: string): Session {
     }
 
     opening = characterId;
-    openGeneration += 1;
 
-    const mine = openGeneration;
-    const current = (): boolean => mine === openGeneration;
+    const mine = takeCharge();
 
     try {
       const outcome = await client.openDirectConversation(characterId);
 
-      if (!current()) {
+      if (!mine()) {
         return;
       }
+
+      opening = undefined;
 
       if (outcome.status !== 'opened') {
         apply(state => noticed(state, outcome.message));
@@ -140,12 +145,9 @@ export function createSession(address: string): Session {
       apply(state => threadOpened(state, outcome));
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
-      if (current()) {
-        apply(state => noticed(state, problem(error)));
-      }
-    } finally {
-      if (current()) {
+      if (mine()) {
         opening = undefined;
+        apply(state => noticed(state, problem(error)));
       }
     }
   };
@@ -238,10 +240,11 @@ export function createSession(address: string): Session {
             'answer',
           ),
         );
-      } catch (error: unknown) {
-        apply(current => answerLost(current, clientMessageId, problem(error)));
-        // No answer came, and the daemon may never have heard the line: the
-        // newest page says whether it did, when it can be read.
+      } catch {
+        // No answer came, so nothing is known of the turn: the newest page
+        // settles the line if the daemon took it and says the daemon
+        // cannot be reached if that is why no answer came. A line the
+        // daemon may still be holding stays pending for the stream.
         await readPage(thread.conversationId, {});
       }
     },

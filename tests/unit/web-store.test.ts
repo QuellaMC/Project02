@@ -1,7 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
 import {
-  answerLost,
   applyEvent,
   composerChanged,
   composerText,
@@ -231,6 +230,31 @@ describe('web store', () => {
       'm-2',
       'm-3',
     ]);
+  });
+
+  it('sets the thread aside when its own character is opened again, so a refresh that cannot be read leaves the conversation in place', () => {
+    const state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
+    const again = threadOpened(state, {
+      status: 'opened',
+      conversationId,
+      characterId: 'mira',
+      userParticipantId: 'local-user',
+    });
+
+    expect(again.thread?.stale.map(message => message.messageId)).toEqual([
+      'm-1',
+    ]);
+    expect(again.thread?.messages).toEqual([]);
+
+    // Another character's thread starts empty: what was shown is not its own.
+    const nova = threadOpened(state, {
+      status: 'opened',
+      conversationId: 'conv-2',
+      characterId: 'nova',
+      userParticipantId: 'local-user',
+    });
+
+    expect(nova.thread?.stale).toEqual([]);
   });
 
   it('shows a line once the daemon says so: the pending bubble becomes the message, and a frame seen twice shows once', () => {
@@ -670,52 +694,6 @@ describe('web store', () => {
 
     expect(composerText(state)).toBe('something for nova');
     expect(composerText(threadOpened(state, mira))).toBe('half a thought');
-  });
-
-  it("says nothing of an answer that never came until the page knows the line's fate: nothing once it landed, the reason when it comes back", () => {
-    const state = sent(opened(), 'hello', 'line-1');
-    const lost = answerLost(
-      state,
-      'line-1',
-      'The daemon could not be reached.',
-    );
-
-    expect(lost.notice).toBeUndefined();
-    expect(lost.pending.get('line-1')).toEqual({
-      conversationId,
-      text: 'hello',
-      ended: 'The daemon could not be reached.',
-    });
-
-    // The stream proves the daemon took the line, or the newest page does.
-    const landed = applyEvent(lost, userMessage('m-1', 'hello', 'line-1'));
-
-    expect(landed.notice).toBeUndefined();
-    expect(landed.pending.size).toBe(0);
-
-    const read = historyPageRead(
-      lost,
-      conversationId,
-      {},
-      page([committed('m-1', 'hello', 'line-1')]),
-    );
-
-    expect(read.notice).toBeUndefined();
-    expect(read.pending.size).toBe(0);
-
-    // The stream showed the line before the answer was lost: nothing to say.
-    const shown = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
-
-    expect(
-      answerLost(shown, 'line-1', 'The daemon could not be reached.'),
-    ).toBe(shown);
-
-    // The newest page lacks it: it comes back, and the reason is said.
-    const absent = historyPageRead(lost, conversationId, {}, page([]));
-
-    expect(composerText(absent)).toBe('hello');
-    expect(absent.pending.size).toBe(0);
-    expect(absent.notice).toBe('The daemon could not be reached.');
   });
 
   it('gives every pending line back, in the order it was written, when the address will never work again', () => {

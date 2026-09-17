@@ -234,6 +234,16 @@ code {
   margin: auto;
 }
 
+/* Every confirmation waiting stands above the thread, however many. */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
 .thread {
   display: flex;
   flex-direction: column;
