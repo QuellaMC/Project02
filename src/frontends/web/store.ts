@@ -33,17 +33,10 @@ export type Message = {
   readonly clientMessageId?: string;
 };
 
-/** A line this tab sent that the stream has not yet shown, whichever thread it went to. */
+/** A line this tab sent that the log has not yet shown, whichever thread it went to. */
 export type PendingLine = {
   readonly conversationId: string;
   readonly text: string;
-  /**
-   * The daemon's verdict on this line's turn, when the answer came before
-   * the stream showed the line: the line comes back with it once a page
-   * proves it was never committed. An answer that never came is no
-   * verdict — nothing is known of the turn, so the line waits.
-   */
-  readonly ended?: string;
 };
 
 /** The one open DM as its log shows it. */
@@ -260,11 +253,10 @@ export function composerChanged(state: WebState, text: string): WebState {
 
 /**
  * A page of the log, and the log's word on every line this tab is
- * waiting for: a page that carries a line proves the daemon took it,
- * whichever page it is, and the newest page — read after the verdict, so
- * that it would hold the line if the line existed — is the one whose
- * silence sends a judged line back to its composer. A line whose turn
- * has not been judged stays pending whatever a page says.
+ * waiting for: a page that carries a line proves the daemon took it, and
+ * the line stops waiting. A page says nothing by lacking one — it holds
+ * a hundred messages, and a busy turn can put more than that between a
+ * line and now — so no line is ever returned on a page's silence.
  *
  * The newest page is the thread. What was shown before its first message
  * — earlier pages — stays before it, and what arrived live after its last
@@ -291,7 +283,6 @@ export function historyPageRead(
   }
 
   const messages = outcome.messages.map(messageOf);
-  const newest = request.before === undefined;
   // A page in front of the person answers whatever the thread last said
   // about being read.
   const read: Thread = {...thread, unread: undefined};
@@ -302,21 +293,14 @@ export function historyPageRead(
   );
   let next: WebState = {
     ...state,
-    thread: newest
-      ? newestPage(read, messages, outcome.earlier)
-      : earlierPage(read, messages, outcome.earlier),
+    thread:
+      request.before === undefined
+        ? newestPage(read, messages, outcome.earlier)
+        : earlierPage(read, messages, outcome.earlier),
   };
 
-  for (const [clientMessageId, line] of state.pending) {
-    if (line.conversationId !== conversationId) {
-      continue;
-    }
-
-    if (carried.has(clientMessageId)) {
-      next = settled(next, clientMessageId);
-    } else if (newest && line.ended !== undefined) {
-      next = noticed(handedBack(next, clientMessageId, line), line.ended);
-    }
+  for (const clientMessageId of carried) {
+    next = settled(next, clientMessageId);
   }
 
   return next;
@@ -388,16 +372,14 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 
 /**
  * A turn's end, however it reaches the tab — the answer to a send, or the
- * stream. Neither proves what became of the line: an answer can beat the
- * frame that would show it, and a stream is ordered only within one
- * connection, so a completion can arrive on a stream whose predecessor
- * carried the line's commit. A refusal is the exception the daemon states
- * itself: nothing ran, so the line was never recorded and comes back to
- * the composer at once. Every other end is a verdict the line keeps until
- * a page of the log says whether it was committed. A line comes back to
- * the thread it was written in, open or not, and a turn that did not
- * complete is said at once, naming its character — this tab's turn or
- * another surface's. `completed` settles nothing here; the log does.
+ * stream — said at once, naming its character, this tab's turn or
+ * another surface's. A refusal is the one end that says what became of
+ * the line: nothing ran, so it was never recorded and comes back to the
+ * thread it was written in, open or not. No other end says, and neither
+ * can the page work it out: an answer can beat the frame that would show
+ * the line, a stream is ordered only within one connection, and a page
+ * of the log is a hundred messages, not the whole of it. So the line
+ * waits for a page that carries it. `completed` says nothing here.
  */
 export function lineEnded(
   state: WebState,
@@ -413,31 +395,34 @@ export function lineEnded(
     ending.message ?? `The turn was ${ending.status}.`
   }`;
   const line = state.pending.get(clientMessageId);
-  const placed =
-    line === undefined
-      ? state
-      : ending.status === 'refused'
-        ? handedBack(state, clientMessageId, line)
-        : marked(state, clientMessageId, line, notice);
 
-  return noticed(placed, notice);
+  return noticed(
+    line !== undefined && ending.status === 'refused'
+      ? handedBack(state, clientMessageId, line)
+      : state,
+    notice,
+  );
 }
 
 /**
- * The daemon says a confirmation is not waiting any more: its deadline
- * passed, or another surface settled it while this tab's stream was
- * away, so no settled frame is coming. The card goes and the person
- * hears why their answer did nothing.
+ * The daemon answered a click on a card with the news that the request
+ * was not waiting any more: its deadline had passed, or another surface
+ * settled it while this tab's stream was away. It is the same news the
+ * cancelled frame carries, said the same way, so whichever reaches the
+ * tab first the person hears it once.
  */
 export function confirmationGone(state: WebState, id: string): WebState {
   const card = state.confirmations.find(pending => pending.id === id);
 
-  return card === undefined
-    ? state
-    : noticed(
-        withoutConfirmation(state, id),
-        `${characterName(state, card.characterId)}: The confirmation is no longer waiting.`,
-      );
+  return card === undefined ? state : cancelled(state, id, card.characterId);
+}
+
+/** A confirmation that ended without this tab's answer, and why the person's click did nothing. */
+function cancelled(state: WebState, id: string, characterId: string): WebState {
+  return noticed(
+    withoutConfirmation(state, id),
+    `${characterName(state, characterId)}: A confirmation was cancelled before it was answered.`,
+  );
 }
 
 function withoutConfirmation(state: WebState, id: string): WebState {
@@ -462,20 +447,14 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       return state.confirmations.some(pending => pending.id === event.id)
         ? state
         : {...state, confirmations: [...state.confirmations, pendingOf(event)]};
-    case 'confirmation_settled': {
-      const settled = withoutConfirmation(state, event.id);
-
+    case 'confirmation_settled':
       // The card was on the page whoever raised it, so its end is too.
       // The daemon cancels a confirmation for its deadline, for a host
       // that gave up on it, and for a shutdown, and says only that it
       // was cancelled — so neither does the page.
       return event.decision === 'cancelled'
-        ? noticed(
-            settled,
-            `${characterName(state, event.characterId)}: A confirmation was cancelled before it was answered.`,
-          )
-        : settled;
-    }
+        ? cancelled(state, event.id, event.characterId)
+        : withoutConfirmation(state, event.id);
     case 'turn_progress': {
       const {progress} = event;
       // The daemon took the line, whichever thread it went to.
@@ -599,20 +578,6 @@ function settled(state: WebState, clientMessageId: string): WebState {
   const pending = new Map(state.pending);
 
   pending.delete(clientMessageId);
-
-  return {...state, pending};
-}
-
-/** The line keeps what it would come back with. */
-function marked(
-  state: WebState,
-  clientMessageId: string,
-  line: PendingLine,
-  ended: string,
-): WebState {
-  const pending = new Map(state.pending);
-
-  pending.set(clientMessageId, {...line, ended});
 
   return {...state, pending};
 }

@@ -142,9 +142,9 @@ export function createSession(address: string): Session {
   /**
    * The daemon has ended a turn whose line this tab has never seen
    * committed, so only the log says whether it was — and only a page read
-   * after the end can say it, since a page begun before one would not
-   * hold the line yet. This reads that page; it settles the line, or
-   * hands it back when the turn was judged and the log lacks it.
+   * after the end can carry it, since a page begun before one would not
+   * hold the line yet. This reads that page: it settles the line if the
+   * daemon took it, and leaves it waiting if the page does not say.
    */
   const askTheLog = async (
     conversationId: string,

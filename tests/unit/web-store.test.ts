@@ -497,17 +497,18 @@ describe('web store', () => {
     expect(composerText(both)).toBe('next thought first second');
     expect(both.pending.size).toBe(0);
 
-    // A turn the daemon judged says so and marks its line; only the log
-    // says whether the line was committed, so nothing comes back yet.
+    // A turn the daemon judged says so, and says nothing about the line:
+    // it waits for a page that carries it.
     const judged = applyEvent(
       state,
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
     expect(composerText(judged)).toBe('next thought');
-    expect(judged.pending.get('line-1')?.ended).toBe(
-      'Mira: The line was blank.',
-    );
+    expect(judged.pending.get('line-1')).toEqual({
+      conversationId,
+      text: 'first',
+    });
     expect(judged.notices.at(-1)).toBe('Mira: The line was blank.');
     // The same news twice is the same notice.
     expect(
@@ -520,26 +521,25 @@ describe('web store', () => {
     );
   });
 
-  it('lets the answer mark a line ended but not hand it back, since its frame may still be on the way: the stream or the newest page settles it', () => {
+  it('leaves a judged line waiting for the log, since only a page that carries it says the daemon took it', () => {
     const state = sent(opened(), 'hello', 'line-1');
-    const marked = lineEnded(state, 'mira', 'line-1', {
+    const judged = lineEnded(state, 'mira', 'line-1', {
       status: 'rejected',
       message: 'The model wrote nothing it could say.',
     });
 
-    expect(composerText(marked)).toBe('');
-    expect(marked.pending.get('line-1')).toEqual({
+    expect(composerText(judged)).toBe('');
+    expect(judged.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-      ended: 'Mira: The model wrote nothing it could say.',
     });
-    expect(marked.notices.at(-1)).toBe(
+    expect(judged.notices.at(-1)).toBe(
       'Mira: The model wrote nothing it could say.',
     );
 
-    // The stream shows the line after all: it was taken, and the daemon's
-    // verdict on the turn stands — the line landing does not answer it.
-    const shown = applyEvent(marked, userMessage('m-1', 'hello', 'line-1'));
+    // The stream shows the line: it was taken, and the daemon's verdict
+    // on the turn stands — the line landing does not answer it.
+    const shown = applyEvent(judged, userMessage('m-1', 'hello', 'line-1'));
 
     expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
@@ -548,11 +548,10 @@ describe('web store', () => {
       'Mira: The model wrote nothing it could say.',
     );
 
-    // The newest page carries it: taken. The newest page lacks it: it
-    // comes back. A line the answer never marked stays pending: its turn
-    // has not run yet.
+    // A page that carries it says the same. A page that lacks it says
+    // nothing: it holds a hundred messages, not the whole log.
     const carried = historyPageRead(
-      marked,
+      judged,
       conversationId,
       {},
       page([committed('m-1', 'hello', 'line-1')]),
@@ -561,17 +560,13 @@ describe('web store', () => {
     expect(carried.pending.size).toBe(0);
     expect(composerText(carried)).toBe('');
 
-    const absent = historyPageRead(marked, conversationId, {}, page([]));
+    const absent = historyPageRead(judged, conversationId, {}, page([]));
 
-    expect(absent.pending.size).toBe(0);
-    expect(composerText(absent)).toBe('hello');
-
-    const queued = historyPageRead(state, conversationId, {}, page([]));
-
-    expect(queued.pending.get('line-1')).toEqual({
+    expect(absent.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
     });
+    expect(composerText(absent)).toBe('');
   });
 
   it("keeps a line sent to one character while another is open, hands it back in its own thread, and says a turn's end at once, naming its character", () => {
@@ -633,23 +628,13 @@ describe('web store', () => {
       completed('line-2', 'failed', 'The store is read-only.'),
     );
 
-    // The turn's end says so and marks the line, wherever the person is;
-    // Mira's own newest page, lacking the line, is what sends it back to
-    // Mira's composer.
-    expect(failed.pending.get('line-2')?.ended).toBe(
-      'Mira: The store is read-only.',
-    );
-    expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
-
-    const back = historyPageRead(
-      threadOpened(failed, mira),
+    // The turn's end is said wherever the person is, and the line waits
+    // for a page of Mira's log to carry it.
+    expect(failed.pending.get('line-2')).toEqual({
       conversationId,
-      {},
-      page([]),
-    );
-
-    expect(back.pending.size).toBe(0);
-    expect(back.composers).toEqual(new Map([[conversationId, 'hello mira']]));
+      text: 'hello mira',
+    });
+    expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
 
     // Another surface's turn is said the same way, named the same way,
     // and stands beside a failure that came before it rather than
@@ -659,7 +644,7 @@ describe('web store', () => {
     ).toEqual(['Mira: The store is read-only.', 'Mira: The turn was failed.']);
   });
 
-  it('settles a pending line from whichever page carries it, and sends a judged one back only when the newest page lacks it', () => {
+  it('settles a pending line from whichever page carries it, and from no page that does not', () => {
     const state = sent(opened(), 'hello', 'line-1');
     // An earlier page carries the line: the daemon took it, whichever
     // page says so, and the faded bubble goes.
@@ -672,28 +657,23 @@ describe('web store', () => {
 
     expect(earlier.pending.size).toBe(0);
 
-    // An earlier page that lacks it proves nothing — the line is newer
-    // than that page — even once the turn has been judged.
+    // A page that lacks it proves nothing, newest or not, and a judged
+    // turn does not change that: a page is a hundred messages, and a
+    // busy turn can put more than that between a line and now.
     const judged = applyEvent(
       state,
       completed('line-1', 'failed', 'The store is read-only.'),
     );
-    const older = historyPageRead(
-      judged,
-      conversationId,
-      {before: 'v1:0:0'},
-      page([committed('m-0', 'long before')]),
-    );
 
-    expect(older.pending.get('line-1')?.ended).toBe(
-      'Mira: The store is read-only.',
-    );
-    expect(composerText(older)).toBe('');
+    for (const request of [{}, {before: 'v1:0:0'}]) {
+      const read = historyPageRead(judged, conversationId, request, page([]));
 
-    // The newest page is the one that would hold it.
-    expect(
-      composerText(historyPageRead(judged, conversationId, {}, page([]))),
-    ).toBe('hello');
+      expect(read.pending.get('line-1')).toEqual({
+        conversationId,
+        text: 'hello',
+      });
+      expect(composerText(read)).toBe('');
+    }
   });
 
   it('keeps what a person typed in each thread', () => {
@@ -839,9 +819,19 @@ describe('web store', () => {
 
     expect(gone.confirmations).toEqual([]);
     expect(gone.notices.at(-1)).toBe(
-      'Mira: The confirmation is no longer waiting.',
+      'Mira: A confirmation was cancelled before it was answered.',
     );
     expect(confirmationGone(gone, 'c-1')).toBe(gone);
+
+    // One ending, said once, whichever of the two reaches the tab first.
+    expect(
+      applyEvent(gone, {
+        kind: 'confirmation_settled',
+        characterId: 'mira',
+        id: 'c-1',
+        decision: 'cancelled',
+      }).notices,
+    ).toEqual(gone.notices);
   });
 
   it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {
