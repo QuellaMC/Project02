@@ -68,11 +68,11 @@ export function App({session}: {readonly session: Session}) {
         ))}
       </aside>
       <main className="main">
-        {state.notice === undefined ? null : (
-          <p className="notice" role="status">
-            {state.notice}
+        {state.notices.map(notice => (
+          <p className="notice" role="status" key={notice}>
+            {notice}
           </p>
-        )}
+        ))}
         {state.confirmations.length === 0 ? null : (
           // Every confirmation waiting is on the page, whichever character
           // it belongs to and whichever surface raised it: a person who

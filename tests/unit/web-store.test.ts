@@ -361,7 +361,7 @@ describe('web store', () => {
     state = applyEvent(state, completed('line-1'));
 
     expect(state.turns.has(conversationId)).toBe(false);
-    expect(state.notice).toBeUndefined();
+    expect(state.notices).toEqual([]);
     expect(state.thread?.conversationId).toBe('conv-2');
   });
 
@@ -483,7 +483,7 @@ describe('web store', () => {
 
     expect(composerText(fromStream)).toBe('next thought first');
     expect(fromStream.pending.size).toBe(1);
-    expect(fromStream.notice).toBe('Mira: The line was blank.');
+    expect(fromStream.notices.at(-1)).toBe('Mira: The line was blank.');
 
     const again = applyEvent(
       fromStream,
@@ -491,7 +491,8 @@ describe('web store', () => {
     );
 
     expect(composerText(again)).toBe('next thought first');
-    expect(again.notice).toBe(fromStream.notice);
+    // The same news twice is the same notice.
+    expect(again.notices).toEqual(fromStream.notices);
 
     // The ordered stream ends the queued line on its own, later: it lands
     // after the first, as it was sent.
@@ -502,7 +503,7 @@ describe('web store', () => {
 
     expect(composerText(both)).toBe('next thought first second');
     expect(both.pending.size).toBe(0);
-    expect(both.notice).toBe('Mira: The store is full.');
+    expect(both.notices.at(-1)).toBe('Mira: The store is full.');
 
     const refused = lineEnded(
       state,
@@ -514,7 +515,7 @@ describe('web store', () => {
 
     expect(composerText(refused)).toBe('next thought first');
     expect(refused.pending.size).toBe(1);
-    expect(refused.notice).toBe(
+    expect(refused.notices.at(-1)).toBe(
       'Mira: The gateway holds no open conversation.',
     );
 
@@ -539,7 +540,9 @@ describe('web store', () => {
       text: 'hello',
       ended: 'Mira: The model wrote nothing it could say.',
     });
-    expect(marked.notice).toBe('Mira: The model wrote nothing it could say.');
+    expect(marked.notices.at(-1)).toBe(
+      'Mira: The model wrote nothing it could say.',
+    );
 
     // The stream shows the line after all: it was taken, and the daemon's
     // verdict on the turn stands — the line landing does not answer it.
@@ -548,7 +551,9 @@ describe('web store', () => {
     expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
     expect(composerText(shown)).toBe('');
-    expect(shown.notice).toBe('Mira: The model wrote nothing it could say.');
+    expect(shown.notices.at(-1)).toBe(
+      'Mira: The model wrote nothing it could say.',
+    );
 
     // The newest page carries it: taken. The newest page lacks it: it
     // comes back. A line the answer never marked stays pending: its turn
@@ -609,14 +614,14 @@ describe('web store', () => {
 
     expect(composerText(ended)).toBe('');
     expect(ended.pending.size).toBe(0);
-    expect(ended.notice).toBe('Mira: Mira is away.');
+    expect(ended.notices.at(-1)).toBe('Mira: Mira is away.');
 
     // Back in Mira's thread, the line is where it was written, and the
     // open spends the notice as any act of the person does.
     state = threadOpened(ended, mira);
 
     expect(composerText(state)).toBe('hello mira');
-    expect(state.notice).toBeUndefined();
+    expect(state.notices).toEqual([]);
     expect(state.turns.has(conversationId)).toBe(false);
 
     // The daemon taking the line settles it whichever thread is open, and
@@ -639,13 +644,15 @@ describe('web store', () => {
     );
 
     expect(failed.pending.size).toBe(0);
-    expect(failed.notice).toBe('Mira: The store is read-only.');
+    expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
     expect(failed.composers).toEqual(new Map([[conversationId, 'hello mira']]));
 
-    // Another surface's turn is said the same way, named the same way.
+    // Another surface's turn is said the same way, named the same way,
+    // and stands beside a failure that came before it rather than
+    // replacing it: nothing the daemon said is overwritten.
     expect(
-      applyEvent(elsewhere, completed('telegram-1', 'failed')).notice,
-    ).toBe('Mira: The turn was failed.');
+      applyEvent(failed, completed('telegram-1', 'failed')).notices,
+    ).toEqual(['Mira: The store is read-only.', 'Mira: The turn was failed.']);
   });
 
   it('keeps what a person typed in each thread', () => {
@@ -705,7 +712,9 @@ describe('web store', () => {
 
     expect(state.thread?.messages).toHaveLength(1);
     expect(state.turns.has(conversationId)).toBe(false);
-    expect(state.notice).toBe('Mira: The model wrote nothing it could say.');
+    expect(state.notices.at(-1)).toBe(
+      'Mira: The model wrote nothing it could say.',
+    );
 
     state = applyEvent(state, {
       kind: 'turn_completed',
@@ -717,13 +726,13 @@ describe('web store', () => {
       reason: 'provider_error',
     });
 
-    expect(state.notice).toBe('Mira: provider_error');
+    expect(state.notices.at(-1)).toBe('Mira: provider_error');
 
     const spent = noticeSpent(state);
 
-    expect(spent.notice).toBeUndefined();
+    expect(spent.notices).toEqual([]);
     expect(noticeSpent(spent)).toBe(spent);
-    expect(sent(state, 'again', 'line-2').notice).toBeUndefined();
+    expect(sent(state, 'again', 'line-2').notices).toEqual([]);
   });
 
   it('tracks confirmations by id, whatever surface raised them, and says when one expired, naming its character', () => {
@@ -747,7 +756,7 @@ describe('web store', () => {
     });
 
     expect(approved.confirmations).toEqual([]);
-    expect(approved.notice).toBeUndefined();
+    expect(approved.notices).toEqual([]);
 
     const expired = applyEvent(state, {
       kind: 'confirmation_settled',
@@ -757,7 +766,7 @@ describe('web store', () => {
     });
 
     expect(expired.confirmations).toEqual([]);
-    expect(expired.notice).toBe(
+    expect(expired.notices.at(-1)).toBe(
       'Mira: A confirmation expired before it was answered.',
     );
 
@@ -778,7 +787,7 @@ describe('web store', () => {
       },
     );
 
-    expect(elsewhere.notice).toBe(
+    expect(elsewhere.notices.at(-1)).toBe(
       'Mira: A confirmation expired before it was answered.',
     );
 
@@ -788,7 +797,9 @@ describe('web store', () => {
     const gone = confirmationGone(state, 'c-1');
 
     expect(gone.confirmations).toEqual([]);
-    expect(gone.notice).toBe('Mira: The confirmation is no longer waiting.');
+    expect(gone.notices.at(-1)).toBe(
+      'Mira: The confirmation is no longer waiting.',
+    );
     expect(confirmationGone(gone, 'c-1')).toBe(gone);
   });
 
@@ -887,7 +898,7 @@ describe('web store', () => {
     );
 
     expect(read.thread?.unread).toBeUndefined();
-    expect(read.notice).toBe('Mira: The store is read-only.');
+    expect(read.notices.at(-1)).toBe('Mira: The store is read-only.');
 
     // A read left behind by a switch of characters says nothing about the
     // thread in front of the person — by either way of failing.

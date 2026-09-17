@@ -94,13 +94,14 @@ export type WebState = {
   /** Conversation id → the turn running there; absent when none is. */
   readonly turns: ReadonlyMap<string, TurnState>;
   /**
-   * The page's one notice: how a turn did not complete, a confirmation
-   * that expired, a page that could not be read, a verb the daemon
-   * refused. A person who sees the whole roster is told about the whole
-   * roster, so a notice about a character names it. Spent by the
-   * person's next act.
+   * What the page has to say that belongs to no thread: how a turn did
+   * not complete, a confirmation that expired, a verb the daemon refused.
+   * A person who sees the whole roster is told about the whole roster, so
+   * a notice about a character names it, and two failures are two
+   * notices — nothing the daemon said is overwritten by the next thing it
+   * says. The person's next act spends them all.
    */
-  readonly notice?: string | undefined;
+  readonly notices: readonly string[];
 };
 
 /** How a line's turn ended, from the answer or the stream. */
@@ -119,6 +120,7 @@ export const initialState: WebState = {
   pending: new Map(),
   composers: new Map(),
   turns: new Map(),
+  notices: [],
 };
 
 /** A character as the person sees it named, wherever the page speaks of one. */
@@ -192,13 +194,16 @@ export function connectionRefused(state: WebState, message: string): WebState {
   return next;
 }
 
+/** Said once: the same news twice — a frame seen again — is the same notice. */
 export function noticed(state: WebState, notice: string): WebState {
-  return state.notice === notice ? state : {...state, notice};
+  return state.notices.includes(notice)
+    ? state
+    : {...state, notices: [...state.notices, notice]};
 }
 
-/** The person's next act — a send, an open, an answer, a start — spends the notice. */
+/** The person's next act — a send, an open, an answer, a start — spends them. */
 export function noticeSpent(state: WebState): WebState {
-  return state.notice === undefined ? state : {...state, notice: undefined};
+  return state.notices.length === 0 ? state : {...state, notices: []};
 }
 
 /**

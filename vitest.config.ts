@@ -66,9 +66,16 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
-      // The page's session runs only in a browser; the browser suite is its cover.
-      exclude: ['src/frontends/web/session.ts'],
+      include: ['src/**/*.{ts,tsx}'],
+      // The page's session and its components run only in a browser; the
+      // browser suite is their cover. Everything else the page owns —
+      // its store, every rule a tab follows — is covered here.
+      exclude: [
+        'src/frontends/web/session.ts',
+        'src/frontends/web/main.tsx',
+        'src/frontends/web/app.tsx',
+        'src/frontends/web/thread.tsx',
+      ],
       reporter: ['text', 'json-summary'],
       thresholds: {
         statements: 85.3,
