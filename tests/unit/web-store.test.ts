@@ -12,6 +12,7 @@ import {
   installSnapshot,
   lineEnded,
   lineSent,
+  linesTaken,
   noticeSpent,
   pageUnread,
   restoredLineUnaccounted,
@@ -385,14 +386,15 @@ describe('web store', () => {
     let state = sent(opened(), 'hello', 'line-1');
 
     state = applyEvent(state, userMessage('m-3', 'meanwhile', 'line-9'));
-    state = historyPageRead(
-      state,
-      conversationId,
-      {},
-      page(
-        [committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')],
-        'v1:0:0',
-      ),
+
+    const newest = page(
+      [committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')],
+      'v1:0:0',
+    );
+
+    state = linesTaken(
+      historyPageRead(state, conversationId, {}, newest),
+      newest,
     );
 
     expect(state.thread?.messages.map(message => message.messageId)).toEqual([
@@ -611,10 +613,8 @@ describe('web store', () => {
 
     // A page that carries it says the same. A page that lacks it says
     // nothing: it holds a hundred messages, not the whole log.
-    const carried = historyPageRead(
+    const carried = linesTaken(
       judged,
-      conversationId,
-      {},
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
@@ -718,10 +718,15 @@ describe('web store', () => {
     const state = sent(opened(), 'hello', 'line-1');
     // An earlier page carries the line: the daemon took it, whichever
     // page says so, and the faded bubble goes.
-    const earlier = historyPageRead(
-      state,
-      conversationId,
-      {before: 'v1:0:0'},
+    // A page says what it carries whichever page it is, and whether or
+    // not its conversation is the thread on screen.
+    const earlier = linesTaken(
+      threadOpened(state, {
+        status: 'opened',
+        conversationId: 'conv-2',
+        characterId: 'nova',
+        userParticipantId: 'local-user',
+      }),
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
@@ -736,7 +741,10 @@ describe('web store', () => {
     );
 
     for (const request of [{}, {before: 'v1:0:0'}]) {
-      const read = historyPageRead(judged, conversationId, request, page([]));
+      const read = linesTaken(
+        historyPageRead(judged, conversationId, request, page([])),
+        page([]),
+      );
 
       expect(read.pending.get('line-1')).toEqual({
         conversationId,

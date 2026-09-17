@@ -25,6 +25,7 @@ import {
   installSnapshot,
   lineEnded,
   lineSent,
+  linesTaken,
   noticeSpent,
   noticed,
   pageUnread,
@@ -127,8 +128,14 @@ export function createSession(address: string): Session {
       const outcome = await client.history(conversationId, request);
 
       if (reads.get(key) === mine) {
+        // What the page says of this tab's lines holds whichever thread
+        // is on screen, or none: a reload reads a conversation nobody is
+        // looking at yet, and its page still says the daemon took them.
         apply(current =>
-          historyPageRead(current, conversationId, request, outcome),
+          linesTaken(
+            historyPageRead(current, conversationId, request, outcome),
+            outcome,
+          ),
         );
       }
     } catch (error: unknown) {
@@ -214,6 +221,12 @@ export function createSession(address: string): Session {
 
         if (event.kind === 'turn_completed') {
           void askTheLog(event.conversationId, event.clientMessageId);
+        }
+
+        // A character that was away when its lines were last accounted
+        // for is a fresh chance at them, and the only one that comes.
+        if (event.kind === 'state_changed' && event.state === 'ready') {
+          void accountForPending(accounting());
         }
       },
       {

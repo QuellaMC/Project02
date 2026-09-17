@@ -321,21 +321,33 @@ export function historyPageRead(
   // A page in front of the person answers whatever the thread last said
   // about being read.
   const read: Thread = {...thread, unread: undefined};
-  const carried = new Set(
-    messages.flatMap(message =>
-      message.clientMessageId === undefined ? [] : [message.clientMessageId],
-    ),
-  );
-  let next: WebState = {
+
+  return {
     ...state,
     thread:
       request.before === undefined
         ? newestPage(read, messages, outcome.earlier)
         : earlierPage(read, messages, outcome.earlier),
   };
+}
 
-  for (const clientMessageId of carried) {
-    next = settled(next, clientMessageId);
+/**
+ * Every line of this tab's that a page carries: the daemon took it, and
+ * the line stops waiting. The log's word on a line is not the same job
+ * as showing a thread — a page read for a conversation nobody is looking
+ * at still says whose lines it holds.
+ */
+export function linesTaken(state: WebState, outcome: HistoryOutcome): WebState {
+  if (outcome.status !== 'ok') {
+    return state;
+  }
+
+  let next = state;
+
+  for (const {clientMessageId} of outcome.messages) {
+    if (clientMessageId !== undefined && next.pending.has(clientMessageId)) {
+      next = settled(next, clientMessageId);
+    }
   }
 
   return next;
