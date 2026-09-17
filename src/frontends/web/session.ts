@@ -19,6 +19,7 @@ import {
   composerChanged,
   confirmationGone,
   connectionRefused,
+  forgetWritten,
   historyPageRead,
   initialState,
   installSnapshot,
@@ -27,6 +28,7 @@ import {
   noticeSpent,
   noticed,
   pageUnread,
+  restoredLineUnaccounted,
   threadOpened,
   type PendingLine,
   type WebState,
@@ -63,9 +65,16 @@ export function createSession(address: string): Session {
     return refusedSession(problem(error));
   }
 
-  let state = {...initialState, ...writtenAndUnsent()};
+  const kept = writtenAndUnsent();
+  let state = {
+    ...initialState,
+    composers: kept.composers,
+    pending: kept.pending,
+  };
   /** A browser that refuses to keep what is written is said once, not on every keystroke. */
   let storageSaid = false;
+  /** The home what is kept was written for; another home is another world. */
+  let keptHome = kept.homeRoot;
   const listeners = new Set<() => void>();
   const apply = (reduce: (state: WebState) => WebState): void => {
     const next = reduce(state);
@@ -79,7 +88,7 @@ export function createSession(address: string): Session {
 
     state = next;
 
-    if (written && !keepWrittenAndUnsent(state) && !storageSaid) {
+    if (written && !keepWrittenAndUnsent(state, keptHome) && !storageSaid) {
       storageSaid = true;
       state = noticed(
         state,
@@ -101,25 +110,29 @@ export function createSession(address: string): Session {
    * it either way — the store says so.
    */
   const reads = new Map<string, number>();
+  /** The thread's own refresh and its paging back are counted apart: neither supersedes the other. */
+  const readKey = (conversationId: string, request: HistoryPage): string =>
+    `${conversationId}${request.before === undefined ? ' newest' : ' earlier'}`;
   /** A page that cannot be read is said on its thread, never as the stream's failure. */
   const readPage = async (
     conversationId: string,
     request: HistoryPage,
   ): Promise<void> => {
-    const mine = (reads.get(conversationId) ?? 0) + 1;
+    const key = readKey(conversationId, request);
+    const mine = (reads.get(key) ?? 0) + 1;
 
-    reads.set(conversationId, mine);
+    reads.set(key, mine);
 
     try {
       const outcome = await client.history(conversationId, request);
 
-      if (reads.get(conversationId) === mine) {
+      if (reads.get(key) === mine) {
         apply(current =>
           historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
-      if (reads.get(conversationId) === mine) {
+      if (reads.get(key) === mine) {
         apply(current => pageUnread(current, conversationId, problem(error)));
       }
     }
@@ -214,7 +227,14 @@ export function createSession(address: string): Session {
             await readPage(thread.conversationId, {});
           }
 
-          await accountForPending();
+          if (keptHome !== undefined && keptHome !== snapshot.health.homeRoot) {
+            apply(forgetWritten);
+          }
+
+          keptHome = snapshot.health.homeRoot;
+          // Not awaited: a line that parks on a confirmation would wait
+          // for a frame this stream cannot send until the bootstrap ends.
+          void accountForPending(accounting());
           openTheOnlyCharacter();
         },
       },
@@ -224,26 +244,11 @@ export function createSession(address: string): Session {
     });
 
   const sending = (): Sending => ({client, apply, askTheLog});
-  /**
-   * Every line this tab is still holding goes again under its own id —
-   * one whose send never reached a daemon that was going away, one a
-   * reload restored, one a passing failure left behind. The daemon's
-   * ledger joins what did arrive, so this says nothing twice. Its
-   * conversation is opened first: a daemon that has restarted holds no
-   * route to it yet, and would refuse the line as belonging to a
-   * conversation it does not know.
-   */
-  const accountForPending = async (): Promise<void> => {
-    for (const [clientMessageId, line] of state.pending) {
-      const opened = await client
-        .openDirectConversation(line.characterId)
-        .catch(() => undefined);
-
-      if (opened?.status === 'opened') {
-        await deliverOnce(sending(), line, clientMessageId);
-      }
-    }
-  };
+  const accounting = (): Accounting => ({
+    ...sending(),
+    readPage,
+    pending: () => state.pending,
+  });
 
   return {
     getState: () => state,
@@ -290,7 +295,7 @@ export function createSession(address: string): Session {
       // Nothing answered this one, which is reason to account for every
       // line still held: a passing failure that left one behind clears
       // without the stream ever dropping.
-      await accountForPending();
+      await accountForPending(accounting());
 
       // Nothing answered, so the log is asked; a line it does not carry
       // goes again under the same id, which the daemon's ledger joins if
@@ -343,6 +348,52 @@ export function createSession(address: string): Session {
       }
     },
   };
+}
+
+/** What accounting for the lines a tab still holds needs of it. */
+type Accounting = Sending & {
+  readonly readPage: (
+    conversationId: string,
+    request: HistoryPage,
+  ) => Promise<void>;
+  readonly pending: () => ReadonlyMap<string, PendingLine>;
+};
+
+/**
+ * Every line this tab is still holding, accounted for: the log first,
+ * which settles one it carries whoever wrote it. What remains goes again
+ * under its own id, which the daemon's ledger joins if it did arrive —
+ * unless a gone tab wrote it, since that ledger did not outlive its run
+ * and the log's own check for a line already taken reaches back one
+ * segment, so an older line would run twice. Those go back to the person
+ * instead. Each line's conversation is opened first: a daemon that has
+ * restarted holds no route to it, and would refuse the line as one it
+ * does not know.
+ */
+async function accountForPending(accounting: Accounting): Promise<void> {
+  for (const [clientMessageId, line] of accounting.pending()) {
+    const opened = await accounting.client
+      .openDirectConversation(line.characterId)
+      .catch(() => undefined);
+
+    if (opened?.status !== 'opened') {
+      continue;
+    }
+
+    await accounting.readPage(opened.conversationId, {});
+
+    if (!accounting.pending().has(clientMessageId)) {
+      continue;
+    }
+
+    if (line.restored === true) {
+      accounting.apply(current =>
+        restoredLineUnaccounted(current, clientMessageId),
+      );
+    } else {
+      await deliverOnce(accounting, line, clientMessageId);
+    }
+  }
 }
 
 /** What one delivery needs of the tab it belongs to. */
@@ -428,27 +479,36 @@ const writtenKey = 'project02.written';
 
 type Written = Pick<WebState, 'composers' | 'pending'>;
 
-function writtenAndUnsent(): Written {
+/** What a gone tab left, and the home it wrote it for. */
+type Kept = Written & {readonly homeRoot?: string};
+
+const nothingKept: Kept = {composers: new Map(), pending: new Map()};
+
+function writtenAndUnsent(): Kept {
   try {
     const kept: unknown = JSON.parse(sessionStorage.getItem(writtenKey) ?? '');
 
     if (typeof kept !== 'object' || kept === null) {
-      return {composers: new Map(), pending: new Map()};
+      return nothingKept;
     }
 
-    const {composers, pending} = kept as Record<string, unknown>;
+    const {composers, pending, homeRoot} = kept as Record<string, unknown>;
 
     return {
       composers: new Map(
         entriesOf(composers, value => typeof value === 'string'),
       ) as ReadonlyMap<string, string>,
-      pending: new Map(entriesOf(pending, isPendingLine)) as ReadonlyMap<
-        string,
-        PendingLine
-      >,
+      // Every line of a tab that is gone is one nobody sends again.
+      pending: new Map(
+        entriesOf(pending, isPendingLine).map(([clientMessageId, line]) => [
+          clientMessageId,
+          {...(line as PendingLine), restored: true as const},
+        ]),
+      ),
+      ...(typeof homeRoot === 'string' ? {homeRoot} : {}),
     };
   } catch {
-    return {composers: new Map(), pending: new Map()};
+    return nothingKept;
   }
 }
 
@@ -477,13 +537,14 @@ function isPendingLine(value: unknown): boolean {
 }
 
 /** Whether the browser kept it; one that will not is said once, and shows what is written all the same. */
-function keepWrittenAndUnsent(state: Written): boolean {
+function keepWrittenAndUnsent(state: Written, homeRoot?: string): boolean {
   try {
     sessionStorage.setItem(
       writtenKey,
       JSON.stringify({
         composers: [...state.composers],
         pending: [...state.pending],
+        ...(homeRoot === undefined ? {} : {homeRoot}),
       }),
     );
 

@@ -44,6 +44,14 @@ export type PendingLine = {
   readonly characterId: string;
   readonly senderId: string;
   readonly text: string;
+  /**
+   * The line was written by a tab that is gone — this page reloaded, or
+   * the browser did. It is never sent again: the daemon's ledger does not
+   * outlive the run that made it, and the log's own check for a line it
+   * has already taken reaches back one segment, so an older line would
+   * run a second time. The log settles it, or the person takes it back.
+   */
+  readonly restored?: true;
 };
 
 /** The one open DM as its log shows it. */
@@ -453,6 +461,32 @@ export function lineEnded(
       : state,
     notice,
   );
+}
+
+/**
+ * A line a gone tab wrote, which the log does not carry: nothing more
+ * will account for it, so it goes back to the person with what is known
+ * — the daemon may have taken it, and the thread in front of them says.
+ */
+export function restoredLineUnaccounted(
+  state: WebState,
+  clientMessageId: string,
+): WebState {
+  const line = state.pending.get(clientMessageId);
+
+  return line === undefined
+    ? state
+    : noticed(
+        handedBack(state, clientMessageId, line),
+        `${characterName(state, line.characterId)}: A line written before this page reloaded is back in the box. Read the thread before sending it again, in case it was taken.`,
+      );
+}
+
+/** A home is a world of its own: what was written for another one is not this one's. */
+export function forgetWritten(state: WebState): WebState {
+  return state.composers.size === 0 && state.pending.size === 0
+    ? state
+    : {...state, composers: new Map(), pending: new Map()};
 }
 
 /**

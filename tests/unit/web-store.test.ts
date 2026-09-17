@@ -6,6 +6,7 @@ import {
   composerText,
   confirmationGone,
   connectionRefused,
+  forgetWritten,
   historyPageRead,
   initialState,
   installSnapshot,
@@ -13,6 +14,7 @@ import {
   lineSent,
   noticeSpent,
   pageUnread,
+  restoredLineUnaccounted,
   threadOpened,
   type WebState,
 } from '../../src/frontends/web/store.ts';
@@ -744,6 +746,43 @@ describe('web store', () => {
       });
       expect(composerText(read)).toBe('');
     }
+  });
+
+  it('gives back a line a gone tab wrote that the log does not carry, and lets go of what was written for another home', () => {
+    const state = sent(opened(), 'hello', 'line-1');
+    // As a tab that has gone leaves it, and a fresh one reads it back.
+    const restored: WebState = {
+      ...state,
+      pending: new Map([
+        [
+          'line-1',
+          {
+            conversationId,
+            characterId: 'mira',
+            senderId: 'local-user',
+            text: 'hello',
+            restored: true,
+          },
+        ],
+      ]),
+    };
+    const back = restoredLineUnaccounted(restored, 'line-1');
+
+    expect(composerText(back)).toBe('hello');
+    expect(back.pending.size).toBe(0);
+    expect(back.notices.at(-1)).toBe(
+      'Mira: A line written before this page reloaded is back in the box. Read the thread before sending it again, in case it was taken.',
+    );
+
+    // Another daemon on the same address is another world: nothing
+    // written for the first one belongs to it.
+    const forgotten = forgetWritten(
+      composerChanged(restored, 'half a thought'),
+    );
+
+    expect(forgotten.pending.size).toBe(0);
+    expect(composerText(forgotten)).toBe('');
+    expect(forgetWritten(forgotten)).toBe(forgotten);
   });
 
   it('keeps what a person typed in each thread', () => {

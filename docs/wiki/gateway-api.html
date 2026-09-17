@@ -394,7 +394,7 @@ event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
 
 event: turn_completed
-data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed"}</code></pre>
+data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed","committed":true}</code></pre>
 
       <table>
         <thead>
@@ -492,8 +492,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         Because both roles are emitted from one post-persist seam, the stream
         and history never disagree: a reply whose write failed is a failed turn,
         never a message shown that history lacks. A message typed on the phone
-        appears in every open browser tab at once, and a surface tells its
-        own lines apart by <code>source</code>.
+        appears in every open browser tab at once. A surface tells the lines it is
+        still holding apart by <code>clientMessageId</code>, which is its own:
+        <code>source</code> names the kind of surface, and two browser tabs
+        share it, so a tab that went by source alone would take another tab's
+        lines for its own.
       </p>
 
       <h2>Streaming replies</h2>
