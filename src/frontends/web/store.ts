@@ -60,6 +60,8 @@ export type Thread = {
   readonly messages: readonly Message[];
   /** The cursor while older messages exist. */
   readonly earlier?: string | undefined;
+  /** Why the thread's last page could not be read; gone once one can be. */
+  readonly unread?: string | undefined;
 };
 
 /**
@@ -164,6 +166,7 @@ function setAside(thread: Thread): Thread {
     stale: [...thread.stale, ...thread.messages],
     messages: [],
     earlier: undefined,
+    unread: undefined,
   };
 }
 
@@ -199,19 +202,23 @@ export function noticeSpent(state: WebState): WebState {
 }
 
 /**
- * A page that could not be read, said only for the conversation on
- * screen: a read of another is no news about the thread in front of the
- * person. Which read is still worth applying is the session's to judge —
- * it holds the ones in flight.
+ * A thread whose page could not be read says so on itself, not in the
+ * page's notice: a turn that failed and a page that would not load are
+ * different news, and neither may erase the other. Said only for the
+ * conversation on screen — a read of another is no news about the thread
+ * in front of the person. Which read is still worth applying is the
+ * session's to judge, since it holds the ones in flight.
  */
 export function pageUnread(
   state: WebState,
   conversationId: string,
   message: string,
 ): WebState {
-  return state.thread?.conversationId === conversationId
-    ? noticed(state, message)
-    : state;
+  return withThread(state, thread =>
+    thread.conversationId === conversationId && thread.unread !== message
+      ? {...thread, unread: message}
+      : thread,
+  );
 }
 
 /**
@@ -271,22 +278,21 @@ export function historyPageRead(
   }
 
   if (outcome.status !== 'ok') {
-    return noticed(state, outcome.message);
+    return pageUnread(state, conversationId, outcome.message);
   }
 
-  // A page in front of the person answers what the page last said about
-  // reading this thread, and spends whatever else it said, as an act of
-  // the person's does.
-  const read = noticeSpent(state);
+  // A page in front of the person answers whatever the thread last said
+  // about being read.
+  const read: Thread = {...thread, unread: undefined};
   const messages = outcome.messages.map(messageOf);
 
   if (request.before !== undefined) {
     const shown = new Set(thread.messages.map(message => message.messageId));
 
     return {
-      ...read,
+      ...state,
       thread: {
-        ...thread,
+        ...read,
         messages: [
           ...messages.filter(message => !shown.has(message.messageId)),
           ...thread.messages,
@@ -313,9 +319,9 @@ export function historyPageRead(
     first === -1 ? thread.messages : thread.messages.slice(last + 1)
   ).filter(message => !onPage.has(message.messageId));
   let next: WebState = {
-    ...read,
+    ...state,
     thread: {
-      ...thread,
+      ...read,
       stale: [],
       messages: [...before, ...messages, ...after],
       // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.

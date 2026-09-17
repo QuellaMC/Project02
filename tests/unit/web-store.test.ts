@@ -189,7 +189,7 @@ describe('web store', () => {
     expect(unread.thread?.stale.map(message => message.messageId)).toEqual([
       'm-1',
     ]);
-    expect(unread.notice).toBe('The thread could not be read.');
+    expect(unread.thread?.unread).toBe('The thread could not be read.');
 
     // The newest page replaces what was set aside and keeps what arrived
     // live after the reconnect.
@@ -842,7 +842,7 @@ describe('web store', () => {
     expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
   });
 
-  it('reports a refused address and a page that could not be read', () => {
+  it('reports a refused address, and says on the thread itself when its page could not be read', () => {
     const refused = connectionRefused(
       initialState,
       'The gateway URL carries no #token.',
@@ -860,17 +860,24 @@ describe('web store', () => {
     };
     const unread = historyPageRead(opened(), conversationId, {}, unreadable);
 
-    expect(unread.notice).toBe('The thread could not be read.');
+    expect(unread.thread?.unread).toBe('The thread could not be read.');
     expect(unread.thread?.messages).toEqual([]);
-    // The next page that can be read answers it, with no act of the person's.
-    expect(
-      historyPageRead(
-        unread,
-        conversationId,
-        {},
-        page([committed('m-1', 'hello')]),
-      ).notice,
-    ).toBeUndefined();
+
+    // A turn that failed meanwhile is different news, and neither erases
+    // the other: the next page that can be read answers its own.
+    const both = applyEvent(
+      unread,
+      completed('line-1', 'failed', 'The store is read-only.'),
+    );
+    const read = historyPageRead(
+      both,
+      conversationId,
+      {},
+      page([committed('m-1', 'hello')]),
+    );
+
+    expect(read.thread?.unread).toBeUndefined();
+    expect(read.notice).toBe('Mira: The store is read-only.');
 
     // A read left behind by a switch of characters says nothing about the
     // thread in front of the person — by either way of failing.
@@ -887,8 +894,8 @@ describe('web store', () => {
     expect(
       pageUnread(switched, conversationId, 'The daemon could not be reached.'),
     ).toBe(switched);
-    expect(pageUnread(switched, 'conv-2', 'Its own read failed.').notice).toBe(
-      'Its own read failed.',
-    );
+    expect(
+      pageUnread(switched, 'conv-2', 'Its own read failed.').thread?.unread,
+    ).toBe('Its own read failed.');
   });
 });

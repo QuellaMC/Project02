@@ -61,6 +61,11 @@ export function ThreadPane({
           </span>
         )}
       </header>
+      {thread.unread === undefined ? null : (
+        <p className="notice" role="status">
+          {thread.unread}
+        </p>
+      )}
       <div
         className="messages"
         ref={scroller}

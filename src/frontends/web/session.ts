@@ -75,33 +75,35 @@ export function createSession(address: string): Session {
       listener();
     }
   };
-  /**
-   * Only the latest open and the latest read apply; an earlier one that
-   * settles later is let go. They are counted apart because an open says
-   * which thread the person wants and a read only refreshes one: a
-   * recovery read for a thread left behind must not undo a roster click,
-   * and a read that arrives for a thread no longer on screen is no news
-   * about it — the store says so.
-   */
+  /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
-  let reads = 0;
-  /** A page that cannot be read is a notice, never the stream's failure. */
+  /**
+   * And only the latest read of each thread, counted per conversation
+   * because a read is about one thread: a recovery read for a thread the
+   * person has left must not discard the read of the thread they are
+   * looking at. A page for a thread no longer on screen is no news about
+   * it either way — the store says so.
+   */
+  const reads = new Map<string, number>();
+  /** A page that cannot be read is said on its thread, never as the stream's failure. */
   const readPage = async (
     conversationId: string,
     request: HistoryPage,
   ): Promise<void> => {
-    const mine = (reads += 1);
+    const mine = (reads.get(conversationId) ?? 0) + 1;
+
+    reads.set(conversationId, mine);
 
     try {
       const outcome = await client.history(conversationId, request);
 
-      if (mine === reads) {
+      if (reads.get(conversationId) === mine) {
         apply(current =>
           historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
-      if (mine === reads) {
+      if (reads.get(conversationId) === mine) {
         apply(current => pageUnread(current, conversationId, problem(error)));
       }
     }
@@ -233,10 +235,15 @@ export function createSession(address: string): Session {
           ),
         );
       } catch (error: unknown) {
-        // The daemon answered, refusing the line before any turn ran — it
-        // is longer than the wire takes, or the token has died: nothing
-        // was recorded, so the line comes back with what the daemon said.
-        if (error instanceof GatewayClientError && error.status !== 0) {
+        // A 4xx is the daemon refusing the request itself — its token, its
+        // route, its shape, its size — so no turn ran and the line comes
+        // back with what the daemon said. Every other answer, including
+        // one whose body was cut short, may have been a turn.
+        if (
+          error instanceof GatewayClientError &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
           apply(current =>
             lineEnded(
               current,
