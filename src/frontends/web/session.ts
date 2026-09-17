@@ -87,7 +87,6 @@ export function createSession(address: string): Session {
    */
   const readPage = async (
     conversationId: string,
-    page: 'newest' | 'earlier',
     request: HistoryPage,
   ): Promise<void> => {
     const mine = openGeneration;
@@ -97,12 +96,14 @@ export function createSession(address: string): Session {
 
       if (mine === openGeneration) {
         apply(current =>
-          historyPageRead(current, conversationId, page, outcome),
+          historyPageRead(current, conversationId, request, outcome),
         );
       }
     } catch (error: unknown) {
       if (mine === openGeneration) {
-        apply(current => pageUnread(current, conversationId, problem(error)));
+        apply(current =>
+          pageUnread(current, conversationId, request, problem(error)),
+        );
       }
     }
   };
@@ -137,7 +138,7 @@ export function createSession(address: string): Session {
       }
 
       apply(state => threadOpened(state, outcome));
-      await readPage(outcome.conversationId, 'newest', {});
+      await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
       if (current()) {
         apply(state => noticed(state, problem(error)));
@@ -174,7 +175,7 @@ export function createSession(address: string): Session {
           const {thread} = state;
 
           if (thread !== undefined) {
-            await readPage(thread.conversationId, 'newest', {});
+            await readPage(thread.conversationId, {});
           }
 
           openTheOnlyCharacter();
@@ -241,7 +242,7 @@ export function createSession(address: string): Session {
         apply(current => answerLost(current, clientMessageId, problem(error)));
         // No answer came, and the daemon may never have heard the line: the
         // newest page says whether it did, when it can be read.
-        await readPage(thread.conversationId, 'newest', {});
+        await readPage(thread.conversationId, {});
       }
     },
     async loadEarlier() {
@@ -252,9 +253,7 @@ export function createSession(address: string): Session {
       }
 
       apply(noticeSpent);
-      await readPage(thread.conversationId, 'earlier', {
-        before: thread.earlier,
-      });
+      await readPage(thread.conversationId, {before: thread.earlier});
     },
     async answer(id, decision) {
       apply(noticeSpent);

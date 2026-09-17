@@ -188,11 +188,16 @@ describe('web store', () => {
     });
 
     // A page that cannot be read leaves what was shown in place, with the notice.
-    const unread = historyPageRead(state, conversationId, 'newest', {
-      status: 'failed',
-      code: 'missing_file',
-      message: 'The thread could not be read.',
-    });
+    const unread = historyPageRead(
+      state,
+      conversationId,
+      {},
+      {
+        status: 'failed',
+        code: 'missing_file',
+        message: 'The thread could not be read.',
+      },
+    );
 
     expect(unread.thread?.stale.map(message => message.messageId)).toEqual([
       'm-1',
@@ -205,7 +210,7 @@ describe('web store', () => {
       historyPageRead(
         state,
         conversationId,
-        'earlier',
+        {before: 'v1:0:0'},
         page([committed('m-0', 'before')]),
       ),
     ).toBe(state);
@@ -216,7 +221,7 @@ describe('web store', () => {
     state = historyPageRead(
       state,
       conversationId,
-      'newest',
+      {},
       page([committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')]),
     );
 
@@ -364,7 +369,7 @@ describe('web store', () => {
     state = historyPageRead(
       state,
       conversationId,
-      'newest',
+      {},
       page(
         [committed('m-1', 'hello', 'line-1'), committed('m-2', 'hi')],
         'v1:0:0',
@@ -381,10 +386,10 @@ describe('web store', () => {
 
     const earlier = page([committed('m-0', 'earlier still')]);
 
-    state = historyPageRead(state, conversationId, 'earlier', earlier);
+    state = historyPageRead(state, conversationId, {before: 'v1:0:0'}, earlier);
     // The same cursor read twice — a second click before the first page
-    // came — is the same page, shown once.
-    state = historyPageRead(state, conversationId, 'earlier', earlier);
+    // came — is a page the thread has moved past: shown once.
+    state = historyPageRead(state, conversationId, {before: 'v1:0:0'}, earlier);
 
     expect(state.thread?.messages.map(message => message.messageId)).toEqual([
       'm-0',
@@ -397,7 +402,7 @@ describe('web store', () => {
     const other = historyPageRead(
       state,
       'conv-2',
-      'newest',
+      {},
       page([committed('x-1', 'elsewhere')]),
     );
 
@@ -408,14 +413,14 @@ describe('web store', () => {
     let state = historyPageRead(
       opened(),
       conversationId,
-      'newest',
+      {},
       page([committed('m-2', 'two'), committed('m-3', 'three')], 'v1:0:2'),
     );
 
     state = historyPageRead(
       state,
       conversationId,
-      'earlier',
+      {before: 'v1:0:2'},
       page([committed('m-0', 'zero'), committed('m-1', 'one')]),
     );
     state = applyEvent(state, userMessage('m-4', 'four', 'line-4'));
@@ -424,7 +429,7 @@ describe('web store', () => {
     state = historyPageRead(
       state,
       conversationId,
-      'newest',
+      {},
       page(
         [
           committed('m-2', 'two'),
@@ -451,7 +456,7 @@ describe('web store', () => {
     const fresh = historyPageRead(
       applyEvent(opened(), userMessage('m-9', 'nine', 'line-9')),
       conversationId,
-      'newest',
+      {},
       page([committed('m-7', 'seven'), committed('m-8', 'eight')], 'v1:0:7'),
     );
 
@@ -552,19 +557,19 @@ describe('web store', () => {
     const carried = historyPageRead(
       marked,
       conversationId,
-      'newest',
+      {},
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
     expect(carried.pending.size).toBe(0);
     expect(composerText(carried)).toBe('');
 
-    const absent = historyPageRead(marked, conversationId, 'newest', page([]));
+    const absent = historyPageRead(marked, conversationId, {}, page([]));
 
     expect(absent.pending.size).toBe(0);
     expect(composerText(absent)).toBe('hello');
 
-    const queued = historyPageRead(state, conversationId, 'newest', page([]));
+    const queued = historyPageRead(state, conversationId, {}, page([]));
 
     expect(queued.pending.get('line-1')).toEqual({
       conversationId,
@@ -691,7 +696,7 @@ describe('web store', () => {
     const read = historyPageRead(
       lost,
       conversationId,
-      'newest',
+      {},
       page([committed('m-1', 'hello', 'line-1')]),
     );
 
@@ -706,7 +711,7 @@ describe('web store', () => {
     ).toBe(shown);
 
     // The newest page lacks it: it comes back, and the reason is said.
-    const absent = historyPageRead(lost, conversationId, 'newest', page([]));
+    const absent = historyPageRead(lost, conversationId, {}, page([]));
 
     expect(composerText(absent)).toBe('hello');
     expect(absent.pending.size).toBe(0);
@@ -871,12 +876,7 @@ describe('web store', () => {
       code: 'missing_file',
       message: 'The thread could not be read.',
     };
-    const unread = historyPageRead(
-      opened(),
-      conversationId,
-      'newest',
-      unreadable,
-    );
+    const unread = historyPageRead(opened(), conversationId, {}, unreadable);
 
     expect(unread.notice).toBe('The thread could not be read.');
     expect(unread.thread?.messages).toEqual([]);
@@ -890,14 +890,32 @@ describe('web store', () => {
       userParticipantId: 'local-user',
     });
 
+    expect(historyPageRead(switched, conversationId, {}, unreadable)).toBe(
+      switched,
+    );
     expect(
-      historyPageRead(switched, conversationId, 'newest', unreadable),
+      pageUnread(
+        switched,
+        conversationId,
+        {},
+        'The daemon could not be reached.',
+      ),
     ).toBe(switched);
     expect(
-      pageUnread(switched, conversationId, 'The daemon could not be reached.'),
-    ).toBe(switched);
-    expect(pageUnread(switched, 'conv-2', 'Its own read failed.').notice).toBe(
-      'Its own read failed.',
+      pageUnread(switched, 'conv-2', {}, 'Its own read failed.').notice,
+    ).toBe('Its own read failed.');
+
+    // An earlier page the thread has moved past — a second click on Load
+    // earlier — says nothing when it fails, either.
+    const paged = historyPageRead(
+      opened(),
+      conversationId,
+      {},
+      page([committed('m-2', 'two')], 'v1:0:2'),
+    );
+
+    expect(pageUnread(paged, conversationId, {before: 'v1:0:0'}, 'Gone.')).toBe(
+      paged,
     );
   });
 });
