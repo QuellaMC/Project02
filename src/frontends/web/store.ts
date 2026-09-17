@@ -259,19 +259,20 @@ export function composerChanged(state: WebState, text: string): WebState {
 }
 
 /**
- * The newest page is the thread, and the log's word on every line this
- * tab is waiting for — the session reads it after the daemon's verdict,
- * so a page begun before one never decides it. What was shown before its
- * first message
+ * A page of the log, and the log's word on every line this tab is
+ * waiting for: a page that carries a line proves the daemon took it,
+ * whichever page it is, and the newest page — read after the verdict, so
+ * that it would hold the line if the line existed — is the one whose
+ * silence sends a judged line back to its composer. A line whose turn
+ * has not been judged stays pending whatever a page says.
+ *
+ * The newest page is the thread. What was shown before its first message
  * — earlier pages — stays before it, and what arrived live after its last
  * message stays after it; a page that meets nothing shown is the whole
  * thread, and what was shown came live after it. What a reconnect set
- * aside is replaced. A pending line of this thread that the page carries
- * is settled; one it lacks whose turn has ended comes back to the
- * composer; one whose turn has not run yet stays pending. An earlier page
- * goes in front and moves the cursor on. A message the thread already
- * shows is shown once, from a page or from a frame, so reading the same
- * page twice changes nothing.
+ * aside is replaced. An earlier page goes in front and moves the cursor
+ * on. A message the thread already shows is shown once, from a page or
+ * from a frame, so reading the same page twice changes nothing.
  */
 export function historyPageRead(
   state: WebState,
@@ -289,33 +290,63 @@ export function historyPageRead(
     return pageUnread(state, conversationId, outcome.message);
   }
 
+  const messages = outcome.messages.map(messageOf);
+  const newest = request.before === undefined;
   // A page in front of the person answers whatever the thread last said
   // about being read.
   const read: Thread = {...thread, unread: undefined};
-  const messages = outcome.messages.map(messageOf);
-
-  if (request.before !== undefined) {
-    const shown = new Set(thread.messages.map(message => message.messageId));
-
-    return {
-      ...state,
-      thread: {
-        ...read,
-        messages: [
-          ...messages.filter(message => !shown.has(message.messageId)),
-          ...thread.messages,
-        ],
-        earlier: outcome.earlier,
-      },
-    };
-  }
-
-  const onPage = new Set(messages.map(message => message.messageId));
   const carried = new Set(
     messages.flatMap(message =>
       message.clientMessageId === undefined ? [] : [message.clientMessageId],
     ),
   );
+  let next: WebState = {
+    ...state,
+    thread: newest
+      ? newestPage(read, messages, outcome.earlier)
+      : earlierPage(read, messages, outcome.earlier),
+  };
+
+  for (const [clientMessageId, line] of state.pending) {
+    if (line.conversationId !== conversationId) {
+      continue;
+    }
+
+    if (carried.has(clientMessageId)) {
+      next = settled(next, clientMessageId);
+    } else if (newest && line.ended !== undefined) {
+      next = noticed(handedBack(next, clientMessageId, line), line.ended);
+    }
+  }
+
+  return next;
+}
+
+/** In front of the thread, once; the cursor moves on to what precedes it. */
+function earlierPage(
+  thread: Thread,
+  messages: readonly Message[],
+  earlier: string | undefined,
+): Thread {
+  const shown = new Set(thread.messages.map(message => message.messageId));
+
+  return {
+    ...thread,
+    messages: [
+      ...messages.filter(message => !shown.has(message.messageId)),
+      ...thread.messages,
+    ],
+    earlier,
+  };
+}
+
+/** The thread itself, with the earlier pages before it and what came live after. */
+function newestPage(
+  thread: Thread,
+  messages: readonly Message[],
+  earlier: string | undefined,
+): Thread {
+  const onPage = new Set(messages.map(message => message.messageId));
   const first = thread.messages.findIndex(message =>
     onPage.has(message.messageId),
   );
@@ -326,30 +357,14 @@ export function historyPageRead(
   const after = (
     first === -1 ? thread.messages : thread.messages.slice(last + 1)
   ).filter(message => !onPage.has(message.messageId));
-  let next: WebState = {
-    ...state,
-    thread: {
-      ...read,
-      stale: [],
-      messages: [...before, ...messages, ...after],
-      // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.
-      earlier: before.length === 0 ? outcome.earlier : thread.earlier,
-    },
+
+  return {
+    ...thread,
+    stale: [],
+    messages: [...before, ...messages, ...after],
+    // Earlier pages already shown keep their cursor; the page's is for a thread that starts at it.
+    earlier: before.length === 0 ? earlier : thread.earlier,
   };
-
-  for (const [clientMessageId, line] of state.pending) {
-    if (line.conversationId !== conversationId) {
-      continue;
-    }
-
-    if (carried.has(clientMessageId)) {
-      next = settled(next, clientMessageId);
-    } else if (line.ended !== undefined) {
-      next = noticed(handedBack(next, clientMessageId, line), line.ended);
-    }
-  }
-
-  return next;
 }
 
 /** The composer's line becomes pending under its id, for the open thread. */
@@ -372,24 +387,23 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 }
 
 /**
- * A line's end, from the stream or the turn's answer. The stream is
- * ordered: a `turn_completed` that finds the line still pending came
- * without a `user_message` before it, so the line was never committed and
- * goes back to the composer. The answer is not ordered against the stream
- * and can beat the frame that would show the line, so from the answer
- * only a refusal hands it back — nothing was recorded; a rejection or a
- * failure is a verdict the line keeps until the stream or a page says
- * whether it was committed. A line comes back to the thread it was
- * written in, open or not, and a turn that did not complete is said at
- * once, naming its character — this tab's turn or another surface's.
- * `completed` settles nothing here.
+ * A turn's end, however it reaches the tab — the answer to a send, or the
+ * stream. Neither proves what became of the line: an answer can beat the
+ * frame that would show it, and a stream is ordered only within one
+ * connection, so a completion can arrive on a stream whose predecessor
+ * carried the line's commit. A refusal is the exception the daemon states
+ * itself: nothing ran, so the line was never recorded and comes back to
+ * the composer at once. Every other end is a verdict the line keeps until
+ * a page of the log says whether it was committed. A line comes back to
+ * the thread it was written in, open or not, and a turn that did not
+ * complete is said at once, naming its character — this tab's turn or
+ * another surface's. `completed` settles nothing here; the log does.
  */
 export function lineEnded(
   state: WebState,
   characterId: string,
   clientMessageId: string,
   ending: LineEnding,
-  from: 'answer' | 'stream',
 ): WebState {
   if (ending.status === 'completed') {
     return state;
@@ -402,9 +416,9 @@ export function lineEnded(
   const placed =
     line === undefined
       ? state
-      : from === 'answer' && ending.status !== 'refused'
-        ? marked(state, clientMessageId, line, notice)
-        : handedBack(state, clientMessageId, line);
+      : ending.status === 'refused'
+        ? handedBack(state, clientMessageId, line)
+        : marked(state, clientMessageId, line, notice);
 
   return noticed(placed, notice);
 }
@@ -494,7 +508,6 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
               : {message: event.reason}
             : {message: event.message}),
         },
-        'stream',
       );
   }
 }

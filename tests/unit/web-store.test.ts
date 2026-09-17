@@ -471,47 +471,15 @@ describe('web store', () => {
     expect(fresh.thread?.earlier).toBe('v1:0:7');
   });
 
-  it('hands a line back to the composer at once when the stream ends its turn without having shown it, or when the answer refuses it — after what is typed, in the order sent, once, and never for a completed turn', () => {
+  it('hands a line back at once only when the daemon refused it, since nothing ran — after what is typed, in the order sent, and never for a completed turn', () => {
     const state = composerChanged(
       sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
       'next thought',
     );
-    const fromStream = applyEvent(
-      state,
-      completed('line-1', 'rejected', 'The line was blank.'),
-    );
-
-    expect(composerText(fromStream)).toBe('next thought first');
-    expect(fromStream.pending.size).toBe(1);
-    expect(fromStream.notices.at(-1)).toBe('Mira: The line was blank.');
-
-    const again = applyEvent(
-      fromStream,
-      completed('line-1', 'rejected', 'The line was blank.'),
-    );
-
-    expect(composerText(again)).toBe('next thought first');
-    // The same news twice is the same notice.
-    expect(again.notices).toEqual(fromStream.notices);
-
-    // The ordered stream ends the queued line on its own, later: it lands
-    // after the first, as it was sent.
-    const both = applyEvent(
-      again,
-      completed('line-2', 'failed', 'The store is full.'),
-    );
-
-    expect(composerText(both)).toBe('next thought first second');
-    expect(both.pending.size).toBe(0);
-    expect(both.notices.at(-1)).toBe('Mira: The store is full.');
-
-    const refused = lineEnded(
-      state,
-      'mira',
-      'line-1',
-      {status: 'refused', message: 'The gateway holds no open conversation.'},
-      'answer',
-    );
+    const refused = lineEnded(state, 'mira', 'line-1', {
+      status: 'refused',
+      message: 'The gateway holds no open conversation.',
+    });
 
     expect(composerText(refused)).toBe('next thought first');
     expect(refused.pending.size).toBe(1);
@@ -519,20 +487,45 @@ describe('web store', () => {
       'Mira: The gateway holds no open conversation.',
     );
 
+    // The queued line is refused too, later: it lands after the first, as
+    // it was sent.
+    const both = lineEnded(refused, 'mira', 'line-2', {
+      status: 'refused',
+      message: 'The gateway holds no open conversation.',
+    });
+
+    expect(composerText(both)).toBe('next thought first second');
+    expect(both.pending.size).toBe(0);
+
+    // A turn the daemon judged says so and marks its line; only the log
+    // says whether the line was committed, so nothing comes back yet.
+    const judged = applyEvent(
+      state,
+      completed('line-1', 'rejected', 'The line was blank.'),
+    );
+
+    expect(composerText(judged)).toBe('next thought');
+    expect(judged.pending.get('line-1')?.ended).toBe(
+      'Mira: The line was blank.',
+    );
+    expect(judged.notices.at(-1)).toBe('Mira: The line was blank.');
+    // The same news twice is the same notice.
     expect(
-      lineEnded(state, 'mira', 'line-1', {status: 'completed'}, 'answer'),
-    ).toBe(state);
+      applyEvent(judged, completed('line-1', 'rejected', 'The line was blank.'))
+        .notices,
+    ).toEqual(judged.notices);
+
+    expect(lineEnded(state, 'mira', 'line-1', {status: 'completed'})).toBe(
+      state,
+    );
   });
 
   it('lets the answer mark a line ended but not hand it back, since its frame may still be on the way: the stream or the newest page settles it', () => {
     const state = sent(opened(), 'hello', 'line-1');
-    const marked = lineEnded(
-      state,
-      'mira',
-      'line-1',
-      {status: 'rejected', message: 'The model wrote nothing it could say.'},
-      'answer',
-    );
+    const marked = lineEnded(state, 'mira', 'line-1', {
+      status: 'rejected',
+      message: 'The model wrote nothing it could say.',
+    });
 
     expect(composerText(marked)).toBe('');
     expect(marked.pending.get('line-1')).toEqual({
@@ -604,13 +597,10 @@ describe('web store', () => {
     // Mira's turn ends while Nova is open: the line goes back to Mira's
     // composer, never into Nova's, and the reason is said at once with
     // Mira's name on it.
-    const ended = lineEnded(
-      state,
-      'mira',
-      'line-1',
-      {status: 'refused', message: 'Mira is away.'},
-      'answer',
-    );
+    const ended = lineEnded(state, 'mira', 'line-1', {
+      status: 'refused',
+      message: 'Mira is away.',
+    });
 
     expect(composerText(ended)).toBe('');
     expect(ended.pending.size).toBe(0);
@@ -643,9 +633,23 @@ describe('web store', () => {
       completed('line-2', 'failed', 'The store is read-only.'),
     );
 
-    expect(failed.pending.size).toBe(0);
+    // The turn's end says so and marks the line, wherever the person is;
+    // Mira's own newest page, lacking the line, is what sends it back to
+    // Mira's composer.
+    expect(failed.pending.get('line-2')?.ended).toBe(
+      'Mira: The store is read-only.',
+    );
     expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
-    expect(failed.composers).toEqual(new Map([[conversationId, 'hello mira']]));
+
+    const back = historyPageRead(
+      threadOpened(failed, mira),
+      conversationId,
+      {},
+      page([]),
+    );
+
+    expect(back.pending.size).toBe(0);
+    expect(back.composers).toEqual(new Map([[conversationId, 'hello mira']]));
 
     // Another surface's turn is said the same way, named the same way,
     // and stands beside a failure that came before it rather than
@@ -653,6 +657,43 @@ describe('web store', () => {
     expect(
       applyEvent(failed, completed('telegram-1', 'failed')).notices,
     ).toEqual(['Mira: The store is read-only.', 'Mira: The turn was failed.']);
+  });
+
+  it('settles a pending line from whichever page carries it, and sends a judged one back only when the newest page lacks it', () => {
+    const state = sent(opened(), 'hello', 'line-1');
+    // An earlier page carries the line: the daemon took it, whichever
+    // page says so, and the faded bubble goes.
+    const earlier = historyPageRead(
+      state,
+      conversationId,
+      {before: 'v1:0:0'},
+      page([committed('m-1', 'hello', 'line-1')]),
+    );
+
+    expect(earlier.pending.size).toBe(0);
+
+    // An earlier page that lacks it proves nothing — the line is newer
+    // than that page — even once the turn has been judged.
+    const judged = applyEvent(
+      state,
+      completed('line-1', 'failed', 'The store is read-only.'),
+    );
+    const older = historyPageRead(
+      judged,
+      conversationId,
+      {before: 'v1:0:0'},
+      page([committed('m-0', 'long before')]),
+    );
+
+    expect(older.pending.get('line-1')?.ended).toBe(
+      'Mira: The store is read-only.',
+    );
+    expect(composerText(older)).toBe('');
+
+    // The newest page is the one that would hold it.
+    expect(
+      composerText(historyPageRead(judged, conversationId, {}, page([]))),
+    ).toBe('hello');
   });
 
   it('keeps what a person typed in each thread', () => {

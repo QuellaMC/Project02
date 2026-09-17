@@ -140,6 +140,21 @@ export function createSession(address: string): Session {
     }
   };
   /**
+   * The daemon has ended a turn whose line this tab has never seen
+   * committed, so only the log says whether it was — and only a page read
+   * after the end can say it, since a page begun before one would not
+   * hold the line yet. This reads that page; it settles the line, or
+   * hands it back when the turn was judged and the log lacks it.
+   */
+  const askTheLog = async (
+    conversationId: string,
+    clientMessageId: string,
+  ): Promise<void> => {
+    if (state.pending.has(clientMessageId)) {
+      await readPage(conversationId, {});
+    }
+  };
+  /**
    * One character opens itself, once — it may not be ready when the page
    * connects, so every event is a chance — and a roster of several waits
    * for a click. Once is enough: a thread outlives a reconnect, and an
@@ -163,6 +178,10 @@ export function createSession(address: string): Session {
       event => {
         apply(current => applyEvent(current, event));
         openTheOnlyCharacter();
+
+        if (event.kind === 'turn_completed') {
+          void askTheLog(event.conversationId, event.clientMessageId);
+        }
       },
       {
         signal: new AbortController().signal,
@@ -232,20 +251,9 @@ export function createSession(address: string): Session {
             outcome.status === 'completed'
               ? {status: 'completed'}
               : {status: outcome.status, message: outcome.message},
-            'answer',
           ),
         );
-
-        // The daemon judged the turn before the stream showed the line, so
-        // the log says whether the line was committed. It is read now, so
-        // that it is read after the verdict: a page begun before one
-        // proves nothing about it, and this read supersedes any such.
-        if (
-          outcome.status !== 'completed' &&
-          state.pending.has(clientMessageId)
-        ) {
-          await readPage(thread.conversationId, {});
-        }
+        await askTheLog(thread.conversationId, clientMessageId);
       } catch (error: unknown) {
         // A turn can only have run if the request reached the route, so
         // every answer the daemon gives here is it refusing the request
@@ -258,13 +266,10 @@ export function createSession(address: string): Session {
           error.status !== 500
         ) {
           apply(current =>
-            lineEnded(
-              current,
-              thread.characterId,
-              clientMessageId,
-              {status: 'refused', message: problem(error)},
-              'answer',
-            ),
+            lineEnded(current, thread.characterId, clientMessageId, {
+              status: 'refused',
+              message: problem(error),
+            }),
           );
 
           return;
