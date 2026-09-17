@@ -4,9 +4,10 @@
  * page reads the store, never the client. The address is the page's own,
  * so this runs only in a browser: the browser suite is its cover.
  */
-import type {
-  GatewayConfirmationDecision,
-  HistoryPage,
+import {
+  turnCommittedTheLine,
+  type GatewayConfirmationDecision,
+  type HistoryPage,
 } from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
@@ -117,6 +118,11 @@ export function createSession(address: string): Session {
    */
   const open = async (characterId: string): Promise<void> => {
     const mine = (opens += 1);
+
+    // The person asking spends what the page had to say, not the answer
+    // that comes back: a turn that fails while the open is in flight is
+    // news of its own, and the open must not take it away.
+    apply(noticeSpent);
 
     try {
       const outcome = await client.openDirectConversation(characterId);
@@ -249,8 +255,12 @@ export function createSession(address: string): Session {
             thread.characterId,
             clientMessageId,
             outcome.status === 'completed'
-              ? {status: 'completed'}
-              : {status: outcome.status, message: outcome.message},
+              ? {status: 'completed', committed: true}
+              : {
+                  status: outcome.status,
+                  committed: turnCommittedTheLine(outcome),
+                  message: outcome.message,
+                },
           ),
         );
         await askTheLog(thread.conversationId, clientMessageId);
@@ -268,6 +278,7 @@ export function createSession(address: string): Session {
           apply(current =>
             lineEnded(current, thread.characterId, clientMessageId, {
               status: 'refused',
+              committed: false,
               message: problem(error),
             }),
           );

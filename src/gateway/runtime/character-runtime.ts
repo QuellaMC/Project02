@@ -721,6 +721,9 @@ async function runTurn(
   }
 
   let delivery: UserMessageDelivery;
+  // The line is in the log exactly when the turn said so on the stream,
+  // so what was announced is what a failure has to report.
+  let committed = false;
 
   context.turn = {
     conversationId: message.conversationId,
@@ -742,6 +745,7 @@ async function runTurn(
       characterRef: assembled.characterRef,
       contextWindowTokens: assembled.contextWindowTokens,
       onProgress: progress => {
+        committed ||= progress.kind === 'user_message';
         emit(context.listeners, {
           kind: 'turn_progress',
           characterId: context.characterId,
@@ -751,13 +755,18 @@ async function runTurn(
       },
     });
   } catch (error: unknown) {
-    return fatalOutcome(context, message.conversationId, error);
+    return fatalOutcome(context, message.conversationId, error, committed);
   } finally {
     context.turn = undefined;
   }
 
   if (delivery.status === 'failed') {
-    return fatalOutcome(context, message.conversationId, delivery.error);
+    return fatalOutcome(
+      context,
+      message.conversationId,
+      delivery.error,
+      committed,
+    );
   }
 
   if (delivery.status === 'duplicate') {
@@ -793,6 +802,7 @@ async function runTurn(
     conversationId: message.conversationId,
     reason: delivery.turn.reason,
     message: delivery.turn.message,
+    committed,
   });
 }
 
@@ -834,6 +844,7 @@ function fatalOutcome(
   context: RuntimeContext,
   conversationId: string,
   error: unknown,
+  committed: boolean,
 ): TurnOutcome {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -844,6 +855,7 @@ function fatalOutcome(
     characterId: context.characterId,
     conversationId,
     message,
+    committed,
   });
 }
 

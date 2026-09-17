@@ -481,7 +481,10 @@ describe('gateway façade', () => {
           clientMessageId: unheld,
           text: 'anyone?',
         }),
-      ).resolves.toMatchObject({status: 'failed'});
+        // The store was unwritable before the line could be appended, so
+        // the turn says it never committed it: the sender's line is the
+        // person's to write again, and no log will ever mention it.
+      ).resolves.toMatchObject({status: 'failed', committed: false});
     } finally {
       chmodSync(conversationsRoot, 0o755);
     }
@@ -491,6 +494,7 @@ describe('gateway façade', () => {
       conversationId: ref.conversationId,
       clientMessageId: unheld,
       status: 'failed',
+      committed: false,
     });
 
     // The recovery let the thread go; the next delivery holds it again on
@@ -1405,9 +1409,11 @@ describe('gateway façade', () => {
         source: 'test',
         clientMessageId,
       }),
-    ).resolves.toMatchObject({status: 'rejected'});
+      // The line was written before the model failed the turn, so it
+      // belongs to the thread and is not the sender's to write again.
+    ).resolves.toMatchObject({status: 'rejected', committed: true});
     // Stamped with the submission's own marks, so every surface knows
-    // whose turn ended, even one that committed nothing.
+    // whose turn ended, and whether the line it named was committed.
     expect(events.at(-1)).toMatchObject({
       kind: 'turn_completed',
       characterId: 'mira',
@@ -1415,6 +1421,7 @@ describe('gateway façade', () => {
       source: 'test',
       clientMessageId,
       status: 'rejected',
+      committed: true,
       reason: 'malformed_output',
     });
     await gateway.stop();

@@ -100,6 +100,8 @@ export type WebState = {
 /** How a line's turn ended, from the answer or the stream. */
 export type LineEnding = {
   readonly status: TurnOutcome['status'];
+  /** Whether the turn put the line in the log; the daemon says, and only it knows. */
+  readonly committed: boolean;
   readonly message?: string;
 };
 
@@ -141,7 +143,8 @@ export function installSnapshot(
   state: WebState,
   snapshot: GatewayReady,
 ): WebState {
-  return {
+  const waiting = new Set(snapshot.confirmations.map(pending => pending.id));
+  let next: WebState = {
     ...state,
     connection: {status: 'live'},
     health: snapshot.health,
@@ -149,6 +152,20 @@ export function installSnapshot(
     turns: new Map(),
     ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
   };
+
+  // A card the snapshot does not carry ended while the tab was away, and
+  // the frame that said how is not replayed: the person hears that their
+  // chance to answer passed, which is all this tab can know.
+  for (const card of state.confirmations) {
+    if (!waiting.has(card.id)) {
+      next = noticed(
+        next,
+        `${characterName(state, card.characterId)}: A confirmation ended while this page was away.`,
+      );
+    }
+  }
+
+  return next;
 }
 
 /**
@@ -231,7 +248,7 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
   const {thread} = state;
 
   return {
-    ...noticeSpent(state),
+    ...state,
     thread:
       thread?.conversationId === conversationId
         ? setAside(thread)
@@ -373,13 +390,14 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 /**
  * A turn's end, however it reaches the tab — the answer to a send, or the
  * stream — said at once, naming its character, this tab's turn or
- * another surface's. A refusal is the one end that says what became of
- * the line: nothing ran, so it was never recorded and comes back to the
- * thread it was written in, open or not. No other end says, and neither
- * can the page work it out: an answer can beat the frame that would show
+ * another surface's. The end says whether the turn put the line in the
+ * log: one it did not is the person's to write again and goes back to
+ * the thread it was written in, open or not; one it did belongs to the
+ * thread and waits for the page or the frame that shows it. The page
+ * works none of this out — an answer can beat the frame that would show
  * the line, a stream is ordered only within one connection, and a page
- * of the log is a hundred messages, not the whole of it. So the line
- * waits for a page that carries it. `completed` says nothing here.
+ * of the log is a hundred messages, not the whole of it — the daemon
+ * says. `completed` says only that, since the line is in the log.
  */
 export function lineEnded(
   state: WebState,
@@ -397,7 +415,7 @@ export function lineEnded(
   const line = state.pending.get(clientMessageId);
 
   return noticed(
-    line !== undefined && ending.status === 'refused'
+    line !== undefined && !ending.committed
       ? handedBack(state, clientMessageId, line)
       : state,
     notice,
@@ -481,6 +499,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         event.clientMessageId,
         {
           status: event.status,
+          committed: event.committed,
           ...(event.message === undefined
             ? event.reason === undefined
               ? {}

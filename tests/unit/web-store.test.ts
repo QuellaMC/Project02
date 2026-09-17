@@ -92,10 +92,12 @@ function userMessage(
   );
 }
 
+/** A turn's end as the daemon sends it: `committed` is its word on the line. */
 function completed(
   clientMessageId: string,
   status: 'completed' | 'rejected' | 'failed' | 'refused' = 'completed',
   message?: string,
+  committed = true,
 ): GatewayEvent {
   return {
     kind: 'turn_completed',
@@ -104,6 +106,7 @@ function completed(
     source: 'web',
     clientMessageId,
     status,
+    committed,
     ...(message === undefined ? {} : {message}),
   };
 }
@@ -471,13 +474,14 @@ describe('web store', () => {
     expect(fresh.thread?.earlier).toBe('v1:0:7');
   });
 
-  it('hands a line back at once only when the daemon refused it, since nothing ran — after what is typed, in the order sent, and never for a completed turn', () => {
+  it('hands a line back at once when the daemon says it never put it in the log — after what is typed, in the order sent, and never for a completed turn', () => {
     const state = composerChanged(
       sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
       'next thought',
     );
     const refused = lineEnded(state, 'mira', 'line-1', {
       status: 'refused',
+      committed: false,
       message: 'The gateway holds no open conversation.',
     });
 
@@ -491,14 +495,27 @@ describe('web store', () => {
     // it was sent.
     const both = lineEnded(refused, 'mira', 'line-2', {
       status: 'refused',
+      committed: false,
       message: 'The gateway holds no open conversation.',
     });
 
     expect(composerText(both)).toBe('next thought first second');
     expect(both.pending.size).toBe(0);
 
-    // A turn the daemon judged says so, and says nothing about the line:
-    // it waits for a page that carries it.
+    // A turn that failed before writing the line says so, and the line is
+    // the person's again — a full disk on the first append, and nothing
+    // in the log will ever mention it.
+    const unwritten = applyEvent(
+      state,
+      completed('line-1', 'failed', 'The store is full.', false),
+    );
+
+    expect(composerText(unwritten)).toBe('next thought first');
+    expect(unwritten.pending.has('line-1')).toBe(false);
+
+    // A turn the daemon judged after writing the line says so, and the
+    // line belongs to the thread: it waits for the page or frame that
+    // shows it, and is not offered back.
     const judged = applyEvent(
       state,
       completed('line-1', 'rejected', 'The line was blank.'),
@@ -516,15 +533,19 @@ describe('web store', () => {
         .notices,
     ).toEqual(judged.notices);
 
-    expect(lineEnded(state, 'mira', 'line-1', {status: 'completed'})).toBe(
-      state,
-    );
+    expect(
+      lineEnded(state, 'mira', 'line-1', {
+        status: 'completed',
+        committed: true,
+      }),
+    ).toBe(state);
   });
 
   it('leaves a judged line waiting for the log, since only a page that carries it says the daemon took it', () => {
     const state = sent(opened(), 'hello', 'line-1');
     const judged = lineEnded(state, 'mira', 'line-1', {
       status: 'rejected',
+      committed: true,
       message: 'The model wrote nothing it could say.',
     });
 
@@ -594,6 +615,7 @@ describe('web store', () => {
     // Mira's name on it.
     const ended = lineEnded(state, 'mira', 'line-1', {
       status: 'refused',
+      committed: false,
       message: 'Mira is away.',
     });
 
@@ -601,12 +623,14 @@ describe('web store', () => {
     expect(ended.pending.size).toBe(0);
     expect(ended.notices.at(-1)).toBe('Mira: Mira is away.');
 
-    // Back in Mira's thread, the line is where it was written, and the
-    // open spends the notice as any act of the person does.
+    // Back in Mira's thread, the line is where it was written. What the
+    // page had to say is spent by the person asking to open, not by the
+    // answer that comes back, so a turn that failed meanwhile survives
+    // the open it raced.
     state = threadOpened(ended, mira);
 
     expect(composerText(state)).toBe('hello mira');
-    expect(state.notices).toEqual([]);
+    expect(state.notices).toEqual(['Mira: Mira is away.']);
     expect(state.turns.has(conversationId)).toBe(false);
 
     // The daemon taking the line settles it whichever thread is open, and
@@ -744,6 +768,7 @@ describe('web store', () => {
       source: 'telegram:bot',
       clientMessageId: 'tg-1',
       status: 'failed',
+      committed: true,
       reason: 'provider_error',
     });
 
@@ -822,6 +847,15 @@ describe('web store', () => {
       'Mira: A confirmation was cancelled before it was answered.',
     );
     expect(confirmationGone(gone, 'c-1')).toBe(gone);
+
+    // A card that ends while the tab is away: the snapshot no longer
+    // carries it, and the frame that said how is never replayed.
+    const away = installSnapshot(state, ready());
+
+    expect(away.confirmations).toEqual([]);
+    expect(away.notices.at(-1)).toBe(
+      'Mira: A confirmation ended while this page was away.',
+    );
 
     // One ending, said once, whichever of the two reaches the tab first.
     expect(

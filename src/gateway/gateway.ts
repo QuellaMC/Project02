@@ -29,6 +29,7 @@ import {
   type PendingConfirmation,
   type ReconcilePlan,
   type StartOutcome,
+  turnCommittedTheLine,
   type TurnOutcome,
   type Unsubscribe,
 } from './api/contract.ts';
@@ -505,6 +506,8 @@ function turnNotRun(
         characterId,
         conversationId: message.conversationId,
         message: held.message,
+        // The turn never reached the runtime, so the line never reached the log.
+        committed: false,
       });
 }
 
@@ -521,6 +524,7 @@ function turnCompleted(
     source: message.source,
     clientMessageId: message.clientMessageId,
     status: outcome.status,
+    committed: turnCommittedTheLine(outcome),
     ...(outcome.status === 'rejected' || outcome.status === 'refused'
       ? {reason: outcome.reason, message: outcome.message}
       : {}),

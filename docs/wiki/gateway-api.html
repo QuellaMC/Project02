@@ -432,6 +432,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
               was not completed, stamped with the submission's
               <code>source</code> and <code>clientMessageId</code> so every
               surface knows whose turn ended — even one that committed nothing.
+              <code>committed</code> says whether the turn put that line in the
+              log: a surface holding the line hands back one that was not, and
+              leaves one that was to the thread. Nothing else answers it, since
+              the log is read in pages and a busy turn can put a hundred
+              messages between a line and now.
             </td>
           </tr>
           <tr>
