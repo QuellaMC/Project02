@@ -28,6 +28,7 @@ import {
   noticed,
   pageUnread,
   threadOpened,
+  type Thread,
   type WebState,
 } from './store.ts';
 
@@ -62,7 +63,7 @@ export function createSession(address: string): Session {
     return refusedSession(problem(error));
   }
 
-  let state = initialState;
+  let state = {...initialState, composers: writtenAndUnsent()};
   const listeners = new Set<() => void>();
   const apply = (reduce: (state: WebState) => WebState): void => {
     const next = reduce(state);
@@ -71,7 +72,13 @@ export function createSession(address: string): Session {
       return;
     }
 
+    const typed = next.composers !== state.composers;
+
     state = next;
+
+    if (typed) {
+      keepWrittenAndUnsent(state.composers);
+    }
 
     for (const listener of listeners) {
       listener();
@@ -240,57 +247,22 @@ export function createSession(address: string): Session {
         return;
       }
 
-      try {
-        const outcome = await client.deliver({
-          conversationId: thread.conversationId,
-          senderId: thread.userParticipantId,
-          text: line.text,
-          source: webSource,
-          clientMessageId,
-        });
+      // Silence says nothing of the turn, so the log is asked; a line it
+      // does not carry was never taken, or was taken and is running. The
+      // same line goes again under the same id, which the daemon's
+      // ledger joins if the first one did arrive: the person's words are
+      // either in the thread or on their way, never left in a bubble
+      // nothing will ever settle.
+      const sending = {client, apply, askTheLog};
 
-        apply(current =>
-          lineEnded(
-            current,
-            thread.characterId,
-            clientMessageId,
-            outcome.status === 'completed'
-              ? {status: 'completed', committed: true}
-              : {
-                  status: outcome.status,
-                  committed: turnCommittedTheLine(outcome),
-                  message: outcome.message,
-                },
-          ),
-        );
-        await askTheLog(thread.conversationId, clientMessageId);
-      } catch (error: unknown) {
-        // A turn can only have run if the request reached the route, so
-        // every answer the daemon gives here is it refusing the request
-        // itself — its token, its route, its shape, its size, or a
-        // daemon on its way down — but its own internal failure, which
-        // may have been a turn, as may an answer cut short under its 200.
-        if (
-          error instanceof GatewayClientError &&
-          error.status >= 400 &&
-          error.status !== 500
-        ) {
-          apply(current =>
-            lineEnded(current, thread.characterId, clientMessageId, {
-              status: 'refused',
-              committed: false,
-              message: problem(error),
-            }),
-          );
+      if (!(await deliverOnce(sending, thread, clientMessageId, line.text))) {
+        return;
+      }
 
-          return;
-        }
+      await readPage(thread.conversationId, {});
 
-        // Silence says nothing of the turn: the newest page settles the
-        // line if the daemon took it and says the daemon cannot be
-        // reached if that is why no answer came. A line the daemon may
-        // still be holding stays pending for the stream.
-        await readPage(thread.conversationId, {});
+      if (state.pending.has(clientMessageId)) {
+        await deliverOnce(sending, thread, clientMessageId, line.text);
       }
     },
     async loadEarlier() {
@@ -332,6 +304,115 @@ export function createSession(address: string): Session {
       }
     },
   };
+}
+
+/** What one delivery needs of the tab it belongs to. */
+type Sending = {
+  readonly client: GatewayClient;
+  readonly apply: (reduce: (state: WebState) => WebState) => void;
+  readonly askTheLog: (
+    conversationId: string,
+    clientMessageId: string,
+  ) => Promise<void>;
+};
+
+/**
+ * One attempt at a line, and what the daemon answered: `true` when
+ * nothing answered at all, which is the only thing the tab can act on
+ * further. A refusal and a verdict are the daemon's word, and the log
+ * settles what it committed.
+ */
+async function deliverOnce(
+  sending: Sending,
+  thread: Thread,
+  clientMessageId: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    const outcome = await sending.client.deliver({
+      conversationId: thread.conversationId,
+      senderId: thread.userParticipantId,
+      text,
+      source: webSource,
+      clientMessageId,
+    });
+
+    sending.apply(current =>
+      lineEnded(
+        current,
+        thread.characterId,
+        clientMessageId,
+        outcome.status === 'completed'
+          ? {status: 'completed', committed: true}
+          : {
+              status: outcome.status,
+              committed: turnCommittedTheLine(outcome),
+              message: outcome.message,
+            },
+      ),
+    );
+    await sending.askTheLog(thread.conversationId, clientMessageId);
+
+    return false;
+  } catch (error: unknown) {
+    // A turn can only have run if the request reached the route, so every
+    // answer the daemon gives here is it refusing the request itself —
+    // its token, its route, its shape, its size, or a daemon on its way
+    // down — but its own internal failure, which may have been a turn, as
+    // may an answer cut short under its 200.
+    if (
+      error instanceof GatewayClientError &&
+      error.status >= 400 &&
+      error.status !== 500
+    ) {
+      sending.apply(current =>
+        lineEnded(current, thread.characterId, clientMessageId, {
+          status: 'refused',
+          committed: false,
+          message: problem(error),
+        }),
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+}
+
+/**
+ * What a person has written and not sent, kept for the tab that holds it:
+ * a reload or a crash is an ordinary interruption, and their words are
+ * theirs. The tab's own store, so nothing outlives the tab and no other
+ * tab reads it; a browser that refuses it changes nothing else.
+ */
+const writtenKey = 'project02.composers';
+
+function writtenAndUnsent(): ReadonlyMap<string, string> {
+  try {
+    const kept: unknown = JSON.parse(
+      sessionStorage.getItem(writtenKey) ?? '[]',
+    );
+
+    return new Map(
+      (Array.isArray(kept) ? kept : []).filter(
+        (entry): entry is [string, string] =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          entry.every(part => typeof part === 'string'),
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function keepWrittenAndUnsent(composers: ReadonlyMap<string, string>): void {
+  try {
+    sessionStorage.setItem(writtenKey, JSON.stringify([...composers]));
+  } catch {
+    // A browser that will not keep it still shows what is typed.
+  }
 }
 
 /** An address that can never work: the page says so and does nothing else. */
