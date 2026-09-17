@@ -115,7 +115,9 @@ export function turnCommittedTheLine(outcome: TurnOutcome): boolean {
     case 'completed':
       return true;
     case 'refused':
-      return false;
+      // A duplicate is the one refusal that means the line is in the log
+      // already: an earlier run of the daemon took it under this same id.
+      return outcome.reason === 'duplicate_submission';
     default:
       return outcome.committed;
   }

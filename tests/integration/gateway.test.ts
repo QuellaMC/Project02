@@ -1036,9 +1036,22 @@ describe('gateway façade', () => {
       status: 'opened',
       conversationId: ref.conversationId,
     });
+
+    const afterRestart: GatewayEvent[] = [];
+
+    restarted.events(event => afterRestart.push(event));
     await expect(restarted.deliver(message)).resolves.toMatchObject({
       status: 'refused',
       reason: 'duplicate_submission',
+    });
+    // The line is in the log already, so the turn's end says it was
+    // committed: a surface still holding the line must not offer it back
+    // for the person to send a second time.
+    expect(afterRestart.at(-1)).toMatchObject({
+      kind: 'turn_completed',
+      clientMessageId: 'msg-1',
+      status: 'refused',
+      committed: true,
     });
 
     const history = await restarted.history(ref.conversationId);
