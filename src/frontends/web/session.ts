@@ -105,9 +105,7 @@ export function createSession(address: string): Session {
       }
     } catch (error: unknown) {
       if (mine()) {
-        apply(current =>
-          pageUnread(current, conversationId, request, problem(error)),
-        );
+        apply(current => pageUnread(current, conversationId, problem(error)));
       }
     }
   };
@@ -232,7 +230,7 @@ export function createSession(address: string): Session {
         apply(current =>
           lineEnded(
             current,
-            thread.conversationId,
+            thread.characterId,
             clientMessageId,
             outcome.status === 'completed'
               ? {status: 'completed'}

@@ -63,17 +63,15 @@ export type Thread = {
 };
 
 /**
- * What a conversation has to show that its log does not, kept for every
- * conversation because only the stream says it: a turn running there —
- * the typing indicator until the first delta or the end — each draft's
- * text so far, and how its last turn ended, held for a thread not on
- * screen until it is opened.
+ * A turn in progress, for every conversation and not only the one on
+ * screen, because only the stream says it and no page read gives it
+ * back: the typing indicator until the first delta or the end, and each
+ * draft's text so far.
  */
 export type TurnState = {
   readonly busy: boolean;
   /** Draft id → the reply's text so far. */
   readonly drafts: ReadonlyMap<string, string>;
-  readonly ended?: string;
 };
 
 export type WebState = {
@@ -91,12 +89,14 @@ export type WebState = {
    * line the daemon did not take comes back where it was written.
    */
   readonly composers: ReadonlyMap<string, string>;
-  /** Conversation id → its turn's news; absent when there is none. */
+  /** Conversation id → the turn running there; absent when none is. */
   readonly turns: ReadonlyMap<string, TurnState>;
   /**
-   * The page's one notice: how a turn on the thread on screen did not
-   * complete, a confirmation that expired, a page that could not be read,
-   * a verb the daemon refused. Spent by the person's next act.
+   * The page's one notice: how a turn did not complete, a confirmation
+   * that expired, a page that could not be read, a verb the daemon
+   * refused. A person who sees the whole roster is told about the whole
+   * roster, so a notice about a character names it. Spent by the
+   * person's next act.
    */
   readonly notice?: string | undefined;
 };
@@ -118,6 +118,14 @@ export const initialState: WebState = {
   composers: new Map(),
   turns: new Map(),
 };
+
+/** A character as the person sees it named, wherever the page speaks of one. */
+export function characterName(state: WebState, characterId: string): string {
+  return (
+    state.health?.characters.find(character => character.id === characterId)
+      ?.displayName ?? characterId
+  );
+}
 
 /** What the person has typed in the thread on screen. */
 export function composerText(state: WebState): string {
@@ -141,7 +149,7 @@ export function installSnapshot(
     connection: {status: 'live'},
     health: snapshot.health,
     confirmations: snapshot.confirmations,
-    turns: endingsKept(state.turns),
+    turns: new Map(),
     ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
   };
 }
@@ -168,11 +176,7 @@ export function connectionRefused(state: WebState, message: string): WebState {
   let next: WebState = {...state, connection: {status: 'refused', message}};
 
   for (const [clientMessageId, line] of state.pending) {
-    next = told(
-      handedBack(next, clientMessageId, line),
-      line.conversationId,
-      line.ended ?? message,
-    );
+    next = handedBack(next, clientMessageId, line);
   }
 
   return next;
@@ -188,39 +192,19 @@ export function noticeSpent(state: WebState): WebState {
 }
 
 /**
- * A page that could not be read, said only while it is still the page
- * being read: a read left behind by a switch of characters, a reconnect,
- * or a cursor the thread has moved past must not tell a person that the
- * thread in front of them failed.
+ * A page that could not be read, said only for the conversation on
+ * screen: a read of another is no news about the thread in front of the
+ * person. Which read is still worth applying is the session's to judge —
+ * it holds the ones in flight.
  */
 export function pageUnread(
   state: WebState,
   conversationId: string,
-  request: HistoryPage,
   message: string,
 ): WebState {
-  return isPageOf(state, conversationId, request)
+  return state.thread?.conversationId === conversationId
     ? noticed(state, message)
     : state;
-}
-
-/**
- * Whether a page read is still the thread's: its conversation on screen,
- * and — for an earlier page — the cursor it was read with still the
- * thread's. The thread moves past a cursor once its page is shown, and a
- * reconnect or a fresh open takes the cursor with what it set aside.
- */
-function isPageOf(
-  state: WebState,
-  conversationId: string,
-  request: HistoryPage,
-): boolean {
-  const {thread} = state;
-
-  return (
-    thread?.conversationId === conversationId &&
-    (request.before === undefined || thread.earlier === request.before)
-  );
 }
 
 /**
@@ -235,11 +219,7 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
   const {thread} = state;
 
   return {
-    ...withTurn(state, conversationId, turn => ({
-      busy: turn.busy,
-      drafts: turn.drafts,
-    })),
-    notice: state.turns.get(conversationId)?.ended,
+    ...noticeSpent(state),
     thread:
       thread?.conversationId === conversationId
         ? setAside(thread)
@@ -267,8 +247,9 @@ export function composerChanged(state: WebState, text: string): WebState {
  * aside is replaced. A pending line of this thread that the page carries
  * is settled; one it lacks whose turn has ended comes back to the
  * composer; one whose turn has not run yet stays pending. An earlier page
- * goes in front of the thread whose cursor it was read with, and moves
- * the cursor on — so the same cursor read twice shows its page once.
+ * goes in front and moves the cursor on. A message the thread already
+ * shows is shown once, from a page or from a frame, so reading the same
+ * page twice changes nothing.
  */
 export function historyPageRead(
   state: WebState,
@@ -278,7 +259,7 @@ export function historyPageRead(
 ): WebState {
   const {thread} = state;
 
-  if (thread === undefined || !isPageOf(state, conversationId, request)) {
+  if (thread?.conversationId !== conversationId) {
     return state;
   }
 
@@ -289,11 +270,16 @@ export function historyPageRead(
   const messages = outcome.messages.map(messageOf);
 
   if (request.before !== undefined) {
+    const shown = new Set(thread.messages.map(message => message.messageId));
+
     return {
       ...state,
       thread: {
         ...thread,
-        messages: [...messages, ...thread.messages],
+        messages: [
+          ...messages.filter(message => !shown.has(message.messageId)),
+          ...thread.messages,
+        ],
         earlier: outcome.earlier,
       },
     };
@@ -334,11 +320,7 @@ export function historyPageRead(
     if (carried.has(clientMessageId)) {
       next = settled(next, clientMessageId);
     } else if (line.ended !== undefined) {
-      next = told(
-        handedBack(next, clientMessageId, line),
-        conversationId,
-        line.ended,
-      );
+      next = noticed(handedBack(next, clientMessageId, line), line.ended);
     }
   }
 
@@ -372,14 +354,14 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * and can beat the frame that would show the line, so from the answer
  * only a refusal hands it back — nothing was recorded; a rejection or a
  * failure is a verdict the line keeps until the stream or a page says
- * whether it was committed. A
- * line comes back to the thread it was written in, open or not. A turn
- * that did not complete is told to its conversation, this tab's or
- * another surface's. `completed` settles nothing here.
+ * whether it was committed. A line comes back to the thread it was
+ * written in, open or not, and a turn that did not complete is said at
+ * once, naming its character — this tab's turn or another surface's.
+ * `completed` settles nothing here.
  */
 export function lineEnded(
   state: WebState,
-  conversationId: string,
+  characterId: string,
   clientMessageId: string,
   ending: LineEnding,
   from: 'answer' | 'stream',
@@ -388,7 +370,9 @@ export function lineEnded(
     return state;
   }
 
-  const notice = ending.message ?? `The turn was ${ending.status}.`;
+  const notice = `${characterName(state, characterId)}: ${
+    ending.message ?? `The turn was ${ending.status}.`
+  }`;
   const line = state.pending.get(clientMessageId);
   const placed =
     line === undefined
@@ -397,7 +381,7 @@ export function lineEnded(
         ? marked(state, clientMessageId, line, notice)
         : handedBack(state, clientMessageId, line);
 
-  return told(placed, conversationId, notice);
+  return noticed(placed, notice);
 }
 
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
@@ -450,7 +434,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'turn_completed':
       return lineEnded(
         withTurn(state, event.conversationId, () => noTurn),
-        event.conversationId,
+        event.characterId,
         event.clientMessageId,
         {
           status: event.status,
@@ -538,39 +522,13 @@ function withTurn(
 
   const turns = new Map(state.turns);
 
-  if (next.busy || next.drafts.size > 0 || next.ended !== undefined) {
+  if (next.busy || next.drafts.size > 0) {
     turns.set(conversationId, next);
   } else if (!turns.delete(conversationId)) {
     return state;
   }
 
   return {...state, turns};
-}
-
-/** What the stream said of a turn in progress is gone with the stream; how a turn ended stands. */
-function endingsKept(
-  turns: ReadonlyMap<string, TurnState>,
-): ReadonlyMap<string, TurnState> {
-  return new Map(
-    [...turns].flatMap(([conversationId, turn]): [string, TurnState][] =>
-      turn.ended === undefined
-        ? []
-        : [[conversationId, {...noTurn, ended: turn.ended}]],
-    ),
-  );
-}
-
-/** A turn's end is told to its conversation: the notice while that thread is on screen, kept for it otherwise. */
-function told(
-  state: WebState,
-  conversationId: string,
-  notice: string,
-): WebState {
-  return state.thread?.conversationId === conversationId
-    ? noticed(state, notice)
-    : withTurn(state, conversationId, turn =>
-        turn.ended === notice ? turn : {...turn, ended: notice},
-      );
 }
 
 /** The daemon took the line, whichever thread it went to; what its ending said stands. */

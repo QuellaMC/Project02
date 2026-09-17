@@ -6,6 +6,7 @@ import type {
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import {webSource, type Session} from './session.ts';
+import {characterName} from './store.ts';
 import {Avatar, stateLabel, ThreadPane} from './thread.tsx';
 
 /** States a line cannot reach; the daemon holds a line through the rest. */
@@ -79,11 +80,7 @@ export function App({session}: {readonly session: Session}) {
               <ConfirmationCard
                 key={card.id}
                 pending={card}
-                characterName={
-                  health?.characters.find(
-                    character => character.id === card.characterId,
-                  )?.displayName ?? card.characterId
-                }
+                characterName={characterName(state, card.characterId)}
                 onAnswer={decision => session.answer(card.id, decision)}
               />
             ))}

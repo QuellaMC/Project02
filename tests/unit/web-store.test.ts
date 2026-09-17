@@ -156,31 +156,19 @@ function sent(state: WebState, text: string, clientMessageId: string) {
 }
 
 describe('web store', () => {
-  it('installs every ready as the truth: roster and confirmations replace, turns in progress drop while how one ended is kept, and what the thread shows stays on screen until its newest page replaces it', () => {
+  it('installs every ready as the truth: roster and confirmations replace, every turn in progress drops, and what the thread shows stays on screen until its newest page replaces it', () => {
     let state = applyEvent(
       opened(),
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
     );
 
     state = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
-    // Another thread's turn failed while this one was read: still news after the reconnect.
-    state = applyEvent(state, {
-      kind: 'turn_completed',
-      characterId: 'nova',
-      conversationId: 'conv-2',
-      source: 'web',
-      clientMessageId: 'line-9',
-      status: 'failed',
-      message: 'The store is full.',
-    });
     state = installSnapshot(state, ready([confirmation('c-1')]));
 
     expect(state.connection).toEqual({status: 'live'});
     expect(state.health?.characters).toEqual([mira]);
     expect(state.confirmations.map(pending => pending.id)).toEqual(['c-1']);
-    expect([...state.turns]).toEqual([
-      ['conv-2', {busy: false, drafts: new Map(), ended: 'The store is full.'}],
-    ]);
+    expect(state.turns.size).toBe(0);
     expect(state.thread).toMatchObject({
       stale: [{messageId: 'm-1'}],
       messages: [],
@@ -202,17 +190,6 @@ describe('web store', () => {
       'm-1',
     ]);
     expect(unread.notice).toBe('The thread could not be read.');
-
-    // An earlier page read before the reconnect is not this thread's: its
-    // cursor went with what was set aside.
-    expect(
-      historyPageRead(
-        state,
-        conversationId,
-        {before: 'v1:0:0'},
-        page([committed('m-0', 'before')]),
-      ),
-    ).toBe(state);
 
     // The newest page replaces what was set aside and keeps what arrived
     // live after the reconnect.
@@ -384,6 +361,7 @@ describe('web store', () => {
 
     expect(state.turns.has(conversationId)).toBe(false);
     expect(state.notice).toBeUndefined();
+    expect(state.thread?.conversationId).toBe('conv-2');
   });
 
   it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {
@@ -504,7 +482,7 @@ describe('web store', () => {
 
     expect(composerText(fromStream)).toBe('next thought first');
     expect(fromStream.pending.size).toBe(1);
-    expect(fromStream.notice).toBe('The line was blank.');
+    expect(fromStream.notice).toBe('Mira: The line was blank.');
 
     const again = applyEvent(
       fromStream,
@@ -523,11 +501,11 @@ describe('web store', () => {
 
     expect(composerText(both)).toBe('next thought first second');
     expect(both.pending.size).toBe(0);
-    expect(both.notice).toBe('The store is full.');
+    expect(both.notice).toBe('Mira: The store is full.');
 
     const refused = lineEnded(
       state,
-      conversationId,
+      'mira',
       'line-1',
       {status: 'refused', message: 'The gateway holds no open conversation.'},
       'answer',
@@ -535,16 +513,12 @@ describe('web store', () => {
 
     expect(composerText(refused)).toBe('next thought first');
     expect(refused.pending.size).toBe(1);
-    expect(refused.notice).toBe('The gateway holds no open conversation.');
+    expect(refused.notice).toBe(
+      'Mira: The gateway holds no open conversation.',
+    );
 
     expect(
-      lineEnded(
-        state,
-        conversationId,
-        'line-1',
-        {status: 'completed'},
-        'answer',
-      ),
+      lineEnded(state, 'mira', 'line-1', {status: 'completed'}, 'answer'),
     ).toBe(state);
   });
 
@@ -552,7 +526,7 @@ describe('web store', () => {
     const state = sent(opened(), 'hello', 'line-1');
     const marked = lineEnded(
       state,
-      conversationId,
+      'mira',
       'line-1',
       {status: 'rejected', message: 'The model wrote nothing it could say.'},
       'answer',
@@ -562,9 +536,9 @@ describe('web store', () => {
     expect(marked.pending.get('line-1')).toEqual({
       conversationId,
       text: 'hello',
-      ended: 'The model wrote nothing it could say.',
+      ended: 'Mira: The model wrote nothing it could say.',
     });
-    expect(marked.notice).toBe('The model wrote nothing it could say.');
+    expect(marked.notice).toBe('Mira: The model wrote nothing it could say.');
 
     // The stream shows the line after all: it was taken, and the daemon's
     // verdict on the turn stands — the line landing does not answer it.
@@ -573,7 +547,7 @@ describe('web store', () => {
     expect(shown.pending.size).toBe(0);
     expect(shown.thread?.messages).toHaveLength(1);
     expect(composerText(shown)).toBe('');
-    expect(shown.notice).toBe('The model wrote nothing it could say.');
+    expect(shown.notice).toBe('Mira: The model wrote nothing it could say.');
 
     // The newest page carries it: taken. The newest page lacks it: it
     // comes back. A line the answer never marked stays pending: its turn
@@ -601,7 +575,7 @@ describe('web store', () => {
     });
   });
 
-  it("keeps a line sent to one character while another is open, hands it back in its own thread, and tells a turn's end to its own thread when that thread is opened", () => {
+  it("keeps a line sent to one character while another is open, hands it back in its own thread, and says a turn's end at once, naming its character", () => {
     const nova = {
       status: 'opened' as const,
       conversationId: 'conv-2',
@@ -622,10 +596,11 @@ describe('web store', () => {
     });
 
     // Mira's turn ends while Nova is open: the line goes back to Mira's
-    // composer, never into Nova's, and the reason waits for Mira's thread.
+    // composer, never into Nova's, and the reason is said at once with
+    // Mira's name on it.
     const ended = lineEnded(
       state,
-      conversationId,
+      'mira',
       'line-1',
       {status: 'refused', message: 'Mira is away.'},
       'answer',
@@ -633,13 +608,14 @@ describe('web store', () => {
 
     expect(composerText(ended)).toBe('');
     expect(ended.pending.size).toBe(0);
-    expect(ended.notice).toBeUndefined();
+    expect(ended.notice).toBe('Mira: Mira is away.');
 
-    // Back in Mira's thread, it is where it was written, and the reason is said.
+    // Back in Mira's thread, the line is where it was written, and the
+    // open spends the notice as any act of the person does.
     state = threadOpened(ended, mira);
 
     expect(composerText(state)).toBe('hello mira');
-    expect(state.notice).toBe('Mira is away.');
+    expect(state.notice).toBeUndefined();
     expect(state.turns.has(conversationId)).toBe(false);
 
     // The daemon taking the line settles it whichever thread is open, and
@@ -662,17 +638,13 @@ describe('web store', () => {
     );
 
     expect(failed.pending.size).toBe(0);
-    expect(failed.notice).toBeUndefined();
-    expect(threadOpened(failed, mira)).toMatchObject({
-      notice: 'The store is read-only.',
-      composers: new Map([[conversationId, 'hello mira']]),
-    });
+    expect(failed.notice).toBe('Mira: The store is read-only.');
+    expect(failed.composers).toEqual(new Map([[conversationId, 'hello mira']]));
 
-    // Another surface's turn on a thread nobody is reading waits for it too.
-    const theirs = applyEvent(elsewhere, completed('telegram-1', 'failed'));
-
-    expect(theirs.notice).toBeUndefined();
-    expect(threadOpened(theirs, mira).notice).toBe('The turn was failed.');
+    // Another surface's turn is said the same way, named the same way.
+    expect(
+      applyEvent(elsewhere, completed('telegram-1', 'failed')).notice,
+    ).toBe('Mira: The turn was failed.');
   });
 
   it('keeps what a person typed in each thread', () => {
@@ -721,7 +693,7 @@ describe('web store', () => {
 
     expect(state.thread?.messages).toHaveLength(1);
     expect(state.turns.has(conversationId)).toBe(false);
-    expect(state.notice).toBe('The model wrote nothing it could say.');
+    expect(state.notice).toBe('Mira: The model wrote nothing it could say.');
 
     state = applyEvent(state, {
       kind: 'turn_completed',
@@ -733,7 +705,7 @@ describe('web store', () => {
       reason: 'provider_error',
     });
 
-    expect(state.notice).toBe('provider_error');
+    expect(state.notice).toBe('Mira: provider_error');
 
     const spent = noticeSpent(state);
 
@@ -872,28 +844,10 @@ describe('web store', () => {
       switched,
     );
     expect(
-      pageUnread(
-        switched,
-        conversationId,
-        {},
-        'The daemon could not be reached.',
-      ),
+      pageUnread(switched, conversationId, 'The daemon could not be reached.'),
     ).toBe(switched);
-    expect(
-      pageUnread(switched, 'conv-2', {}, 'Its own read failed.').notice,
-    ).toBe('Its own read failed.');
-
-    // An earlier page the thread has moved past — a second click on Load
-    // earlier — says nothing when it fails, either.
-    const paged = historyPageRead(
-      opened(),
-      conversationId,
-      {},
-      page([committed('m-2', 'two')], 'v1:0:2'),
-    );
-
-    expect(pageUnread(paged, conversationId, {before: 'v1:0:0'}, 'Gone.')).toBe(
-      paged,
+    expect(pageUnread(switched, 'conv-2', 'Its own read failed.').notice).toBe(
+      'Its own read failed.',
     );
   });
 });
