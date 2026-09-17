@@ -201,25 +201,21 @@ function setAside(thread: Thread): Thread {
 }
 
 /**
- * The address will never work again, so nothing it was carrying can ever
- * settle: every pending line comes back where it was written, the page
- * stops taking new ones, and every confirmation waiting and every turn in
- * progress goes — an answer would never reach the daemon, and a draft
- * would never be finished.
+ * The address will never work again: the page stops taking new lines,
+ * and every confirmation waiting and every turn in progress goes, since
+ * an answer would never reach the daemon and a draft would never be
+ * finished. A line already sent stays as it is, with the id it was sent
+ * under — a token dies when a daemon restarts, and a line it committed
+ * just before is one the log can still be asked about. Turning it back
+ * into ordinary text would lose the only name it can be recognised by.
  */
 export function connectionRefused(state: WebState, message: string): WebState {
-  let next: WebState = {
+  return {
     ...state,
     connection: {status: 'refused', message},
     confirmations: [],
     turns: new Map(),
   };
-
-  for (const [clientMessageId, line] of state.pending) {
-    next = handedBack(next, clientMessageId, line);
-  }
-
-  return next;
 }
 
 /** Said once: the same news twice — a frame seen again — is the same notice. */

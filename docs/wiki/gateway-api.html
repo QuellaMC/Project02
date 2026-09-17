@@ -355,8 +355,11 @@ Content-Type: application/json
 
       <p>
         <code>source</code> is the client's stamp on the message —
-        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — for rendering and for a surface to
-        suppress the echo of its own messages. It is never a permission input.
+        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — naming the kind of surface a line
+        came from, for rendering. It is never a permission input, and never
+        what a surface tells its own lines by: every browser tab stamps
+        <code>web</code>, so a line is its sender's by its
+        <code>clientMessageId</code> alone.
         Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are
         persisted on the user's commit record, and come back in history. A stamp
         that fails the pattern never reaches a turn: on the wire the body schema

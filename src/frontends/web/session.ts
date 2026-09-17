@@ -66,41 +66,7 @@ export function createSession(address: string): Session {
     return refusedSession(problem(error));
   }
 
-  const kept = writtenAndUnsent();
-  let state = {
-    ...initialState,
-    composers: kept.composers,
-    pending: kept.pending,
-  };
-  /** A browser that refuses to keep what is written is said once, not on every keystroke. */
-  let storageSaid = false;
-  /** The home what is kept was written for; another home is another world. */
-  let keptHome = kept.homeRoot;
-  const listeners = new Set<() => void>();
-  const apply = (reduce: (state: WebState) => WebState): void => {
-    const next = reduce(state);
-
-    if (next === state) {
-      return;
-    }
-
-    const written =
-      next.composers !== state.composers || next.pending !== state.pending;
-
-    state = next;
-
-    if (written && !keepWrittenAndUnsent(state, keptHome) && !storageSaid) {
-      storageSaid = true;
-      state = noticed(
-        state,
-        'This browser is not keeping what you write, so a reload will lose it.',
-      );
-    }
-
-    for (const listener of listeners) {
-      listener();
-    }
-  };
+  const {getState, subscribe, apply, writtenFor} = createTabValue();
   /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
   /**
@@ -191,7 +157,7 @@ export function createSession(address: string): Session {
     conversationId: string,
     clientMessageId: string,
   ): Promise<void> => {
-    if (state.pending.has(clientMessageId)) {
+    if (getState().pending.has(clientMessageId)) {
       await readPage(conversationId, {});
     }
   };
@@ -203,7 +169,7 @@ export function createSession(address: string): Session {
    */
   let openedItself = false;
   const openTheOnlyCharacter = (): void => {
-    const characters = state.health?.characters ?? [];
+    const characters = getState().health?.characters ?? [];
     const only = characters.length === 1 ? characters[0] : undefined;
 
     if (!openedItself && only?.state === 'ready') {
@@ -238,17 +204,22 @@ export function createSession(address: string): Session {
           reads.clear();
           apply(current => installSnapshot(current, snapshot));
 
-          const {thread} = state;
+          const {thread} = getState();
 
           if (thread !== undefined) {
             await readPage(thread.conversationId, {});
           }
 
-          if (keptHome !== undefined && keptHome !== snapshot.health.homeRoot) {
+          const wroteFor = writtenFor();
+
+          // Only what a previous tab kept can belong to another home; a
+          // tab that has written nothing yet has nothing to let go of,
+          // including what is being typed while this frame arrives.
+          if (wroteFor !== undefined && wroteFor !== snapshot.health.homeRoot) {
             apply(forgetWritten);
           }
 
-          keptHome = snapshot.health.homeRoot;
+          writtenFor(snapshot.health.homeRoot);
           // Not awaited: a line that parks on a confirmation would wait
           // for a frame this stream cannot send until the bootstrap ends.
           void accountForPending(accounting());
@@ -264,28 +235,22 @@ export function createSession(address: string): Session {
   const accounting = (): Accounting => ({
     ...sending(),
     readPage,
-    pending: () => state.pending,
+    pending: () => getState().pending,
   });
 
   return {
-    getState: () => state,
-    subscribe: listener => {
-      listeners.add(listener);
-
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    getState,
+    subscribe,
     compose: text => {
       apply(current => composerChanged(current, text));
     },
     open,
     async send() {
-      const {thread} = state;
+      const {thread} = getState();
 
       // A refused address will never take a line, and nothing could
       // settle one: what is typed stays in the composer.
-      if (thread === undefined || state.connection.status === 'refused') {
+      if (thread === undefined || getState().connection.status === 'refused') {
         return;
       }
 
@@ -293,7 +258,7 @@ export function createSession(address: string): Session {
 
       apply(current => lineSent(current, clientMessageId));
 
-      const line = state.pending.get(clientMessageId);
+      const line = getState().pending.get(clientMessageId);
 
       if (line === undefined) {
         return;
@@ -320,17 +285,18 @@ export function createSession(address: string): Session {
       // for the next connection, which sends it again.
       await readPage(line.conversationId, {});
 
-      if (state.pending.has(clientMessageId)) {
+      if (getState().pending.has(clientMessageId)) {
         await deliverOnce(sending(), line, clientMessageId);
       }
     },
     async loadEarlier() {
-      const {thread} = state;
+      const {thread} = getState();
 
       if (thread?.earlier === undefined) {
         return;
       }
 
+      apply(noticeSpent);
       await readPage(thread.conversationId, {before: thread.earlier});
     },
     async answer(id, decision) {
@@ -411,6 +377,73 @@ async function accountForPending(accounting: Accounting): Promise<void> {
       await deliverOnce(accounting, line, clientMessageId);
     }
   }
+}
+
+/**
+ * The tab's one value, everyone watching it, and what it keeps of a
+ * person's words. Nothing outside reads the value except through
+ * `getState`, so there is one place it changes and one place it is kept:
+ * a reload finds what was written and what was sent but not yet
+ * accounted for, and a browser that will not keep them says so once.
+ */
+function createTabValue(): {
+  readonly getState: () => WebState;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly apply: (reduce: (state: WebState) => WebState) => void;
+  /** The home the kept words belong to; called with one, the home they belong to now. */
+  readonly writtenFor: (homeRoot?: string) => string | undefined;
+} {
+  const kept = writtenAndUnsent();
+  const listeners = new Set<() => void>();
+  let state: WebState = {
+    ...initialState,
+    composers: kept.composers,
+    pending: kept.pending,
+  };
+  let home = kept.homeRoot;
+  let refusalSaid = false;
+
+  return {
+    getState: () => state,
+    subscribe: listener => {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    apply: reduce => {
+      const next = reduce(state);
+
+      if (next === state) {
+        return;
+      }
+
+      const written =
+        next.composers !== state.composers || next.pending !== state.pending;
+
+      state = next;
+
+      if (written && !keepWrittenAndUnsent(state, home) && !refusalSaid) {
+        refusalSaid = true;
+        state = noticed(
+          state,
+          'This browser is not keeping what you write, so a reload will lose it.',
+        );
+      }
+
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    writtenFor: homeRoot => {
+      if (homeRoot !== undefined) {
+        home = homeRoot;
+      }
+
+      return home;
+    },
+  };
 }
 
 /** What one delivery needs of the tab it belongs to. */

@@ -814,7 +814,7 @@ describe('web store', () => {
     expect(composerText(threadOpened(state, mira))).toBe('half a thought');
   });
 
-  it('gives every pending line back in the order it was written when the address will never work again, and lets go of what it can never settle', () => {
+  it('keeps a line it has already sent, with the id it was sent under, when the address will never work again, and lets go of what it can never settle', () => {
     let live = sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2');
 
     live = applyEvent(live, {
@@ -825,6 +825,7 @@ describe('web store', () => {
       live,
       progress({kind: 'reply_delta', draftId: '1.0', text: 'half a thought'}),
     );
+    live = composerChanged(live, 'and this is unsent');
 
     const state = connectionRefused(live, 'A bearer token is required.');
 
@@ -832,9 +833,12 @@ describe('web store', () => {
       status: 'refused',
       message: 'A bearer token is required.',
     });
-    expect(state.pending.size).toBe(0);
-    expect(composerText(state)).toBe('first second');
-    // An answer would never reach the daemon, and the draft is never finished.
+    // A token dies when a daemon restarts, and a line it committed just
+    // before is one the log can still be asked about — under the id it
+    // was sent with, which ordinary text would not carry.
+    expect([...state.pending.keys()]).toEqual(['line-1', 'line-2']);
+    expect(composerText(state)).toBe('and this is unsent');
+    // An answer would never reach the daemon, and a draft never finish.
     expect(state.confirmations).toEqual([]);
     expect(state.turns.size).toBe(0);
   });
