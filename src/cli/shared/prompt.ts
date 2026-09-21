@@ -1,9 +1,7 @@
 /**
  * The terminal question adapter for a CLI that asks one thing and leaves:
- * the store consent gate and the config console. Chat reads its own lines
- * through a broker it keeps for the whole session, and only shares the
- * answer reading below. A closed stream answers `undefined`; a stream that
- * fails while read rejects.
+ * the store consent gate and the config console. A closed stream answers
+ * `undefined`; a stream that fails while read rejects.
  */
 import {createInterface} from 'node:readline/promises';
 

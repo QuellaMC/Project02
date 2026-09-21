@@ -1,4 +1,3 @@
-import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -13,12 +12,12 @@ import {describe, expect, it} from 'vitest';
 
 import {
   createGatewayClient,
-  gatewayUrlEnvVarName,
   type GatewayClient,
 } from '../../src/gateway/client/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {spawnDaemon} from '../support/spawn-daemon.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {readCharacterConversation} from '../support/conversation-fixtures.ts';
 
@@ -41,81 +40,15 @@ function seedNovaPackage(homeRoot: string): void {
   );
 }
 
-type Daemon = {
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly client: GatewayClient;
-  /** SIGINT, the way an operator stops it; resolves with the exit code. */
-  stop(): Promise<{readonly code: number | null; readonly stderr: string}>;
-};
+/** A real serve process on this home, with a client on its address. */
+async function spawnServe(homeRoot: string) {
+  const daemon = await spawnDaemon('src/cli/serve/main.ts', [
+    '--store',
+    homeRoot,
+    '--init',
+  ]);
 
-/** A real serve process on this home; ready once it printed its URL. */
-async function spawnDaemon(homeRoot: string): Promise<Daemon> {
-  const child = spawn(
-    process.execPath,
-    ['src/cli/serve/main.ts', '--store', homeRoot, '--init'],
-    {cwd: process.cwd(), stdio: 'pipe'},
-  );
-  let stderr = '';
-
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
-  });
-
-  const url = await new Promise<string>((resolveUrl, rejectUrl) => {
-    let stdout = '';
-    // An idle deadline, not a total one: these cases cold-start several
-    // real Node processes, so any fixed budget goes flaky under load.
-    let timeout: NodeJS.Timeout | undefined;
-    const failIfIdle = (): void => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        child.kill();
-        rejectUrl(new Error(`Timed out waiting for serve: ${stdout}${stderr}`));
-      }, 20_000);
-    };
-
-    failIfIdle();
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-
-      const line = stdout
-        .split('\n')
-        .find(candidate => candidate.startsWith(`${gatewayUrlEnvVarName}=`));
-
-      if (line !== undefined) {
-        clearTimeout(timeout);
-        resolveUrl(line.slice(gatewayUrlEnvVarName.length + 1));
-
-        return;
-      }
-
-      failIfIdle();
-    });
-    child.once('error', error => {
-      clearTimeout(timeout);
-      rejectUrl(error);
-    });
-    child.once('exit', code => {
-      clearTimeout(timeout);
-      rejectUrl(
-        new Error(`serve exited before its URL (${String(code)}): ${stderr}`),
-      );
-    });
-  });
-
-  return {
-    child,
-    client: createGatewayClient({url}),
-    stop: () =>
-      new Promise(resolveExit => {
-        child.once('exit', code => {
-          resolveExit({code, stderr});
-        });
-        child.kill('SIGINT');
-      }),
-  };
+  return {client: createGatewayClient({url: daemon.url}), stop: daemon.stop};
 }
 
 async function chat(
@@ -183,7 +116,7 @@ describe('two characters from one home', () => {
     seedNovaPackage(homeRoot);
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const daemon = await spawnDaemon(homeRoot);
+    const daemon = await spawnServe(homeRoot);
 
     try {
       const [mira, nova] = await Promise.all([
@@ -245,13 +178,13 @@ describe('two characters from one home', () => {
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const first = await spawnDaemon(homeRoot);
+    const first = await spawnServe(homeRoot);
 
     try {
       await chat(first.client, 'mira', 'hello from the first daemon');
 
       const before = await snapshotDurableFiles(homeRoot);
-      const second = await spawnDaemon(homeRoot);
+      const second = await spawnServe(homeRoot);
 
       try {
         await expect(

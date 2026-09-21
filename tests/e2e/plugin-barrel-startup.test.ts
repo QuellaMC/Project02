@@ -3,22 +3,6 @@ import {spawnSync} from 'node:child_process';
 import {describe, expect, it} from 'vitest';
 
 describe('plugin type barrel startup safety', () => {
-  it('does not pull runtime storage into chat CLI startup through plugins/types', () => {
-    const result = spawnSync(
-      process.execPath,
-      ['src/cli/chat/main.ts', '--help'],
-      {
-        cwd: process.cwd(),
-        encoding: 'utf8',
-      },
-    );
-    const output = `${result.stdout}\n${result.stderr}`;
-
-    expect(output).not.toContain('ReferenceError');
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Unknown chat option: --help.');
-  });
-
   it('starts the daemon entry without module initialization cycles', () => {
     const result = spawnSync(
       process.execPath,

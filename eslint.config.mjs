@@ -5,7 +5,14 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts', 'vitest.config.ts'],
+    files: [
+      'src/**/*.ts',
+      'src/**/*.tsx',
+      'tests/**/*.ts',
+      'vitest.config.ts',
+      'vite.config.ts',
+      'playwright.config.ts',
+    ],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -22,6 +29,9 @@ export default tseslint.config(
       // Google TS style (gts) core rules not covered by the presets above.
       'block-scoped-var': 'error',
       eqeqeq: 'error',
+      // Playwright fixtures take their dependencies as a destructured
+      // parameter; one that needs none is spelled `{}`.
+      'no-empty-pattern': ['error', {allowObjectPatternsAsParameters: true}],
       'no-var': 'error',
       'prefer-arrow-callback': 'error',
       'prefer-const': 'error',
@@ -39,7 +49,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
     rules: {
       complexity: ['error', 20],
       'max-lines': [

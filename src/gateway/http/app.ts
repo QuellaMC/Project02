@@ -1,3 +1,4 @@
+import {serveStatic} from '@hono/node-server/serve-static';
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {bearerAuth} from 'hono/bearer-auth';
 import {bodyLimit} from 'hono/body-limit';
@@ -18,6 +19,8 @@ export type CreateGatewayAppOptions = {
   readonly token: string;
   readonly events: EventStreams;
   readonly lifecycle: GatewayLifecycle;
+  /** The built page's files, served at the root; absent, the root says so. */
+  readonly uiRoot?: string;
 };
 
 /** A message is a few KiB; a body past this is not a message. */
@@ -95,9 +98,23 @@ export function createGatewayApp(options: CreateGatewayAppOptions) {
     ),
   );
 
-  // A person who opens the printed address in a browser lands here.
+  // The page's files are public bytes — the token reaches the page through
+  // the fragment — served behind the API router, so no file answers for an
+  // API path, and never cached, so a rebuild is always seen on reload.
+  if (options.uiRoot !== undefined) {
+    routes.use('/*', async (c, next) => {
+      c.header('Cache-Control', 'no-store');
+      await next();
+    });
+    routes.use('/*', serveStatic<ApiEnv>({root: options.uiRoot}));
+  }
+
+  // A person who opens the printed address before the page is built lands here.
   routes.get('/', c =>
-    c.text('No web UI is installed here. The API is under /api.', 404),
+    c.text(
+      'No web page is built here: run `pnpm build:web`. The API is under /api.',
+      404,
+    ),
   );
 
   return routes;

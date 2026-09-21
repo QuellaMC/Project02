@@ -1,7 +1,9 @@
 # tests/support
 
-Shared fixtures and harnesses for all four buckets. This directory owns
-test plumbing; buckets own assertions. Data files live in `../fixtures/`,
+Shared fixtures and harnesses for all five buckets. This directory owns
+test plumbing; buckets own assertions. `spawn-daemon.ts`,
+`scripted-adapter.ts`, and `demo-config-tool.ts` import no vitest, so the
+browser suite's Playwright worker can use them too. Data files live in `../fixtures/`,
 which must remain a sibling — `plugin-host-fixtures.ts` reaches it via
 `import.meta.url`.
 

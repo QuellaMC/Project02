@@ -3,7 +3,6 @@ import {join} from 'node:path';
 import {expect} from 'vitest';
 
 import {createGateway, type Gateway} from '../../src/gateway/index.ts';
-import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {
   createDemoConfigPluginManifest,
   demoConfigPluginId,
@@ -14,6 +13,7 @@ import {
   inspectRuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
 import {writeTestCharacterPackage} from './character-fixtures.ts';
+import {demoConfigToneChangeOutput} from './demo-config-tool.ts';
 import {runtimeLocationForTest, writeRuntimeConfig} from './runtime-config.ts';
 import {createTestTempRoot} from './temp-root.ts';
 
@@ -56,30 +56,18 @@ export async function createConfirmationHome(
     plugins: {[demoConfigPluginId]: {enabled: true}},
   });
 
-  let expectedFingerprint = '';
   let invocations = 0;
   const adapter: RoleModelAdapter = {
     invoke() {
       invocations += 1;
 
       return {
-        rawOutputText: JSON.stringify({
-          toolCalls:
-            invocations === 1
-              ? [
-                  {
-                    name: runtimePluginConfigUpdateToolName,
-                    input: {
-                      pluginId: demoConfigPluginId,
-                      fieldName: 'tone',
-                      operation: 'set',
-                      value: 'warm',
-                      expectedFingerprint,
-                    },
-                  },
-                ]
-              : [{name: 'visible_reply', input: {text: reply}}],
-        }),
+        rawOutputText:
+          invocations === 1
+            ? demoConfigToneChangeOutput(homeRoot, characterId)
+            : JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: reply}}],
+              }),
       };
     },
   };
@@ -100,7 +88,6 @@ export async function createConfirmationHome(
     });
 
   await gateway.startCharacter(characterId);
-  expectedFingerprint = inspectTone().fingerprint;
 
   return {homeRoot, gateway, inspectTone};
 }

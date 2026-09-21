@@ -3,7 +3,8 @@
 import {execFileSync} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 
-const TEXT_FILE_PATTERN = /\.(?:ts|mts|cts|mjs|cjs|js|json|md|html|yml|yaml)$/;
+const TEXT_FILE_PATTERN =
+  /\.(?:ts|tsx|mts|cts|mjs|cjs|js|json|md|html|css|yml|yaml)$/;
 
 const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
   encoding: 'utf8',

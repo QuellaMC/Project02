@@ -242,7 +242,8 @@ style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
   unless the task requires them.
 - Do not change public APIs unless the task requires it.
 
-`pnpm check` is the gate — format, lint, typecheck, arch, and coverage. CI runs
+`pnpm check` is the gate — format, lint, typecheck, arch, the web page's
+build, coverage, and the browser suite (Chromium via Playwright). CI runs
 the same command. For TypeScript-heavy changes also run:
 
 ```text
