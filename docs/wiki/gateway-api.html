@@ -48,7 +48,7 @@
       <p>
         The daemon (<code>pnpm serve</code>) holds every character runtime
         behind one gateway and speaks HTTP plus server-sent events on a loopback
-        port. Every surface — the web UI, the terminal chat, a messaging
+        port. Every surface — the web page, a messaging
         connector — is a client of this API and nothing else, so what one
         surface sends, every surface sees. The contract's types live in
         <code>src/gateway/api/contract.ts</code>; this page is the wire.
@@ -65,8 +65,9 @@
       <p>
         <code>serve</code> binds <code>127.0.0.1</code> on port 4310, or a free
         port when that one is taken, prints
-        <code>Gateway listening on http://127.0.0.1:&lt;port&gt;/</code>, brings
-        the roster up, and only then prints the line a client reads:
+        <code>Gateway listening on port &lt;port&gt;</code>, brings the roster
+        up, and only then prints the one address it has — the line a client
+        reads, and the address a person opens:
       </p>
 
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:4310/#token=&lt;token&gt;</code></pre>
@@ -74,7 +75,9 @@
       <p>
         The token is minted per run and travels in the URL fragment, so it never
         reaches a server log or a referrer. Nothing that connects before that
-        line is printed can find a half-started daemon.
+        line is printed can find a half-started daemon. The same address,
+        opened in a browser, is the web page: the daemon serves it from its
+        root, and the page takes the token from the fragment.
       </p>
 
       <h2>The four wire rules</h2>
@@ -253,8 +256,11 @@
             <td>
               <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
               until the turn ends — a turn waiting on a confirmation can take
-              minutes, so the reference client sends it over
-              <code>node:http</code> with no timeout.
+              minutes. A browser's fetch waits without limit; Node's gives a
+              response five minutes. The reference client uses the platform's
+              fetch, which is why the page is its caller today; a Node client
+              that parks turns on confirmations needs a transport without that
+              bound, and brings one when it arrives.
             </td>
           </tr>
           <tr>
@@ -319,11 +325,15 @@
             <td>SSE, described below.</td>
           </tr>
           <tr>
-            <td>root</td>
-            <td><code>GET /</code></td>
+            <td>page</td>
+            <td><code>GET /</code> · <code>GET /assets/…</code></td>
             <td>
-              A plain-text 404 naming <code>/api</code>, until a web UI is
-              installed.
+              The built web page's files: public bytes with no auth (the
+              token reaches the page through the fragment), every one
+              <code>Cache-Control: no-store</code>, served behind the API
+              router so no file answers for an API path. Before the page is
+              built, <code>/</code> is a plain-text 404 naming
+              <code>pnpm build:web</code> and <code>/api</code>.
             </td>
           </tr>
         </tbody>
@@ -345,9 +355,11 @@ Content-Type: application/json
 
       <p>
         <code>source</code> is the client's stamp on the message —
-        <code>web</code>, <code>chat-shim:&lt;run id&gt;</code>,
-        <code>telegram:&lt;bot&gt;</code> — for rendering and for a surface to
-        suppress the echo of its own messages. It is never a permission input.
+        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — naming the kind of surface a line
+        came from, for rendering. It is never a permission input, and never
+        what a surface tells its own lines by: every browser tab stamps
+        <code>web</code>, so a line is its sender's by its
+        <code>clientMessageId</code> alone.
         Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are
         persisted on the user's commit record, and come back in history. A stamp
         that fails the pattern never reaches a turn: on the wire the body schema
@@ -370,7 +382,7 @@ Content-Type: application/json
       </p>
 
       <pre><code>event: ready
-data: {"protocolVersion":1,"health":{…},"confirmations":[…]}
+data: {"protocolVersion":2,"health":{…},"confirmations":[…]}
 
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
@@ -385,7 +397,7 @@ event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
 
 event: turn_completed
-data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed"}</code></pre>
+data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed","committed":true}</code></pre>
 
       <table>
         <thead>
@@ -425,6 +437,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
               was not completed, stamped with the submission's
               <code>source</code> and <code>clientMessageId</code> so every
               surface knows whose turn ended — even one that committed nothing.
+              <code>committed</code> says whether the turn put that line in the
+              log: a surface holding the line hands back one that was not, and
+              leaves one that was to the thread. Nothing else answers it, since
+              the log is read in pages and a busy turn can put a hundred
+              messages between a line and now.
             </td>
           </tr>
           <tr>
@@ -432,9 +449,14 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
             <td>
               A tool asking for approval: id, request, deadline, and the
               <code>turn</code> that raised it (its <code>conversationId</code>,
-              <code>source</code>, <code>clientMessageId</code>), so a surface
-              answers for its own turns and leaves the rest to the surface that
-              sent them. The same shape the pending list returns.
+              <code>source</code>, <code>clientMessageId</code>). A
+              contact-shaped surface — a bot in one chat — answers for its own
+              turns and leaves the rest to the surface that sent them; a
+              roster-shaped surface, where the person sees every character,
+              shows them all and names the surface that raised one. The
+              person is the same on every surface, and the daemon settles a
+              confirmation once for all of them. The same shape the pending
+              list returns.
             </td>
           </tr>
           <tr>
@@ -473,8 +495,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         Because both roles are emitted from one post-persist seam, the stream
         and history never disagree: a reply whose write failed is a failed turn,
         never a message shown that history lacks. A message typed on the phone
-        appears in the open browser tab and the terminal at once, each
-        suppressing only what it sent itself by <code>source</code>.
+        appears in every open browser tab at once. A surface tells the lines it is
+        still holding apart by <code>clientMessageId</code>, which is its own:
+        <code>source</code> names the kind of surface, and two browser tabs
+        share it, so a tab that went by source alone would take another tab's
+        lines for its own.
       </p>
 
       <h2>Streaming replies</h2>

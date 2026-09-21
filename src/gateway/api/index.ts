@@ -36,6 +36,7 @@ export {
   type StartOutcome,
   type StorageFailure,
   type TurnIdentity,
+  turnCommittedTheLine,
   type TurnOutcome,
   type Unsubscribe,
 } from './contract.ts';

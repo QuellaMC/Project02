@@ -52,7 +52,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 1});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 2});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},
@@ -189,20 +189,23 @@ describe('gateway reference client', () => {
     await close();
   });
 
-  it('comes back after the daemon severs the stream and returns on its port', async () => {
+  it('says when the daemon severs the stream, and comes back when it returns on its port', async () => {
     const {gateway, server, client, close} = await startServer();
-    const readies: boolean[] = [];
+    const stream: string[] = [];
     const abort = new AbortController();
     const following = client.events(() => undefined, {
       signal: abort.signal,
       retryMs: 20,
       onReady: ({reconnected}) => {
-        readies.push(reconnected);
+        stream.push(reconnected ? 'back' : 'ready');
+      },
+      onLost: () => {
+        stream.push('lost');
       },
     });
 
     await vi.waitFor(() => {
-      expect(readies).toEqual([false]);
+      expect(stream).toEqual(['ready']);
     });
     // Severed, not ended: the socket is torn down under the stream.
     await server.close();
@@ -210,7 +213,7 @@ describe('gateway reference client', () => {
     const returned = await startTestGatewayServer({gateway, port: server.port});
 
     await vi.waitFor(() => {
-      expect(readies).toEqual([false, true]);
+      expect(stream).toEqual(['ready', 'lost', 'back']);
     });
     abort.abort();
     await following;
@@ -399,7 +402,8 @@ describe('gateway reference client error boundary', () => {
 
   it('closes the socket when the stream is unusable, for a wrong protocol or a bad frame', async () => {
     for (const [frame, code] of [
-      ['event: ready\ndata: {"protocolVersion":2}\n\n', 'protocol_mismatch'],
+      // The version before this one: a daemon that has not been restarted.
+      ['event: ready\ndata: {"protocolVersion":1}\n\n', 'protocol_mismatch'],
       ['event: ready\ndata: not json\n\n', 'malformed_event'],
     ] as const) {
       let aborted = 0;

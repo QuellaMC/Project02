@@ -115,8 +115,8 @@ export default {
         'src/app is the composition root: it wires runtime, plugins, and ' +
         'role-model together. Only the public barrel, gateway, and the ' +
         'surviving CLIs (config console, inspect, shared helpers) may ' +
-        'import it; the chat shim is a client of the socket. Green (zero ' +
-        'baseline entries).',
+        'import it; every other surface is a client of the socket. Green ' +
+        '(zero baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
@@ -134,26 +134,34 @@ export default {
       comment:
         'src/gateway is the daemon composition layer above app: it holds ' +
         'the character runtimes and the façade behind the socket. Only the ' +
-        'barrel and cli may import it; app, runtime, plugins, and core ' +
-        'never reach upward into it. Green (zero baseline entries).',
+        'barrel, cli, and the frontends (which reach its wire barrels ' +
+        'alone, see clients-see-only-the-wire) may import it; app, ' +
+        'runtime, plugins, and core never reach upward into it. Green ' +
+        '(zero baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
-        pathNot: ['^src/gateway/', '^src/cli/', '^src/index\\.ts$'],
+        pathNot: [
+          '^src/gateway/',
+          '^src/cli/',
+          '^src/frontends/',
+          '^src/index\\.ts$',
+        ],
       },
       to: {path: '^src/gateway/'},
     },
     {
       name: 'clients-see-only-the-wire',
       comment:
-        'src/gateway/client and src/cli/chat are clients of the wire: they ' +
-        'may value-import only gateway/api (the contract, which value-imports ' +
-        'nothing), gateway/client, core, and shared — never the façade, the ' +
-        'runtimes, app, or the HTTP server — so no client grows a private ' +
-        'path into the daemon. The Hono app type the client derives its ' +
-        'calls from is imported type-only. Green (zero baseline entries).',
+        'src/gateway/client and every frontend under src/frontends are ' +
+        'clients of the wire: they may value-import only gateway/api (the ' +
+        'contract, which value-imports nothing), gateway/client, core, and ' +
+        'shared — never the façade, the runtimes, app, or the HTTP server ' +
+        '— so no client grows a private path into the daemon. The Hono ' +
+        'app type the client derives its calls from is imported type-only. ' +
+        'Green (zero baseline entries).',
       severity: 'error',
-      from: {path: ['^src/gateway/client/', '^src/cli/chat/']},
+      from: {path: ['^src/gateway/client/', '^src/frontends/']},
       to: {
         path: '^src/',
         pathNot: [
@@ -161,7 +169,7 @@ export default {
           '^src/gateway/api/',
           '^src/core/',
           '^src/shared/',
-          '^src/cli/',
+          '^src/frontends/',
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -174,6 +182,16 @@ export default {
       severity: 'error',
       from: {path: '^src/', pathNot: ['^src/cli/']},
       to: {path: '^src/cli/'},
+    },
+    {
+      name: 'nothing-imports-frontends',
+      comment:
+        'src/frontends holds the clients of the wire — the web page, the ' +
+        'connectors to come; the daemon never imports one, so no frontend ' +
+        'is privileged over another. Green (zero baseline entries).',
+      severity: 'error',
+      from: {path: '^src/', pathNot: ['^src/frontends/']},
+      to: {path: '^src/frontends/'},
     },
     {
       name: 'runtime-plugins-value-via-api',
@@ -232,6 +250,6 @@ export default {
     tsConfig: {fileName: 'tsconfig.json'},
     // Rules that filter type-only edges need this to see them.
     tsPreCompilationDeps: true,
-    enhancedResolveOptions: {extensions: ['.ts']},
+    enhancedResolveOptions: {extensions: ['.ts', '.tsx']},
   },
 };

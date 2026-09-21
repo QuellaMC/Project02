@@ -16,7 +16,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 1;
+export const gatewayProtocolVersion = 2;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be
@@ -86,6 +86,8 @@ export type TurnOutcome =
       readonly conversationId: string;
       readonly reason: LocalRuntimeUserMessageRejectionReason;
       readonly message: string;
+      /** Whether the line was committed before the turn ended; see `turnCommittedTheLine`. */
+      readonly committed: boolean;
     }
   | {
       readonly status: 'refused';
@@ -97,7 +99,29 @@ export type TurnOutcome =
       readonly characterId: string;
       readonly conversationId: string;
       readonly message: string;
+      /** Whether the line was committed before the turn ended; see `turnCommittedTheLine`. */
+      readonly committed: boolean;
     };
+
+/**
+ * Whether a turn put the line it was given in the log. A surface holds a
+ * line until it knows: one that was committed belongs to the thread, and
+ * one that was not is the person's to write again. Nothing else answers
+ * it — the log is read in pages, and a busy turn can put a hundred
+ * messages between a line and now.
+ */
+export function turnCommittedTheLine(outcome: TurnOutcome): boolean {
+  switch (outcome.status) {
+    case 'completed':
+      return true;
+    case 'refused':
+      // A duplicate is the one refusal that means the line is in the log
+      // already: an earlier run of the daemon took it under this same id.
+      return outcome.reason === 'duplicate_submission';
+    default:
+      return outcome.committed;
+  }
+}
 
 /**
  * An ordinary operational failure of the home's storage — a full disk, a
@@ -337,6 +361,8 @@ export type GatewayEvent =
       readonly source: string;
       readonly clientMessageId: string;
       readonly status: TurnOutcome['status'];
+      /** Whether the turn put the line in the log, for a surface still holding it. */
+      readonly committed: boolean;
       /** The terminal explanation every surface can show, not only the sender. */
       readonly reason?: string;
       readonly message?: string;

@@ -23,7 +23,9 @@
     "src/**/*.ts",
     "tests/**/*.ts",
     "vitest.config.ts",
+    "vite.config.ts",
+    "playwright.config.ts",
     "eslint.config.mjs"
   ],
-  "exclude": ["node_modules", "coverage", "dist"]
+  "exclude": ["node_modules", "coverage", "dist", "src/frontends/web"]
 }

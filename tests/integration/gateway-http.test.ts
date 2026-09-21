@@ -1,3 +1,4 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
 import {connect} from 'node:net';
 import {join} from 'node:path';
 
@@ -48,7 +49,10 @@ type RequestOptions = {
 };
 
 async function createHttpHarness(
-  options: {readonly stopping?: () => boolean} = {},
+  options: {
+    readonly stopping?: () => boolean;
+    readonly uiRoot?: string;
+  } = {},
 ) {
   const homeRoot = join(createTestTempRoot('project02-gateway-http-'), 'home');
 
@@ -65,6 +69,7 @@ async function createHttpHarness(
     token,
     events: createEventStreams(gateway),
     lifecycle: {stopping: options.stopping ?? (() => false)},
+    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   // Every request names the loopback host and carries the token unless a
   // case overrides one of them.
@@ -213,7 +218,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 1,
+      protocolVersion: 2,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -340,6 +345,54 @@ describe('gateway over HTTP', () => {
     expect(late.status).toBe(503);
     expect(await errorOf(late)).toMatchObject({code: 'unavailable'});
   });
+
+  it('serves the built page from the UI root, public and uncached, and nothing outside it', async () => {
+    const uiRoot = join(createTestTempRoot('project02-gateway-ui-'), 'web');
+
+    mkdirSync(join(uiRoot, 'assets'), {recursive: true});
+    mkdirSync(join(uiRoot, 'api'), {recursive: true});
+    writeFileSync(join(uiRoot, 'index.html'), '<title>Project02</title>');
+    writeFileSync(join(uiRoot, 'assets', 'app.js'), 'console.log(1);');
+    writeFileSync(join(uiRoot, 'api', 'health'), 'not the API');
+    writeFileSync(join(uiRoot, '..', 'outside.txt'), 'private');
+
+    const {request} = await createHttpHarness({uiRoot});
+    const anonymous = {authorization: ''};
+    const index = await request('/', {headers: anonymous});
+
+    expect(index.status).toBe(200);
+    expect(index.headers.get('content-type')).toContain('text/html');
+    expect(index.headers.get('cache-control')).toBe('no-store');
+    expect(await index.text()).toContain('<title>Project02</title>');
+
+    const head = await request('/', {method: 'HEAD', headers: anonymous});
+
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+
+    const asset = await request('/assets/app.js', {headers: anonymous});
+
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get('content-type')).toContain('javascript');
+    expect(asset.headers.get('cache-control')).toBe('no-store');
+
+    // A file named like an API path never answers for it.
+    expect((await request('/api/health', {headers: anonymous})).status).toBe(
+      401,
+    );
+
+    // A path that climbs out of the root, and one that names nothing, both
+    // meet the app's own 404 — never a byte from outside the root.
+    const outside = await request('/%2e%2e/outside.txt', {headers: anonymous});
+
+    expect(outside.status).toBe(404);
+    expect(await outside.text()).not.toContain('private');
+
+    const missing = await request('/missing.js', {headers: anonymous});
+
+    expect(missing.status).toBe(404);
+    expect(await errorOf(missing)).toMatchObject({code: 'not_found'});
+  });
   it('opens every stream with ready, then carries the turn in order — the draft ahead of the durable reply, whatever breath it comes in', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-sse-'), 'home');
 
@@ -377,7 +430,7 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 1,
+      protocolVersion: 2,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
     });
@@ -518,7 +571,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 1,
+          protocolVersion: 2,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},

@@ -375,7 +375,7 @@ if (invokedDirectly) {
       `  3. Enable it: pnpm runtime-config ui  (Plugins -> ${id} -> Enable)`,
     );
     console.log(
-      '  4. pnpm serve, export the PROJECT02_GATEWAY line, pnpm chat',
+      '  4. pnpm serve, then open the address it prints in a browser',
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

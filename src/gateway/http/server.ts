@@ -11,6 +11,8 @@ export type GatewayServerOptions = {
   readonly token: string;
   /** 0 asks the OS for a free port; a busy port falls back to one. */
   readonly port: number;
+  /** The built page's files, served at the root; absent, the root says so. */
+  readonly uiRoot?: string;
 };
 
 export type GatewayServer = {
@@ -39,6 +41,7 @@ export async function createGatewayServer(
     token: options.token,
     events,
     lifecycle: {stopping: () => stopping},
+    ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   const server = createAdaptorServer({fetch: app.fetch});
   const responses = trackResponses(server);

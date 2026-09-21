@@ -1,6 +1,3 @@
-import {request as httpRequest} from 'node:http';
-import {Readable} from 'node:stream';
-
 import {hc} from 'hono/client';
 
 import {
@@ -51,13 +48,20 @@ export type GatewayEventsOptions = {
     readonly reconnected: boolean;
     readonly snapshot: GatewayReady;
   }) => void | Promise<void>;
+  /**
+   * Runs when the stream ends before the caller aborts it — the daemon
+   * down, stopping, or gone from its socket — and a reconnect is coming;
+   * the next `ready` says it is back.
+   */
+  readonly onLost?: () => void;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
 };
 
 /**
- * The gateway's verbs from the far side of the socket. Domain outcomes come
- * back as they are; a transport failure is a `GatewayClientError`.
+ * The gateway's verbs from the far side of the socket, in Node and in a
+ * browser tab alike. Domain outcomes come back as they are; a transport
+ * failure is a `GatewayClientError`.
  */
 export type GatewayClient = {
   readonly baseUrl: string;
@@ -70,7 +74,11 @@ export type GatewayClient = {
     characterId: string,
     options?: GatewayCallOptions,
   ): Promise<OpenOutcome>;
-  /** Waits for the turn however long it takes, and is never retried. */
+  /**
+   * Waits for the turn and is never retried. The platform's fetch sets
+   * the only bound: a browser has none, Node's gives a response five
+   * minutes.
+   */
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
   history(
     conversationId: string,
@@ -135,7 +143,7 @@ export function createGatewayClient(
   const headers = {authorization: `Bearer ${token}`};
   const api = hc<GatewayApp>(baseUrl, {
     headers,
-    fetch: fetchWithoutTimeouts,
+    fetch: guardedFetch,
   }).api;
 
   const client: GatewayClient = {
@@ -222,7 +230,7 @@ export function createGatewayClient(
 
       while (!aborted()) {
         try {
-          const response = await fetchWithoutTimeouts(`${baseUrl}/api/events`, {
+          const response = await guardedFetch(`${baseUrl}/api/events`, {
             headers,
             signal,
           });
@@ -262,6 +270,7 @@ export function createGatewayClient(
           }
         }
 
+        eventsOptions.onLost?.();
         await pause(retryMs, signal);
       }
     },
@@ -593,113 +602,60 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/**
- * A fetch over node:http with no timeouts of its own. The global fetch
- * gives a response five minutes to start and its body five minutes between
- * chunks; a turn that waits on a person can outlast both, and this client
- * never retries a turn.
- */
 /** The caller's own abort, whenever in the exchange it lands. */
 function abortedRequest(): GatewayClientError {
   return new GatewayClientError(0, 'aborted', 'The request was aborted.');
 }
 
-function fetchWithoutTimeouts(
+/**
+ * The platform's fetch, guarded. Every request runs under a signal of its
+ * own, derived from the caller's: the platform keeps a listener on a
+ * signal it is handed until the request is collected, and a signal reused
+ * across reconnects must not gather one per stream. A rejection is named
+ * for what it is — the caller's abort, or a daemon that could not be
+ * reached, with the platform's reason.
+ */
+function guardedFetch(
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
-  // The signal stays out of the Request: the platform would derive its own
-  // and hold a listener on the caller's until garbage collection, and a
-  // signal reused across reconnects must not collect one per stream.
-  const {signal: given, ...rest} = init ?? {};
-  const signal = given ?? undefined;
+  const {signal, ...rest} = init ?? {};
+  const target =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
 
-  return new Promise((resolve, reject) => {
-    const target =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url;
-    const fail = (error: unknown): void => {
-      if (signal?.aborted === true) {
-        reject(abortedRequest());
+  if (signal?.aborted === true) {
+    return Promise.reject(abortedRequest());
+  }
 
-        return;
-      }
-
-      reject(
-        error instanceof GatewayClientError
-          ? error
-          : new GatewayClientError(
-              0,
-              'unreachable',
-              `The daemon at ${target} could not be reached: ${error instanceof Error ? error.message : String(error)}`,
-            ),
-      );
-    };
-    let request: Request;
-
-    // Building the request can throw — a header value that cannot be sent
-    // — and that fails like a request that never connected.
-    try {
-      request = new Request(input, rest);
-    } catch (error: unknown) {
-      fail(error);
-
-      return;
+  return fetch(input, {
+    ...rest,
+    ...(signal === undefined || signal === null
+      ? {}
+      : {signal: AbortSignal.any([signal])}),
+  }).catch((error: unknown) => {
+    if (signal?.aborted === true) {
+      throw abortedRequest();
     }
 
-    request.text().then(body => {
-      try {
-        if (signal?.aborted === true) {
-          reject(abortedRequest());
-
-          return;
-        }
-
-        const headers = Object.fromEntries(request.headers);
-
-        if (body.length > 0) {
-          headers['content-length'] = String(Buffer.byteLength(body));
-        }
-
-        const outgoing = httpRequest(
-          request.url,
-          {method: request.method, headers},
-          incoming => {
-            resolve(
-              new Response(Readable.toWeb(incoming), {
-                status: incoming.statusCode ?? 500,
-                headers: Object.entries(incoming.headers).flatMap(
-                  ([name, value]) =>
-                    typeof value === 'string' ? [[name, value] as const] : [],
-                ),
-              }),
-            );
-          },
-        );
-
-        // The listener lives as long as the exchange: a signal reused across
-        // reconnects must not keep every finished request alive.
-        const onAbort = (): void => {
-          outgoing.destroy(new Error('aborted'));
-        };
-        const release = (): void => {
-          signal?.removeEventListener('abort', onAbort);
-        };
-
-        signal?.addEventListener('abort', onAbort, {once: true});
-        outgoing.once('response', incoming => {
-          incoming.once('close', release);
-        });
-        outgoing.once('close', release);
-        outgoing.on('error', fail);
-        outgoing.end(body);
-      } catch (error: unknown) {
-        // A request that cannot even be built fails like one that never connected.
-        fail(error);
-      }
-    }, fail);
+    throw new GatewayClientError(
+      0,
+      'unreachable',
+      `The daemon at ${target} could not be reached: ${describeFailure(error)}`,
+    );
   });
+}
+
+/** The platform says `fetch failed` and keeps the reason in `cause`. */
+function describeFailure(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  return error.cause instanceof Error
+    ? `${error.message}: ${error.cause.message}`
+    : error.message;
 }

@@ -41,20 +41,15 @@ describe('root public surface', () => {
       new URL('../../src/index.ts', import.meta.url),
       'utf8',
     );
-    const entrypoints = ['chat', 'serve'].map(name =>
-      readFileSync(
-        new URL(`../../src/cli/${name}/main.ts`, import.meta.url),
-        'utf8',
-      ),
+    const serveEntrypoint = readFileSync(
+      new URL('../../src/cli/serve/main.ts', import.meta.url),
+      'utf8',
     );
 
     expect(pluginBarrel).not.toContain('packages/character-state/plugin');
     expect(pluginBarrel).not.toContain("export * from './default-host.ts'");
     expect(rootBarrel).not.toContain('packages/character-state/plugin');
-
-    for (const entrypoint of entrypoints) {
-      expect(entrypoint).not.toContain('runRuntimePluginSessionEndHooks');
-    }
+    expect(serveEntrypoint).not.toContain('runRuntimePluginSessionEndHooks');
   });
 
   it('declares the root public surface without wildcard exports', () => {
