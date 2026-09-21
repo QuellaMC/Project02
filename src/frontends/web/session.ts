@@ -500,15 +500,15 @@ async function deliverOnce(
 
     return false;
   } catch (error: unknown) {
-    // A turn can only have run if the request reached the route, so every
-    // answer the daemon gives here is it refusing the request itself —
-    // its token, its route, its shape, its size, or a daemon on its way
-    // down — but its own internal failure, which may have been a turn, as
-    // may an answer cut short under its 200.
+    // A refusal of the request as written — its shape, its size — says
+    // the line was never taken, on this attempt or on an earlier one that
+    // sent the same words. Every other answer is about this attempt
+    // alone: a dead token, a daemon on its way down, one that could not
+    // be reached or failed inside, an answer cut short. An earlier attempt
+    // may have committed the line, so the log stays its only judge.
     if (
       error instanceof GatewayClientError &&
-      error.status >= 400 &&
-      error.status !== 500
+      (error.status === 400 || error.status === 413)
     ) {
       sending.apply(current =>
         lineEnded(current, line.characterId, clientMessageId, {
