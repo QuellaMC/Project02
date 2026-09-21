@@ -99,7 +99,7 @@ code {
   height: 100vh;
 }
 
-/* Every startup problem stands above the app, however many there are. */
+/* The connection and every startup problem stand above the app, however many there are. */
 .banners {
   grid-column: 1 / -1;
   display: flex;

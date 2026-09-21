@@ -16,6 +16,7 @@ import {
   noticeSpent,
   pageUnread,
   restoredLineUnaccounted,
+  streamLost,
   threadOpened,
   type WebState,
 } from '../../src/frontends/web/store.ts';
@@ -163,6 +164,20 @@ function sent(state: WebState, text: string, clientMessageId: string) {
 }
 
 describe('web store', () => {
+  it('says it is connecting again while the stream is down, keeps what it shows, and leaves a refused address refused', () => {
+    const live = opened();
+    const lost = streamLost(live);
+
+    expect(lost.connection).toEqual({status: 'connecting'});
+    expect(lost.thread).toBe(live.thread);
+    expect(streamLost(lost)).toBe(lost);
+    expect(installSnapshot(lost, ready()).connection).toEqual({status: 'live'});
+
+    const refused = connectionRefused(live, 'A bearer token is required.');
+
+    expect(streamLost(refused)).toBe(refused);
+  });
+
   it('installs every ready as the truth: roster and confirmations replace, every turn in progress drops, and what the thread shows stays on screen until its newest page replaces it', () => {
     let state = applyEvent(
       opened(),

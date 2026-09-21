@@ -108,9 +108,11 @@ export type WebState = {
    * What the page has to say that belongs to no thread: how a turn did
    * not complete, a confirmation that expired, a verb the daemon refused.
    * A person who sees the whole roster is told about the whole roster, so
-   * a notice about a character names it, and two failures are two
-   * notices — nothing the daemon said is overwritten by the next thing it
-   * says. The person's next act spends them all.
+   * a notice about a character names it, and a failure after a failure
+   * is a second notice — nothing the daemon said is overwritten by the
+   * next thing it says. The same sentence twice is one notice, since the
+   * answer and the stream both report a turn's end. The person's next act
+   * spends them all.
    */
   readonly notices: readonly string[];
 };
@@ -198,6 +200,17 @@ function setAside(thread: Thread): Thread {
     earlier: undefined,
     unread: undefined,
   };
+}
+
+/**
+ * The stream is down until the next `ready`, so the page says it is
+ * connecting again: what it shows is from before, and a line sent now
+ * waits for that `ready` to go.
+ */
+export function streamLost(state: WebState): WebState {
+  return state.connection.status === 'live'
+    ? {...state, connection: {status: 'connecting'}}
+    : state;
 }
 
 /**

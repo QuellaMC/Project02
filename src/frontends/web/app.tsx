@@ -33,6 +33,9 @@ export function App({session}: {readonly session: Session}) {
             printed.
           </p>
         ) : null}
+        {connection.status === 'connecting' ? (
+          <p className="banner muted">Connecting…</p>
+        ) : null}
         {configProblems.map((diagnostic, problem) => (
           // Two fields can fail the same way, so the banner names the
           // field: the message alone says what is wrong, not what to fix.
@@ -45,11 +48,7 @@ export function App({session}: {readonly session: Session}) {
       </header>
       <aside className="roster" aria-label="Characters">
         <h1 className="roster-title">Characters</h1>
-        {health === undefined ? (
-          <p className="muted">
-            {connection.status === 'connecting' ? 'Connecting…' : ''}
-          </p>
-        ) : (
+        {health === undefined ? null : (
           <Roster
             characters={health.characters}
             openId={thread?.characterId}

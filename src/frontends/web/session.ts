@@ -30,6 +30,7 @@ import {
   noticed,
   pageUnread,
   restoredLineUnaccounted,
+  streamLost,
   threadOpened,
   type PendingLine,
   type WebState,
@@ -77,6 +78,8 @@ export function createSession(address: string): Session {
    * it either way — the store says so.
    */
   const reads = new Map<string, number>();
+  /** Numbered from one count, so a read let go never shares its number with the one that replaces it. */
+  let tickets = 0;
   /** The thread's own refresh and its paging back are counted apart: neither supersedes the other. */
   const readKey = (conversationId: string, request: HistoryPage): string =>
     `${conversationId}${request.before === undefined ? ' newest' : ' earlier'}`;
@@ -86,7 +89,7 @@ export function createSession(address: string): Session {
     request: HistoryPage,
   ): Promise<void> => {
     const key = readKey(conversationId, request);
-    const mine = (reads.get(key) ?? 0) + 1;
+    const mine = (tickets += 1);
 
     reads.set(key, mine);
 
@@ -224,6 +227,9 @@ export function createSession(address: string): Session {
           // for a frame this stream cannot send until the bootstrap ends.
           void accountForPending(accounting());
           openTheOnlyCharacter();
+        },
+        onLost: () => {
+          apply(streamLost);
         },
       },
     )

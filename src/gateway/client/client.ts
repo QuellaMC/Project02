@@ -48,6 +48,12 @@ export type GatewayEventsOptions = {
     readonly reconnected: boolean;
     readonly snapshot: GatewayReady;
   }) => void | Promise<void>;
+  /**
+   * Runs when the stream ends before the caller aborts it — the daemon
+   * down, stopping, or gone from its socket — and a reconnect is coming;
+   * the next `ready` says it is back.
+   */
+  readonly onLost?: () => void;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
 };
@@ -264,6 +270,7 @@ export function createGatewayClient(
           }
         }
 
+        eventsOptions.onLost?.();
         await pause(retryMs, signal);
       }
     },

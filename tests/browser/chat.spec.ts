@@ -58,6 +58,26 @@ test('opens the printed address, chats with the reply drafted ahead of its commi
   );
 });
 
+test('says it is connecting once the daemon stops, and keeps the thread', async ({
+  daemon,
+  page,
+}) => {
+  await page.goto(daemon.url);
+
+  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+  const reply = page.locator('.bubble-theirs .bubble-text');
+
+  await composer.fill('hello');
+  await composer.press('Enter');
+  await expect(reply).toHaveText('noted: hello');
+
+  const stopped = await daemon.stop();
+
+  expect(stopped.code, stopped.stderr).toBe(0);
+  await expect(page.getByText('Connecting…')).toBeVisible();
+  await expect(reply).toHaveText('noted: hello');
+});
+
 test('shows a confirmation card for a tool round and lets the turn finish once approved', async ({
   daemon,
   page,
