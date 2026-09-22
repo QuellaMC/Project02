@@ -45,14 +45,6 @@ export type PendingLine = {
   readonly characterId: string;
   readonly senderId: string;
   readonly text: string;
-  /**
-   * The line was written by a tab that is gone — this page reloaded, or
-   * the browser did. It is never sent again: the daemon's ledger does not
-   * outlive the run that made it, and the log's own check for a line it
-   * has already taken reaches back one segment, so an older line would
-   * run a second time. The log settles it, or the person takes it back.
-   */
-  readonly restored?: true;
 };
 
 /** The one open DM as its log shows it. */
@@ -455,12 +447,13 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
  * stream — said at once, naming its character, this tab's turn or
  * another surface's. The end says whether the turn put the line in the
  * log: one it did not is the person's to write again and goes back to
- * the thread it was written in, open or not; one it did belongs to the
- * thread and waits for the page or the frame that shows it. The page
- * works none of this out — an answer can beat the frame that would show
- * the line, a stream is ordered only within one connection, and a page
- * of the log is a hundred messages, not the whole of it — the daemon
- * says. `completed` says only that, since the line is in the log.
+ * the thread it was written in, open or not; one it did is the thread's,
+ * settled here, and the page or the frame shows it where it landed —
+ * which may be far back, for a line the daemon took in an earlier run.
+ * The page works none of this out — an answer can beat the frame that
+ * would show the line, a stream is ordered only within one connection,
+ * and a page of the log is a hundred messages, not the whole of it — the
+ * daemon says. `completed` says only that.
  */
 export function lineEnded(
   state: WebState,
@@ -468,39 +461,22 @@ export function lineEnded(
   clientMessageId: string,
   ending: LineEnding,
 ): WebState {
-  if (ending.status === 'completed') {
-    return state;
+  const line = state.pending.get(clientMessageId);
+  let next = state;
+
+  if (line !== undefined) {
+    next = ending.committed
+      ? settled(state, clientMessageId)
+      : handedBack(state, clientMessageId, line);
   }
 
-  const notice = `${characterName(state, characterId)}: ${
-    ending.message ?? `The turn was ${ending.status}.`
-  }`;
-  const line = state.pending.get(clientMessageId);
-
-  return noticed(
-    line !== undefined && !ending.committed
-      ? handedBack(state, clientMessageId, line)
-      : state,
-    notice,
-  );
-}
-
-/**
- * A line a gone tab wrote, which the log does not carry: nothing more
- * will account for it, so it goes back to the person with what is known
- * — the daemon may have taken it, and the thread in front of them says.
- */
-export function restoredLineUnaccounted(
-  state: WebState,
-  clientMessageId: string,
-): WebState {
-  const line = state.pending.get(clientMessageId);
-
-  return line === undefined
-    ? state
+  return ending.status === 'completed'
+    ? next
     : noticed(
-        handedBack(state, clientMessageId, line),
-        `${characterName(state, line.characterId)}: A line written before this page reloaded is back in the box. Read the thread before sending it again, in case it was taken.`,
+        next,
+        `${characterName(state, characterId)}: ${
+          ending.message ?? `The turn was ${ending.status}.`
+        }`,
       );
 }
 

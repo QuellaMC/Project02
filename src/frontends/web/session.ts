@@ -29,7 +29,6 @@ import {
   noticeSpent,
   noticed,
   pageUnread,
-  restoredLineUnaccounted,
   streamLost,
   threadOpened,
   type PendingLine,
@@ -150,21 +149,6 @@ export function createSession(address: string): Session {
     }
   };
   /**
-   * The daemon has ended a turn whose line this tab has never seen
-   * committed, so only the log says whether it was — and only a page read
-   * after the end can carry it, since a page begun before one would not
-   * hold the line yet. This reads that page: it settles the line if the
-   * daemon took it, and leaves it waiting if the page does not say.
-   */
-  const askTheLog = async (
-    conversationId: string,
-    clientMessageId: string,
-  ): Promise<void> => {
-    if (getState().pending.has(clientMessageId)) {
-      await readPage(conversationId, {});
-    }
-  };
-  /**
    * One character opens itself, once — it may not be ready when the page
    * connects, so every event is a chance — and a roster of several waits
    * for a click. Once is enough: a thread outlives a reconnect, and an
@@ -188,10 +172,6 @@ export function createSession(address: string): Session {
       event => {
         apply(current => applyEvent(current, event));
         openTheOnlyCharacter();
-
-        if (event.kind === 'turn_completed') {
-          void askTheLog(event.conversationId, event.clientMessageId);
-        }
 
         // A character that was away when its lines were last accounted
         // for is a fresh chance at them, and the only one that comes.
@@ -237,7 +217,7 @@ export function createSession(address: string): Session {
       apply(current => connectionRefused(current, problem(error)));
     });
 
-  const sending = (): Sending => ({client, apply, askTheLog});
+  const sending = (): Sending => ({client, apply});
   const accounting = (): Accounting => ({
     ...sending(),
     readPage,
@@ -351,13 +331,12 @@ type Accounting = Sending & {
 /**
  * Every line this tab is still holding, accounted for: the log first,
  * which settles one it carries whoever wrote it. What remains goes again
- * under its own id, which the daemon's ledger joins if it did arrive —
- * unless a gone tab wrote it, since that ledger did not outlive its run
- * and the log's own check for a line already taken reaches back one
- * segment, so an older line would run twice. Those go back to the person
- * instead. Each line's conversation is opened first: a daemon that has
- * restarted holds no route to it, and would refuse the line as one it
- * does not know.
+ * under its own id, whether this tab or a gone one wrote it: the daemon's
+ * ledger joins a turn still running, and the daemon refuses a line it
+ * took anywhere in the conversation, in this run or an earlier one — so a
+ * line goes twice only if the person sends it twice. Each line's
+ * conversation is opened first: a daemon that has restarted holds no
+ * route to it, and would refuse the line as one it does not know.
  */
 async function accountForPending(accounting: Accounting): Promise<void> {
   for (const [clientMessageId, line] of accounting.pending()) {
@@ -371,15 +350,7 @@ async function accountForPending(accounting: Accounting): Promise<void> {
 
     await accounting.readPage(opened.conversationId, {});
 
-    if (!accounting.pending().has(clientMessageId)) {
-      continue;
-    }
-
-    if (line.restored === true) {
-      accounting.apply(current =>
-        restoredLineUnaccounted(current, clientMessageId),
-      );
-    } else {
+    if (accounting.pending().has(clientMessageId)) {
       await deliverOnce(accounting, line, clientMessageId);
     }
   }
@@ -456,17 +427,12 @@ function createTabValue(): {
 type Sending = {
   readonly client: GatewayClient;
   readonly apply: (reduce: (state: WebState) => WebState) => void;
-  readonly askTheLog: (
-    conversationId: string,
-    clientMessageId: string,
-  ) => Promise<void>;
 };
 
 /**
  * One attempt at a line, and what the daemon answered: `true` when
  * nothing answered at all, which is the only thing the tab can act on
- * further. A refusal and a verdict are the daemon's word, and the log
- * settles what it committed.
+ * further. A refusal and a verdict are the daemon's word on the line.
  */
 async function deliverOnce(
   sending: Sending,
@@ -496,7 +462,6 @@ async function deliverOnce(
             },
       ),
     );
-    await sending.askTheLog(line.conversationId, clientMessageId);
 
     return false;
   } catch (error: unknown) {
@@ -554,13 +519,10 @@ function writtenAndUnsent(): Kept {
       composers: new Map(
         entriesOf(composers, value => typeof value === 'string'),
       ) as ReadonlyMap<string, string>,
-      // Every line of a tab that is gone is one nobody sends again.
-      pending: new Map(
-        entriesOf(pending, isPendingLine).map(([clientMessageId, line]) => [
-          clientMessageId,
-          {...(line as PendingLine), restored: true as const},
-        ]),
-      ),
+      pending: new Map(entriesOf(pending, isPendingLine)) as ReadonlyMap<
+        string,
+        PendingLine
+      >,
       ...(typeof homeRoot === 'string' ? {homeRoot} : {}),
     };
   } catch {

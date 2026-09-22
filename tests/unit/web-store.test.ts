@@ -15,7 +15,6 @@ import {
   linesTaken,
   noticeSpent,
   pageUnread,
-  restoredLineUnaccounted,
   streamLost,
   threadOpened,
   type WebState,
@@ -567,20 +566,14 @@ describe('web store', () => {
     expect(unwritten.pending.has('line-1')).toBe(false);
 
     // A turn the daemon judged after writing the line says so, and the
-    // line belongs to the thread: it waits for the page or frame that
-    // shows it, and is not offered back.
+    // line belongs to the thread: settled, and not offered back.
     const judged = applyEvent(
       state,
       completed('line-1', 'rejected', 'The line was blank.'),
     );
 
     expect(composerText(judged)).toBe('next thought');
-    expect(judged.pending.get('line-1')).toEqual({
-      conversationId,
-      characterId: 'mira',
-      senderId: 'local-user',
-      text: 'first',
-    });
+    expect(judged.pending.has('line-1')).toBe(false);
     expect(judged.notices.at(-1)).toBe('Mira: The line was blank.');
     // The same news twice is the same notice.
     expect(
@@ -588,15 +581,18 @@ describe('web store', () => {
         .notices,
     ).toEqual(judged.notices);
 
-    expect(
-      lineEnded(state, 'mira', 'line-1', {
-        status: 'completed',
-        committed: true,
-      }),
-    ).toBe(state);
+    // A completed turn says nothing, and the line is the thread's.
+    const done = lineEnded(state, 'mira', 'line-1', {
+      status: 'completed',
+      committed: true,
+    });
+
+    expect(done.notices).toEqual(state.notices);
+    expect(done.pending.has('line-1')).toBe(false);
+    expect(composerText(done)).toBe('next thought');
   });
 
-  it('leaves a judged line waiting for the log, since only a page that carries it says the daemon took it', () => {
+  it('settles a judged line the daemon says it took, and says why the turn ended', () => {
     const state = sent(opened(), 'hello', 'line-1');
     const judged = lineEnded(state, 'mira', 'line-1', {
       status: 'rejected',
@@ -605,12 +601,7 @@ describe('web store', () => {
     });
 
     expect(composerText(judged)).toBe('');
-    expect(judged.pending.get('line-1')).toEqual({
-      conversationId,
-      characterId: 'mira',
-      senderId: 'local-user',
-      text: 'hello',
-    });
+    expect(judged.pending.has('line-1')).toBe(false);
     expect(judged.notices.at(-1)).toBe(
       'Mira: The model wrote nothing it could say.',
     );
@@ -625,26 +616,6 @@ describe('web store', () => {
     expect(shown.notices.at(-1)).toBe(
       'Mira: The model wrote nothing it could say.',
     );
-
-    // A page that carries it says the same. A page that lacks it says
-    // nothing: it holds a hundred messages, not the whole log.
-    const carried = linesTaken(
-      judged,
-      page([committed('m-1', 'hello', 'line-1')]),
-    );
-
-    expect(carried.pending.size).toBe(0);
-    expect(composerText(carried)).toBe('');
-
-    const absent = historyPageRead(judged, conversationId, {}, page([]));
-
-    expect(absent.pending.get('line-1')).toEqual({
-      conversationId,
-      characterId: 'mira',
-      senderId: 'local-user',
-      text: 'hello',
-    });
-    expect(composerText(absent)).toBe('');
   });
 
   it("keeps a line sent to one character while another is open, hands it back in its own thread, and says a turn's end at once, naming its character", () => {
@@ -711,14 +682,9 @@ describe('web store', () => {
       completed('line-2', 'failed', 'The store is read-only.'),
     );
 
-    // The turn's end is said wherever the person is, and the line waits
-    // for a page of Mira's log to carry it.
-    expect(failed.pending.get('line-2')).toEqual({
-      conversationId,
-      characterId: 'mira',
-      senderId: 'local-user',
-      text: 'hello mira',
-    });
+    // The turn's end is said wherever the person is, and a line the
+    // daemon kept is settled wherever it landed.
+    expect(failed.pending.has('line-2')).toBe(false);
     expect(failed.notices.at(-1)).toBe('Mira: The store is read-only.');
 
     // Another surface's turn is said the same way, named the same way,
@@ -747,17 +713,12 @@ describe('web store', () => {
 
     expect(earlier.pending.size).toBe(0);
 
-    // A page that lacks it proves nothing, newest or not, and a judged
-    // turn does not change that: a page is a hundred messages, and a
-    // busy turn can put more than that between a line and now.
-    const judged = applyEvent(
-      state,
-      completed('line-1', 'failed', 'The store is read-only.'),
-    );
-
+    // A page that lacks it proves nothing, newest or not: a page is a
+    // hundred messages, and a busy turn can put more than that between a
+    // line and now.
     for (const request of [{}, {before: 'v1:0:0'}]) {
       const read = linesTaken(
-        historyPageRead(judged, conversationId, request, page([])),
+        historyPageRead(state, conversationId, request, page([])),
         page([]),
       );
 
@@ -771,31 +732,8 @@ describe('web store', () => {
     }
   });
 
-  it('gives back a line a gone tab wrote that the log does not carry, and lets go of what was written for another home', () => {
-    const state = sent(opened(), 'hello', 'line-1');
-    // As a tab that has gone leaves it, and a fresh one reads it back.
-    const restored: WebState = {
-      ...state,
-      pending: new Map([
-        [
-          'line-1',
-          {
-            conversationId,
-            characterId: 'mira',
-            senderId: 'local-user',
-            text: 'hello',
-            restored: true,
-          },
-        ],
-      ]),
-    };
-    const back = restoredLineUnaccounted(restored, 'line-1');
-
-    expect(composerText(back)).toBe('hello');
-    expect(back.pending.size).toBe(0);
-    expect(back.notices.at(-1)).toBe(
-      'Mira: A line written before this page reloaded is back in the box. Read the thread before sending it again, in case it was taken.',
-    );
+  it('lets go of what was written for another home', () => {
+    const restored = sent(opened(), 'hello', 'line-1');
 
     // Another daemon on the same address is another world: nothing
     // written for the first one belongs to it.
