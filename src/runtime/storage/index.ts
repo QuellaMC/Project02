@@ -48,6 +48,12 @@ export {
   createRuntimePluginDatabaseProvider,
 } from './plugin-database.ts';
 export {
+  readTakenLines,
+  takenLinesPath,
+  writeTakenLines,
+  type TakenLines,
+} from './taken-lines.ts';
+export {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,

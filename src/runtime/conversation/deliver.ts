@@ -18,6 +18,8 @@ import type {
 } from './contracts.ts';
 import {openContinuedSegment, userLinesOf} from './segment.ts';
 import {endSession} from './session-end.ts';
+import {parseSegmentSessionId} from '../storage/layout-contract.ts';
+import {takenLine, writeTakenLines} from '../storage/taken-lines.ts';
 
 /**
  * One user message through the character's turn, serialized per
@@ -54,8 +56,8 @@ async function deliverThroughSegment(
   const {clientMessageId} = options;
   // A run before this one may have taken the line — the daemon can go
   // down after committing it and before answering — and the segment's
-  // own record, or the one before it, says so at no cost. Nothing runs
-  // twice for one id.
+  // own record, or the conversation's record of every segment before it,
+  // says so at no cost. Nothing runs twice for one id.
   const earlier =
     clientMessageId === undefined
       ? undefined
@@ -65,7 +67,7 @@ async function deliverThroughSegment(
             record =>
               record.role === 'user' &&
               record.clientMessageId === clientMessageId,
-          )?.id ?? state.earlierLines.get(clientMessageId));
+          )?.id ?? takenLine(state.takenLines, clientMessageId));
 
   if (earlier !== undefined && clientMessageId !== undefined) {
     return {status: 'duplicate', clientMessageId, messageId: earlier};
@@ -198,27 +200,46 @@ async function rotateIfNeeded(
 
   // The continuation is committed: the conversation is in the new segment
   // from here on, however closing the old one goes; the old one's lines
-  // stay known to the new one.
+  // stay known to the new one, and to every run after this one.
   const previous = state.segment;
+  const closed = parseSegmentSessionId(previous.session.id);
 
-  state.earlierLines = userLinesOf(previous.logStore.conversationMessages());
+  state.takenLines = new Map([
+    ...state.takenLines,
+    [closed.segment, userLinesOf(previous.logStore.conversationMessages())],
+  ]);
   state.segment = next;
 
   let endFailure: string | undefined;
+  const closingFailed = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+
+    endFailure =
+      endFailure === undefined ? message : `${endFailure}; ${message}`;
+  };
+
+  try {
+    writeTakenLines(
+      {
+        storeRoot: state.context.storageOptions.storeRoot,
+        conversationId: closed.conversationId,
+      },
+      state.takenLines,
+    );
+  } catch (error: unknown) {
+    closingFailed(error);
+  }
 
   try {
     await endSession({session, logStore, pluginHost: options.pluginHost});
   } catch (error: unknown) {
-    endFailure = error instanceof Error ? error.message : String(error);
+    closingFailed(error);
   }
 
   try {
     await previous.writerLease.release();
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    endFailure =
-      endFailure === undefined ? message : `${endFailure}; ${message}`;
+    closingFailed(error);
   }
 
   return {
