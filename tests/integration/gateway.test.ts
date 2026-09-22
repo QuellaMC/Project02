@@ -1392,6 +1392,7 @@ describe('gateway façade', () => {
         kind: 'confirmation_settled',
         id: pending?.id,
         decision: 'cancelled',
+        reason: 'expired',
       }),
     );
     expect(authoredTone(inspectTone())).toBeUndefined();

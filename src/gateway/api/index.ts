@@ -16,6 +16,8 @@ export {
   type ConfigTarget,
   type ConfigView,
   type ConfirmationAnswerStatus,
+  type ConfirmationCancelReason,
+  type ConfirmationSettlement,
   type Gateway,
   type GatewayConfirmationDecision,
   type GatewayErrorBody,

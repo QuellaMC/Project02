@@ -47,6 +47,14 @@ export type GatewayMessage = {
 
 export type GatewayConfirmationDecision = 'approved' | 'denied';
 
+/** Why a parked confirmation ended without an answer. */
+export type ConfirmationCancelReason = 'expired' | 'stopped';
+
+/** How a confirmation ended: with an answer, or cancelled and why. */
+export type ConfirmationSettlement =
+  | {readonly decision: GatewayConfirmationDecision}
+  | {readonly decision: 'cancelled'; readonly reason: ConfirmationCancelReason};
+
 /**
  * `reloading` is a pause, not an outage: the character is assembling
  * afresh from the config on disk between turns, and a delivery sent
@@ -368,12 +376,11 @@ export type GatewayEvent =
       readonly message?: string;
     }
   | ({readonly kind: 'confirmation_requested'} & PendingConfirmation)
-  | {
+  | ({
       readonly kind: 'confirmation_settled';
       readonly characterId: string;
       readonly id: string;
-      readonly decision: 'approved' | 'denied' | 'cancelled';
-    }
+    } & ConfirmationSettlement)
   | {
       readonly kind: 'state_changed';
       readonly characterId: string;
