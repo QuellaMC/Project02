@@ -12,7 +12,10 @@ import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
 } from './atomic-file.ts';
-import {createLocalRuntimeStorageLayout} from './layout-contract.ts';
+import {
+  createLocalRuntimeStorageLayout,
+  normalizeConversationId,
+} from './layout-contract.ts';
 import {readOptionalStoreText, storeWriteFailed} from './store-file.ts';
 
 /** Segment number → client message id → the message id the line was committed as. */
@@ -27,19 +30,18 @@ export function takenLinesPath(options: TakenLinesOptions): string {
   return join(
     createLocalRuntimeStorageLayout({storeRoot: options.storeRoot})
       .takenLinesRoot,
-    `${options.conversationId}.json`,
+    `${normalizeConversationId(options.conversationId)}.json`,
   );
 }
 
+/** A record that cannot be read is no record, like one that is missing or will not parse. */
 export function readTakenLines(options: TakenLinesOptions): TakenLines {
-  const text = readOptionalStoreText(takenLinesPath(options));
-
-  if (text === undefined) {
-    return new Map();
-  }
+  const path = takenLinesPath(options);
 
   try {
-    return decodeTakenLines(JSON.parse(text));
+    const text = readOptionalStoreText(path);
+
+    return text === undefined ? new Map() : decodeTakenLines(JSON.parse(text));
   } catch {
     return new Map();
   }

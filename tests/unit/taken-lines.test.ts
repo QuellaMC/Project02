@@ -1,4 +1,4 @@
-import {writeFileSync} from 'node:fs';
+import {chmodSync, writeFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
 
@@ -41,5 +41,18 @@ describe('taken lines', () => {
     expect(readTakenLines(record)).toEqual(new Map());
     writeFileSync(takenLinesPath(record), 'not json');
     expect(readTakenLines(record)).toEqual(new Map());
+    writeTakenLines(record, lines);
+    chmodSync(takenLinesPath(record), 0o000);
+
+    try {
+      expect(readTakenLines(record)).toEqual(new Map());
+    } finally {
+      chmodSync(takenLinesPath(record), 0o600);
+    }
+
+    // The id names the file, so it is the id the store accepts and no path.
+    expect(() =>
+      takenLinesPath({...record, conversationId: '../schema'}),
+    ).toThrow('Conversation ID');
   });
 });
