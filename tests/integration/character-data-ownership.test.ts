@@ -512,22 +512,27 @@ describe('character data directories through the durable runtime', () => {
     });
   });
 
-  it('refuses a marked data directory whose sessions root is a symlink', async () => {
-    const homeRoot = createTestTempRoot();
-    const outside = createTestTempRoot();
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+  it('refuses a marked data directory whose sessions root or taken-lines root is a symlink', async () => {
+    for (const [entry, label] of [
+      ['sessions', 'Sessions root'],
+      ['taken-lines', 'Taken lines root'],
+    ] as const) {
+      const homeRoot = createTestTempRoot();
+      const outside = createTestTempRoot();
+      const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
-    mkdirSync(dataRoot, {recursive: true});
-    writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('mira'));
-    symlinkSync(outside, join(dataRoot, 'sessions'));
+      mkdirSync(dataRoot, {recursive: true});
+      writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('mira'));
+      symlinkSync(outside, join(dataRoot, entry));
 
-    await expect(
-      openConversation({
-        homeRoot,
-        character: testCharacterProfile,
-      }),
-    ).rejects.toThrow('Sessions root');
-    expect(readdirSync(outside)).toEqual([]);
+      await expect(
+        openConversation({
+          homeRoot,
+          character: testCharacterProfile,
+        }),
+      ).rejects.toThrow(label);
+      expect(readdirSync(outside)).toEqual([]);
+    }
   });
 
   it('refuses a character data marker that is only a symlink to an external proof', async () => {
