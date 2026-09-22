@@ -27,6 +27,13 @@ for autocomplete and inline validation:
 {"$schema": "../../../../schemas/project02.plugin.schema.json"}
 ```
 
+`runtimePolicy.timeoutMs` bounds every hook of the plugin, and the clock
+includes what the runtime does on the hook's behalf: a write to the plugin
+store waits up to two seconds for the store's lock before it starts, and a
+busy disk adds more. A plugin that reads or writes its store budgets ten
+seconds, as the first-party ones do; a tighter budget turns a slow disk into
+a failed turn.
+
 Rules the loader enforces beyond the schema: the directory name must equal
 `manifest.id`, and `entry` must stay inside the package and use `.ts`,
 `.js`, or `.mjs`.
