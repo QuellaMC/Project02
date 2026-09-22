@@ -23,7 +23,7 @@
     },
     "firstParty": true,
     "runtimePolicy": {
-      "timeoutMs": 1000,
+      "timeoutMs": 10000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "reject_turn",

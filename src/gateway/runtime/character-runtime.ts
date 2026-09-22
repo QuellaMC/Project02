@@ -134,12 +134,12 @@ export function createLocalCharacterRuntime(
         emit(listeners, event);
       },
       turnOf: () => context.turn,
-      onSettled: (id, decision) => {
+      onSettled: (id, settlement) => {
         emit(listeners, {
           kind: 'confirmation_settled',
           characterId,
           id,
-          decision,
+          ...settlement,
         });
       },
     }),

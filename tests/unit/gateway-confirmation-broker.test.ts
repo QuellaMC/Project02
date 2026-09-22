@@ -23,8 +23,12 @@ function createBrokerHarness() {
         events.push(event);
       }
     },
-    onSettled(id, decision) {
-      settled.push(`${id}:${decision}`);
+    onSettled(id, settlement) {
+      settled.push(
+        settlement.decision === 'cancelled'
+          ? `${id}:cancelled:${settlement.reason}`
+          : `${id}:${settlement.decision}`,
+      );
     },
   });
   const ask = (signal?: AbortSignal, deadlineAt = Date.now() + 60_000) =>
@@ -75,7 +79,7 @@ describe('gateway confirmation broker', () => {
     await expect(decision).resolves.toEqual({status: 'cancelled'});
     expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('unknown');
     await expect(decision).resolves.toEqual({status: 'cancelled'});
-    expect(settled).toEqual([`${events[0]?.id ?? ''}:cancelled`]);
+    expect(settled).toEqual([`${events[0]?.id ?? ''}:cancelled:expired`]);
   });
 
   it('refuses an answer at the deadline even before the host aborts', async () => {
@@ -84,20 +88,21 @@ describe('gateway confirmation broker', () => {
     try {
       vi.setSystemTime(10_000);
 
-      const {broker, events, ask} = createBrokerHarness();
+      const {broker, events, settled, ask} = createBrokerHarness();
       const decision = ask(undefined, 11_000);
 
       vi.setSystemTime(11_000);
 
       expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('expired');
       await expect(decision).resolves.toEqual({status: 'cancelled'});
+      expect(settled).toEqual([`${events[0]?.id ?? ''}:cancelled:expired`]);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('cancels everything still parked on cancelAll', async () => {
-    const {broker, ask} = createBrokerHarness();
+  it('cancels everything still parked on cancelAll, saying the character stopped', async () => {
+    const {broker, events, settled, ask} = createBrokerHarness();
     const first = ask();
     const second = ask();
 
@@ -105,6 +110,9 @@ describe('gateway confirmation broker', () => {
 
     await expect(first).resolves.toEqual({status: 'cancelled'});
     await expect(second).resolves.toEqual({status: 'cancelled'});
+    expect(settled).toEqual(
+      events.map(event => `${event.id}:cancelled:stopped`),
+    );
   });
 
   it('settles a request that arrives after shutdown at once, then parks again re-armed', async () => {
