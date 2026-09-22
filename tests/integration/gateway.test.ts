@@ -27,6 +27,7 @@ import {
   createLocalRuntimeStorageLayout,
   ensureCharacterDataDir,
   listConversationSegments,
+  takenLinesPath,
   readCommittedConversationMessages,
 } from '../../src/runtime/storage/index.ts';
 import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
@@ -1093,11 +1094,19 @@ describe('gateway façade', () => {
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
 
+    // Without the conversation's record of taken lines, the open reads
+    // every segment before the current one to build it again.
+    const forgetTakenLines = (): void => {
+      rmSync(takenLinesPath({storeRoot, conversationId: ref.conversationId}));
+    };
+
     await gateway.stop();
+    forgetTakenLines();
     appendFileSync(rawEventsOf(oldest.sessionId), '{"eventId": "evt_torn"}\n');
 
     // The character starts on the newest segment and runs; only the page
-    // of history that reaches the damaged segment fails.
+    // of history that reaches the damaged segment fails, and the record
+    // is built from the segments that can be read.
     const restarted = createGateway(options);
 
     await restarted.startCharacter('mira');
@@ -1131,6 +1140,7 @@ describe('gateway façade', () => {
       throw new Error('Expected a segment before the newest one.');
     }
 
+    forgetTakenLines();
     appendFileSync(rawEventsOf(before.sessionId), '{"eventId": "evt_torn"}\n');
 
     const damaged = createGateway(options);
@@ -1242,6 +1252,9 @@ describe('gateway façade', () => {
     });
     const damaged = createGateway(options);
 
+    // The record written at the rotation holds that segment's lines; with
+    // it gone, the open must read the segment itself.
+    rmSync(takenLinesPath({storeRoot, conversationId: ref.conversationId}));
     await damaged.startCharacter('mira');
     chmodSync(beforePaths.sessionRoot, 0o000);
 
@@ -1265,6 +1278,84 @@ describe('gateway façade', () => {
       code: 'missing_file',
     });
     await damaged.stop();
+  });
+
+  it('refuses a line from any earlier segment after a restart, and builds the record of taken lines again when it is gone', async () => {
+    const {homeRoot, gateway, ref, segments} = await createRotatedChat([
+      'one',
+      'two',
+      'three',
+      'four',
+      'five',
+      'six',
+      'seven',
+      'eight',
+    ]);
+    const storeRoot = characterDataDirPath(homeRoot, 'mira');
+    const record = takenLinesPath({
+      storeRoot,
+      conversationId: ref.conversationId,
+    });
+    const holds = (sessionId: string, clientMessageId: string): boolean =>
+      readCommittedConversationMessages({
+        storeRoot,
+        characterId: 'mira',
+        sessionId,
+        onMissing: 'allow',
+      }).some(message => message.clientMessageId === clientMessageId);
+    const line = (text: string) => ({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text,
+      source: 'web',
+      clientMessageId: `msg-${text}`,
+    });
+
+    // The first line sits past the segment before the current one, which
+    // is as far as the segments' own records reach.
+    if (segments.length < 3) {
+      throw new Error('Expected a chat of three segments or more.');
+    }
+    for (const segment of segments.slice(-2)) {
+      expect(holds(segment.sessionId, 'msg-one')).toBe(false);
+    }
+
+    await gateway.stop();
+
+    const options = {
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const restarted = createGateway(options);
+
+    await restarted.startCharacter('mira');
+    await expect(
+      restarted.openDirectConversation('mira'),
+    ).resolves.toMatchObject({status: 'opened'});
+    await expect(restarted.deliver(line('one'))).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'duplicate_submission',
+    });
+    await restarted.stop();
+
+    // A store from before the record, or one that lost it: the open reads
+    // every segment before the current one and writes the record again.
+    rmSync(record);
+
+    const rebuilt = createGateway(options);
+
+    await rebuilt.startCharacter('mira');
+    await expect(rebuilt.openDirectConversation('mira')).resolves.toMatchObject(
+      {status: 'opened'},
+    );
+    expect(existsSync(record)).toBe(true);
+    await expect(rebuilt.deliver(line('two'))).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'duplicate_submission',
+    });
+    await rebuilt.stop();
   });
 
   it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {

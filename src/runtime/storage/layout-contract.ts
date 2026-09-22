@@ -76,6 +76,8 @@ export type LocalRuntimeStorageLayout = {
   readonly locksRoot: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
+  /** One record per conversation of the user lines its closed segments hold. */
+  readonly takenLinesRoot: string;
 };
 
 export type LocalRuntimeSessionPaths = {
@@ -167,6 +169,8 @@ const schemaFileName = 'schema.json';
 const sessionCatalogFileName = 'sessions.jsonl';
 
 const sessionsDirectoryName = 'sessions';
+
+const takenLinesDirectoryName = 'taken-lines';
 
 const locksDirectoryName = '.locks';
 
@@ -269,6 +273,7 @@ export function createLocalRuntimeStorageLayout(
     locksRoot: join(storeRoot, locksDirectoryName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot,
+    takenLinesRoot: join(storeRoot, takenLinesDirectoryName),
   } satisfies LocalRuntimeStorageLayout);
 }
 

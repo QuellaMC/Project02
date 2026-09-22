@@ -14,10 +14,16 @@ import {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
 import {createFileRuntimeLogStore} from '../storage/file-runtime-log-store.ts';
 import {
+  LocalRuntimeStorageContractError,
   parseSegmentSessionId,
   segmentSessionId,
 } from '../storage/layout-contract.ts';
 import {readCommittedConversationMessages} from '../storage/session-history-feed.ts';
+import {
+  readTakenLines,
+  writeTakenLines,
+  type TakenLines,
+} from '../storage/taken-lines.ts';
 import type {
   LocalRuntimeMutationLockLease,
   LocalRuntimeMutationLockOwnerToken,
@@ -160,29 +166,58 @@ export function userLinesOf(
 }
 
 /**
- * The user lines of the segment before this one, so a line committed just
- * before a rotation is known to the segment after it: a daemon can go down
- * between the two and before answering. A first segment has none. One that
- * cannot be read fails the open, as an unreadable current segment would: a
- * line it holds could otherwise run twice.
+ * The user lines of every segment before this one, so a line an earlier
+ * run committed — just before a rotation, or long ago — is refused rather
+ * than run again. The conversation's record of them is read once and
+ * completed from the segments it does not cover, which is every one of
+ * them for a conversation older than the record; what it learns is
+ * written back. The segment before this one must be whole, as the current
+ * one must: a daemon can go down between a rotation and its answer, before
+ * the record has that segment. An older segment that cannot be read gives
+ * up its lines, as history gives up its page, rather than closing the
+ * conversation.
  */
-export function userLinesOfSegmentBefore(
+export function takenLinesBefore(
   context: SegmentContext,
   sessionId: string,
-): ReadonlyMap<string, string> {
+): TakenLines {
   const {conversationId, segment} = parseSegmentSessionId(sessionId);
+  const record = {storeRoot: context.storageOptions.storeRoot, conversationId};
+  const taken = new Map(readTakenLines(record));
+  let learned = false;
 
-  if (segment <= 1) {
-    return new Map();
+  for (let earlier = 1; earlier < segment; earlier += 1) {
+    if (taken.has(earlier)) {
+      continue;
+    }
+
+    try {
+      taken.set(
+        earlier,
+        userLinesOf(
+          readCommittedConversationMessages({
+            ...context.storageOptions,
+            sessionId: segmentSessionId(conversationId, earlier),
+            onMissing: 'reject',
+          }),
+        ),
+      );
+      learned = true;
+    } catch (error: unknown) {
+      if (
+        earlier === segment - 1 ||
+        !(error instanceof LocalRuntimeStorageContractError)
+      ) {
+        throw error;
+      }
+    }
   }
 
-  return userLinesOf(
-    readCommittedConversationMessages({
-      ...context.storageOptions,
-      sessionId: segmentSessionId(conversationId, segment - 1),
-      onMissing: 'reject',
-    }),
-  );
+  if (learned) {
+    writeTakenLines(record, taken);
+  }
+
+  return taken;
 }
 
 function readDurableConversationEvidence(
