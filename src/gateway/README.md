@@ -21,9 +21,9 @@ config owner's two verbs — the view a settings page renders, and the
 change that goes through the one control transaction the console uses,
 applied by reconcile behind the answer; `submissions.ts` is the turn ledger that makes a resubmitted message join
 its turn instead of starting another; a line an earlier run of the daemon
-already put on the segment the character is on, or the one before it, is
-refused by the runtime itself, from those segments' records, before
-anything runs.
+already put on any segment of the conversation is refused by the runtime
+itself, from the segments' records and the conversation's record of the
+lines they hold, before anything runs.
 
 `http/` is the transport, on Hono: the app (auth, origin, body limits, the
 error envelope), the API router (one route per verb, each

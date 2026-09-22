@@ -164,6 +164,7 @@ function readAdoptableCharacterDataMarker(
 
   assertRealDataControlRoot(layout.locksRoot, 'Lock root');
   assertRealDataControlRoot(layout.sessionsRoot, 'Sessions root');
+  assertRealDataControlRoot(layout.takenLinesRoot, 'Taken lines root');
   assertRealDataControlFile(layout.sessionCatalogPath, 'Session catalog');
   assertRealDataControlFile(layout.configPath, 'Character overlay');
 
