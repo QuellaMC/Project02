@@ -461,7 +461,13 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
           </tr>
           <tr>
             <td><code>confirmation_settled</code></td>
-            <td>The decision: approved, denied, or cancelled.</td>
+            <td>
+              The decision: approved, denied, or cancelled — and, cancelled,
+              why: <code>expired</code> (the deadline passed, whether the
+              daemon's timer fired or an answer came too late) or
+              <code>stopped</code> (the character stopped or restarted with
+              the request parked).
+            </td>
           </tr>
           <tr>
             <td><code>state_changed</code></td>

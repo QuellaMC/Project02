@@ -9,6 +9,7 @@
 import type {
   CharacterSummary,
   ConfirmationAnswerStatus,
+  ConfirmationCancelReason,
   GatewayEvent,
   GatewayHealth,
   GatewayReady,
@@ -535,7 +536,7 @@ export function confirmationGone(
   // it is not waiting — never that it was cancelled, which would invite
   // a person to do a settled thing again.
   return outcome === 'expired'
-    ? cancelled(state, id, card.characterId)
+    ? cancelled(state, id, card.characterId, 'expired')
     : noticed(
         withoutConfirmation(state, id),
         `${characterName(state, card.characterId)}: A confirmation is no longer waiting.`,
@@ -543,10 +544,19 @@ export function confirmationGone(
 }
 
 /** A confirmation that ended without this tab's answer, and why the person's click did nothing. */
-function cancelled(state: WebState, id: string, characterId: string): WebState {
+function cancelled(
+  state: WebState,
+  id: string,
+  characterId: string,
+  reason: ConfirmationCancelReason,
+): WebState {
+  const name = characterName(state, characterId);
+
   return noticed(
     withoutConfirmation(state, id),
-    `${characterName(state, characterId)}: A confirmation was cancelled before it was answered.`,
+    reason === 'expired'
+      ? `${name}: A confirmation expired before it was answered.`
+      : `${name}: A confirmation was cancelled when the character stopped.`,
   );
 }
 
@@ -573,12 +583,10 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ? state
         : {...state, confirmations: [...state.confirmations, pendingOf(event)]};
     case 'confirmation_settled':
-      // The card was on the page whoever raised it, so its end is too.
-      // The daemon cancels a confirmation for its deadline, for a host
-      // that gave up on it, and for a shutdown, and says only that it
-      // was cancelled — so neither does the page.
+      // The card was on the page whoever raised it, so its end is too,
+      // with the daemon's reason when nobody answered.
       return event.decision === 'cancelled'
-        ? cancelled(state, event.id, event.characterId)
+        ? cancelled(state, event.id, event.characterId, event.reason)
         : withoutConfirmation(state, event.id);
     case 'turn_progress': {
       const {progress} = event;
