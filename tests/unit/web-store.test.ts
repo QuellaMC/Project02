@@ -921,12 +921,22 @@ describe('web store', () => {
       characterId: 'mira',
       id: 'c-1',
       decision: 'cancelled',
+      reason: 'expired',
     });
 
     expect(expired.confirmations).toEqual([]);
     expect(expired.notices.at(-1)).toBe(
-      'Mira: A confirmation was cancelled before it was answered.',
+      'Mira: A confirmation expired before it was answered.',
     );
+    expect(
+      applyEvent(state, {
+        kind: 'confirmation_settled',
+        characterId: 'mira',
+        id: 'c-1',
+        decision: 'cancelled',
+        reason: 'stopped',
+      }).notices.at(-1),
+    ).toBe('Mira: A confirmation was cancelled when the character stopped.');
 
     // A card for a character nobody is reading was on the page too, so
     // its expiry is said as well.
@@ -942,11 +952,12 @@ describe('web store', () => {
         characterId: 'mira',
         id: 'c-1',
         decision: 'cancelled',
+        reason: 'expired',
       },
     );
 
     expect(elsewhere.notices.at(-1)).toBe(
-      'Mira: A confirmation was cancelled before it was answered.',
+      'Mira: A confirmation expired before it was answered.',
     );
 
     // The daemon can say the request is not waiting when this tab answers
@@ -956,7 +967,7 @@ describe('web store', () => {
 
     expect(gone.confirmations).toEqual([]);
     expect(gone.notices.at(-1)).toBe(
-      'Mira: A confirmation was cancelled before it was answered.',
+      'Mira: A confirmation expired before it was answered.',
     );
     expect(confirmationGone(gone, 'c-1', 'expired')).toBe(gone);
 
@@ -983,6 +994,7 @@ describe('web store', () => {
         characterId: 'mira',
         id: 'c-1',
         decision: 'cancelled',
+        reason: 'expired',
       }).notices,
     ).toEqual(gone.notices);
   });

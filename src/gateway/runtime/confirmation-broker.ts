@@ -6,6 +6,7 @@ import type {
 } from '../../plugins/index.ts';
 import type {
   ConfirmationAnswerStatus,
+  ConfirmationSettlement,
   GatewayConfirmationDecision,
   GatewayEvent,
   TurnIdentity,
@@ -17,7 +18,7 @@ type ParkedRequest = {
   readonly request: RuntimePluginToolConfirmationRequest;
   readonly deadlineAt: number;
   readonly turn: TurnIdentity | undefined;
-  readonly settle: (decision: Decision) => void;
+  readonly settle: (settlement: ConfirmationSettlement) => void;
 };
 
 export type ParkedConfirmation = {
@@ -59,8 +60,8 @@ export function createConfirmationBroker(options: {
   readonly emit: (event: GatewayEvent) => void;
   /** The turn running right now, whose tool is asking; none outside a turn. */
   readonly turnOf: () => TurnIdentity | undefined;
-  /** Fires once per parked request, however it settled. */
-  readonly onSettled?: (id: string, decision: Decision['status']) => void;
+  /** Fires once per parked request, however it settled: with the answer, or cancelled and why. */
+  readonly onSettled?: (id: string, settlement: ConfirmationSettlement) => void;
 }): ConfirmationBroker {
   const pending = new Map<string, ParkedRequest>();
   let cancelling = false;
@@ -78,10 +79,10 @@ export function createConfirmationBroker(options: {
           return;
         }
 
-        const settle = (decision: Decision): void => {
+        const settle = (settlement: ConfirmationSettlement): void => {
           if (pending.delete(id)) {
-            resolve(decision);
-            options.onSettled?.(id, decision.status);
+            resolve({status: settlement.decision});
+            options.onSettled?.(id, settlement);
           }
         };
 
@@ -96,7 +97,7 @@ export function createConfirmationBroker(options: {
         context.signal.addEventListener(
           'abort',
           () => {
-            settle({status: 'cancelled'});
+            settle({decision: 'cancelled', reason: 'expired'});
           },
           {once: true},
         );
@@ -130,17 +131,17 @@ export function createConfirmationBroker(options: {
       }
 
       if (Date.now() >= parked.deadlineAt) {
-        parked.settle({status: 'cancelled'});
+        parked.settle({decision: 'cancelled', reason: 'expired'});
         return 'expired';
       }
 
-      parked.settle({status: decision});
+      parked.settle({decision});
       return 'answered';
     },
     cancelAll() {
       cancelling = true;
       for (const parked of [...pending.values()]) {
-        parked.settle({status: 'cancelled'});
+        parked.settle({decision: 'cancelled', reason: 'stopped'});
       }
     },
     arm() {
