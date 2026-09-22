@@ -48,7 +48,7 @@ next segment → end the current one, so a failure leaves the current
 segment in place — and the person sees nothing of it: rotation is the
 character's memory management, not a conversation event. The segment it
 closes leaves its user lines in the conversation's record of taken lines
-(`storage/taken-lines.ts`), which the open of a later run completes from
-any segment the record does not cover, so a line an earlier run took is
-refused wherever it sits, and a store older than the record grows one on
-its first open.
+(`storage/taken-lines.ts`), written whole at each rotation; the open of a
+later run completes what it reads from any segment the record does not
+cover, so a line an earlier run took is refused wherever it sits, and a
+store older than the record grows one at its first rotation.

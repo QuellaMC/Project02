@@ -19,11 +19,7 @@ import {
   segmentSessionId,
 } from '../storage/layout-contract.ts';
 import {readCommittedConversationMessages} from '../storage/session-history-feed.ts';
-import {
-  readTakenLines,
-  writeTakenLines,
-  type TakenLines,
-} from '../storage/taken-lines.ts';
+import {readTakenLines, type TakenLines} from '../storage/taken-lines.ts';
 import type {
   LocalRuntimeMutationLockLease,
   LocalRuntimeMutationLockOwnerToken,
@@ -170,11 +166,12 @@ export function userLinesOf(
  * run committed — just before a rotation, or long ago — is refused rather
  * than run again. The conversation's record of them is read once and
  * completed from the segments it does not cover, which is every one of
- * them for a conversation older than the record; what it learns is
- * written back. The segment before this one must be whole, as the current
- * one must: a daemon can go down between a rotation and its answer, before
- * the record has that segment. An older segment that cannot be read gives
- * up its lines, as history gives up its page, rather than closing the
+ * them for a conversation older than the record; the next rotation
+ * writes the whole of it, so an open never depends on a write. The
+ * segment before this one must be whole, as the current one must: a
+ * daemon can go down between a rotation and its answer, before the record
+ * has that segment. An older segment that cannot be read gives up its
+ * lines, as history gives up its page, rather than closing the
  * conversation.
  */
 export function takenLinesBefore(
@@ -182,9 +179,12 @@ export function takenLinesBefore(
   sessionId: string,
 ): TakenLines {
   const {conversationId, segment} = parseSegmentSessionId(sessionId);
-  const record = {storeRoot: context.storageOptions.storeRoot, conversationId};
-  const taken = new Map(readTakenLines(record));
-  let learned = false;
+  const taken = new Map(
+    readTakenLines({
+      storeRoot: context.storageOptions.storeRoot,
+      conversationId,
+    }),
+  );
 
   for (let earlier = 1; earlier < segment; earlier += 1) {
     if (taken.has(earlier)) {
@@ -202,7 +202,6 @@ export function takenLinesBefore(
           }),
         ),
       );
-      learned = true;
     } catch (error: unknown) {
       if (
         earlier === segment - 1 ||
@@ -211,10 +210,6 @@ export function takenLinesBefore(
         throw error;
       }
     }
-  }
-
-  if (learned) {
-    writeTakenLines(record, taken);
   }
 
   return taken;

@@ -1341,7 +1341,8 @@ describe('gateway façade', () => {
     await restarted.stop();
 
     // A store from before the record, or one that lost it: the open reads
-    // every segment before the current one and writes the record again.
+    // every segment before the current one and knows their lines for the
+    // run, without writing — the next rotation writes the whole record.
     rmSync(record);
 
     const rebuilt = createGateway(options);
@@ -1350,11 +1351,23 @@ describe('gateway façade', () => {
     await expect(rebuilt.openDirectConversation('mira')).resolves.toMatchObject(
       {status: 'opened'},
     );
-    expect(existsSync(record)).toBe(true);
+    expect(existsSync(record)).toBe(false);
     await expect(rebuilt.deliver(line('two'))).resolves.toMatchObject({
       status: 'refused',
       reason: 'duplicate_submission',
     });
+
+    for (const text of ['nine', 'ten', 'eleven', 'twelve', 'thirteen']) {
+      await expect(rebuilt.deliver(line(text))).resolves.toMatchObject({
+        status: 'completed',
+      });
+
+      if (existsSync(record)) {
+        break;
+      }
+    }
+
+    expect(existsSync(record)).toBe(true);
     await rebuilt.stop();
   });
 

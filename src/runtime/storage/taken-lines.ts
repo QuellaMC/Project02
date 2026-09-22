@@ -13,7 +13,7 @@ import {
   cleanupAbandonedAtomicReplacementFilesSync,
 } from './atomic-file.ts';
 import {createLocalRuntimeStorageLayout} from './layout-contract.ts';
-import {readOptionalStoreText} from './store-file.ts';
+import {readOptionalStoreText, storeWriteFailed} from './store-file.ts';
 
 /** Segment number → client message id → the message id the line was committed as. */
 export type TakenLines = ReadonlyMap<number, ReadonlyMap<string, string>>;
@@ -58,11 +58,15 @@ export function writeTakenLines(
     segments[String(segment)] = Object.fromEntries(taken);
   }
 
-  cleanupAbandonedAtomicReplacementFilesSync(targetPath);
-  atomicReplaceFileSync({
-    targetPath,
-    content: `${JSON.stringify({segments})}\n`,
-  });
+  try {
+    cleanupAbandonedAtomicReplacementFilesSync(targetPath);
+    atomicReplaceFileSync({
+      targetPath,
+      content: `${JSON.stringify({segments})}\n`,
+    });
+  } catch (error: unknown) {
+    throw storeWriteFailed(targetPath, error);
+  }
 }
 
 /** The message id an earlier run committed the line as, if any segment holds it. */
