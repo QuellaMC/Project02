@@ -1753,38 +1753,57 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('reconcile stops a character disabled since it started and starts it again once enabled', async () => {
+  it('stops a character switched off through the change verb, keeps its settings readable, and starts it again once switched on', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
+    const mira = {scope: 'character', characterId: 'mira'} as const;
+    const setEnabled = async (enabled: boolean): Promise<void> => {
+      const view = gateway.configView(mira);
+
+      if (view.status !== 'ok') {
+        expect.fail(view.message);
+      }
+
+      await expect(
+        gateway.applyConfigChange({
+          target: mira,
+          expectedFingerprint: view.fingerprint,
+          operation: {kind: 'set', path: 'project02.enabled', value: enabled},
+        }),
+      ).resolves.toMatchObject({status: 'applied'});
+    };
 
     await gateway.reconcile();
+    expect(gateway.health().characters[0]?.state).toBe('ready');
 
-    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
-
-    writeRuntimeConfig(overlay, {project02: {enabled: false}});
-    await expect(gateway.reconcile()).resolves.toEqual({
-      starting: [],
-      stopping: ['mira'],
-      reloading: [],
-    });
-    expect(gateway.health().characters[0]).toMatchObject({
-      enabled: false,
-      state: 'stopped',
+    await setEnabled(false);
+    await vi.waitFor(() => {
+      expect(gateway.health().characters[0]).toMatchObject({
+        enabled: false,
+        state: 'stopped',
+      });
     });
 
-    writeRuntimeConfig(overlay, {});
-    await expect(gateway.reconcile()).resolves.toEqual({
-      starting: ['mira'],
-      stopping: [],
-      reloading: [],
-    });
-    expect(gateway.health().characters[0]).toMatchObject({
-      enabled: true,
-      state: 'ready',
+    // Off is a setting, not a lockout: the page still reads the character
+    // and the same field is the way back on.
+    const off = gateway.configView(mira);
+
+    expect(off.status).toBe('ok');
+    expect(
+      off.status === 'ok' &&
+        off.project02.find(field => field.name === 'enabled'),
+    ).toMatchObject({authored: {configured: true, value: false}});
+
+    await setEnabled(true);
+    await vi.waitFor(() => {
+      expect(gateway.health().characters[0]).toMatchObject({
+        enabled: true,
+        state: 'ready',
+      });
     });
     await gateway.stop();
   });
@@ -1951,14 +1970,16 @@ describe('gateway façade', () => {
       expect.fail(global.message);
     }
 
+    // The page renders in this order: what a person decides first, first;
+    // the knobs after; the switch last.
     expect(global.project02.map(field => field.name)).toEqual([
-      'defaultMemoryProvider',
-      'enabled',
+      'userDisplayName',
       'roleModelProvider',
       'nvidiaApiKey',
       'nvidiaModel',
-      'userDisplayName',
       'contextWindowTokens',
+      'defaultMemoryProvider',
+      'enabled',
     ]);
     expect(
       global.project02.find(field => field.name === 'userDisplayName'),
