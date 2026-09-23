@@ -66,7 +66,7 @@
 
     <p>
       The host fields are declared once, in the field registry, in the order a settings page
-      renders them: what a person decides first, then the knobs, then the switch. Each field
+      will render them: what a person decides first, then the knobs, then the switch. Each field
       carries its description, value type, allowed values, default summary, and whether it is
       a secret. Plugin fields come from <code>RuntimePluginManifest.config.fields</code>, which
       is likewise the single source for value types, allowed values, secret handling, reload
@@ -98,7 +98,7 @@
     <p>
       Installed characters are enabled unless <code>project02.enabled</code> says otherwise —
       it layers like every other field, so a global <code>false</code> switches them all off
-      and a character's overlay value overrides it. A character switched off keeps its settings
+      and a character's overlay value overrides it. A character switched off keeps its config view
       readable, and the same field switches it back on. An absent character field keeps
       inheriting future global changes; global values are never copied into the overlay. On
       first selection, the character package contributes only its plugin declarations and
@@ -164,8 +164,9 @@
       from the declared fields — the home's, or one character's — and <code>POST /api/config</code>
       writes one change through the one control transaction, bound to the fingerprint the view
       handed out, and applies it to the running character by a reload between turns
-      (<a href="gateway-api.html">Gateway API</a>). The web page is the operator's surface over
-      those verbs. A hand edit made while the daemon runs is applied at its next reconcile.
+      (<a href="gateway-api.html">Gateway API</a>). A settings page over those verbs is the next
+      roadmap step; today an operator sends the verb, or edits the document by hand, and the
+      daemon applies it at its next reconcile.
     </p>
 
     <p>

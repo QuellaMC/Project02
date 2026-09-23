@@ -72,10 +72,10 @@ Plugin manifests declare `config.scope`:
   settings, with per-character overrides.
 - `character_only` permits enablement and settings only in a character
   package or character config -- secrets included, so such a plugin is
-  wholly self-contained, and the home's settings do not list it.
+  wholly self-contained, and the home's config view does not list it.
 
 A package still carries no credentials of its own: secret fields are the
-operator's, entered in the home's or the character's settings.
+operator's, written into the home's or the character's config document.
 
 Rules the loader enforces beyond the schema: the directory name must
 equal `identity.id`, and the same id must not be defined in more than one
@@ -87,5 +87,5 @@ error, not a precedence contest.
 1. `pnpm character:new <id>`, then shape the identity and persona.
 2. `pnpm check` — discovery picks the package up automatically; the
    schema parity suite validates your descriptor.
-3. Select it in a test home. Starting it, or viewing its settings,
-   intentionally creates or upgrades its character overlay.
+3. Select it in a test home. Starting it, or reading its config view
+   through the daemon, intentionally creates or upgrades its overlay.
