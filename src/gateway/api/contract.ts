@@ -382,6 +382,17 @@ export type GatewayEvent =
       /** Present when a failure caused the change. */
       readonly message?: string;
     }
+  | {
+      /**
+       * The daemon's whole state read again the moment a config change
+       * landed, before the pass that acts on it: the roster as config now
+       * says it — who is on, who is installed — and the config and package
+       * problems as they stand. What the pass does to each character's
+       * state follows as `state_changed`.
+       */
+      readonly kind: 'health_changed';
+      readonly health: GatewayHealth;
+    }
   | ({
       readonly kind: 'maintenance_failed';
       readonly characterId: string;

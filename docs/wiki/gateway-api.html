@@ -480,6 +480,17 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
             </td>
           </tr>
           <tr>
+            <td><code>health_changed</code></td>
+            <td>
+              The daemon's whole state, read again the moment a config change
+              landed and before the pass that acts on it: the roster as config
+              now says it and the config and package problems as they stand,
+              the shape <code>GET /api/health</code> returns. Every surface
+              hears it, not only the one that wrote; what the pass then does
+              to each character follows as <code>state_changed</code>.
+            </td>
+          </tr>
+          <tr>
             <td><code>maintenance_failed</code></td>
             <td>
               A segment rotation that failed after a completed turn; health
@@ -637,7 +648,8 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
 
       <p>
         <code>applied</code> means the bytes are on disk. What the change does
-        to running characters arrives as <code>state_changed</code>: the daemon
+        to the roster arrives as <code>health_changed</code> at once, and what
+        it does to running characters as <code>state_changed</code>: the daemon
         reconciles behind the answer, and a ready character whose assembly would
         now differ — its effective config, its plugin values including secrets,
         its package version — publishes <code>reloading</code>, finishes the

@@ -11,7 +11,10 @@ import {dirname, join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
-import {gatewayProtocolVersion} from '../../src/gateway/api/index.ts';
+import {
+  gatewayProtocolVersion,
+  type GatewayHealth,
+} from '../../src/gateway/api/index.ts';
 import {
   createGateway,
   type ConfigChange,
@@ -1761,6 +1764,12 @@ describe('gateway façade', () => {
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
     const mira = {scope: 'character', characterId: 'mira'} as const;
+    const rosters: GatewayHealth[] = [];
+    const stopListening = gateway.events(event => {
+      if (event.kind === 'health_changed') {
+        rosters.push(event.health);
+      }
+    });
     const setEnabled = async (enabled: boolean): Promise<void> => {
       const view = gateway.configView(mira);
 
@@ -1781,6 +1790,12 @@ describe('gateway façade', () => {
     expect(gateway.health().characters[0]?.state).toBe('ready');
 
     await setEnabled(false);
+    // The stream says at once what the change did to the roster, before
+    // the pass acts on it: off is config, which no state frame carries.
+    expect(rosters.at(-1)?.characters[0]).toMatchObject({
+      enabled: false,
+      state: 'ready',
+    });
     await vi.waitFor(() => {
       expect(gateway.health().characters[0]).toMatchObject({
         enabled: false,
@@ -1799,12 +1814,17 @@ describe('gateway façade', () => {
     ).toMatchObject({authored: {configured: true, value: false}});
 
     await setEnabled(true);
+    expect(rosters.at(-1)?.characters[0]).toMatchObject({
+      enabled: true,
+      state: 'stopped',
+    });
     await vi.waitFor(() => {
       expect(gateway.health().characters[0]).toMatchObject({
         enabled: true,
         state: 'ready',
       });
     });
+    stopListening();
     await gateway.stop();
   });
 

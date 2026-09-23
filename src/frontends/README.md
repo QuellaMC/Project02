@@ -34,8 +34,9 @@ The settings screen is the page's one writer of config, over the daemon's
 two verbs. `settings.ts` holds its rules, pure and tested in Node: the
 screen's target and view, what is typed and not saved, one operation per
 change built from the field's shape, and how each outcome of a change
-ends — applied re-reads the view, a refusal stays at its field, a
-conflict is said once with the person's text kept. `settings-session.ts`
+ends — applied re-reads the view and leaves the roster to the stream, a
+refusal stays at its field, a conflict is said once with the person's
+text kept. `settings-session.ts`
 is the verbs over the tab's client, and `settings.tsx` renders one screen
 for the home and for a character, every row the field shape the view
 carries. The roster links to it: Settings for the home, a gear per

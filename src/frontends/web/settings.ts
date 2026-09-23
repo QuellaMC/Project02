@@ -239,8 +239,9 @@ export function changeEnded(
  * typed by the field's valueType: a number when it reads as one, a
  * boolean from the switch, JSON for an object or array when it parses,
  * and the text itself otherwise — the daemon says what is wrong with it.
- * No text is a reset: unset, or the plugin switch cleared, so the row
- * inherits again.
+ * A secret goes as typed whatever kind it declares: the daemon takes a
+ * credential as text only. No text is a reset: unset, or the plugin
+ * switch cleared, so the row inherits again.
  */
 export function operationFor(
   view: ConfigView,
@@ -372,6 +373,10 @@ function valueOf(
   field: RuntimePluginConfigFieldInspectShape,
   text: string,
 ): RuntimeConfigValue {
+  if (field.secret) {
+    return text;
+  }
+
   if (field.valueType === 'boolean') {
     return text === 'true';
   }
@@ -383,7 +388,7 @@ function valueOf(
   }
 
   // Everything else is the text as typed: the daemon judges it, and a
-  // credential or a path is sent exactly as written.
+  // path is sent exactly as written.
   return readsJson(field) ? parsedOrText(text) : text;
 }
 

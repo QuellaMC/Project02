@@ -254,47 +254,6 @@ export function connectionRefused(state: WebState, message: string): WebState {
   };
 }
 
-/**
- * The roster as the health verb reports it, read by a tab that changed
- * config: whether a character is on is config, which no event carries.
- * A character's state is the stream's — every frame reaches the tab in
- * order, while this answer may have been made before the last one — so
- * a character the tab already knows keeps the state it was last told.
- */
-export function healthRead(state: WebState, health: GatewayHealth): WebState {
-  const known = new Map(
-    (state.health?.characters ?? []).map(character => [
-      character.id,
-      character,
-    ]),
-  );
-
-  return {
-    ...state,
-    health: {
-      ...health,
-      characters: health.characters.map(character => {
-        const told = known.get(character.id);
-
-        return told === undefined
-          ? character
-          : {
-              id: character.id,
-              displayName: character.displayName,
-              enabled: character.enabled,
-              state: told.state,
-              ...(told.diagnostic === undefined
-                ? {}
-                : {diagnostic: told.diagnostic}),
-              ...(told.maintenance === undefined
-                ? {}
-                : {maintenance: told.maintenance}),
-            };
-      }),
-    },
-  };
-}
-
 /** Said once: the same news twice — a frame seen again — is the same notice. */
 export function noticed(state: WebState, notice: string): WebState {
   return state.notices.includes(notice)
@@ -625,6 +584,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ...character,
         maintenance: {at: event.at, message: event.message},
       }));
+    case 'health_changed':
+      // The daemon's word on the roster, in order with every state frame.
+      return {...state, health: event.health};
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state

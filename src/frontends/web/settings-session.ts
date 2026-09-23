@@ -19,7 +19,7 @@ import {
   settingsOpened,
   setupNeeded,
 } from './settings.ts';
-import {healthRead, noticeSpent, noticed, type WebState} from './store.ts';
+import {noticeSpent, noticed, type WebState} from './store.ts';
 
 export type SettingsVerbs = {
   readonly openSettings: (target: ConfigTarget) => Promise<void>;
@@ -114,32 +114,15 @@ export function createSettingsVerbs(tab: {
     apply(current => changeEnded(current, ticket, outcome));
 
     // The screen the change came from is read again, if it is still the
-    // one open; the roster is read again either way.
+    // one open. The roster needs no read: what the change did to it comes
+    // on the stream, to every tab.
     const open = getState().settings;
-    const stillOpen =
-      open !== undefined && sameTarget(open.target, page.target);
+    const moved =
+      outcome.status === 'applied' ||
+      (outcome.status === 'refused' && outcome.reason === 'conflict');
 
-    if (outcome.status === 'applied') {
-      await Promise.all([
-        stillOpen ? readView(page.target) : Promise.resolve(),
-        readHealth(),
-      ]);
-    } else if (
-      stillOpen &&
-      outcome.status === 'refused' &&
-      outcome.reason === 'conflict'
-    ) {
+    if (moved && open !== undefined && sameTarget(open.target, page.target)) {
       await readView(page.target);
-    }
-  };
-  /** A roster that cannot be read now is read again by the next `ready`. */
-  const readHealth = async (): Promise<void> => {
-    try {
-      const health = await client.health();
-
-      apply(current => healthRead(current, health));
-    } catch {
-      return;
     }
   };
 

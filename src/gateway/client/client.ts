@@ -133,6 +133,7 @@ const eventKinds: ReadonlySet<GatewayEvent['kind']> = new Set([
   'confirmation_requested',
   'confirmation_settled',
   'state_changed',
+  'health_changed',
   'maintenance_failed',
 ]);
 

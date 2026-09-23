@@ -90,7 +90,7 @@ function view(fingerprint = 'f1'): OkView {
         activation: {enabled: true, status: 'active', reasons: []},
         fields: [
           field('tone', {allowedValues: ['neutral', 'warm']}),
-          field('apiKey', {secret: true}),
+          untyped(field('apiKey', {secret: true})),
           field('settings', {valueType: 'object'}),
           field('endpoints', {valueType: 'array'}),
           untyped(field('mode', {allowedValues: ['true', 'off']})),
@@ -369,6 +369,17 @@ describe('web settings', () => {
         hostFieldKey('nvidiaApiKey'),
         'nvapi-1',
         {kind: 'set', path: 'project02.nvidiaApiKey', value: 'nvapi-1'},
+      ],
+      // A secret of no declared kind is still a credential, not a number.
+      [
+        secret,
+        '123',
+        {
+          kind: 'plugin_field_set',
+          pluginId: 'demo-config',
+          field: 'apiKey',
+          value: '123',
+        },
       ],
       [
         tone,
