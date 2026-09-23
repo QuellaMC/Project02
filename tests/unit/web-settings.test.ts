@@ -214,6 +214,12 @@ describe('web settings', () => {
     expect(landed.settings?.edits.get(tone)).toBe('neutral');
     expect(landed.settings?.saved).toBeUndefined();
     expect(landed.settings?.saving).toBeUndefined();
+    // The answer's fingerprint is the view's at once: a save made before
+    // the re-read lands does not conflict with this one.
+    expect(
+      landed.settings?.view?.status === 'ok' &&
+        landed.settings.view.fingerprint,
+    ).toBe('f2');
 
     // Left for the home and came back: a fresh screen, waiting on nothing.
     const back = settingsOpened(settingsOpened(sent, home), mira);
@@ -232,6 +238,34 @@ describe('web settings', () => {
       changeEnded(again, 2, {status: 'applied', fingerprint: 'f3'}).settings
         ?.saved,
     ).toBe(tone);
+  });
+
+  it('lets a flip of a switch go when it did not land, so the switch shows what the daemon has', () => {
+    const enabled = hostFieldKey('enabled');
+    const flipped = changeSent(
+      fieldEdited(configViewRead(opened(), mira, view()), enabled, 'false'),
+      1,
+      enabled,
+    );
+
+    expect(flipped.settings?.edits.get(enabled)).toBe('false');
+
+    const conflicted = changeEnded(flipped, 1, {
+      status: 'refused',
+      reason: 'conflict',
+      message: 'moved',
+    });
+
+    expect(conflicted.settings?.edits.has(enabled)).toBe(false);
+
+    const invalid = changeEnded(flipped, 1, {
+      status: 'refused',
+      reason: 'invalid',
+      message: 'no',
+    });
+
+    expect(invalid.settings?.edits.has(enabled)).toBe(false);
+    expect(invalid.settings?.problems.get(enabled)).toBe('no');
   });
 
   it('keeps what is typed when the screen already open is opened again', () => {

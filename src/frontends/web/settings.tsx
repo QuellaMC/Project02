@@ -328,7 +328,11 @@ function PluginBlock({
           context={context}
         />
       ))}
-      <Diagnostics diagnostics={plugin.diagnostics} />
+      <Diagnostics
+        diagnostics={plugin.diagnostics.filter(
+          diagnostic => diagnostic.scope === 'plugin',
+        )}
+      />
     </div>
   );
 }
@@ -376,14 +380,18 @@ function FieldControl({
       <input
         type="checkbox"
         aria-label={name}
-        // What was just flipped shows at once; the view says the rest.
+        // What was just flipped shows at once; the view says the rest. A
+        // field nothing has set is neither on nor off here — its summary
+        // says what applies — and a click decides it.
         checked={
-          edit !== undefined
-            ? edit === 'true'
-            : field.effective.value === undefined
-              ? field.defaultValueSummary === 'true'
-              : field.effective.value === true
+          edit !== undefined ? edit === 'true' : field.effective.value === true
         }
+        ref={box => {
+          if (box !== null) {
+            box.indeterminate =
+              edit === undefined && field.effective.value === undefined;
+          }
+        }}
         disabled={busy}
         onChange={event => {
           // A switch is its own save: one field, one operation.

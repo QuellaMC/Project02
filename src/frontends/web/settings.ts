@@ -156,12 +156,16 @@ export function changeSent(
  * How the change ended, known by its ticket: a screen opened since, or a
  * later change on it, is waiting on nothing this one can answer.
  * `applied`: the text that was sent is done with, and a newer word typed
- * meanwhile stays to be saved; the session re-reads the view. `refused`
- * as `invalid`: the daemon's reason stays at the field, with the text.
- * `conflict`: someone else saved first; said once, and the session
- * re-reads, with the text still in the row. A character that is gone
- * closes the screen. A write the daemon could not make is said as the
- * daemon said it.
+ * meanwhile stays to be saved; the fingerprint the answer carries is the
+ * view's from now on, so a save made before the session's re-read lands
+ * cannot conflict with this one, and the re-read fills in the rest.
+ * `refused` as `invalid`: the daemon's reason stays at the field, with
+ * the text. `conflict`: someone else saved first; said once, and the
+ * session re-reads, with the text still in the row. A character that is
+ * gone closes the screen. A write the daemon could not make is said as
+ * the daemon said it. A switch has no Save of its own, so a flip that
+ * did not land is let go: the switch shows what the daemon has, and a
+ * click sends it again.
  */
 export function changeEnded(
   state: WebState,
@@ -196,6 +200,9 @@ export function changeEnded(
       ...state,
       settings: {
         ...page,
+        ...(page.view?.status === 'ok'
+          ? {view: {...page.view, fingerprint: outcome.fingerprint}}
+          : {}),
         edits,
         problems,
         ...(newer === undefined ? {saved: key} : {}),
@@ -203,15 +210,17 @@ export function changeEnded(
     };
   }
 
+  const kept = isSwitch(page, key) ? withoutEdit(page, key) : page;
+
   if (outcome.status === 'refused' && outcome.reason === 'invalid') {
-    const problems = new Map(page.problems);
+    const problems = new Map(kept.problems);
 
     problems.set(key, outcome.message);
 
-    return {...state, settings: {...page, problems}};
+    return {...state, settings: {...kept, problems}};
   }
 
-  const next: WebState = {...state, settings: page};
+  const next: WebState = {...state, settings: kept};
 
   if (outcome.status === 'refused' && outcome.reason === 'unknown_character') {
     return noticed(settingsClosed(next), outcome.message);
@@ -393,6 +402,28 @@ function withSettings(
   return state.settings === undefined
     ? state
     : {...state, settings: update(state.settings)};
+}
+
+/** A boolean field, or a plugin's switch: a row with no Save of its own. */
+function isSwitch(page: SettingsPage, key: string): boolean {
+  const row = page.view?.status === 'ok' ? rowAt(page.view, key) : undefined;
+
+  return (
+    row !== undefined &&
+    (row.kind === 'plugin_enabled' || row.field.valueType === 'boolean')
+  );
+}
+
+function withoutEdit(page: SettingsPage, key: string): SettingsPage {
+  if (!page.edits.has(key)) {
+    return page;
+  }
+
+  const edits = new Map(page.edits);
+
+  edits.delete(key);
+
+  return {...page, edits};
 }
 
 function withoutSaved(settings: SettingsPage): SettingsPage {
