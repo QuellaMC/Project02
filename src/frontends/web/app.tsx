@@ -67,6 +67,8 @@ export function App({session}: {readonly session: Session}) {
               state.settings === undefined ? thread?.characterId : undefined
             }
             onOpen={characterId => {
+              // A character clicked is a thread wanted, whatever screen is up.
+              session.closeSettings();
               void session.open(characterId);
             }}
             onStart={characterId => {

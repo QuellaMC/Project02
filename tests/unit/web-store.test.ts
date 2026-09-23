@@ -998,7 +998,7 @@ describe('web store', () => {
     expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
   });
 
-  it('replaces the roster with a fresh health read, keeping everything else', () => {
+  it('takes the roster from a health read, keeping the state the stream last told of a character it knows', () => {
     const state = opened();
     const nova: CharacterSummary = {
       id: 'nova',
@@ -1006,11 +1006,19 @@ describe('web store', () => {
       enabled: true,
       state: 'starting',
     };
-    const read = healthRead(state, health(mira, nova));
+    // The answer was made before the stream said Mira was reloading.
+    const read = healthRead(
+      applyEvent(state, {
+        kind: 'state_changed',
+        characterId: 'mira',
+        state: 'reloading',
+      }),
+      health({...mira, enabled: false, state: 'ready'}, nova),
+    );
 
-    expect(read.health?.characters.map(character => character.id)).toEqual([
-      'mira',
-      'nova',
+    expect(read.health?.characters).toEqual([
+      {...mira, enabled: false, state: 'reloading'},
+      nova,
     ]);
     expect(read.thread).toBe(state.thread);
   });

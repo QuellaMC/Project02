@@ -138,6 +138,10 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   await expect(
     staleSignoff.getByRole('textbox', {name: 'Signoff'}),
   ).toHaveValue('bye');
+
+  // A character clicked in the roster is a thread wanted: settings give way.
+  await page.getByRole('button', {name: /^Mira\b/u}).click();
+  await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
 test.describe('a roster with a character that is off', () => {

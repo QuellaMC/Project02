@@ -14,6 +14,7 @@ import {
   configViewRead,
   fieldEdited,
   operationFor,
+  sameTarget,
   settingsClosed,
   settingsOpened,
   setupNeeded,
@@ -92,7 +93,7 @@ export function createSettingsVerbs(tab: {
       return;
     }
 
-    apply(current => changeSent(noticeSpent(current), key));
+    apply(current => changeSent(noticeSpent(current), page.target, key));
 
     let outcome: ConfigChangeOutcome;
 
@@ -106,11 +107,24 @@ export function createSettingsVerbs(tab: {
       outcome = {status: 'failed', message: problem(error)};
     }
 
-    apply(current => changeEnded(current, key, outcome));
+    apply(current => changeEnded(current, page.target, key, outcome));
+
+    // The screen the change came from is read again, if it is still the
+    // one open; the roster is read again either way.
+    const open = getState().settings;
+    const stillOpen =
+      open !== undefined && sameTarget(open.target, page.target);
 
     if (outcome.status === 'applied') {
-      await Promise.all([readView(page.target), readHealth()]);
-    } else if (outcome.status === 'refused' && outcome.reason === 'conflict') {
+      await Promise.all([
+        stillOpen ? readView(page.target) : Promise.resolve(),
+        readHealth(),
+      ]);
+    } else if (
+      stillOpen &&
+      outcome.status === 'refused' &&
+      outcome.reason === 'conflict'
+    ) {
       await readView(page.target);
     }
   };
@@ -153,18 +167,24 @@ export function createSettingsVerbs(tab: {
         return;
       }
 
-      // Judged once: a reconnect must not bounce a person who left the
-      // frame, and a home that has since chosen a provider needs no frame.
+      // Judged once, on a view that was read: a reconnect must not bounce
+      // a person who left the frame, and a read that failed is no
+      // judgement, so the next ready tries again.
       if (setupJudged) {
+        return;
+      }
+
+      const target: ConfigTarget = {scope: 'global'};
+      const view = await client.configView(target).catch(() => undefined);
+
+      if (view === undefined) {
         return;
       }
 
       setupJudged = true;
 
-      const target: ConfigTarget = {scope: 'global'};
-      const view = await client.configView(target).catch(() => undefined);
-
-      if (view !== undefined && setupNeeded(view)) {
+      // Not over a screen the person opened while the view was on its way.
+      if (setupNeeded(view) && getState().settings === undefined) {
         apply(current =>
           configViewRead(settingsOpened(current, target, true), target, view),
         );

@@ -93,8 +93,8 @@ export type SettingsPage = {
   readonly edits: ReadonlyMap<string, string>;
   /** Field key → the daemon's refusal of the last change there. */
   readonly problems: ReadonlyMap<string, string>;
-  /** The one field whose change is on its way. */
-  readonly saving?: string;
+  /** The one change on its way: its row, and the text it carried — none for a secret, which the tab keeps no copy of. */
+  readonly saving?: {readonly key: string; readonly text?: string};
   /** The field whose last change landed, until the person's next edit. */
   readonly saved?: string;
 };
@@ -247,11 +247,43 @@ export function connectionRefused(state: WebState, message: string): WebState {
 
 /**
  * The roster as the health verb reports it, read by a tab that changed
- * config: whether a character is on is config, which no event carries,
- * and the states that follow arrive as events.
+ * config: whether a character is on is config, which no event carries.
+ * A character's state is the stream's — every frame reaches the tab in
+ * order, while this answer may have been made before the last one — so
+ * a character the tab already knows keeps the state it was last told.
  */
 export function healthRead(state: WebState, health: GatewayHealth): WebState {
-  return {...state, health};
+  const known = new Map(
+    (state.health?.characters ?? []).map(character => [
+      character.id,
+      character,
+    ]),
+  );
+
+  return {
+    ...state,
+    health: {
+      ...health,
+      characters: health.characters.map(character => {
+        const told = known.get(character.id);
+
+        return told === undefined
+          ? character
+          : {
+              id: character.id,
+              displayName: character.displayName,
+              enabled: character.enabled,
+              state: told.state,
+              ...(told.diagnostic === undefined
+                ? {}
+                : {diagnostic: told.diagnostic}),
+              ...(told.maintenance === undefined
+                ? {}
+                : {maintenance: told.maintenance}),
+            };
+      }),
+    },
+  };
 }
 
 /** Said once: the same news twice — a frame seen again — is the same notice. */

@@ -141,7 +141,7 @@ describe('web settings', () => {
       'warm',
     );
 
-    state = changeEnded(changeSent(state, tone), tone, {
+    state = changeEnded(changeSent(state, mira, tone), mira, tone, {
       status: 'refused',
       reason: 'invalid',
       message: 'not warm enough',
@@ -164,21 +164,63 @@ describe('web settings', () => {
       secret,
       'sk-live',
     );
-    const sent = changeSent(state, secret);
+    const sent = changeSent(state, mira, secret);
 
-    expect(sent.settings?.saving).toBe(secret);
+    expect(sent.settings?.saving).toEqual({key: secret});
     expect(sent.settings?.edits.has(secret)).toBe(false);
     expect(sent.settings?.edits.get(tone)).toBe('warm');
-    expect(changeSent(state, tone).settings?.edits.get(tone)).toBe('warm');
+    expect(changeSent(state, mira, tone).settings?.saving).toEqual({
+      key: tone,
+      text: 'warm',
+    });
+  });
+
+  it('keeps a newer word typed while the save was on its way, and a change is no concern of a screen opened since', () => {
+    const sent = changeSent(
+      fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
+      mira,
+      tone,
+    );
+    const retyped = fieldEdited(sent, tone, 'neutral');
+    const landed = changeEnded(retyped, mira, tone, {
+      status: 'applied',
+      fingerprint: 'f2',
+    });
+
+    expect(landed.settings?.edits.get(tone)).toBe('neutral');
+    expect(landed.settings?.saved).toBeUndefined();
+    expect(landed.settings?.saving).toBeUndefined();
+
+    const elsewhere = settingsOpened(sent, home);
+
+    expect(
+      changeEnded(elsewhere, mira, tone, {
+        status: 'applied',
+        fingerprint: 'f2',
+      }),
+    ).toBe(elsewhere);
+    expect(changeSent(elsewhere, mira, tone)).toBe(elsewhere);
+  });
+
+  it('keeps what is typed when the screen already open is opened again', () => {
+    const typed = fieldEdited(
+      configViewRead(opened(), mira, view()),
+      tone,
+      'warm',
+    );
+
+    expect(settingsOpened(typed, mira)).toBe(typed);
+    expect(settingsOpened(typed, home).settings?.edits.size).toBe(0);
   });
 
   it('ends a change by its outcome: applied clears the row, invalid stays at it, conflict and failure are said, a gone character closes the screen', () => {
     const typed = changeSent(
       fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
+      mira,
       tone,
     );
 
-    const applied = changeEnded(typed, tone, {
+    const applied = changeEnded(typed, mira, tone, {
       status: 'applied',
       fingerprint: 'f2',
     });
@@ -191,7 +233,7 @@ describe('web settings', () => {
       fieldEdited(applied, tone, 'neutral').settings?.saved,
     ).toBeUndefined();
 
-    const invalid = changeEnded(typed, tone, {
+    const invalid = changeEnded(typed, mira, tone, {
       status: 'refused',
       reason: 'invalid',
       message: 'Plugin config field "tone" must be one of: neutral, warm.',
@@ -201,7 +243,7 @@ describe('web settings', () => {
     expect(invalid.settings?.edits.get(tone)).toBe('warm');
     expect(invalid.notices).toEqual([]);
 
-    const conflict = changeEnded(typed, tone, {
+    const conflict = changeEnded(typed, mira, tone, {
       status: 'refused',
       reason: 'conflict',
       message: 'Runtime config changed before the mutation could be committed.',
@@ -212,14 +254,14 @@ describe('web settings', () => {
     ]);
     expect(conflict.settings?.edits.get(tone)).toBe('warm');
 
-    const failed = changeEnded(typed, tone, {
+    const failed = changeEnded(typed, mira, tone, {
       status: 'failed',
       message: 'Could not write runtime config file.',
     });
 
     expect(failed.notices).toEqual(['Could not write runtime config file.']);
 
-    const gone = changeEnded(typed, tone, {
+    const gone = changeEnded(typed, mira, tone, {
       status: 'refused',
       reason: 'unknown_character',
       message: 'Character "mira" was not found.',

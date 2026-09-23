@@ -48,16 +48,23 @@ export function sameTarget(left: ConfigTarget, right: ConfigTarget): boolean {
     : right.scope === 'character' && left.characterId === right.characterId;
 }
 
-/** The screen opens on a target; the thread stays in the store, hidden behind it. */
+/**
+ * The screen opens on a target; the thread stays in the store, hidden
+ * behind it. Opening the screen already open is a refresh — the session
+ * reads the view again — and takes nothing the person typed.
+ */
 export function settingsOpened(
   state: WebState,
   target: ConfigTarget,
   setup = false,
 ): WebState {
-  return {
-    ...state,
-    settings: {target, setup, edits: new Map(), problems: new Map()},
-  };
+  return state.settings !== undefined &&
+    sameTarget(state.settings.target, target)
+    ? state
+    : {
+        ...state,
+        settings: {target, setup, edits: new Map(), problems: new Map()},
+      };
 }
 
 /** Back to the chat; what was typed and not saved is let go. */
@@ -105,32 +112,44 @@ export function fieldEdited(
 }
 
 /**
- * The change is on its way. A secret's text goes the moment it is sent:
- * the daemon redacts it from then on, and the tab keeps no copy either.
+ * The change is on its way from this screen. A secret's text goes the
+ * moment it is sent: the daemon redacts it from then on, and the tab
+ * keeps no copy either; any other text is remembered as what was sent,
+ * so a newer word typed meanwhile is told apart from it.
  */
-export function changeSent(state: WebState, key: string): WebState {
-  return withSettings(state, settings => {
+export function changeSent(
+  state: WebState,
+  target: ConfigTarget,
+  key: string,
+): WebState {
+  return withScreen(state, target, settings => {
     const row =
       settings.view?.status === 'ok' ? rowAt(settings.view, key) : undefined;
+    const secret =
+      row !== undefined && row.kind !== 'plugin_enabled' && row.field.secret;
     const edits = new Map(settings.edits);
     const problems = new Map(settings.problems);
+    const text = edits.get(key);
 
-    if (
-      row !== undefined &&
-      row.kind !== 'plugin_enabled' &&
-      row.field.secret
-    ) {
+    if (secret) {
       edits.delete(key);
     }
 
     problems.delete(key);
 
-    return {...withoutSaved(settings), edits, problems, saving: key};
+    return {
+      ...withoutSaved(settings),
+      edits,
+      problems,
+      saving: {key, ...(secret || text === undefined ? {} : {text})},
+    };
   });
 }
 
 /**
- * How the change ended. `applied`: the edit is done with, and the session
+ * How the change ended, for the screen it was sent from — a screen opened
+ * since is no concern of it. `applied`: the text that was sent is done
+ * with, and a newer word typed meanwhile stays to be saved; the session
  * re-reads the view. `refused` as `invalid`: the daemon's reason stays at
  * the field, with the text. `conflict`: someone else saved first; said
  * once, and the session re-reads, with the text still in the row. A
@@ -139,27 +158,42 @@ export function changeSent(state: WebState, key: string): WebState {
  */
 export function changeEnded(
   state: WebState,
+  target: ConfigTarget,
   key: string,
   outcome: ConfigChangeOutcome,
 ): WebState {
   const {settings} = state;
 
-  if (settings === undefined) {
+  if (settings === undefined || !sameTarget(settings.target, target)) {
     return state;
   }
 
   const {saving, ...page} = settings;
 
-  void saving;
-
   if (outcome.status === 'applied') {
     const edits = new Map(page.edits);
     const problems = new Map(page.problems);
+    const newer =
+      edits.has(key) && edits.get(key) !== saving?.text
+        ? edits.get(key)
+        : undefined;
 
     edits.delete(key);
     problems.delete(key);
 
-    return {...state, settings: {...page, edits, problems, saved: key}};
+    if (newer !== undefined) {
+      edits.set(key, newer);
+    }
+
+    return {
+      ...state,
+      settings: {
+        ...page,
+        edits,
+        problems,
+        ...(newer === undefined ? {saved: key} : {}),
+      },
+    };
   }
 
   if (outcome.status === 'refused' && outcome.reason === 'invalid') {
@@ -343,6 +377,18 @@ function withSettings(
   return state.settings === undefined
     ? state
     : {...state, settings: update(state.settings)};
+}
+
+/** The screen on a target, if that is the one open. */
+function withScreen(
+  state: WebState,
+  target: ConfigTarget,
+  update: (settings: SettingsPage) => SettingsPage,
+): WebState {
+  return state.settings !== undefined &&
+    sameTarget(state.settings.target, target)
+    ? {...state, settings: update(state.settings)}
+    : state;
 }
 
 function withoutSaved(settings: SettingsPage): SettingsPage {
