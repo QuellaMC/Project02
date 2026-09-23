@@ -263,10 +263,6 @@ export type RuntimeConfigMutationOperation =
       readonly pluginId: string;
     }
   | {
-      readonly kind: 'default_memory_provider';
-      readonly pluginId?: string;
-    }
-  | {
       readonly kind: 'plugin_config_set';
       readonly pluginId: string;
       readonly fieldName: string;

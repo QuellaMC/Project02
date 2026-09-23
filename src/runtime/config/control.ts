@@ -36,7 +36,7 @@ import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
   {
-    readonly kind: 'set' | 'unset' | 'default_memory_provider';
+    readonly kind: 'set' | 'unset';
   }
 >;
 
@@ -46,7 +46,6 @@ export function assertRuntimeConfigControlOperation(
   switch (operation.kind) {
     case 'set':
     case 'unset':
-    case 'default_memory_provider':
       return;
     case 'plugin_enable':
     case 'plugin_disable':

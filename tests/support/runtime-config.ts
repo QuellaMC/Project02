@@ -3,11 +3,17 @@ import {dirname} from 'node:path';
 
 import {
   bindProject02CharacterRuntimeLocation,
+  createRuntimeConfigInspectShape,
+  diagnosticsHaveErrors,
+  inspectConfiguredPlugins,
   loadProject02RuntimeConfigWithLocation,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  type InspectConfiguredPlugin,
   type LoadedProject02RuntimeConfig,
+  type RuntimeConfigDiagnostic,
+  type RuntimeConfigInspectShape,
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigCharacterScope,
@@ -15,6 +21,7 @@ import {
 } from '../../src/runtime/config/index.ts';
 import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
 import type {RuntimePluginCatalogSnapshot} from '../../src/app/activation.ts';
+import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 import {
   composeRuntimePluginCatalog,
   type RuntimePluginFactoryDefinition,
@@ -324,4 +331,48 @@ export function writeRuntimeConfig(
     'utf8',
   );
   return path;
+}
+
+export type RuntimeConfigCheck = {
+  /** No error in the activation plan. */
+  readonly ok: boolean;
+  readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly plugins: readonly InspectConfiguredPlugin[];
+};
+
+/**
+ * The character's activation plan, resolved the way a startup resolves it
+ * and never constructing a plugin: what a config check reports.
+ */
+export async function checkRuntimeConfigForTest(options: {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+  readonly character?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+}): Promise<RuntimeConfigCheck> {
+  const {env, factories, ...location} = options;
+  const startup = await resolveRuntimeCliStartup({
+    location,
+    ...(env === undefined ? {} : {env}),
+    ...(factories === undefined ? {} : {factories}),
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new TypeError(
+      startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages.join(' ')
+        : 'Character activation failed.',
+    );
+  }
+
+  const plan = startup.activationPlan;
+
+  return Object.freeze({
+    ok: !diagnosticsHaveErrors(plan.activation.diagnostics),
+    runtimeConfig: createRuntimeConfigInspectShape(plan.resolvedConfig),
+    activationDiagnostics: plan.activation.diagnostics,
+    plugins: inspectConfiguredPlugins(plan),
+  });
 }

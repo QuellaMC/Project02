@@ -372,10 +372,10 @@ if (invokedDirectly) {
     console.log('  1. Edit the manifest and plugin behavior.');
     console.log('  2. pnpm check');
     console.log(
-      `  3. Enable it: pnpm runtime-config ui  (Plugins -> ${id} -> Enable)`,
+      '  3. pnpm serve, then open the address it prints in a browser',
     );
     console.log(
-      '  4. pnpm serve, then open the address it prints in a browser',
+      `  4. Enable it there, or through POST /api/config (plugin_enabled ${id})`,
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -30,7 +30,6 @@ import {
   runtimeConfigDiagnosticLocation,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
-  type Project02HostConfig,
   type Project02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigMutationOperation,
@@ -372,87 +371,31 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   } satisfies PreparedRuntimeConfigMutationCandidate);
 }
 
+/** A host field's authored value, redacted by its key; the field inspection is its reader. */
 export function getRedactedRuntimeConfigValueAtPath(
   config: Project02RuntimeConfig | undefined,
   path: string,
 ): RuntimeConfigValue | undefined {
   const parts = parseConfigPath(path);
 
-  if (parts[0] === 'plugins') {
-    throw new TypeError(
-      'Plugin config values are not available through generic runtime config get.',
-    );
+  if (parts[0] !== 'project02' || parts.length !== 2) {
+    throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
-  if (config === undefined) {
-    return undefined;
-  }
+  const value = project02ConfigValue(config, parts[1]);
 
-  if (parts.length === 1) {
-    return redactedConfigValueForKey(
-      rootConfigValue(config, parts[0]),
-      parts[0],
-    );
-  }
-
-  if (parts[0] === 'project02' && parts.length === 2) {
-    return redactedConfigValueForKey(
-      project02ConfigValue(config, parts[1]),
-      parts[1],
-    );
-  }
-
-  return undefined;
-}
-
-function redactedConfigValueForKey(
-  value: RuntimeConfigValue | undefined,
-  key: string | undefined,
-): RuntimeConfigValue | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return key === undefined
-    ? redactRuntimeConfigValue(value)
-    : redactRuntimeConfigValue(value, {key});
-}
-
-function rootConfigValue(
-  config: Project02RuntimeConfig,
-  field: string | undefined,
-): RuntimeConfigValue | undefined {
-  switch (field) {
-    case 'version':
-      return config.version;
-    case 'project02':
-      return project02ConfigObject(config.project02);
-    default:
-      return undefined;
-  }
-}
-
-function project02ConfigObject(
-  config: Project02HostConfig | undefined,
-): Readonly<Record<string, RuntimeConfigValue>> | undefined {
-  if (config === undefined) {
-    return undefined;
-  }
-
-  return frozenRuntimeConfigRecord(
-    Object.entries(config).flatMap(([name, value]) =>
-      value === undefined ? [] : [[name, value]],
-    ),
-  );
+  return value === undefined
+    ? undefined
+    : redactRuntimeConfigValue(value, {key: parts[1] ?? ''});
 }
 
 function project02ConfigValue(
-  config: Project02RuntimeConfig,
+  config: Project02RuntimeConfig | undefined,
   field: string | undefined,
 ): RuntimeConfigValue | undefined {
   return field === undefined
     ? undefined
-    : ownJsonRecordValue(config.project02, field);
+    : ownJsonRecordValue(config?.project02, field);
 }
 
 function mutateConfig(
@@ -470,14 +413,6 @@ function mutateConfig(
       return setPluginEnabled(config, operation.pluginId, false);
     case 'plugin_activation_clear':
       return clearPluginEnabled(config, operation.pluginId);
-    case 'default_memory_provider':
-      return operation.pluginId === undefined
-        ? unsetConfigPath(config, 'project02.defaultMemoryProvider')
-        : setConfigPath(
-            config,
-            'project02.defaultMemoryProvider',
-            operation.pluginId,
-          );
     case 'plugin_config_set':
       return setPluginConfigField(
         config,
@@ -678,18 +613,6 @@ function unsetConfigPath(
   }
 
   throw new TypeError(`Unsupported runtime config path: ${path}.`);
-}
-
-function frozenRuntimeConfigRecord(
-  entries: readonly (readonly [string, RuntimeConfigValue])[],
-): Readonly<Record<string, RuntimeConfigValue>> {
-  const record: Record<string, RuntimeConfigValue> = {};
-
-  for (const [name, value] of entries) {
-    record[name] = value;
-  }
-
-  return Object.freeze(record);
 }
 
 function project02FieldForConfigPath(

@@ -1,6 +1,5 @@
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
-import {shellQuoteCommandArgument} from '../shared/shell-command.ts';
 import {
   validateRuntimePluginManifest,
   type RuntimePluginManifest,
@@ -204,8 +203,6 @@ export function enforceCharacterPluginExpectations(options: {
   readonly characterId: string;
   readonly activation: RuntimePluginActivationResult;
   readonly installedPluginIds: ReadonlySet<string>;
-  /** Selected home, so the recovery command edits the right store. */
-  readonly storeRoot: string;
 }): readonly RuntimeConfigDiagnostic[] {
   if (options.expectations === undefined) {
     return Object.freeze([]);
@@ -244,11 +241,8 @@ export function enforceCharacterPluginExpectations(options: {
             : 'character_recommended_plugin_disabled',
           `Character "${options.characterId}" ${
             level === 'required' ? 'requires' : 'recommends'
-          } plugin "${pluginId}", which is disabled. Enable it with: ` +
-            // Quoted because the operator copy-pastes this hint into a shell.
-            `runtime-config --store ${shellQuoteCommandArgument(options.storeRoot)} ` +
-            `--character ${shellQuoteCommandArgument(options.characterId)} plugin ` +
-            `enable ${shellQuoteCommandArgument(pluginId)}`,
+          } plugin "${pluginId}", which is disabled. Enable it in the ` +
+            "character's settings.",
           `plugins.${pluginId}.enabled`,
           {pluginId},
         ),

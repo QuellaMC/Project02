@@ -12,7 +12,6 @@ import {
 export type Project02HomeOptions = {
   readonly location?: RuntimeLocationCliState;
   readonly env?: NodeJS.ProcessEnv;
-  readonly cwdDotEnv?: 'auto' | 'always';
 };
 
 /**
@@ -36,7 +35,6 @@ export function loadProject02Home(
   const cwdDotEnv = resolveCwdDotEnv({
     location,
     suppliedEnv,
-    mode: options.cwdDotEnv ?? 'auto',
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
@@ -71,15 +69,13 @@ function resolveCwdDotEnv(options: {
   readonly location: RuntimeLocationCliState;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly mayReadProcessCwd: boolean;
-  readonly mode: 'auto' | 'always';
 }): NodeJS.ProcessEnv {
   if (
     !options.mayReadProcessCwd ||
-    (options.mode === 'auto' &&
-      !shouldReadDefaultDotEnvForRuntimeLocation({
-        location: options.location,
-        env: options.suppliedEnv,
-      }))
+    !shouldReadDefaultDotEnvForRuntimeLocation({
+      location: options.location,
+      env: options.suppliedEnv,
+    })
   ) {
     return Object.freeze({});
   }

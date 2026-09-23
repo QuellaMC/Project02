@@ -23,7 +23,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "runtime-config": "node src/cli/config/main.ts",
     "inspect": "node src/cli/inspect/main.ts",
     "serve": "pnpm build:web && node src/cli/serve/main.ts",
     "build:web": "vite build",

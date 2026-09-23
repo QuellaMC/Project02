@@ -15,14 +15,12 @@ import {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,
 } from './character-plugins.ts';
-import {installedRuntimePluginCatalogEntry} from '../plugins/index.ts';
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import type {RuntimePluginManifest} from '../plugins/api/index.ts';
 import {loadProject02Home, type Project02Home} from './home.ts';
 import {
   applyRuntimeConfigControlOperation,
   assertResolvedProject02HomeAdoptable,
-  assertScopedMutationOperationAllowed,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
@@ -32,16 +30,12 @@ import {
   readCharacterOverlayForScope,
   loadRuntimeConfigEnvFile,
   resolveRuntimeConfigScopeTarget,
-  RuntimeConfigMutationError,
   runtimeConfigDiagnosticIsReadinessFailure,
   simulateCharacterOverlayCandidate,
   withRuntimeConfigDiagnosticOrigin,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
-  type RuntimeConfigControlApplyResult,
-  type RuntimeConfigControlOperation,
-  type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
@@ -59,7 +53,6 @@ type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly cwdDotEnv?: 'auto' | 'always';
 };
 
 type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
@@ -67,17 +60,6 @@ type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly continueAfterActivationErrors?: boolean;
   /** Throwing here rejects the startup before anything durable is written. */
   readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
-  /** Composed with package materialization into one locked overlay commit. */
-  readonly characterConfigRequest?:
-    | {
-        readonly kind: 'document';
-        readonly operation: RuntimeConfigControlOperation;
-      }
-    | {
-        readonly kind: 'plugin_activation';
-        readonly pluginId: string;
-        readonly enabled: boolean;
-      };
 };
 
 type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
@@ -87,7 +69,7 @@ type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
 /** Same decisions and rejections as an activation startup, but no write. */
 type RuntimeCliReportStartupOptions = Omit<
   RuntimeCliActivationStartupOptions,
-  'stage' | 'characterConfigRequest'
+  'stage'
 > & {
   readonly stage: 'report';
 };
@@ -96,10 +78,6 @@ type RuntimeCliStartupOptions =
   | RuntimeCliActivationStartupOptions
   | RuntimeCliConfigStartupOptions
   | RuntimeCliReportStartupOptions;
-
-type RuntimeCliCharacterConfigRequest = NonNullable<
-  RuntimeCliActivationStartupOptions['characterConfigRequest']
->;
 
 type RuntimeCliStartupBase = {
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
@@ -119,7 +97,6 @@ type RuntimeCliActivationStartupBase = Omit<
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
-  readonly characterConfigMutation?: RuntimeConfigControlApplyResult;
 };
 
 export type RuntimeCliStartupResult =
@@ -166,7 +143,6 @@ type PlannedRuntimeCliActivationStartup = {
   ) => NodeJS.ProcessEnv | undefined;
   readonly document: Project02RuntimeConfig;
   readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly request?: RuntimeConfigControlRequest;
   /** The overlay the commit would write; a reader finishes from it. */
   readonly simulatedOverlay: LoadedProject02CharacterOverlayConfig;
 };
@@ -276,12 +252,7 @@ export function resolveRuntimeCliStartup(
     return activateProject02Character(home, {...shared, stage: 'report'});
   }
 
-  return activateProject02Character(home, {
-    ...shared,
-    ...(options.characterConfigRequest === undefined
-      ? {}
-      : {characterConfigRequest: options.characterConfigRequest}),
-  });
+  return activateProject02Character(home, shared);
 }
 
 export type ActivateProject02CharacterOptions = {
@@ -290,8 +261,6 @@ export type ActivateProject02CharacterOptions = {
   readonly continueAfterActivationErrors?: boolean;
   /** Throwing here rejects the startup before anything durable is written. */
   readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
-  /** Composed with package materialization into one locked overlay commit. */
-  readonly characterConfigRequest?: RuntimeCliCharacterConfigRequest;
 };
 
 /**
@@ -301,9 +270,7 @@ export type ActivateProject02CharacterOptions = {
  */
 export function activateProject02Character(
   home: Project02Home,
-  options: Omit<ActivateProject02CharacterOptions, 'characterConfigRequest'> & {
-    readonly stage: 'report';
-  },
+  options: ActivateProject02CharacterOptions & {readonly stage: 'report'},
 ): RuntimeCliStartupResult;
 export function activateProject02Character(
   home: Project02Home,
@@ -353,12 +320,7 @@ export function activateProject02Character(
 
   return resolveRuntimeCliActivationStartup({
     ...activationInput,
-    options: {
-      ...stagelessOptions,
-      ...(options.characterConfigRequest === undefined
-        ? {}
-        : {characterConfigRequest: options.characterConfigRequest}),
-    },
+    options: stagelessOptions,
   });
 }
 
@@ -508,9 +470,6 @@ function planRuntimeCliActivationStartup(input: {
     expectations: characterActivation.definition.plugins,
     plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
-    // A reader describes the store as a run would find it, carrying no edit.
-    request:
-      options.stage === 'report' ? undefined : options.characterConfigRequest,
   });
 
   if (preflight.diagnostics.length > 0) {
@@ -538,7 +497,6 @@ function planRuntimeCliActivationStartup(input: {
     characterActivation,
     document: preflight.packagePlan.document,
     pluginManifests: materializationManifests,
-    ...(preflight.request === undefined ? {} : {request: preflight.request}),
   });
 
   if (simulated.status === 'invalid') {
@@ -595,7 +553,6 @@ function planRuntimeCliActivationStartup(input: {
       document: preflight.packagePlan.document,
       pluginManifests: materializationManifests,
       simulatedOverlay: simulated.overlay,
-      ...(preflight.request === undefined ? {} : {request: preflight.request}),
     }),
   });
 }
@@ -610,7 +567,6 @@ async function commitPlannedRuntimeCliActivationStartup(
     configEnv: plan.configEnv,
     document: plan.document,
     pluginManifests: plan.pluginManifests,
-    ...(plan.request === undefined ? {} : {request: plan.request}),
   });
 
   if (materialization.status === 'failed') {
@@ -627,9 +583,6 @@ async function commitPlannedRuntimeCliActivationStartup(
     plan,
     overlayLoadedConfig: loadCharacterOverlayForStartup(plan.runtimeLocation),
     diagnostics: materialization.diagnostics,
-    ...(materialization.configMutation === undefined
-      ? {}
-      : {configMutation: materialization.configMutation}),
   });
 }
 
@@ -648,7 +601,6 @@ function finishRuntimeCliActivationStartup(input: {
   readonly plan: PlannedRuntimeCliActivationStartup;
   readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
-  readonly configMutation?: RuntimeConfigControlApplyResult;
 }): RuntimeCliStartupResult {
   const {
     loadedConfig,
@@ -663,12 +615,6 @@ function finishRuntimeCliActivationStartup(input: {
     activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
     base,
   } = buildPreEnvState(input.overlayLoadedConfig);
-  const materializedBase = {
-    ...base,
-    ...(input.configMutation === undefined
-      ? {}
-      : {characterConfigMutation: input.configMutation}),
-  };
   const activationPlanBeforeRuntimeEnv = withActivationDiagnostics(
     unadornedActivationPlanBeforeRuntimeEnv,
     input.diagnostics,
@@ -676,7 +622,7 @@ function finishRuntimeCliActivationStartup(input: {
 
   if (startupConfigHasErrors(loadedConfig, input.overlayLoadedConfig)) {
     return Object.freeze({
-      ...materializedBase,
+      ...base,
       status: 'config_invalid',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
@@ -689,7 +635,7 @@ function finishRuntimeCliActivationStartup(input: {
 
   if (runtimeEnv === undefined) {
     return Object.freeze({
-      ...materializedBase,
+      ...base,
       status: 'activation_blocked_before_runtime_env',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
@@ -709,7 +655,7 @@ function finishRuntimeCliActivationStartup(input: {
   );
 
   return Object.freeze({
-    ...materializedBase,
+    ...base,
     status: 'resolved',
     runtimeEnv,
     activationPlan,
@@ -721,7 +667,6 @@ type CharacterMaterializationInput = {
   readonly configEnv: NodeJS.ProcessEnv;
   readonly document: Project02RuntimeConfig;
   readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly request?: RuntimeConfigControlRequest;
   readonly characterActivation: Extract<
     Project02CharacterActivation,
     {status: 'resolved'}
@@ -746,7 +691,6 @@ function characterMaterializationOperation(
         materializedPackageVersion !==
         input.characterActivation.definition.meta.version,
     },
-    ...(input.request === undefined ? {} : {request: input.request}),
   };
 }
 
@@ -808,7 +752,6 @@ async function materializeCharacterDataDir(
   | {
       readonly status: 'resolved';
       readonly diagnostics: readonly RuntimeConfigDiagnostic[];
-      readonly configMutation?: RuntimeConfigControlApplyResult;
     }
   | {
       readonly status: 'failed';
@@ -860,7 +803,6 @@ async function materializeCharacterDataDir(
             ),
           ),
       ),
-      ...(input.request === undefined ? {} : {configMutation: applied}),
     });
   } catch (error: unknown) {
     // Only an identity mismatch is character-shaped; other errors rethrow.
@@ -882,47 +824,11 @@ async function materializeCharacterDataDir(
   }
 }
 
-function resolveCharacterConfigStartupRequest(options: {
-  readonly request: RuntimeCliCharacterConfigRequest | undefined;
-  readonly plan: PreparedProject02PluginActivationPlan;
-}): RuntimeConfigControlRequest | undefined {
-  if (options.request === undefined) {
-    return undefined;
-  }
-
-  if (options.request.kind === 'document') {
-    assertScopedMutationOperationAllowed(options.request.operation);
-    return options.request;
-  }
-
-  const definition = installedRuntimePluginCatalogEntry(
-    options.plan.catalogEntries,
-    options.request.pluginId,
-  );
-
-  if (definition === undefined) {
-    throw new RuntimeConfigMutationError(
-      `Plugin "${options.request.pluginId}" is not installed.`,
-    );
-  }
-
-  return Object.freeze({
-    kind: 'plugin_activation',
-    manifest: definition.manifest,
-    enabled: options.request.enabled,
-  });
-}
-
 function prepareCharacterMaterializationPreflight(options: {
   readonly expectations: CharacterPluginExpectations | undefined;
   readonly plan: PreparedProject02PluginActivationPlan;
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
-  readonly request: RuntimeCliCharacterConfigRequest | undefined;
 }) {
-  const request = resolveCharacterConfigStartupRequest({
-    request: options.request,
-    plan: options.plan,
-  });
   const packagePlan = planCharacterPackagePluginMaterialization({
     expectations: options.expectations,
     pluginManifests: Object.values(options.plan.catalogEntries).map(
@@ -931,7 +837,6 @@ function prepareCharacterMaterializationPreflight(options: {
   });
 
   return Object.freeze({
-    request,
     packagePlan,
     diagnostics: Object.freeze([
       ...(packagePlan.status === 'invalid' ? packagePlan.diagnostics : []),
@@ -1060,7 +965,6 @@ function prepareActivationPlan(options: {
     characterId: options.characterActivation.profile.id,
     activation: plan.activation,
     installedPluginIds: new Set(Object.keys(plan.catalogEntries)),
-    storeRoot: plan.resolvedConfig.project02.storeRoot,
   });
 
   return enforcement.length === 0

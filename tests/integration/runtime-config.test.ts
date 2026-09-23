@@ -1,4 +1,4 @@
-import {readFileSync, realpathSync, statSync, symlinkSync} from 'node:fs';
+import {realpathSync, symlinkSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -25,18 +25,16 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
+  checkRuntimeConfigForTest,
   writeRuntimeConfig,
   runtimeLocationForTest,
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
-import {collect} from '../support/streams.ts';
 import {
   activationPluginById,
   initializeCharacterDataForHost,
-  initializeTestStore,
   memoryProviderPlugin,
   requiredDottedConfigPlugin,
   requiredSecretPluginWithManifestEnvVar,
@@ -299,7 +297,6 @@ describe('runtime config loading and resolution', () => {
       store_root: 'typo-store',
     });
     const loaded = loadRuntimeConfigForTest({configPath});
-    let stdout = '';
 
     expect(loaded.config).toBeUndefined();
     expect(loaded.diagnostics).toEqual([
@@ -330,19 +327,18 @@ describe('runtime config loading and resolution', () => {
       activationStatus: 'blocked',
     });
 
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, '--config', configPath, 'check'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(1);
-    expect(stdout).toContain('"runtime_config_unknown_top_level_field"');
-    expect(stdout).toContain('"store_root"');
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_top_level_field',
+          path: 'store_root',
+        }),
+      ]),
+    );
   });
 
   it('rejects unknown plugin wrapper fields and blocks that plugin activation', async () => {
@@ -358,7 +354,6 @@ describe('runtime config loading and resolution', () => {
       },
     });
     const loaded = loadRuntimeConfigForTest({configPath});
-    let stdout = '';
 
     expect(loaded.config).toBeUndefined();
     expect(loaded.diagnostics).toEqual([
@@ -401,19 +396,23 @@ describe('runtime config loading and resolution', () => {
       ]),
     );
 
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, '--config', configPath, 'check'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(1);
-    expect(stdout).toContain('"runtime_config_unknown_plugin_wrapper_field"');
-    expect(stdout).toContain('"activationStatus": "blocked"');
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_plugin_wrapper_field',
+        }),
+      ]),
+    );
+    expect(check.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: 'character-state',
+        activationStatus: 'blocked',
+      }),
+    );
   });
 
   it('treats unknown plugin wrapper load errors as global activation blockers', async () => {
@@ -1868,7 +1867,6 @@ describe('runtime config loading and resolution', () => {
         create: () => memoryTwo,
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
@@ -1909,17 +1907,17 @@ describe('runtime config loading and resolution', () => {
       ['memory.two', 'blocked'],
     ]);
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'ambiguous_memory_provider_selection',
         }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"ambiguous_memory_provider_selection"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats a typoed explicit default memory provider as an activation-wide error when another provider is enabled', async () => {
@@ -1944,7 +1942,6 @@ describe('runtime config loading and resolution', () => {
         },
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo',
@@ -1998,25 +1995,24 @@ describe('runtime config loading and resolution', () => {
       'not_selected_as_default_memory_provider',
     );
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
     expect(factoryCalls).toBe(0);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+        }),
+      ]),
+    );
   });
 
   it('treats a known non-memory default memory provider as an activation error', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-memory-default-non-memory-',
     );
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'character-state',
@@ -2051,16 +2047,17 @@ describe('runtime config loading and resolution', () => {
       activationStatus: 'disabled',
     });
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_not_memory_provider',
         }),
-        stderr: collect(() => {}),
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"default_memory_provider_not_memory_provider"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats an inactive explicit default memory provider as an activation error when another provider is enabled', async () => {
@@ -2079,7 +2076,6 @@ describe('runtime config loading and resolution', () => {
         create: () => disabledPlugin,
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.disabled',
@@ -2130,17 +2126,17 @@ describe('runtime config loading and resolution', () => {
         ?.activationReasons,
     ).toContain('disabled_by_config');
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
         }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats a disabled explicit default memory provider as an activation error without another provider enabled', async () => {
@@ -2158,7 +2154,6 @@ describe('runtime config loading and resolution', () => {
         },
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.disabled',
@@ -2205,119 +2200,17 @@ describe('runtime config loading and resolution', () => {
         ?.activationReasons,
     ).toContain('disabled_by_config');
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
     expect(factoryCalls).toBe(0);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
-  });
-
-  it('writes non-secret and secret-ref config through the shared mutation path', async () => {
-    const storeRoot = await initializeTestStore(
-      createTestTempRoot('project02-config-cli-'),
-    );
-    const secretPlugin = requiredSecretPlugin('mem0-local');
-    const memoryPlugin = memoryProviderPlugin('memory.recall');
-    const factories = {
-      [memoryPlugin.manifest.id]: {
-        manifest: memoryPlugin.manifest,
-        create: () => memoryPlugin,
-      },
-      [secretPlugin.manifest.id]: {
-        manifest: secretPlugin.manifest,
-        create: () => secretPlugin,
-      },
-    };
-    let stdout = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        [
-          '--store',
-          storeRoot,
-          '--character',
-          'mira',
-          'plugin',
-          'disable',
-          'character-state',
-        ],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'plugin', 'enable', 'memory.recall'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-          factories,
-        },
-      ),
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        [
-          '--store',
-          storeRoot,
-          'secret',
-          'set',
-          'mem0-local',
-          'apiKey',
-          'MEM0_API_KEY',
-        ],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-          factories,
-          env: {MEM0_API_KEY: 'super-secret'},
-        },
-      ),
-    ).toBe(0);
-
-    const config: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8'),
-    );
-
-    expect(stdout).toContain('config.json');
-    expect(config).toMatchObject({
-      plugins: {
-        'memory.recall': {enabled: true},
-        'mem0-local': {
-          config: {apiKey: {$env: 'MEM0_API_KEY'}},
-        },
-      },
-    });
-    expect(
-      JSON.parse(
-        readFileSync(
-          characterOverlayConfigPath(characterDataDirPath(storeRoot, 'mira')),
-          'utf8',
-        ),
-      ),
-    ).toMatchObject({
-      plugins: {
-        'character-state': {enabled: false},
-      },
-    });
-    expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(
-      'MEM0_API_KEY="super-secret"',
-    );
-    expect((statSync(join(storeRoot, '.env')).mode & 0o777).toString(8)).toBe(
-      '600',
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+        }),
+      ]),
     );
   });
 });

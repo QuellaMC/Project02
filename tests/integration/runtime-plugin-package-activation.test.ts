@@ -11,7 +11,6 @@ import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   characterMemoryPluginId,
@@ -33,6 +32,7 @@ import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {collect} from '../support/streams.ts';
 import {
+  checkRuntimeConfigForTest,
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
@@ -240,11 +240,9 @@ describe('configured runtime plugin package activation', () => {
     });
   });
 
-  it('keeps config check and inspect on the same cold package catalog path', async () => {
+  it('keeps a config check and inspect on the same cold package catalog path', async () => {
     const storeRoot = createTestTempRoot('project02-package-cold-clis-');
     const manifest = testPackageManifest('operator.cold-cli');
-    let checkStdout = '';
-    let checkStderr = '';
     let inspectStdout = '';
     let inspectStderr = '';
 
@@ -262,17 +260,7 @@ describe('configured runtime plugin package activation', () => {
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const checkExitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          checkStdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          checkStderr += chunk;
-        }),
-      },
-    );
+    const check = await checkRuntimeConfigForTest({storeRoot});
     const inspectExitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
@@ -285,11 +273,12 @@ describe('configured runtime plugin package activation', () => {
       },
     );
 
-    expect(checkExitCode).toBe(0);
+    expect(check.ok).toBe(true);
+    expect(check.plugins).toContainEqual(
+      expect.objectContaining({pluginId: manifest.id}),
+    );
     expect(inspectExitCode).toBe(0);
-    expect(checkStderr).toBe('');
     expect(inspectStderr).toBe('');
-    expect(checkStdout).toContain(`"pluginId": "${manifest.id}"`);
     expect(inspectStdout).toContain(`"pluginId": "${manifest.id}"`);
   });
 

@@ -2,7 +2,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -113,7 +112,6 @@ describe('character plugin enforcement', () => {
       characterId: 'seeded',
       activation: activationWithEnabled(['ok-plugin']),
       installedPluginIds: new Set(['disabled-required', 'ok-plugin']),
-      storeRoot: '/tmp/home',
     });
 
     expect(diagnostics).toMatchObject([
@@ -134,22 +132,7 @@ describe('character plugin enforcement', () => {
       },
     ]);
     expect(diagnostics[1]?.message).toContain(
-      "runtime-config --store '/tmp/home' --character 'seeded' plugin enable 'disabled-required'",
-    );
-  });
-
-  it('quotes a selected home containing whitespace in the recovery command', () => {
-    const diagnostics = enforceCharacterPluginExpectations({
-      expectations: expectations({required: ['disabled-required']}),
-      characterId: 'seeded',
-      activation: activationWithEnabled([]),
-      installedPluginIds: new Set(['disabled-required']),
-      storeRoot: '/tmp/My Home',
-    });
-
-    // Unquoted, --store would consume only "/tmp/My".
-    expect(diagnostics[0]?.message).toContain(
-      "runtime-config --store '/tmp/My Home' --character 'seeded' plugin enable 'disabled-required'",
+      "Enable it in the character's settings.",
     );
   });
 });
@@ -541,12 +524,8 @@ describe('first-selection materialization through startup', () => {
       diagnostic => diagnostic.code === 'character_required_plugin_disabled',
     );
 
-    // The recovery command is shell-quoted so it survives a copy-paste.
     expect(disabled?.message).toContain(
-      `--store '${realpathSync.native(homeRoot)}' `,
-    );
-    expect(disabled?.message).toContain(
-      "--character 'seeded' plugin enable 'demo-config'",
+      "Enable it in the character's settings.",
     );
   });
 });
@@ -641,66 +620,6 @@ describe('package-version missing-only upgrades', () => {
         ),
       ),
     ).toMatchObject({materializedCharacterPackageVersion: '2.0.0'});
-  });
-});
-
-describe('concurrent materialization and first edits', () => {
-  it('serializes package defaults and preserves both first scoped edits', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {
-        required: ['demo-config'],
-        config: {'demo-config': {tone: 'warm'}},
-      },
-    });
-    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
-
-    const startups = await Promise.all([
-      resolveRuntimeCliStartup({
-        location: {storeRoot: homeRoot, character: 'seeded'},
-        env: {},
-        characterConfigRequest: {
-          kind: 'document',
-          operation: {
-            kind: 'set',
-            path: 'project02.userDisplayName',
-            value: 'First Editor',
-          },
-        },
-      }),
-      resolveRuntimeCliStartup({
-        location: {storeRoot: homeRoot, character: 'seeded'},
-        env: {},
-        characterConfigRequest: {
-          kind: 'document',
-          operation: {
-            kind: 'set',
-            path: 'project02.roleModelProvider',
-            value: 'local',
-          },
-        },
-      }),
-    ]);
-
-    expect(startups.map(startup => startup.status)).toEqual([
-      'resolved',
-      'resolved',
-    ]);
-    expect(
-      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
-    ).toEqual({
-      version: 'project02.config.v2',
-      project02: {
-        userDisplayName: 'First Editor',
-        roleModelProvider: 'local',
-      },
-      plugins: {
-        'demo-config': {
-          enabled: true,
-          config: {tone: 'warm'},
-        },
-      },
-    });
   });
 });
 

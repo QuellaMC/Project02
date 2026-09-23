@@ -442,7 +442,7 @@ function assemblyIdentity(
 /** One set of options for the assembly and for the check that it would differ. */
 function activationOptions(
   context: RuntimeContext,
-): Omit<ActivateProject02CharacterOptions, 'characterConfigRequest'> {
+): ActivateProject02CharacterOptions {
   const {options, characterId} = context;
 
   return {
