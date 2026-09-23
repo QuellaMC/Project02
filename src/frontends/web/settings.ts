@@ -29,17 +29,22 @@ export type SettingsRow =
     }
   | {readonly kind: 'plugin_enabled'; readonly pluginId: string};
 
-/** Keys: `project02.<field>` · `plugins.<id>` for the switch · `plugins.<id>.<field>`. */
+/**
+ * Keys: `project02.<field>` for a host field — its path on the wire —
+ * `plugins/<id>` for a plugin's switch and `plugins/<id>/<field>` for its
+ * field. A slash appears in no plugin id and no field name, so two rows
+ * never share a key whatever their names.
+ */
 export function hostFieldKey(name: string): string {
   return `project02.${name}`;
 }
 
 export function pluginKey(pluginId: string): string {
-  return `plugins.${pluginId}`;
+  return `plugins/${pluginId}`;
 }
 
 export function pluginFieldKey(pluginId: string, name: string): string {
-  return `${pluginKey(pluginId)}.${name}`;
+  return `${pluginKey(pluginId)}/${name}`;
 }
 
 export function sameTarget(left: ConfigTarget, right: ConfigTarget): boolean {
@@ -112,17 +117,18 @@ export function fieldEdited(
 }
 
 /**
- * The change is on its way from this screen. A secret's text goes the
- * moment it is sent: the daemon redacts it from then on, and the tab
- * keeps no copy either; any other text is remembered as what was sent,
- * so a newer word typed meanwhile is told apart from it.
+ * The change is on its way from the screen that is open, under a ticket
+ * of its own. A secret's text goes the moment it is sent: the daemon
+ * redacts it from then on, and the tab keeps no copy either; any other
+ * text is remembered as what was sent, so a newer word typed meanwhile
+ * is told apart from it.
  */
 export function changeSent(
   state: WebState,
-  target: ConfigTarget,
+  ticket: number,
   key: string,
 ): WebState {
-  return withScreen(state, target, settings => {
+  return withSettings(state, settings => {
     const row =
       settings.view?.status === 'ok' ? rowAt(settings.view, key) : undefined;
     const secret =
@@ -141,40 +147,41 @@ export function changeSent(
       ...withoutSaved(settings),
       edits,
       problems,
-      saving: {key, ...(secret || text === undefined ? {} : {text})},
+      saving: {ticket, key, ...(secret || text === undefined ? {} : {text})},
     };
   });
 }
 
 /**
- * How the change ended, for the screen it was sent from — a screen opened
- * since is no concern of it. `applied`: the text that was sent is done
- * with, and a newer word typed meanwhile stays to be saved; the session
- * re-reads the view. `refused` as `invalid`: the daemon's reason stays at
- * the field, with the text. `conflict`: someone else saved first; said
- * once, and the session re-reads, with the text still in the row. A
- * character that is gone closes the screen. A write the daemon could not
- * make is said as the daemon said it.
+ * How the change ended, known by its ticket: a screen opened since, or a
+ * later change on it, is waiting on nothing this one can answer.
+ * `applied`: the text that was sent is done with, and a newer word typed
+ * meanwhile stays to be saved; the session re-reads the view. `refused`
+ * as `invalid`: the daemon's reason stays at the field, with the text.
+ * `conflict`: someone else saved first; said once, and the session
+ * re-reads, with the text still in the row. A character that is gone
+ * closes the screen. A write the daemon could not make is said as the
+ * daemon said it.
  */
 export function changeEnded(
   state: WebState,
-  target: ConfigTarget,
-  key: string,
+  ticket: number,
   outcome: ConfigChangeOutcome,
 ): WebState {
   const {settings} = state;
 
-  if (settings === undefined || !sameTarget(settings.target, target)) {
+  if (settings?.saving?.ticket !== ticket) {
     return state;
   }
 
   const {saving, ...page} = settings;
+  const {key} = saving;
 
   if (outcome.status === 'applied') {
     const edits = new Map(page.edits);
     const problems = new Map(page.problems);
     const newer =
-      edits.has(key) && edits.get(key) !== saving?.text
+      edits.has(key) && edits.get(key) !== saving.text
         ? edits.get(key)
         : undefined;
 
@@ -349,10 +356,11 @@ function valueOf(
     return text.trim().length > 0 && Number.isFinite(number) ? number : text;
   }
 
+  // A choice from allowed values is one of those strings, whatever the
+  // field's kind; the daemon compares it as written.
   if (
-    valueType === 'object' ||
-    valueType === 'array' ||
-    valueType === undefined
+    field.allowedValues === undefined &&
+    (valueType === 'object' || valueType === 'array' || valueType === undefined)
   ) {
     return parsedOrText(text);
   }
@@ -377,18 +385,6 @@ function withSettings(
   return state.settings === undefined
     ? state
     : {...state, settings: update(state.settings)};
-}
-
-/** The screen on a target, if that is the one open. */
-function withScreen(
-  state: WebState,
-  target: ConfigTarget,
-  update: (settings: SettingsPage) => SettingsPage,
-): WebState {
-  return state.settings !== undefined &&
-    sameTarget(state.settings.target, target)
-    ? {...state, settings: update(state.settings)}
-    : state;
 }
 
 function withoutSaved(settings: SettingsPage): SettingsPage {

@@ -56,6 +56,8 @@ export function createSettingsVerbs(tab: {
   const {client, getState, apply} = tab;
   /** Only the latest read of the screen applies; an earlier one that settles later is let go. */
   let reads = 0;
+  /** Each change has a ticket of its own; its end is known by it. */
+  let changes = 0;
   let setupJudged = false;
   const readView = async (target: ConfigTarget): Promise<void> => {
     const mine = (reads += 1);
@@ -93,7 +95,9 @@ export function createSettingsVerbs(tab: {
       return;
     }
 
-    apply(current => changeSent(noticeSpent(current), page.target, key));
+    const ticket = (changes += 1);
+
+    apply(current => changeSent(noticeSpent(current), ticket, key));
 
     let outcome: ConfigChangeOutcome;
 
@@ -107,7 +111,7 @@ export function createSettingsVerbs(tab: {
       outcome = {status: 'failed', message: problem(error)};
     }
 
-    apply(current => changeEnded(current, page.target, key, outcome));
+    apply(current => changeEnded(current, ticket, outcome));
 
     // The screen the change came from is read again, if it is still the
     // one open; the roster is read again either way.

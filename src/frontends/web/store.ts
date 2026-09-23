@@ -93,8 +93,17 @@ export type SettingsPage = {
   readonly edits: ReadonlyMap<string, string>;
   /** Field key → the daemon's refusal of the last change there. */
   readonly problems: ReadonlyMap<string, string>;
-  /** The one change on its way: its row, and the text it carried — none for a secret, which the tab keeps no copy of. */
-  readonly saving?: {readonly key: string; readonly text?: string};
+  /**
+   * The one change on its way: its ticket, its row, and the text it
+   * carried — none for a secret, which the tab keeps no copy of. Its end
+   * is known by the ticket, so the end of a change sent from an earlier
+   * screen on the same target is not taken for this one's.
+   */
+  readonly saving?: {
+    readonly ticket: number;
+    readonly key: string;
+    readonly text?: string;
+  };
   /** The field whose last change landed, until the person's next edit. */
   readonly saved?: string;
 };

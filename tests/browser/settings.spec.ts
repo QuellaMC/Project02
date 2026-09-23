@@ -87,7 +87,7 @@ test("saves a character's plugin field and secret, shows the secret only as set,
     page.getByRole('heading', {name: 'Settings · Mira'}),
   ).toBeVisible();
 
-  const tone = row(page, 'plugins.demo-config.tone');
+  const tone = row(page, 'plugins/demo-config/tone');
 
   await expect(tone).toContainText('default');
   await tone.getByRole('combobox', {name: 'Tone'}).selectOption('warm');
@@ -96,7 +96,7 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   await expect(tone).toContainText('this character');
   await expect(tone.getByRole('combobox', {name: 'Tone'})).toHaveValue('warm');
 
-  const secret = row(page, 'plugins.demo-config.apiKey');
+  const secret = row(page, 'plugins/demo-config/apiKey');
 
   await expect(secret).toContainText('not set');
   await secret.getByLabel('Api key').fill('sk-live-secret');
@@ -112,17 +112,17 @@ test("saves a character's plugin field and secret, shows the secret only as set,
 
   await second.goto(daemon.url);
   await second.getByRole('button', {name: 'Settings for Mira'}).click();
-  await expect(row(second, 'plugins.demo-config.tone')).toContainText(
+  await expect(row(second, 'plugins/demo-config/tone')).toContainText(
     'this character',
   );
 
-  const note = row(page, 'plugins.demo-config.operatorNote');
+  const note = row(page, 'plugins/demo-config/operatorNote');
 
   await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
 
-  const staleSignoff = row(second, 'plugins.demo-config.signoff');
+  const staleSignoff = row(second, 'plugins/demo-config/signoff');
 
   await staleSignoff.getByRole('textbox', {name: 'Signoff'}).fill('bye');
   await staleSignoff.getByRole('button', {name: 'Save'}).click();
@@ -131,7 +131,7 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   );
   // The screen shows what is there now, with the person's own text still in its row.
   await expect(
-    row(second, 'plugins.demo-config.operatorNote').getByRole('textbox', {
+    row(second, 'plugins/demo-config/operatorNote').getByRole('textbox', {
       name: 'Operator note',
     }),
   ).toHaveValue('kept');

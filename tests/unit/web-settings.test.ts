@@ -52,6 +52,17 @@ function field(
 
 type OkView = Extract<ConfigView, {status: 'ok'}>;
 
+/** A field whose manifest declares no valueType. */
+function untyped(
+  shape: RuntimePluginConfigFieldInspectShape,
+): RuntimePluginConfigFieldInspectShape {
+  const {valueType, ...rest} = shape;
+
+  void valueType;
+
+  return rest;
+}
+
 /** Mira's view: the host fields, and demo-config with a secret and a structure. */
 function view(fingerprint = 'f1'): OkView {
   return {
@@ -82,6 +93,7 @@ function view(fingerprint = 'f1'): OkView {
           field('apiKey', {secret: true}),
           field('settings', {valueType: 'object'}),
           field('endpoints', {valueType: 'array'}),
+          untyped(field('mode', {allowedValues: ['true', 'off']})),
         ],
         diagnostics: [],
         fingerprint,
@@ -141,7 +153,7 @@ describe('web settings', () => {
       'warm',
     );
 
-    state = changeEnded(changeSent(state, mira, tone), mira, tone, {
+    state = changeEnded(changeSent(state, 1, tone), 1, {
       status: 'refused',
       reason: 'invalid',
       message: 'not warm enough',
@@ -164,25 +176,26 @@ describe('web settings', () => {
       secret,
       'sk-live',
     );
-    const sent = changeSent(state, mira, secret);
+    const sent = changeSent(state, 1, secret);
 
-    expect(sent.settings?.saving).toEqual({key: secret});
+    expect(sent.settings?.saving).toEqual({ticket: 1, key: secret});
     expect(sent.settings?.edits.has(secret)).toBe(false);
     expect(sent.settings?.edits.get(tone)).toBe('warm');
-    expect(changeSent(state, mira, tone).settings?.saving).toEqual({
+    expect(changeSent(state, 1, tone).settings?.saving).toEqual({
+      ticket: 1,
       key: tone,
       text: 'warm',
     });
   });
 
-  it('keeps a newer word typed while the save was on its way, and a change is no concern of a screen opened since', () => {
+  it('keeps a newer word typed while the save was on its way, and knows a change by its ticket: a screen opened since, or a later change, is not answered by it', () => {
     const sent = changeSent(
       fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
-      mira,
+      1,
       tone,
     );
     const retyped = fieldEdited(sent, tone, 'neutral');
-    const landed = changeEnded(retyped, mira, tone, {
+    const landed = changeEnded(retyped, 1, {
       status: 'applied',
       fingerprint: 'f2',
     });
@@ -191,15 +204,23 @@ describe('web settings', () => {
     expect(landed.settings?.saved).toBeUndefined();
     expect(landed.settings?.saving).toBeUndefined();
 
-    const elsewhere = settingsOpened(sent, home);
+    // Left for the home and came back: a fresh screen, waiting on nothing.
+    const back = settingsOpened(settingsOpened(sent, home), mira);
 
+    expect(changeEnded(back, 1, {status: 'applied', fingerprint: 'f2'})).toBe(
+      back,
+    );
+
+    // A later change on the same row: the first one's end is not its end.
+    const again = changeSent(fieldEdited(back, tone, 'playful'), 2, tone);
+
+    expect(changeEnded(again, 1, {status: 'applied', fingerprint: 'f2'})).toBe(
+      again,
+    );
     expect(
-      changeEnded(elsewhere, mira, tone, {
-        status: 'applied',
-        fingerprint: 'f2',
-      }),
-    ).toBe(elsewhere);
-    expect(changeSent(elsewhere, mira, tone)).toBe(elsewhere);
+      changeEnded(again, 2, {status: 'applied', fingerprint: 'f3'}).settings
+        ?.saved,
+    ).toBe(tone);
   });
 
   it('keeps what is typed when the screen already open is opened again', () => {
@@ -216,11 +237,11 @@ describe('web settings', () => {
   it('ends a change by its outcome: applied clears the row, invalid stays at it, conflict and failure are said, a gone character closes the screen', () => {
     const typed = changeSent(
       fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
-      mira,
+      1,
       tone,
     );
 
-    const applied = changeEnded(typed, mira, tone, {
+    const applied = changeEnded(typed, 1, {
       status: 'applied',
       fingerprint: 'f2',
     });
@@ -233,7 +254,7 @@ describe('web settings', () => {
       fieldEdited(applied, tone, 'neutral').settings?.saved,
     ).toBeUndefined();
 
-    const invalid = changeEnded(typed, mira, tone, {
+    const invalid = changeEnded(typed, 1, {
       status: 'refused',
       reason: 'invalid',
       message: 'Plugin config field "tone" must be one of: neutral, warm.',
@@ -243,7 +264,7 @@ describe('web settings', () => {
     expect(invalid.settings?.edits.get(tone)).toBe('warm');
     expect(invalid.notices).toEqual([]);
 
-    const conflict = changeEnded(typed, mira, tone, {
+    const conflict = changeEnded(typed, 1, {
       status: 'refused',
       reason: 'conflict',
       message: 'Runtime config changed before the mutation could be committed.',
@@ -254,14 +275,14 @@ describe('web settings', () => {
     ]);
     expect(conflict.settings?.edits.get(tone)).toBe('warm');
 
-    const failed = changeEnded(typed, mira, tone, {
+    const failed = changeEnded(typed, 1, {
       status: 'failed',
       message: 'Could not write runtime config file.',
     });
 
     expect(failed.notices).toEqual(['Could not write runtime config file.']);
 
-    const gone = changeEnded(typed, mira, tone, {
+    const gone = changeEnded(typed, 1, {
       status: 'refused',
       reason: 'unknown_character',
       message: 'Character "mira" was not found.',
@@ -349,7 +370,17 @@ describe('web settings', () => {
         undefined,
         {kind: 'plugin_enabled', pluginId: 'demo-config'},
       ],
-      ['plugins.nobody.tone', 'warm', undefined],
+      ['plugins/nobody/tone', 'warm', undefined],
+      [
+        pluginFieldKey('demo-config', 'mode'),
+        'true',
+        {
+          kind: 'plugin_field_set',
+          pluginId: 'demo-config',
+          field: 'mode',
+          value: 'true',
+        },
+      ],
     ];
 
     for (const [key, text, operation] of cases) {
@@ -360,6 +391,8 @@ describe('web settings', () => {
       kind: 'plugin_enabled',
       pluginId: 'demo-config',
     });
+    // Two rows never share a key, whatever the names: a slash is in no id.
+    expect(pluginKey('a.b')).not.toBe(pluginFieldKey('a', 'b'));
     expect(
       operationFor(
         {status: 'refused', reason: 'config_unloadable', message: 'no'},
