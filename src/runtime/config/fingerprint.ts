@@ -2,6 +2,7 @@ import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import type {Project02RuntimeConfig, RuntimeConfigValue} from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
+import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
 
 /**
  * Fingerprints are shown to surfaces that must never see a secret -- the
@@ -60,47 +61,76 @@ function secretFieldsByPlugin(
 }
 
 /**
- * Walks only the well-formed `plugins.<id>.config.<field>` positions, so
- * an invalid authored document still fingerprints as its own bytes.
+ * Walks only the well-formed `project02.<field>` and
+ * `plugins.<id>.config.<field>` positions, so an invalid authored document
+ * still fingerprints as its own bytes.
  */
 function redactAuthoredSecretFields(
   document: unknown,
   secretFields: ReadonlyMap<string, ReadonlySet<string>>,
 ): unknown {
-  if (!isPlainRecord(document) || !isPlainRecord(document['plugins'])) {
+  if (!isPlainRecord(document)) {
     return document;
   }
 
+  const project02 = document['project02'];
+  const plugins = document['plugins'];
+
   return {
     ...document,
-    plugins: Object.fromEntries(
-      Object.entries(document['plugins']).map(([pluginId, pluginConfig]) => {
-        const fields = secretFields.get(pluginId);
-
-        if (
-          fields === undefined ||
-          fields.size === 0 ||
-          !isPlainRecord(pluginConfig) ||
-          !isPlainRecord(pluginConfig['config'])
-        ) {
-          return [pluginId, pluginConfig];
+    ...(isPlainRecord(project02)
+      ? {
+          project02: Object.fromEntries(
+            Object.entries(project02).map(([name, value]) => [
+              name,
+              secretHostFieldNames.has(name) ? {$secret: 'authored'} : value,
+            ]),
+          ),
         }
-
-        return [
-          pluginId,
-          {
-            ...pluginConfig,
-            config: Object.fromEntries(
-              Object.entries(pluginConfig['config']).map(([name, value]) => [
-                name,
-                fields.has(name) ? {$secret: 'authored'} : value,
-              ]),
-            ),
-          },
-        ];
-      }),
-    ),
+      : {}),
+    ...(isPlainRecord(plugins)
+      ? {plugins: redactPluginSecrets(plugins, secretFields)}
+      : {}),
   };
+}
+
+const secretHostFieldNames: ReadonlySet<string> = new Set(
+  project02RuntimeConfigFieldDefinitions()
+    .filter(field => field.secret)
+    .map(field => field.name),
+);
+
+function redactPluginSecrets(
+  plugins: Record<string, unknown>,
+  secretFields: ReadonlyMap<string, ReadonlySet<string>>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(plugins).map(([pluginId, pluginConfig]) => {
+      const fields = secretFields.get(pluginId);
+
+      if (
+        fields === undefined ||
+        fields.size === 0 ||
+        !isPlainRecord(pluginConfig) ||
+        !isPlainRecord(pluginConfig['config'])
+      ) {
+        return [pluginId, pluginConfig];
+      }
+
+      return [
+        pluginId,
+        {
+          ...pluginConfig,
+          config: Object.fromEntries(
+            Object.entries(pluginConfig['config']).map(([name, value]) => [
+              name,
+              fields.has(name) ? {$secret: 'authored'} : value,
+            ]),
+          ),
+        },
+      ];
+    }),
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

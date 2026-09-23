@@ -31,7 +31,12 @@ export function createRuntimeConfigInspectShape(
   return Object.freeze({
     source: resolvedConfig.source,
     ...(resolvedConfig.path === undefined ? {} : {path: resolvedConfig.path}),
-    project02: resolvedConfig.project02,
+    project02: Object.freeze({
+      ...resolvedConfig.project02,
+      ...(resolvedConfig.project02.nvidiaApiKey === undefined
+        ? {}
+        : {nvidiaApiKey: '[redacted]'}),
+    }),
     diagnostics: Object.freeze([...resolvedConfig.diagnostics]),
     fingerprint: resolvedConfig.effectiveConfigFingerprint,
   } satisfies RuntimeConfigInspectShape);
@@ -226,7 +231,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
               : 'default',
         effective: Object.freeze({
           name: field.name,
-          secret: false,
+          secret: field.secret,
           source: effectiveValue === undefined ? 'missing' : 'config',
           resolved: true,
           ...(effectiveValue === undefined ? {} : {value: effectiveValue}),

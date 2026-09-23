@@ -215,7 +215,6 @@ function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
       entry.isFile() &&
       isLiveAtomicReplacementForAnyTarget(entry.name, [
         layout.configPath,
-        layout.envPath,
         layout.schemaPath,
       ])
     ) {
@@ -257,7 +256,7 @@ function isProject02HomeControlEntry(
     return entry.isFile();
   }
 
-  return entryPath === layout.envPath || entryPath === layout.schemaPath;
+  return entryPath === layout.schemaPath;
 }
 
 function defaultHomeClock(): string {

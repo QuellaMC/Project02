@@ -2,7 +2,6 @@ import type {RuntimePluginConfigValueType} from '../../plugins/api/index.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
-export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
 
 export type RuntimeConfigValue =
@@ -27,6 +26,8 @@ export type Project02HostConfig = Readonly<
   readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
+  readonly nvidiaApiKey?: string;
+  readonly nvidiaModel?: string;
   readonly contextWindowTokens?: number;
 };
 
@@ -133,6 +134,8 @@ export type ResolvedProject02RuntimeConfig = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    readonly nvidiaApiKey?: string;
+    readonly nvidiaModel?: string;
     readonly contextWindowTokens: number;
   };
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
@@ -153,6 +156,9 @@ export type RuntimeConfigInspectShape = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    /** Never the key: '[redacted]' whenever one is set. */
+    readonly nvidiaApiKey?: string;
+    readonly nvidiaModel?: string;
     readonly contextWindowTokens: number;
   };
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];

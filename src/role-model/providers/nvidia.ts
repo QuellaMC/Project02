@@ -39,8 +39,6 @@ import {scrubReasoningBlocks} from '../api/reasoning.ts';
 
 const nvidiaRoleModelProviderName = 'nvidia';
 export const defaultNvidiaRoleModelReasoningBudget = 16384;
-export const nvidiaApiKeyEnvName = 'NVIDIA_API_KEY';
-export const nvidiaModelEnvName = 'NVIDIA_MODEL';
 
 export const nvidiaRoleModelProviderCapabilities = Object.freeze({
   ...defaultRoleModelProviderCapabilities,
@@ -54,11 +52,6 @@ export type NvidiaRoleModelProviderConfig = {
   readonly endpoint?: string;
   readonly model?: string;
   readonly requestTimeoutMs?: number;
-};
-
-type NvidiaRoleModelProviderEnvironment = {
-  readonly NVIDIA_API_KEY?: string;
-  readonly NVIDIA_MODEL?: string;
 };
 
 type NvidiaChatCompletionMessage = RoleModelChatMessage;
@@ -101,18 +94,6 @@ type NvidiaProviderErrorCode =
   | 'provider_error'
   | 'request_timeout';
 
-export function createNvidiaRoleModelProviderConfigFromEnv(
-  env: NvidiaRoleModelProviderEnvironment = process.env,
-): NvidiaRoleModelProviderConfig {
-  const apiKey = optionalNvidiaProviderEnvValue(env.NVIDIA_API_KEY);
-  const model = optionalNvidiaProviderEnvValue(env.NVIDIA_MODEL);
-
-  return Object.freeze({
-    ...(apiKey === undefined ? {} : {apiKey}),
-    ...(model === undefined ? {} : {model}),
-  } satisfies NvidiaRoleModelProviderConfig);
-}
-
 export function createNvidiaRoleModelProviderAdapter(
   options: CreateNvidiaRoleModelProviderAdapterOptions = {},
 ): RoleModelAdapter {
@@ -141,7 +122,7 @@ export function createNvidiaRoleModelProviderAdapter(
         return createProviderRejectedOutput({
           code: 'missing_api_key',
           endpoint,
-          message: `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
+          message: 'NVIDIA provider requires the nvidiaApiKey setting.',
           model,
         });
       }
@@ -879,14 +860,4 @@ function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
     redact: true,
     limits: roleModelProviderExchangeJsonBoundaryLimits,
   });
-}
-
-function optionalNvidiaProviderEnvValue(
-  value: string | undefined,
-): string | undefined {
-  if (value === undefined || value.trim().length === 0) {
-    return undefined;
-  }
-
-  return value;
 }

@@ -21,7 +21,7 @@ describe('project02 sole-enabled startup selection', () => {
       project02: {contextWindowTokens: -5},
     });
 
-    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const home = loadProject02Home({location: {storeRoot: homeRoot}});
 
     expect(selectSoleEnabledCharacterId(home)).toBe(
       listProject02Characters(home).characters[0]?.id,
@@ -36,7 +36,7 @@ describe('project02 character listing', () => {
     writeTestCharacterPackage(homeRoot, {id: 'zeta', displayName: 'Zeta'});
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const home = loadProject02Home({location: {storeRoot: homeRoot}});
 
     expect(listProject02Characters(home)).toEqual({
       characters: [
@@ -52,7 +52,6 @@ describe('project02 character listing', () => {
 
     const disabledHome = loadProject02Home({
       location: {storeRoot: homeRoot},
-      env: {},
     });
 
     expect(
@@ -74,7 +73,7 @@ describe('project02 character listing', () => {
       'utf8',
     );
 
-    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const home = loadProject02Home({location: {storeRoot: homeRoot}});
 
     expect(
       listProject02Characters(home).characters.map(character => character.id),
@@ -88,7 +87,7 @@ describe('project02 character listing', () => {
       project02: {character: 'mira'},
     });
 
-    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+    const home = loadProject02Home({location: {storeRoot: homeRoot}});
 
     expect(home.loadedConfig.config).toBeUndefined();
     expect(home.loadedConfig.diagnostics).toEqual([

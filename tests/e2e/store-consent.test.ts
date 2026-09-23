@@ -65,7 +65,6 @@ function serve(
     stderr: collect(chunk => {
       stderr += chunk;
     }),
-    env: {},
     pluginHost: createRuntimePluginHost({plugins: []}),
     signal: abort.signal,
     port: 0,
@@ -171,7 +170,6 @@ describe('store consent gate', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -194,7 +192,6 @@ describe('store consent gate', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 

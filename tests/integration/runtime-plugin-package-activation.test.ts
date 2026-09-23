@@ -403,7 +403,7 @@ describe('configured runtime plugin package activation', () => {
 
     // Direct initialization applies the same ownership rule.
     await expect(
-      initializeProject02CharacterRuntime({location: {storeRoot}, env: {}}),
+      initializeProject02CharacterRuntime({location: {storeRoot}}),
     ).rejects.toThrow('foreign entries');
   });
 

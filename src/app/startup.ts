@@ -27,7 +27,6 @@ import {
   createRuntimeConfigDiagnostic,
   diagnosticsHaveErrors,
   readCharacterOverlayForScope,
-  loadRuntimeConfigEnvFile,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticIsReadinessFailure,
   simulateCharacterOverlayCandidate,
@@ -50,15 +49,11 @@ import {
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
-  readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
-  readonly continueAfterActivationErrors?: boolean;
-  /** Throwing here rejects the startup before anything durable is written. */
-  readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
 };
 
 type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
@@ -80,7 +75,6 @@ type RuntimeCliStartupOptions =
 
 type RuntimeCliStartupBase = {
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
-  readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 };
 
@@ -106,19 +100,15 @@ export type RuntimeCliStartupResult =
       readonly status: 'config_invalid';
     })
   | (RuntimeCliActivationStartupBase & {
-      readonly status: 'activation_blocked_before_runtime_env';
-    })
-  | (RuntimeCliActivationStartupBase & {
       readonly status: 'resolved';
-      readonly runtimeEnv: NodeJS.ProcessEnv;
     });
 
-type StartupPreEnvState = {
+type StartupPlanState = {
   readonly overlayForPlan:
     | Record<string, never>
     | {readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig};
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
-  readonly activationPlanBeforeRuntimeEnv: PreparedProject02PluginActivationPlan;
+  readonly activationPlan: PreparedProject02PluginActivationPlan;
   // Each exit pairs its own plan with the status that describes it.
   readonly base: Omit<RuntimeCliActivationStartupBase, 'activationPlan'>;
 };
@@ -132,12 +122,9 @@ type PlannedRuntimeCliActivationStartup = {
     {status: 'resolved'}
   >;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly buildPreEnvState: (
+  readonly buildPlanState: (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
-  ) => StartupPreEnvState;
-  readonly readRuntimeEnvFileUnlessBlocked: (
-    diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
-  ) => NodeJS.ProcessEnv | undefined;
+  ) => StartupPlanState;
   readonly document: Project02RuntimeConfig;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   /** The overlay the commit would write; a reader finishes from it. */
@@ -153,16 +140,13 @@ function rejectedStartup(result: RuntimeCliStartupResult): {
 
 /** Throws on any non-resolved startup; must run before host construction. */
 export async function initializeProject02CharacterRuntime(
-  options: RuntimeCliStartupCommonOptions & {
-    readonly continueAfterActivationErrors?: boolean;
-  } = {},
+  options: RuntimeCliStartupCommonOptions = {},
 ): Promise<{
   readonly characterActivation: Extract<
     Project02CharacterActivation,
     {status: 'resolved'}
   >;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
-  readonly runtimeEnv: NodeJS.ProcessEnv;
 }> {
   const startup = await resolveRuntimeCliStartup({...options});
 
@@ -179,15 +163,15 @@ export async function initializeProject02CharacterRuntime(
     );
   }
 
-  if (startup.status !== 'resolved') {
-    const blocking =
-      startup.activationPlan.activation.diagnostics.find(
-        diagnostic => diagnostic.severity === 'error',
-      ) ??
-      startup.loadedConfig.diagnostics.find(
-        diagnostic => diagnostic.severity === 'error',
-      );
+  const blocking =
+    startup.activationPlan.activation.diagnostics.find(
+      diagnostic => diagnostic.severity === 'error',
+    ) ??
+    startup.loadedConfig.diagnostics.find(
+      diagnostic => diagnostic.severity === 'error',
+    );
 
+  if (startup.status !== 'resolved' || blocking !== undefined) {
     throw new TypeError(
       `Character runtime initialization failed (${startup.status}): ${
         blocking?.message ?? 'invalid runtime config.'
@@ -198,7 +182,6 @@ export async function initializeProject02CharacterRuntime(
   return Object.freeze({
     characterActivation: startup.characterActivation,
     activationPlan: startup.activationPlan,
-    runtimeEnv: startup.runtimeEnv,
   });
 }
 
@@ -237,12 +220,6 @@ export function resolveRuntimeCliStartup(
   const shared = {
     characterId,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(options.continueAfterActivationErrors === undefined
-      ? {}
-      : {continueAfterActivationErrors: options.continueAfterActivationErrors}),
-    ...(options.validateRuntimeEnv === undefined
-      ? {}
-      : {validateRuntimeEnv: options.validateRuntimeEnv}),
   };
 
   if (options.stage === 'report') {
@@ -255,15 +232,12 @@ export function resolveRuntimeCliStartup(
 export type ActivateProject02CharacterOptions = {
   readonly characterId: string;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly continueAfterActivationErrors?: boolean;
-  /** Throwing here rejects the startup before anything durable is written. */
-  readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
 };
 
 /**
  * Activates one character against an already-loaded home: package
- * resolution, overlay, plugin activation plan, per-character env. The
- * 'report' stage makes the same decisions without the durable write.
+ * resolution, overlay, plugin activation plan. The 'report' stage makes
+ * the same decisions without the durable write.
  */
 export function activateProject02Character(
   home: Project02Home,
@@ -281,25 +255,16 @@ export function activateProject02Character(
 ): RuntimeCliStartupResult | Promise<RuntimeCliStartupResult> {
   const startupBase = {
     runtimeLocation: home.runtimeLocation,
-    cwdDotEnv: home.cwdDotEnv,
     loadedConfig: home.loadedConfig,
   };
   const activationInput = {
     configLocation: home.runtimeLocation,
     characterId: options.characterId,
-    suppliedEnv: home.suppliedEnv,
-    cwdDotEnv: home.cwdDotEnv,
     startupBase,
     loadedConfig: home.loadedConfig,
   };
   const stagelessOptions = {
     ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(options.continueAfterActivationErrors === undefined
-      ? {}
-      : {continueAfterActivationErrors: options.continueAfterActivationErrors}),
-    ...(options.validateRuntimeEnv === undefined
-      ? {}
-      : {validateRuntimeEnv: options.validateRuntimeEnv}),
   };
 
   if (options.stage === 'report') {
@@ -327,8 +292,6 @@ async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
   readonly characterId: string;
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
@@ -348,8 +311,6 @@ function planRuntimeCliActivationStartup(input: {
     RuntimeCliActivationStartupOptions | RuntimeCliReportStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
   readonly characterId: string;
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }):
@@ -394,9 +355,9 @@ function planRuntimeCliActivationStartup(input: {
       ? {}
       : {factoryOverrides: options.factories}),
   });
-  const buildPreEnvState = (
+  const buildPlanState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
-  ): StartupPreEnvState => {
+  ): StartupPlanState => {
     const overlayForPlan =
       overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
     const catalogSnapshot = classifyRuntimePluginCatalogDiscovery({
@@ -412,7 +373,7 @@ function planRuntimeCliActivationStartup(input: {
     return {
       overlayForPlan,
       catalogSnapshot,
-      activationPlanBeforeRuntimeEnv: prepareActivationPlan({
+      activationPlan: prepareActivationPlan({
         loadedConfig,
         characterActivation,
         ...overlayForPlan,
@@ -431,14 +392,14 @@ function planRuntimeCliActivationStartup(input: {
 
   // An invalid global config must not create durable state.
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
-    const invalidState = buildPreEnvState(
+    const invalidState = buildPlanState(
       loadCharacterOverlayForStartup(runtimeLocation),
     );
 
     return rejectedStartup({
       ...invalidState.base,
       status: 'config_invalid',
-      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
+      activationPlan: invalidState.activationPlan,
     });
   }
 
@@ -448,19 +409,19 @@ function planRuntimeCliActivationStartup(input: {
     blockingRuntimeConfigLayerDiagnostic(preexistingOverlay);
 
   if (unreadableOverlay !== undefined) {
-    const invalidState = buildPreEnvState(preexistingOverlay);
+    const invalidState = buildPlanState(preexistingOverlay);
 
     return rejectedStartup({
       ...invalidState.base,
       status: 'config_invalid',
-      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
+      activationPlan: invalidState.activationPlan,
     });
   }
 
-  const preMaterializationState = buildPreEnvState(preexistingOverlay);
+  const preMaterializationState = buildPlanState(preexistingOverlay);
   const preflight = prepareCharacterMaterializationPreflight({
     expectations: characterActivation.definition.plugins,
-    plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
+    plan: preMaterializationState.activationPlan,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
   });
 
@@ -469,7 +430,7 @@ function planRuntimeCliActivationStartup(input: {
       ...preMaterializationState.base,
       status: 'config_invalid',
       activationPlan: withActivationDiagnostics(
-        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        preMaterializationState.activationPlan,
         preflight.diagnostics,
       ),
     });
@@ -480,7 +441,7 @@ function planRuntimeCliActivationStartup(input: {
   }
 
   const materializationManifests = Object.values(
-    preMaterializationState.activationPlanBeforeRuntimeEnv.catalogEntries,
+    preMaterializationState.activationPlan.catalogEntries,
   ).map(entry => entry.manifest);
   // The overlay as it will be, so later decisions judge the committed state.
   const simulated = simulateCharacterMaterialization({
@@ -495,7 +456,7 @@ function planRuntimeCliActivationStartup(input: {
       ...preMaterializationState.base,
       status: 'config_invalid',
       activationPlan: withActivationDiagnostics(
-        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        preMaterializationState.activationPlan,
         [
           withRuntimeConfigDiagnosticOrigin(
             createRuntimeConfigDiagnostic(
@@ -514,23 +475,6 @@ function planRuntimeCliActivationStartup(input: {
     });
   }
 
-  const plannedState = buildPreEnvState(simulated.overlay);
-  const readRuntimeEnvFileUnlessBlocked = createStartupRuntimeEnvFileReader({
-    runtimeLocation,
-    suppliedEnv: input.suppliedEnv,
-    cwdDotEnv: input.cwdDotEnv,
-    continueAfterActivationErrors: options.continueAfterActivationErrors,
-  });
-
-  // Still phase one: the env file is read while rejecting is still free.
-  const plannedRuntimeEnv = readRuntimeEnvFileUnlessBlocked(
-    plannedState.activationPlanBeforeRuntimeEnv.activation.diagnostics,
-  );
-
-  if (plannedRuntimeEnv !== undefined) {
-    options.validateRuntimeEnv?.(plannedRuntimeEnv);
-  }
-
   return Object.freeze({
     outcome: 'committable',
     plan: Object.freeze({
@@ -538,8 +482,7 @@ function planRuntimeCliActivationStartup(input: {
       loadedConfig,
       characterActivation,
       runtimeLocation,
-      buildPreEnvState,
-      readRuntimeEnvFileUnlessBlocked,
+      buildPlanState,
       document: preflight.packagePlan.document,
       pluginManifests: materializationManifests,
       simulatedOverlay: simulated.overlay,
@@ -591,43 +534,21 @@ function finishRuntimeCliActivationStartup(input: {
   readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
 }): RuntimeCliStartupResult {
-  const {loadedConfig, buildPreEnvState, readRuntimeEnvFileUnlessBlocked} =
-    input.plan;
-  const {
-    activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
-    base,
-  } = buildPreEnvState(input.overlayLoadedConfig);
-  const activationPlanBeforeRuntimeEnv = withActivationDiagnostics(
-    unadornedActivationPlanBeforeRuntimeEnv,
+  const {loadedConfig, buildPlanState} = input.plan;
+  const {activationPlan: unadornedActivationPlan, base} = buildPlanState(
+    input.overlayLoadedConfig,
+  );
+  const activationPlan = withActivationDiagnostics(
+    unadornedActivationPlan,
     input.diagnostics,
   );
 
-  if (startupConfigHasErrors(loadedConfig, input.overlayLoadedConfig)) {
-    return Object.freeze({
-      ...base,
-      status: 'config_invalid',
-      activationPlan: activationPlanBeforeRuntimeEnv,
-    });
-  }
-
-  // Materializing the character can add the error that blocks this startup.
-  const runtimeEnv = readRuntimeEnvFileUnlessBlocked(
-    activationPlanBeforeRuntimeEnv.activation.diagnostics,
-  );
-
-  if (runtimeEnv === undefined) {
-    return Object.freeze({
-      ...base,
-      status: 'activation_blocked_before_runtime_env',
-      activationPlan: activationPlanBeforeRuntimeEnv,
-    });
-  }
-
   return Object.freeze({
     ...base,
-    status: 'resolved',
-    runtimeEnv,
-    activationPlan: activationPlanBeforeRuntimeEnv,
+    status: startupConfigHasErrors(loadedConfig, input.overlayLoadedConfig)
+      ? 'config_invalid'
+      : 'resolved',
+    activationPlan,
   });
 }
 
@@ -810,7 +731,8 @@ function materializationConfigPreflightDiagnostics(
     plan.resolvedConfig.diagnostics.filter(
       diagnostic =>
         diagnostic.severity === 'error' &&
-        // The runtime .env loads only after durable initialization.
+        // A missing credential is one plugin's readiness failure, reported
+        // by activation; it does not make the document invalid.
         !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
         // The simulated candidate is the authority on overlay errors.
         diagnostic.origin?.scope !== 'character',
@@ -876,20 +798,6 @@ function readCharacterDataMarkerForStartup(
   return readCharacterOverlayForScope(runtimeLocation.characterScope).marker;
 }
 
-function loadRuntimeEnv(options: {
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly cwdDotEnv: NodeJS.ProcessEnv;
-}): NodeJS.ProcessEnv {
-  return Object.freeze(
-    loadRuntimeConfigEnvFile({
-      runtimeLocation: options.runtimeLocation,
-      env: options.suppliedEnv,
-      envDefaults: options.cwdDotEnv,
-    }),
-  );
-}
-
 function prepareActivationPlan(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly characterActivation: Extract<
@@ -937,53 +845,4 @@ function withActivationDiagnostics(
       ]),
     }),
   });
-}
-
-/** Undefined says the activation is blocked, so the file is not read. */
-function createStartupRuntimeEnvFileReader(options: {
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly cwdDotEnv: NodeJS.ProcessEnv;
-  readonly continueAfterActivationErrors: boolean | undefined;
-}): (
-  diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
-) => NodeJS.ProcessEnv | undefined {
-  let cached: NodeJS.ProcessEnv | undefined;
-
-  return diagnostics =>
-    startupReadsRuntimeEnvFile({
-      continueAfterActivationErrors: options.continueAfterActivationErrors,
-      diagnostics,
-    })
-      ? (cached ??= loadRuntimeEnv({
-          runtimeLocation: options.runtimeLocation,
-          suppliedEnv: options.suppliedEnv,
-          cwdDotEnv: options.cwdDotEnv,
-        }))
-      : undefined;
-}
-
-/**
- * A blocked activation skips the read, so no env-file failure displaces
- * its error. A missing secret is the exception: the env file supplies it.
- */
-function startupReadsRuntimeEnvFile(options: {
-  readonly continueAfterActivationErrors: boolean | undefined;
-  readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
-}): boolean {
-  if (options.continueAfterActivationErrors === true) {
-    return true;
-  }
-
-  const errors = options.diagnostics.filter(
-    diagnostic => diagnostic.severity === 'error',
-  );
-
-  return (
-    errors.length === 0 ||
-    errors.some(
-      diagnostic =>
-        diagnostic.code === 'runtime_config_required_secret_missing',
-    )
-  );
 }

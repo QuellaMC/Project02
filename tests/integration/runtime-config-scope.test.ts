@@ -644,7 +644,6 @@ describe('plugin manifest config scope policy', () => {
 
     const base = {
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
-      env: {},
     };
     const editableFields = (
       inspected: ReturnType<typeof inspectRuntimePluginConfig>,
@@ -1108,7 +1107,6 @@ describe('plugin inspection target authorship', () => {
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
-      env: {},
     };
 
     const target = resolveRuntimeConfigScopeTarget({

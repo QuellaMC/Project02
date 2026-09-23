@@ -132,7 +132,6 @@ describe('runtime config activation planning', () => {
 
     const initialized = await initializeProject02CharacterRuntime({
       location: {storeRoot},
-      env: {},
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: initialized.activationPlan,

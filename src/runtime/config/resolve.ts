@@ -192,6 +192,12 @@ function resolvedProject02HostSection(options: {
     ).trim(),
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
     roleModelProvider: authored?.roleModelProvider ?? 'local',
+    ...(authored?.nvidiaApiKey === undefined
+      ? {}
+      : {nvidiaApiKey: authored.nvidiaApiKey}),
+    ...(authored?.nvidiaModel === undefined
+      ? {}
+      : {nvidiaModel: authored.nvidiaModel}),
     contextWindowTokens:
       authored?.contextWindowTokens ?? defaultProject02ContextWindowTokens,
   });
@@ -529,6 +535,9 @@ function effectiveFingerprintInput(options: {
         options.config?.project02?.defaultMemoryProvider ?? null,
       roleModelProvider:
         options.config?.project02?.roleModelProvider ?? 'local',
+      // Presence only: this fingerprint is shown, so the key never is.
+      nvidiaApiKeySet: options.config?.project02?.nvidiaApiKey !== undefined,
+      nvidiaModel: options.config?.project02?.nvidiaModel ?? null,
       contextWindowTokens:
         options.config?.project02?.contextWindowTokens ??
         defaultProject02ContextWindowTokens,

@@ -34,7 +34,6 @@ import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   applyRuntimeConfigControlOperation,
   characterOverlayConfigPath,
-  runtimeConfigVersion,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -727,7 +726,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -761,7 +759,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -785,7 +782,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -819,7 +815,6 @@ describe('inspect CLI plugin evidence', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        env: {},
       },
     );
 
@@ -850,7 +845,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -889,7 +883,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -921,7 +914,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -955,7 +947,6 @@ describe('inspect CLI plugin evidence', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -980,7 +971,6 @@ describe('inspect CLI plugin evidence', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        env: {},
       },
     );
 
@@ -1032,77 +1022,11 @@ describe('inspect CLI plugin evidence', () => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        env: {},
       },
     );
 
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
-  });
-
-  it('reports env-independent activation errors before runtime env file errors', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-inspect-activation-before-env-',
-    );
-    const plugin = createInspectRequiredConfigFixturePlugin(
-      'inspect.required-config',
-    );
-    let stdout = '';
-    let stderr = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true,
-        },
-      },
-    });
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      conversationId: 'session-activation-before-env',
-      createdAt: '2026-06-21T00:00:00.000Z',
-    });
-    mkdirSync(join(storeRoot, '.env'));
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              throw new Error('inspect should not construct invalid plugins');
-            },
-          },
-        },
-      },
-    );
-    const output = JSON.parse(stdout) as {
-      readonly activationDiagnostics: readonly {
-        readonly code: string;
-        readonly path?: string;
-      }[];
-    };
-
-    expect(exitCode).toBe(0);
-    expect(stderr).toBe('');
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_required_value_missing',
-          path: `plugins.${plugin.manifest.id}.config.endpoint`,
-        }),
-      ]),
-    );
-    expect(stdout).not.toContain('Could not load runtime config env file');
   });
 
   it('reports the missing field beside a supplied secret', async () => {
@@ -1322,58 +1246,6 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(stderr).toBe('Error: Local runtime store could not be read.\n');
-  });
-
-  it('loads the runtime env file for inspect without mutating process env', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-env-');
-    const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_INSPECT_ENV_FILE_SECRET_3448711012';
-    const previousEnvValue = process.env[envVar];
-
-    writeFileSync(
-      configPath,
-      `${JSON.stringify(
-        {
-          version: runtimeConfigVersion,
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
-    );
-    writeFileSync(
-      join(storeRoot, '.env'),
-      `${envVar}=inspect-secret\n`,
-      'utf8',
-    );
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      conversationId: 'session-env',
-      createdAt: '2026-06-21T00:00:00.000Z',
-    });
-
-    try {
-      Reflect.deleteProperty(process.env, envVar);
-
-      const exitCode = await runInspectCliFromArgs(
-        ['--store', storeRoot, '--sessions'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-        },
-      );
-
-      expect(exitCode).toBe(0);
-      expect(process.env[envVar]).toBeUndefined();
-    } finally {
-      if (previousEnvValue === undefined) {
-        Reflect.deleteProperty(process.env, envVar);
-      } else {
-        process.env[envVar] = previousEnvValue;
-      }
-    }
   });
 });
 

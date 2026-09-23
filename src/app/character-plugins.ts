@@ -88,8 +88,8 @@ export function planCharacterPackagePluginMaterialization(options: {
   }
 
   // A package is a shareable artifact: a credential inside one would be
-  // distributed to every installer. Secrets stay the operator's to enter,
-  // through their env files or their own config.
+  // distributed to every installer. Secrets stay the operator's to enter
+  // in the home's or the character's own settings.
   const shippedSecrets = packagedSecretFieldPaths(
     validated.config,
     options.pluginManifests,
@@ -110,7 +110,7 @@ export function planCharacterPackagePluginMaterialization(options: {
     validateInactivePluginConfigs: true,
     authoredScope: 'character',
   });
-  // A readiness failure may still be met by the global layer or env.
+  // A readiness failure may still be met by the global layer.
   const blocking = resolved.diagnostics.filter(
     diagnostic =>
       diagnostic.severity === 'error' &&

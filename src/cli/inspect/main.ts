@@ -50,7 +50,6 @@ import {isMainModule} from '../shared/main-module.ts';
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
-  readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
@@ -126,7 +125,6 @@ export async function runInspectCliFromArgs(
     const startup = resolveRuntimeCliStartup({
       stage: 'report',
       location: parsedArgs,
-      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),

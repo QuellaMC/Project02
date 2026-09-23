@@ -243,11 +243,15 @@ export function getRedactedRuntimeConfigValueAtPath(
     throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
-  const value = project02ConfigValue(config, parts[1]);
+  const name = parts[1] ?? '';
+  const value = project02ConfigValue(config, name);
 
   return value === undefined
     ? undefined
-    : redactRuntimeConfigValue(value, {key: parts[1] ?? ''});
+    : redactRuntimeConfigValue(value, {
+        key: name,
+        secret: project02RuntimeConfigFieldDefinition(name)?.secret === true,
+      });
 }
 
 function project02ConfigValue(

@@ -226,7 +226,6 @@ function resolveCharacterScope(
   const startup = activateProject02Character(home, {
     characterId,
     stage: 'report',
-    continueAfterActivationErrors: true,
   });
 
   if (startup.status === 'character_invalid') {

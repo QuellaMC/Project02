@@ -60,7 +60,6 @@ async function createHttpHarness(
 
   const gateway = createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: replyAdapter(),
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });
@@ -409,7 +408,6 @@ describe('gateway over HTTP', () => {
     ).join(' ');
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
         reply: () => ({text}),
       }),

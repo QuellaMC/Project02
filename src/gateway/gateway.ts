@@ -12,7 +12,7 @@ import type {
   RuntimePluginHost,
   RuntimePluginToolConfirmationHandler,
 } from '../plugins/index.ts';
-import type {ChatProviderName, RoleModelAdapter} from '../role-model/index.ts';
+import type {RoleModelAdapter} from '../role-model/index.ts';
 import {
   gatewayProtocolVersion,
   type AnswerOutcome,
@@ -44,7 +44,6 @@ import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
   /** Test and dev injection, applied to every character this gateway starts. */
-  readonly provider?: ChatProviderName;
   readonly roleModelAdapter?: RoleModelAdapter;
   /** Receives the character's confirmation seam, so injected hosts park confirmations too. */
   readonly createPluginHost?: (
@@ -64,8 +63,8 @@ type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
  */
 export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   // The home identity binds once; only its config document reloads per
-  // use. A config fix reaches the retry, while an env or store redirect
-  // made later cannot split the gateway across two homes.
+  // use. A config fix reaches the retry, while a store redirect made
+  // later cannot split the gateway across two homes.
   const boundHome = loadProject02Home(options);
   const loadHome = (): Project02Home => reloadProject02Home(boundHome);
   const runtimes = new Map<string, LocalCharacterRuntime>();
@@ -419,7 +418,6 @@ function createRuntimeFactory(seams: {
     const runtime = createLocalCharacterRuntime({
       loadHome: seams.loadHome,
       characterId,
-      ...(options.provider === undefined ? {} : {provider: options.provider}),
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),

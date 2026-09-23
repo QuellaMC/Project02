@@ -62,8 +62,6 @@ try {
       stdin: Readable.from([]),
       stdout: process.stdout,
       stderr: process.stderr,
-      // A developer's .env must not pick the provider over the script.
-      env: {},
       signal: abort.signal,
       roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
       port: 0,

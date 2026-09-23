@@ -5,11 +5,6 @@ export {
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 export {
-  loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
-  RuntimeEnvFileError,
-} from './env-file.ts';
-export {
   assertResolvedProject02HomeAdoptable,
   assertResolvedProject02HomeCurrent,
   bindProject02CharacterRuntimeLocation,
@@ -112,7 +107,6 @@ export {
 } from './schema.ts';
 export {
   defaultProject02UserDisplayName,
-  roleModelProviderEnvVarName,
   runtimeConfigDiagnosticLocation,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,

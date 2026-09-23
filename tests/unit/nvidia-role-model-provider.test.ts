@@ -23,10 +23,8 @@ import {
 } from '../../src/role-model/index.ts';
 import {
   createNvidiaRoleModelProviderAdapter,
-  createNvidiaRoleModelProviderConfigFromEnv,
   defaultNvidiaRoleModelRequestTimeoutMs,
   defaultNvidiaRoleModelReasoningBudget,
-  nvidiaModelEnvName,
   type NvidiaFetchClient,
 } from '../../src/role-model/providers/nvidia.ts';
 import {
@@ -332,15 +330,6 @@ describe('NVIDIA role-model provider', () => {
         },
       ],
     });
-  });
-
-  it('reads the model name from environment configuration', () => {
-    expect(
-      createNvidiaRoleModelProviderConfigFromEnv({
-        NVIDIA_API_KEY: 'secret',
-        [nvidiaModelEnvName]: 'nvidia/test-model',
-      }).model,
-    ).toBe('nvidia/test-model');
   });
 
   it('redacts credential-bearing response keys from provider exchange evidence', async () => {

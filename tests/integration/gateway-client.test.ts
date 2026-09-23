@@ -31,7 +31,6 @@ function replyAdapter(text = 'a reply'): RoleModelAdapter {
 async function startServer() {
   const gateway = createGateway({
     location: {storeRoot: await createGatewayTestHome()},
-    env: {},
     roleModelAdapter: replyAdapter(),
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });

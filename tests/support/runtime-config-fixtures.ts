@@ -144,18 +144,6 @@ export function memoryProviderPlugin(id: string) {
   });
 }
 
-export function restoreProcessEnvValue(
-  name: string,
-  value: string | undefined,
-): void {
-  if (value === undefined) {
-    Reflect.deleteProperty(process.env, name);
-    return;
-  }
-
-  process.env[name] = value;
-}
-
 export type ActivationPluginSnapshot = Awaited<
   ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
 >['activation']['plugins'][number];

@@ -21,7 +21,6 @@ type Project02StoreConsentOptions = {
   readonly init: boolean;
   readonly stdout: NodeJS.WritableStream;
   readonly stdin?: NodeJS.ReadableStream;
-  readonly env?: NodeJS.ProcessEnv;
   /** A run being stopped abandons the question, which is a no. */
   readonly signal?: AbortSignal;
 };
@@ -30,10 +29,7 @@ type Project02StoreConsentOptions = {
 export async function assertProject02StoreConsent(
   options: Project02StoreConsentOptions,
 ): Promise<void> {
-  const home = loadProject02Home({
-    location: options.location,
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
+  const home = loadProject02Home({location: options.location});
   const homeRoot = home.runtimeLocation.homeRoot;
 
   if (!project02HomeCreationIsNew({homeRoot})) {

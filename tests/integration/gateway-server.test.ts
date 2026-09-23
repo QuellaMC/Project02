@@ -55,7 +55,6 @@ function heldAdapter(): {
 function gatewayOver(homeRoot: string, adapter: RoleModelAdapter) {
   return createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: adapter,
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });

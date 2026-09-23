@@ -41,7 +41,6 @@ export type ServeCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
-  readonly env?: NodeJS.ProcessEnv;
   /** Ends the run; the main module wires SIGINT and SIGTERM to it. */
   readonly signal: AbortSignal;
   /** Test and dev injection, handed through to the gateway. */
@@ -69,12 +68,10 @@ export async function runServeCliFromArgs(
       stdout: options.stdout,
       stdin: options.stdin,
       signal: options.signal,
-      ...(options.env === undefined ? {} : {env: options.env}),
     });
 
     const gateway = createGateway({
       location: flags.location,
-      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),
