@@ -1965,11 +1965,26 @@ describe('gateway façade', () => {
     ).toMatchObject({
       authored: {configured: true, value: 'Global Name'},
       effectiveSource: 'global',
-      editableInScope: true,
     });
     expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
       'demo-config',
     );
+    // A plugin that belongs to a character is not the home's to show or
+    // to change.
+    expect(global.plugins.map(plugin => plugin.pluginId)).not.toContain(
+      'character-state',
+    );
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: global.fingerprint,
+        operation: {
+          kind: 'plugin_enabled',
+          pluginId: 'character-state',
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
     const character = gateway.configView({
       scope: 'character',
       characterId: 'mira',

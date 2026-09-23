@@ -6,7 +6,6 @@ import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
-  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
 } from './types.ts';
 
@@ -17,15 +16,9 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly invalidValueMessage: string;
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
-  readonly scopes: readonly RuntimeConfigFieldScope[];
   /** Narrows `valueType` where the field's real rule is stricter. */
   readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
-
-const characterScopedFieldScopes = Object.freeze([
-  'global',
-  'character',
-] satisfies RuntimeConfigFieldScope[]);
 
 const project02ConfigFieldDefinitions = Object.freeze([
   Object.freeze({
@@ -39,7 +32,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -58,7 +50,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     valueType: 'boolean',
     defaultValueSummary: 'true',
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -77,7 +68,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     defaultValueSummary: 'local',
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -93,7 +83,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: true,
     valueType: 'secret',
     redactionLabels: Object.freeze(['secret']),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -109,7 +98,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -133,7 +121,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     acceptsValue: value =>
       typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -155,7 +142,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     acceptsValue: value =>
       typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),

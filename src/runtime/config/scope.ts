@@ -301,9 +301,7 @@ function normalizedControlMutation(
       operation: {kind: 'activation'},
     });
 
-    // Clearing is how a document that already decides an activation this
-    // scope may not decide gets repaired; deciding it stays refused.
-    if (violation !== undefined && request.enabled !== undefined) {
+    if (violation !== undefined) {
       throw new RuntimeConfigMutationError(violation.message);
     }
 

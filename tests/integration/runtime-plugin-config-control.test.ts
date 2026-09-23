@@ -130,7 +130,6 @@ describe('runtime plugin config control', () => {
       defaultValueSummary: 'local',
       allowedValues: ['local', 'remote'],
       agentMutable: true,
-      editableInScope: true,
       reloadRequired: true,
       authored: {
         configured: true,
@@ -152,7 +151,6 @@ describe('runtime plugin config control', () => {
       secret: true,
       valueType: 'secret',
       agentMutable: false,
-      editableInScope: true,
       reloadRequired: true,
       authored: {
         configured: true,

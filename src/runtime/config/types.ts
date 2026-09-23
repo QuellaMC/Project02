@@ -174,11 +174,6 @@ export type RuntimePluginConfigFieldInspectShape = {
   readonly defaultValueSummary?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable: boolean;
-  /**
-   * false when this scope may not author the field, so a console never
-   * offers a setting whose save the scope rules would reject.
-   */
-  readonly editableInScope: boolean;
   readonly reloadRequired: boolean;
   /** Value authored in the inspection's explicit mutation target only. */
   readonly authored: {
@@ -196,18 +191,12 @@ export type RuntimePluginActivationStatusShape = {
   readonly reasons: readonly string[];
 };
 
-export type RuntimePluginConfigActivationInspectShape =
-  RuntimePluginActivationStatusShape & {
-    /** false when this scope may not turn the plugin on or off. */
-    readonly editableInScope: boolean;
-  };
-
 export type RuntimePluginConfigInspectShape = {
   readonly pluginId: string;
   readonly displayName: string;
   readonly version: string;
   readonly enabled: boolean;
-  readonly activation: RuntimePluginConfigActivationInspectShape;
+  readonly activation: RuntimePluginActivationStatusShape;
   readonly fields: readonly RuntimePluginConfigFieldInspectShape[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;

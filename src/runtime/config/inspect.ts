@@ -12,10 +12,6 @@ import type {
 } from './types.ts';
 import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
-import {
-  runtimePluginScopeViolation,
-  type RuntimePluginScopeOperation,
-} from './plugin-scope.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
@@ -94,16 +90,13 @@ export function createRuntimePluginConfigInspectShape(options: {
         }),
     ),
   );
-  const activation = Object.freeze({
-    ...runtimePluginConfigActivationInspection({
-      configuredEnabled,
-      diagnostics,
-      manifest: options.manifest,
-      ...(options.activation === undefined
-        ? {}
-        : {activation: options.activation}),
-    }),
-    editableInScope: scopeAllowsAuthoring(options, {kind: 'activation'}),
+  const activation = runtimePluginConfigActivationInspection({
+    configuredEnabled,
+    diagnostics,
+    manifest: options.manifest,
+    ...(options.activation === undefined
+      ? {}
+      : {activation: options.activation}),
   });
 
   return Object.freeze({
@@ -141,12 +134,6 @@ export function createRuntimePluginConfigInspectShape(options: {
             ? {}
             : {allowedValues: Object.freeze([...field.allowedValues])}),
           agentMutable: field.agentMutable === true && !field.secret,
-          // Asked of the one rule that decides it, so an offered setting
-          // and an accepted save can never disagree.
-          editableInScope: scopeAllowsAuthoring(options, {
-            kind: 'field',
-            fieldName: field.name,
-          }),
           reloadRequired: field.reloadRequired !== false,
           authored: Object.freeze({
             configured: authoredValue !== undefined,
@@ -217,7 +204,6 @@ export function createProject02ConfigFieldInspectShapes(options: {
           ? {}
           : {allowedValues: Object.freeze([...field.allowedValues])}),
         agentMutable: field.agentMutable,
-        editableInScope: field.scopes.includes(options.targetScope),
         reloadRequired: field.reloadRequired,
         authored: Object.freeze({
           configured: authoredValue !== undefined,
@@ -273,26 +259,6 @@ function authoredPluginConfigField(
   return ownJsonRecordValue(
     ownJsonRecordValue(config?.plugins, pluginId)?.config,
     fieldName,
-  );
-}
-
-/**
- * Asks the one rule that decides authoring, so an offered setting and an
- * accepted save can never disagree.
- */
-function scopeAllowsAuthoring(
-  options: {
-    readonly manifest: RuntimePluginManifest;
-    readonly targetScope: RuntimeConfigFieldScope;
-  },
-  operation: RuntimePluginScopeOperation,
-): boolean {
-  return (
-    runtimePluginScopeViolation({
-      manifest: options.manifest,
-      authoredScope: options.targetScope,
-      operation,
-    }) === undefined
   );
 }
 

@@ -285,22 +285,29 @@ function viewOf(resolution: ScopeResolution): ConfigView {
         ),
       ),
     ),
+    // A plugin that belongs to a character is not the home's to show.
     plugins: Object.freeze(
-      resolution.manifests.map(manifest => {
-        const activation = resolution.activationByPluginId?.[manifest.id];
+      resolution.manifests
+        .filter(
+          manifest =>
+            targetScope === 'character' ||
+            manifest.config.scope !== 'character_only',
+        )
+        .map(manifest => {
+          const activation = resolution.activationByPluginId?.[manifest.id];
 
-        return createRuntimePluginConfigInspectShape({
-          layeredConfig,
-          targetScope,
-          pluginResolution: resolution.pluginResolution,
-          manifest,
-          fingerprint,
-          ...(activation === undefined ? {} : {activation}),
-          defaultEnabled: resolution.defaultEnabledPluginIds.includes(
-            manifest.id,
-          ),
-        });
-      }),
+          return createRuntimePluginConfigInspectShape({
+            layeredConfig,
+            targetScope,
+            pluginResolution: resolution.pluginResolution,
+            manifest,
+            fingerprint,
+            ...(activation === undefined ? {} : {activation}),
+            defaultEnabled: resolution.defaultEnabledPluginIds.includes(
+              manifest.id,
+            ),
+          });
+        }),
     ),
   });
 }

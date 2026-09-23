@@ -125,7 +125,6 @@ export {
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginActivationStatusShape,
-  type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
   type RuntimePluginConfigInspectShape,
 } from './types.ts';

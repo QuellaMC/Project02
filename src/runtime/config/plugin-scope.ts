@@ -29,8 +29,8 @@ export function runtimePluginScopeViolation(options: {
           code: 'runtime_config_character_only_plugin_enabled_globally',
           path: `plugins.${options.manifest.id}.enabled`,
           message:
-            `Plugin "${options.manifest.id}" is character-only; enable or disable ` +
-            'it in a character config or character package, not the global config.',
+            `Plugin "${options.manifest.id}" belongs to a character; turn it ` +
+            "on or off in that character's settings, not the home's.",
         })
       : undefined;
   }
@@ -55,9 +55,8 @@ export function runtimePluginScopeViolation(options: {
       code: 'runtime_config_character_only_plugin_field_globally',
       path,
       message:
-        `Config field "${field.name}" for character-only plugin ` +
-        `"${options.manifest.id}" belongs in a character config or ` +
-        'character package, not the global config.',
+        `Setting "${field.name}" of plugin "${options.manifest.id}" belongs ` +
+        "to a character; set it in that character's settings, not the home's.",
     });
   }
 

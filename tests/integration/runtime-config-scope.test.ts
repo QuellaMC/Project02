@@ -632,88 +632,6 @@ describe('plugin manifest config scope policy', () => {
     );
   });
 
-  it('offers a scope only the settings that scope can save', async () => {
-    const {homeRoot, dataRoot} = seededHome();
-    const characterOnly = characterOnlyConfigPlugin('scope.character-owned');
-    const shared = structuredConfigPlugin('scope.shared');
-
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    const base = {
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
-    };
-    const editableFields = (
-      inspected: ReturnType<typeof inspectRuntimePluginConfig>,
-    ) =>
-      inspected.fields
-        .filter(field => field.editableInScope)
-        .map(field => field.name);
-    const globalViewOfCharacterOnly = inspectRuntimePluginConfig({
-      ...base,
-      targetScope: 'global',
-      manifest: characterOnly.manifest,
-      pluginManifests: [characterOnly.manifest],
-    });
-    const characterViewOfShared = inspectRuntimePluginConfig({
-      ...base,
-      targetScope: 'character',
-      manifest: shared.manifest,
-      pluginManifests: [shared.manifest],
-    });
-    const globalTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: base.runtimeLocation,
-      scope: 'global',
-    });
-
-    // A console renders from this shape, so anything it offers must save:
-    // a character-only plugin belongs wholly to its character, secrets
-    // included, and a shared plugin is now fully character-tunable too.
-    expect(editableFields(globalViewOfCharacterOnly)).toEqual([]);
-    expect(globalViewOfCharacterOnly.activation.editableInScope).toBe(false);
-    expect(editableFields(characterViewOfShared)).toEqual([
-      'settings',
-      'endpoints',
-    ]);
-    expect(characterViewOfShared.activation.editableInScope).toBe(true);
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target: globalTarget,
-        request: {
-          kind: 'plugin_config',
-          manifest: characterOnly.manifest,
-          actor: 'operator',
-          fieldOperation: {
-            kind: 'set',
-            fieldName: 'setting',
-            value: 'global-nope',
-          },
-        },
-      }),
-    ).toThrow('character-only');
-
-    // A document already holding a forbidden value must be repairable:
-    // the console offers Unset, and the rule allows exactly that.
-    applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target: globalTarget,
-      request: {
-        kind: 'plugin_config',
-        manifest: characterOnly.manifest,
-        actor: 'operator',
-        fieldOperation: {kind: 'unset', fieldName: 'setting'},
-      },
-    });
-    applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target: globalTarget,
-      request: {kind: 'plugin_activation', manifest: characterOnly.manifest},
-    });
-  });
-
   it("layers a character's own secret over the home's, in the documents", async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
 
@@ -836,7 +754,6 @@ describe('plugin manifest config scope policy', () => {
       authored: {configured: true, value: 4096},
       effectiveSource: 'character',
       effective: {source: 'config', value: 4096},
-      editableInScope: true,
       reloadRequired: true,
     });
     expect(character['userDisplayName']).toMatchObject({
@@ -892,7 +809,7 @@ describe('plugin manifest config scope policy', () => {
           enabled: true,
         },
       }),
-    ).toThrow('character-only');
+    ).toThrow('belongs to a character');
     expect(() =>
       applyRuntimeConfigControlOperation({
         pluginManifests: [],
@@ -908,7 +825,27 @@ describe('plugin manifest config scope policy', () => {
           },
         },
       }),
-    ).toThrow('character-only');
+    ).toThrow('belongs to a character');
+    // Nor may the home clear or unset what it never owned.
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        pluginManifests: [],
+        target: globalTarget,
+        request: {kind: 'plugin_activation', manifest: plugin.manifest},
+      }),
+    ).toThrow('belongs to a character');
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        pluginManifests: [],
+        target: globalTarget,
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {kind: 'unset', fieldName: 'apiKey'},
+        },
+      }),
+    ).toThrow('belongs to a character');
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
 
     applyRuntimeConfigControlOperation({
