@@ -1543,7 +1543,7 @@ describe('runtime plugin package loader', () => {
           apiKey: {
             name: 'apiKey',
             secret: true,
-            source: 'env:PLUGIN_SECRET',
+            source: 'config',
             resolved: true,
             value: secret,
           },
@@ -1552,7 +1552,7 @@ describe('runtime plugin package loader', () => {
           apiKey: {
             name: 'apiKey',
             secret: true,
-            source: 'env:PLUGIN_SECRET',
+            source: 'config',
             resolved: true,
             value: '[redacted]',
           },
@@ -1606,7 +1606,7 @@ describe('runtime plugin package loader', () => {
           apiKey: {
             name: 'apiKey',
             secret: true,
-            source: 'env:PLUGIN_SECRET',
+            source: 'config',
             resolved: true,
             value: secret,
           },
@@ -1615,7 +1615,7 @@ describe('runtime plugin package loader', () => {
           apiKey: {
             name: 'apiKey',
             secret: true,
-            source: 'env:PLUGIN_SECRET',
+            source: 'config',
             resolved: true,
             value: '[redacted]',
           },

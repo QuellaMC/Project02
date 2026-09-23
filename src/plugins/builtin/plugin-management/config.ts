@@ -134,7 +134,6 @@ export function inspectRuntimePluginConfigForControl(options: {
         }),
     runtimeLocation,
     targetScope: target.scope,
-    env: target.env,
   });
 }
 
@@ -186,7 +185,7 @@ function modelVisiblePluginConfigInspection(
       ...(field.allowedValues === undefined
         ? {}
         : {allowedValues: field.allowedValues}),
-      agentMutable: field.agentMutable && field.editableInScope,
+      agentMutable: field.agentMutable,
       reloadRequired: field.reloadRequired,
       authored: field.authored,
       effectiveSource: field.effectiveSource,

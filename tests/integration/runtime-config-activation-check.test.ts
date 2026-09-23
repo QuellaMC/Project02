@@ -2,7 +2,6 @@ import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation,
@@ -19,18 +18,17 @@ import {
   createCharacterStatePluginManifest,
 } from '../../src/plugins/packages/character-state/plugin.ts';
 import {
+  checkRuntimeConfigForTest,
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
-import {collect} from '../support/streams.ts';
 import {
   enabledNonHostScopedActivationPlugins,
   fileStoreSessionEndPlugin,
   firstPartyPlugin,
   modelFacingMemorySearchPlugin,
   modelFacingPluginListCollisionPlugin,
-  parseActivationOutput,
   pluginWithAdditionalConfigField,
   requiredSecretPlugin,
   sessionEndPlugin,
@@ -42,22 +40,14 @@ describe('runtime config activation checks and construction', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-character-state-default-factory-',
     );
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-      },
-    );
-    const output = parseActivationOutput(stdout);
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
@@ -81,33 +71,25 @@ describe('runtime config activation checks and construction', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-character-state-real-factory-',
     );
-    let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: createCharacterStatePluginManifest(),
-            create() {
-              factoryCalls += 1;
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+      factories: {
+        [characterStatePluginId]: {
+          manifest: createCharacterStatePluginManifest(),
+          create() {
+            factoryCalls += 1;
 
-              return createCharacterStatePlugin();
-            },
+            return createCharacterStatePlugin();
           },
         },
       },
-    );
-    const output = parseActivationOutput(stdout);
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(factoryCalls).toBe(0);
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
@@ -139,33 +121,25 @@ describe('runtime config activation checks and construction', () => {
       providedTools: builtInPlugin.providedTools,
       lifecycleHooks: builtInPlugin.lifecycleHooks,
     });
-    let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: createCharacterStatePluginManifest(),
-            create() {
-              factoryCalls += 1;
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+      factories: {
+        [characterStatePluginId]: {
+          manifest: createCharacterStatePluginManifest(),
+          create() {
+            factoryCalls += 1;
 
-              return plugin;
-            },
+            return plugin;
           },
         },
       },
-    );
-    const output = parseActivationOutput(stdout);
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(factoryCalls).toBe(0);
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
@@ -192,33 +166,25 @@ describe('runtime config activation checks and construction', () => {
       'project02-config-check-character-state-spoof-',
     );
     const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
-    let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          [characterStatePluginId]: {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+      factories: {
+        [characterStatePluginId]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
 
-              return plugin;
-            },
+            return plugin;
           },
         },
       },
-    );
-    const output = parseActivationOutput(stdout);
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(factoryCalls).toBe(0);
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
@@ -233,10 +199,8 @@ describe('runtime config activation checks and construction', () => {
 
   it('keeps unselected memory providers passing check', async () => {
     const storeRoot = createTestTempRoot('project02-config-memory-unselected-');
-    const envVar = 'PROJECT02_SELECTED_MEMORY_DUPLICATE_SECRET_3450063170';
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
-    let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -245,47 +209,37 @@ describe('runtime config activation checks and construction', () => {
         'memory.selected': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'selected-memory-secret',
           },
         },
       },
     });
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        env: {
-          [envVar]: 'selected-memory-secret',
-        },
-        factories: {
-          'memory.selected': {
-            manifest: selectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'runtime-config check must not construct factories',
-              );
-            },
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+      factories: {
+        'memory.selected': {
+          manifest: selectedPlugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error(
+              'runtime-config check must not construct factories',
+            );
           },
-          'memory.unselected': {
-            manifest: unselectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'unselected memory provider check must not construct factories',
-              );
-            },
+        },
+        'memory.unselected': {
+          manifest: unselectedPlugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error(
+              'unselected memory provider check must not construct factories',
+            );
           },
         },
       },
-    );
-    const output = parseActivationOutput(stdout);
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(factoryCalls).toBe(0);
     expect(
       enabledNonHostScopedActivationPlugins(output).filter(plugin =>
@@ -308,7 +262,6 @@ describe('runtime config activation checks and construction', () => {
       'project02-config-reserved-management-id-',
     );
     const plugin = firstPartyPlugin(runtimePluginId);
-    let stdout = '';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -319,27 +272,20 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'fixture.discovery-collision': {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('reserved id check must not construct factories');
-            },
+    const output = await checkRuntimeConfigForTest({
+      storeRoot,
+      factories: {
+        'fixture.discovery-collision': {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
+            throw new Error('reserved id check must not construct factories');
           },
         },
       },
-    );
-    const output = parseActivationOutput(stdout);
+    });
 
-    expect(exitCode).toBe(0);
+    expect(output.ok).toBe(true);
     expect(factoryCalls).toBe(0);
     expect(
       output.plugins.filter(plugin => plugin.pluginId === runtimePluginId),
@@ -355,7 +301,6 @@ describe('runtime config activation checks and construction', () => {
   it('rejects manifest-backed factories that return a different same-id manifest', async () => {
     const storeRoot = createTestTempRoot('project02-config-manifest-mismatch-');
     const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MISMATCH_SECRET_3448659339';
     let cleanupCalls = 0;
     const cleanupPlugin = sessionEndPlugin('first.cleanup', () => {
       cleanupCalls += 1;
@@ -371,7 +316,7 @@ describe('runtime config activation checks and construction', () => {
         'memory.contract': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'same-id-different-manifest-secret',
           },
         },
       },
@@ -387,9 +332,6 @@ describe('runtime config activation checks and construction', () => {
           ...runtimeConfigSnapshotForTest({
             loadedConfig: loadedConfig,
             storeRoot,
-            env: {
-              [envVar]: 'same-id-different-manifest-secret',
-            },
             factories: {
               [cleanupPlugin.manifest.id]: {
                 manifest: cleanupPlugin.manifest,
@@ -401,10 +343,6 @@ describe('runtime config activation checks and construction', () => {
               },
             },
           }),
-
-          env: {
-            [envVar]: 'same-id-different-manifest-secret',
-          },
         }),
       }),
     ).rejects.toThrow(
@@ -719,10 +657,7 @@ describe('runtime config activation checks and construction', () => {
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({
-            configPath,
-            storeRoot: invalidStoreRoot,
-          }),
+          loadedConfig: loadRuntimeConfigForTest({storeRoot: invalidStoreRoot}),
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,
@@ -895,7 +830,6 @@ describe('runtime config activation checks and construction', () => {
   it('accepts manifest-backed factories that return their declared manifest', async () => {
     const storeRoot = createTestTempRoot('project02-config-manifest-match-');
     const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MATCH_SECRET_3448659339';
     const plugin = requiredSecretPlugin('memory.contract');
     let factoryCalls = 0;
 
@@ -904,7 +838,7 @@ describe('runtime config activation checks and construction', () => {
         'memory.contract': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'same-id-matching-manifest-secret',
           },
         },
       },
@@ -918,9 +852,6 @@ describe('runtime config activation checks and construction', () => {
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadedConfig,
           storeRoot,
-          env: {
-            [envVar]: 'same-id-matching-manifest-secret',
-          },
           factories: {
             'memory.contract': {
               manifest: plugin.manifest,
@@ -932,10 +863,6 @@ describe('runtime config activation checks and construction', () => {
             },
           },
         }),
-
-        env: {
-          [envVar]: 'same-id-matching-manifest-secret',
-        },
       }),
     });
 

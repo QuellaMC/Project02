@@ -12,7 +12,7 @@ import {
 } from '../plugins/index.ts';
 import {
   applyRuntimeConfigControlOperation,
-  assertProject02ReloadedConfigUsesBoundHome,
+  assertResolvedProject02HomeCurrent,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
@@ -21,8 +21,6 @@ import {
   createRuntimeConfigFingerprint,
   createRuntimePluginConfigInspectShape,
   layeredRuntimeConfigFingerprintForScope,
-  loadRuntimeConfigEnvFile,
-  pluginSecretEnvVarName,
   project02RuntimeConfigFieldDefinitions,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
@@ -31,7 +29,6 @@ import {
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
   RuntimeConfigMutationError,
-  RuntimeEnvFileError,
   type LayeredProject02RuntimeConfigSnapshot,
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigControlRequest,
@@ -51,19 +48,10 @@ import type {
 } from './api/contract.ts';
 
 /**
- * The host fields a client may see and write. The store root is the home
- * the daemon runs in, bound once at start — health names it, and no
- * setting moves a running daemon — so it is not a field over the wire.
- */
-const wireFields = project02RuntimeConfigFieldDefinitions().filter(
-  field => field.path !== 'project02.storeRoot',
-);
-
-/**
  * How long a write waits for a file another writer holds. The lock's own
  * default is ten seconds per file, spent in a synchronous wait: fine for a
- * console, a frozen daemon for everyone else. A person who saved while the
- * console was saving simply tries again.
+ * terminal, a frozen daemon for everyone else. A person who saved while
+ * another page was saving simply tries again.
  */
 const writeLockWaitMs = 500;
 
@@ -76,7 +64,6 @@ type ScopeResolution = {
   >[0]['pluginResolution'];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
-  readonly env: NodeJS.ProcessEnv;
   readonly activationByPluginId?: Readonly<
     Record<string, RuntimePluginActivationStatusShape>
   >;
@@ -88,13 +75,10 @@ export function readConfigView(
   target: ConfigTarget,
 ): ConfigView {
   try {
-    // A document that now names another home describes a daemon that is
-    // not this one; a view over it would mix its fields with this home's
+    // A home replaced under the daemon belongs to a daemon that is not
+    // this one; a view over it would mix its files with this home's
     // catalog, and every save would refuse anyway.
-    assertProject02ReloadedConfigUsesBoundHome({
-      configLocation: home.runtimeLocation,
-      loadedConfig: home.loadedConfig,
-    });
+    assertResolvedProject02HomeCurrent(home.runtimeLocation);
 
     const resolution =
       target.scope === 'global'
@@ -112,9 +96,9 @@ export function readConfigView(
 }
 
 /**
- * Writes one change through the control transaction the console uses, so
- * the daemon and the console never race a live reload with a second
- * writer. Whatever the seam refuses is an outcome; a bug still throws.
+ * Writes one change through the one control transaction, so the daemon
+ * never races a live reload with a second writer. Whatever the seam
+ * refuses is an outcome; a bug still throws.
  */
 export async function applyConfigChange(
   home: Project02Home,
@@ -133,33 +117,12 @@ export async function applyConfigChange(
       return refusedChange('invalid', prepared);
     }
 
-    // The env the daemon was launched with wins over the home's env file —
-    // an empty value included — so a secret written there under a name the
-    // launch env carries would be applied to nothing; a character's own
-    // secrets file wins over both, so only a global write can be shadowed.
-    const shadowed =
-      change.target.scope === 'global'
-        ? Object.keys(prepared.env).find(
-            name => home.suppliedEnv[name] !== undefined,
-          )
-        : undefined;
-
-    if (shadowed !== undefined) {
-      return refusedChange(
-        'invalid',
-        `${shadowed} is set in the daemon's own environment, which wins ` +
-          "over the home's env file; unset it and restart the daemon " +
-          'before writing this secret.',
-      );
-    }
-
     const pluginManifests = manifestsOf(catalog.catalogEntries);
     const target = await resolveWriteTarget({
       home,
       target: change.target,
-      env: {...runtimeEnv(home), ...prepared.env},
       pluginManifests,
-      request: prepared.request,
+      request: prepared,
       expectedFingerprint: change.expectedFingerprint,
     });
 
@@ -171,7 +134,7 @@ export async function applyConfigChange(
       target,
       pluginManifests,
       expectedFingerprint: change.expectedFingerprint,
-      request: prepared.request,
+      request: prepared,
       lockWaitTimeoutMs: writeLockWaitMs,
     });
 
@@ -204,12 +167,10 @@ function resolveGlobalScope(
     classificationConfig: layeredConfig.effective,
   });
   const manifests = manifestsOf(catalog.catalogEntries);
-  const env = runtimeEnv(home);
   // Location-free: the global document resolves through no character.
   const pluginResolution = resolveRuntimePluginConfigs({
     config: layeredConfig.effective.config,
     pluginManifests: manifests,
-    env,
     validateInactivePluginConfigs: true,
     defaultEnabledPluginIds: new Set(catalog.defaultEnabledPluginIds),
   });
@@ -219,7 +180,6 @@ function resolveGlobalScope(
     targetScope: 'global',
     manifests,
     pluginResolution,
-    env,
     diagnostics: [
       ...loaded.diagnostics,
       ...catalog.diagnostics,
@@ -266,7 +226,6 @@ function resolveCharacterScope(
   const startup = activateProject02Character(home, {
     characterId,
     stage: 'report',
-    continueAfterActivationErrors: true,
   });
 
   if (startup.status === 'character_invalid') {
@@ -291,7 +250,6 @@ function resolveCharacterScope(
     targetScope: 'character',
     manifests,
     pluginResolution: plan.resolvedConfig,
-    env: runtimeEnv(home),
     // The activation's diagnostics carry the resolution's plus what the
     // catalog could not publish — the errors the runtime itself acts on.
     diagnostics: plan.activation.diagnostics,
@@ -321,25 +279,35 @@ function viewOf(resolution: ScopeResolution): ConfigView {
       createProject02ConfigFieldInspectShapes({
         layeredConfig,
         targetScope,
-        env: resolution.env,
-      }).filter(field => wireFields.some(wire => wire.name === field.name)),
+      }).filter(field =>
+        project02RuntimeConfigFieldDefinitions().some(
+          wire => wire.name === field.name,
+        ),
+      ),
     ),
+    // A plugin that belongs to a character is not the home's to show.
     plugins: Object.freeze(
-      resolution.manifests.map(manifest => {
-        const activation = resolution.activationByPluginId?.[manifest.id];
+      resolution.manifests
+        .filter(
+          manifest =>
+            targetScope === 'character' ||
+            manifest.config.scope !== 'character_only',
+        )
+        .map(manifest => {
+          const activation = resolution.activationByPluginId?.[manifest.id];
 
-        return createRuntimePluginConfigInspectShape({
-          layeredConfig,
-          targetScope,
-          pluginResolution: resolution.pluginResolution,
-          manifest,
-          fingerprint,
-          ...(activation === undefined ? {} : {activation}),
-          defaultEnabled: resolution.defaultEnabledPluginIds.includes(
-            manifest.id,
-          ),
-        });
-      }),
+          return createRuntimePluginConfigInspectShape({
+            layeredConfig,
+            targetScope,
+            pluginResolution: resolution.pluginResolution,
+            manifest,
+            fingerprint,
+            ...(activation === undefined ? {} : {activation}),
+            defaultEnabled: resolution.defaultEnabledPluginIds.includes(
+              manifest.id,
+            ),
+          });
+        }),
     ),
   });
 }
@@ -348,21 +316,22 @@ function viewOf(resolution: ScopeResolution): ConfigView {
 function prepareControlRequest(
   operation: ConfigChange['operation'],
   catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
-):
-  | {
-      readonly request: RuntimeConfigControlRequest;
-      readonly env: NodeJS.ProcessEnv;
-    }
-  | string {
+): RuntimeConfigControlRequest | string {
   if (operation.kind === 'set' || operation.kind === 'unset') {
-    if (!wireFields.some(field => field.path === operation.path)) {
+    if (
+      !project02RuntimeConfigFieldDefinitions().some(
+        field => field.path === operation.path,
+      )
+    ) {
       return (
         `Unknown config field "${operation.path}". Fields: ` +
-        `${wireFields.map(field => field.path).join(', ')}.`
+        `${project02RuntimeConfigFieldDefinitions()
+          .map(field => field.path)
+          .join(', ')}.`
       );
     }
 
-    return {request: {kind: 'document', operation}, env: {}};
+    return {kind: 'document', operation};
   }
 
   const manifest = installedRuntimePluginCatalogEntry(
@@ -374,82 +343,38 @@ function prepareControlRequest(
     return `Plugin "${operation.pluginId}" is not installed.`;
   }
 
-  switch (operation.kind) {
-    case 'plugin_enabled':
-      return {
-        request: {
-          kind: 'plugin_activation',
-          manifest,
-          ...(operation.enabled === undefined
-            ? {}
-            : {enabled: operation.enabled}),
-        },
-        env: {},
-      };
-    case 'plugin_field_set':
-    case 'plugin_field_unset':
-      return {
-        request: {
-          kind: 'plugin_config',
-          manifest,
-          actor: 'operator',
-          fieldOperation:
-            operation.kind === 'plugin_field_set'
-              ? {
-                  kind: 'set',
-                  fieldName: operation.field,
-                  value: operation.value,
-                }
-              : {kind: 'unset', fieldName: operation.field},
-        },
-        env: {},
-      };
-    case 'plugin_secret_set': {
-      const field = manifest.config.fields.find(
-        candidate => candidate.name === operation.field,
-      );
-
-      if (field === undefined) {
-        return `Plugin "${manifest.id}" does not declare config field "${operation.field}".`;
-      }
-
-      const envVar = pluginSecretEnvVarName(manifest.id, field);
-
-      return {
-        request: {
-          kind: 'plugin_config',
-          manifest,
-          actor: 'operator',
-          fieldOperation: {
-            kind: 'secret_set',
-            fieldName: field.name,
-            envVar,
-            secretValue: operation.value,
-          },
-        },
-        // The value the write is about to put in the env file, so the
-        // candidate resolves against it.
-        env: {[envVar]: operation.value},
-      };
-    }
+  if (operation.kind === 'plugin_enabled') {
+    return {
+      kind: 'plugin_activation',
+      manifest,
+      ...(operation.enabled === undefined ? {} : {enabled: operation.enabled}),
+    };
   }
+
+  return {
+    kind: 'plugin_config',
+    manifest,
+    actor: 'operator',
+    fieldOperation:
+      operation.kind === 'plugin_field_set'
+        ? {kind: 'set', fieldName: operation.field, value: operation.value}
+        : {kind: 'unset', fieldName: operation.field},
+  };
 }
 
 async function resolveWriteTarget(options: {
   readonly home: Project02Home;
   readonly target: ConfigTarget;
-  readonly env: NodeJS.ProcessEnv;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request: RuntimeConfigControlRequest;
   readonly expectedFingerprint: string;
 }): Promise<ResolvedRuntimeConfigScopeTarget | RefusedChange> {
-  const {home, target, env} = options;
+  const {home, target} = options;
 
   if (target.scope === 'global') {
     return resolveRuntimeConfigScopeTarget({
       runtimeLocation: home.runtimeLocation,
       scope: 'global',
-      env,
     });
   }
 
@@ -465,7 +390,6 @@ async function resolveWriteTarget(options: {
       characterId: target.characterId,
     }),
     scope: 'character',
-    env,
   });
   // The commit's own preparation and expectation check, run without
   // locking or writing, so a change the seam will refuse creates no data
@@ -481,8 +405,8 @@ async function resolveWriteTarget(options: {
     return refusedChange(candidate.status, candidate.message);
   }
 
-  // A character's first valid write claims its data directory, as the
-  // console's does; the transaction then verifies the marker under its lock.
+  // A character's first valid write claims its data directory, as its
+  // first start does; the transaction then verifies the marker under its lock.
   await ensureCharacterDataDir({
     homeRoot: home.runtimeLocation.homeRoot,
     characterId: target.characterId,
@@ -523,18 +447,8 @@ function changeFailure(error: unknown): ConfigChangeOutcome {
 function unloadable(error: unknown): error is Error {
   return (
     error instanceof RuntimeConfigLocationError ||
-    error instanceof RuntimeEnvFileError ||
     error instanceof LocalRuntimeStorageContractError
   );
-}
-
-/** The env the daemon's characters resolve with: the home's env file over the run's. */
-function runtimeEnv(home: Project02Home): NodeJS.ProcessEnv {
-  return loadRuntimeConfigEnvFile({
-    runtimeLocation: home.runtimeLocation,
-    env: home.suppliedEnv,
-    envDefaults: home.cwdDotEnv,
-  });
 }
 
 /**

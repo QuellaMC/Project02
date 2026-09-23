@@ -870,10 +870,10 @@ describe('local runtime session store', () => {
     ).rejects.toMatchObject({code: 'missing_file'});
   });
 
-  it('refuses to initialize a character data directory containing a stray .env', async () => {
+  it('refuses to initialize a character data directory containing a stray file', async () => {
     const storeRoot = await createTempStoreRoot();
 
-    await writeFile(join(storeRoot, '.env'), 'API_KEY=nope\n', 'utf8');
+    await writeFile(join(storeRoot, 'notes.txt'), 'not ours\n', 'utf8');
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,

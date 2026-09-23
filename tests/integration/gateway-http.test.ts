@@ -60,7 +60,6 @@ async function createHttpHarness(
 
   const gateway = createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: replyAdapter(),
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });
@@ -218,7 +217,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 2,
+      protocolVersion: 3,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -409,7 +408,6 @@ describe('gateway over HTTP', () => {
     ).join(' ');
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
         reply: () => ({text}),
       }),
@@ -430,7 +428,7 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 2,
+      protocolVersion: 3,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
     });
@@ -571,7 +569,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 2,
+          protocolVersion: 3,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},

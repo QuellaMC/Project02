@@ -30,25 +30,6 @@ export async function createInitializedTestStoreRoot(
   return initializeTestStore(createTestTempRoot(prefix));
 }
 
-export function requiredSecretPluginWithManifestEnvVar(
-  id: string,
-  envVar: string,
-) {
-  const plugin = requiredSecretPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: plugin.manifest.config.fields.map(field =>
-          field.name === 'apiKey' ? {...field, envVar} : field,
-        ),
-      },
-    },
-  });
-}
-
 export function requiredDottedConfigPlugin(
   id = 'memory',
   fieldName = 'api.config.key',
@@ -161,51 +142,6 @@ export function memoryProviderPlugin(id: string) {
       return Promise.resolve({items: []});
     },
   });
-}
-
-export function restoreProcessEnvValue(
-  name: string,
-  value: string | undefined,
-): void {
-  if (value === undefined) {
-    Reflect.deleteProperty(process.env, name);
-    return;
-  }
-
-  process.env[name] = value;
-}
-
-export async function withScopedProcessEnv<T>(
-  options: {
-    readonly env: Readonly<Record<string, string | undefined>>;
-    readonly cwd?: string;
-  },
-  body: () => Promise<T>,
-): Promise<T> {
-  const previousCwd = process.cwd();
-  const previousEnv = Object.keys(options.env).map(
-    name => [name, process.env[name]] as const,
-  );
-
-  try {
-    for (const [name, value] of Object.entries(options.env)) {
-      restoreProcessEnvValue(name, value);
-    }
-
-    if (options.cwd !== undefined) {
-      process.chdir(options.cwd);
-    }
-
-    return await body();
-  } finally {
-    if (options.cwd !== undefined) {
-      process.chdir(previousCwd);
-    }
-
-    for (const [name, value] of previousEnv) {
-      restoreProcessEnvValue(name, value);
-    }
-  }
 }
 
 export type ActivationPluginSnapshot = Awaited<

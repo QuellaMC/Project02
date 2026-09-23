@@ -49,13 +49,12 @@ export class LocalRuntimeStorageContractError extends Error {
   }
 }
 
-// Home lock families: runtime-control-file:* for the global config and
-// .env writes, conversations-catalog for conversation creation, and
+// Home lock families: runtime-control-file:* for the global config,
+// conversations-catalog for conversation creation, and
 // conversation-writer:* for one process owning an open conversation.
 export type Project02HomeLayout = {
   readonly homeRoot: string;
   readonly configPath: string;
-  readonly envPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
   readonly pluginPackagesRoot: string;
@@ -65,13 +64,10 @@ export type Project02HomeLayout = {
 };
 
 // Deliberately has no package roots, so installable concerns cannot be
-// derived from a data root by accident. Secrets are per-character: each
-// data root carries its own env file, so one character's credentials are
-// never another character's to read.
+// derived from a data root by accident.
 export type LocalRuntimeStorageLayout = {
   readonly storeRoot: string;
   readonly configPath: string;
-  readonly envPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
   readonly sessionCatalogPath: string;
@@ -162,8 +158,6 @@ export type CreateLocalRuntimeSessionMetadataOptions = {
 
 const configFileName = 'config.json';
 
-const envFileName = '.env';
-
 const schemaFileName = 'schema.json';
 
 const sessionCatalogFileName = 'sessions.jsonl';
@@ -208,7 +202,6 @@ export function createProject02HomeLayout(
   return Object.freeze({
     homeRoot,
     configPath: join(homeRoot, configFileName),
-    envPath: join(homeRoot, envFileName),
     schemaPath: join(homeRoot, schemaFileName),
     locksRoot: join(homeRoot, locksDirectoryName),
     pluginPackagesRoot: join(homeRoot, pluginsDirectoryName),
@@ -268,7 +261,6 @@ export function createLocalRuntimeStorageLayout(
   return Object.freeze({
     storeRoot,
     configPath: join(storeRoot, configFileName),
-    envPath: join(storeRoot, envFileName),
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),

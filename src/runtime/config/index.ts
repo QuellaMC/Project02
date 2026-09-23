@@ -5,18 +5,8 @@ export {
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 export {
-  defaultDotEnvForRuntimeLocation,
-  loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
-  runtimeConfigEnvPathForLocation,
-  RuntimeEnvFileError,
-  shouldReadDefaultDotEnvForRuntimeLocation,
-} from './env-file.ts';
-export {
-  assertProject02ReloadedConfigUsesBoundHome,
   assertResolvedProject02HomeAdoptable,
   assertResolvedProject02HomeCurrent,
-  assertSelectedProject02HomeAdoptable,
   bindProject02CharacterRuntimeLocation,
   loadProject02RuntimeConfigForLocation,
   loadProject02RuntimeConfigWithLocation,
@@ -24,7 +14,6 @@ export {
   requireResolvedProject02RuntimeLocation,
   requireResolvedRuntimeConfigScopeTarget,
   resolveRuntimeConfigScopeTarget,
-  runtimeConfigLocationUsesDefaultConfigPath,
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
@@ -32,7 +21,6 @@ export {
 } from './location.ts';
 export {
   inspectRuntimePluginConfig,
-  pluginSecretEnvVarName,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
@@ -61,8 +49,6 @@ export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction
 export {
   characterOverlayConfigPath,
   layeredRuntimeConfigFingerprintForScope,
-  characterSecretsEnvPath,
-  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,
@@ -121,9 +107,7 @@ export {
 } from './schema.ts';
 export {
   defaultProject02UserDisplayName,
-  roleModelProviderEnvVarName,
   runtimeConfigDiagnosticLocation,
-  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
@@ -138,11 +122,9 @@ export {
   type RuntimeConfigInspectShape,
   type RedactedPluginRuntimeConfig,
   type ResolvedPluginRuntimeConfig,
-  type SelectedLoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginActivationStatusShape,
-  type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
   type RuntimePluginConfigInspectShape,
 } from './types.ts';

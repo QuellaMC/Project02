@@ -139,13 +139,11 @@ describe('runtime plugin host catalog and routing', () => {
     const source = resolveRuntimeConfigScopeTarget({
       runtimeLocation,
       scope: 'character',
-      env: {},
     });
     const mutableTarget = {
       ...source,
       runtimeLocation: {
         ...runtimeLocation,
-        selectedConfig: {...runtimeLocation.selectedConfig},
         characterScope: {...runtimeLocation.characterScope},
       },
     };
@@ -185,47 +183,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(
       createRuntimePluginInventoryHostStateSnapshot(inventorySnapshot),
     ).toBe(inventorySnapshot);
-  });
-
-  it('owns config-control environment only through the resolved target', () => {
-    const env = {PROJECT02_TEST_ENV: 'captured'};
-    const state = runtimePluginConfigControlStateForTest({
-      control: testRuntimePluginConfigControlCapability,
-      pluginManifests: [],
-      env,
-    });
-
-    env.PROJECT02_TEST_ENV = 'changed';
-
-    expect(Object.hasOwn(state, 'env')).toBe(false);
-    expect(state.configControl.target.env).toEqual({
-      PROJECT02_TEST_ENV: 'captured',
-    });
-    expect(Object.isFrozen(state.configControl.target.env)).toBe(true);
-  });
-
-  it('snapshots the process environment when config control receives no override', () => {
-    const envName = 'PROJECT02_CONFIG_TARGET_ENV_TEST';
-    const previous = process.env[envName];
-
-    try {
-      process.env[envName] = 'captured';
-      const state = runtimePluginConfigControlStateForTest({
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [],
-      });
-
-      process.env[envName] = 'changed';
-
-      expect(state.configControl.target.env[envName]).toBe('captured');
-      expect(Object.isFrozen(state.configControl.target.env)).toBe(true);
-    } finally {
-      if (previous === undefined) {
-        Reflect.deleteProperty(process.env, envName);
-      } else {
-        process.env[envName] = previous;
-      }
-    }
   });
 
   it('keeps real bootstrap constructors separate from ordinary package loaders', () => {
@@ -982,6 +939,5 @@ function testRuntimePluginConfigLocation(): ReturnType<
   return runtimeLocationForTest({
     storeRoot: '/tmp/project02-config-binding-home',
     characterId: 'mira',
-    env: {},
   });
 }

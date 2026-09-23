@@ -55,7 +55,6 @@ function heldAdapter(): {
 function gatewayOver(homeRoot: string, adapter: RoleModelAdapter) {
   return createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: adapter,
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });
@@ -98,7 +97,7 @@ describe('gateway server lifecycle', () => {
     );
 
     expect(health.status).toBe(200);
-    await expect(health.json()).resolves.toMatchObject({protocolVersion: 2});
+    await expect(health.json()).resolves.toMatchObject({protocolVersion: 3});
 
     await server.close();
     await new Promise<void>(resolve => {

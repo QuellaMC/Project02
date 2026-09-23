@@ -157,7 +157,7 @@ const controlChildPrelude = [
   "} = await import('./src/runtime/config/index.ts');",
   'const storeRoot = process.argv[1];',
   'const { configLocation } = loadProject02RuntimeConfigWithLocation({',
-  "  selection: { storeRoot, character: 'mira' }, env: {},",
+  "  selection: { storeRoot, character: 'mira' },",
   '});',
   'const runtimeLocation = bindProject02CharacterRuntimeLocation({',
   "  configLocation, characterId: 'mira',",
@@ -168,7 +168,7 @@ const controlChildPrelude = [
 const globalExpectationMutationScript = [
   controlChildPrelude,
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  runtimeLocation, env: {}, scope: 'global',",
+  "  runtimeLocation, scope: 'global',",
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
@@ -185,7 +185,7 @@ const globalExpectationMutationScript = [
 const characterMutationScript = [
   controlChildPrelude,
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  runtimeLocation, env: {}, scope: 'character',",
+  "  runtimeLocation, scope: 'character',",
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
@@ -202,7 +202,7 @@ const barrieredGlobalExpectationMutationScript = [
   controlChildPrelude,
   'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  runtimeLocation, env: {}, scope: 'global',",
+  "  runtimeLocation, scope: 'global',",
   '});',
   'try {',
   '  applyRuntimeConfigControlOperation({',
@@ -225,7 +225,7 @@ const barrieredCharacterMutationScript = [
   controlChildPrelude,
   'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  runtimeLocation, env: {}, scope: 'character',",
+  "  runtimeLocation, scope: 'character',",
   '});',
   'applyRuntimeConfigControlOperation({',
   'pluginManifests: [],',
@@ -265,7 +265,7 @@ async function createLayeredHome(): Promise<{
   const homeRoot = realpathSync(root);
 
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    project02: {storeRoot: homeRoot},
+    project02: {},
   });
   await ensureCharacterDataDir({homeRoot, characterId: 'mira'});
 
@@ -274,9 +274,7 @@ async function createLayeredHome(): Promise<{
   const seeded = applyRuntimeConfigControlOperation({
     pluginManifests: [],
     target: resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     }),
     request: {

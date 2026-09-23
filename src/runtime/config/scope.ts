@@ -25,7 +25,6 @@ import {
   type ResolvedRuntimeConfigScopeTarget,
 } from './location.ts';
 import {
-  assertOverlayLocatedCandidateStaysCharacterScoped,
   prepareRuntimeConfigMutationCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
@@ -34,15 +33,10 @@ import {
 } from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterSecretsEnv,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
+import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
-  mergeCharacterOverlayDocument,
-  runtimeConfigEnvWithCharacterSecrets,
-} from './resolve-layered.ts';
-import {
-  characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
@@ -136,7 +130,6 @@ export function applyRuntimeConfigControlOperation(options: {
     ...(options.lockWaitTimeoutMs === undefined
       ? {}
       : {lockWaitTimeoutMs: options.lockWaitTimeoutMs}),
-    secretMutation: mutation.operation?.kind === 'secret_set',
     prepare: snapshot =>
       prepareScopedRuntimeConfigControlCandidate({
         target,
@@ -308,9 +301,7 @@ function normalizedControlMutation(
       operation: {kind: 'activation'},
     });
 
-    // Clearing is how a document that already decides an activation this
-    // scope may not decide gets repaired; deciding it stays refused.
-    if (violation !== undefined && request.enabled !== undefined) {
+    if (violation !== undefined) {
       throw new RuntimeConfigMutationError(violation.message);
     }
 
@@ -330,25 +321,7 @@ function normalizedControlMutation(
     actor: request.actor,
     operation: request.fieldOperation,
     authoredScope: target.scope,
-    env: runtimeConfigControlEnv(target),
   });
-}
-
-/**
- * What the target's scope resolves with. A character's own secrets ride
- * over the shared env, as they do when that character runs; a global
- * value resolves globally, never through one character's secrets.
- */
-function runtimeConfigControlEnv(
-  target: ResolvedRuntimeConfigScopeTarget,
-): NodeJS.ProcessEnv {
-  return target.scope === 'character'
-    ? runtimeConfigEnvWithCharacterSecrets(
-        target.env,
-        loadCharacterSecretsEnv(target.runtimeLocation.characterScope.dataRoot)
-          .env,
-      )
-    : target.env;
 }
 
 /** Rejects before any ensure step materializes a marker or data directory. */
@@ -367,12 +340,6 @@ export function assertScopedMutationOperationAllowed(
     throw new RuntimeConfigMutationError(
       `Unsupported runtime config path: ${operation.path}.`,
     );
-  }
-
-  const scopeViolation = characterRuntimeConfigFieldScopeViolation(field);
-
-  if (scopeViolation !== undefined) {
-    throw new RuntimeConfigMutationError(scopeViolation);
   }
 
   if (
@@ -423,7 +390,6 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
 
   const overlay = requiredCharacterOverlay(options.snapshot);
 
-  // Never the global bootstrap: it would seed a store root into the overlay.
   const overlayBase =
     overlay.authoredDocument ??
     Object.freeze({
@@ -443,7 +409,6 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
     },
     ...(options.operation === undefined ? {} : {operation: options.operation}),
     validateCandidate: candidate => {
-      assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
       const globalConfig = options.snapshot.validatedGlobalConfig;
 
       if (globalConfig === undefined) {

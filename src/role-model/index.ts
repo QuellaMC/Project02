@@ -133,23 +133,15 @@ export {
 export {
   createNvidiaRoleModelProviderAdapter,
   type CreateNvidiaRoleModelProviderAdapterOptions,
-  createNvidiaRoleModelProviderConfigFromEnv,
   defaultNvidiaRoleModelReasoningBudget,
   defaultNvidiaRoleModelRequestTimeoutMs,
-  nvidiaApiKeyEnvName,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
-  nvidiaModelEnvName,
   nvidiaRoleModelProviderCapabilities,
   type NvidiaRoleModelProviderConfig,
 } from './providers/nvidia.ts';
 export {
-  createSelectedRoleModelAdapter,
-  parseProviderName,
-  providerOption,
-  roleModelEnvironment,
-  RoleModelProviderSelectionError,
-  selectChatProvider,
-  type ChatProviderName,
+  createRoleModelProviderAdapter,
+  type RoleModelProviderSettings,
 } from './providers/select.ts';
 export * from './api/index.ts';

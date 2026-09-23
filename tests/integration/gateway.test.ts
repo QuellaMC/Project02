@@ -90,7 +90,6 @@ async function createRotatedChat(texts: readonly string[]) {
 
   const gateway = createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: replyAdapter(),
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });
@@ -144,7 +143,6 @@ describe('gateway façade', () => {
     });
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: adapter,
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -194,7 +192,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -218,7 +215,7 @@ describe('gateway façade', () => {
       project02: {enabled: false},
     });
 
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     await gateway.startCharacter('mira');
 
@@ -231,7 +228,7 @@ describe('gateway façade', () => {
 
   it('refuses an unknown character before creating a runtime', async () => {
     const homeRoot = await createGatewayHome();
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     const outcome = await gateway.startCharacter('ghost');
 
@@ -244,36 +241,6 @@ describe('gateway façade', () => {
     );
   });
 
-  it('keeps the bound home when the document redirects its store', async () => {
-    const homeA = await createGatewayHome();
-    const homeB = join(
-      createTestTempRoot('project02-gateway-redirect-'),
-      'other',
-    );
-
-    await ensureInitializedProject02Store({homeRoot: homeB});
-    writeTestCharacterPackage(homeB, {id: 'zeta', displayName: 'Zeta'});
-
-    const configPath = join(homeA, 'config.json');
-
-    writeRuntimeConfig(configPath, {project02: {storeRoot: homeA}});
-
-    const gateway = createGateway({location: {configPath}, env: {}});
-
-    expect(gateway.health().characters.map(character => character.id)).toEqual([
-      'mira',
-    ]);
-
-    // Another window redirects the document's store; the running gateway
-    // keeps the home it bound.
-    writeRuntimeConfig(configPath, {project02: {storeRoot: homeB}});
-
-    expect(gateway.health().characters.map(character => character.id)).toEqual([
-      'mira',
-    ]);
-    await gateway.stop();
-  });
-
   it('reloads the global config for an explicit retry', async () => {
     const homeRoot = await createGatewayHome();
 
@@ -283,7 +250,6 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -307,7 +273,6 @@ describe('gateway façade', () => {
     const dataRoot = dirname(characterDataDirPath(homeRoot, 'mira'));
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -336,7 +301,6 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -375,7 +339,7 @@ describe('gateway façade', () => {
       'utf8',
     );
 
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     const outcome = await gateway.startCharacter('broken');
 
@@ -392,7 +356,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -438,7 +401,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -517,7 +479,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -563,7 +524,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -598,7 +558,7 @@ describe('gateway façade', () => {
 
   it('refuses a conversation it never attached', async () => {
     const homeRoot = await createGatewayHome();
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     await expect(
       gateway.deliver({
@@ -618,7 +578,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -669,7 +628,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -688,7 +646,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gatewayOptions = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -716,7 +673,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -752,7 +708,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -777,7 +732,7 @@ describe('gateway façade', () => {
     });
 
     const events: GatewayEvent[] = [];
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     gateway.events(event => events.push(event));
     await gateway.startCharacter('mira');
@@ -810,7 +765,6 @@ describe('gateway façade', () => {
 
     const health = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
     }).health();
 
     expect(health.protocolVersion).toBe(gatewayProtocolVersion);
@@ -827,7 +781,7 @@ describe('gateway façade', () => {
 
   it('tells an installed but unstarted character apart from an unknown one', async () => {
     const homeRoot = await createGatewayHome();
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
 
     await expect(gateway.openDirectConversation('mira')).resolves.toMatchObject(
       {status: 'refused', reason: 'character_unavailable'},
@@ -848,7 +802,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const options = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -881,7 +834,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -908,7 +860,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -948,7 +899,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -979,7 +929,6 @@ describe('gateway façade', () => {
     });
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: adapter,
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1026,7 +975,6 @@ describe('gateway façade', () => {
 
     const restarted = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: adapter,
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1089,7 +1037,6 @@ describe('gateway façade', () => {
       createLocalRuntimeSessionPaths({storeRoot, sessionId}).rawEventsPath;
     const options = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -1161,7 +1108,6 @@ describe('gateway façade', () => {
 
     const options = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -1324,7 +1270,6 @@ describe('gateway façade', () => {
 
     const options = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -1507,7 +1452,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: {invoke: () => ({rawOutputText: 'not json at all'})},
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1556,7 +1500,6 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1788,7 +1731,6 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1811,39 +1753,57 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('reconcile stops a character disabled since it started and starts it again once enabled', async () => {
+  it('stops a character switched off through the change verb, keeps its settings readable, and starts it again once switched on', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
+    const mira = {scope: 'character', characterId: 'mira'} as const;
+    const setEnabled = async (enabled: boolean): Promise<void> => {
+      const view = gateway.configView(mira);
+
+      if (view.status !== 'ok') {
+        expect.fail(view.message);
+      }
+
+      await expect(
+        gateway.applyConfigChange({
+          target: mira,
+          expectedFingerprint: view.fingerprint,
+          operation: {kind: 'set', path: 'project02.enabled', value: enabled},
+        }),
+      ).resolves.toMatchObject({status: 'applied'});
+    };
 
     await gateway.reconcile();
+    expect(gateway.health().characters[0]?.state).toBe('ready');
 
-    const overlay = join(characterDataDirPath(homeRoot, 'mira'), 'config.json');
-
-    writeRuntimeConfig(overlay, {project02: {enabled: false}});
-    await expect(gateway.reconcile()).resolves.toEqual({
-      starting: [],
-      stopping: ['mira'],
-      reloading: [],
-    });
-    expect(gateway.health().characters[0]).toMatchObject({
-      enabled: false,
-      state: 'stopped',
+    await setEnabled(false);
+    await vi.waitFor(() => {
+      expect(gateway.health().characters[0]).toMatchObject({
+        enabled: false,
+        state: 'stopped',
+      });
     });
 
-    writeRuntimeConfig(overlay, {});
-    await expect(gateway.reconcile()).resolves.toEqual({
-      starting: ['mira'],
-      stopping: [],
-      reloading: [],
-    });
-    expect(gateway.health().characters[0]).toMatchObject({
-      enabled: true,
-      state: 'ready',
+    // Off is a setting, not a lockout: the page still reads the character
+    // and the same field is the way back on.
+    const off = gateway.configView(mira);
+
+    expect(off.status).toBe('ok');
+    expect(
+      off.status === 'ok' &&
+        off.project02.find(field => field.name === 'enabled'),
+    ).toMatchObject({authored: {configured: true, value: false}});
+
+    await setEnabled(true);
+    await vi.waitFor(() => {
+      expect(gateway.health().characters[0]).toMatchObject({
+        enabled: true,
+        state: 'ready',
+      });
     });
     await gateway.stop();
   });
@@ -1857,7 +1817,6 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1879,7 +1838,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -1969,7 +1927,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -2006,46 +1963,49 @@ describe('gateway façade', () => {
       project02: {userDisplayName: 'Global Name'},
     });
 
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
     const global = gateway.configView({scope: 'global'});
 
     if (global.status !== 'ok') {
       expect.fail(global.message);
     }
 
+    // The page renders in this order: what a person decides first, first;
+    // the knobs after; the switch last.
     expect(global.project02.map(field => field.name)).toEqual([
+      'userDisplayName',
+      'roleModelProvider',
+      'nvidiaApiKey',
+      'nvidiaModel',
+      'contextWindowTokens',
       'defaultMemoryProvider',
       'enabled',
-      'roleModelProvider',
-      'userDisplayName',
-      'contextWindowTokens',
     ]);
     expect(
       global.project02.find(field => field.name === 'userDisplayName'),
     ).toMatchObject({
       authored: {configured: true, value: 'Global Name'},
       effectiveSource: 'global',
-      editableInScope: true,
     });
     expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
       'demo-config',
     );
-    // A provider chosen in the environment wins over either document, and
-    // the view says so rather than reporting the document's value.
-    const overridden = createGateway({
-      location: {storeRoot: homeRoot},
-      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'},
-    }).configView({scope: 'global'});
-
-    expect(
-      overridden.status === 'ok' &&
-        overridden.project02.find(field => field.name === 'roleModelProvider')
-          ?.effective,
-    ).toMatchObject({
-      source: 'env:PROJECT02_ROLE_MODEL_PROVIDER',
-      value: 'nvidia',
-    });
-
+    // A plugin that belongs to a character is not the home's to show or
+    // to change.
+    expect(global.plugins.map(plugin => plugin.pluginId)).not.toContain(
+      'character-state',
+    );
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: global.fingerprint,
+        operation: {
+          kind: 'plugin_enabled',
+          pluginId: 'character-state',
+          enabled: true,
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
     const character = gateway.configView({
       scope: 'character',
       characterId: 'mira',
@@ -2116,16 +2076,6 @@ describe('gateway façade', () => {
       'invalid_descriptor',
     );
 
-    // A document that now names another home describes a daemon that is
-    // not this one.
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {storeRoot: join(homeRoot, '..', 'elsewhere')},
-    });
-    expect(gateway.configView({scope: 'global'})).toMatchObject({
-      status: 'refused',
-      reason: 'config_unloadable',
-    });
-
     writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
     expect(gateway.configView({scope: 'global'})).toMatchObject({
       status: 'refused',
@@ -2137,7 +2087,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -2205,7 +2154,7 @@ describe('gateway façade', () => {
 
   it('refuses a change the seam will not take, and fails one it cannot write', async () => {
     const homeRoot = await createGatewayHome();
-    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
     const view = gateway.configView({scope: 'global'});
 
     if (view.status !== 'ok') {
@@ -2237,26 +2186,6 @@ describe('gateway façade', () => {
         value: 1,
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
-    // A secret whose variable the daemon was launched with — even empty —
-    // would be written to a file the launch env shadows.
-    const shadowed = await createGateway({
-      location: {storeRoot: homeRoot},
-      env: {DEMO_CONFIG_TONE: ''},
-    }).applyConfigChange({
-      target: {scope: 'global'},
-      expectedFingerprint: view.fingerprint,
-      operation: {
-        kind: 'plugin_secret_set',
-        pluginId: 'demo-config',
-        field: 'tone',
-        value: 'secret',
-      },
-    });
-
-    expect(shadowed).toMatchObject({status: 'refused', reason: 'invalid'});
-    expect(shadowed.status === 'refused' && shadowed.message).toContain(
-      'DEMO_CONFIG_TONE',
-    );
     await expect(
       gateway.applyConfigChange({
         target: {scope: 'character', characterId: 'nobody'},
@@ -2313,7 +2242,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const options = {
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     };
@@ -2380,7 +2308,6 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
-      env: {},
       roleModelAdapter: replyAdapter(),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });

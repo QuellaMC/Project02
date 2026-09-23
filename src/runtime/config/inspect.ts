@@ -12,10 +12,6 @@ import type {
 } from './types.ts';
 import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
-import {
-  runtimePluginScopeViolation,
-  type RuntimePluginScopeOperation,
-} from './plugin-scope.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
@@ -31,7 +27,12 @@ export function createRuntimeConfigInspectShape(
   return Object.freeze({
     source: resolvedConfig.source,
     ...(resolvedConfig.path === undefined ? {} : {path: resolvedConfig.path}),
-    project02: resolvedConfig.project02,
+    project02: Object.freeze({
+      ...resolvedConfig.project02,
+      ...(resolvedConfig.project02.nvidiaApiKey === undefined
+        ? {}
+        : {nvidiaApiKey: '[redacted]'}),
+    }),
     diagnostics: Object.freeze([...resolvedConfig.diagnostics]),
     fingerprint: resolvedConfig.effectiveConfigFingerprint,
   } satisfies RuntimeConfigInspectShape);
@@ -89,16 +90,13 @@ export function createRuntimePluginConfigInspectShape(options: {
         }),
     ),
   );
-  const activation = Object.freeze({
-    ...runtimePluginConfigActivationInspection({
-      configuredEnabled,
-      diagnostics,
-      manifest: options.manifest,
-      ...(options.activation === undefined
-        ? {}
-        : {activation: options.activation}),
-    }),
-    editableInScope: scopeAllowsAuthoring(options, {kind: 'activation'}),
+  const activation = runtimePluginConfigActivationInspection({
+    configuredEnabled,
+    diagnostics,
+    manifest: options.manifest,
+    ...(options.activation === undefined
+      ? {}
+      : {activation: options.activation}),
   });
 
   return Object.freeze({
@@ -136,12 +134,6 @@ export function createRuntimePluginConfigInspectShape(options: {
             ? {}
             : {allowedValues: Object.freeze([...field.allowedValues])}),
           agentMutable: field.agentMutable === true && !field.secret,
-          // Asked of the one rule that decides it, so an offered setting
-          // and an accepted save can never disagree.
-          editableInScope: scopeAllowsAuthoring(options, {
-            kind: 'field',
-            fieldName: field.name,
-          }),
           reloadRequired: field.reloadRequired !== false,
           authored: Object.freeze({
             configured: authoredValue !== undefined,
@@ -178,8 +170,6 @@ export function createRuntimePluginConfigInspectShape(options: {
 export function createProject02ConfigFieldInspectShapes(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-  /** What the scope resolves with; a field's declared env var wins in it. */
-  readonly env: NodeJS.ProcessEnv;
 }): readonly RuntimePluginConfigFieldInspectShape[] {
   const {globalConfig, characterConfig} = options.layeredConfig;
   const targetConfig =
@@ -199,12 +189,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
         globalConfig,
         field.path,
       );
-      const envValue =
-        field.envVar === undefined ? undefined : options.env[field.envVar];
-      const overriddenByEnv = envValue !== undefined && envValue.length > 0;
-      const effectiveValue = overriddenByEnv
-        ? envValue
-        : (characterValue ?? globalValue);
+      const effectiveValue = characterValue ?? globalValue;
 
       return Object.freeze({
         name: field.name,
@@ -219,7 +204,6 @@ export function createProject02ConfigFieldInspectShapes(options: {
           ? {}
           : {allowedValues: Object.freeze([...field.allowedValues])}),
         agentMutable: field.agentMutable,
-        editableInScope: field.scopes.includes(options.targetScope),
         reloadRequired: field.reloadRequired,
         authored: Object.freeze({
           configured: authoredValue !== undefined,
@@ -233,12 +217,8 @@ export function createProject02ConfigFieldInspectShapes(options: {
               : 'default',
         effective: Object.freeze({
           name: field.name,
-          secret: false,
-          source: overriddenByEnv
-            ? (`env:${field.envVar ?? ''}` as const)
-            : effectiveValue === undefined
-              ? 'missing'
-              : 'config',
+          secret: field.secret,
+          source: effectiveValue === undefined ? 'missing' : 'config',
           resolved: true,
           ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
         }),
@@ -279,26 +259,6 @@ function authoredPluginConfigField(
   return ownJsonRecordValue(
     ownJsonRecordValue(config?.plugins, pluginId)?.config,
     fieldName,
-  );
-}
-
-/**
- * Asks the one rule that decides authoring, so an offered setting and an
- * accepted save can never disagree.
- */
-function scopeAllowsAuthoring(
-  options: {
-    readonly manifest: RuntimePluginManifest;
-    readonly targetScope: RuntimeConfigFieldScope;
-  },
-  operation: RuntimePluginScopeOperation,
-): boolean {
-  return (
-    runtimePluginScopeViolation({
-      manifest: options.manifest,
-      authoredScope: options.targetScope,
-      operation,
-    }) === undefined
   );
 }
 

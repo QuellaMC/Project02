@@ -31,7 +31,6 @@ function replyAdapter(text = 'a reply'): RoleModelAdapter {
 async function startServer() {
   const gateway = createGateway({
     location: {storeRoot: await createGatewayTestHome()},
-    env: {},
     roleModelAdapter: replyAdapter(),
     createPluginHost: () => createRuntimePluginHost({plugins: []}),
   });
@@ -52,7 +51,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 2});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 3});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},

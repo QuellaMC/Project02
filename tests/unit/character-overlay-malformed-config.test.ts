@@ -24,7 +24,7 @@ function storeWithAuthoredPluginConfig(config: unknown): string {
 
   writeFileSync(
     join(storeRoot, 'config.json'),
-    `${JSON.stringify({version: runtimeConfigVersion, project02: {storeRoot}})}\n`,
+    `${JSON.stringify({version: runtimeConfigVersion, project02: {}})}\n`,
     'utf8',
   );
   mkdirSync(dataRoot, {recursive: true});
@@ -49,7 +49,6 @@ function simulateMaterialization(storeRoot: string) {
     pluginManifests: [],
     target: resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({storeRoot, characterId}),
-      env: {},
       scope: 'character',
     }),
     characterMaterialization: {

@@ -1,10 +1,9 @@
-import {existsSync, readFileSync, readdirSync} from 'node:fs';
+import {existsSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
 
 import {describe, expect, it, onTestFinished, vi} from 'vitest';
 
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {runServeCliFromArgs} from '../../src/cli/serve/main.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
@@ -49,212 +48,112 @@ function closedInteractiveStdin(): NodeJS.ReadableStream {
   return stdin;
 }
 
+/** Serve on the given root; `stop` ends a run that got past the gate. */
+function serve(
+  storeRoot: string,
+  args: readonly string[],
+  stdin: NodeJS.ReadableStream,
+) {
+  const abort = new AbortController();
+  let stdout = '';
+  let stderr = '';
+  const exit = runServeCliFromArgs(['--store', storeRoot, ...args], {
+    stdin,
+    stdout: collect(chunk => {
+      stdout += chunk;
+    }),
+    stderr: collect(chunk => {
+      stderr += chunk;
+    }),
+    pluginHost: createRuntimePluginHost({plugins: []}),
+    signal: abort.signal,
+    port: 0,
+  });
+
+  return {
+    exit,
+    stdout: () => stdout,
+    stderr: () => stderr,
+    stop: () => {
+      abort.abort();
+
+      return exit;
+    },
+  };
+}
+
 describe('store consent gate', () => {
   it('refuses to create a store for a run nobody can be asked about', async () => {
     const storeRoot = createTestTempRoot('project02-consent-non-interactive-');
-    let stderr = '';
+    const run = serve(storeRoot, [], pipedStdin());
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
-    expect(stderr).toContain('Re-run with --init');
+    await expect(run.exit).resolves.toBe(1);
+    expect(run.stderr()).toContain(`No Project02 store at "${storeRoot}"`);
+    expect(run.stderr()).toContain('Re-run with --init');
     expect(readdirSync(storeRoot)).toEqual([]);
+    expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
   });
 
-  it('creates the whole store and runs the command when --init says yes', async () => {
+  it('creates the whole store and serves it when --init says yes', async () => {
     const storeRoot = createTestTempRoot('project02-consent-init-flag-');
-    let stdout = '';
-    let stderr = '';
+    const run = serve(storeRoot, ['--init'], pipedStdin());
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, '--init', 'check'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
+    await vi.waitFor(() => {
+      expect(run.stdout()).toContain('Gateway listening on port');
+    });
+    expect(run.stdout()).not.toContain('Create one there?');
+    expect(readdirSync(storeRoot)).toEqual(
+      expect.arrayContaining([...initializedStoreEntries]),
     );
-
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain('"runtimeConfig"');
-    expect(readdirSync(storeRoot).sort()).toEqual(initializedStoreEntries);
-    expect(
-      JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')),
-    ).toMatchObject({project02: {storeRoot}});
+    await expect(run.stop()).resolves.toBe(0);
   });
 
-  it('creates the store and continues into the command the operator typed', async () => {
+  it('creates the store and continues into the run when the operator says yes', async () => {
     const storeRoot = createTestTempRoot('project02-consent-accepted-');
-    let stdout = '';
-    let stderr = '';
+    const run = serve(storeRoot, [], interactiveStdin('y\n'));
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdin: interactiveStdin('y\n'),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
-    // Saying yes runs `check` rather than ending the run.
-    expect(stdout).toContain(
+    await vi.waitFor(() => {
+      expect(run.stdout()).toContain('Gateway listening on port');
+    });
+    expect(run.stdout()).toContain(
       `No Project02 store at "${storeRoot}". Create one there? [y/N]`,
     );
-    expect(stdout).toContain('"runtimeConfig"');
-    expect(readdirSync(storeRoot).sort()).toEqual(initializedStoreEntries);
+    expect(readdirSync(storeRoot)).toEqual(
+      expect.arrayContaining([...initializedStoreEntries]),
+    );
+    await expect(run.stop()).resolves.toBe(0);
   });
 
   it('leaves the directory alone when the operator declines', async () => {
     const storeRoot = createTestTempRoot('project02-consent-declined-');
-    let stdout = '';
-    let stderr = '';
+    const run = serve(storeRoot, [], interactiveStdin('n\n'));
 
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdin: interactiveStdin('n\n'),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stdout).toContain('Create one there? [y/N]');
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
+    await expect(run.exit).resolves.toBe(1);
+    expect(run.stdout()).toContain('Create one there? [y/N]');
+    expect(run.stderr()).toContain(`No Project02 store at "${storeRoot}"`);
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 
   it('treats a prompt that never gets an answer as a refusal', async () => {
     const storeRoot = createTestTempRoot('project02-consent-unanswered-');
-    let stderr = '';
-
     // A terminal that goes away mid-question is silence.
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdin: closedInteractiveStdin(),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
+    const run = serve(storeRoot, [], closedInteractiveStdin());
 
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
+    await expect(run.exit).resolves.toBe(1);
+    expect(run.stderr()).toContain(`No Project02 store at "${storeRoot}"`);
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 
-  it('leaves a read verb ungated', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-read-verb-');
-    let stdout = '';
-    let stderr = '';
+  it('lets a stop reach the consent question, and takes it as a no', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-serve-stop-');
+    const run = serve(storeRoot, [], interactiveStdin());
 
-    // `path` asks where a store would live, so it answers for an absent one.
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'path'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe(`${join(storeRoot, 'config.json')}\n`);
-    expect(readdirSync(storeRoot)).toEqual([]);
-  });
-
-  it('asks before a global write that would stand the store up', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-global-set-');
-    let stderr = '';
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'set', 'project02.roleModelProvider', 'local'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
-    expect(readdirSync(storeRoot)).toEqual([]);
-  });
-
-  it('writes a standalone config without offering to create a store', async () => {
-    const configRoot = createTestTempRoot('project02-consent-standalone-');
-    const configPath = join(configRoot, 'runtime.json');
-    let stdout = '';
-    let stderr = '';
-
-    // An explicit --config names a document, not a home.
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--config', configPath, 'set', 'project02.roleModelProvider', 'local'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(stderr).toBe('');
-    expect(exitCode).toBe(0);
-    expect(stdout).not.toContain('Create one there?');
-    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
-      project02: {roleModelProvider: 'local'},
+    await vi.waitFor(() => {
+      expect(run.stdout()).toContain('Create one there? [y/N]');
     });
-    // The write takes a lock beside the document, so a `.locks` root is
-    // expected here and is not a store.
-    expect(existsSync(join(configRoot, 'schema.json'))).toBe(false);
-    expect(existsSync(join(configRoot, 'character-data'))).toBe(false);
-    expect(existsSync(join(configRoot, 'config.json'))).toBe(false);
+    await expect(run.stop()).resolves.toBe(1);
+    expect(run.stderr()).toContain(`No Project02 store at "${storeRoot}"`);
+    expect(readdirSync(storeRoot)).toEqual([]);
   });
 
   it('reports on a store that does not exist without creating one', async () => {
@@ -271,7 +170,6 @@ describe('store consent gate', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
@@ -294,63 +192,11 @@ describe('store consent gate', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        env: {},
       },
     );
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('--init does not apply');
-    expect(readdirSync(storeRoot)).toEqual([]);
-  });
-
-  it('refuses to serve before it materializes any character state', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-serve-');
-    let stderr = '';
-
-    const exitCode = await runServeCliFromArgs(['--store', storeRoot], {
-      stdin: pipedStdin(),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      env: {},
-      pluginHost: createRuntimePluginHost({plugins: []}),
-      signal: new AbortController().signal,
-      port: 0,
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
-    expect(readdirSync(storeRoot)).toEqual([]);
-    expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
-  });
-
-  it('lets a stop reach serve at the consent question, and takes it as a no', async () => {
-    const storeRoot = createTestTempRoot('project02-consent-serve-stop-');
-    const abort = new AbortController();
-    let stdout = '';
-    let stderr = '';
-
-    const run = runServeCliFromArgs(['--store', storeRoot], {
-      stdin: interactiveStdin(),
-      stdout: collect(chunk => {
-        stdout += chunk;
-      }),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      env: {},
-      pluginHost: createRuntimePluginHost({plugins: []}),
-      signal: abort.signal,
-      port: 0,
-    });
-
-    await vi.waitFor(() => {
-      expect(stdout).toContain('Create one there? [y/N]');
-    });
-    abort.abort();
-    await expect(run).resolves.toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 });

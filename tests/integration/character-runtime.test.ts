@@ -14,10 +14,7 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
-import {
-  characterDataDirPath,
-  createProject02HomeLayout,
-} from '../../src/runtime/storage/index.ts';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
 import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -70,7 +67,7 @@ async function createConsentedHome(): Promise<{
 
   return {
     homeRoot,
-    home: loadProject02Home({location: {storeRoot: homeRoot}, env: {}}),
+    home: loadProject02Home({location: {storeRoot: homeRoot}}),
   };
 }
 
@@ -311,14 +308,14 @@ describe('local character runtime', () => {
     await runtime.stop();
   });
 
-  it('turns an invalid provider env into a failed boot before any character state exists', async () => {
+  it('turns an invalid provider setting into a failed boot before any character state exists', async () => {
     const {homeRoot} = await createConsentedHome();
-    const home = loadProject02Home({
-      location: {storeRoot: homeRoot},
-      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'bogus'},
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {roleModelProvider: 'bogus'},
     });
     const runtime = createLocalCharacterRuntime({
-      loadHome: () => home,
+      loadHome: () => loadProject02Home({location: {storeRoot: homeRoot}}),
       characterId: 'mira',
     });
 
@@ -548,7 +545,7 @@ describe('local character runtime', () => {
     await runtime.stop();
   });
 
-  it('counts an upgraded plugin package and a changed home env as drift', async () => {
+  it('counts an upgraded plugin package and a re-keyed provider secret as drift', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-'), 'home');
     const manifest = {
       ...firstPartyPlugin('operator.versioned').manifest,
@@ -578,9 +575,8 @@ describe('local character runtime', () => {
       plugins: {[manifest.id]: {enabled: true}},
     });
 
-    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
     const runtime = createLocalCharacterRuntime({
-      loadHome: () => home,
+      loadHome: () => loadProject02Home({location: {storeRoot: homeRoot}}),
       characterId: 'mira',
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
       roleModelAdapter: replyAdapter(),
@@ -596,13 +592,11 @@ describe('local character runtime', () => {
     writePackage('1.0.0');
     expect(runtime.assemblyDrifted()).toBe(false);
 
-    // Only what the provider reads counts; a secret for something else
-    // in the home env is not a reason to rebuild.
-    const envPath = createProject02HomeLayout({homeRoot}).envPath;
-
-    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\n');
-    expect(runtime.assemblyDrifted()).toBe(false);
-    writeFileSync(envPath, 'SOME_PLUGIN_TOKEN=set\nNVIDIA_API_KEY=rotated\n');
+    // The provider's key shapes the character: a re-keyed secret rebuilds it.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {nvidiaApiKey: 'rotated'},
+      plugins: {[manifest.id]: {enabled: true}},
+    });
     expect(runtime.assemblyDrifted()).toBe(true);
     await runtime.stop();
   });

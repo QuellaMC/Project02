@@ -1,11 +1,8 @@
-import {readFileSync, realpathSync, statSync, symlinkSync} from 'node:fs';
+import {realpathSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {
-  characterDataDirPath,
-  createProject02HomeLayout,
-} from '../../src/runtime/storage/index.ts';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation,
@@ -13,8 +10,6 @@ import {
 import {
   characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
-  roleModelProviderEnvVarName,
-  runtimeConfigEnvVarName,
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -25,22 +20,17 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
+  checkRuntimeConfigForTest,
   writeRuntimeConfig,
-  runtimeLocationForTest,
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
-import {collect} from '../support/streams.ts';
 import {
   activationPluginById,
   initializeCharacterDataForHost,
-  initializeTestStore,
   memoryProviderPlugin,
   requiredDottedConfigPlugin,
-  requiredSecretPluginWithManifestEnvVar,
-  structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {
   nonHostScopedActivationPlugins,
@@ -118,178 +108,28 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('loads explicit config before env config', () => {
-    const root = createTestTempRoot('project02-config-precedence-');
-    const explicitPath = join(root, 'explicit.json');
-    const envPath = join(root, 'env.json');
-
-    writeRuntimeConfig(explicitPath, {storeRoot: 'explicit-store'});
-    writeRuntimeConfig(envPath, {storeRoot: 'env-store'});
-
-    const loaded = loadRuntimeConfigForTest({
-      configPath: explicitPath,
-      env: {
-        PROJECT02_RUNTIME_CONFIG: envPath,
-      },
-    });
-    const resolved = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-    });
-
-    expect(loaded.source).toBe('path');
-    expect(resolved.project02.storeRoot).toBe(
-      join(process.cwd(), 'explicit-store'),
-    );
-  });
-
   it('includes plugin enablement in the effective config fingerprint', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-plugin-fingerprint-',
     );
-    const withoutPluginPath = writeRuntimeConfig(
-      join(storeRoot, 'without.json'),
-      {},
-    );
-    const withEnabledPluginPath = writeRuntimeConfig(
-      join(storeRoot, 'with.json'),
-      {
-        plugins: {
-          memory: {
-            enabled: true,
-          },
-        },
-      },
-    );
-    const withoutPlugin = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({
-          configPath: withoutPluginPath,
+    const configPath = join(storeRoot, 'config.json');
+    const resolveFrom = () =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({configPath}),
+          configPath,
         }),
-        configPath: withoutPluginPath,
-        storeRoot: storeRoot,
-      }),
-    });
-    const withEnabledPlugin = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({
-          configPath: withEnabledPluginPath,
-        }),
-        configPath: withEnabledPluginPath,
-        storeRoot: storeRoot,
-      }),
-    });
+      });
+
+    writeRuntimeConfig(configPath, {});
+    const withoutPlugin = resolveFrom();
+
+    writeRuntimeConfig(configPath, {plugins: {memory: {enabled: true}}});
+    const withEnabledPlugin = resolveFrom();
 
     expect(withEnabledPlugin.effectiveConfigFingerprint).not.toBe(
       withoutPlugin.effectiveConfigFingerprint,
     );
-  });
-
-  it('loads explicit store default config before env config', () => {
-    const selectedStoreRoot = createTestTempRoot(
-      'project02-config-store-precedence-',
-    );
-    const envStoreRoot = createTestTempRoot('project02-config-env-store-');
-    const selectedPath = createProject02HomeLayout({
-      homeRoot: selectedStoreRoot,
-    }).configPath;
-    const envPath = join(envStoreRoot, 'env.json');
-
-    writeRuntimeConfig(selectedPath, {storeRoot: selectedStoreRoot});
-    writeRuntimeConfig(envPath, {storeRoot: envStoreRoot});
-
-    const loaded = loadRuntimeConfigForTest({
-      storeRoot: selectedStoreRoot,
-      env: {
-        [runtimeConfigEnvVarName]: envPath,
-      },
-    });
-    const resolved = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loaded,
-        storeRoot: selectedStoreRoot,
-      }),
-    });
-
-    expect(loaded).toMatchObject({
-      source: 'default',
-      path: selectedPath,
-    });
-    expect(resolved.project02.storeRoot).toBe(
-      realpathSync.native(selectedStoreRoot),
-    );
-  });
-
-  it('does not infer a home from an explicit or env-selected config filename', () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-store-default-infer-',
-    );
-    const defaultHomeRoot = join(process.cwd(), '.project02');
-    const configPath = createProject02HomeLayout({
-      homeRoot: storeRoot,
-    }).configPath;
-
-    writeRuntimeConfig(configPath, {});
-
-    const explicitLoaded = loadRuntimeConfigForTest({configPath});
-    const envLoaded = loadRuntimeConfigForTest({
-      env: {
-        [runtimeConfigEnvVarName]: configPath,
-      },
-    });
-
-    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
-    expect(
-      resolveProject02RuntimeConfig({
-        ...runtimeConfigSnapshotForTest({loadedConfig: explicitLoaded}),
-      }).project02.storeRoot,
-    ).toBe(defaultHomeRoot);
-    expect(
-      resolveProject02RuntimeConfig({
-        ...runtimeConfigSnapshotForTest({loadedConfig: envLoaded}),
-      }).project02.storeRoot,
-    ).toBe(defaultHomeRoot);
-  });
-
-  it('does not infer a home from a standalone config symlink target', () => {
-    const targetStoreRoot = createTestTempRoot(
-      'project02-config-store-default-link-target-',
-    );
-    const linkStoreRoot = createTestTempRoot(
-      'project02-config-store-default-link-selected-',
-    );
-    const defaultHomeRoot = join(process.cwd(), '.project02');
-    const targetConfigPath = createProject02HomeLayout({
-      homeRoot: targetStoreRoot,
-    }).configPath;
-    const linkConfigPath = createProject02HomeLayout({
-      homeRoot: linkStoreRoot,
-    }).configPath;
-
-    writeRuntimeConfig(targetConfigPath, {});
-    symlinkSync(targetConfigPath, linkConfigPath);
-
-    const explicitLoaded = loadRuntimeConfigForTest({
-      configPath: linkConfigPath,
-    });
-    const envLoaded = loadRuntimeConfigForTest({
-      env: {
-        [runtimeConfigEnvVarName]: linkConfigPath,
-      },
-    });
-
-    expect(explicitLoaded.config?.project02?.storeRoot).toBeUndefined();
-    expect(envLoaded.config?.project02?.storeRoot).toBeUndefined();
-    expect(
-      resolveProject02RuntimeConfig({
-        ...runtimeConfigSnapshotForTest({loadedConfig: explicitLoaded}),
-      }).project02.storeRoot,
-    ).toBe(defaultHomeRoot);
-    expect(
-      resolveProject02RuntimeConfig({
-        ...runtimeConfigSnapshotForTest({loadedConfig: envLoaded}),
-      }).project02.storeRoot,
-    ).toBe(defaultHomeRoot);
   });
 
   it('rejects unknown top-level config fields and blocks default activation', async () => {
@@ -299,7 +139,6 @@ describe('runtime config loading and resolution', () => {
       store_root: 'typo-store',
     });
     const loaded = loadRuntimeConfigForTest({configPath});
-    let stdout = '';
 
     expect(loaded.config).toBeUndefined();
     expect(loaded.diagnostics).toEqual([
@@ -330,19 +169,18 @@ describe('runtime config loading and resolution', () => {
       activationStatus: 'blocked',
     });
 
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, '--config', configPath, 'check'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(1);
-    expect(stdout).toContain('"runtime_config_unknown_top_level_field"');
-    expect(stdout).toContain('"store_root"');
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_top_level_field',
+          path: 'store_root',
+        }),
+      ]),
+    );
   });
 
   it('rejects unknown plugin wrapper fields and blocks that plugin activation', async () => {
@@ -358,7 +196,6 @@ describe('runtime config loading and resolution', () => {
       },
     });
     const loaded = loadRuntimeConfigForTest({configPath});
-    let stdout = '';
 
     expect(loaded.config).toBeUndefined();
     expect(loaded.diagnostics).toEqual([
@@ -401,19 +238,23 @@ describe('runtime config loading and resolution', () => {
       ]),
     );
 
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, '--config', configPath, 'check'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(1);
-    expect(stdout).toContain('"runtime_config_unknown_plugin_wrapper_field"');
-    expect(stdout).toContain('"activationStatus": "blocked"');
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_unknown_plugin_wrapper_field',
+        }),
+      ]),
+    );
+    expect(check.plugins).toContainEqual(
+      expect.objectContaining({
+        pluginId: 'character-state',
+        activationStatus: 'blocked',
+      }),
+    );
   });
 
   it('treats unknown plugin wrapper load errors as global activation blockers', async () => {
@@ -599,22 +440,8 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('redacts secret env refs and keeps fingerprints independent of env secret values', () => {
+  it('redacts an inline secret and keeps the fingerprint independent of its value', () => {
     const plugin = createCharacterStatePlugin();
-    const loaded = loadRuntimeConfigForTest({
-      configPath: writeRuntimeConfig(
-        join(createTestTempRoot('project02-config-secret-'), 'config.json'),
-        {
-          plugins: {
-            [plugin.manifest.id]: {
-              config: {
-                apiKey: {$env: 'PROJECT02_TEST_SECRET'},
-              },
-            },
-          },
-        },
-      ),
-    });
     const manifest = {
       ...plugin.manifest,
       config: {
@@ -631,32 +458,33 @@ describe('runtime config loading and resolution', () => {
         ],
       },
     };
-    const first = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loaded,
-        env: {PROJECT02_TEST_SECRET: 'first-secret'},
-      }),
+    const configPath = join(
+      createTestTempRoot('project02-config-secret-'),
+      'config.json',
+    );
+    const resolveWithSecret = (apiKey: string) =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({
+            configPath: writeRuntimeConfig(configPath, {
+              plugins: {[plugin.manifest.id]: {config: {apiKey}}},
+            }),
+          }),
+          configPath,
+        }),
+        pluginManifests: [manifest],
+      });
+    const first = resolveWithSecret('first-secret');
+    const second = resolveWithSecret('second-secret');
 
-      pluginManifests: [manifest],
-      env: {PROJECT02_TEST_SECRET: 'first-secret'},
-    });
-    const second = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loaded,
-        env: {PROJECT02_TEST_SECRET: 'second-secret'},
-      }),
-
-      pluginManifests: [manifest],
-      env: {PROJECT02_TEST_SECRET: 'second-secret'},
-    });
-
-    expect(
-      first.redactedPluginConfigs['character-state']?.['apiKey'],
-    ).toMatchObject({
-      value: '[redacted]',
-      source: 'env:PROJECT02_TEST_SECRET',
+    expect(first.pluginConfigs['character-state']?.['apiKey']).toMatchObject({
+      value: 'first-secret',
+      source: 'config',
       resolved: true,
     });
+    expect(
+      first.redactedPluginConfigs['character-state']?.['apiKey'],
+    ).toMatchObject({value: '[redacted]', source: 'config', resolved: true});
     expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
       'first-secret',
     );
@@ -668,65 +496,25 @@ describe('runtime config loading and resolution', () => {
 
   it('includes per-plugin enabled flags in effective fingerprints without leaking secrets', () => {
     const plugin = requiredSecretPlugin();
-    const enabledPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-enabled-fingerprint-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-            config: {
-              apiKey: {$env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET'},
-            },
-          },
-        },
-      },
+    const configPath = join(
+      createTestTempRoot('project02-config-enabled-fingerprint-'),
+      'config.json',
     );
-    const disabledPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-disabled-fingerprint-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: false,
-            config: {
-              apiKey: {$env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET'},
-            },
-          },
-        },
-      },
-    );
-    const enabledFirst = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: enabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-    });
-    const enabledSecond = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: enabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'second-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'second-secret'},
-    });
-    const disabled = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: disabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-    });
+    const resolveWith = (enabled: boolean, apiKey: string) =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({
+            configPath: writeRuntimeConfig(configPath, {
+              plugins: {[plugin.manifest.id]: {enabled, config: {apiKey}}},
+            }),
+          }),
+          configPath,
+        }),
+        pluginManifests: [plugin.manifest],
+      });
+    const enabledFirst = resolveWith(true, 'first-secret');
+    const enabledSecond = resolveWith(true, 'second-secret');
+    const disabled = resolveWith(false, 'first-secret');
 
     expect(enabledFirst.effectiveConfigFingerprint).toBe(
       enabledSecond.effectiveConfigFingerprint,
@@ -776,104 +564,35 @@ describe('runtime config loading and resolution', () => {
         ],
       },
     };
-    const first = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadRuntimeConfigForTest({
-          configPath: writeRuntimeConfig(
-            join(
-              createTestTempRoot('project02-config-credential-fields-a-'),
-              'runtime.json',
-            ),
-            {
+    const configPath = join(
+      createTestTempRoot('project02-config-credential-fields-'),
+      'config.json',
+    );
+    const resolveWith = (prefix: string) =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({
+            configPath: writeRuntimeConfig(configPath, {
               plugins: {
                 [plugin.manifest.id]: {
                   config: {
-                    apiKey: 'first-api-key',
-                    token: 'first-token',
+                    apiKey: `${prefix}-api-key`,
+                    token: `${prefix}-token`,
                     metadata: {
-                      access_token: 'first-nested-token',
+                      access_token: `${prefix}-nested-token`,
                       label: 'visible-label',
                     },
                   },
                 },
               },
-            },
-          ),
+            }),
+          }),
+          configPath,
         }),
-      }),
-      loadedConfig: loadRuntimeConfigForTest({
-        configPath: writeRuntimeConfig(
-          join(
-            createTestTempRoot('project02-config-credential-fields-a-'),
-            'runtime.json',
-          ),
-          {
-            plugins: {
-              [plugin.manifest.id]: {
-                config: {
-                  apiKey: 'first-api-key',
-                  token: 'first-token',
-                  metadata: {
-                    access_token: 'first-nested-token',
-                    label: 'visible-label',
-                  },
-                },
-              },
-            },
-          },
-        ),
-      }),
-      pluginManifests: [manifest],
-    });
-    const second = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadRuntimeConfigForTest({
-          configPath: writeRuntimeConfig(
-            join(
-              createTestTempRoot('project02-config-credential-fields-b-'),
-              'runtime.json',
-            ),
-            {
-              plugins: {
-                [plugin.manifest.id]: {
-                  config: {
-                    apiKey: 'second-api-key',
-                    token: 'second-token',
-                    metadata: {
-                      access_token: 'second-nested-token',
-                      label: 'visible-label',
-                    },
-                  },
-                },
-              },
-            },
-          ),
-        }),
-      }),
-      loadedConfig: loadRuntimeConfigForTest({
-        configPath: writeRuntimeConfig(
-          join(
-            createTestTempRoot('project02-config-credential-fields-b-'),
-            'runtime.json',
-          ),
-          {
-            plugins: {
-              [plugin.manifest.id]: {
-                config: {
-                  apiKey: 'second-api-key',
-                  token: 'second-token',
-                  metadata: {
-                    access_token: 'second-nested-token',
-                    label: 'visible-label',
-                  },
-                },
-              },
-            },
-          },
-        ),
-      }),
-      pluginManifests: [manifest],
-    });
+        pluginManifests: [manifest],
+      });
+    const first = resolveWith('first');
+    const second = resolveWith('second');
 
     expect(first.pluginConfigs['character-state']?.['apiKey']?.value).toBe(
       'first-api-key',
@@ -908,112 +627,8 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('rejects nested secret refs in non-secret object and array config fields', async () => {
-    const plugin = structuredConfigPlugin('memory.structured');
-    const storeRoot = createTestTempRoot('project02-config-nested-secret-ref-');
-    await initializeCharacterDataForHost(storeRoot);
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'memory.structured': {
-          enabled: true,
-          config: {
-            settings: {
-              apiKey: {$env: 'PROJECT02_NESTED_OBJECT_SECRET'},
-            },
-            endpoints: [
-              {
-                token: {$env: 'PROJECT02_NESTED_ARRAY_SECRET'},
-              },
-            ],
-          },
-        },
-      },
-    });
-    let factoryCalls = 0;
-
-    const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: prepareConfiguredProject02PluginActivation({
-        ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({configPath}),
-          storeRoot,
-          env: {
-            PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
-            PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
-          },
-          factories: {
-            'memory.structured': {
-              manifest: plugin.manifest,
-              create() {
-                factoryCalls += 1;
-                throw new Error(
-                  'factory should not receive nested secret refs',
-                );
-              },
-            },
-          },
-        }),
-
-        env: {
-          PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
-          PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
-        },
-      }),
-    });
-
-    expect(factoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured'],
-    ).toMatchObject({
-      settings: {
-        source: 'config',
-        resolved: false,
-      },
-      endpoints: {
-        source: 'config',
-        resolved: false,
-      },
-    });
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured']?.[
-        'settings'
-      ],
-    ).not.toHaveProperty('value');
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured']?.[
-        'endpoints'
-      ],
-    ).not.toHaveProperty('value');
-    expect(configured.activation.enabledPluginIds).not.toContain(
-      'memory.structured',
-    );
-    expect(
-      activationPluginById(configured.activation.plugins, 'memory.structured'),
-    ).toMatchObject({
-      pluginId: 'memory.structured',
-      activationStatus: 'blocked',
-    });
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_secret_ref_for_non_secret',
-          path: 'plugins.memory.structured.config.settings.apiKey',
-          pluginId: 'memory.structured',
-          pluginConfigField: 'settings',
-        }),
-        expect.objectContaining({
-          code: 'runtime_config_secret_ref_for_non_secret',
-          path: 'plugins.memory.structured.config.endpoints[0].token',
-          pluginId: 'memory.structured',
-          pluginConfigField: 'endpoints',
-        }),
-      ]),
-    );
-  });
-
-  it('accepts a plaintext secret in config, with the env overriding it', () => {
+  it('accepts a plaintext secret in config', () => {
     const plugin = createCharacterStatePlugin();
-    const envVar = 'PROJECT02_PLAINTEXT_SECRET_3447588015';
     const loaded = loadRuntimeConfigForTest({
       configPath: writeRuntimeConfig(
         join(createTestTempRoot('project02-config-plaintext-'), 'config.json'),
@@ -1040,7 +655,6 @@ describe('runtime config loading and resolution', () => {
               description: 'API key.',
               required: true,
               secret: true,
-              envVar,
               valueType: 'secret' as const,
               redactionLabels: ['secret'],
             },
@@ -1052,14 +666,8 @@ describe('runtime config loading and resolution', () => {
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
       pluginManifests: manifests,
     });
-    const fromEnv = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-      pluginManifests: manifests,
-      env: {[envVar]: 'env-secret'},
-    });
 
-    // Typing a key into config is acceptable; the env file stays the
-    // preferred home and wins whenever it holds the variable.
+    // A key typed into config is the key; the plugin reads it as written.
     expect(
       fromConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
     ).toMatchObject({
@@ -1067,19 +675,12 @@ describe('runtime config loading and resolution', () => {
       resolved: true,
       value: 'plaintext-secret',
     });
-    expect(fromEnv.pluginConfigs[plugin.manifest.id]?.['apiKey']).toMatchObject(
-      {
-        source: `env:${envVar}`,
-        resolved: true,
-        value: 'env-secret',
-      },
-    );
-    // Redacted views never show the value, wherever it came from.
+    // Redacted views never show the value.
     expect(JSON.stringify(fromConfig.redactedPluginConfigs)).not.toContain(
       'plaintext-secret',
     );
 
-    // Shapes that are neither a string nor an env ref stay rejected.
+    // A shape other than a string is rejected, never silently ignored.
     const invalid = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({
@@ -1111,15 +712,14 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('treats empty env values for required secrets as missing', () => {
-    const envVar = 'PROJECT02_EMPTY_SECRET_3447588015';
+  it('rejects a blank secret as invalid rather than reading it as absent', () => {
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-empty-secret-'), 'config.json'),
       {
         plugins: {
           'memory.required': {
             config: {
-              apiKey: {$env: envVar},
+              apiKey: '   ',
             },
           },
         },
@@ -1128,170 +728,27 @@ describe('runtime config loading and resolution', () => {
     const resolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
-        env: {[envVar]: ''},
       }),
-
       pluginManifests: [requiredSecretPlugin().manifest],
-      env: {[envVar]: ''},
     });
     const resolvedField = resolved.pluginConfigs['memory.required']?.['apiKey'];
 
     expect(resolvedField).toMatchObject({
-      source: `env:${envVar}`,
+      source: 'config',
       resolved: false,
     });
     expect(resolvedField).not.toHaveProperty('value');
     expect(resolved.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: 'runtime_config_required_secret_missing',
+          code: 'runtime_config_secret_value_invalid',
           path: 'plugins.memory.required.config.apiKey',
         }),
       ]),
     );
   });
 
-  it('resolves manifest secret env var defaults without raw config', async () => {
-    const envVar = 'PROJECT02_MANIFEST_DEFAULT_SECRET_3449527784';
-    const plugin = requiredSecretPluginWithManifestEnvVar(
-      'memory.manifest-default-secret',
-      envVar,
-    );
-    const storeRoot = createTestTempRoot(
-      'project02-config-manifest-env-default-',
-    );
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true,
-        },
-      },
-    });
-    const factoryInputs: unknown[] = [];
-
-    await initializeCharacterDataForHost(storeRoot);
-
-    const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: prepareConfiguredProject02PluginActivation({
-        ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({configPath}),
-          storeRoot,
-          env: {[envVar]: 'manifest-default-secret'},
-          factories: {
-            [plugin.manifest.id]: {
-              manifest: plugin.manifest,
-              create(input) {
-                factoryInputs.push(input.resolvedConfig['apiKey']?.value);
-
-                return plugin;
-              },
-            },
-          },
-        }),
-
-        env: {[envVar]: 'manifest-default-secret'},
-      }),
-    });
-
-    expect(configured.activation.enabledPluginIds).toContain(
-      plugin.manifest.id,
-    );
-    expect(factoryInputs).toEqual(['manifest-default-secret']);
-    expect(
-      configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
-    ).toMatchObject({
-      source: `env:${envVar}`,
-      resolved: true,
-      value: 'manifest-default-secret',
-    });
-    expect(
-      configured.activation.diagnostics.map(item => item.code),
-    ).not.toContain('runtime_config_reserved_control_env_var');
-  });
-
-  it.each([runtimeConfigEnvVarName, roleModelProviderEnvVarName])(
-    'rejects reserved runtime control env var %s in manifest secret defaults',
-    async envVar => {
-      const plugin = requiredSecretPluginWithManifestEnvVar(
-        'memory.reserved-manifest-secret',
-        envVar,
-      );
-      const storeRoot = createTestTempRoot(
-        'project02-config-manifest-reserved-env-',
-      );
-      await initializeCharacterDataForHost(storeRoot);
-      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-          },
-        },
-      });
-      let factoryCalls = 0;
-      const configured = await createConfiguredProject02PluginHostFromPlan({
-        activationPlan: prepareConfiguredProject02PluginActivation({
-          ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadRuntimeConfigForTest({configPath}),
-            storeRoot,
-            env: {[envVar]: 'runtime-control-value'},
-            factories: {
-              [plugin.manifest.id]: {
-                manifest: plugin.manifest,
-                create() {
-                  factoryCalls += 1;
-                  throw new Error(
-                    'reserved control env var must block activation',
-                  );
-                },
-              },
-            },
-          }),
-
-          env: {[envVar]: 'runtime-control-value'},
-        }),
-      });
-      const resolvedField =
-        configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'];
-      const activation = configured.activation.plugins.find(
-        item => item.pluginId === plugin.manifest.id,
-      );
-
-      expect(factoryCalls).toBe(0);
-      expect(configured.activation.enabledPluginIds).not.toContain(
-        plugin.manifest.id,
-      );
-      expect(resolvedField).toMatchObject({
-        source: `env:${envVar}`,
-        resolved: false,
-      });
-      expect(resolvedField).not.toHaveProperty('value');
-      expect(configured.activation.diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            severity: 'error',
-            code: 'runtime_config_reserved_control_env_var',
-            path: `plugins.${plugin.manifest.id}.config.apiKey`,
-            pluginId: plugin.manifest.id,
-            pluginConfigField: 'apiKey',
-          }),
-        ]),
-      );
-      expect(activation).toMatchObject({
-        pluginId: plugin.manifest.id,
-        enabled: false,
-        activationStatus: 'blocked',
-      });
-      expect(activation?.activationReasons).toContain(
-        'blocked_by_config_errors',
-      );
-      expect(JSON.stringify(configured.resolvedConfig)).not.toContain(
-        'runtime-control-value',
-      );
-    },
-  );
-
   it('rejects unknown config fields for enabled or default-enabled plugins', async () => {
-    const envVar = 'PROJECT02_UNKNOWN_FIELD_SECRET_3447705094';
     const plugin = requiredSecretPlugin();
     const storeRoot = createTestTempRoot('project02-config-unknown-field-');
     await initializeCharacterDataForHost(storeRoot);
@@ -1299,7 +756,7 @@ describe('runtime config loading and resolution', () => {
       plugins: {
         'memory.required': {
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'configured-secret',
             zetaTypo: 'ignored',
             alphaTypo: 'ignored',
           },
@@ -1311,7 +768,6 @@ describe('runtime config loading and resolution', () => {
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           storeRoot,
-          env: {[envVar]: 'configured-secret'},
           factories: {
             'memory.required': {
               manifest: plugin.manifest,
@@ -1319,8 +775,6 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'configured-secret'},
       }),
     });
 
@@ -1600,76 +1054,14 @@ describe('runtime config loading and resolution', () => {
     ).not.toContain('runtime_config_unknown_plugin_config_field');
   });
 
-  it('uses supplied env maps when creating configured plugin hosts', async () => {
-    const envVar = 'PROJECT02_SUPPLIED_ONLY_SECRET_3447588016';
-    const previousEnvValue = process.env[envVar];
-    process.env[envVar] = '';
-
-    try {
-      const storeRoot = createTestTempRoot('project02-config-supplied-env-');
-      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-        plugins: {
-          'memory.required': {
-            enabled: true,
-            config: {
-              apiKey: {$env: envVar},
-            },
-          },
-        },
-      });
-
-      await initializeCharacterDataForHost(storeRoot);
-
-      const configured = await createConfiguredProject02PluginHostFromPlan({
-        activationPlan: prepareConfiguredProject02PluginActivation({
-          ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadRuntimeConfigForTest({configPath}),
-            storeRoot,
-            env: {[envVar]: 'from-supplied-env'},
-            factories: {
-              'memory.required': {
-                manifest: requiredSecretPlugin().manifest,
-                create: () => requiredSecretPlugin(),
-              },
-            },
-          }),
-
-          env: {[envVar]: 'from-supplied-env'},
-        }),
-      });
-
-      expect(configured.activation.enabledPluginIds).toContain(
-        'memory.required',
-      );
-      expect(
-        configured.activation.diagnostics.map(item => item.code),
-      ).not.toContain('runtime_config_required_secret_missing');
-      expect(
-        configured.resolvedConfig.pluginConfigs['memory.required']?.['apiKey'],
-      ).toMatchObject({
-        source: `env:${envVar}`,
-        resolved: true,
-        value: 'from-supplied-env',
-      });
-    } finally {
-      if (previousEnvValue === undefined) {
-        Reflect.deleteProperty(process.env, envVar);
-      } else {
-        process.env[envVar] = previousEnvValue;
-      }
-    }
-  });
-
   it('creates manifest-backed configured plugin factories once with resolved config', async () => {
-    const envVar = 'PROJECT02_FACTORY_SECRET_3447631396';
     const storeRoot = createTestTempRoot('project02-config-factory-');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      storeRoot,
       plugins: {
         'memory.required': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'from-manifest-backed-factory',
           },
         },
       },
@@ -1689,7 +1081,6 @@ describe('runtime config loading and resolution', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
-          env: {[envVar]: 'from-manifest-backed-factory'},
           factories: {
             'character-state': {
               manifest: createCharacterStatePluginManifest(),
@@ -1715,8 +1106,6 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'from-manifest-backed-factory'},
       }),
     });
 
@@ -1799,37 +1188,27 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('passes config-resolved store roots to manifest-backed plugin factories', async () => {
-    const cliStoreRoot = createTestTempRoot('project02-config-cli-root-');
-    const configuredStoreRoot = createTestTempRoot(
-      'project02-config-file-root-',
-    );
-    const envVar = 'PROJECT02_CONFIG_ROOT_FACTORY_SECRET_3448745052';
-    const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-legacy-root-'), 'config.json'),
-      {
-        storeRoot: configuredStoreRoot,
-        plugins: {
-          'memory.required': {
-            enabled: true,
-            config: {
-              apiKey: {$env: envVar},
-            },
+  it('passes the home to manifest-backed plugin factories', async () => {
+    const storeRoot = createTestTempRoot('project02-config-factory-home-');
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'memory.required': {
+          enabled: true,
+          config: {
+            apiKey: 'from-the-home',
           },
         },
       },
-    );
+    });
     let factoryStoreRoot: string | undefined;
 
-    await initializeCharacterDataForHost(configuredStoreRoot);
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           configPath,
-          storeRoot: cliStoreRoot,
-          env: {[envVar]: 'from-configured-store-root'},
           factories: {
             'memory.required': {
               manifest: requiredSecretPlugin().manifest,
@@ -1841,16 +1220,14 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'from-configured-store-root'},
       }),
     });
 
     expect(factoryStoreRoot).toBe(
-      characterDataDirPath(realpathSync.native(configuredStoreRoot), 'mira'),
+      characterDataDirPath(realpathSync.native(storeRoot), 'mira'),
     );
     expect(configured.resolvedConfig.project02.storeRoot).toBe(
-      realpathSync.native(configuredStoreRoot),
+      realpathSync.native(storeRoot),
     );
   });
 
@@ -1868,7 +1245,6 @@ describe('runtime config loading and resolution', () => {
         create: () => memoryTwo,
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
@@ -1909,17 +1285,17 @@ describe('runtime config loading and resolution', () => {
       ['memory.two', 'blocked'],
     ]);
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'ambiguous_memory_provider_selection',
         }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"ambiguous_memory_provider_selection"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats a typoed explicit default memory provider as an activation-wide error when another provider is enabled', async () => {
@@ -1944,7 +1320,6 @@ describe('runtime config loading and resolution', () => {
         },
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo',
@@ -1998,25 +1373,24 @@ describe('runtime config loading and resolution', () => {
       'not_selected_as_default_memory_provider',
     );
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
     expect(factoryCalls).toBe(0);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+        }),
+      ]),
+    );
   });
 
   it('treats a known non-memory default memory provider as an activation error', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-memory-default-non-memory-',
     );
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'character-state',
@@ -2051,16 +1425,17 @@ describe('runtime config loading and resolution', () => {
       activationStatus: 'disabled',
     });
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_not_memory_provider',
         }),
-        stderr: collect(() => {}),
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"default_memory_provider_not_memory_provider"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats an inactive explicit default memory provider as an activation error when another provider is enabled', async () => {
@@ -2079,7 +1454,6 @@ describe('runtime config loading and resolution', () => {
         create: () => disabledPlugin,
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.disabled',
@@ -2130,17 +1504,17 @@ describe('runtime config loading and resolution', () => {
         ?.activationReasons,
     ).toContain('disabled_by_config');
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
         }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
+      ]),
+    );
   });
 
   it('treats a disabled explicit default memory provider as an activation error without another provider enabled', async () => {
@@ -2158,7 +1532,6 @@ describe('runtime config loading and resolution', () => {
         },
       },
     };
-    let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.disabled',
@@ -2205,119 +1578,17 @@ describe('runtime config loading and resolution', () => {
         ?.activationReasons,
     ).toContain('disabled_by_config');
 
-    expect(
-      await runRuntimeConfigCliFromArgs(['--store', storeRoot, 'check'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories,
-      }),
-    ).toBe(1);
+    const check = await checkRuntimeConfigForTest({storeRoot, factories});
+
     expect(factoryCalls).toBe(0);
-    expect(stdout).toContain('"default_memory_provider_unavailable"');
-    expect(stdout).toContain('"severity": "error"');
-  });
-
-  it('writes non-secret and secret-ref config through the shared mutation path', async () => {
-    const storeRoot = await initializeTestStore(
-      createTestTempRoot('project02-config-cli-'),
-    );
-    const secretPlugin = requiredSecretPlugin('mem0-local');
-    const memoryPlugin = memoryProviderPlugin('memory.recall');
-    const factories = {
-      [memoryPlugin.manifest.id]: {
-        manifest: memoryPlugin.manifest,
-        create: () => memoryPlugin,
-      },
-      [secretPlugin.manifest.id]: {
-        manifest: secretPlugin.manifest,
-        create: () => secretPlugin,
-      },
-    };
-    let stdout = '';
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        [
-          '--store',
-          storeRoot,
-          '--character',
-          'mira',
-          'plugin',
-          'disable',
-          'character-state',
-        ],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      ),
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'plugin', 'enable', 'memory.recall'],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-          factories,
-        },
-      ),
-    ).toBe(0);
-
-    expect(
-      await runRuntimeConfigCliFromArgs(
-        [
-          '--store',
-          storeRoot,
-          'secret',
-          'set',
-          'mem0-local',
-          'apiKey',
-          'MEM0_API_KEY',
-        ],
-        {
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-          factories,
-          env: {MEM0_API_KEY: 'super-secret'},
-        },
-      ),
-    ).toBe(0);
-
-    const config: unknown = JSON.parse(
-      readFileSync(join(storeRoot, 'config.json'), 'utf8'),
-    );
-
-    expect(stdout).toContain('config.json');
-    expect(config).toMatchObject({
-      plugins: {
-        'memory.recall': {enabled: true},
-        'mem0-local': {
-          config: {apiKey: {$env: 'MEM0_API_KEY'}},
-        },
-      },
-    });
-    expect(
-      JSON.parse(
-        readFileSync(
-          characterOverlayConfigPath(characterDataDirPath(storeRoot, 'mira')),
-          'utf8',
-        ),
-      ),
-    ).toMatchObject({
-      plugins: {
-        'character-state': {enabled: false},
-      },
-    });
-    expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(
-      'MEM0_API_KEY="super-secret"',
-    );
-    expect((statSync(join(storeRoot, '.env')).mode & 0o777).toString(8)).toBe(
-      '600',
+    expect(check.ok).toBe(false);
+    expect(check.activationDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'default_memory_provider_unavailable',
+        }),
+      ]),
     );
   });
 });

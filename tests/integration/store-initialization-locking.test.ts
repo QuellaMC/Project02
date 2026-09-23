@@ -3,7 +3,10 @@ import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
-import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
+import {
+  runtimeConfigVersion,
+  ensureInitializedProject02Store,
+} from '../../src/runtime/config/index.ts';
 import {createProject02HomeLayout} from '../../src/runtime/storage/index.ts';
 import {acquireLocalRuntimeMutationLock} from '../../src/runtime/storage/mutation-lock.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -44,8 +47,8 @@ describe('store initialization against a concurrent config author', () => {
 
     await ensureInitializedProject02Store({homeRoot});
 
-    expect(JSON.parse(readFileSync(layout.configPath, 'utf8'))).toMatchObject({
-      project02: {storeRoot: homeRoot},
+    expect(JSON.parse(readFileSync(layout.configPath, 'utf8'))).toEqual({
+      version: runtimeConfigVersion,
     });
   });
 });

@@ -372,7 +372,10 @@ if (invokedDirectly) {
     console.log('  1. Edit the manifest and plugin behavior.');
     console.log('  2. pnpm check');
     console.log(
-      `  3. Enable it: pnpm runtime-config ui  (Plugins -> ${id} -> Enable)`,
+      `  3. Enable it: add {"plugins": {"${id}": {"enabled": true}}} to the home's config.json,`,
+    );
+    console.log(
+      '     or send plugin_enabled through POST /api/config (the settings page is the next roadmap step)',
     );
     console.log(
       '  4. pnpm serve, then open the address it prints in a browser',

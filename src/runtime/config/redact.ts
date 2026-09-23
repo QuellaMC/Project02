@@ -1,5 +1,4 @@
 import {isJsonBoundaryCredentialKey} from '../../shared/redaction.ts';
-import {valueIsSecretMarker} from '../../shared/secret-marker.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
@@ -10,7 +9,7 @@ export function redactRuntimeConfigValue(
   value: RuntimeConfigValue,
   options: {readonly secret?: boolean; readonly key?: string} = {},
 ): RuntimeConfigValue {
-  if (options.secret === true || runtimeConfigValueIsSecretMarker(value)) {
+  if (options.secret === true) {
     return '[redacted]';
   }
 
@@ -66,10 +65,6 @@ export function redactResolvedRuntimeConfigField(
           }),
         }),
   } satisfies RedactedRuntimeConfigField);
-}
-
-function runtimeConfigValueIsSecretMarker(value: RuntimeConfigValue): boolean {
-  return valueIsSecretMarker(value);
 }
 
 function runtimeConfigRedactionPath(

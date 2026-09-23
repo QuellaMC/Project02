@@ -36,7 +36,6 @@ describe('config system v2 contract', () => {
     const result = runtimeConfig.validateProject02RuntimeConfig({
       version: canonicalRuntimeConfigVersion,
       project02: {
-        storeRoot: 'runtime-store',
         defaultMemoryProvider: 'memory.primary',
         roleModelProvider: 'nvidia',
       },
@@ -54,7 +53,6 @@ describe('config system v2 contract', () => {
     expect(result.config).toEqual({
       version: canonicalRuntimeConfigVersion,
       project02: {
-        storeRoot: 'runtime-store',
         defaultMemoryProvider: 'memory.primary',
         roleModelProvider: 'nvidia',
       },

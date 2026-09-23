@@ -37,17 +37,6 @@ export function parseRuntimeStoreFlag(options: {
     }));
   }
 
-  if (arg === '--config') {
-    if (location.configPath !== undefined) {
-      throw new CliUsageError('--config can only be provided once.');
-    }
-
-    return matchedValueFlag(options, '--config', value => ({
-      ...location,
-      configPath: value,
-    }));
-  }
-
   if (arg === '--character') {
     if (location.character !== undefined) {
       throw new CliUsageError('--character can only be provided once.');

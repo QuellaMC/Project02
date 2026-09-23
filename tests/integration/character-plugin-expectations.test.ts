@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
@@ -113,7 +106,6 @@ describe('character plugin enforcement', () => {
       characterId: 'seeded',
       activation: activationWithEnabled(['ok-plugin']),
       installedPluginIds: new Set(['disabled-required', 'ok-plugin']),
-      storeRoot: '/tmp/home',
     });
 
     expect(diagnostics).toMatchObject([
@@ -134,22 +126,7 @@ describe('character plugin enforcement', () => {
       },
     ]);
     expect(diagnostics[1]?.message).toContain(
-      "runtime-config --store '/tmp/home' --character 'seeded' plugin enable 'disabled-required'",
-    );
-  });
-
-  it('quotes a selected home containing whitespace in the recovery command', () => {
-    const diagnostics = enforceCharacterPluginExpectations({
-      expectations: expectations({required: ['disabled-required']}),
-      characterId: 'seeded',
-      activation: activationWithEnabled([]),
-      installedPluginIds: new Set(['disabled-required']),
-      storeRoot: '/tmp/My Home',
-    });
-
-    // Unquoted, --store would consume only "/tmp/My".
-    expect(diagnostics[0]?.message).toContain(
-      "runtime-config --store '/tmp/My Home' --character 'seeded' plugin enable 'disabled-required'",
+      "Enable it in the character's settings.",
     );
   });
 });
@@ -181,7 +158,6 @@ describe('first-selection materialization through startup', () => {
 
     await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(
@@ -219,7 +195,6 @@ describe('first-selection materialization through startup', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'seeded');
     const first = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(
@@ -250,7 +225,6 @@ describe('first-selection materialization through startup', () => {
     });
     const second = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     if (second.status !== 'resolved') {
@@ -290,36 +264,6 @@ describe('first-selection materialization through startup', () => {
     ]);
   });
 
-  it('reports a broken character secrets env instead of silently reading nothing', async () => {
-    const homeRoot = homeWithCharacter({characterId: 'seeded'});
-    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
-    const first = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
-    });
-
-    expect(first.status).toBe('resolved');
-    // A symlink here would hand another file's values to this character's
-    // secret refs; the reader must say so, not resolve from an empty env.
-    symlinkSync(join(homeRoot, '.env'), join(dataRoot, '.env'));
-
-    const second = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
-    });
-
-    expect(second.status).not.toBe('resolved');
-    if (second.status === 'character_invalid') {
-      throw new Error('Expected a config diagnostic, not a character error.');
-    }
-    expect(second.activationPlan.resolvedConfig.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: 'runtime_config_character_env_not_regular',
-        severity: 'error',
-      }),
-    );
-  });
-
   it('keeps config-only and unknown plugin defaults without implicitly enabling them', async () => {
     const homeRoot = homeWithCharacter({
       characterId: 'seeded',
@@ -333,8 +277,6 @@ describe('first-selection materialization through startup', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'seeded');
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
-      continueAfterActivationErrors: true,
     });
 
     expect(startup.status).toBe('resolved');
@@ -372,7 +314,6 @@ describe('first-selection materialization through startup', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('resolved');
@@ -405,7 +346,6 @@ describe('first-selection materialization through startup', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('resolved');
@@ -435,14 +375,13 @@ describe('first-selection materialization through startup', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: 'project02.config.v2',
       plugins: {'not-installed-plugin': {enabled: true}},
     });
-    expect(startup.status).toBe('activation_blocked_before_runtime_env');
+    expect(startup.status).toBe('resolved');
     if (startup.status === 'character_invalid') {
       throw new Error('Expected a plugin activation plan.');
     }
@@ -469,10 +408,7 @@ describe('first-selection materialization through startup', () => {
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterId: 'seeded',
-        env: {},
       }),
-
-      env: {},
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
@@ -494,7 +430,6 @@ describe('first-selection materialization through startup', () => {
     const cliWrittenBytes = readFileSync(overlayPath, 'utf8');
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(readFileSync(overlayPath, 'utf8')).not.toBe(cliWrittenBytes);
@@ -529,10 +464,9 @@ describe('first-selection materialization through startup', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
-    expect(startup.status).toBe('activation_blocked_before_runtime_env');
+    expect(startup.status).toBe('resolved');
     if (startup.status === 'character_invalid') {
       throw new Error('Expected a plugin activation plan.');
     }
@@ -541,12 +475,8 @@ describe('first-selection materialization through startup', () => {
       diagnostic => diagnostic.code === 'character_required_plugin_disabled',
     );
 
-    // The recovery command is shell-quoted so it survives a copy-paste.
     expect(disabled?.message).toContain(
-      `--store '${realpathSync.native(homeRoot)}' `,
-    );
-    expect(disabled?.message).toContain(
-      "--character 'seeded' plugin enable 'demo-config'",
+      "Enable it in the character's settings.",
     );
   });
 });
@@ -572,7 +502,6 @@ describe('package-version missing-only upgrades', () => {
 
     await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
     writeRuntimeConfig(overlayPath, {
       plugins: {
@@ -588,7 +517,6 @@ describe('package-version missing-only upgrades', () => {
 
     await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
     expect(readFileSync(overlayPath, 'utf8')).toBe(sameVersionBytes);
 
@@ -608,7 +536,6 @@ describe('package-version missing-only upgrades', () => {
     });
     const upgraded = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
@@ -644,66 +571,6 @@ describe('package-version missing-only upgrades', () => {
   });
 });
 
-describe('concurrent materialization and first edits', () => {
-  it('serializes package defaults and preserves both first scoped edits', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {
-        required: ['demo-config'],
-        config: {'demo-config': {tone: 'warm'}},
-      },
-    });
-    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
-
-    const startups = await Promise.all([
-      resolveRuntimeCliStartup({
-        location: {storeRoot: homeRoot, character: 'seeded'},
-        env: {},
-        characterConfigRequest: {
-          kind: 'document',
-          operation: {
-            kind: 'set',
-            path: 'project02.userDisplayName',
-            value: 'First Editor',
-          },
-        },
-      }),
-      resolveRuntimeCliStartup({
-        location: {storeRoot: homeRoot, character: 'seeded'},
-        env: {},
-        characterConfigRequest: {
-          kind: 'document',
-          operation: {
-            kind: 'set',
-            path: 'project02.roleModelProvider',
-            value: 'local',
-          },
-        },
-      }),
-    ]);
-
-    expect(startups.map(startup => startup.status)).toEqual([
-      'resolved',
-      'resolved',
-    ]);
-    expect(
-      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
-    ).toEqual({
-      version: 'project02.config.v2',
-      project02: {
-        userDisplayName: 'First Editor',
-        roleModelProvider: 'local',
-      },
-      plugins: {
-        'demo-config': {
-          enabled: true,
-          config: {tone: 'warm'},
-        },
-      },
-    });
-  });
-});
-
 describe('materialization ordering', () => {
   it('creates no durable state when the global config is invalid', async () => {
     const homeRoot = homeWithCharacter({
@@ -718,7 +585,6 @@ describe('materialization ordering', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('config_invalid');
@@ -735,7 +601,6 @@ describe('materialization ordering', () => {
     });
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('config_invalid');
@@ -760,7 +625,6 @@ describe('materialization ordering', () => {
     });
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('config_invalid');
@@ -791,7 +655,6 @@ describe('materialization ordering for pre-existing overlays', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('config_invalid');
@@ -811,7 +674,6 @@ describe('materialization ordering for pre-existing overlays', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
     });
 
     expect(startup.status).toBe('config_invalid');
