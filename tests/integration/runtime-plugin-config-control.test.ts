@@ -470,6 +470,34 @@ describe('runtime plugin config control', () => {
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
 
+  it('refuses a blank secret instead of storing it', () => {
+    const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+      }),
+      scope: 'global',
+    });
+
+    // A blank is not a credential: stored, it would read as set and
+    // resolve as missing at once, and shadow an inherited value in an
+    // overlay. Removing a credential is the unset operation.
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        pluginManifests: [],
+        target,
+        expectedFingerprint: fixture.fingerprint,
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'operator',
+          fieldOperation: {kind: 'set', fieldName: 'apiKey', value: '   '},
+        },
+      }),
+    ).toThrow('must be a non-blank string');
+    expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
+  });
+
   it('rejects values with the wrong type or outside declared allowed values', () => {
     const fixture = createSeededControlFixture();
     const target = resolveRuntimeConfigScopeTarget({

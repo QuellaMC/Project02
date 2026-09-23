@@ -712,7 +712,7 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('treats a blank secret as missing', () => {
+  it('rejects a blank secret as invalid rather than reading it as absent', () => {
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-empty-secret-'), 'config.json'),
       {
@@ -734,14 +734,14 @@ describe('runtime config loading and resolution', () => {
     const resolvedField = resolved.pluginConfigs['memory.required']?.['apiKey'];
 
     expect(resolvedField).toMatchObject({
-      source: 'missing',
+      source: 'config',
       resolved: false,
     });
     expect(resolvedField).not.toHaveProperty('value');
     expect(resolved.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: 'runtime_config_required_secret_missing',
+          code: 'runtime_config_secret_value_invalid',
           path: 'plugins.memory.required.config.apiKey',
         }),
       ]),

@@ -334,8 +334,8 @@ describe('scope-aware runtime config mutations', () => {
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
-    // The value the operator is fixing: present but empty, which the
-    // resolver reads as missing.
+    // The value the operator is fixing: present but blank, which the
+    // resolver refuses.
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       plugins: {
         'scope.secret-repair': {enabled: true, config: {apiKey: ''}},

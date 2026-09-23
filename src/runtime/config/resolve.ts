@@ -339,14 +339,19 @@ function resolveSecretField(options: {
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
   // Silently ignoring what the operator wrote would leave a landmine in
-  // the config, so a value of another shape is an error.
-  if (options.rawValue !== undefined && typeof options.rawValue !== 'string') {
+  // the config, so a value of another shape, or a blank one, is an error:
+  // a blank would read as set and resolve as absent at once.
+  if (
+    options.rawValue !== undefined &&
+    (typeof options.rawValue !== 'string' ||
+      options.rawValue.trim().length === 0)
+  ) {
     if (options.validateConfig) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_secret_value_invalid',
-          `Secret config field "${options.field.name}" must be a string.`,
+          `Secret config field "${options.field.name}" must be a non-blank string.`,
           options.path,
           pluginConfigDiagnosticMetadata(options),
         ),
@@ -360,7 +365,7 @@ function resolveSecretField(options: {
     });
   }
 
-  if (options.rawValue !== undefined && options.rawValue.trim().length > 0) {
+  if (options.rawValue !== undefined) {
     return fieldResult({
       field: options.field,
       source: 'config',
