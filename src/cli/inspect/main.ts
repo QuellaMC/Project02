@@ -50,13 +50,11 @@ import {isMainModule} from '../shared/main-module.ts';
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
-  readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
 type InspectCliLocationArgs = {
   readonly storeRoot?: string;
-  readonly configPath?: string;
   readonly character?: string;
 };
 
@@ -127,7 +125,6 @@ export async function runInspectCliFromArgs(
     const startup = resolveRuntimeCliStartup({
       stage: 'report',
       location: parsedArgs,
-      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
@@ -213,7 +210,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     if (arg === '--init') {
       throw new CliUsageError(
         'inspect never creates a store, so --init does not apply. ' +
-          'Run serve or runtime-config with --init to create one.',
+          'Run serve with --init to create one.',
       );
     }
 
@@ -302,9 +299,6 @@ function resolveInspectMode(
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
-    ...(location.configPath === undefined
-      ? {}
-      : {configPath: location.configPath}),
     ...(location.character === undefined
       ? {}
       : {character: location.character}),

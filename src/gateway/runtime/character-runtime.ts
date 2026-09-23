@@ -17,10 +17,7 @@ import {
   type RuntimePluginToolConfirmationHandler,
 } from '../../plugins/index.ts';
 import {
-  createSelectedRoleModelAdapter,
-  roleModelEnvironment,
-  selectChatProvider,
-  type ChatProviderName,
+  createRoleModelProviderAdapter,
   type RoleModelAdapter,
   type RoleModelCharacterRef,
 } from '../../role-model/index.ts';
@@ -67,7 +64,6 @@ export type LocalCharacterRuntimeOptions = {
     confirmations: RuntimePluginToolConfirmationHandler,
   ) => RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly provider?: ChatProviderName;
 };
 
 export type LocalCharacterRuntime = CharacterRuntime & {
@@ -400,25 +396,22 @@ function assemblyDrifted(context: RuntimeContext): boolean {
     assemblyIdentity(
       startup.activationPlan,
       startup.characterActivation.characterRef,
-      startup.runtimeEnv,
     ) !== assembled.identity
   );
 }
 
 /**
- * The parts of a plan that shape the character: the host settings, and
- * for each plugin it enables — a disabled one is not constructed, so
- * configuring it ahead of enabling it changes nothing running — its
- * values with their secrets (the authored fingerprint hashes only a
- * secret's presence, so a re-keyed secret would otherwise go unnoticed)
- * and its package version; the part of the runtime env the provider
- * selection and adapter read; and the character package's version and
+ * The parts of a plan that shape the character: the host settings with
+ * their secrets (the authored fingerprint hashes only a secret's presence,
+ * so a re-keyed secret would otherwise go unnoticed), and for each plugin
+ * it enables — a disabled one is not constructed, so configuring it ahead
+ * of enabling it changes nothing running — its values with their secrets
+ * and its package version; and the character package's version and
  * persona. Held in memory only.
  */
 function assemblyIdentity(
   plan: PreparedProject02PluginActivationPlan,
   characterRef: RoleModelCharacterRef,
-  runtimeEnv: NodeJS.ProcessEnv,
 ): string {
   return createCanonicalJsonFingerprint({
     host: plan.resolvedConfig.project02,
@@ -434,7 +427,6 @@ function assemblyIdentity(
         },
       ]),
     ),
-    env: roleModelEnvironment(runtimeEnv),
     character: characterRef,
   });
 }
@@ -442,18 +434,8 @@ function assemblyIdentity(
 /** One set of options for the assembly and for the check that it would differ. */
 function activationOptions(
   context: RuntimeContext,
-): Omit<ActivateProject02CharacterOptions, 'characterConfigRequest'> {
-  const {options, characterId} = context;
-
-  return {
-    characterId,
-    continueAfterActivationErrors: options.createPluginHost !== undefined,
-    // Runs in the planning phase, so a bad provider value is refused
-    // before any durable character state is written.
-    validateRuntimeEnv: env => {
-      selectChatProvider(options.provider, env);
-    },
-  };
+): ActivateProject02CharacterOptions {
+  return {characterId: context.characterId};
 }
 
 async function assembleAndPublish(
@@ -543,22 +525,11 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     contextWindowTokens: project02.contextWindowTokens,
     userDisplayName: project02.userDisplayName,
     storeRoot: project02.storeRoot,
-    identity: assemblyIdentity(
-      startup.activationPlan,
-      activation.characterRef,
-      startup.runtimeEnv,
-    ),
+    identity: assemblyIdentity(startup.activationPlan, activation.characterRef),
   };
-  // The selected provider wins; an injected adapter covers the rest.
+  // The configured provider wins; an injected adapter covers the rest.
   const adapter =
-    createSelectedRoleModelAdapter(
-      selectChatProvider(
-        options.provider,
-        startup.runtimeEnv,
-        project02.roleModelProvider,
-      ),
-      startup.runtimeEnv,
-    ) ?? options.roleModelAdapter;
+    createRoleModelProviderAdapter(project02) ?? options.roleModelAdapter;
   const adapterOption = adapter === undefined ? {} : {adapter};
 
   if (options.createPluginHost !== undefined) {

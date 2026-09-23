@@ -42,7 +42,6 @@ describe('project02 home initialization', () => {
     mkdirSync(layout.pluginPackagesRoot, {recursive: true});
     mkdirSync(layout.conversationsRoot, {recursive: true});
     writeFileSync(layout.configPath, '{"version":"project02.config.v2"}\n');
-    writeFileSync(layout.envPath, 'API_KEY=x\n');
 
     await expect(
       ensureInitializedProject02Home({homeRoot}),

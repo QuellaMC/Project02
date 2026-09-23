@@ -1,6 +1,6 @@
 /**
  * The terminal question adapter for a CLI that asks one thing and leaves:
- * the store consent gate and the config console. A closed stream answers
+ * the store consent gate. A closed stream answers
  * `undefined`; a stream that fails while read rejects.
  */
 import {createInterface} from 'node:readline/promises';

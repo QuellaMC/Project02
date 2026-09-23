@@ -128,21 +128,6 @@ async function ensureRealCharacterDataRoot(
   }
 }
 
-/** Only mutation guards call this; activation errors outrank env-file ones. */
-export function assertRealHomeEnvFileSync(
-  options: Project02HomeLayoutOptions = {},
-): void {
-  const layout = createProject02HomeLayout(options);
-
-  if (isPresentButNot(describeRealEntry(layout.envPath), 'file')) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
-      `Project02 home "${layout.homeRoot}" has an env file that is not ` +
-        'a real file; home control state must live inside the home.',
-    );
-  }
-}
-
 function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
   for (const entry of [
     {path: layout.locksRoot, kind: 'directory' as const, label: 'lock root'},
@@ -230,7 +215,6 @@ function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
       entry.isFile() &&
       isLiveAtomicReplacementForAnyTarget(entry.name, [
         layout.configPath,
-        layout.envPath,
         layout.schemaPath,
       ])
     ) {
@@ -272,7 +256,7 @@ function isProject02HomeControlEntry(
     return entry.isFile();
   }
 
-  return entryPath === layout.envPath || entryPath === layout.schemaPath;
+  return entryPath === layout.schemaPath;
 }
 
 function defaultHomeClock(): string {

@@ -6,112 +6,26 @@ import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
-  roleModelProviderEnvVarName,
-  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
 } from './types.ts';
 
 export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly path: string;
-  readonly label: string;
   readonly invalidValueCode: string;
   readonly invalidValueMessage: string;
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
-  readonly scopes: readonly RuntimeConfigFieldScope[];
   /** Narrows `valueType` where the field's real rule is stricter. */
   readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
 
-const globalOnlyFieldScopes = Object.freeze([
-  'global',
-] satisfies RuntimeConfigFieldScope[]);
-const characterScopedFieldScopes = Object.freeze([
-  'global',
-  'character',
-] satisfies RuntimeConfigFieldScope[]);
-
 const project02ConfigFieldDefinitions = Object.freeze([
-  Object.freeze({
-    path: 'project02.storeRoot',
-    name: 'storeRoot',
-    label: 'Runtime store root',
-    description:
-      'The Project02 home: global config, secrets, installed packages, and ' +
-      'the per-character data directories.',
-    invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage: 'Runtime config field must be a non-empty string.',
-    required: false,
-    secret: false,
-    valueType: 'path',
-    defaultValueSummary: '.project02',
-    redactionLabels: Object.freeze([]),
-    scopes: globalOnlyFieldScopes,
-    agentMutable: false,
-    reloadRequired: true,
-  } satisfies Project02ConfigFieldDefinition),
-  Object.freeze({
-    path: 'project02.defaultMemoryProvider',
-    name: 'defaultMemoryProvider',
-    label: 'Default memory provider',
-    description: 'Selects one already-enabled memory provider.',
-    invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage: 'Runtime config field must be a non-empty string.',
-    required: false,
-    secret: false,
-    valueType: 'string',
-    redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
-    agentMutable: false,
-    reloadRequired: true,
-  } satisfies Project02ConfigFieldDefinition),
-  Object.freeze({
-    path: 'project02.enabled',
-    name: 'enabled',
-    label: 'Enabled',
-    description:
-      'Whether this character is an active contact. Installed characters ' +
-      'are enabled unless this says otherwise; a disabled character is ' +
-      'offline and never boots.',
-    invalidValueCode: 'runtime_config_boolean_invalid',
-    invalidValueMessage: 'Project02 enabled must be a boolean.',
-    required: false,
-    secret: false,
-    valueType: 'boolean',
-    defaultValueSummary: 'true',
-    redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
-    agentMutable: false,
-    reloadRequired: true,
-  } satisfies Project02ConfigFieldDefinition),
-  Object.freeze({
-    path: 'project02.roleModelProvider',
-    name: 'roleModelProvider',
-    label: 'Role-model provider',
-    description:
-      'Default role-model provider for every character the daemon runs.',
-    invalidValueCode: 'runtime_config_role_model_provider_invalid',
-    invalidValueMessage:
-      'Project02 roleModelProvider must be "local" or "nvidia".',
-    required: false,
-    secret: false,
-    valueType: 'enum',
-    defaultValueSummary: 'local',
-    // Set in the environment, it wins over either document.
-    envVar: roleModelProviderEnvVarName,
-    allowedValues: Object.freeze([...project02RoleModelProviderValues]),
-    redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
-    agentMutable: false,
-    reloadRequired: true,
-  } satisfies Project02ConfigFieldDefinition),
   Object.freeze({
     path: 'project02.userDisplayName',
     name: 'userDisplayName',
-    label: 'User display name',
     description:
-      "Speaker name stamped on the local user's messages. Applies to new " +
-      'sessions; existing sessions keep their historical name.',
+      'The name you go by in conversation. Applies to new conversations; ' +
+      'earlier ones keep the name they were started with.',
     invalidValueCode: 'runtime_config_string_invalid',
     invalidValueMessage:
       'Project02 userDisplayName must be a non-empty single-line string of ' +
@@ -125,18 +39,63 @@ const project02ConfigFieldDefinitions = Object.freeze([
     acceptsValue: value =>
       typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.roleModelProvider',
+    name: 'roleModelProvider',
+    description:
+      'Who answers as the character: the built-in local voice, or a model ' +
+      'hosted by NVIDIA.',
+    invalidValueCode: 'runtime_config_role_model_provider_invalid',
+    invalidValueMessage:
+      'Project02 roleModelProvider must be "local" or "nvidia".',
+    required: false,
+    secret: false,
+    valueType: 'enum',
+    defaultValueSummary: 'local',
+    allowedValues: Object.freeze([...project02RoleModelProviderValues]),
+    redactionLabels: Object.freeze([]),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.nvidiaApiKey',
+    name: 'nvidiaApiKey',
+    description:
+      'Your NVIDIA API key. Needed when the provider is nvidia; never shown ' +
+      'back once saved.',
+    invalidValueCode: 'runtime_config_secret_value_invalid',
+    invalidValueMessage: 'Project02 nvidiaApiKey must be a non-empty string.',
+    required: false,
+    secret: true,
+    valueType: 'secret',
+    redactionLabels: Object.freeze(['secret']),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.nvidiaModel',
+    name: 'nvidiaModel',
+    description:
+      "The NVIDIA model to talk to; the provider's default when left unset.",
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage: 'Project02 nvidiaModel must be a non-empty string.',
+    required: false,
+    secret: false,
+    valueType: 'string',
+    redactionLabels: Object.freeze([]),
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
   Object.freeze({
     path: 'project02.contextWindowTokens',
     name: 'contextWindowTokens',
-    label: 'Context window tokens',
     description:
-      'Context size of the role model in tokens; the conversation history ' +
-      'replayed to the model may use half of it. A stopgap until the ' +
-      'provider reports its own limit.',
+      'How much conversation the model can hold at once, in tokens; up to ' +
+      'half of it replays past messages. Lower it if the model runs out of ' +
+      'room.',
     invalidValueCode: 'runtime_config_context_window_tokens_invalid',
     invalidValueMessage:
       'Project02 contextWindowTokens must be a positive whole number of tokens.',
@@ -147,7 +106,37 @@ const project02ConfigFieldDefinitions = Object.freeze([
     acceptsValue: value =>
       typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
     redactionLabels: Object.freeze([]),
-    scopes: characterScopedFieldScopes,
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.defaultMemoryProvider',
+    name: 'defaultMemoryProvider',
+    description:
+      'Which enabled memory plugin keeps what the character remembers, when ' +
+      'more than one is enabled.',
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage: 'Runtime config field must be a non-empty string.',
+    required: false,
+    secret: false,
+    valueType: 'string',
+    redactionLabels: Object.freeze([]),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.enabled',
+    name: 'enabled',
+    description:
+      'Whether the character is switched on. A character that is off is not ' +
+      'started and cannot be reached; turning it back on starts it.',
+    invalidValueCode: 'runtime_config_boolean_invalid',
+    invalidValueMessage: 'Project02 enabled must be a boolean.',
+    required: false,
+    secret: false,
+    valueType: 'boolean',
+    defaultValueSummary: 'true',
+    redactionLabels: Object.freeze([]),
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -167,15 +156,6 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
   return Object.freeze(
     project02ConfigFieldDefinitions.map(field => field.name),
   );
-}
-
-export function characterRuntimeConfigFieldScopeViolation(
-  field: Project02ConfigFieldDefinition,
-): string | undefined {
-  return field.scopes.includes('character')
-    ? undefined
-    : `Config field "${field.path}" is global-only; set it in the home ` +
-        'config.json, not the character overlay.';
 }
 
 export function runtimeConfigValueMatchesField(
@@ -207,7 +187,7 @@ export function runtimeConfigValueMatchesField(
     case 'array':
       return Array.isArray(value);
     case 'secret':
-      return field.secret;
+      return field.secret && typeof value === 'string';
   }
 
   return true;

@@ -61,7 +61,6 @@ export type RuntimePluginConfigField = {
   readonly secret: boolean;
   readonly valueType?: RuntimePluginConfigValueType;
   readonly defaultValueSummary?: string;
-  readonly envVar?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable?: boolean;
   readonly reloadRequired?: boolean;

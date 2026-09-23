@@ -1,4 +1,4 @@
-import {writeFileSync} from 'node:fs';
+import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
@@ -80,26 +80,30 @@ describe('runtime config loader validation', () => {
 
   it('distinguishes read, syntax, and schema failures', () => {
     const root = createTestTempRoot('project02-config-load-diagnostics-');
-    const malformedPath = join(root, 'malformed.json');
-    const invalidSchemaPath = join(root, 'invalid-schema.json');
+    const homeWithDirectory = join(root, 'directory');
+    const homeWithMalformed = join(root, 'malformed');
+    const homeWithInvalidSchema = join(root, 'invalid-schema');
 
-    writeFileSync(malformedPath, '{', 'utf8');
+    mkdirSync(join(homeWithDirectory, 'config.json'), {recursive: true});
+    mkdirSync(homeWithMalformed);
+    writeFileSync(join(homeWithMalformed, 'config.json'), '{', 'utf8');
+    mkdirSync(homeWithInvalidSchema);
     writeFileSync(
-      invalidSchemaPath,
+      join(homeWithInvalidSchema, 'config.json'),
       JSON.stringify({version: 'project02.config.unknown'}),
       'utf8',
     );
 
-    expect(loadRuntimeConfigForTest({configPath: root}).diagnostics).toEqual([
-      expect.objectContaining({code: 'runtime_config_read_failed'}),
-    ]);
     expect(
-      loadRuntimeConfigForTest({configPath: malformedPath}).diagnostics,
+      loadRuntimeConfigForTest({storeRoot: homeWithDirectory}).diagnostics,
+    ).toEqual([expect.objectContaining({code: 'runtime_config_read_failed'})]);
+    expect(
+      loadRuntimeConfigForTest({storeRoot: homeWithMalformed}).diagnostics,
     ).toEqual([
       expect.objectContaining({code: 'runtime_config_malformed_json'}),
     ]);
     expect(
-      loadRuntimeConfigForTest({configPath: invalidSchemaPath}).diagnostics,
+      loadRuntimeConfigForTest({storeRoot: homeWithInvalidSchema}).diagnostics,
     ).toEqual([
       expect.objectContaining({code: 'runtime_config_version_unsupported'}),
     ]);
@@ -224,51 +228,6 @@ describe('runtime config loader validation', () => {
     expect(loaded.diagnostics).toEqual([]);
     expect(loaded.authoredDocument).toEqual(validated.authoredDocument);
     expect(loaded.config).toEqual(validated.config);
-  });
-
-  it('rejects env secret refs with unknown fields', () => {
-    const result = validateProject02RuntimeConfig({
-      version: runtimeConfigVersion,
-      plugins: {
-        foo: {
-          config: {
-            apiKey: {
-              $env: 'PROJECT02_TEST_API_KEY',
-              unexpected: 'not supported',
-            },
-          },
-        },
-      },
-    });
-
-    expect(result.config).toBeUndefined();
-    expect(result.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_value_invalid',
-          path: 'plugins.foo.config.apiKey',
-        }),
-      ]),
-    );
-  });
-
-  it('accepts env secret refs', () => {
-    const result = validateProject02RuntimeConfig({
-      version: runtimeConfigVersion,
-      plugins: {
-        foo: {
-          config: {
-            apiKey: {$env: 'PROJECT02_TEST_API_KEY'},
-          },
-        },
-      },
-    });
-
-    expect(result.diagnostics).toEqual([]);
-    expect(result.config?.plugins?.['foo']?.config?.['apiKey']).toEqual({
-      $env: 'PROJECT02_TEST_API_KEY',
-    });
   });
 
   it('deeply snapshots accepted nested config values', () => {

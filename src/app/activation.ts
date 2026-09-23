@@ -259,7 +259,6 @@ export function prepareConfiguredProject02PluginActivation(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   readonly validateInactivePluginConfigs?: boolean;
-  readonly env?: NodeJS.ProcessEnv;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
@@ -294,7 +293,6 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const configControlTarget = resolveRuntimeConfigScopeTarget({
     runtimeLocation: options.runtimeLocation,
     scope: 'character',
-    ...(options.env === undefined ? {} : {env: options.env}),
   });
   const {layeredConfig, resolvedConfig} =
     resolveLayeredProject02RuntimeConfigWithSnapshot({
@@ -305,7 +303,6 @@ export function prepareConfiguredProject02PluginActivation(options: {
       defaultEnabledPluginIds,
       validateInactivePluginConfigs:
         options.validateInactivePluginConfigs === true,
-      env: configControlTarget.env,
     });
   const activation = resolveRuntimePluginActivation({
     pluginManifests,

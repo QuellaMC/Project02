@@ -1,9 +1,7 @@
 import {ConversationRehydrationError} from '../../core/index.ts';
-import {RoleModelProviderSelectionError} from '../../role-model/index.ts';
 import {
   RuntimeConfigLocationError,
   RuntimeConfigMutationError,
-  RuntimeEnvFileError,
 } from '../../runtime/config/index.ts';
 import {
   LocalRuntimeConversationStoreError,
@@ -49,9 +47,7 @@ export function isCliTerminalError(error: unknown): error is Error {
     error instanceof CliUsageError ||
     error instanceof ChatCliStartupError ||
     error instanceof Project02StoreConsentError ||
-    error instanceof RoleModelProviderSelectionError ||
     error instanceof RuntimeConfigMutationError ||
-    error instanceof RuntimeEnvFileError ||
     isLocalRuntimeTerminalError(error)
   );
 }

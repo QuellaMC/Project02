@@ -3,10 +3,7 @@
  * call, before any command writes, so no write precedes a rejection.
  */
 import {loadProject02Home} from '../../app/index.ts';
-import {
-  ensureInitializedProject02Store,
-  type ResolvedProject02ConfigLocation,
-} from '../../runtime/config/index.ts';
+import {ensureInitializedProject02Store} from '../../runtime/config/index.ts';
 import {project02HomeCreationIsNew} from '../../runtime/storage/index.ts';
 import {cliPromptAnswerIsYes, createCliPrompt} from './prompt.ts';
 import type {RuntimeLocationCliState} from './runtime-location-flags.ts';
@@ -24,14 +21,6 @@ type Project02StoreConsentOptions = {
   readonly init: boolean;
   readonly stdout: NodeJS.WritableStream;
   readonly stdin?: NodeJS.ReadableStream;
-  readonly env?: NodeJS.ProcessEnv;
-  /** How the command's own env staging resolves a cwd `.env`. */
-  readonly cwdDotEnv?: 'always' | 'auto';
-  /**
-   * `'selected-config'` names a run that writes only the document the
-   * operator pointed at; standalone, that file is no store to consent to.
-   */
-  readonly creates?: 'home' | 'selected-config';
   /** A run being stopped abandons the question, which is a no. */
   readonly signal?: AbortSignal;
 };
@@ -40,17 +29,10 @@ type Project02StoreConsentOptions = {
 export async function assertProject02StoreConsent(
   options: Project02StoreConsentOptions,
 ): Promise<void> {
-  const home = loadProject02Home({
-    location: options.location,
-    ...(options.cwdDotEnv === undefined ? {} : {cwdDotEnv: options.cwdDotEnv}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
+  const home = loadProject02Home({location: options.location});
   const homeRoot = home.runtimeLocation.homeRoot;
 
-  if (
-    !runWouldCreateStore(options, home.runtimeLocation) ||
-    !project02HomeCreationIsNew({homeRoot})
-  ) {
+  if (!project02HomeCreationIsNew({homeRoot})) {
     return;
   }
 
@@ -65,16 +47,6 @@ export async function assertProject02StoreConsent(
   }
 
   await ensureInitializedProject02Store({homeRoot});
-}
-
-function runWouldCreateStore(
-  options: Project02StoreConsentOptions,
-  runtimeLocation: ResolvedProject02ConfigLocation,
-): boolean {
-  return (
-    options.creates !== 'selected-config' ||
-    runtimeLocation.selectedConfig.owner.kind === 'home'
-  );
 }
 
 async function operatorAgreesToCreateStore(

@@ -73,7 +73,6 @@ export async function createConfirmationHome(
   };
   const gateway = createGateway({
     location: {storeRoot: homeRoot},
-    env: {},
     roleModelAdapter: adapter,
   });
   const inspectTone = () =>

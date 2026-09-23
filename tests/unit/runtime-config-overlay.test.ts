@@ -17,7 +17,6 @@ import {
   characterOverlayConfigPath,
   layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
-  runtimeConfigDiagnosticAttribution,
   runtimeConfigVersion,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
@@ -26,7 +25,6 @@ import {
   resolveLayeredProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
-import {assertOverlayLocatedCandidateStaysCharacterScoped} from '../../src/runtime/config/mutate.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 
 function overlayDataRoot(): string {
@@ -57,11 +55,11 @@ function loadedGlobalConfig(options: {
   readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
 }): LoadedProject02RuntimeConfig {
   return {
-    source: 'default',
+    source: 'path',
     path: '/global-home/config.json',
     config: {
       version: runtimeConfigVersion,
-      project02: {storeRoot: '/global-home', ...options.project02},
+      project02: {...options.project02},
       ...(options.plugins === undefined ? {} : {plugins: options.plugins}),
     },
     diagnostics: [],
@@ -76,7 +74,6 @@ function loadedOverlay(options: {
     scope: 'character',
     characterId: 'mira',
     source: 'overlay',
-    secretsEnv: {},
     path: '/global-home/character-data/mira/config.json',
     config: {
       version: runtimeConfigVersion,
@@ -123,7 +120,6 @@ describe('character overlay config loader', () => {
       scope: 'character',
       characterId: 'mira',
       source: 'none',
-      secretsEnv: {},
       diagnostics: [],
     });
   });
@@ -146,51 +142,7 @@ describe('character overlay config loader', () => {
     });
   });
 
-  it('rejects global-only fields with an attributed diagnostic and no config', () => {
-    const dataRoot = overlayDataRoot();
-
-    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
-      project02: {
-        storeRoot: '/elsewhere',
-        userDisplayName: 'Mike',
-      },
-    });
-
-    const overlay = loadCharacterOverlay(dataRoot);
-
-    expect(overlay.config).toBeUndefined();
-    expect(overlay.diagnostics).toEqual([
-      expect.objectContaining({
-        severity: 'error',
-        code: 'runtime_config_field_global_only',
-        path: 'project02.storeRoot',
-        origin: {
-          scope: 'character',
-          characterId: 'mira',
-          path: characterOverlayConfigPath(dataRoot),
-        },
-      }),
-    ]);
-    const globalOnly = overlay.diagnostics[0];
-
-    if (globalOnly === undefined) {
-      throw new Error('Expected a global-only diagnostic.');
-    }
-
-    expect(globalOnly.message).toContain('global-only');
-    expect(globalOnly.message).toContain('home');
-    expect(runtimeConfigDiagnosticAttribution(globalOnly)).toBe(
-      '[character mira] ',
-    );
-  });
-
   it.each([
-    [
-      'project02.storeRoot',
-      '/tmp/home',
-      {version: runtimeConfigVersion, project02: {storeRoot: '/tmp/home'}},
-      true,
-    ],
     [
       'project02.defaultMemoryProvider',
       'memory',
@@ -198,7 +150,6 @@ describe('character overlay config loader', () => {
         version: runtimeConfigVersion,
         project02: {defaultMemoryProvider: 'memory'},
       },
-      false,
     ],
     [
       'project02.roleModelProvider',
@@ -207,44 +158,23 @@ describe('character overlay config loader', () => {
         version: runtimeConfigVersion,
         project02: {roleModelProvider: 'local' as const},
       },
-      false,
     ],
     [
       'project02.userDisplayName',
       'Mike',
       {version: runtimeConfigVersion, project02: {userDisplayName: 'Mike'}},
-      false,
     ],
   ] as const)(
     'uses one character-field scope policy for %s across every write boundary',
-    (path, value, candidate, globalOnly) => {
+    (path, value, candidate) => {
       const operation = {kind: 'set' as const, path, value};
       const dataRoot = overlayDataRoot();
 
       writeRuntimeConfig(characterOverlayConfigPath(dataRoot), candidate);
       const loaded = loadCharacterOverlay(dataRoot);
 
-      if (globalOnly) {
-        expect(() => {
-          assertScopedMutationOperationAllowed(operation);
-        }).toThrow('global-only');
-        expect(() => {
-          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
-        }).toThrow('global-only');
-        expect(loaded.diagnostics).toEqual([
-          expect.objectContaining({
-            code: 'runtime_config_field_global_only',
-            path,
-          }),
-        ]);
-        return;
-      }
-
       expect(() => {
         assertScopedMutationOperationAllowed(operation);
-      }).not.toThrow();
-      expect(() => {
-        assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
       }).not.toThrow();
       expect(loaded.diagnostics).toEqual([]);
     },
@@ -319,7 +249,7 @@ describe('character overlay config loader', () => {
 
     // Two bad fields, so fixing one still leaves the overlay invalid.
     writeRuntimeConfig(overlayPath, {
-      project02: {storeRoot: '/elsewhere', character: 'nova'},
+      project02: {contextWindowTokens: -1, character: 'nova'},
     });
 
     const before = overlayFingerprint(dataRoot);
@@ -335,7 +265,7 @@ describe('character overlay config loader', () => {
     const dataRoot = overlayDataRoot();
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
-    writeRuntimeConfig(overlayPath, {project02: {storeRoot: '/elsewhere'}});
+    writeRuntimeConfig(overlayPath, {project02: {contextWindowTokens: -1}});
 
     const invalid = overlayFingerprint(dataRoot);
 
@@ -375,45 +305,34 @@ describe('layered runtime config resolution', () => {
           scope: 'character',
           characterId: 'mira',
           source: 'none',
-          secretsEnv: {},
           diagnostics: [],
         },
       }),
     ).toEqual(globalResolved);
   });
 
-  it('overrides only character-scoped project02 fields and keeps the global path', () => {
+  it('overrides project02 fields from the overlay and keeps the global path', () => {
     const loadedConfig = loadedGlobalConfig({
       project02: {
         userDisplayName: 'Global Name',
         roleModelProvider: 'local',
       },
     });
+    const overlay = loadedOverlay({
+      project02: {
+        userDisplayName: 'Overlay Name',
+        roleModelProvider: 'nvidia',
+        defaultMemoryProvider: 'memory.overlay',
+        // Hand-built: the character is the location's, never a document's.
+        character: 'nova',
+      },
+    });
     const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadedConfig,
-        characterId: loadedOverlay({
-          project02: {
-            userDisplayName: 'Overlay Name',
-            roleModelProvider: 'nvidia',
-            defaultMemoryProvider: 'memory.overlay',
-            // Hand-built to bypass the loader's rejection of global-only keys.
-            storeRoot: '/smuggled-home',
-            character: 'nova',
-          },
-        }).characterId,
+        loadedConfig,
+        characterId: overlay.characterId,
       }),
-
-      overlayConfig: loadedOverlay({
-        project02: {
-          userDisplayName: 'Overlay Name',
-          roleModelProvider: 'nvidia',
-          defaultMemoryProvider: 'memory.overlay',
-          // Hand-built to bypass the loader's rejection of global-only keys.
-          storeRoot: '/smuggled-home',
-          character: 'nova',
-        },
-      }),
+      overlayConfig: overlay,
     });
 
     expect(resolved.project02).toMatchObject({
@@ -574,7 +493,6 @@ describe('startup with a character overlay', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
-      env: {},
       factories: {},
     });
 
@@ -599,12 +517,11 @@ describe('startup with a character overlay', () => {
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
-      project02: {storeRoot: '/elsewhere'},
+      project02: {contextWindowTokens: -1},
     });
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
-      env: {},
       factories: {},
     });
 
@@ -615,7 +532,8 @@ describe('startup with a character overlay', () => {
     expect(startup.overlayLoadedConfig?.characterId).toBe('mira');
     expect(
       startup.activationPlan.resolvedConfig.diagnostics.filter(
-        diagnostic => diagnostic.code === 'runtime_config_field_global_only',
+        diagnostic =>
+          diagnostic.code === 'runtime_config_context_window_tokens_invalid',
       ),
     ).toMatchObject([{origin: {characterId: 'mira'}}]);
   });
@@ -634,7 +552,6 @@ describe('startup with a character overlay', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
-      env: {},
       factories: {},
     });
 
@@ -647,7 +564,6 @@ describe('startup with a character overlay', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: 'nova'},
-      env: {},
       factories: {},
     });
 
@@ -663,7 +579,6 @@ describe('startup with a character overlay', () => {
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot, character: '../bad'},
-      env: {},
       factories: {},
     });
 

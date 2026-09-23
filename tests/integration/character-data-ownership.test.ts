@@ -329,7 +329,7 @@ describe('layered config control against a rebound character-data directory', ()
     const configPath = join(homeRoot, 'config.json');
 
     writeRuntimeConfig(configPath, {
-      project02: {storeRoot: homeRoot, character: 'mira'},
+      project02: {character: 'mira'},
     });
 
     // A copied directory: mira's data dir claims nova and carries nova's
@@ -348,9 +348,7 @@ describe('layered config control against a rebound character-data directory', ()
   it('refuses a global mutation instead of fingerprinting the foreign overlay', () => {
     const {homeRoot, configPath} = homeWithForeignMiraDataDir();
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     });
     const configBefore = readFileSync(configPath, 'utf8');
@@ -375,9 +373,7 @@ describe('layered config control against a rebound character-data directory', ()
   it('refuses a layered expectation before comparing fingerprints', () => {
     const {homeRoot, configPath} = homeWithForeignMiraDataDir();
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     });
     const configBefore = readFileSync(configPath, 'utf8');

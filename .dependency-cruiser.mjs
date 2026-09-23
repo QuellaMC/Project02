@@ -114,15 +114,15 @@ export default {
       comment:
         'src/app is the composition root: it wires runtime, plugins, and ' +
         'role-model together. Only the public barrel, gateway, and the ' +
-        'surviving CLIs (config console, inspect, shared helpers) may ' +
-        'import it; every other surface is a client of the socket. Green ' +
+        'surviving CLIs (inspect and its shared helpers) may import it; ' +
+        'every other surface is a client of the socket. Green ' +
         '(zero baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
         pathNot: [
           '^src/app/',
-          '^src/cli/(config|inspect|shared)/',
+          '^src/cli/(inspect|shared)/',
           '^src/gateway/',
           '^src/index\\.ts$',
         ],

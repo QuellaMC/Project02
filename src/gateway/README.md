@@ -18,8 +18,8 @@ running set in line with the config on disk — boot, the enabled toggle,
 and a reload of a ready character whose assembly would differ now, which
 the runtime itself judges from what it was built with; `config.ts` is the
 config owner's two verbs — the view a settings page renders, and the
-change that goes through the one control transaction the console uses,
-applied by reconcile behind the answer; `submissions.ts` is the turn ledger that makes a resubmitted message join
+change that goes through the one control transaction, applied by
+reconcile behind the answer; `submissions.ts` is the turn ledger that makes a resubmitted message join
 its turn instead of starting another; a line an earlier run of the daemon
 already put on any segment of the conversation is refused by the runtime
 itself, from the segments' records and the conversation's record of the

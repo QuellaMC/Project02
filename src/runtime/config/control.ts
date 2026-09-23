@@ -17,7 +17,6 @@ import {
   runtimeConfigValueMatchesField,
 } from './schema.ts';
 import {runtimePluginScopeViolation} from './plugin-scope.ts';
-import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import type {
   RuntimePluginConfigField,
@@ -36,7 +35,7 @@ import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
   {
-    readonly kind: 'set' | 'unset' | 'default_memory_provider';
+    readonly kind: 'set' | 'unset';
   }
 >;
 
@@ -46,7 +45,6 @@ export function assertRuntimeConfigControlOperation(
   switch (operation.kind) {
     case 'set':
     case 'unset':
-    case 'default_memory_provider':
       return;
     case 'plugin_enable':
     case 'plugin_disable':
@@ -55,7 +53,6 @@ export function assertRuntimeConfigControlOperation(
       );
     case 'plugin_config_set':
     case 'plugin_config_unset':
-    case 'secret_set':
       throw new TypeError(
         'Plugin config fields must be changed through manifest-aware control.',
       );
@@ -73,17 +70,10 @@ export type RuntimePluginConfigFieldControlOperation =
   | {
       readonly kind: 'unset';
       readonly fieldName: string;
-    }
-  | {
-      readonly kind: 'secret_set';
-      readonly fieldName: string;
-      readonly envVar: string;
-      readonly secretValue: string;
     };
 
 export function inspectRuntimePluginConfig(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly env?: NodeJS.ProcessEnv;
   /** The one document this inspection's control operation can mutate. */
   readonly targetScope: 'global' | 'character';
   readonly manifest: RuntimePluginManifest;
@@ -109,7 +99,6 @@ export function inspectRuntimePluginConfig(options: {
       overlayConfig,
       pluginManifests: manifests,
       validateInactivePluginConfigs: true,
-      ...(options.env === undefined ? {} : {env: options.env}),
     });
   const mutationBase =
     createRuntimeConfigAuthoredSnapshot(loadedConfig).document;
@@ -134,21 +123,6 @@ export function inspectRuntimePluginConfig(options: {
   });
 }
 
-/**
- * The one rule naming a plugin secret's environment variable: the
- * manifest's own, else the plugin and field upper-cased. Every writer of a
- * secret — the console's printed command, the daemon — derives it here.
- */
-export function pluginSecretEnvVarName(
-  pluginId: string,
-  field: RuntimePluginConfigField,
-): string {
-  return (
-    field.envVar ??
-    `${pluginId}_${field.name}`.replaceAll(/[^A-Za-z0-9]+/g, '_').toUpperCase()
-  );
-}
-
 function layeredControlFingerprint(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
@@ -165,8 +139,6 @@ function layeredControlFingerprint(options: {
 }
 
 export function runtimePluginConfigControlMutation(options: {
-  /** What this scope resolves with: a character's secrets over the shared env. */
-  readonly env: NodeJS.ProcessEnv;
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
@@ -183,20 +155,12 @@ export function runtimePluginConfigControlMutation(options: {
       fieldName: fieldNameOf(options.operation),
     },
   });
-  // Unsetting is how a document already holding a value this scope may
-  // not author gets repaired -- including a required field, whose value
-  // this scope was never the place for; refusing it would leave the
-  // operator editing JSON by hand.
-  const scopeRepair =
-    scopeViolation !== undefined && options.operation.kind === 'unset';
-  const field = validateRuntimePluginConfigControlOperation({
-    ...options,
-    ...(scopeRepair ? {allowRequiredUnset: true} : {}),
-  });
 
-  if (scopeViolation !== undefined && !scopeRepair) {
+  if (scopeViolation !== undefined) {
     throw new TypeError(scopeViolation.message);
   }
+
+  const field = validateRuntimePluginConfigControlOperation(options);
 
   return {
     operation: runtimePluginConfigMutationOperation(options.operation, {
@@ -208,7 +172,6 @@ export function runtimePluginConfigControlMutation(options: {
         config,
         manifest: options.manifest,
         operation: options.operation,
-        env: options.env,
       });
     },
   };
@@ -239,13 +202,6 @@ function runtimePluginConfigMutationOperation(
         kind: 'plugin_config_unset',
         ...target,
       };
-    case 'secret_set':
-      return {
-        kind: 'secret_set',
-        ...target,
-        envVar: operation.envVar,
-        secretValue: operation.secretValue,
-      };
   }
 }
 
@@ -253,20 +209,11 @@ function assertRuntimePluginConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
   readonly operation: RuntimePluginConfigFieldControlOperation;
-  readonly env: NodeJS.ProcessEnv;
 }): void {
   const resolved = resolveRuntimePluginConfigs({
     config: options.config,
     pluginManifests: [options.manifest],
     skipPluginScopeValidation: true,
-    // The pending secret sits on top of the scope's env: the file this is
-    // validated against is the one this mutation is about to write.
-    env: {
-      ...options.env,
-      ...(options.operation.kind === 'secret_set'
-        ? {[options.operation.envVar]: options.operation.secretValue}
-        : {}),
-    },
     validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
@@ -287,8 +234,6 @@ export function validateRuntimePluginConfigControlOperation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
-  /** Set only for a scope repair: removing a value this scope may not hold. */
-  readonly allowRequiredUnset?: boolean;
 }): RuntimePluginConfigField {
   const field = options.manifest.config.fields.find(
     candidate => candidate.name === options.operation.fieldName,
@@ -305,29 +250,11 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  if (options.operation.kind === 'secret_set') {
-    if (options.actor !== 'operator') {
-      throw new TypeError('Only an operator can update plugin secrets.');
-    }
-
-    if (!field.secret) {
-      throw new TypeError(
-        `Plugin config field "${field.name}" is not declared as secret.`,
-      );
-    }
-
-    return field;
-  }
-
-  // Removing a pointer is not managing a credential, and it is the one
-  // repair a scope violation leaves the operator; writing one still goes
-  // through the secret command.
-  const operatorClearingSecret =
-    options.operation.kind === 'unset' && options.actor === 'operator';
-
-  if (field.secret && !operatorClearingSecret) {
+  // A secret is the operator's alone: the model never reads one back, so
+  // it never writes one either.
+  if (field.secret && options.actor !== 'operator') {
     throw new TypeError(
-      `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`,
+      `Plugin config field "${field.name}" is secret; only an operator may change it.`,
     );
   }
 
@@ -337,11 +264,7 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  if (
-    options.operation.kind === 'unset' &&
-    field.required &&
-    options.allowRequiredUnset !== true
-  ) {
+  if (options.operation.kind === 'unset' && field.required) {
     throw new TypeError(
       `Required plugin config field "${field.name}" cannot be unset.`,
     );
@@ -354,13 +277,10 @@ export function validateRuntimePluginConfigControlOperation(options: {
       );
     }
 
-    if (runtimeConfigControlValueContainsSecret(options.operation.value)) {
-      throw new TypeError(
-        `Plugin config field "${field.name}" value must not embed secret references; secrets are managed through the dedicated secret command.`,
-      );
-    }
-
+    // A secret field holds a credential by declaration; a plain field
+    // must not be handed one by its name.
     if (
+      !field.secret &&
       runtimeConfigControlValueRequiresRedaction(
         options.operation.value,
         field.name,
@@ -395,10 +315,4 @@ function manifestsIncludingTarget(
 
   byId.set(target.id, target);
   return Object.freeze([...byId.values()]);
-}
-
-function runtimeConfigControlValueContainsSecret(
-  value: RuntimeConfigValue,
-): boolean {
-  return nestedSecretMarkerPath(value, 'value') !== undefined;
 }

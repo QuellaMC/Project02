@@ -8,12 +8,8 @@ import {
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
-import {collect} from '../support/streams.ts';
-
-import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {resolveProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {
-  createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
@@ -136,78 +132,7 @@ describe('runtime config redaction', () => {
     expect(JSON.stringify(redacted)).not.toContain('nested-api-key-secret');
     expect(JSON.stringify(redacted)).not.toContain('array-api-key-secret');
   });
-
-  it('fails closed for manifest-declared auth secrets on runtime-config get', async () => {
-    const manifest = authSecretConfigManifest();
-    const plugin = createRuntimePlugin({manifest});
-    const plaintextSecret = 'plaintext-auth-secret';
-    const configPath = writeRuntimeConfig(
-      join(createTestTempRoot('project02-config-auth-get-'), 'config.json'),
-      {
-        plugins: {
-          [manifest.id]: {
-            config: {auth: plaintextSecret},
-          },
-        },
-      },
-    );
-    let stdout = '';
-    let stderr = '';
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--config', configPath, 'get', `plugins.${manifest.id}.config.auth`],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        factories: {
-          [manifest.id]: {
-            manifest,
-            create: () => plugin,
-          },
-        },
-      },
-    );
-
-    expect({
-      exitCode,
-      stdout,
-      leakedSecret: `${stdout}${stderr}`.includes(plaintextSecret),
-    }).toEqual({
-      exitCode: 1,
-      stdout: '',
-      leakedSecret: false,
-    });
-  });
 });
-
-function authSecretConfigManifest(): RuntimePluginManifest {
-  const base = dottedConfigManifest();
-
-  return Object.freeze({
-    ...base,
-    id: 'memory.auth-secret',
-    displayName: 'Auth Secret',
-    description: 'Test manifest for a secret field outside name heuristics.',
-    declaredPlugins: ['plugin_discovery'],
-    config: {
-      scope: 'global_with_character_overrides',
-      fields: [
-        {
-          name: 'auth',
-          description: 'Authentication material.',
-          required: false,
-          secret: true,
-          valueType: 'secret',
-          redactionLabels: ['secret'],
-        },
-      ],
-    },
-  } satisfies RuntimePluginManifest);
-}
 
 function dottedConfigManifest(): RuntimePluginManifest {
   return Object.freeze({

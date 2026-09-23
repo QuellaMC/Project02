@@ -1,6 +1,6 @@
 import {dirname} from 'node:path';
 
-import {pathExistsSync, unlinkPathSync} from '../../shared/file-system.ts';
+import {pathExistsSync} from '../../shared/file-system.ts';
 
 import {
   createJsonBoundaryObjectSnapshot,
@@ -10,7 +10,6 @@ import {
   type JsonBoundaryObject,
   type JsonBoundaryValue,
 } from '../../shared/json-boundary.ts';
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -24,13 +23,10 @@ import {
   acquireLocalRuntimeMutationLock,
   type LocalRuntimeMutationLockTarget,
 } from '../storage/mutation-lock.ts';
-import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
-  isRuntimeControlEnvVarName,
   runtimeConfigDiagnosticLocation,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
-  type Project02HostConfig,
   type Project02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigMutationOperation,
@@ -40,16 +36,13 @@ import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {canonicalRuntimeConfigPath} from './path.ts';
 import {
-  characterRuntimeConfigFieldScopeViolation,
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinition,
-  project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
 
 export type RuntimeConfigMutationResult = {
   readonly configPath: string;
-  readonly envPath: string;
   readonly config: Project02RuntimeConfig;
   readonly fingerprint: string;
 };
@@ -73,59 +66,22 @@ export function runtimeConfigControlFileLockTarget(
 export function commitPreparedRuntimeConfigMutation(options: {
   readonly canonicalConfigPath: string;
   readonly displayConfigPath: string;
-  readonly canonicalEnvPath: string;
-  readonly displayEnvPath: string;
-  readonly operation?: RuntimeConfigMutationOperation;
   readonly preparedCandidate: PreparedRuntimeConfigMutationCandidate;
 }): void {
-  if (
-    options.operation?.kind === 'secret_set' &&
-    options.canonicalConfigPath === options.canonicalEnvPath
-  ) {
-    throw new TypeError(
-      'Cannot write runtime config secret because the selected config path and runtime env path resolve to the same file.',
+  try {
+    cleanupAbandonedAtomicReplacementFilesSync(options.canonicalConfigPath);
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      `Could not write runtime config file at ${options.displayConfigPath}.`,
+      error,
     );
   }
 
-  cleanupRuntimeConfigAtomicTemps(
+  writeJsonAtomic(
     options.canonicalConfigPath,
-    options.displayConfigPath,
-    'config',
+    options.preparedCandidate.config,
+    0o600,
   );
-
-  if (options.operation?.kind !== 'secret_set') {
-    writeJsonAtomic(
-      options.canonicalConfigPath,
-      options.preparedCandidate.config,
-      0o600,
-    );
-  } else {
-    cleanupRuntimeConfigAtomicTemps(
-      options.canonicalEnvPath,
-      options.displayEnvPath,
-      'env',
-    );
-    const secretWrite = prepareEnvSecretWrite(
-      options.canonicalEnvPath,
-      options.operation.envVar,
-      options.operation.secretValue,
-    );
-    const previousConfigState = snapshotPreviousConfigState(
-      options.canonicalConfigPath,
-    );
-
-    writeJsonAtomic(
-      options.canonicalConfigPath,
-      options.preparedCandidate.config,
-      0o600,
-    );
-
-    try {
-      writePreparedEnvSecret(secretWrite);
-    } catch (error: unknown) {
-      throwRuntimeConfigSecretWriteFailure(error, previousConfigState);
-    }
-  }
 }
 
 export class RuntimeConfigMutationError extends Error {
@@ -146,55 +102,7 @@ export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
   }
 }
 
-function throwRuntimeConfigSecretWriteFailure(
-  error: unknown,
-  previousConfigState: PreviousConfigState,
-): never {
-  const rollbackError = restorePreviousConfigState(previousConfigState);
-
-  if (rollbackError !== undefined) {
-    throw new RuntimeConfigMutationError(
-      'Could not write runtime config secret and failed to roll back the config update.',
-      {
-        cause: new AggregateError(
-          [error, rollbackError],
-          'Runtime config secret write failed and config rollback failed.',
-          {cause: error},
-        ),
-      },
-    );
-  }
-
-  throw error;
-}
-
-function cleanupRuntimeConfigAtomicTemps(
-  path: string,
-  displayPath: string,
-  kind: 'config' | 'env',
-): void {
-  try {
-    cleanupAbandonedAtomicReplacementFilesSync(path);
-  } catch (error: unknown) {
-    throw mutationFileAccessError(
-      kind === 'config'
-        ? `Could not write runtime config file at ${displayPath}.`
-        : `Could not write runtime config env file at ${displayPath}.`,
-      error,
-    );
-  }
-}
-
-function bootstrapRuntimeConfig(options: {
-  readonly storeRoot?: string;
-}): Project02RuntimeConfig {
-  if (options.storeRoot !== undefined) {
-    return {
-      version: runtimeConfigVersion,
-      project02: Object.freeze({storeRoot: options.storeRoot}),
-    };
-  }
-
+function bootstrapRuntimeConfig(): Project02RuntimeConfig {
   return {version: runtimeConfigVersion};
 }
 
@@ -219,36 +127,13 @@ export async function ensureInitializedProject02Store(options: {
 
   try {
     if (!pathExistsSync(layout.configPath)) {
-      writeJsonAtomic(
-        layout.configPath,
-        bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
-        0o600,
-      );
+      writeJsonAtomic(layout.configPath, bootstrapRuntimeConfig(), 0o600);
     }
   } finally {
     await lock.release();
   }
 
   return layout;
-}
-
-/** Any path that writes an overlay must go through this dialect check. */
-export function assertOverlayLocatedCandidateStaysCharacterScoped(
-  candidate: Project02RuntimeConfig,
-): void {
-  const section = candidate.project02;
-
-  if (section === undefined) {
-    return;
-  }
-
-  for (const field of project02RuntimeConfigFieldDefinitions()) {
-    const violation = characterRuntimeConfigFieldScopeViolation(field);
-
-    if (violation !== undefined && section[field.name] !== undefined) {
-      throw new RuntimeConfigMutationError(violation);
-    }
-  }
 }
 
 export type RuntimeConfigAuthoredSnapshot = Readonly<{
@@ -305,32 +190,7 @@ export function createRuntimeConfigAuthoredSnapshot(
     });
   }
 
-  const selectedConfigPath =
-    loadedConfig.selectedConfig?.canonicalPath ?? loadedConfig.path;
-
-  if (selectedConfigPath === undefined) {
-    throw new TypeError(
-      'Absent runtime config bootstrap requires retained selection provenance.',
-    );
-  }
-
-  const bootstrapStoreRoot =
-    loadedConfig.selectedConfig?.runtimeHomeRoot ??
-    (loadedConfig.selectedConfig === undefined
-      ? undefined
-      : loadedConfig.selectedConfig.owner.kind === 'home'
-        ? loadedConfig.selectedConfig.owner.homeRoot
-        : undefined);
-  const canonicalBootstrapStoreRoot =
-    bootstrapStoreRoot === undefined
-      ? undefined
-      : canonicalRuntimeConfigMutationPath(bootstrapStoreRoot);
-
-  const validatedConfig = bootstrapRuntimeConfig({
-    ...(canonicalBootstrapStoreRoot === undefined
-      ? {}
-      : {storeRoot: canonicalBootstrapStoreRoot}),
-  });
+  const validatedConfig = bootstrapRuntimeConfig();
 
   return Object.freeze({
     document: createJsonBoundaryObjectSnapshot(validatedConfig, {
@@ -372,87 +232,35 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   } satisfies PreparedRuntimeConfigMutationCandidate);
 }
 
+/** A host field's authored value, redacted by its key; the field inspection is its reader. */
 export function getRedactedRuntimeConfigValueAtPath(
   config: Project02RuntimeConfig | undefined,
   path: string,
 ): RuntimeConfigValue | undefined {
   const parts = parseConfigPath(path);
 
-  if (parts[0] === 'plugins') {
-    throw new TypeError(
-      'Plugin config values are not available through generic runtime config get.',
-    );
+  if (parts[0] !== 'project02' || parts.length !== 2) {
+    throw new TypeError(`Unsupported runtime config path: ${path}.`);
   }
 
-  if (config === undefined) {
-    return undefined;
-  }
+  const name = parts[1] ?? '';
+  const value = project02ConfigValue(config, name);
 
-  if (parts.length === 1) {
-    return redactedConfigValueForKey(
-      rootConfigValue(config, parts[0]),
-      parts[0],
-    );
-  }
-
-  if (parts[0] === 'project02' && parts.length === 2) {
-    return redactedConfigValueForKey(
-      project02ConfigValue(config, parts[1]),
-      parts[1],
-    );
-  }
-
-  return undefined;
-}
-
-function redactedConfigValueForKey(
-  value: RuntimeConfigValue | undefined,
-  key: string | undefined,
-): RuntimeConfigValue | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return key === undefined
-    ? redactRuntimeConfigValue(value)
-    : redactRuntimeConfigValue(value, {key});
-}
-
-function rootConfigValue(
-  config: Project02RuntimeConfig,
-  field: string | undefined,
-): RuntimeConfigValue | undefined {
-  switch (field) {
-    case 'version':
-      return config.version;
-    case 'project02':
-      return project02ConfigObject(config.project02);
-    default:
-      return undefined;
-  }
-}
-
-function project02ConfigObject(
-  config: Project02HostConfig | undefined,
-): Readonly<Record<string, RuntimeConfigValue>> | undefined {
-  if (config === undefined) {
-    return undefined;
-  }
-
-  return frozenRuntimeConfigRecord(
-    Object.entries(config).flatMap(([name, value]) =>
-      value === undefined ? [] : [[name, value]],
-    ),
-  );
+  return value === undefined
+    ? undefined
+    : redactRuntimeConfigValue(value, {
+        key: name,
+        secret: project02RuntimeConfigFieldDefinition(name)?.secret === true,
+      });
 }
 
 function project02ConfigValue(
-  config: Project02RuntimeConfig,
+  config: Project02RuntimeConfig | undefined,
   field: string | undefined,
 ): RuntimeConfigValue | undefined {
   return field === undefined
     ? undefined
-    : ownJsonRecordValue(config.project02, field);
+    : ownJsonRecordValue(config?.project02, field);
 }
 
 function mutateConfig(
@@ -470,14 +278,6 @@ function mutateConfig(
       return setPluginEnabled(config, operation.pluginId, false);
     case 'plugin_activation_clear':
       return clearPluginEnabled(config, operation.pluginId);
-    case 'default_memory_provider':
-      return operation.pluginId === undefined
-        ? unsetConfigPath(config, 'project02.defaultMemoryProvider')
-        : setConfigPath(
-            config,
-            'project02.defaultMemoryProvider',
-            operation.pluginId,
-          );
     case 'plugin_config_set':
       return setPluginConfigField(
         config,
@@ -490,13 +290,6 @@ function mutateConfig(
         config,
         operation.pluginId,
         operation.fieldName,
-      );
-    case 'secret_set':
-      return setPluginConfigField(
-        config,
-        operation.pluginId,
-        operation.fieldName,
-        {$env: operation.envVar},
       );
   }
 }
@@ -680,18 +473,6 @@ function unsetConfigPath(
   throw new TypeError(`Unsupported runtime config path: ${path}.`);
 }
 
-function frozenRuntimeConfigRecord(
-  entries: readonly (readonly [string, RuntimeConfigValue])[],
-): Readonly<Record<string, RuntimeConfigValue>> {
-  const record: Record<string, RuntimeConfigValue> = {};
-
-  for (const [name, value] of entries) {
-    record[name] = value;
-  }
-
-  return Object.freeze(record);
-}
-
 function project02FieldForConfigPath(
   parts: readonly string[],
 ): Project02ConfigFieldDefinition | undefined {
@@ -746,272 +527,6 @@ function unsetProject02ConfigField(
   }
 
   return freezeJsonObject(root);
-}
-
-type PreparedEnvSecretWrite = {
-  readonly envPath: string;
-  readonly value: string;
-  readonly mode: number;
-};
-
-type PreviousConfigState = {
-  readonly path: string;
-  readonly text?: string;
-};
-
-function snapshotPreviousConfigState(path: string): PreviousConfigState {
-  try {
-    const text = readOptionalStoreText(path);
-
-    return Object.freeze(
-      text === undefined ? {path} : {path, text},
-    ) satisfies PreviousConfigState;
-  } catch (error: unknown) {
-    throw mutationFileAccessError(
-      `Could not read runtime config file at ${path}.`,
-      error,
-    );
-  }
-}
-
-function prepareEnvSecretWrite(
-  envPath: string,
-  envVar: string,
-  secretValue: string,
-): PreparedEnvSecretWrite {
-  if (!/^[A-Z_][A-Z0-9_]*$/u.test(envVar)) {
-    throw new TypeError('Secret env var name must be uppercase snake case.');
-  }
-
-  if (isRuntimeControlEnvVarName(envVar)) {
-    throw new TypeError(
-      `Secret env var ${envVar} is reserved for Project02 runtime control and cannot be used for plugin secrets.`,
-    );
-  }
-
-  const current = readExistingEnvSecretFile(envPath);
-  const existing = envFileTextWithoutAssignment(current, envVar);
-  const assignment = `${envVar}=${formatDotenvSecretValue(secretValue)}`;
-  const next =
-    existing.length === 0
-      ? `${assignment}\n`
-      : `${existing}${existing.endsWith('\n') ? '' : '\n'}${assignment}\n`;
-
-  return Object.freeze({
-    envPath,
-    value: next,
-    mode: 0o600,
-  } satisfies PreparedEnvSecretWrite);
-}
-
-function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
-  try {
-    writeTextAtomic(secretWrite.envPath, secretWrite.value, secretWrite.mode);
-  } catch (error: unknown) {
-    throw mutationFileAccessError(
-      `Could not write runtime config env file at ${secretWrite.envPath}.`,
-      error,
-    );
-  }
-}
-
-function readExistingEnvSecretFile(envPath: string): string {
-  try {
-    return readOptionalStoreText(envPath) ?? '';
-  } catch (error: unknown) {
-    throw mutationFileAccessError(
-      `Could not read runtime config env file at ${envPath}.`,
-      error,
-    );
-  }
-}
-
-function restorePreviousConfigState(
-  previousConfigState: PreviousConfigState,
-): Error | undefined {
-  try {
-    if (previousConfigState.text === undefined) {
-      // Unlink and accept ENOENT; checking first races other cleanup.
-      try {
-        unlinkPathSync(previousConfigState.path);
-      } catch (error: unknown) {
-        if (!isNodeErrorWithCode(error, 'ENOENT')) {
-          throw error;
-        }
-      }
-
-      return undefined;
-    }
-
-    writeTextAtomic(previousConfigState.path, previousConfigState.text, 0o600);
-    return undefined;
-  } catch (error: unknown) {
-    return mutationFileAccessError(
-      `Could not restore runtime config file at ${previousConfigState.path}.`,
-      error,
-    );
-  }
-}
-
-type DotenvQuoteDelimiter = '"' | "'" | '`';
-
-function envFileTextWithoutAssignment(value: string, envVar: string): string {
-  const lines = value.split('\n');
-  const kept: string[] = [];
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    const assignment = dotenvAssignmentForLine(line);
-    const blockEndIndex =
-      assignment === undefined
-        ? index
-        : dotenvAssignmentBlockEndIndex(lines, index, assignment.value);
-
-    if (assignment?.name === envVar) {
-      index = blockEndIndex;
-      continue;
-    }
-
-    kept.push(...lines.slice(index, blockEndIndex + 1));
-    index = blockEndIndex;
-  }
-
-  return kept.join('\n');
-}
-
-type DotenvAssignment = {
-  readonly name: string;
-  readonly value: string;
-};
-
-function dotenvAssignmentForLine(line: string): DotenvAssignment | undefined {
-  let index = 0;
-
-  while (isDotenvWhitespace(line[index])) {
-    index += 1;
-  }
-
-  if (
-    line.startsWith('export', index) &&
-    isDotenvWhitespace(line[index + 'export'.length])
-  ) {
-    index += 'export'.length;
-
-    while (isDotenvWhitespace(line[index])) {
-      index += 1;
-    }
-  }
-
-  const nameStart = index;
-
-  while (isDotenvNameCharacter(line[index])) {
-    index += 1;
-  }
-
-  const name = line.slice(nameStart, index);
-
-  if (name.length === 0 || !isDotenvNameStart(name[0])) {
-    return undefined;
-  }
-
-  while (isDotenvWhitespace(line[index])) {
-    index += 1;
-  }
-
-  if (line[index] !== '=') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    name,
-    value: line.slice(index + 1).trimStart(),
-  } satisfies DotenvAssignment);
-}
-
-function isDotenvWhitespace(value: string | undefined): boolean {
-  return value === ' ' || value === '\t';
-}
-
-function isDotenvNameStart(value: string | undefined): boolean {
-  return value !== undefined && /^[A-Za-z_]$/u.test(value);
-}
-
-function isDotenvNameCharacter(value: string | undefined): boolean {
-  return value !== undefined && /^[A-Za-z0-9_]$/u.test(value);
-}
-
-function dotenvQuoteDelimiter(value: string): DotenvQuoteDelimiter | undefined {
-  const first = value[0];
-
-  return isDotenvQuoteDelimiter(first) ? first : undefined;
-}
-
-function isDotenvQuoteDelimiter(
-  value: string | undefined,
-): value is DotenvQuoteDelimiter {
-  return value === '"' || value === "'" || value === '`';
-}
-
-function dotenvAssignmentBlockEndIndex(
-  lines: readonly string[],
-  startIndex: number,
-  assignmentValue: string,
-): number {
-  const delimiter = dotenvQuoteDelimiter(assignmentValue);
-
-  if (delimiter === undefined || assignmentValue.slice(1).includes(delimiter)) {
-    return startIndex;
-  }
-
-  return dotenvQuotedValueContinuationEndIndex(
-    lines,
-    startIndex + 1,
-    delimiter,
-  );
-}
-
-function dotenvQuotedValueContinuationEndIndex(
-  lines: readonly string[],
-  startIndex: number,
-  delimiter: DotenvQuoteDelimiter,
-): number {
-  for (let index = startIndex; index < lines.length; index += 1) {
-    if ((lines[index] ?? '').includes(delimiter)) {
-      return index;
-    }
-  }
-
-  return startIndex - 1;
-}
-
-function formatDotenvSecretValue(value: string): string {
-  if (value.includes('\r')) {
-    throw new TypeError(
-      'Secret value cannot be written to the runtime config env file because dotenv parsing does not preserve carriage returns.',
-    );
-  }
-
-  const delimiters = value.includes('\\')
-    ? (["'", '`'] as const)
-    : (['"', "'", '`'] as const);
-
-  for (const delimiter of delimiters) {
-    if (!value.includes(delimiter)) {
-      return `${delimiter}${value}${delimiter}`;
-    }
-  }
-
-  if (isSafeUnquotedDotenvValue(value)) {
-    return value;
-  }
-
-  throw new TypeError(
-    'Secret value cannot be written to the runtime config env file because it has no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value.',
-  );
-}
-
-function isSafeUnquotedDotenvValue(value: string): boolean {
-  return !isDotenvQuoteDelimiter(value[0]) && /^[^\s#]+$/u.test(value);
 }
 
 function writeJsonAtomic(

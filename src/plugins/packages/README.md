@@ -125,22 +125,20 @@ open-ended input.
 ## Config fields
 
 Declared in `manifest.config.fields`; the same declarations drive runtime
-resolution, the operator console, and the model-facing
+resolution, the daemon's config view, and the model-facing
 `runtime.plugin.config` tools.
 
-- `config.scope: "global_with_character_overrides"` allows global
+- `config.scope: "global_with_character_overrides"` allows home
   settings with per-character overrides; `"character_only"` keeps the
-  plugin's settings wholly per character (its `activation.defaultEnabled`
-  must be `false`).
+  plugin wholly per character — the home's config view does not list it, and
+  its `activation.defaultEnabled` must be `false`.
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
-- `secret: true` fields hold credentials. The preferred home is an env
-  file — the manifest's `envVar` or an authored `{"$env": "VAR"}` ref —
-  and each character's own env file (set with `runtime-config --character
-<id> secret set`) merges over the home `.env`, so two characters can
-  hold different accounts for one plugin. A plain string typed into
-  config also works; the env wins whenever it holds the variable. Reads
-  always show secret fields redacted, and they cannot be `agentMutable`.
+- `secret: true` fields hold credentials. The operator writes one into
+  that scope's config document (through the daemon's config change, or by
+  hand), and it is kept as a plain string at mode 0600; a character's own value overrides the home's, so two
+  characters can hold different accounts for one plugin. Reads always
+  show secret fields redacted, and they cannot be `agentMutable`.
 - `agentMutable: true` lets the model propose updates through
   `runtime.plugin.config.update` (each still requires explicit user
   approval). Every other field is out of the model's reach — that is what
@@ -190,11 +188,12 @@ A character package may request enablement (`required`/`recommended`) and
 ship config values, so its character works right after install with no
 setup. Materialization only fills what is missing: a field the operator
 has set keeps the operator's value, on first install and on every package
-update. Character-only, demo, and
-optional plugins ship `false` and are enabled per store:
-`pnpm runtime-config ui` → Plugins → your plugin → Enable. A
-character-only plugin is enabled with `--character <id>` or by that
-character's package; it is rejected from the home `config.json`.
+update. Character-only, demo, and optional plugins ship `false` and are
+enabled in the home's `config.json` or a character's overlay — by hand,
+or through the daemon's `plugin_enabled` change; the settings page over
+that verb is the next roadmap step. A character-only plugin is enabled
+in a character's overlay or by that character's package; the home's
+config view does not list it.
 
 ## Testing a package
 

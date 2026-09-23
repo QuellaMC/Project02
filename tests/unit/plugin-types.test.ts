@@ -818,7 +818,6 @@ describe('runtime plugin config metadata', () => {
               required: false,
               secret: true,
               valueType: 'secret',
-              envVar: 'MEMORY_API_KEY',
               redactionLabels: ['secret'],
             },
           ],

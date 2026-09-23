@@ -1,6 +1,5 @@
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
-import {shellQuoteCommandArgument} from '../shared/shell-command.ts';
 import {
   validateRuntimePluginManifest,
   type RuntimePluginManifest,
@@ -89,8 +88,8 @@ export function planCharacterPackagePluginMaterialization(options: {
   }
 
   // A package is a shareable artifact: a credential inside one would be
-  // distributed to every installer. Secrets stay the operator's to enter,
-  // through their env files or their own config.
+  // distributed to every installer. Secrets stay the operator's to enter
+  // in the home's or the character's own settings.
   const shippedSecrets = packagedSecretFieldPaths(
     validated.config,
     options.pluginManifests,
@@ -110,9 +109,8 @@ export function planCharacterPackagePluginMaterialization(options: {
     pluginManifests: options.pluginManifests,
     validateInactivePluginConfigs: true,
     authoredScope: 'character',
-    env: {},
   });
-  // A readiness failure may still be met by the global layer or env.
+  // A readiness failure may still be met by the global layer.
   const blocking = resolved.diagnostics.filter(
     diagnostic =>
       diagnostic.severity === 'error' &&
@@ -204,8 +202,6 @@ export function enforceCharacterPluginExpectations(options: {
   readonly characterId: string;
   readonly activation: RuntimePluginActivationResult;
   readonly installedPluginIds: ReadonlySet<string>;
-  /** Selected home, so the recovery command edits the right store. */
-  readonly storeRoot: string;
 }): readonly RuntimeConfigDiagnostic[] {
   if (options.expectations === undefined) {
     return Object.freeze([]);
@@ -244,11 +240,8 @@ export function enforceCharacterPluginExpectations(options: {
             : 'character_recommended_plugin_disabled',
           `Character "${options.characterId}" ${
             level === 'required' ? 'requires' : 'recommends'
-          } plugin "${pluginId}", which is disabled. Enable it with: ` +
-            // Quoted because the operator copy-pastes this hint into a shell.
-            `runtime-config --store ${shellQuoteCommandArgument(options.storeRoot)} ` +
-            `--character ${shellQuoteCommandArgument(options.characterId)} plugin ` +
-            `enable ${shellQuoteCommandArgument(pluginId)}`,
+          } plugin "${pluginId}", which is disabled. Enable it in the ` +
+            "character's settings.",
           `plugins.${pluginId}.enabled`,
           {pluginId},
         ),

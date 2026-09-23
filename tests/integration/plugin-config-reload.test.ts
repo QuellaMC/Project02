@@ -79,13 +79,10 @@ function authoredFingerprint(options: {
     runtimeLocation: runtimeLocationForTest({
       configPath: options.configPath,
       storeRoot: options.storeRoot,
-      env: {},
     }),
     manifest: manifest as Parameters<
       typeof inspectRuntimePluginConfig
     >[0]['manifest'],
-
-    env: {},
   }).fingerprint;
 }
 
@@ -105,19 +102,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 
@@ -138,7 +130,6 @@ describe('configured runtime plugin reloader', () => {
     const authored = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
-      env: {},
     });
 
     writeFileSync(
@@ -213,19 +204,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
 
     // What inspection hands the model as expectedFingerprint is what the
@@ -308,25 +294,21 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot,
-        env: {},
       }),
-      loadedConfig: loadRuntimeConfigForTest({configPath, storeRoot, env: {}}),
+      loadedConfig: loadRuntimeConfigForTest({configPath, storeRoot}),
       catalogSnapshot: {
         ...discovery,
         diagnostics: discovery.reservedIdDiagnostics,
       },
-      env: {},
     });
     const inspectedFingerprint = inspectRuntimePluginConfig({
       runtimeLocation: activationPlan.runtimeLocation,
       targetScope: 'global',
       manifest,
       pluginManifests: [manifest],
-      env: {},
     }).fingerprint;
 
     await createConfiguredProject02PluginHostFromPlan({activationPlan});
@@ -370,19 +352,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
     const approvedFingerprint = authoredFingerprint({
@@ -423,19 +400,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
     const approvedFingerprint = authoredFingerprint({
@@ -472,19 +444,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -555,19 +522,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -642,19 +604,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 
@@ -686,19 +643,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -761,17 +713,14 @@ describe('configured runtime plugin reloader', () => {
     const loadedConfig = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
-      env: {},
     });
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig,
         configPath,
         storeRoot,
-        env: {},
       }),
       loadedConfig,
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -885,19 +834,14 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 

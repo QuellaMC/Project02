@@ -101,9 +101,6 @@
   "definitions": {
     "packagePluginConfig": {
       "type": "object",
-      "properties": {
-        "$env": false
-      },
       "additionalProperties": {
         "$ref": "#/definitions/packageConfigValue"
       }

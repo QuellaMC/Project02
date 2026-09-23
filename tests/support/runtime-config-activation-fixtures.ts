@@ -4,9 +4,9 @@ import {
   memorySearchTool,
   runtimePluginContractVersion,
   runtimePluginListToolName,
-  type RuntimePluginAccessMap,
   type RuntimePluginContext,
 } from '../../src/plugins/index.ts';
+import type {RuntimeConfigCheck} from './runtime-config.ts';
 
 export function requiredSecretPlugin(
   id = 'memory.required',
@@ -266,38 +266,6 @@ export function modelFacingPluginListCollisionPlugin(
   });
 }
 
-export function parseActivationOutput(stdout: string): {
-  readonly activationDiagnostics: readonly {
-    readonly severity: string;
-    readonly code: string;
-    readonly path?: string;
-    readonly pluginId?: string;
-  }[];
-  readonly plugins: readonly {
-    readonly pluginId: string;
-    readonly activationStatus: string;
-    readonly enabled: boolean;
-    readonly requestedAccess: RuntimePluginAccessMap;
-    readonly grantedAccess: RuntimePluginAccessMap;
-  }[];
-} {
-  return JSON.parse(stdout) as {
-    readonly activationDiagnostics: readonly {
-      readonly severity: string;
-      readonly code: string;
-      readonly path?: string;
-      readonly pluginId?: string;
-    }[];
-    readonly plugins: readonly {
-      readonly pluginId: string;
-      readonly activationStatus: string;
-      readonly enabled: boolean;
-      readonly requestedAccess: RuntimePluginAccessMap;
-      readonly grantedAccess: RuntimePluginAccessMap;
-    }[];
-  };
-}
-
 export function nonHostScopedActivationPlugins<
   Plugin extends {readonly pluginId: string},
 >(plugins: readonly Plugin[]): readonly Plugin[] {
@@ -309,8 +277,8 @@ export function nonHostScopedActivationPlugins<
 }
 
 export function enabledNonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>,
-): ReturnType<typeof parseActivationOutput>['plugins'] {
+  output: RuntimeConfigCheck,
+): RuntimeConfigCheck['plugins'] {
   return Object.freeze(
     nonHostScopedActivationPlugins(output.plugins).filter(
       plugin => plugin.enabled,

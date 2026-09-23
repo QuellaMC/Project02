@@ -46,7 +46,6 @@ function runServe(args: readonly string[]) {
     stderr: collect(chunk => {
       stderr += chunk;
     }),
-    env: {},
     pluginHost: createRuntimePluginHost({plugins: []}),
     roleModelAdapter: adapter,
     signal: abort.signal,
@@ -115,7 +114,6 @@ describe('serve', () => {
     // A clean stop released the leases: a fresh gateway takes the DM over.
     const fresh = createGateway({
       location: {storeRoot},
-      env: {},
       roleModelAdapter: adapter,
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
@@ -165,7 +163,6 @@ describe('serve', () => {
         stdout += chunk;
       }),
       stderr: collect(() => undefined),
-      env: {},
       pluginHost: createRuntimePluginHost({plugins: []}),
       roleModelAdapter: adapter,
       signal: AbortSignal.abort(),
