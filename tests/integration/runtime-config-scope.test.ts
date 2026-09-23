@@ -3,10 +3,8 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   renameSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import {join} from 'node:path';
@@ -28,7 +26,6 @@ import {
   applyRuntimeConfigControlOperation,
   bindProject02CharacterRuntimeLocation,
   characterOverlayConfigPath,
-  characterSecretsEnvPath,
   createLayeredProject02RuntimeConfigSnapshot,
   createProject02ConfigFieldInspectShapes,
   readCharacterOverlayForScope,
@@ -81,12 +78,11 @@ describe('scope-aware runtime config mutations', () => {
     const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
       storeRoot: missingHome,
     });
-    const envVar = 'PROJECT02_MISSING_HOME_SECRET';
 
     await ensureInitializedProject02Home({homeRoot: redirectedHome});
     const snapshot = loadProject02RuntimeConfigWithLocation({
       selection: {configPath},
-      env: {[envVar]: 'secret'},
+      env: {},
     });
     const runtimeLocation = bindProject02CharacterRuntimeLocation({
       configLocation: snapshot.configLocation,
@@ -94,7 +90,7 @@ describe('scope-aware runtime config mutations', () => {
     });
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation,
-      env: {[envVar]: 'secret'},
+      env: {},
       scope: 'global',
     });
 
@@ -109,15 +105,13 @@ describe('scope-aware runtime config mutations', () => {
           manifest: requiredSecretPlugin('scope.missing-home').manifest,
           actor: 'operator',
           fieldOperation: {
-            kind: 'secret_set',
+            kind: 'set',
             fieldName: 'apiKey',
-            envVar,
-            secretValue: 'secret',
+            value: 'secret',
           },
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
-    expect(existsSync(join(redirectedHome, '.env'))).toBe(false);
   });
 
   it('rejects an existing bound home replaced at the same path', async () => {
@@ -129,13 +123,12 @@ describe('scope-aware runtime config mutations', () => {
     const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
       storeRoot: homeRoot,
     });
-    const envVar = 'PROJECT02_REPLACED_HOME_SECRET';
 
     mkdirSync(homeRoot);
     await ensureInitializedProject02Home({homeRoot});
     const snapshot = loadProject02RuntimeConfigWithLocation({
       selection: {configPath},
-      env: {[envVar]: 'secret'},
+      env: {},
     });
     const runtimeLocation = bindProject02CharacterRuntimeLocation({
       configLocation: snapshot.configLocation,
@@ -143,7 +136,7 @@ describe('scope-aware runtime config mutations', () => {
     });
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation,
-      env: {[envVar]: 'secret'},
+      env: {},
       scope: 'global',
     });
 
@@ -159,16 +152,13 @@ describe('scope-aware runtime config mutations', () => {
           manifest: requiredSecretPlugin('scope.replaced-home').manifest,
           actor: 'operator',
           fieldOperation: {
-            kind: 'secret_set',
+            kind: 'set',
             fieldName: 'apiKey',
-            envVar,
-            secretValue: 'secret',
+            value: 'secret',
           },
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
-    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
-    expect(existsSync(join(displacedHome, '.env'))).toBe(false);
   });
 
   it('allows a standalone config edit but rejects its foreign effective home for state control', () => {
@@ -181,16 +171,15 @@ describe('scope-aware runtime config mutations', () => {
     const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
       storeRoot: foreignHome,
     });
-    const envVar = 'PROJECT02_FOREIGN_HOME_SECRET';
 
     writeFileSync(join(foreignHome, 'notes.txt'), 'foreign content\n', 'utf8');
     const snapshot = loadProject02RuntimeConfigWithLocation({
       selection: {configPath},
-      env: {[envVar]: 'secret'},
+      env: {},
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
       runtimeLocation: snapshot.configLocation,
-      env: {[envVar]: 'secret'},
+      env: {},
       scope: 'global',
     });
 
@@ -218,29 +207,6 @@ describe('scope-aware runtime config mutations', () => {
       configLocation: snapshot.configLocation,
       characterId: 'mira',
     });
-    const secretTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation,
-      env: {[envVar]: 'secret'},
-      scope: 'global',
-    });
-
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target: secretTarget,
-        request: {
-          kind: 'plugin_config',
-          manifest: requiredSecretPlugin('scope.foreign-home').manifest,
-          actor: 'operator',
-          fieldOperation: {
-            kind: 'secret_set',
-            fieldName: 'apiKey',
-            envVar,
-            secretValue: 'secret',
-          },
-        },
-      }),
-    ).toThrow(/contains foreign entries/);
     expect(() =>
       resolveRuntimeConfigScopeTarget({
         runtimeLocation,
@@ -248,7 +214,6 @@ describe('scope-aware runtime config mutations', () => {
         scope: 'character',
       }),
     ).toThrow(/contains foreign entries/);
-    expect(existsSync(join(foreignHome, '.env'))).toBe(false);
     expect(existsSync(join(foreignHome, '.locks'))).toBe(false);
   });
 
@@ -340,59 +305,6 @@ describe('scope-aware runtime config mutations', () => {
         }
       ).project02.storeRoot,
     ).toBe(repairedHome);
-  });
-
-  it('keeps secret writes at the bound physical home after an authored alias moves', async () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-bound-home-config-',
-    );
-    const firstHome = createTestTempRoot('project02-config-bound-home-first-');
-    const secondHome = createTestTempRoot(
-      'project02-config-bound-home-second-',
-    );
-    const authoredHome = join(configRoot, 'runtime-home');
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: authoredHome,
-    });
-    const envVar = 'PROJECT02_BOUND_HOME_SECRET';
-
-    await ensureInitializedProject02Home({homeRoot: firstHome});
-    await ensureInitializedProject02Home({homeRoot: secondHome});
-    symlinkSync(firstHome, authoredHome);
-
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({
-        configPath,
-        env: {[envVar]: 'bound-secret'},
-      }),
-      env: {[envVar]: 'bound-secret'},
-      scope: 'global',
-    });
-
-    unlinkSync(authoredHome);
-    symlinkSync(secondHome, authoredHome);
-
-    const result = applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target,
-      request: {
-        kind: 'plugin_config',
-        manifest: requiredSecretPlugin('scope.bound-home').manifest,
-        actor: 'operator',
-        fieldOperation: {
-          kind: 'secret_set',
-          fieldName: 'apiKey',
-          envVar,
-          secretValue: 'bound-secret',
-        },
-      },
-    });
-
-    expect(result.envPath).toBe(join(realpathSync.native(firstHome), '.env'));
-    expect(readFileSync(join(firstHome, '.env'), 'utf8')).toContain(
-      `${envVar}="bound-secret"`,
-    );
-    expect(existsSync(join(secondHome, '.env'))).toBe(false);
   });
 
   it('guards the selected home separately from the authored runtime home', async () => {
@@ -492,7 +404,6 @@ describe('scope-aware runtime config mutations', () => {
     // R7: the overlay lock root is local to the data dir rather than
     // re-inferred from the home.
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
-    expect(existsSync(join(dataRoot, '.env'))).toBe(false);
     expect(existsSync(join(dataRoot, '.locks'))).toBe(true);
 
     const globalConfig = loadRuntimeConfigForTest({
@@ -541,8 +452,8 @@ describe('scope-aware runtime config mutations', () => {
       }),
     ).toThrow('global-only');
 
-    // A character's credential lands beside its overlay, never in the
-    // shared home env, so two characters can hold different accounts.
+    // A character's credential lands in its own overlay, never in the
+    // home's document, so two characters can hold different accounts.
     applyRuntimeConfigControlOperation({
       pluginManifests: [],
       target,
@@ -551,10 +462,9 @@ describe('scope-aware runtime config mutations', () => {
         manifest: plugin.manifest,
         actor: 'operator',
         fieldOperation: {
-          kind: 'secret_set',
+          kind: 'set',
           fieldName: 'apiKey',
-          envVar: 'SCOPE_SECRETS_KEY',
-          secretValue: 'character-value',
+          value: 'character-value',
         },
       },
     });
@@ -563,17 +473,16 @@ describe('scope-aware runtime config mutations', () => {
       JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
     ).toMatchObject({
       plugins: {
-        'scope.secrets': {config: {apiKey: {$env: 'SCOPE_SECRETS_KEY'}}},
+        'scope.secrets': {config: {apiKey: 'character-value'}},
       },
     });
-    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
-      'SCOPE_SECRETS_KEY="character-value"',
+    expect(readFileSync(join(homeRoot, 'config.json'), 'utf8')).not.toContain(
+      'character-value',
     );
-    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
 
-    // A later scoped edit validates against the same merged env the
+    // A later scoped edit validates against the merged document the
     // runtime resolves with, so the credential above satisfies a
-    // required secret even though the process env never held it.
+    // required secret.
     const requiredSecretManifest = {
       ...plugin.manifest,
       config: {
@@ -619,17 +528,13 @@ describe('scope-aware runtime config mutations', () => {
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
-    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
-      plugins: {
-        'scope.secret-repair': {
-          enabled: true,
-          config: {apiKey: {$env: 'SECRET_REPAIR_KEY'}},
-        },
-      },
-    });
     // The value the operator is fixing: present but empty, which the
     // resolver reads as missing.
-    writeFileSync(characterSecretsEnvPath(dataRoot), 'SECRET_REPAIR_KEY=""\n');
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {
+        'scope.secret-repair': {enabled: true, config: {apiKey: ''}},
+      },
+    });
 
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
@@ -638,8 +543,8 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
 
-    // Validation judges the file this write is about to produce, so the
-    // pending value satisfies the required secret it supplies.
+    // Validation judges the document this write is about to produce, so
+    // the pending value satisfies the required secret it supplies.
     applyRuntimeConfigControlOperation({
       target,
       pluginManifests: [requiredSecretManifest],
@@ -648,74 +553,18 @@ describe('scope-aware runtime config mutations', () => {
         manifest: requiredSecretManifest,
         actor: 'operator',
         fieldOperation: {
-          kind: 'secret_set',
+          kind: 'set',
           fieldName: 'apiKey',
-          envVar: 'SECRET_REPAIR_KEY',
-          secretValue: 'repaired-value',
+          value: 'repaired-value',
         },
       },
     });
 
-    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
-      'SECRET_REPAIR_KEY="repaired-value"',
-    );
-  });
-
-  it('guards the env file a character secret write targets, not the home one', async () => {
-    const {homeRoot, dataRoot} = seededHome();
-    const plugin = characterOnlyConfigPlugin('scope.env-target');
-
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      plugins: {'scope.secret-repair': {config: {apiKey: 'repaired-value'}}},
     });
-    // The home env being a symlink is irrelevant to a write that only
-    // touches the character's own file.
-    symlinkSync(join(homeRoot, 'elsewhere.env'), join(homeRoot, '.env'));
-
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
-      scope: 'character',
-    });
-    const secretSet = {
-      kind: 'plugin_config' as const,
-      manifest: plugin.manifest,
-      actor: 'operator' as const,
-      fieldOperation: {
-        kind: 'secret_set' as const,
-        fieldName: 'apiKey',
-        envVar: 'ENV_TARGET_KEY',
-        secretValue: 'character-value',
-      },
-    };
-
-    applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target,
-      request: secretSet,
-    });
-
-    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
-      'ENV_TARGET_KEY="character-value"',
-    );
-
-    // The file it does write must be real: a symlink would carry the
-    // credential outside the character-data directory.
-    unlinkSync(characterSecretsEnvPath(dataRoot));
-    symlinkSync(
-      join(homeRoot, 'elsewhere.env'),
-      characterSecretsEnvPath(dataRoot),
-    );
-
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target,
-        request: secretSet,
-      }),
-    ).toThrow('must be a regular file');
   });
 
   it('refuses scoped writes into an unmarked data directory', () => {
@@ -957,7 +806,7 @@ describe('plugin manifest config scope policy', () => {
             enabled: true,
             config: {
               setting: 'global-value',
-              apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
+              apiKey: 'secret',
             },
           },
         },
@@ -965,14 +814,10 @@ describe('plugin manifest config scope policy', () => {
       diagnostics: Object.freeze([]),
     });
     const resolved = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig,
-        env: {CHARACTER_ONLY_API_KEY: 'secret'},
-      }),
+      runtimeLocation: runtimeLocationForTest({loadedConfig, env: {}}),
       loadedConfig,
       pluginManifests: [plugin.manifest],
       validateInactivePluginConfigs: true,
-      env: {CHARACTER_ONLY_API_KEY: 'secret'},
     });
 
     expect(resolved.diagnostics).toEqual(
@@ -1081,7 +926,7 @@ describe('plugin manifest config scope policy', () => {
     });
   });
 
-  it('merges the character env over the shared env for secret refs', async () => {
+  it("layers a character's own secret over the home's, in the documents", async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
 
     await ensureCharacterDataMarker({
@@ -1106,6 +951,28 @@ describe('plugin manifest config scope policy', () => {
         ],
       },
     };
+    const resolve = () => {
+      const runtimeLocation = runtimeLocationForTest({
+        loadedConfig: loadRuntimeConfigForTest({
+          configPath,
+          storeRoot: homeRoot,
+        }),
+        configPath,
+        storeRoot: homeRoot,
+      });
+
+      return resolveLayeredProject02RuntimeConfig({
+        runtimeLocation,
+        loadedConfig: loadRuntimeConfigForTest({
+          configPath,
+          storeRoot: homeRoot,
+        }),
+        overlayConfig: readCharacterOverlayForScope(
+          runtimeLocation.characterScope,
+        ).overlay,
+        pluginManifests: [manifest],
+      }).pluginConfigs['scope.layered-secrets']?.['apiKey'];
+    };
 
     writeRuntimeConfig(configPath, {
       plugins: {
@@ -1114,74 +981,31 @@ describe('plugin manifest config scope policy', () => {
           config: {
             settings: {from: 'global'},
             endpoints: ['global'],
-            apiKey: {$env: 'LAYERED_KEY'},
+            apiKey: 'operator-account',
           },
         },
       },
     });
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       plugins: {
-        'scope.layered-secrets': {config: {apiKey: {$env: 'LAYERED_KEY'}}},
+        'scope.layered-secrets': {config: {apiKey: 'character-account'}},
       },
     });
-    writeFileSync(
-      characterSecretsEnvPath(dataRoot),
-      'LAYERED_KEY="character-account"\n',
-    );
 
-    const env = {LAYERED_KEY: 'operator-account'};
-    const runtimeLocation = runtimeLocationForTest({
-      loadedConfig: loadRuntimeConfigForTest({
-        configPath,
-        storeRoot: homeRoot,
-        env,
-      }),
-      configPath,
-      storeRoot: homeRoot,
-      env,
-    });
-    const layered = resolveLayeredProject02RuntimeConfig({
-      runtimeLocation,
-      loadedConfig: loadRuntimeConfigForTest({
-        configPath,
-        storeRoot: homeRoot,
-        env,
-      }),
-      overlayConfig: readCharacterOverlayForScope(
-        runtimeLocation.characterScope,
-      ).overlay,
-      pluginManifests: [manifest],
-      env,
-    });
-    const fields = layered.pluginConfigs['scope.layered-secrets'] ?? {};
-
-    // Same variable in both envs: the character's own value wins, the same
-    // way a character overlay wins over the global config.
-    expect(fields['apiKey']).toMatchObject({
+    // The character's own value wins, the same way its overlay wins over
+    // the global config for any other field.
+    expect(resolve()).toMatchObject({
       resolved: true,
       value: 'character-account',
     });
 
-    // When the character's file lacks the value, the shared env fills it --
-    // one account for every character until one keeps its own.
-    writeFileSync(characterSecretsEnvPath(dataRoot), '');
-    const fallthrough = resolveLayeredProject02RuntimeConfig({
-      runtimeLocation,
-      loadedConfig: loadRuntimeConfigForTest({
-        configPath,
-        storeRoot: homeRoot,
-        env,
-      }),
-      overlayConfig: readCharacterOverlayForScope(
-        runtimeLocation.characterScope,
-      ).overlay,
-      pluginManifests: [manifest],
-      env,
+    // Without one of its own, the home's fills it -- one account for
+    // every character until one keeps its own.
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {});
+    expect(resolve()).toMatchObject({
+      resolved: true,
+      value: 'operator-account',
     });
-
-    expect(
-      fallthrough.pluginConfigs['scope.layered-secrets']?.['apiKey'],
-    ).toMatchObject({resolved: true, value: 'operator-account'});
   });
 
   it('inspects the host fields in the plugin field shape, per scope', async () => {
@@ -1216,7 +1040,6 @@ describe('plugin manifest config scope policy', () => {
                 }),
           }),
           targetScope,
-          env: {},
         }).map(field => [field.name, field]),
       );
     const character = fieldsOf('character');
@@ -1256,7 +1079,7 @@ describe('plugin manifest config scope policy', () => {
     writeRuntimeConfig(configPath, {
       plugins: {
         [plugin.manifest.id]: {
-          config: {apiKey: {$env: 'CHARACTER_ONLY_CONTROL_API_KEY'}},
+          config: {apiKey: 'secret'},
         },
       },
     });
@@ -1265,21 +1088,13 @@ describe('plugin manifest config scope policy', () => {
       characterId: 'mira',
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({
-        storeRoot: homeRoot,
-        env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
-      }),
-
-      env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      env: {},
       scope: 'global',
     });
     const characterTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({
-        storeRoot: homeRoot,
-        env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
-      }),
-
-      env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      env: {},
       scope: 'character',
     });
     const globalBefore = readFileSync(configPath, 'utf8');
@@ -1396,8 +1211,6 @@ describe('character-scoped plugin control capability', () => {
       targetScope: 'character',
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
-
-      env: {},
     }).fingerprint;
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const globalBefore = readFileSync(configPath, 'utf8');
@@ -1479,7 +1292,6 @@ describe('plugin inspection target authorship', () => {
       targetScope: 'character',
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
-      env: {},
     });
     const settings = inspected.fields.find(field => field.name === 'settings');
 

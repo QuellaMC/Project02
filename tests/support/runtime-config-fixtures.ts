@@ -30,25 +30,6 @@ export async function createInitializedTestStoreRoot(
   return initializeTestStore(createTestTempRoot(prefix));
 }
 
-export function requiredSecretPluginWithManifestEnvVar(
-  id: string,
-  envVar: string,
-) {
-  const plugin = requiredSecretPlugin(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...plugin.manifest,
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: plugin.manifest.config.fields.map(field =>
-          field.name === 'apiKey' ? {...field, envVar} : field,
-        ),
-      },
-    },
-  });
-}
-
 export function requiredDottedConfigPlugin(
   id = 'memory',
   fieldName = 'api.config.key',

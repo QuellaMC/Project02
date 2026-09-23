@@ -26,7 +26,6 @@ import {
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
   diagnosticsHaveErrors,
-  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   loadRuntimeConfigEnvFile,
   resolveRuntimeConfigScopeTarget,
@@ -424,7 +423,6 @@ function planRuntimeCliActivationStartup(input: {
         characterActivation,
         ...overlayForPlan,
         runtimeLocation,
-        env: input.configEnv,
         validateInactivePluginConfigs: true,
         catalogSnapshot,
       }),
@@ -602,16 +600,9 @@ function finishRuntimeCliActivationStartup(input: {
   readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
 }): RuntimeCliStartupResult {
+  const {loadedConfig, buildPreEnvState, readRuntimeEnvFileUnlessBlocked} =
+    input.plan;
   const {
-    loadedConfig,
-    characterActivation,
-    runtimeLocation,
-    buildPreEnvState,
-    readRuntimeEnvFileUnlessBlocked,
-  } = input.plan;
-  const {
-    overlayForPlan,
-    catalogSnapshot,
     activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
     base,
   } = buildPreEnvState(input.overlayLoadedConfig);
@@ -641,24 +632,11 @@ function finishRuntimeCliActivationStartup(input: {
     });
   }
 
-  const activationPlan = withActivationDiagnostics(
-    prepareActivationPlan({
-      loadedConfig,
-      characterActivation,
-      ...overlayForPlan,
-      runtimeLocation,
-      env: runtimeEnv,
-      validateInactivePluginConfigs: true,
-      catalogSnapshot,
-    }),
-    input.diagnostics,
-  );
-
   return Object.freeze({
     ...base,
     status: 'resolved',
     runtimeEnv,
-    activationPlan,
+    activationPlan: activationPlanBeforeRuntimeEnv,
   });
 }
 
@@ -717,13 +695,7 @@ function simulateCharacterMaterialization(
     return {status: 'invalid', message: simulated.message};
   }
 
-  // This overlay describes a file that has not been written yet; the
-  // secrets env is the real one already on disk, broken-file diagnostics
-  // included, so a reader sees what a real load would see.
-  const secrets = loadCharacterSecretsEnv(
-    input.runtimeLocation.characterScope.dataRoot,
-  );
-
+  // This overlay describes a file that has not been written yet.
   return Object.freeze({
     status: 'valid',
     overlay: Object.freeze({
@@ -732,15 +704,7 @@ function simulateCharacterMaterialization(
       source: 'overlay',
       path: input.runtimeLocation.overlayPath,
       config: simulated.document,
-      secretsEnv: secrets.env,
-      diagnostics: Object.freeze(
-        secrets.diagnostics.map(diagnostic =>
-          withRuntimeConfigDiagnosticOrigin(diagnostic, {
-            scope: 'character',
-            characterId,
-          }),
-        ),
-      ),
+      diagnostics: Object.freeze([]),
     } satisfies LoadedProject02CharacterOverlayConfig),
   });
 }
@@ -945,7 +909,6 @@ function prepareActivationPlan(options: {
   >;
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly env: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs?: boolean;
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
@@ -955,7 +918,6 @@ function prepareActivationPlan(options: {
     ...(options.overlayLoadedConfig === undefined
       ? {}
       : {overlayConfig: options.overlayLoadedConfig}),
-    env: options.env,
     validateInactivePluginConfigs:
       options.validateInactivePluginConfigs === true,
     catalogSnapshot: options.catalogSnapshot,

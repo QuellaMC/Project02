@@ -1,4 +1,4 @@
-import {existsSync, writeFileSync} from 'node:fs';
+import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -248,7 +248,6 @@ describe('runtime config activation planning', () => {
       'project02-config-invalid-inventory-recovery-',
     );
     const plugin = requiredSecretAndEndpointPlugin('memory.blocked-config');
-    const envVar = 'PROJECT02_BLOCKED_CONFIG_SECRET_3452542101';
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -256,7 +255,7 @@ describe('runtime config activation planning', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'blocked-config-secret',
           },
         },
       },
@@ -268,9 +267,6 @@ describe('runtime config activation planning', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
-          env: {
-            [envVar]: 'blocked-config-secret',
-          },
           factories: {
             [plugin.manifest.id]: {
               manifest: plugin.manifest,
@@ -281,10 +277,6 @@ describe('runtime config activation planning', () => {
             },
           },
         }),
-
-        env: {
-          [envVar]: 'blocked-config-secret',
-        },
       }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
@@ -329,22 +321,20 @@ describe('runtime config activation planning', () => {
     });
   });
 
-  it('loads runtime env before reporting mixed check activation diagnostics', async () => {
+  it('reports the missing field beside a supplied secret', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-mixed-env-');
     const plugin = requiredSecretAndEndpointPlugin('memory.mixed-check');
-    const envVar = 'PROJECT02_CHECK_MIXED_SECRET_3452532128';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'check-secret',
           },
         },
       },
     });
-    writeFileSync(join(storeRoot, '.env'), `${envVar}=check-secret\n`, 'utf8');
 
     const output = await checkRuntimeConfigForTest({
       storeRoot,
@@ -907,7 +897,6 @@ describe('runtime config activation planning', () => {
     );
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
-    const envVar = 'PROJECT02_SELECTED_MEMORY_SECRET_3449142730';
     let selectedFactoryCalls = 0;
     let unselectedFactoryCalls = 0;
 
@@ -917,7 +906,7 @@ describe('runtime config activation planning', () => {
         [selectedPlugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'selected-memory-secret',
           },
         },
       },
@@ -929,9 +918,6 @@ describe('runtime config activation planning', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
-          env: {
-            [envVar]: 'selected-memory-secret',
-          },
           factories: {
             [selectedPlugin.manifest.id]: {
               manifest: selectedPlugin.manifest,
@@ -951,10 +937,6 @@ describe('runtime config activation planning', () => {
             },
           },
         }),
-
-        env: {
-          [envVar]: 'selected-memory-secret',
-        },
       }),
     });
     const discoveryResult = await configured.host.handleToolCall(
@@ -1020,7 +1002,6 @@ describe('runtime config activation planning', () => {
     );
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
-    const envVar = 'PROJECT02_EXPLICIT_SELECTED_MEMORY_SECRET_3449174646';
     let selectedFactoryCalls = 0;
     let unselectedFactoryCalls = 0;
 
@@ -1030,7 +1011,7 @@ describe('runtime config activation planning', () => {
         [selectedPlugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'selected-memory-secret',
           },
         },
         [unselectedPlugin.manifest.id]: {
@@ -1045,9 +1026,6 @@ describe('runtime config activation planning', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
-          env: {
-            [envVar]: 'selected-memory-secret',
-          },
           factories: {
             [selectedPlugin.manifest.id]: {
               manifest: selectedPlugin.manifest,
@@ -1067,10 +1045,6 @@ describe('runtime config activation planning', () => {
             },
           },
         }),
-
-        env: {
-          [envVar]: 'selected-memory-secret',
-        },
       }),
     });
     const unselectedActivation = configured.activation.plugins.find(
@@ -1106,7 +1080,6 @@ describe('runtime config activation planning', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-manifest-backed-check-',
     );
-    const envVar = 'PROJECT02_MANIFEST_BACKED_CHECK_SECRET_3448479333';
     const plugin = requiredSecretPlugin('memory.required');
     let factoryCalls = 0;
 
@@ -1115,7 +1088,7 @@ describe('runtime config activation planning', () => {
         'memory.required': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'manifest-backed-secret',
           },
         },
       },
@@ -1123,9 +1096,6 @@ describe('runtime config activation planning', () => {
 
     const output = await checkRuntimeConfigForTest({
       storeRoot,
-      env: {
-        [envVar]: 'manifest-backed-secret',
-      },
       factories: {
         'memory.required': {
           manifest: plugin.manifest,

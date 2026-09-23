@@ -76,7 +76,6 @@ function loadedOverlay(options: {
     scope: 'character',
     characterId: 'mira',
     source: 'overlay',
-    secretsEnv: {},
     path: '/global-home/character-data/mira/config.json',
     config: {
       version: runtimeConfigVersion,
@@ -123,7 +122,6 @@ describe('character overlay config loader', () => {
       scope: 'character',
       characterId: 'mira',
       source: 'none',
-      secretsEnv: {},
       diagnostics: [],
     });
   });
@@ -375,7 +373,6 @@ describe('layered runtime config resolution', () => {
           scope: 'character',
           characterId: 'mira',
           source: 'none',
-          secretsEnv: {},
           diagnostics: [],
         },
       }),

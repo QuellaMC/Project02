@@ -33,7 +33,6 @@ import {
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
 import {canonicalRuntimeConfigPath} from './path.ts';
-import {secretEnvMarkerField} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -48,7 +47,6 @@ const project02RuntimeConfigFields = Object.freeze([
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
-const runtimeConfigSecretRefFields = Object.freeze([secretEnvMarkerField]);
 
 const maxProject02RuntimeConfigBytes = 256 * 1_024;
 const runtimeConfigJsonBoundaryLimits = Object.freeze({
@@ -687,7 +685,7 @@ function optionalConfigRecord(
             createRuntimeConfigDiagnostic(
               'error',
               'runtime_config_value_invalid',
-              'Runtime config values must be JSON-compatible values or supported secret refs.',
+              'Runtime config values must be JSON-compatible values.',
               `${path}.${key}`,
             ),
           );
@@ -784,22 +782,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
     return false;
   }
 
-  if (secretEnvMarkerField in value) {
-    return (
-      hasOnlyFields(value, runtimeConfigSecretRefFields) &&
-      typeof value[secretEnvMarkerField] === 'string' &&
-      value[secretEnvMarkerField].trim().length > 0
-    );
-  }
-
   return Object.values(value).every(isRuntimeConfigValue);
-}
-
-function hasOnlyFields(
-  value: Readonly<Record<string, unknown>>,
-  allowedFields: readonly string[],
-): boolean {
-  return Object.keys(value).every(field => allowedFields.includes(field));
 }
 
 function optionalBoolean(

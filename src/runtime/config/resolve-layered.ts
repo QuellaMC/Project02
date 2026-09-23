@@ -79,25 +79,6 @@ export function resolveLayeredProject02RuntimeConfig(
     .resolvedConfig;
 }
 
-/**
- * The character's env layers over the shared env exactly as its config
- * layers over the global config: same names, character wins; anything it
- * lacks falls through to the shared value. Every resolution of a
- * character's effective config must use this same overlay.
- */
-export function runtimeConfigEnvWithCharacterSecrets(
-  env: NodeJS.ProcessEnv | undefined,
-  secretsEnv: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const characterEntries = Object.entries(secretsEnv).filter(
-    ([, value]) => value !== undefined,
-  );
-
-  return characterEntries.length === 0
-    ? (env ?? process.env)
-    : {...(env ?? process.env), ...Object.fromEntries(characterEntries)};
-}
-
 export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   options: ResolveLayeredProject02RuntimeConfigOptions,
 ): ResolvedLayeredProject02RuntimeConfigSnapshot {
@@ -108,13 +89,6 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   });
   const source = loadedConfig.source;
   const path = loadedConfig.path;
-  const resolutionOptions = {
-    ...effectiveOptions,
-    env: runtimeConfigEnvWithCharacterSecrets(
-      effectiveOptions.env,
-      overlayConfig?.secretsEnv ?? {},
-    ),
-  };
 
   // With no overlay this must equal the global resolve, fingerprint included.
   if (
@@ -125,7 +99,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
     return Object.freeze({
       layeredConfig,
       resolvedConfig: resolveEffectiveProject02RuntimeConfig({
-        ...resolutionOptions,
+        ...effectiveOptions,
         config: layeredConfig.effective.config,
         source,
         ...(path === undefined ? {} : {path}),
@@ -157,7 +131,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   return Object.freeze({
     layeredConfig,
     resolvedConfig: resolveEffectiveProject02RuntimeConfig({
-      ...resolutionOptions,
+      ...effectiveOptions,
       config: layeredConfig.effective.config,
       source,
       ...(path === undefined ? {} : {path}),

@@ -41,7 +41,6 @@
           "required": false,
           "secret": true,
           "valueType": "string",
-          "envVar": "MEM0_API_KEY",
           "agentMutable": false,
           "redactionLabels": ["memory"],
           "reloadRequired": true
@@ -83,7 +82,6 @@
           "required": false,
           "secret": true,
           "valueType": "string",
-          "envVar": "MEM0_OSS_LLM_API_KEY",
           "agentMutable": false,
           "redactionLabels": ["memory"],
           "reloadRequired": true
@@ -114,7 +112,6 @@
           "required": false,
           "secret": true,
           "valueType": "string",
-          "envVar": "MEM0_OSS_EMBEDDER_API_KEY",
           "agentMutable": false,
           "redactionLabels": ["memory"],
           "reloadRequired": true

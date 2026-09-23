@@ -15,7 +15,6 @@ import {
   compareText,
   packageDescriptorSchemaRefIsValid,
 } from '../../shared/package-metadata.ts';
-import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 
 export const characterPackageDescriptorFormat = 'project02.character.v1';
 export const characterPackageDescriptorFileName = 'project02.character.json';
@@ -400,16 +399,6 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       return rejectedDescriptor(
         'invalid_plugins',
         `Character package plugins.config["${pluginId}"] must be an object.`,
-      );
-    }
-
-    const configPath = `plugins.config["${pluginId}"]`;
-    const unsafeSecretPath = nestedSecretMarkerPath(pluginConfig, configPath);
-
-    if (unsafeSecretPath !== undefined) {
-      return rejectedDescriptor(
-        'invalid_plugins',
-        `Character package ${unsafeSecretPath} must not contain secret references.`,
       );
     }
 

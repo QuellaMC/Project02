@@ -37,7 +37,6 @@ import {
 import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 const fixturePluginId = 'config.control.fixture';
-const fixtureSecretEnvVar = 'PROJECT02_FIXTURE_API_KEY';
 
 describe('runtime plugin config control', () => {
   it('resolves one coherent control target from one selected config snapshot', () => {
@@ -95,7 +94,7 @@ describe('runtime plugin config control', () => {
           config: {
             mode: 'remote',
             label: 'primary',
-            apiKey: {$env: fixtureSecretEnvVar},
+            apiKey: 'resolved-secret-value',
           },
         },
       },
@@ -108,24 +107,26 @@ describe('runtime plugin config control', () => {
 
     const inspected = inspectRuntimePluginConfig({
       targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: root,
-        env: {[fixtureSecretEnvVar]: 'resolved-secret-value'},
-      }),
-
-      env: {[fixtureSecretEnvVar]: 'resolved-secret-value'},
+      runtimeLocation: runtimeLocationForTest({configPath, storeRoot: root}),
       manifest,
+    });
+
+    writeRuntimeConfig(configPath, {
+      project02: authoredConfig.project02,
+      plugins: {
+        [fixturePluginId]: {
+          enabled: true,
+          config: {
+            mode: 'remote',
+            label: 'primary',
+            apiKey: 'changed-secret-value',
+          },
+        },
+      },
     });
     const inspectedWithChangedSecret = inspectRuntimePluginConfig({
       targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: root,
-        env: {[fixtureSecretEnvVar]: 'changed-secret-value'},
-      }),
-
-      env: {[fixtureSecretEnvVar]: 'changed-secret-value'},
+      runtimeLocation: runtimeLocationForTest({configPath, storeRoot: root}),
       manifest,
     });
 
@@ -181,14 +182,15 @@ describe('runtime plugin config control', () => {
       effective: {
         name: 'apiKey',
         secret: true,
-        source: `env:${fixtureSecretEnvVar}`,
+        source: 'config',
         resolved: true,
         value: '[redacted]',
       },
     });
+    // The manifest names the secret field, so its value stays out of the hash.
     expect(inspected.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        pluginManifests: [manifest],
         globalConfig: authoredConfig,
         characterId: 'mira',
         overlayConfig: null,
@@ -222,7 +224,6 @@ describe('runtime plugin config control', () => {
         env: {},
       }),
 
-      env: {},
       manifest: configControlManifest(),
     });
 
@@ -475,7 +476,7 @@ describe('runtime plugin config control', () => {
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
 
-  it('rejects secret field mutation even when the value is only an env reference', () => {
+  it("refuses an agent's write to a secret field", () => {
     const fixture = createSeededControlFixture();
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
@@ -499,12 +500,12 @@ describe('runtime plugin config control', () => {
           fieldOperation: {
             kind: 'set',
             fieldName: 'apiKey',
-            value: {$env: 'ATTACKER_SELECTED_SECRET'},
+            value: 'attacker-selected-secret',
           },
         },
       }),
     ).toThrow(
-      'Plugin config field "apiKey" is secret and must be managed through the dedicated secret command.',
+      'Plugin config field "apiKey" is secret; only an operator may change it.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -562,44 +563,6 @@ describe('runtime plugin config control', () => {
       ).toThrow(message);
     }
 
-    expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
-  });
-
-  it('rejects nested env references in non-secret structured fields', () => {
-    const fixture = createSeededControlFixture();
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        env: {},
-      }),
-
-      env: {},
-      scope: 'global',
-    });
-
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target,
-        expectedFingerprint: fixture.fingerprint,
-        request: {
-          kind: 'plugin_config',
-          manifest: fixture.manifest,
-          actor: 'agent',
-          fieldOperation: {
-            kind: 'set',
-            fieldName: 'settings',
-            value: {
-              authentication: {
-                token: {$env: 'NESTED_SECRET'},
-              },
-            },
-          },
-        },
-      }),
-    ).toThrow(
-      'Plugin config field "settings" value must not embed secret references; secrets are managed through the dedicated secret command.',
-    );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
 
@@ -714,7 +677,6 @@ describe('runtime plugin config control', () => {
       targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
 
-      env: {},
       manifest: plugin.manifest,
     });
 
@@ -736,13 +698,12 @@ describe('runtime plugin config control', () => {
         targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
 
-        env: {},
         manifest: plugin.manifest,
       }),
     ).toThrow('holds history for character "nova"');
   });
 
-  it('rejects a direct overlay selection before secret control', async () => {
+  it('rejects a direct overlay selection as a scope target', async () => {
     const homeRoot = createTestTempRoot('project02-plugin-overlay-secret-');
     const dataRoot = join(homeRoot, 'character-data', 'mira');
     const overlayPath = join(dataRoot, 'config.json');
@@ -752,21 +713,18 @@ describe('runtime plugin config control', () => {
       characterId: 'mira',
     });
 
-    const env = {OVERLAY_SECRET_VAR: 'overlay-secret-value'};
     expect(() =>
       resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: overlayPath,
-          env: env,
+          env: {},
         }),
 
-        env,
+        env: {},
         scope: 'character',
       }),
     ).toThrow('is inside a character-data directory');
     expect(existsSync(overlayPath)).toBe(false);
-    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
-    expect(existsSync(join(dataRoot, '.env'))).toBe(false);
   });
 
   it('rejects a mutation bound to a stale authored fingerprint', () => {
@@ -886,7 +844,6 @@ describe('runtime plugin config control', () => {
       targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({storeRoot: storeRoot, env: {}}),
 
-      env: {},
       manifest,
     });
     const bootstrapBase: Project02RuntimeConfig = {
@@ -1012,7 +969,6 @@ function configControlManifest(
             required: false,
             secret: true,
             valueType: 'secret',
-            envVar: fixtureSecretEnvVar,
             redactionLabels: ['secret'],
           },
         ],
@@ -1081,7 +1037,6 @@ function createSeededControlFixture(): {
         env: {},
       }),
 
-      env: {},
       manifest,
     }).fingerprint,
   };

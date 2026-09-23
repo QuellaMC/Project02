@@ -264,7 +264,7 @@
         },
         "secret": {
           "type": "boolean",
-          "description": "Secret values resolve from an env file first -- the manifest envVar or an authored {\"$env\"} reference -- and a plain string in config is accepted as a fallback. Reads are always redacted, and secret fields cannot be agentMutable."
+          "description": "A credential, stored as a plain string with the scope's config at mode 0600. Reads are always redacted, and secret fields cannot be agentMutable."
         },
         "valueType": {
           "enum": [
@@ -279,9 +279,6 @@
           ]
         },
         "defaultValueSummary": {
-          "type": "string"
-        },
-        "envVar": {
           "type": "string"
         },
         "allowedValues": {

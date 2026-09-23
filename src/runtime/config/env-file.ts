@@ -21,7 +21,7 @@ export class RuntimeEnvFileError extends Error {
   }
 }
 
-export function runtimeConfigEnvPathForLocation(
+function runtimeConfigEnvPathForLocation(
   runtimeLocation: Pick<ResolvedProject02RuntimeLocation, 'homeRoot'>,
 ): string {
   return defaultRuntimeConfigEnvPath(runtimeLocation.homeRoot);

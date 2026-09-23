@@ -6,10 +6,7 @@ import {
   createLocalRuntimeStorageLayout,
   normalizeLocalRuntimeCharacterId,
 } from '../storage/layout-contract.ts';
-import {
-  assertProject02HomeAdoptableSync,
-  assertRealHomeEnvFileSync,
-} from '../storage/home.ts';
+import {assertProject02HomeAdoptableSync} from '../storage/home.ts';
 import {
   canonicalRuntimeConfigHomeRoot,
   canonicalRuntimeConfigLocationPath,
@@ -133,7 +130,6 @@ function resolveProject02ConfigLocation(options: {
 /** Checks the operator-selected home, not the effective one from config. */
 export function assertSelectedProject02HomeAdoptable(
   location: ResolvedProject02ConfigLocation,
-  options: {readonly requireRealEnvFile?: boolean} = {},
 ): void {
   location = requireResolvedProject02ConfigLocation(location);
   const selectedHomeRoot =
@@ -146,10 +142,6 @@ export function assertSelectedProject02HomeAdoptable(
   }
 
   assertProject02HomeAdoptableSync({homeRoot: selectedHomeRoot});
-
-  if (options.requireRealEnvFile === true) {
-    assertRealHomeEnvFileSync({homeRoot: selectedHomeRoot});
-  }
 }
 
 export function resolveAdoptableRuntimeConfigCandidateHomeTarget(options: {
@@ -537,26 +529,18 @@ function assertProject02HomeTargetCurrent(
 /** The identity check brackets admission so a mid-check replacement fails. */
 export function assertResolvedProject02HomeAdoptable(
   location: ResolvedProject02ConfigLocation,
-  options: {readonly requireRealEnvFile?: boolean} = {},
 ): void {
   location = requireResolvedProject02ConfigLocation(location);
   assertProject02HomeTargetAdoptable(
     requireResolvedProject02HomeTarget(location),
-    options,
   );
 }
 
 function assertProject02HomeTargetAdoptable(
   target: ResolvedProject02HomeTarget,
-  options: {readonly requireRealEnvFile?: boolean} = {},
 ): void {
   assertProject02HomeTargetCurrent(target);
   assertProject02HomeAdoptableSync({homeRoot: target.canonicalRoot});
-
-  if (options.requireRealEnvFile === true) {
-    assertRealHomeEnvFileSync({homeRoot: target.canonicalRoot});
-  }
-
   assertProject02HomeTargetCurrent(target);
 }
 

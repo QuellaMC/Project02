@@ -354,7 +354,7 @@ describe('host-owned runtime plugin management tools', () => {
           enabled: true,
           config: {
             tone: 'warm',
-            apiKey: {$env: 'PLUGIN_CONFIG_TEST_KEY'},
+            apiKey: 'raw-secret-value',
           },
         },
       },
@@ -362,11 +362,7 @@ describe('host-owned runtime plugin management tools', () => {
     const host = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-          env: {PLUGIN_CONFIG_TEST_KEY: 'raw-secret-value'},
-        }),
+        runtimeLocation: runtimeLocationForTest({configPath, storeRoot}),
 
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
@@ -377,8 +373,6 @@ describe('host-owned runtime plugin management tools', () => {
             reasons: ['host_policy_blocked'],
           },
         },
-
-        env: {PLUGIN_CONFIG_TEST_KEY: 'raw-secret-value'},
       }),
     });
 
@@ -1745,7 +1739,6 @@ function configurablePluginManifest(
           secret: true,
           valueType: 'secret',
           agentMutable: false,
-          envVar: 'PLUGIN_CONFIG_TEST_KEY',
           redactionLabels: ['secret'],
         },
       ],

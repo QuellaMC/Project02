@@ -178,8 +178,6 @@ export function createRuntimePluginConfigInspectShape(options: {
 export function createProject02ConfigFieldInspectShapes(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-  /** What the scope resolves with; a field's declared env var wins in it. */
-  readonly env: NodeJS.ProcessEnv;
 }): readonly RuntimePluginConfigFieldInspectShape[] {
   const {globalConfig, characterConfig} = options.layeredConfig;
   const targetConfig =
@@ -199,12 +197,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
         globalConfig,
         field.path,
       );
-      const envValue =
-        field.envVar === undefined ? undefined : options.env[field.envVar];
-      const overriddenByEnv = envValue !== undefined && envValue.length > 0;
-      const effectiveValue = overriddenByEnv
-        ? envValue
-        : (characterValue ?? globalValue);
+      const effectiveValue = characterValue ?? globalValue;
 
       return Object.freeze({
         name: field.name,
@@ -234,11 +227,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
         effective: Object.freeze({
           name: field.name,
           secret: false,
-          source: overriddenByEnv
-            ? (`env:${field.envVar ?? ''}` as const)
-            : effectiveValue === undefined
-              ? 'missing'
-              : 'config',
+          source: effectiveValue === undefined ? 'missing' : 'config',
           resolved: true,
           ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
         }),

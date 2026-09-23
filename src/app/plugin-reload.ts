@@ -87,7 +87,6 @@ export function createConfiguredRuntimePluginReloader(options: {
         overlayConfig: authoredState.overlay,
         pluginManifests,
         defaultEnabledPluginIds,
-        env: pluginConfigControl.configControl.target.env,
       });
 
       // Another plugin's bad config must not strand this rebuild.

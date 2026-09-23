@@ -14,12 +14,12 @@ import {requiredSecretPlugin} from '../support/runtime-config-activation-fixture
 import {runtimeLocationForTest} from '../support/runtime-config.ts';
 
 describe('runtime config atomic temporary-file cleanup', () => {
-  it('removes an abandoned plaintext env replacement under the env lock', async () => {
+  it('removes an abandoned config replacement under the config lock', async () => {
     const storeRoot = createTestTempRoot('project02-config-dead-temp-');
     const configPath = join(storeRoot, 'config.json');
     const abandonedPath = join(
       storeRoot,
-      '..env.2147483647.00000000-0000-4000-8000-000000000000.tmp',
+      '.config.json.2147483647.00000000-0000-4000-8000-000000000000.tmp',
     );
     const unrelatedPath = join(
       storeRoot,
@@ -35,7 +35,7 @@ describe('runtime config atomic temporary-file cleanup', () => {
       })}\n`,
       'utf8',
     );
-    writeFileSync(abandonedPath, 'plaintext-abandoned-sentinel\n', {
+    writeFileSync(abandonedPath, 'abandoned-sentinel\n', {
       encoding: 'utf8',
       mode: 0o600,
     });
@@ -46,31 +46,21 @@ describe('runtime config atomic temporary-file cleanup', () => {
     applyRuntimeConfigControlOperation({
       pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
-        runtimeLocation: runtimeLocationForTest({
-          storeRoot: storeRoot,
-          env: {PROJECT02_MEMORY_API_KEY: 'current-secret'},
-        }),
-
-        env: {PROJECT02_MEMORY_API_KEY: 'current-secret'},
+        runtimeLocation: runtimeLocationForTest({storeRoot}),
         scope: 'global',
       }),
       request: {
         kind: 'plugin_config',
         manifest: plugin.manifest,
         actor: 'operator',
-        fieldOperation: {
-          kind: 'secret_set',
-          fieldName: 'apiKey',
-          envVar: 'PROJECT02_MEMORY_API_KEY',
-          secretValue: 'current-secret',
-        },
+        fieldOperation: {kind: 'set', fieldName: 'apiKey', value: 'current'},
       },
     });
 
     expect(existsSync(abandonedPath)).toBe(false);
     expect(readFileSync(unrelatedPath, 'utf8')).toBe('keep-me\n');
-    expect(readFileSync(join(storeRoot, '.env'), 'utf8')).not.toContain(
-      'plaintext-abandoned-sentinel',
+    expect(readFileSync(configPath, 'utf8')).not.toContain(
+      'abandoned-sentinel',
     );
   });
 });

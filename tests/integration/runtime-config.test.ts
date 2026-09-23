@@ -13,9 +13,8 @@ import {
 import {
   characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
-  roleModelProviderEnvVarName,
-  runtimeConfigEnvVarName,
   resolveProject02RuntimeConfig,
+  runtimeConfigEnvVarName,
 } from '../../src/runtime/config/index.ts';
 import {
   hostScopedFirstPartyRuntimePluginIds,
@@ -37,8 +36,6 @@ import {
   initializeCharacterDataForHost,
   memoryProviderPlugin,
   requiredDottedConfigPlugin,
-  requiredSecretPluginWithManifestEnvVar,
-  structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {
   nonHostScopedActivationPlugins,
@@ -598,22 +595,8 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('redacts secret env refs and keeps fingerprints independent of env secret values', () => {
+  it('redacts an inline secret and keeps the fingerprint independent of its value', () => {
     const plugin = createCharacterStatePlugin();
-    const loaded = loadRuntimeConfigForTest({
-      configPath: writeRuntimeConfig(
-        join(createTestTempRoot('project02-config-secret-'), 'config.json'),
-        {
-          plugins: {
-            [plugin.manifest.id]: {
-              config: {
-                apiKey: {$env: 'PROJECT02_TEST_SECRET'},
-              },
-            },
-          },
-        },
-      ),
-    });
     const manifest = {
       ...plugin.manifest,
       config: {
@@ -630,32 +613,32 @@ describe('runtime config loading and resolution', () => {
         ],
       },
     };
-    const first = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loaded,
-        env: {PROJECT02_TEST_SECRET: 'first-secret'},
-      }),
+    const resolveWithSecret = (apiKey: string) =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({
+            configPath: writeRuntimeConfig(
+              join(
+                createTestTempRoot('project02-config-secret-'),
+                'config.json',
+              ),
+              {plugins: {[plugin.manifest.id]: {config: {apiKey}}}},
+            ),
+          }),
+        }),
+        pluginManifests: [manifest],
+      });
+    const first = resolveWithSecret('first-secret');
+    const second = resolveWithSecret('second-secret');
 
-      pluginManifests: [manifest],
-      env: {PROJECT02_TEST_SECRET: 'first-secret'},
-    });
-    const second = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loaded,
-        env: {PROJECT02_TEST_SECRET: 'second-secret'},
-      }),
-
-      pluginManifests: [manifest],
-      env: {PROJECT02_TEST_SECRET: 'second-secret'},
-    });
-
-    expect(
-      first.redactedPluginConfigs['character-state']?.['apiKey'],
-    ).toMatchObject({
-      value: '[redacted]',
-      source: 'env:PROJECT02_TEST_SECRET',
+    expect(first.pluginConfigs['character-state']?.['apiKey']).toMatchObject({
+      value: 'first-secret',
+      source: 'config',
       resolved: true,
     });
+    expect(
+      first.redactedPluginConfigs['character-state']?.['apiKey'],
+    ).toMatchObject({value: '[redacted]', source: 'config', resolved: true});
     expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
       'first-secret',
     );
@@ -667,65 +650,24 @@ describe('runtime config loading and resolution', () => {
 
   it('includes per-plugin enabled flags in effective fingerprints without leaking secrets', () => {
     const plugin = requiredSecretPlugin();
-    const enabledPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-enabled-fingerprint-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-            config: {
-              apiKey: {$env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET'},
-            },
-          },
-        },
-      },
-    );
-    const disabledPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-disabled-fingerprint-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: false,
-            config: {
-              apiKey: {$env: 'PROJECT02_ENABLED_FINGERPRINT_SECRET'},
-            },
-          },
-        },
-      },
-    );
-    const enabledFirst = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: enabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-    });
-    const enabledSecond = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: enabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'second-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'second-secret'},
-    });
-    const disabled = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadRuntimeConfigForTest({configPath: disabledPath}),
-        env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-      }),
-
-      pluginManifests: [plugin.manifest],
-      env: {PROJECT02_ENABLED_FINGERPRINT_SECRET: 'first-secret'},
-    });
+    const resolveWith = (enabled: boolean, apiKey: string) =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({
+            configPath: writeRuntimeConfig(
+              join(
+                createTestTempRoot('project02-config-enabled-fingerprint-'),
+                'config.json',
+              ),
+              {plugins: {[plugin.manifest.id]: {enabled, config: {apiKey}}}},
+            ),
+          }),
+        }),
+        pluginManifests: [plugin.manifest],
+      });
+    const enabledFirst = resolveWith(true, 'first-secret');
+    const enabledSecond = resolveWith(true, 'second-secret');
+    const disabled = resolveWith(false, 'first-secret');
 
     expect(enabledFirst.effectiveConfigFingerprint).toBe(
       enabledSecond.effectiveConfigFingerprint,
@@ -907,112 +849,8 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('rejects nested secret refs in non-secret object and array config fields', async () => {
-    const plugin = structuredConfigPlugin('memory.structured');
-    const storeRoot = createTestTempRoot('project02-config-nested-secret-ref-');
-    await initializeCharacterDataForHost(storeRoot);
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'memory.structured': {
-          enabled: true,
-          config: {
-            settings: {
-              apiKey: {$env: 'PROJECT02_NESTED_OBJECT_SECRET'},
-            },
-            endpoints: [
-              {
-                token: {$env: 'PROJECT02_NESTED_ARRAY_SECRET'},
-              },
-            ],
-          },
-        },
-      },
-    });
-    let factoryCalls = 0;
-
-    const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: prepareConfiguredProject02PluginActivation({
-        ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({configPath}),
-          storeRoot,
-          env: {
-            PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
-            PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
-          },
-          factories: {
-            'memory.structured': {
-              manifest: plugin.manifest,
-              create() {
-                factoryCalls += 1;
-                throw new Error(
-                  'factory should not receive nested secret refs',
-                );
-              },
-            },
-          },
-        }),
-
-        env: {
-          PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
-          PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
-        },
-      }),
-    });
-
-    expect(factoryCalls).toBe(0);
-    expect(configured.plugins).toEqual([]);
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured'],
-    ).toMatchObject({
-      settings: {
-        source: 'config',
-        resolved: false,
-      },
-      endpoints: {
-        source: 'config',
-        resolved: false,
-      },
-    });
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured']?.[
-        'settings'
-      ],
-    ).not.toHaveProperty('value');
-    expect(
-      configured.resolvedConfig.pluginConfigs['memory.structured']?.[
-        'endpoints'
-      ],
-    ).not.toHaveProperty('value');
-    expect(configured.activation.enabledPluginIds).not.toContain(
-      'memory.structured',
-    );
-    expect(
-      activationPluginById(configured.activation.plugins, 'memory.structured'),
-    ).toMatchObject({
-      pluginId: 'memory.structured',
-      activationStatus: 'blocked',
-    });
-    expect(configured.activation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_secret_ref_for_non_secret',
-          path: 'plugins.memory.structured.config.settings.apiKey',
-          pluginId: 'memory.structured',
-          pluginConfigField: 'settings',
-        }),
-        expect.objectContaining({
-          code: 'runtime_config_secret_ref_for_non_secret',
-          path: 'plugins.memory.structured.config.endpoints[0].token',
-          pluginId: 'memory.structured',
-          pluginConfigField: 'endpoints',
-        }),
-      ]),
-    );
-  });
-
-  it('accepts a plaintext secret in config, with the env overriding it', () => {
+  it('accepts a plaintext secret in config', () => {
     const plugin = createCharacterStatePlugin();
-    const envVar = 'PROJECT02_PLAINTEXT_SECRET_3447588015';
     const loaded = loadRuntimeConfigForTest({
       configPath: writeRuntimeConfig(
         join(createTestTempRoot('project02-config-plaintext-'), 'config.json'),
@@ -1039,7 +877,6 @@ describe('runtime config loading and resolution', () => {
               description: 'API key.',
               required: true,
               secret: true,
-              envVar,
               valueType: 'secret' as const,
               redactionLabels: ['secret'],
             },
@@ -1051,14 +888,8 @@ describe('runtime config loading and resolution', () => {
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
       pluginManifests: manifests,
     });
-    const fromEnv = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-      pluginManifests: manifests,
-      env: {[envVar]: 'env-secret'},
-    });
 
-    // Typing a key into config is acceptable; the env file stays the
-    // preferred home and wins whenever it holds the variable.
+    // A key typed into config is the key; the plugin reads it as written.
     expect(
       fromConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
     ).toMatchObject({
@@ -1066,19 +897,12 @@ describe('runtime config loading and resolution', () => {
       resolved: true,
       value: 'plaintext-secret',
     });
-    expect(fromEnv.pluginConfigs[plugin.manifest.id]?.['apiKey']).toMatchObject(
-      {
-        source: `env:${envVar}`,
-        resolved: true,
-        value: 'env-secret',
-      },
-    );
-    // Redacted views never show the value, wherever it came from.
+    // Redacted views never show the value.
     expect(JSON.stringify(fromConfig.redactedPluginConfigs)).not.toContain(
       'plaintext-secret',
     );
 
-    // Shapes that are neither a string nor an env ref stay rejected.
+    // A shape other than a string is rejected, never silently ignored.
     const invalid = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({
@@ -1110,15 +934,14 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('treats empty env values for required secrets as missing', () => {
-    const envVar = 'PROJECT02_EMPTY_SECRET_3447588015';
+  it('treats a blank secret as missing', () => {
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-empty-secret-'), 'config.json'),
       {
         plugins: {
           'memory.required': {
             config: {
-              apiKey: {$env: envVar},
+              apiKey: '   ',
             },
           },
         },
@@ -1127,16 +950,13 @@ describe('runtime config loading and resolution', () => {
     const resolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
-        env: {[envVar]: ''},
       }),
-
       pluginManifests: [requiredSecretPlugin().manifest],
-      env: {[envVar]: ''},
     });
     const resolvedField = resolved.pluginConfigs['memory.required']?.['apiKey'];
 
     expect(resolvedField).toMatchObject({
-      source: `env:${envVar}`,
+      source: 'missing',
       resolved: false,
     });
     expect(resolvedField).not.toHaveProperty('value');
@@ -1150,147 +970,7 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('resolves manifest secret env var defaults without raw config', async () => {
-    const envVar = 'PROJECT02_MANIFEST_DEFAULT_SECRET_3449527784';
-    const plugin = requiredSecretPluginWithManifestEnvVar(
-      'memory.manifest-default-secret',
-      envVar,
-    );
-    const storeRoot = createTestTempRoot(
-      'project02-config-manifest-env-default-',
-    );
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [plugin.manifest.id]: {
-          enabled: true,
-        },
-      },
-    });
-    const factoryInputs: unknown[] = [];
-
-    await initializeCharacterDataForHost(storeRoot);
-
-    const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: prepareConfiguredProject02PluginActivation({
-        ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({configPath}),
-          storeRoot,
-          env: {[envVar]: 'manifest-default-secret'},
-          factories: {
-            [plugin.manifest.id]: {
-              manifest: plugin.manifest,
-              create(input) {
-                factoryInputs.push(input.resolvedConfig['apiKey']?.value);
-
-                return plugin;
-              },
-            },
-          },
-        }),
-
-        env: {[envVar]: 'manifest-default-secret'},
-      }),
-    });
-
-    expect(configured.activation.enabledPluginIds).toContain(
-      plugin.manifest.id,
-    );
-    expect(factoryInputs).toEqual(['manifest-default-secret']);
-    expect(
-      configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
-    ).toMatchObject({
-      source: `env:${envVar}`,
-      resolved: true,
-      value: 'manifest-default-secret',
-    });
-    expect(
-      configured.activation.diagnostics.map(item => item.code),
-    ).not.toContain('runtime_config_reserved_control_env_var');
-  });
-
-  it.each([runtimeConfigEnvVarName, roleModelProviderEnvVarName])(
-    'rejects reserved runtime control env var %s in manifest secret defaults',
-    async envVar => {
-      const plugin = requiredSecretPluginWithManifestEnvVar(
-        'memory.reserved-manifest-secret',
-        envVar,
-      );
-      const storeRoot = createTestTempRoot(
-        'project02-config-manifest-reserved-env-',
-      );
-      await initializeCharacterDataForHost(storeRoot);
-      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-          },
-        },
-      });
-      let factoryCalls = 0;
-      const configured = await createConfiguredProject02PluginHostFromPlan({
-        activationPlan: prepareConfiguredProject02PluginActivation({
-          ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadRuntimeConfigForTest({configPath}),
-            storeRoot,
-            env: {[envVar]: 'runtime-control-value'},
-            factories: {
-              [plugin.manifest.id]: {
-                manifest: plugin.manifest,
-                create() {
-                  factoryCalls += 1;
-                  throw new Error(
-                    'reserved control env var must block activation',
-                  );
-                },
-              },
-            },
-          }),
-
-          env: {[envVar]: 'runtime-control-value'},
-        }),
-      });
-      const resolvedField =
-        configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'];
-      const activation = configured.activation.plugins.find(
-        item => item.pluginId === plugin.manifest.id,
-      );
-
-      expect(factoryCalls).toBe(0);
-      expect(configured.activation.enabledPluginIds).not.toContain(
-        plugin.manifest.id,
-      );
-      expect(resolvedField).toMatchObject({
-        source: `env:${envVar}`,
-        resolved: false,
-      });
-      expect(resolvedField).not.toHaveProperty('value');
-      expect(configured.activation.diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            severity: 'error',
-            code: 'runtime_config_reserved_control_env_var',
-            path: `plugins.${plugin.manifest.id}.config.apiKey`,
-            pluginId: plugin.manifest.id,
-            pluginConfigField: 'apiKey',
-          }),
-        ]),
-      );
-      expect(activation).toMatchObject({
-        pluginId: plugin.manifest.id,
-        enabled: false,
-        activationStatus: 'blocked',
-      });
-      expect(activation?.activationReasons).toContain(
-        'blocked_by_config_errors',
-      );
-      expect(JSON.stringify(configured.resolvedConfig)).not.toContain(
-        'runtime-control-value',
-      );
-    },
-  );
-
   it('rejects unknown config fields for enabled or default-enabled plugins', async () => {
-    const envVar = 'PROJECT02_UNKNOWN_FIELD_SECRET_3447705094';
     const plugin = requiredSecretPlugin();
     const storeRoot = createTestTempRoot('project02-config-unknown-field-');
     await initializeCharacterDataForHost(storeRoot);
@@ -1298,7 +978,7 @@ describe('runtime config loading and resolution', () => {
       plugins: {
         'memory.required': {
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'configured-secret',
             zetaTypo: 'ignored',
             alphaTypo: 'ignored',
           },
@@ -1310,7 +990,6 @@ describe('runtime config loading and resolution', () => {
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           storeRoot,
-          env: {[envVar]: 'configured-secret'},
           factories: {
             'memory.required': {
               manifest: plugin.manifest,
@@ -1318,8 +997,6 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'configured-secret'},
       }),
     });
 
@@ -1599,68 +1276,7 @@ describe('runtime config loading and resolution', () => {
     ).not.toContain('runtime_config_unknown_plugin_config_field');
   });
 
-  it('uses supplied env maps when creating configured plugin hosts', async () => {
-    const envVar = 'PROJECT02_SUPPLIED_ONLY_SECRET_3447588016';
-    const previousEnvValue = process.env[envVar];
-    process.env[envVar] = '';
-
-    try {
-      const storeRoot = createTestTempRoot('project02-config-supplied-env-');
-      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-        plugins: {
-          'memory.required': {
-            enabled: true,
-            config: {
-              apiKey: {$env: envVar},
-            },
-          },
-        },
-      });
-
-      await initializeCharacterDataForHost(storeRoot);
-
-      const configured = await createConfiguredProject02PluginHostFromPlan({
-        activationPlan: prepareConfiguredProject02PluginActivation({
-          ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadRuntimeConfigForTest({configPath}),
-            storeRoot,
-            env: {[envVar]: 'from-supplied-env'},
-            factories: {
-              'memory.required': {
-                manifest: requiredSecretPlugin().manifest,
-                create: () => requiredSecretPlugin(),
-              },
-            },
-          }),
-
-          env: {[envVar]: 'from-supplied-env'},
-        }),
-      });
-
-      expect(configured.activation.enabledPluginIds).toContain(
-        'memory.required',
-      );
-      expect(
-        configured.activation.diagnostics.map(item => item.code),
-      ).not.toContain('runtime_config_required_secret_missing');
-      expect(
-        configured.resolvedConfig.pluginConfigs['memory.required']?.['apiKey'],
-      ).toMatchObject({
-        source: `env:${envVar}`,
-        resolved: true,
-        value: 'from-supplied-env',
-      });
-    } finally {
-      if (previousEnvValue === undefined) {
-        Reflect.deleteProperty(process.env, envVar);
-      } else {
-        process.env[envVar] = previousEnvValue;
-      }
-    }
-  });
-
   it('creates manifest-backed configured plugin factories once with resolved config', async () => {
-    const envVar = 'PROJECT02_FACTORY_SECRET_3447631396';
     const storeRoot = createTestTempRoot('project02-config-factory-');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       storeRoot,
@@ -1668,7 +1284,7 @@ describe('runtime config loading and resolution', () => {
         'memory.required': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'from-manifest-backed-factory',
           },
         },
       },
@@ -1688,7 +1304,6 @@ describe('runtime config loading and resolution', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
-          env: {[envVar]: 'from-manifest-backed-factory'},
           factories: {
             'character-state': {
               manifest: createCharacterStatePluginManifest(),
@@ -1714,8 +1329,6 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'from-manifest-backed-factory'},
       }),
     });
 
@@ -1803,7 +1416,6 @@ describe('runtime config loading and resolution', () => {
     const configuredStoreRoot = createTestTempRoot(
       'project02-config-file-root-',
     );
-    const envVar = 'PROJECT02_CONFIG_ROOT_FACTORY_SECRET_3448745052';
     const configPath = writeRuntimeConfig(
       join(createTestTempRoot('project02-config-legacy-root-'), 'config.json'),
       {
@@ -1812,7 +1424,7 @@ describe('runtime config loading and resolution', () => {
           'memory.required': {
             enabled: true,
             config: {
-              apiKey: {$env: envVar},
+              apiKey: 'from-configured-store-root',
             },
           },
         },
@@ -1828,7 +1440,6 @@ describe('runtime config loading and resolution', () => {
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           configPath,
           storeRoot: cliStoreRoot,
-          env: {[envVar]: 'from-configured-store-root'},
           factories: {
             'memory.required': {
               manifest: requiredSecretPlugin().manifest,
@@ -1840,8 +1451,6 @@ describe('runtime config loading and resolution', () => {
             },
           },
         }),
-
-        env: {[envVar]: 'from-configured-store-root'},
       }),
     });
 

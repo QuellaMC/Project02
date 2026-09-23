@@ -109,7 +109,6 @@ export function planCharacterPackagePluginMaterialization(options: {
     pluginManifests: options.pluginManifests,
     validateInactivePluginConfigs: true,
     authoredScope: 'character',
-    env: {},
   });
   // A readiness failure may still be met by the global layer or env.
   const blocking = resolved.diagnostics.filter(

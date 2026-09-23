@@ -199,7 +199,6 @@ describe('runtime config activation checks and construction', () => {
 
   it('keeps unselected memory providers passing check', async () => {
     const storeRoot = createTestTempRoot('project02-config-memory-unselected-');
-    const envVar = 'PROJECT02_SELECTED_MEMORY_DUPLICATE_SECRET_3450063170';
     const selectedPlugin = requiredSecretPlugin('memory.selected');
     const unselectedPlugin = requiredSecretPlugin('memory.unselected');
     let factoryCalls = 0;
@@ -210,7 +209,7 @@ describe('runtime config activation checks and construction', () => {
         'memory.selected': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'selected-memory-secret',
           },
         },
       },
@@ -218,9 +217,6 @@ describe('runtime config activation checks and construction', () => {
 
     const output = await checkRuntimeConfigForTest({
       storeRoot,
-      env: {
-        [envVar]: 'selected-memory-secret',
-      },
       factories: {
         'memory.selected': {
           manifest: selectedPlugin.manifest,
@@ -305,7 +301,6 @@ describe('runtime config activation checks and construction', () => {
   it('rejects manifest-backed factories that return a different same-id manifest', async () => {
     const storeRoot = createTestTempRoot('project02-config-manifest-mismatch-');
     const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MISMATCH_SECRET_3448659339';
     let cleanupCalls = 0;
     const cleanupPlugin = sessionEndPlugin('first.cleanup', () => {
       cleanupCalls += 1;
@@ -321,7 +316,7 @@ describe('runtime config activation checks and construction', () => {
         'memory.contract': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'same-id-different-manifest-secret',
           },
         },
       },
@@ -337,9 +332,6 @@ describe('runtime config activation checks and construction', () => {
           ...runtimeConfigSnapshotForTest({
             loadedConfig: loadedConfig,
             storeRoot,
-            env: {
-              [envVar]: 'same-id-different-manifest-secret',
-            },
             factories: {
               [cleanupPlugin.manifest.id]: {
                 manifest: cleanupPlugin.manifest,
@@ -351,10 +343,6 @@ describe('runtime config activation checks and construction', () => {
               },
             },
           }),
-
-          env: {
-            [envVar]: 'same-id-different-manifest-secret',
-          },
         }),
       }),
     ).rejects.toThrow(
@@ -845,7 +833,6 @@ describe('runtime config activation checks and construction', () => {
   it('accepts manifest-backed factories that return their declared manifest', async () => {
     const storeRoot = createTestTempRoot('project02-config-manifest-match-');
     const configPath = join(storeRoot, 'config.json');
-    const envVar = 'PROJECT02_MANIFEST_MATCH_SECRET_3448659339';
     const plugin = requiredSecretPlugin('memory.contract');
     let factoryCalls = 0;
 
@@ -854,7 +841,7 @@ describe('runtime config activation checks and construction', () => {
         'memory.contract': {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'same-id-matching-manifest-secret',
           },
         },
       },
@@ -868,9 +855,6 @@ describe('runtime config activation checks and construction', () => {
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadedConfig,
           storeRoot,
-          env: {
-            [envVar]: 'same-id-matching-manifest-secret',
-          },
           factories: {
             'memory.contract': {
               manifest: plugin.manifest,
@@ -882,10 +866,6 @@ describe('runtime config activation checks and construction', () => {
             },
           },
         }),
-
-        env: {
-          [envVar]: 'same-id-matching-manifest-secret',
-        },
       }),
     });
 

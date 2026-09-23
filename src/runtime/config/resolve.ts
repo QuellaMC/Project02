@@ -8,7 +8,6 @@ import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
   defaultProject02ContextWindowTokens,
   defaultProject02UserDisplayName,
-  isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
   type RedactedPluginRuntimeConfig,
@@ -19,18 +18,12 @@ import {
   type RuntimeConfigDiagnosticPluginMetadata,
   type RuntimeConfigFieldScope,
   type RuntimeConfigSource,
-  type RuntimeConfigSecretRef,
   type RuntimeConfigValue,
 } from './types.ts';
 import {
   createJsonBoundarySnapshot,
-  isJsonRecord,
   ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
-import {
-  nestedSecretMarkerPath,
-  secretEnvMarkerField,
-} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
 import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
@@ -39,7 +32,6 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
-  readonly env?: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly authoredScope?: RuntimeConfigFieldScope;
@@ -60,7 +52,6 @@ type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
 export type ResolveRuntimePluginConfigsOptions = {
   readonly config: Project02RuntimeConfig | undefined;
   readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly env?: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly authoredScope?: RuntimeConfigFieldScope;
@@ -89,13 +80,11 @@ export function resolveRuntimePluginConfigs(
         ];
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
-  const env = options.env ?? process.env;
 
   for (const manifest of options.pluginManifests) {
     const resolved = resolvePluginConfig({
       config: options.config,
       manifest,
-      env,
       validateInactivePluginConfigs:
         options.validateInactivePluginConfigs === true,
       defaultEnabled:
@@ -145,7 +134,6 @@ export function resolveEffectiveProject02RuntimeConfig(
   const pluginResolution = resolveRuntimePluginConfigs({
     config,
     pluginManifests: options.pluginManifests ?? [],
-    ...(options.env === undefined ? {} : {env: options.env}),
     validateInactivePluginConfigs:
       options.validateInactivePluginConfigs === true,
     ...(options.defaultEnabledPluginIds === undefined
@@ -228,7 +216,6 @@ export function runtimeConfigDiagnosticMatchesPlugin(options: {
 function resolvePluginConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly manifest: RuntimePluginManifest;
-  readonly env: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs: boolean;
   readonly defaultEnabled: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
@@ -274,7 +261,6 @@ function resolvePluginConfigField(options: {
   readonly manifest: RuntimePluginManifest;
   readonly field: RuntimePluginConfigField;
   readonly rawValue: RuntimeConfigValue | undefined;
-  readonly env: NodeJS.ProcessEnv;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
@@ -302,28 +288,6 @@ function resolvePluginConfigField(options: {
       field: options.field,
       source: 'missing',
       resolved: !options.field.required,
-    });
-  }
-
-  // Any reserved marker, malformed included, blocks a non-secret field.
-  const secretValuePath = nestedSecretMarkerPath(options.rawValue, path);
-
-  if (secretValuePath !== undefined) {
-    if (options.validateConfig) {
-      options.diagnostics.push(
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_secret_ref_for_non_secret',
-          `Non-secret config field "${options.field.name}" cannot contain a secret value.`,
-          secretValuePath,
-          pluginConfigDiagnosticMetadata(options),
-        ),
-      );
-    }
-    return fieldResult({
-      field: options.field,
-      source: 'config',
-      resolved: false,
     });
   }
 
@@ -355,38 +319,28 @@ function resolvePluginConfigField(options: {
   });
 }
 
+/**
+ * A secret is a plain string in whichever layer authored it. The plugin
+ * reads the resolved value; every other reader is handed it redacted.
+ */
 function resolveSecretField(options: {
   readonly manifest: RuntimePluginManifest;
   readonly field: RuntimePluginConfigField;
   readonly rawValue: RuntimeConfigValue | undefined;
-  readonly env: NodeJS.ProcessEnv;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
-  const authoredRef = isSecretRef(options.rawValue)
-    ? options.rawValue
-    : undefined;
-  const plaintext =
-    typeof options.rawValue === 'string' && options.rawValue.trim().length > 0
-      ? options.rawValue
-      : undefined;
-
-  // An authored shape that is neither a ref nor a plain value is an error
-  // even when an env var could cover the field: silently ignoring what the
-  // operator wrote would leave a landmine in the config.
-  if (
-    options.rawValue !== undefined &&
-    authoredRef === undefined &&
-    plaintext === undefined
-  ) {
+  // Silently ignoring what the operator wrote would leave a landmine in
+  // the config, so a value of another shape is an error.
+  if (options.rawValue !== undefined && typeof options.rawValue !== 'string') {
     if (options.validateConfig) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_secret_value_invalid',
-          `Secret config field "${options.field.name}" must be a plain string value or an {"$env": "VAR"} reference.`,
+          `Secret config field "${options.field.name}" must be a string.`,
           options.path,
           pluginConfigDiagnosticMetadata(options),
         ),
@@ -400,24 +354,12 @@ function resolveSecretField(options: {
     });
   }
 
-  // The env is consulted even over an authored plain value: the env file
-  // is the convenient place for keys, so it wins where both exist.
-  const envRef =
-    authoredRef ??
-    (options.field.envVar !== undefined
-      ? {$env: options.field.envVar}
-      : undefined);
-
-  if (envRef !== undefined) {
-    return resolveSecretFieldFromEnv({...options, envRef, plaintext});
-  }
-
-  if (plaintext !== undefined) {
+  if (options.rawValue !== undefined && options.rawValue.trim().length > 0) {
     return fieldResult({
       field: options.field,
       source: 'config',
       resolved: true,
-      value: plaintext,
+      value: options.rawValue,
     });
   }
 
@@ -437,78 +379,6 @@ function resolveSecretField(options: {
     field: options.field,
     source: 'missing',
     resolved: !options.field.required,
-  });
-}
-
-function resolveSecretFieldFromEnv(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly field: RuntimePluginConfigField;
-  readonly envRef: RuntimeConfigSecretRef;
-  readonly plaintext: string | undefined;
-  readonly env: NodeJS.ProcessEnv;
-  readonly diagnostics: RuntimeConfigDiagnostic[];
-  readonly path: string;
-  readonly validateConfig: boolean;
-  readonly validateReadiness: boolean;
-}): ResolvedRuntimeConfigField {
-  const envName = options.envRef.$env;
-
-  if (isRuntimeControlEnvVarName(envName)) {
-    if (options.validateConfig) {
-      options.diagnostics.push(
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_reserved_control_env_var',
-          `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envName}".`,
-          options.path,
-          pluginConfigDiagnosticMetadata(options),
-        ),
-      );
-    }
-
-    return fieldResult({
-      field: options.field,
-      source: `env:${envName}`,
-      resolved: false,
-    });
-  }
-
-  const secretValue = options.env[envName];
-
-  if (secretValue !== undefined && secretValue.length > 0) {
-    return fieldResult({
-      field: options.field,
-      source: `env:${envName}`,
-      resolved: true,
-      value: secretValue,
-    });
-  }
-
-  if (options.plaintext !== undefined) {
-    return fieldResult({
-      field: options.field,
-      source: 'config',
-      resolved: true,
-      value: options.plaintext,
-    });
-  }
-
-  if (options.field.required && options.validateReadiness) {
-    options.diagnostics.push(
-      createRuntimeConfigDiagnostic(
-        'error',
-        'runtime_config_required_secret_missing',
-        `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envName}.`,
-        options.path,
-        pluginConfigDiagnosticMetadata(options),
-      ),
-    );
-  }
-
-  return fieldResult({
-    field: options.field,
-    source: `env:${envName}`,
-    resolved: false,
   });
 }
 
@@ -634,16 +504,6 @@ function fieldResult(options: {
           }),
         }),
   } satisfies ResolvedRuntimeConfigField);
-}
-
-function isSecretRef(
-  value: RuntimeConfigValue | undefined,
-): value is RuntimeConfigSecretRef {
-  return (
-    isJsonRecord(value) &&
-    secretEnvMarkerField in value &&
-    typeof value[secretEnvMarkerField] === 'string'
-  );
 }
 
 function effectiveFingerprintInput(options: {

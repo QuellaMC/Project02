@@ -5,25 +5,12 @@ export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
-const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
-  runtimeConfigEnvVarName,
-  roleModelProviderEnvVarName,
-]);
-
-export function isRuntimeControlEnvVarName(name: string): boolean {
-  return runtimeControlEnvVarNames.includes(name);
-}
-
-export type RuntimeConfigSecretRef = {
-  readonly $env: string;
-};
 
 export type RuntimeConfigValue =
   | string
   | number
   | boolean
   | null
-  | RuntimeConfigSecretRef
   | readonly RuntimeConfigValue[]
   | {readonly [key: string]: RuntimeConfigValue};
 
@@ -134,7 +121,7 @@ export type SelectedLoadedProject02RuntimeConfig =
     readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
   };
 
-type RuntimeConfigFieldSource = 'config' | 'missing' | `env:${string}`;
+type RuntimeConfigFieldSource = 'config' | 'missing';
 
 /** Distinct from RuntimeConfigFieldSource, which says how a field resolves. */
 export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;
@@ -272,11 +259,4 @@ export type RuntimeConfigMutationOperation =
       readonly kind: 'plugin_config_unset';
       readonly pluginId: string;
       readonly fieldName: string;
-    }
-  | {
-      readonly kind: 'secret_set';
-      readonly pluginId: string;
-      readonly fieldName: string;
-      readonly envVar: string;
-      readonly secretValue: string;
     };

@@ -59,17 +59,6 @@ describe('layered runtime config fingerprint', () => {
     expect(
       createRuntimeConfigFingerprint(malformed('weak-passcode'), [manifest]),
     ).toBe(createRuntimeConfigFingerprint(malformed('other'), [manifest]));
-
-    // The variable an env ref names stays in the hash: repointing a
-    // field at another variable is a change an expectation must notice.
-    const withRef = (envVar: string): Project02RuntimeConfig => ({
-      version: runtimeConfigVersion,
-      plugins: {'demo-config': {config: {apiKey: {$env: envVar}}}},
-    });
-
-    expect(
-      createRuntimeConfigFingerprint(withRef('KEY_A'), [manifest]),
-    ).not.toBe(createRuntimeConfigFingerprint(withRef('KEY_B'), [manifest]));
   });
 
   it('never collides with the per-file fingerprint of the same global document', () => {
@@ -128,23 +117,5 @@ describe('layered runtime config fingerprint', () => {
         },
       }),
     ).not.toBe(base);
-  });
-
-  it('redacts secret refs instead of hashing raw env material', () => {
-    const withSecret: Project02RuntimeConfig = {
-      version: runtimeConfigVersion,
-      plugins: {
-        memory: {config: {apiKey: {$env: 'PROJECT02_TEST_KEY'}}},
-      },
-    };
-
-    expect(
-      createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
-        globalConfig: globalDocument,
-        characterId: 'mira',
-        overlayConfig: withSecret,
-      }),
-    ).toMatch(/^sha256:/u);
   });
 });

@@ -139,11 +139,6 @@ const configChangeSchema: SchemaObject = {
           pluginId: identifier,
           field: identifier,
         }),
-        operationBranch('plugin_secret_set', {
-          pluginId: identifier,
-          field: identifier,
-          value: {type: 'string', minLength: 1},
-        }),
       ],
     },
   },

@@ -1,10 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
@@ -271,36 +265,6 @@ describe('first-selection materialization through startup', () => {
         'plugins.scope.package-secret.config.apiKey',
       ) as string,
     ]);
-  });
-
-  it('reports a broken character secrets env instead of silently reading nothing', async () => {
-    const homeRoot = homeWithCharacter({characterId: 'seeded'});
-    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
-    const first = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
-    });
-
-    expect(first.status).toBe('resolved');
-    // A symlink here would hand another file's values to this character's
-    // secret refs; the reader must say so, not resolve from an empty env.
-    symlinkSync(join(homeRoot, '.env'), join(dataRoot, '.env'));
-
-    const second = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot, character: 'seeded'},
-      env: {},
-    });
-
-    expect(second.status).not.toBe('resolved');
-    if (second.status === 'character_invalid') {
-      throw new Error('Expected a config diagnostic, not a character error.');
-    }
-    expect(second.activationPlan.resolvedConfig.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: 'runtime_config_character_env_not_regular',
-        severity: 'error',
-      }),
-    );
   });
 
   it('keeps config-only and unknown plugin defaults without implicitly enabling them', async () => {

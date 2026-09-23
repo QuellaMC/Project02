@@ -134,7 +134,6 @@ export function inspectRuntimePluginConfigForControl(options: {
         }),
     runtimeLocation,
     targetScope: target.scope,
-    env: target.env,
   });
 }
 

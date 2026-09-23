@@ -46,40 +46,6 @@ describe('runtime config mutation concurrency', () => {
       pluginIds.every(pluginId => stored.plugins?.[pluginId]?.enabled === true),
     ).toBe(true);
   }, 20_000);
-
-  it('serializes one shared env file across distinct config directories', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const barrierPath = join(storeRoot, 'secret-start');
-    const mutationCount = 24;
-    const children = Array.from({length: mutationCount}, (_value, index) => {
-      const suffix = String(index).padStart(2, '0');
-
-      return runSecretMutationChild({
-        storeRoot,
-        barrierPath,
-        configPath: join(storeRoot, `config-${suffix}`, 'runtime.json'),
-        pluginId: `memory-${suffix}`,
-        envVar: `PROJECT02_SHARED_SECRET_${suffix}`,
-        secretValue: `secret-${suffix}`,
-      });
-    });
-
-    await new Promise<void>(resolve => {
-      setTimeout(resolve, 250);
-    });
-    await writeFile(barrierPath, 'go\n', 'utf8');
-    await Promise.all(children);
-
-    const envContent = await readFile(join(storeRoot, '.env'), 'utf8');
-
-    for (let index = 0; index < mutationCount; index += 1) {
-      const suffix = String(index).padStart(2, '0');
-
-      expect(envContent).toContain(
-        `PROJECT02_SHARED_SECRET_${suffix}="secret-${suffix}"`,
-      );
-    }
-  }, 30_000);
 });
 
 async function runConfigMutationChild(options: {
@@ -104,48 +70,6 @@ async function runConfigMutationChild(options: {
   await runMutationChildProcess({
     script,
     args: [options.storeRoot, options.barrierPath, options.pluginId],
-  });
-}
-
-async function runSecretMutationChild(options: {
-  readonly storeRoot: string;
-  readonly barrierPath: string;
-  readonly configPath: string;
-  readonly pluginId: string;
-  readonly envVar: string;
-  readonly secretValue: string;
-}): Promise<void> {
-  const script = [
-    "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigControlOperation, bindProject02CharacterRuntimeLocation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
-    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-activation-fixtures.ts');",
-    'const sleep = new Int32Array(new SharedArrayBuffer(4));',
-    'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-    'const env = { [process.argv[5]]: process.argv[6] };',
-    'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1], configPath: process.argv[3] }, env });',
-    "const runtimeLocation = bindProject02CharacterRuntimeLocation({ configLocation, characterId: 'mira' });",
-    'applyRuntimeConfigControlOperation({',
-    'pluginManifests: [],',
-    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation, env, scope: 'global' }),",
-    '  request: {',
-    "    kind: 'plugin_config',",
-    '    manifest: requiredSecretPlugin(process.argv[4]).manifest,',
-    "    actor: 'operator',",
-    "    fieldOperation: { kind: 'secret_set', fieldName: 'apiKey', envVar: process.argv[5], secretValue: process.argv[6] }",
-    '  }',
-    '});',
-  ].join('\n');
-
-  await runMutationChildProcess({
-    script,
-    args: [
-      options.storeRoot,
-      options.barrierPath,
-      options.configPath,
-      options.pluginId,
-      options.envVar,
-      options.secretValue,
-    ],
   });
 }
 

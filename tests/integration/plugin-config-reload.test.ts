@@ -84,8 +84,6 @@ function authoredFingerprint(options: {
     manifest: manifest as Parameters<
       typeof inspectRuntimePluginConfig
     >[0]['manifest'],
-
-    env: {},
   }).fingerprint;
 }
 
@@ -116,8 +114,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 
@@ -224,8 +220,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
 
     // What inspection hands the model as expectedFingerprint is what the
@@ -319,14 +313,12 @@ describe('configured runtime plugin reloader', () => {
         ...discovery,
         diagnostics: discovery.reservedIdDiagnostics,
       },
-      env: {},
     });
     const inspectedFingerprint = inspectRuntimePluginConfig({
       runtimeLocation: activationPlan.runtimeLocation,
       targetScope: 'global',
       manifest,
       pluginManifests: [manifest],
-      env: {},
     }).fingerprint;
 
     await createConfiguredProject02PluginHostFromPlan({activationPlan});
@@ -381,8 +373,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
     const approvedFingerprint = authoredFingerprint({
@@ -434,8 +424,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
     const approvedFingerprint = authoredFingerprint({
@@ -483,8 +471,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -566,8 +552,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -653,8 +637,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 
@@ -697,8 +679,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -771,7 +751,6 @@ describe('configured runtime plugin reloader', () => {
         env: {},
       }),
       loadedConfig,
-      env: {},
     });
     const entry = activationPlan.catalogEntries['demo-config'];
 
@@ -896,8 +875,6 @@ describe('configured runtime plugin reloader', () => {
         storeRoot,
         env: {},
       }),
-
-      env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 

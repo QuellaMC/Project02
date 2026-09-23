@@ -524,7 +524,6 @@ function requiredConfigField(
     value['defaultValueSummary'],
     'defaultValueSummary',
   );
-  const envVar = optionalString(value['envVar'], 'envVar');
   const allowedValues =
     value['allowedValues'] === undefined
       ? accept(undefined)
@@ -547,7 +546,6 @@ function requiredConfigField(
   if (secret.status === 'rejected') return secret;
   if (valueType.status === 'rejected') return valueType;
   if (defaultValueSummary.status === 'rejected') return defaultValueSummary;
-  if (envVar.status === 'rejected') return envVar;
   if (allowedValues.status === 'rejected') return allowedValues;
   if (agentMutable.status === 'rejected') return agentMutable;
   if (reloadRequired.status === 'rejected') return reloadRequired;
@@ -567,7 +565,6 @@ function requiredConfigField(
     secret: secret.value,
     valueType: valueType.value,
     defaultValueSummary: defaultValueSummary.value,
-    envVar: envVar.value,
     allowedValues: allowedValues.value,
     agentMutable: agentMutable.value,
     reloadRequired: reloadRequired.value,
@@ -582,7 +579,6 @@ function acceptRuntimePluginConfigField(options: {
   readonly secret: boolean;
   readonly valueType: RuntimePluginConfigValueType | undefined;
   readonly defaultValueSummary: string | undefined;
-  readonly envVar: string | undefined;
   readonly allowedValues: readonly string[] | undefined;
   readonly agentMutable: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
@@ -600,7 +596,6 @@ function acceptRuntimePluginConfigField(options: {
       ...(options.defaultValueSummary === undefined
         ? {}
         : {defaultValueSummary: options.defaultValueSummary}),
-      ...(options.envVar === undefined ? {} : {envVar: options.envVar}),
       ...(options.allowedValues === undefined
         ? {}
         : {

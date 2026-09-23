@@ -34,13 +34,9 @@ import {
 } from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterSecretsEnv,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
-import {
-  mergeCharacterOverlayDocument,
-  runtimeConfigEnvWithCharacterSecrets,
-} from './resolve-layered.ts';
+import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldAcceptsValue,
@@ -136,7 +132,6 @@ export function applyRuntimeConfigControlOperation(options: {
     ...(options.lockWaitTimeoutMs === undefined
       ? {}
       : {lockWaitTimeoutMs: options.lockWaitTimeoutMs}),
-    secretMutation: mutation.operation?.kind === 'secret_set',
     prepare: snapshot =>
       prepareScopedRuntimeConfigControlCandidate({
         target,
@@ -330,25 +325,7 @@ function normalizedControlMutation(
     actor: request.actor,
     operation: request.fieldOperation,
     authoredScope: target.scope,
-    env: runtimeConfigControlEnv(target),
   });
-}
-
-/**
- * What the target's scope resolves with. A character's own secrets ride
- * over the shared env, as they do when that character runs; a global
- * value resolves globally, never through one character's secrets.
- */
-function runtimeConfigControlEnv(
-  target: ResolvedRuntimeConfigScopeTarget,
-): NodeJS.ProcessEnv {
-  return target.scope === 'character'
-    ? runtimeConfigEnvWithCharacterSecrets(
-        target.env,
-        loadCharacterSecretsEnv(target.runtimeLocation.characterScope.dataRoot)
-          .env,
-      )
-    : target.env;
 }
 
 /** Rejects before any ensure step materializes a marker or data directory. */

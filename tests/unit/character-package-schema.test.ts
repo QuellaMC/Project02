@@ -291,15 +291,6 @@ describe('character package descriptor schema parity', () => {
       }),
     ],
     [
-      'a secret env reference in plugin defaults',
-      (descriptor: Record<string, unknown>) => ({
-        ...descriptor,
-        plugins: {
-          config: {'demo-config': {apiKey: {$env: 'DEMO_API_KEY'}}},
-        },
-      }),
-    ],
-    [
       'a non-object plugin config entry',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,

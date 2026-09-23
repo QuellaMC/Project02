@@ -1445,14 +1445,13 @@ describe('inspect CLI plugin evidence', () => {
     expect(stdout).not.toContain('Could not load runtime config env file');
   });
 
-  it('loads runtime env before reporting mixed inspect activation diagnostics', async () => {
+  it('reports the missing field beside a supplied secret', async () => {
     const storeRoot = createTestTempRoot(
       'project02-inspect-mixed-activation-env-',
     );
     const plugin = createInspectRequiredSecretAndConfigFixturePlugin(
       'inspect.mixed-config',
     );
-    const envVar = 'PROJECT02_INSPECT_MIXED_SECRET_3452532128';
     let stdout = '';
     let stderr = '';
 
@@ -1461,7 +1460,7 @@ describe('inspect CLI plugin evidence', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: {$env: envVar},
+            apiKey: 'inspect-secret',
           },
         },
       },
@@ -1473,12 +1472,6 @@ describe('inspect CLI plugin evidence', () => {
       conversationId: 'session-mixed-activation-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
-    writeFileSync(
-      join(storeRoot, '.env'),
-      `${envVar}=inspect-secret\n`,
-      'utf8',
-    );
-
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {

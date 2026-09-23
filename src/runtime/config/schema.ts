@@ -6,7 +6,6 @@ import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
-  roleModelProviderEnvVarName,
   type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
 } from './types.ts';
@@ -97,8 +96,6 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'enum',
     defaultValueSummary: 'local',
-    // Set in the environment, it wins over either document.
-    envVar: roleModelProviderEnvVarName,
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
     scopes: characterScopedFieldScopes,
@@ -207,7 +204,7 @@ export function runtimeConfigValueMatchesField(
     case 'array':
       return Array.isArray(value);
     case 'secret':
-      return field.secret;
+      return field.secret && typeof value === 'string';
   }
 
   return true;

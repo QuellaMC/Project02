@@ -2030,22 +2030,6 @@ describe('gateway façade', () => {
     expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
       'demo-config',
     );
-    // A provider chosen in the environment wins over either document, and
-    // the view says so rather than reporting the document's value.
-    const overridden = createGateway({
-      location: {storeRoot: homeRoot},
-      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'nvidia'},
-    }).configView({scope: 'global'});
-
-    expect(
-      overridden.status === 'ok' &&
-        overridden.project02.find(field => field.name === 'roleModelProvider')
-          ?.effective,
-    ).toMatchObject({
-      source: 'env:PROJECT02_ROLE_MODEL_PROVIDER',
-      value: 'nvidia',
-    });
-
     const character = gateway.configView({
       scope: 'character',
       characterId: 'mira',
@@ -2237,26 +2221,6 @@ describe('gateway façade', () => {
         value: 1,
       }),
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
-    // A secret whose variable the daemon was launched with — even empty —
-    // would be written to a file the launch env shadows.
-    const shadowed = await createGateway({
-      location: {storeRoot: homeRoot},
-      env: {DEMO_CONFIG_TONE: ''},
-    }).applyConfigChange({
-      target: {scope: 'global'},
-      expectedFingerprint: view.fingerprint,
-      operation: {
-        kind: 'plugin_secret_set',
-        pluginId: 'demo-config',
-        field: 'tone',
-        value: 'secret',
-      },
-    });
-
-    expect(shadowed).toMatchObject({status: 'refused', reason: 'invalid'});
-    expect(shadowed.status === 'refused' && shadowed.message).toContain(
-      'DEMO_CONFIG_TONE',
-    );
     await expect(
       gateway.applyConfigChange({
         target: {scope: 'character', characterId: 'nobody'},

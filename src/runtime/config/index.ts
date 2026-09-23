@@ -8,7 +8,6 @@ export {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
-  runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation,
 } from './env-file.ts';
@@ -32,7 +31,6 @@ export {
 } from './location.ts';
 export {
   inspectRuntimePluginConfig,
-  pluginSecretEnvVarName,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
@@ -61,8 +59,6 @@ export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction
 export {
   characterOverlayConfigPath,
   layeredRuntimeConfigFingerprintForScope,
-  characterSecretsEnvPath,
-  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,
