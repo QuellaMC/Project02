@@ -4,36 +4,37 @@ import {describeRealEntry} from '../../shared/real-path.ts';
 import {
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   normalizeLocalRuntimeCharacterId,
 } from '../storage/layout-contract.ts';
 import {assertProject02HomeAdoptableSync} from '../storage/home.ts';
 import {
+  assertRuntimeConfigGlobalTargetAdmitted,
   canonicalRuntimeConfigHomeRoot,
   canonicalRuntimeConfigLocationPath,
-  loadSelectedProject02RuntimeConfig,
-  requireSelectedLoadedProject02RuntimeConfigSnapshot,
+  loadProject02RuntimeConfigDocumentAt,
   RuntimeConfigLocationError,
-  selectProject02RuntimeConfigLocation,
 } from './load.ts';
-import {
-  runtimeConfigEnvVarName,
-  type Project02RuntimeConfig,
-  type RuntimeConfigCharacterScope,
-  type SelectedLoadedProject02RuntimeConfig,
-  type SelectedProject02RuntimeConfigLocation,
+import type {
+  LoadedProject02RuntimeConfig,
+  RuntimeConfigCharacterScope,
 } from './types.ts';
 
 /** Retained so a re-resolve keeps the operator's explicit choices. */
 export type RuntimeLocationCliState = {
   readonly storeRoot?: string;
-  readonly configPath?: string;
   readonly character?: string;
 };
 
-/** No character storage; it is bound only after activation validates. */
+/**
+ * The home a run is bound to, and its config file. No character storage:
+ * that is bound only after activation validates.
+ */
 export type ResolvedProject02ConfigLocation = {
-  readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
+  /** Canonical: the physical directory, however the operator spelled it. */
   readonly homeRoot: string;
+  readonly configPath: string;
+  readonly canonicalConfigPath: string;
 };
 
 /** Consumers take this instead of re-reading the character from config. */
@@ -46,8 +47,6 @@ export type ResolvedProject02RuntimeLocation =
 type ResolvedRuntimeConfigScopeTargetBase = {
   readonly configPath: string;
   readonly canonicalConfigPath: string;
-  /** One frozen environment used by activation, inspection, and mutation. */
-  readonly env: NodeJS.ProcessEnv;
 };
 
 export type ResolvedRuntimeConfigScopeTarget =
@@ -64,7 +63,6 @@ export type ResolvedRuntimeConfigScopeTarget =
 const resolvedProject02ConfigLocations = new WeakSet<object>();
 const resolvedProject02RuntimeLocations = new WeakSet<object>();
 const resolvedRuntimeConfigScopeTargets = new WeakSet<object>();
-const runtimeConfigCandidateHomeTargets = new WeakSet<object>();
 const resolvedProject02HomeTargets = new WeakMap<
   object,
   ResolvedProject02HomeTarget
@@ -83,230 +81,105 @@ type RuntimeHomeDirectoryIdentity = RuntimeHomeEntryIdentity & {
 
 type ResolvedProject02HomeTarget = {
   readonly canonicalRoot: string;
-  readonly selection: ResolvedProject02HomeSelection;
   readonly existingAnchor: RuntimeHomeDirectoryIdentity;
   homeEntry: RuntimeHomeEntryIdentity | undefined;
-};
-
-type ResolvedProject02HomeSelection =
-  | Readonly<{kind: 'config'; value: string}>
-  | Readonly<{kind: 'runtime'; value: string}>
-  | Readonly<{kind: 'owner'; value: string}>
-  | Readonly<{kind: 'default'}>;
-
-/** Deliberately without provenance: a candidate can never be activated. */
-export type RuntimeConfigCandidateHomeTarget = {
-  readonly homeRoot: string;
 };
 
 type GlobalRuntimeConfigLocation = {
   readonly scope: 'global';
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
-  readonly env?: NodeJS.ProcessEnv;
 };
 
 type CharacterRuntimeConfigLocation = {
   readonly scope: 'character';
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly env?: NodeJS.ProcessEnv;
 };
 
 type ScopedRuntimeConfigLocation =
   GlobalRuntimeConfigLocation | CharacterRuntimeConfigLocation;
 
-function resolveProject02ConfigLocation(options: {
-  readonly loadedConfig: SelectedLoadedProject02RuntimeConfig;
-}): ResolvedProject02ConfigLocation {
-  const loadedConfig = requireSelectedLoadedProject02RuntimeConfigSnapshot(
-    options.loadedConfig,
+/**
+ * The one way a run picks its home: `--store`, else the default. The home
+ * is bound to its physical directory here, so a link that later points
+ * elsewhere cannot move a running home.
+ */
+export function resolveProject02ConfigLocation(
+  selection: Pick<RuntimeLocationCliState, 'storeRoot'> = {},
+): ResolvedProject02ConfigLocation {
+  const layout = createProject02HomeLayout(
+    selection.storeRoot === undefined ? {} : {homeRoot: selection.storeRoot},
+  );
+  const homeRoot = canonicalRuntimeConfigHomeRoot(layout.homeRoot);
+  const canonicalConfigPath = canonicalRuntimeConfigLocationPath(
+    layout.configPath,
   );
 
-  return createResolvedProject02ConfigLocation({
-    selectedConfig: loadedConfig.selectedConfig,
-    ...(loadedConfig.config === undefined ? {} : {config: loadedConfig.config}),
+  assertRuntimeConfigGlobalTargetAdmitted({
+    displayPath: layout.configPath,
+    canonicalPath: canonicalConfigPath,
+    selectedHomeRoot: homeRoot,
   });
-}
 
-/** Checks the operator-selected home, not the effective one from config. */
-export function assertSelectedProject02HomeAdoptable(
-  location: ResolvedProject02ConfigLocation,
-): void {
-  location = requireResolvedProject02ConfigLocation(location);
-  const selectedHomeRoot =
-    location.selectedConfig.owner.kind === 'home'
-      ? location.selectedConfig.owner.homeRoot
-      : location.selectedConfig.runtimeHomeRoot;
-
-  if (selectedHomeRoot === undefined) {
-    return;
-  }
-
-  assertProject02HomeAdoptableSync({homeRoot: selectedHomeRoot});
-}
-
-export function resolveAdoptableRuntimeConfigCandidateHomeTarget(options: {
-  readonly configLocation: ResolvedProject02ConfigLocation;
-  readonly config?: Project02RuntimeConfig;
-}): RuntimeConfigCandidateHomeTarget {
-  const configLocation = requireResolvedProject02ConfigLocation(
-    options.configLocation,
-  );
-  const selection = resolvedProject02HomeSelection({
-    selectedConfig: configLocation.selectedConfig,
-    ...(options.config === undefined ? {} : {config: options.config}),
-  });
-  const homeRoot = canonicalRuntimeConfigHomeRoot(
-    selection.kind === 'default' ? undefined : selection.value,
-  );
-  const candidate = Object.freeze({
-    homeRoot,
-  } satisfies RuntimeConfigCandidateHomeTarget);
-
-  runtimeConfigCandidateHomeTargets.add(candidate);
-  resolvedProject02HomeTargets.set(
-    candidate,
-    createResolvedProject02HomeTarget(homeRoot, selection),
-  );
-  assertRuntimeConfigCandidateHomeAdoptable(candidate);
-  return candidate;
-}
-
-export function assertRuntimeConfigCandidateHomeAdoptable(
-  candidate: RuntimeConfigCandidateHomeTarget,
-): void {
-  if (!runtimeConfigCandidateHomeTargets.has(candidate)) {
-    throw new TypeError(
-      'Runtime config candidate home must be created by the config transaction candidate resolver.',
-    );
-  }
-
-  assertProject02HomeTargetAdoptable(
-    requireResolvedProject02HomeTarget(candidate),
-  );
-}
-
-/** An unchanged selector keeps its bound target even if an alias moved. */
-export function assertProject02ReloadedConfigUsesBoundHome(options: {
-  readonly configLocation: ResolvedProject02ConfigLocation;
-  readonly loadedConfig: SelectedLoadedProject02RuntimeConfig;
-}): void {
-  const configLocation = requireResolvedProject02ConfigLocation(
-    options.configLocation,
-  );
-  const loadedConfig = requireSelectedLoadedProject02RuntimeConfigSnapshot(
-    options.loadedConfig,
-  );
-
-  assertReloadedSelectionMatchesConfigLocation(
-    configLocation.selectedConfig,
-    loadedConfig.selectedConfig,
-  );
-  const selection = resolvedProject02HomeSelection({
-    selectedConfig: loadedConfig.selectedConfig,
-    ...(loadedConfig.config === undefined ? {} : {config: loadedConfig.config}),
-  });
-  const boundTarget = requireResolvedProject02HomeTarget(configLocation);
-
-  if (resolvedProject02HomeSelectionsMatch(boundTarget.selection, selection)) {
-    assertResolvedProject02HomeCurrent(configLocation);
-    return;
-  }
-
-  const reloadedHomeRoot = canonicalRuntimeConfigHomeRoot(
-    selection.kind === 'default' ? undefined : selection.value,
-  );
-
-  if (reloadedHomeRoot !== configLocation.homeRoot) {
-    throw new RuntimeConfigLocationError(
-      'Reloaded runtime config selects another Project02 home.',
-    );
-  }
-
-  assertResolvedProject02HomeCurrent(configLocation);
-}
-
-function createResolvedProject02ConfigLocation(options: {
-  readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
-  readonly config?: Project02RuntimeConfig;
-}): ResolvedProject02ConfigLocation {
-  const selection = resolvedProject02HomeSelection(options);
-  const homeRoot = canonicalRuntimeConfigHomeRoot(
-    selection.kind === 'default' ? undefined : selection.value,
-  );
   const location = Object.freeze({
-    selectedConfig: options.selectedConfig,
     homeRoot,
+    configPath: layout.configPath,
+    canonicalConfigPath,
   } satisfies ResolvedProject02ConfigLocation);
 
   resolvedProject02ConfigLocations.add(location);
   resolvedProject02HomeTargets.set(
     location,
-    createResolvedProject02HomeTarget(homeRoot, selection),
+    createResolvedProject02HomeTarget(homeRoot),
   );
   return location;
 }
 
-function resolvedProject02HomeSelection(options: {
-  readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
-  readonly config?: Project02RuntimeConfig;
-}): ResolvedProject02HomeSelection {
-  const configuredHome = options.config?.project02?.storeRoot;
+export function loadProject02RuntimeConfigWithLocation(
+  options: {readonly selection?: RuntimeLocationCliState} = {},
+): Readonly<{
+  loadedConfig: LoadedProject02RuntimeConfig;
+  configLocation: ResolvedProject02ConfigLocation;
+}> {
+  const configLocation = resolveProject02ConfigLocation(options.selection);
 
-  if (configuredHome !== undefined) {
-    return Object.freeze({kind: 'config', value: configuredHome});
-  }
-
-  if (options.selectedConfig.runtimeHomeRoot !== undefined) {
-    return Object.freeze({
-      kind: 'runtime',
-      value: options.selectedConfig.runtimeHomeRoot,
-    });
-  }
-
-  if (options.selectedConfig.owner.kind === 'home') {
-    return Object.freeze({
-      kind: 'owner',
-      value: options.selectedConfig.owner.homeRoot,
-    });
-  }
-
-  return Object.freeze({kind: 'default'});
+  return Object.freeze({
+    loadedConfig: loadProject02RuntimeConfigForLocation(configLocation),
+    configLocation,
+  });
 }
 
-function resolvedProject02HomeSelectionsMatch(
-  left: ResolvedProject02HomeSelection,
-  right: ResolvedProject02HomeSelection,
-): boolean {
-  return (
-    left.kind === right.kind &&
-    (left.kind === 'default' ||
-      (right.kind !== 'default' && left.value === right.value))
-  );
+export function loadProject02RuntimeConfigForLocation(
+  location: ResolvedProject02ConfigLocation,
+): LoadedProject02RuntimeConfig {
+  location = requireResolvedProject02ConfigLocation(location);
+  assertResolvedProject02ConfigLocationStillBound(location);
+
+  return loadProject02RuntimeConfigDocumentAt({
+    path: location.configPath,
+    canonicalPath: location.canonicalConfigPath,
+  });
 }
 
-function assertReloadedSelectionMatchesConfigLocation(
-  bound: SelectedProject02RuntimeConfigLocation,
-  reloaded: SelectedProject02RuntimeConfigLocation,
+/** The config file still names the file it named when the home was bound. */
+export function assertResolvedProject02ConfigLocationStillBound(
+  location: ResolvedProject02ConfigLocation,
 ): void {
-  const ownersMatch =
-    bound.owner.kind === reloaded.owner.kind &&
-    (bound.owner.kind === 'standalone' ||
-      (reloaded.owner.kind === 'home' &&
-        bound.owner.homeRoot === reloaded.owner.homeRoot));
+  location = requireResolvedProject02ConfigLocation(location);
 
   if (
-    bound.source === reloaded.source &&
-    bound.path === reloaded.path &&
-    bound.canonicalPath === reloaded.canonicalPath &&
-    bound.runtimeHomeRoot === reloaded.runtimeHomeRoot &&
-    ownersMatch
+    canonicalRuntimeConfigLocationPath(location.configPath) !==
+    location.canonicalConfigPath
   ) {
-    return;
+    throw new RuntimeConfigLocationError(
+      `Runtime config path "${location.configPath}" now names another file. Resolve a fresh runtime location before retrying.`,
+    );
   }
 
-  throw new RuntimeConfigLocationError(
-    'Reloaded runtime config does not match its bound selected config location.',
-  );
+  assertRuntimeConfigGlobalTargetAdmitted({
+    displayPath: location.configPath,
+    canonicalPath: location.canonicalConfigPath,
+    selectedHomeRoot: location.homeRoot,
+  });
 }
 
 export function bindProject02CharacterRuntimeLocation(options: {
@@ -351,14 +224,8 @@ export function resolveRuntimeConfigScopeTarget(
 export function resolveRuntimeConfigScopeTarget(
   options: ScopedRuntimeConfigLocation,
 ): ResolvedRuntimeConfigScopeTarget {
-  // The config selector may be accessor-backed; it must not be read twice.
   const configLocation = requireResolvedProject02ConfigLocation(
     options.runtimeLocation,
-  );
-  const env = runtimeConfigScopeEnvironmentSnapshot(
-    options.env ?? process.env,
-    configLocation.selectedConfig.source,
-    configLocation.selectedConfig.path,
   );
 
   if (options.scope === 'global') {
@@ -374,9 +241,8 @@ export function resolveRuntimeConfigScopeTarget(
       ...(characterRuntimeLocation === undefined
         ? {}
         : {characterRuntimeLocation}),
-      env,
-      configPath: configLocation.selectedConfig.path,
-      canonicalConfigPath: configLocation.selectedConfig.canonicalPath,
+      configPath: configLocation.configPath,
+      canonicalConfigPath: configLocation.canonicalConfigPath,
     });
   }
 
@@ -389,7 +255,6 @@ export function resolveRuntimeConfigScopeTarget(
   return registerResolvedRuntimeConfigScopeTarget({
     scope: 'character',
     runtimeLocation,
-    env,
     configPath: runtimeLocation.overlayPath,
     canonicalConfigPath: canonicalRuntimeConfigLocationPath(
       runtimeLocation.overlayPath,
@@ -420,57 +285,6 @@ function registerResolvedRuntimeConfigScopeTarget<
 
   resolvedRuntimeConfigScopeTargets.add(snapshot);
   return snapshot;
-}
-
-function runtimeConfigScopeEnvironmentSnapshot(
-  env: NodeJS.ProcessEnv,
-  selectedSource: ResolvedProject02ConfigLocation['selectedConfig']['source'],
-  selectedPath: string,
-): NodeJS.ProcessEnv {
-  const snapshot: NodeJS.ProcessEnv = {};
-
-  for (const key of Object.keys(env)) {
-    if (key === runtimeConfigEnvVarName && selectedSource === 'env') {
-      snapshot[key] = selectedPath;
-      continue;
-    }
-
-    snapshot[key] = env[key];
-  }
-
-  return Object.freeze(snapshot);
-}
-
-export function loadProject02RuntimeConfigWithLocation(
-  options: {
-    readonly selection?: RuntimeLocationCliState;
-    readonly env?: NodeJS.ProcessEnv;
-  } = {},
-): Readonly<{
-  loadedConfig: SelectedLoadedProject02RuntimeConfig;
-  configLocation: ResolvedProject02ConfigLocation;
-}> {
-  const selection = Object.freeze({...options.selection});
-  const selectedConfig = selectProject02RuntimeConfigLocation({
-    selection,
-    env: options.env ?? process.env,
-  });
-  const loadedConfig = loadSelectedProject02RuntimeConfig(selectedConfig);
-
-  return Object.freeze({
-    loadedConfig,
-    configLocation: resolveProject02ConfigLocation({
-      loadedConfig,
-    }),
-  });
-}
-
-export function loadProject02RuntimeConfigForLocation(
-  location: ResolvedProject02ConfigLocation,
-): SelectedLoadedProject02RuntimeConfig {
-  return loadSelectedProject02RuntimeConfig(
-    requireResolvedProject02ConfigLocation(location).selectedConfig,
-  );
 }
 
 /** A missing home binds its nearest ancestor until the directory exists. */
@@ -531,14 +345,8 @@ export function assertResolvedProject02HomeAdoptable(
   location: ResolvedProject02ConfigLocation,
 ): void {
   location = requireResolvedProject02ConfigLocation(location);
-  assertProject02HomeTargetAdoptable(
-    requireResolvedProject02HomeTarget(location),
-  );
-}
+  const target = requireResolvedProject02HomeTarget(location);
 
-function assertProject02HomeTargetAdoptable(
-  target: ResolvedProject02HomeTarget,
-): void {
   assertProject02HomeTargetCurrent(target);
   assertProject02HomeAdoptableSync({homeRoot: target.canonicalRoot});
   assertProject02HomeTargetCurrent(target);
@@ -546,11 +354,9 @@ function assertProject02HomeTargetAdoptable(
 
 function createResolvedProject02HomeTarget(
   canonicalRoot: string,
-  selection: ResolvedProject02HomeSelection,
 ): ResolvedProject02HomeTarget {
   return Object.seal({
     canonicalRoot,
-    selection,
     existingAnchor: nearestExistingRuntimeHomeAncestor(canonicalRoot),
     homeEntry: runtimeHomeEntryIdentityAt(canonicalRoot),
   } satisfies ResolvedProject02HomeTarget);
@@ -697,10 +503,4 @@ function isResolvedProject02RuntimeLocation(
     value !== null &&
     resolvedProject02RuntimeLocations.has(value)
   );
-}
-
-export function runtimeConfigLocationUsesDefaultConfigPath(
-  location: ResolvedProject02ConfigLocation,
-): boolean {
-  return location.selectedConfig.source === 'default';
 }

@@ -17,10 +17,6 @@ import {
   validateProject02RuntimeConfig,
 } from './load.ts';
 import {
-  characterRuntimeConfigFieldScopeViolation,
-  project02RuntimeConfigFieldDefinitions,
-} from './schema.ts';
-import {
   type Project02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
@@ -109,10 +105,7 @@ function loadProject02CharacterOverlayConfig(options: {
       ? {}
       : {authoredDocument: accepted.authoredDocument}),
     ...(accepted.config === undefined ? {} : {config: accepted.config}),
-    diagnostics: [
-      ...accepted.diagnostics,
-      ...globalOnlyFieldDiagnostics(document.value),
-    ],
+    diagnostics: accepted.diagnostics,
   });
 }
 
@@ -209,39 +202,4 @@ export function layeredRuntimeConfigFingerprintForScope(options: {
         overlayConfig: characterOverlayFingerprintLayer(options.overlay),
         pluginManifests: options.pluginManifests,
       });
-}
-
-// Reads the raw document so a global-only field is named even if invalid.
-function globalOnlyFieldDiagnostics(
-  value: unknown,
-): readonly RuntimeConfigDiagnostic[] {
-  const project02 =
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)['project02']
-      : undefined;
-
-  if (
-    typeof project02 !== 'object' ||
-    project02 === null ||
-    Array.isArray(project02)
-  ) {
-    return [];
-  }
-
-  const section = project02 as Record<string, unknown>;
-
-  return project02RuntimeConfigFieldDefinitions().flatMap(field => {
-    const violation = characterRuntimeConfigFieldScopeViolation(field);
-
-    return violation === undefined || section[field.name] === undefined
-      ? []
-      : [
-          createRuntimeConfigDiagnostic(
-            'error',
-            'runtime_config_field_global_only',
-            violation,
-            field.path,
-          ),
-        ];
-  });
 }

@@ -156,39 +156,6 @@ export function restoreProcessEnvValue(
   process.env[name] = value;
 }
 
-export async function withScopedProcessEnv<T>(
-  options: {
-    readonly env: Readonly<Record<string, string | undefined>>;
-    readonly cwd?: string;
-  },
-  body: () => Promise<T>,
-): Promise<T> {
-  const previousCwd = process.cwd();
-  const previousEnv = Object.keys(options.env).map(
-    name => [name, process.env[name]] as const,
-  );
-
-  try {
-    for (const [name, value] of Object.entries(options.env)) {
-      restoreProcessEnvValue(name, value);
-    }
-
-    if (options.cwd !== undefined) {
-      process.chdir(options.cwd);
-    }
-
-    return await body();
-  } finally {
-    if (options.cwd !== undefined) {
-      process.chdir(previousCwd);
-    }
-
-    for (const [name, value] of previousEnv) {
-      restoreProcessEnvValue(name, value);
-    }
-  }
-}
-
 export type ActivationPluginSnapshot = Awaited<
   ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
 >['activation']['plugins'][number];

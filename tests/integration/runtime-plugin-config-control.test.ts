@@ -11,7 +11,6 @@ import {
   createRuntimeConfigFingerprint,
   prepareRuntimeConfigControlOperation,
   RuntimeConfigConflictError,
-  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimePluginConfigFieldInspectShape,
@@ -39,46 +38,27 @@ import {requiredSecretPlugin} from '../support/runtime-config-activation-fixture
 const fixturePluginId = 'config.control.fixture';
 
 describe('runtime plugin config control', () => {
-  it('resolves one coherent control target from one selected config snapshot', () => {
-    const firstRoot = createTestTempRoot('project02-control-target-first-');
-    const secondRoot = createTestTempRoot('project02-control-target-second-');
-    const firstConfigPath = writeRuntimeConfig(join(firstRoot, 'config.json'), {
-      project02: {storeRoot: firstRoot},
+  it('resolves one coherent control target from the bound home', () => {
+    const homeRoot = createTestTempRoot('project02-control-target-');
+    const configPath = writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {},
     });
-    const secondConfigPath = writeRuntimeConfig(
-      join(secondRoot, 'config.json'),
-      {project02: {storeRoot: secondRoot}},
-    );
-    const env: NodeJS.ProcessEnv = {};
-    let selectionReads = 0;
-
-    Object.defineProperty(env, runtimeConfigEnvVarName, {
-      enumerable: true,
-      get: () => {
-        selectionReads += 1;
-        return selectionReads === 1 ? firstConfigPath : secondConfigPath;
-      },
-    });
-
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({env: env}),
-      env,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     });
 
-    expect(selectionReads).toBe(1);
     expect(target).toMatchObject({
       scope: 'global',
-      configPath: firstConfigPath,
-      canonicalConfigPath: realpathSync.native(firstConfigPath),
+      configPath,
+      canonicalConfigPath: realpathSync.native(configPath),
       runtimeLocation: {
-        selectedConfig: {
-          path: firstConfigPath,
-          canonicalPath: realpathSync.native(firstConfigPath),
-        },
-        homeRoot: realpathSync.native(firstRoot),
+        homeRoot: realpathSync.native(homeRoot),
+        configPath,
+        canonicalConfigPath: realpathSync.native(configPath),
       },
     });
+    expect(Object.isFrozen(target)).toBe(true);
   });
 
   it('inspects declared metadata with redacted authored and effective values plus an authored fingerprint', () => {
@@ -87,7 +67,7 @@ describe('runtime plugin config control', () => {
     const manifest = configControlManifest();
     const authoredConfig: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
-      project02: {storeRoot: root},
+      project02: {},
       plugins: {
         [fixturePluginId]: {
           enabled: true,
@@ -221,7 +201,6 @@ describe('runtime plugin config control', () => {
       targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        env: {},
       }),
 
       manifest: configControlManifest(),
@@ -251,10 +230,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -341,11 +317,9 @@ describe('runtime plugin config control', () => {
     const fixture = createSeededControlFixture();
     const configLocation = configLocationForTest({
       configPath: fixture.configPath,
-      env: {},
     });
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: configLocation,
-      env: {},
       scope: 'global',
     });
 
@@ -356,7 +330,7 @@ describe('runtime plugin config control', () => {
       target,
       expectedFingerprint: createRuntimeConfigFingerprint(
         createRuntimeConfigAuthoredSnapshot(
-          loadRuntimeConfigForTest({configPath: fixture.configPath, env: {}}),
+          loadRuntimeConfigForTest({configPath: fixture.configPath}),
         ).document,
         [fixture.manifest],
       ),
@@ -381,10 +355,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -416,10 +387,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -447,10 +415,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -481,10 +446,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -515,10 +477,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -571,10 +530,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -628,10 +584,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
 
@@ -675,7 +628,7 @@ describe('runtime plugin config control', () => {
 
     const before = inspectRuntimePluginConfig({
       targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
 
       manifest: plugin.manifest,
     });
@@ -696,7 +649,7 @@ describe('runtime plugin config control', () => {
     expect(() =>
       inspectRuntimePluginConfig({
         targetScope: 'global',
-        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
 
         manifest: plugin.manifest,
       }),
@@ -717,10 +670,7 @@ describe('runtime plugin config control', () => {
       resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: overlayPath,
-          env: {},
         }),
-
-        env: {},
         scope: 'character',
       }),
     ).toThrow('is inside a character-data directory');
@@ -732,10 +682,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
     const committed = applyRuntimeConfigControlOperation({
@@ -793,10 +740,7 @@ describe('runtime plugin config control', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        env: {},
       }),
-
-      env: {},
       scope: 'global',
     });
     const options = {
@@ -835,22 +779,18 @@ describe('runtime plugin config control', () => {
 
   it('bootstraps a missing config through the same inspected fingerprint', () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-bootstrap-');
-    const canonicalStoreRoot = realpathSync.native(storeRoot);
     const configPath = createProject02HomeLayout({
       homeRoot: storeRoot,
     }).configPath;
     const manifest = configControlManifest();
     const inspected = inspectRuntimePluginConfig({
       targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({storeRoot: storeRoot, env: {}}),
+      runtimeLocation: runtimeLocationForTest({storeRoot: storeRoot}),
 
       manifest,
     });
     const bootstrapBase: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
-      project02: {
-        storeRoot: canonicalStoreRoot,
-      },
     };
 
     expect(existsSync(configPath)).toBe(false);
@@ -868,10 +808,7 @@ describe('runtime plugin config control', () => {
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           storeRoot: storeRoot,
-          env: {},
         }),
-
-        env: {},
         scope: 'global',
       }),
       expectedFingerprint: inspected.fingerprint,
@@ -1003,7 +940,7 @@ function createSeededControlFixture(): {
   const manifest = configControlManifest();
   const config: Project02RuntimeConfig = {
     version: runtimeConfigVersion,
-    project02: {storeRoot: root},
+    project02: {},
     plugins: {
       [fixturePluginId]: {
         enabled: true,
@@ -1034,7 +971,6 @@ function createSeededControlFixture(): {
       targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        env: {},
       }),
 
       manifest,

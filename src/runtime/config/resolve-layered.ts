@@ -4,10 +4,6 @@ import {
   resolveEffectiveProject02RuntimeConfig,
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
-import {
-  characterRuntimeConfigFieldScopeViolation,
-  project02RuntimeConfigFieldDefinitions,
-} from './schema.ts';
 import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
 import {withRuntimeConfigDiagnosticOrigin} from './diagnostic.ts';
 import {
@@ -18,7 +14,6 @@ import {
   type Project02RuntimePluginConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigValue,
 } from './types.ts';
 
 export type EffectiveProject02RuntimeConfigSnapshot = {
@@ -169,29 +164,9 @@ function mergedProject02Section(
   globalSection: Project02HostConfig | undefined,
   overlaySection: Project02HostConfig | undefined,
 ): Project02HostConfig | undefined {
-  if (overlaySection === undefined) {
-    return globalSection;
-  }
-
-  const merged: Record<string, RuntimeConfigValue | undefined> = {
-    ...globalSection,
-  };
-
-  // The loader already rejects global-only fields; the merge does not trust it.
-  for (const field of project02RuntimeConfigFieldDefinitions()) {
-    const value = overlaySection[field.name];
-
-    if (
-      characterRuntimeConfigFieldScopeViolation(field) !== undefined ||
-      value === undefined
-    ) {
-      continue;
-    }
-
-    merged[field.name] = value;
-  }
-
-  return Object.freeze(merged);
+  return overlaySection === undefined
+    ? globalSection
+    : Object.freeze({...globalSection, ...overlaySection});
 }
 
 function mergedPluginSections(

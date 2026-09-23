@@ -12,11 +12,7 @@ import {
   type LocalRuntimeMutationLocksLeaseSync,
 } from '../storage/mutation-lock.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
-import {
-  assertSelectedRuntimeConfigStillBound,
-  loadSelectedProject02RuntimeConfig,
-  RuntimeConfigLocationError,
-} from './load.ts';
+import {RuntimeConfigLocationError} from './load.ts';
 import {
   blockingRuntimeConfigLayerDiagnostic,
   canonicalRuntimeConfigMutationPath,
@@ -36,14 +32,10 @@ import {
   type RuntimeConfigCharacterOverlaySnapshot,
 } from './overlay.ts';
 import {
-  assertProject02ReloadedConfigUsesBoundHome,
-  assertRuntimeConfigCandidateHomeAdoptable,
+  assertResolvedProject02ConfigLocationStillBound,
   assertResolvedProject02HomeAdoptable,
-  assertResolvedProject02HomeCurrent,
-  assertSelectedProject02HomeAdoptable,
+  loadProject02RuntimeConfigForLocation,
   requireResolvedRuntimeConfigScopeTarget,
-  resolveAdoptableRuntimeConfigCandidateHomeTarget,
-  type RuntimeConfigCandidateHomeTarget,
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
@@ -52,7 +44,6 @@ import type {
   LoadedProject02RuntimeConfig,
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,
-  SelectedLoadedProject02RuntimeConfig,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
@@ -94,11 +85,6 @@ type RuntimeConfigControlLockPlan = {
   readonly targets: readonly LocalRuntimeMutationLockTarget[];
 };
 
-type RuntimeConfigControlCandidateHome = {
-  readonly homeRoot: string;
-  readonly candidateTarget?: RuntimeConfigCandidateHomeTarget;
-};
-
 /**
  * Lock-free: apply reloads and re-verifies the expectation under its locks.
  * Pass `requireCharacterMarker: false` only when simulating initialization.
@@ -112,10 +98,10 @@ export function readRuntimeConfigControlSnapshot(
 ): RuntimeConfigControlSnapshot {
   target = requireResolvedRuntimeConfigScopeTarget(target);
   assertRuntimeConfigTargetStillBound(target);
-  assertSelectedProject02HomeAdoptable(target.runtimeLocation);
-  assertRuntimeConfigEffectiveHomeAvailable(target);
-  const loadedConfig = loadSelectedGlobalConfig(target);
-  assertReloadedGlobalConfigUsesBoundHome(target, loadedConfig);
+  assertRuntimeConfigHomeAvailable(target);
+  const loadedConfig = loadProject02RuntimeConfigForLocation(
+    target.runtimeLocation,
+  );
 
   return snapshotFromLoadedGlobal({
     target,
@@ -149,10 +135,10 @@ export function applyRuntimeConfigControlTransaction<T>(
   try {
     assertRuntimeConfigTargetStillBound(target);
     assertRuntimeConfigOverlayLockStillBound(lockPlan.overlay);
-    assertSelectedProject02HomeAdoptable(target.runtimeLocation);
-    assertRuntimeConfigEffectiveHomeAvailable(target);
-    const loadedConfig = loadSelectedGlobalConfig(target);
-    assertReloadedGlobalConfigUsesBoundHome(target, loadedConfig);
+    assertRuntimeConfigHomeAvailable(target);
+    const loadedConfig = loadProject02RuntimeConfigForLocation(
+      target.runtimeLocation,
+    );
     const snapshot = snapshotFromLoadedGlobal({
       target,
       loadedConfig,
@@ -169,11 +155,6 @@ export function applyRuntimeConfigControlTransaction<T>(
     }
 
     const preparation = options.prepare(snapshot);
-    const candidateHome = runtimeConfigControlCandidateHome({
-      target,
-      candidate: preparation.preparedCandidate.config,
-      operation: preparation.operation,
-    });
     const writePath =
       target.scope === 'character'
         ? requiredCharacterWritePath(target, lockPlan.overlay)
@@ -182,8 +163,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     if (preparation.commit) {
       assertRuntimeConfigTargetStillBound(target);
       assertRuntimeConfigOverlayLockStillBound(lockPlan.overlay);
-      assertRuntimeConfigEffectiveHomeAvailable(target);
-      assertRuntimeConfigControlCandidateHomeAdoptable(candidateHome);
+      assertRuntimeConfigHomeAvailable(target);
 
       commitPreparedRuntimeConfigMutation({
         canonicalConfigPath: writePath,
@@ -313,53 +293,6 @@ function snapshotFromLoadedGlobal(options: {
   });
 }
 
-function loadSelectedGlobalConfig(
-  target: ResolvedRuntimeConfigScopeTarget,
-): SelectedLoadedProject02RuntimeConfig {
-  return loadSelectedProject02RuntimeConfig(
-    target.runtimeLocation.selectedConfig,
-  );
-}
-
-function runtimeConfigControlCandidateHome(options: {
-  readonly target: ResolvedRuntimeConfigScopeTarget;
-  readonly candidate: Project02RuntimeConfig;
-  readonly operation: RuntimeConfigMutationOperation | undefined;
-}): RuntimeConfigControlCandidateHome {
-  if (!runtimeConfigMutationMovesEffectiveHome(options.operation)) {
-    return Object.freeze({
-      homeRoot: options.target.runtimeLocation.homeRoot,
-    });
-  }
-
-  const candidateTarget = resolveAdoptableRuntimeConfigCandidateHomeTarget({
-    configLocation: options.target.runtimeLocation,
-    config: options.candidate,
-  });
-
-  return Object.freeze({
-    homeRoot: candidateTarget.homeRoot,
-    candidateTarget,
-  });
-}
-
-function assertRuntimeConfigControlCandidateHomeAdoptable(
-  candidate: RuntimeConfigControlCandidateHome,
-): void {
-  if (candidate.candidateTarget !== undefined) {
-    assertRuntimeConfigCandidateHomeAdoptable(candidate.candidateTarget);
-  }
-}
-
-function runtimeConfigMutationMovesEffectiveHome(
-  operation: RuntimeConfigMutationOperation | undefined,
-): boolean {
-  return (
-    (operation?.kind === 'set' || operation?.kind === 'unset') &&
-    operation.path === 'project02.storeRoot'
-  );
-}
-
 /** Only a layer with no readable authored bytes blocks the mutation. */
 function assertCharacterOverlayMutable(
   target: ResolvedRuntimeConfigScopeTarget,
@@ -378,17 +311,11 @@ function assertCharacterOverlayMutable(
   }
 }
 
-function assertRuntimeConfigEffectiveHomeAvailable(
+function assertRuntimeConfigHomeAvailable(
   target: ResolvedRuntimeConfigScopeTarget,
 ): void {
   try {
-    if (target.scope === 'character') {
-      assertResolvedProject02HomeAdoptable(target.runtimeLocation);
-
-      return;
-    }
-
-    assertResolvedProject02HomeCurrent(target.runtimeLocation);
+    assertResolvedProject02HomeAdoptable(target.runtimeLocation);
   } catch (error: unknown) {
     if (error instanceof RuntimeConfigLocationError) {
       throw runtimeConfigTargetConflict(
@@ -400,33 +327,11 @@ function assertRuntimeConfigEffectiveHomeAvailable(
   }
 }
 
-function assertReloadedGlobalConfigUsesBoundHome(
-  target: ResolvedRuntimeConfigScopeTarget,
-  loadedConfig: SelectedLoadedProject02RuntimeConfig,
-): void {
-  try {
-    assertProject02ReloadedConfigUsesBoundHome({
-      configLocation: target.runtimeLocation,
-      loadedConfig,
-    });
-  } catch (error: unknown) {
-    if (error instanceof RuntimeConfigLocationError) {
-      throw runtimeConfigTargetConflict(
-        'The reloaded runtime config could not preserve its resolved Project02 home.',
-      );
-    }
-
-    throw error;
-  }
-}
-
 function assertRuntimeConfigTargetStillBound(
   target: ResolvedRuntimeConfigScopeTarget,
 ): void {
   try {
-    assertSelectedRuntimeConfigStillBound(
-      target.runtimeLocation.selectedConfig,
-    );
+    assertResolvedProject02ConfigLocationStillBound(target.runtimeLocation);
   } catch {
     throw runtimeConfigTargetConflict(
       'The selected runtime config path now names another file.',
@@ -503,12 +408,10 @@ function createRuntimeConfigControlLockPlan(
   target: ResolvedRuntimeConfigScopeTarget,
 ): RuntimeConfigControlLockPlan {
   assertRuntimeConfigTargetStillBound(target);
-  assertSelectedProject02HomeAdoptable(target.runtimeLocation);
-  assertRuntimeConfigEffectiveHomeAvailable(target);
+  assertRuntimeConfigHomeAvailable(target);
 
-  const canonicalGlobalConfigPath =
-    target.runtimeLocation.selectedConfig.canonicalPath;
-  const displayGlobalConfigPath = target.runtimeLocation.selectedConfig.path;
+  const canonicalGlobalConfigPath = target.runtimeLocation.canonicalConfigPath;
+  const displayGlobalConfigPath = target.runtimeLocation.configPath;
   const overlay = runtimeConfigControlOverlayLockTarget({
     runtimeLocation:
       target.scope === 'character'

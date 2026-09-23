@@ -22,33 +22,12 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
 
-const globalOnlyFieldScopes = Object.freeze([
-  'global',
-] satisfies RuntimeConfigFieldScope[]);
 const characterScopedFieldScopes = Object.freeze([
   'global',
   'character',
 ] satisfies RuntimeConfigFieldScope[]);
 
 const project02ConfigFieldDefinitions = Object.freeze([
-  Object.freeze({
-    path: 'project02.storeRoot',
-    name: 'storeRoot',
-    label: 'Runtime store root',
-    description:
-      'The Project02 home: global config, secrets, installed packages, and ' +
-      'the per-character data directories.',
-    invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage: 'Runtime config field must be a non-empty string.',
-    required: false,
-    secret: false,
-    valueType: 'path',
-    defaultValueSummary: '.project02',
-    redactionLabels: Object.freeze([]),
-    scopes: globalOnlyFieldScopes,
-    agentMutable: false,
-    reloadRequired: true,
-  } satisfies Project02ConfigFieldDefinition),
   Object.freeze({
     path: 'project02.defaultMemoryProvider',
     name: 'defaultMemoryProvider',
@@ -164,15 +143,6 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
   return Object.freeze(
     project02ConfigFieldDefinitions.map(field => field.name),
   );
-}
-
-export function characterRuntimeConfigFieldScopeViolation(
-  field: Project02ConfigFieldDefinition,
-): string | undefined {
-  return field.scopes.includes('character')
-    ? undefined
-    : `Config field "${field.path}" is global-only; set it in the home ` +
-        'config.json, not the character overlay.';
 }
 
 export function runtimeConfigValueMatchesField(

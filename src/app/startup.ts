@@ -81,7 +81,6 @@ type RuntimeCliStartupOptions =
 type RuntimeCliStartupBase = {
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
-  readonly configEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 };
 
@@ -127,7 +126,6 @@ type StartupPreEnvState = {
 /** A startup that survived every rejection except the write itself. */
 type PlannedRuntimeCliActivationStartup = {
   readonly startupBase: RuntimeCliStartupBase;
-  readonly configEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly characterActivation: Extract<
     Project02CharacterActivation,
@@ -284,7 +282,6 @@ export function activateProject02Character(
   const startupBase = {
     runtimeLocation: home.runtimeLocation,
     cwdDotEnv: home.cwdDotEnv,
-    configEnv: home.configEnv,
     loadedConfig: home.loadedConfig,
   };
   const activationInput = {
@@ -292,7 +289,6 @@ export function activateProject02Character(
     characterId: options.characterId,
     suppliedEnv: home.suppliedEnv,
     cwdDotEnv: home.cwdDotEnv,
-    configEnv: home.configEnv,
     startupBase,
     loadedConfig: home.loadedConfig,
   };
@@ -333,7 +329,6 @@ async function resolveRuntimeCliActivationStartup(input: {
   readonly characterId: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
-  readonly configEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
@@ -355,7 +350,6 @@ function planRuntimeCliActivationStartup(input: {
   readonly characterId: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
-  readonly configEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }):
@@ -491,7 +485,6 @@ function planRuntimeCliActivationStartup(input: {
   // The overlay as it will be, so later decisions judge the committed state.
   const simulated = simulateCharacterMaterialization({
     runtimeLocation,
-    configEnv: input.configEnv,
     characterActivation,
     document: preflight.packagePlan.document,
     pluginManifests: materializationManifests,
@@ -542,7 +535,6 @@ function planRuntimeCliActivationStartup(input: {
     outcome: 'committable',
     plan: Object.freeze({
       startupBase: input.startupBase,
-      configEnv: input.configEnv,
       loadedConfig,
       characterActivation,
       runtimeLocation,
@@ -562,7 +554,6 @@ async function commitPlannedRuntimeCliActivationStartup(
   const materialization = await materializeCharacterDataDir({
     characterActivation: plan.characterActivation,
     runtimeLocation: plan.runtimeLocation,
-    configEnv: plan.configEnv,
     document: plan.document,
     pluginManifests: plan.pluginManifests,
   });
@@ -642,7 +633,6 @@ function finishRuntimeCliActivationStartup(input: {
 
 type CharacterMaterializationInput = {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly configEnv: NodeJS.ProcessEnv;
   readonly document: Project02RuntimeConfig;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly characterActivation: Extract<
@@ -659,7 +649,6 @@ function characterMaterializationOperation(
   return {
     target: resolveRuntimeConfigScopeTarget({
       runtimeLocation: input.runtimeLocation,
-      env: input.configEnv,
       scope: 'character',
     }),
     pluginManifests: input.pluginManifests,

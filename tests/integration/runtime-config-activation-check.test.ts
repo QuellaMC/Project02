@@ -657,10 +657,7 @@ describe('runtime config activation checks and construction', () => {
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({
-            configPath,
-            storeRoot: invalidStoreRoot,
-          }),
+          loadedConfig: loadRuntimeConfigForTest({storeRoot: invalidStoreRoot}),
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,

@@ -416,10 +416,7 @@ describe('first-selection materialization through startup', () => {
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterId: 'seeded',
-        env: {},
       }),
-
-      env: {},
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({

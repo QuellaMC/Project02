@@ -12,7 +12,7 @@ import {
 } from '../plugins/index.ts';
 import {
   applyRuntimeConfigControlOperation,
-  assertProject02ReloadedConfigUsesBoundHome,
+  assertResolvedProject02HomeCurrent,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
@@ -48,15 +48,6 @@ import type {
 } from './api/contract.ts';
 
 /**
- * The host fields a client may see and write. The store root is the home
- * the daemon runs in, bound once at start — health names it, and no
- * setting moves a running daemon — so it is not a field over the wire.
- */
-const wireFields = project02RuntimeConfigFieldDefinitions().filter(
-  field => field.path !== 'project02.storeRoot',
-);
-
-/**
  * How long a write waits for a file another writer holds. The lock's own
  * default is ten seconds per file, spent in a synchronous wait: fine for a
  * console, a frozen daemon for everyone else. A person who saved while the
@@ -84,13 +75,10 @@ export function readConfigView(
   target: ConfigTarget,
 ): ConfigView {
   try {
-    // A document that now names another home describes a daemon that is
-    // not this one; a view over it would mix its fields with this home's
+    // A home replaced under the daemon belongs to a daemon that is not
+    // this one; a view over it would mix its files with this home's
     // catalog, and every save would refuse anyway.
-    assertProject02ReloadedConfigUsesBoundHome({
-      configLocation: home.runtimeLocation,
-      loadedConfig: home.loadedConfig,
-    });
+    assertResolvedProject02HomeCurrent(home.runtimeLocation);
 
     const resolution =
       target.scope === 'global'
@@ -292,7 +280,11 @@ function viewOf(resolution: ScopeResolution): ConfigView {
       createProject02ConfigFieldInspectShapes({
         layeredConfig,
         targetScope,
-      }).filter(field => wireFields.some(wire => wire.name === field.name)),
+      }).filter(field =>
+        project02RuntimeConfigFieldDefinitions().some(
+          wire => wire.name === field.name,
+        ),
+      ),
     ),
     plugins: Object.freeze(
       resolution.manifests.map(manifest => {
@@ -320,10 +312,16 @@ function prepareControlRequest(
   catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
 ): RuntimeConfigControlRequest | string {
   if (operation.kind === 'set' || operation.kind === 'unset') {
-    if (!wireFields.some(field => field.path === operation.path)) {
+    if (
+      !project02RuntimeConfigFieldDefinitions().some(
+        field => field.path === operation.path,
+      )
+    ) {
       return (
         `Unknown config field "${operation.path}". Fields: ` +
-        `${wireFields.map(field => field.path).join(', ')}.`
+        `${project02RuntimeConfigFieldDefinitions()
+          .map(field => field.path)
+          .join(', ')}.`
       );
     }
 

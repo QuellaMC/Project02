@@ -31,7 +31,7 @@ describe('runtime config atomic temporary-file cleanup', () => {
       configPath,
       `${JSON.stringify({
         version: runtimeConfigVersion,
-        project02: {storeRoot},
+        project02: {},
       })}\n`,
       'utf8',
     );

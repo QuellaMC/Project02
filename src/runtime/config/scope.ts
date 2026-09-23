@@ -25,7 +25,6 @@ import {
   type ResolvedRuntimeConfigScopeTarget,
 } from './location.ts';
 import {
-  assertOverlayLocatedCandidateStaysCharacterScoped,
   prepareRuntimeConfigMutationCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
@@ -38,7 +37,6 @@ import {
 } from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
-  characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
@@ -346,12 +344,6 @@ export function assertScopedMutationOperationAllowed(
     );
   }
 
-  const scopeViolation = characterRuntimeConfigFieldScopeViolation(field);
-
-  if (scopeViolation !== undefined) {
-    throw new RuntimeConfigMutationError(scopeViolation);
-  }
-
   if (
     operation.kind === 'set' &&
     !project02RuntimeConfigFieldAcceptsValue(operation.value, field)
@@ -400,7 +392,6 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
 
   const overlay = requiredCharacterOverlay(options.snapshot);
 
-  // Never the global bootstrap: it would seed a store root into the overlay.
   const overlayBase =
     overlay.authoredDocument ??
     Object.freeze({
@@ -420,7 +411,6 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
     },
     ...(options.operation === undefined ? {} : {operation: options.operation}),
     validateCandidate: candidate => {
-      assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
       const globalConfig = options.snapshot.validatedGlobalConfig;
 
       if (globalConfig === undefined) {

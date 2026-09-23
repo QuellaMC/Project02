@@ -3,9 +3,10 @@ import {canonicalPath, PathResolutionError} from '../../shared/real-path.ts';
 export {PathResolutionError as RuntimeConfigPathResolutionError};
 
 /**
- * The one canonicalization for runtime config paths: `--config` may name a
- * link to a file not yet written, and links can dangle. The caller names the
- * domain error, so a failure is never classed by the file it was raised in.
+ * The one canonicalization for runtime config paths: a home may be reached
+ * through a link, its config file may not exist yet, and links can dangle.
+ * The caller names the domain error, so a failure is never classed by the
+ * file it was raised in.
  */
 export function canonicalRuntimeConfigPath(
   path: string,

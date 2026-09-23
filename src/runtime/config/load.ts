@@ -4,26 +4,17 @@ import {
   readBoundedJsonFileSource,
   type BoundedJsonFileSourceRejectionReason,
 } from '../../shared/package-metadata.ts';
-import {dirname} from 'node:path';
-
-import {
-  createProject02HomeLayout,
-  LocalRuntimeStorageContractError,
-} from '../storage/layout-contract.ts';
+import {createProject02HomeLayout} from '../storage/layout-contract.ts';
 import {isProject02CharacterDataOwnedPath} from '../storage/character-data.ts';
 import {
-  runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticPluginMetadata,
-  type RuntimeConfigSource,
   type RuntimeConfigValue,
-  type SelectedLoadedProject02RuntimeConfig,
-  type SelectedProject02RuntimeConfigLocation,
-  type SelectedProject02RuntimeConfigOwner,
 } from './types.ts';
 import {
   createJsonBoundaryObjectSnapshot,
@@ -67,92 +58,40 @@ type Project02RuntimeConfigValidationResult = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-const selectedLoadedProject02RuntimeConfigSnapshots = new WeakSet<object>();
-const selectedProject02RuntimeConfigLocations = new WeakSet<object>();
-
-export function loadSelectedProject02RuntimeConfig(
-  location: SelectedProject02RuntimeConfigLocation,
-): SelectedLoadedProject02RuntimeConfig {
-  const selectedConfig =
-    requireSelectedProject02RuntimeConfigLocation(location);
-
-  assertSelectedRuntimeConfigStillBound(selectedConfig);
-
-  if (!pathExistsSync(selectedConfig.canonicalPath)) {
-    if (selectedConfig.source === 'default') {
-      return registerSelectedLoadedProject02RuntimeConfigSnapshot({
-        source: 'none',
-        path: selectedConfig.path,
-        selectedConfig,
-        diagnostics: [],
-      });
-    }
-
-    return registerSelectedLoadedProject02RuntimeConfigSnapshot({
-      source: selectedConfig.source,
-      path: selectedConfig.path,
-      selectedConfig,
-      diagnostics: [
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_missing',
-          `Runtime config file does not exist: ${selectedConfig.path}.`,
-        ),
-      ],
-    });
+/** Existence is decided here: an absent file is a valid empty config. */
+export function loadProject02RuntimeConfigDocumentAt(location: {
+  readonly path: string;
+  readonly canonicalPath: string;
+}): LoadedProject02RuntimeConfig {
+  if (!pathExistsSync(location.canonicalPath)) {
+    return Object.freeze({
+      source: 'none',
+      path: location.path,
+      diagnostics: Object.freeze([]),
+    } satisfies LoadedProject02RuntimeConfig);
   }
 
-  const document = readProject02RuntimeConfigDocument(
-    selectedConfig.canonicalPath,
-  );
+  const document = readProject02RuntimeConfigDocument(location.canonicalPath);
 
   if (document.status === 'rejected') {
-    return registerSelectedLoadedProject02RuntimeConfigSnapshot({
-      source: selectedConfig.source,
-      path: selectedConfig.path,
-      selectedConfig,
-      diagnostics: [document.diagnostic],
-    });
+    return Object.freeze({
+      source: 'path',
+      path: location.path,
+      diagnostics: Object.freeze([document.diagnostic]),
+    } satisfies LoadedProject02RuntimeConfig);
   }
 
   const accepted = validateProject02RuntimeConfig(document.value);
 
-  return registerSelectedLoadedProject02RuntimeConfigSnapshot({
-    source: selectedConfig.source,
-    path: selectedConfig.path,
-    selectedConfig,
+  return Object.freeze({
+    source: 'path',
+    path: location.path,
     ...(accepted.authoredDocument === undefined
       ? {}
       : {authoredDocument: accepted.authoredDocument}),
     ...(accepted.config === undefined ? {} : {config: accepted.config}),
     diagnostics: accepted.diagnostics,
-  });
-}
-
-function registerSelectedLoadedProject02RuntimeConfigSnapshot(
-  loadedConfig: SelectedLoadedProject02RuntimeConfig,
-): SelectedLoadedProject02RuntimeConfig {
-  const snapshot = Object.freeze(loadedConfig);
-
-  selectedLoadedProject02RuntimeConfigSnapshots.add(snapshot);
-  return snapshot;
-}
-
-/** Only the loader's exact snapshot: a clone loses the selection event. */
-export function requireSelectedLoadedProject02RuntimeConfigSnapshot(
-  value: unknown,
-): SelectedLoadedProject02RuntimeConfig {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    selectedLoadedProject02RuntimeConfigSnapshots.has(value)
-  ) {
-    return value as SelectedLoadedProject02RuntimeConfig;
-  }
-
-  throw new TypeError(
-    'Runtime config location requires the exact selected snapshot returned by the runtime config loader.',
-  );
+  } satisfies LoadedProject02RuntimeConfig);
 }
 
 function snapshotAuthoredRuntimeConfigDocument(value: unknown):
@@ -296,101 +235,12 @@ export function validateProject02RuntimeConfig(
   } satisfies Project02RuntimeConfigValidationResult);
 }
 
-function defaultRuntimeConfigPath(storeRoot?: string): string {
-  return createProject02HomeLayout(
-    storeRoot === undefined ? {} : {homeRoot: storeRoot},
-  ).configPath;
-}
-
-export function defaultRuntimeConfigEnvPath(storeRoot?: string): string {
-  return createProject02HomeLayout(
-    storeRoot === undefined ? {} : {homeRoot: storeRoot},
-  ).envPath;
-}
-
-export function selectProject02RuntimeConfigLocation(options: {
-  readonly selection: {
-    readonly configPath?: string;
-    readonly storeRoot?: string;
-  };
-  readonly env: NodeJS.ProcessEnv;
-}): SelectedProject02RuntimeConfigLocation {
-  if (options.selection.configPath !== undefined) {
-    return createSelectedRuntimeConfigLocation(
-      'path',
-      normalizeConfigPath(options.selection.configPath),
-      options.selection.storeRoot,
-    );
-  }
-
-  if (options.selection.storeRoot !== undefined) {
-    return createSelectedRuntimeConfigLocation(
-      'default',
-      defaultRuntimeConfigPath(options.selection.storeRoot),
-    );
-  }
-
-  const envPath = options.env[runtimeConfigEnvVarName];
-
-  if (envPath !== undefined && envPath.trim().length > 0) {
-    return createSelectedRuntimeConfigLocation(
-      'env',
-      normalizeConfigPath(envPath),
-    );
-  }
-
-  return createSelectedRuntimeConfigLocation(
-    'default',
-    defaultRuntimeConfigPath(options.selection.storeRoot),
-  );
-}
-
 /** Selection, re-binding, and home resolution are location boundaries. */
 export function canonicalRuntimeConfigLocationPath(path: string): string {
   return canonicalRuntimeConfigPath(
     path,
     cause => new RuntimeConfigLocationError(cause.message),
   );
-}
-
-function createSelectedRuntimeConfigLocation(
-  source: Exclude<RuntimeConfigSource, 'none'>,
-  path: string,
-  runtimeHomeRoot?: string,
-): SelectedProject02RuntimeConfigLocation {
-  const canonicalPath = canonicalRuntimeConfigLocationPath(path);
-  const normalizedRuntimeHomeRoot =
-    runtimeHomeRoot === undefined
-      ? undefined
-      : normalizeSelectedRuntimeHomeRoot(runtimeHomeRoot);
-  const owner: SelectedProject02RuntimeConfigOwner =
-    source === 'default'
-      ? Object.freeze({
-          kind: 'home',
-          homeRoot: canonicalRuntimeConfigHomeRoot(dirname(path)),
-        })
-      : Object.freeze({kind: 'standalone'});
-  const selectedHomeRoot =
-    owner.kind === 'home' ? owner.homeRoot : normalizedRuntimeHomeRoot;
-
-  assertRuntimeConfigGlobalTargetAdmitted({
-    displayPath: path,
-    canonicalPath,
-    ...(selectedHomeRoot === undefined ? {} : {selectedHomeRoot}),
-  });
-
-  const selectedConfig = Object.freeze({
-    source,
-    path,
-    canonicalPath,
-    owner,
-    ...(normalizedRuntimeHomeRoot === undefined
-      ? {}
-      : {runtimeHomeRoot: normalizedRuntimeHomeRoot}),
-  });
-
-  selectedProject02RuntimeConfigLocations.add(selectedConfig);
-  return selectedConfig;
 }
 
 export function canonicalRuntimeConfigHomeRoot(homeRoot?: string): string {
@@ -400,59 +250,7 @@ export function canonicalRuntimeConfigHomeRoot(homeRoot?: string): string {
   );
 }
 
-function normalizeSelectedRuntimeHomeRoot(homeRoot: string): string {
-  return canonicalRuntimeConfigHomeRoot(homeRoot);
-}
-
-function requireSelectedProject02RuntimeConfigLocation(
-  value: unknown,
-): SelectedProject02RuntimeConfigLocation {
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    selectedProject02RuntimeConfigLocations.has(value)
-  ) {
-    return value as SelectedProject02RuntimeConfigLocation;
-  }
-
-  throw new TypeError(
-    'Selected runtime config location must come from runtime config selection.',
-  );
-}
-
-export function assertSelectedRuntimeConfigStillBound(
-  selectedConfig: SelectedProject02RuntimeConfigLocation,
-): void {
-  selectedConfig =
-    requireSelectedProject02RuntimeConfigLocation(selectedConfig);
-  const currentCanonicalPath = canonicalRuntimeConfigLocationPath(
-    selectedConfig.path,
-  );
-
-  if (currentCanonicalPath !== selectedConfig.canonicalPath) {
-    throw new RuntimeConfigLocationError(
-      `Selected runtime config path "${selectedConfig.path}" now names another file. Resolve a fresh runtime location before retrying.`,
-    );
-  }
-
-  const selectedHomeRoot = selectedRuntimeConfigHomeRoot(selectedConfig);
-
-  assertRuntimeConfigGlobalTargetAdmitted({
-    displayPath: selectedConfig.path,
-    canonicalPath: selectedConfig.canonicalPath,
-    ...(selectedHomeRoot === undefined ? {} : {selectedHomeRoot}),
-  });
-}
-
-function selectedRuntimeConfigHomeRoot(
-  selectedConfig: SelectedProject02RuntimeConfigLocation,
-): string | undefined {
-  return selectedConfig.owner.kind === 'home'
-    ? selectedConfig.owner.homeRoot
-    : selectedConfig.runtimeHomeRoot;
-}
-
-function assertRuntimeConfigGlobalTargetAdmitted(options: {
+export function assertRuntimeConfigGlobalTargetAdmitted(options: {
   readonly displayPath: string;
   readonly canonicalPath: string;
   readonly selectedHomeRoot?: string;
@@ -807,19 +605,6 @@ function optionalBoolean(
   }
 
   return value;
-}
-
-function normalizeConfigPath(value: string): string {
-  const normalized = value.trim();
-
-  if (normalized.length === 0) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
-      'Runtime config path must be non-empty.',
-    );
-  }
-
-  return normalized;
 }
 
 function runtimeConfigLimitDiagnostic(

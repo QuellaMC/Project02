@@ -265,7 +265,7 @@ async function createLayeredHome(): Promise<{
   const homeRoot = realpathSync(root);
 
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    project02: {storeRoot: homeRoot},
+    project02: {},
   });
   await ensureCharacterDataDir({homeRoot, characterId: 'mira'});
 
@@ -274,9 +274,7 @@ async function createLayeredHome(): Promise<{
   const seeded = applyRuntimeConfigControlOperation({
     pluginManifests: [],
     target: resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     }),
     request: {

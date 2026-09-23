@@ -56,7 +56,6 @@ type InspectCliOptions = {
 
 type InspectCliLocationArgs = {
   readonly storeRoot?: string;
-  readonly configPath?: string;
   readonly character?: string;
 };
 
@@ -302,9 +301,6 @@ function resolveInspectMode(
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
-    ...(location.configPath === undefined
-      ? {}
-      : {configPath: location.configPath}),
     ...(location.character === undefined
       ? {}
       : {character: location.character}),

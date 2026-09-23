@@ -20,6 +20,7 @@ import {
   runtimeLocationForTest,
   writeRuntimeConfig,
   loadRuntimeConfigForTest,
+  configLocationForTest,
 } from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -33,7 +34,6 @@ import {
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigFieldInspectShape,
-  loadProject02RuntimeConfigWithLocation,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   inspectRuntimePluginConfig,
@@ -67,30 +67,19 @@ function seededHome(): {
 }
 
 describe('scope-aware runtime config mutations', () => {
-  it('rejects a missing bound home that becomes a symlink before secret control', async () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-missing-home-anchor-',
-    );
-    const missingHome = join(configRoot, 'runtime-home');
+  it('rejects a missing bound home that becomes a symlink before the write', async () => {
+    const root = createTestTempRoot('project02-config-missing-home-anchor-');
+    const missingHome = join(root, 'runtime-home');
     const redirectedHome = createTestTempRoot(
       'project02-config-missing-home-redirect-',
     );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: missingHome,
-    });
 
     await ensureInitializedProject02Home({homeRoot: redirectedHome});
-    const snapshot = loadProject02RuntimeConfigWithLocation({
-      selection: {configPath},
-      env: {},
-    });
-    const runtimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: snapshot.configLocation,
-      characterId: 'mira',
-    });
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation,
-      env: {},
+      runtimeLocation: bindProject02CharacterRuntimeLocation({
+        configLocation: configLocationForTest({storeRoot: missingHome}),
+        characterId: 'mira',
+      }),
       scope: 'global',
     });
 
@@ -104,39 +93,24 @@ describe('scope-aware runtime config mutations', () => {
           kind: 'plugin_config',
           manifest: requiredSecretPlugin('scope.missing-home').manifest,
           actor: 'operator',
-          fieldOperation: {
-            kind: 'set',
-            fieldName: 'apiKey',
-            value: 'secret',
-          },
+          fieldOperation: {kind: 'set', fieldName: 'apiKey', value: 'secret'},
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
   });
 
   it('rejects an existing bound home replaced at the same path', async () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-replaced-home-config-',
-    );
-    const homeRoot = join(configRoot, 'runtime-home');
-    const displacedHome = join(configRoot, 'runtime-home-before');
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: homeRoot,
-    });
+    const root = createTestTempRoot('project02-config-replaced-home-config-');
+    const homeRoot = join(root, 'runtime-home');
+    const displacedHome = join(root, 'runtime-home-before');
 
     mkdirSync(homeRoot);
     await ensureInitializedProject02Home({homeRoot});
-    const snapshot = loadProject02RuntimeConfigWithLocation({
-      selection: {configPath},
-      env: {},
-    });
-    const runtimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: snapshot.configLocation,
-      characterId: 'mira',
-    });
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation,
-      env: {},
+      runtimeLocation: bindProject02CharacterRuntimeLocation({
+        configLocation: configLocationForTest({storeRoot: homeRoot}),
+        characterId: 'mira',
+      }),
       scope: 'global',
     });
 
@@ -151,160 +125,10 @@ describe('scope-aware runtime config mutations', () => {
           kind: 'plugin_config',
           manifest: requiredSecretPlugin('scope.replaced-home').manifest,
           actor: 'operator',
-          fieldOperation: {
-            kind: 'set',
-            fieldName: 'apiKey',
-            value: 'secret',
-          },
+          fieldOperation: {kind: 'set', fieldName: 'apiKey', value: 'secret'},
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
-  });
-
-  it('allows a standalone config edit but rejects its foreign effective home for state control', () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-standalone-foreign-config-',
-    );
-    const foreignHome = createTestTempRoot(
-      'project02-config-standalone-foreign-home-',
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: foreignHome,
-    });
-
-    writeFileSync(join(foreignHome, 'notes.txt'), 'foreign content\n', 'utf8');
-    const snapshot = loadProject02RuntimeConfigWithLocation({
-      selection: {configPath},
-      env: {},
-    });
-    const globalTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: snapshot.configLocation,
-      env: {},
-      scope: 'global',
-    });
-
-    applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target: globalTarget,
-      request: {
-        kind: 'document',
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'Standalone Edit',
-        },
-      },
-    });
-    expect(
-      (
-        JSON.parse(readFileSync(configPath, 'utf8')) as {
-          readonly project02: {readonly userDisplayName: string};
-        }
-      ).project02.userDisplayName,
-    ).toBe('Standalone Edit');
-
-    const runtimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: snapshot.configLocation,
-      characterId: 'mira',
-    });
-    expect(() =>
-      resolveRuntimeConfigScopeTarget({
-        runtimeLocation,
-        env: {},
-        scope: 'character',
-      }),
-    ).toThrow(/contains foreign entries/);
-    expect(existsSync(join(foreignHome, '.locks'))).toBe(false);
-  });
-
-  it('rejects a foreign candidate home without granting it target authority', async () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-foreign-candidate-config-',
-    );
-    const currentHome = createTestTempRoot(
-      'project02-config-foreign-candidate-current-',
-    );
-    const foreignHome = createTestTempRoot(
-      'project02-config-foreign-candidate-home-',
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: currentHome,
-    });
-    const originalConfig = readFileSync(configPath, 'utf8');
-
-    await ensureInitializedProject02Home({homeRoot: currentHome});
-    writeFileSync(join(foreignHome, 'notes.txt'), 'foreign content\n', 'utf8');
-    const snapshot = loadProject02RuntimeConfigWithLocation({
-      selection: {configPath},
-      env: {},
-    });
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: snapshot.configLocation,
-      env: {},
-      scope: 'global',
-    });
-
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target,
-        request: {
-          kind: 'document',
-          operation: {
-            kind: 'set',
-            path: 'project02.storeRoot',
-            value: foreignHome,
-          },
-        },
-      }),
-    ).toThrow(/contains foreign entries/);
-    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
-    expect(existsSync(join(foreignHome, '.locks'))).toBe(false);
-  });
-
-  it('repairs a standalone config whose current effective home is unusable', () => {
-    const configRoot = createTestTempRoot(
-      'project02-config-repair-invalid-home-',
-    );
-    const invalidHome = join(configRoot, 'not-a-directory');
-    const repairedHome = createTestTempRoot(
-      'project02-config-repair-valid-home-',
-    );
-    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
-      storeRoot: invalidHome,
-    });
-
-    writeFileSync(invalidHome, 'not a directory\n', 'utf8');
-    const snapshot = loadProject02RuntimeConfigWithLocation({
-      selection: {configPath},
-      env: {},
-    });
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: snapshot.configLocation,
-      env: {},
-      scope: 'global',
-    });
-
-    applyRuntimeConfigControlOperation({
-      pluginManifests: [],
-      target,
-      request: {
-        kind: 'document',
-        operation: {
-          kind: 'set',
-          path: 'project02.storeRoot',
-          value: repairedHome,
-        },
-      },
-    });
-
-    expect(
-      (
-        JSON.parse(readFileSync(configPath, 'utf8')) as {
-          readonly project02: {readonly storeRoot: string};
-        }
-      ).project02.storeRoot,
-    ).toBe(repairedHome);
   });
 
   it('guards the selected home separately from the authored runtime home', async () => {
@@ -322,7 +146,7 @@ describe('scope-aware runtime config mutations', () => {
       {project02: {userDisplayName: 'Effective Home'}},
     );
     writeRuntimeConfig(configPath, {
-      project02: {storeRoot: effectiveHomeRoot},
+      project02: {},
     });
     writeFileSync(
       join(selectedHomeRoot, 'notes.txt'),
@@ -336,9 +160,7 @@ describe('scope-aware runtime config mutations', () => {
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         storeRoot: selectedHomeRoot,
-        env: {},
       }),
-      env: {},
       scope: 'global',
     });
 
@@ -376,9 +198,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
@@ -408,7 +228,6 @@ describe('scope-aware runtime config mutations', () => {
 
     const globalConfig = loadRuntimeConfigForTest({
       storeRoot: homeRoot,
-      env: {},
     }).config;
 
     if (globalConfig === undefined) {
@@ -425,7 +244,7 @@ describe('scope-aware runtime config mutations', () => {
     );
   });
 
-  it('rejects global-only host fields while secrets stay per character', async () => {
+  it("keeps a character's secret in its own overlay", async () => {
     const {homeRoot, dataRoot} = seededHome();
     const plugin = characterOnlyConfigPlugin('scope.secrets');
 
@@ -435,22 +254,9 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
-
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        pluginManifests: [],
-        target,
-        request: {
-          kind: 'document',
-          operation: {kind: 'set', path: 'project02.storeRoot', value: '/x'},
-        },
-      }),
-    ).toThrow('global-only');
 
     // A character's credential lands in its own overlay, never in the
     // home's document, so two characters can hold different accounts.
@@ -537,9 +343,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
 
@@ -570,9 +374,7 @@ describe('scope-aware runtime config mutations', () => {
   it('refuses scoped writes into an unmarked data directory', () => {
     const {homeRoot, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
 
@@ -602,9 +404,7 @@ describe('scope-aware runtime config mutations', () => {
       characterId: 'mira',
     });
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
 
@@ -673,9 +473,7 @@ describe('scope-aware runtime config mutations', () => {
 
     const expected = resolveScopedExpected(homeRoot);
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
@@ -710,9 +508,7 @@ describe('scope-aware runtime config mutations', () => {
       characterId: 'mira',
     });
     const bareTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: bareHome, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: bareHome}),
       scope: 'character',
     });
     expect(() =>
@@ -746,10 +542,7 @@ describe('scope-aware runtime config mutations', () => {
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterId: 'nova',
-        env: {},
       }),
-
-      env: {},
       scope: 'character',
     });
 
@@ -759,7 +552,7 @@ describe('scope-aware runtime config mutations', () => {
         characterOverlayConfigPath(characterDataDirPath(homeRoot, 'nova')),
       ),
       runtimeLocation: {
-        selectedConfig: {path: configPath},
+        configPath,
         homeRoot: canonicalRuntimeConfigPath(homeRoot),
         characterScope: {characterId: 'nova'},
       },
@@ -778,10 +571,7 @@ describe('scope-aware runtime config mutations', () => {
       resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: novaOverlayPath,
-          env: {},
         }),
-
-        env: {},
         scope: 'character',
       }),
     ).toThrow('is inside a character-data directory');
@@ -814,7 +604,7 @@ describe('plugin manifest config scope policy', () => {
       diagnostics: Object.freeze([]),
     });
     const resolved = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({loadedConfig, env: {}}),
+      runtimeLocation: runtimeLocationForTest({loadedConfig}),
       loadedConfig,
       pluginManifests: [plugin.manifest],
       validateInactivePluginConfigs: true,
@@ -853,7 +643,7 @@ describe('plugin manifest config scope policy', () => {
     });
 
     const base = {
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       env: {},
     };
     const editableFields = (
@@ -876,7 +666,6 @@ describe('plugin manifest config scope policy', () => {
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
       runtimeLocation: base.runtimeLocation,
-      env: {},
       scope: 'global',
     });
 
@@ -1021,7 +810,6 @@ describe('plugin manifest config scope policy', () => {
 
     const loadedConfig = loadRuntimeConfigForTest({
       storeRoot: homeRoot,
-      env: {},
     });
     const fieldsOf = (
       targetScope: 'global' | 'character',
@@ -1064,12 +852,10 @@ describe('plugin manifest config scope policy', () => {
       defaultValueSummary: 'local',
       allowedValues: ['local', 'nvidia'],
     });
-    expect(character['storeRoot']?.editableInScope).toBe(false);
     expect(global['userDisplayName']).toMatchObject({
       authored: {configured: true, value: 'Global Name'},
       effectiveSource: 'global',
     });
-    expect(global['storeRoot']?.editableInScope).toBe(true);
   });
 
   it('uses the same policy for manifest-aware activation and field controls', async () => {
@@ -1088,13 +874,11 @@ describe('plugin manifest config scope policy', () => {
       characterId: 'mira',
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     });
     const characterTarget = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'character',
     });
     const globalBefore = readFileSync(configPath, 'utf8');
@@ -1167,7 +951,7 @@ describe('plugin manifest config scope policy', () => {
 });
 
 function resolveScopedExpected(homeRoot: string): string {
-  const loaded = loadRuntimeConfigForTest({storeRoot: homeRoot, env: {}});
+  const loaded = loadRuntimeConfigForTest({storeRoot: homeRoot});
 
   if (loaded.config === undefined) {
     throw new Error('Expected the seeded global config to load.');
@@ -1206,7 +990,6 @@ describe('character-scoped plugin control capability', () => {
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterScope: characterScope,
-        env: {},
       }),
       targetScope: 'character',
       manifest: plugin.manifest,
@@ -1218,9 +1001,7 @@ describe('character-scoped plugin control capability', () => {
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterScope,
-        env: {},
       }),
-      env: {},
       scope: 'character',
     });
     const prepared = capability.prepareOperation({
@@ -1288,7 +1069,7 @@ describe('plugin inspection target authorship', () => {
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {});
 
     const inspected = inspectRuntimePluginConfig({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       targetScope: 'character',
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
@@ -1324,7 +1105,7 @@ describe('plugin inspection target authorship', () => {
       },
     });
     const base = {
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
       env: {},
@@ -1332,7 +1113,6 @@ describe('plugin inspection target authorship', () => {
 
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: base.runtimeLocation,
-      env: {},
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
@@ -1402,10 +1182,7 @@ describe('scoped writes over a broken global layer', () => {
         runtimeLocation: runtimeLocationForTest({
           storeRoot: homeRoot,
           characterId: 'mira',
-          env: {},
         }),
-
-        env: {},
         scope: 'character',
       });
       applyRuntimeConfigControlOperation({
@@ -1433,9 +1210,7 @@ describe('stale global expectations', () => {
   it('conflicts without materializing a lock root in an absent data dir', () => {
     const {homeRoot, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-      env: {},
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',
     });
 

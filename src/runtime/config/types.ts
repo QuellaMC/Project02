@@ -2,7 +2,6 @@ import type {RuntimePluginConfigValueType} from '../../plugins/api/index.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
-export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
 
@@ -24,7 +23,6 @@ export const defaultProject02UserDisplayName = 'You';
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {
-  readonly storeRoot?: string;
   readonly enabled?: boolean;
   readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
@@ -43,18 +41,8 @@ export type Project02RuntimePluginConfig = {
   readonly config?: Readonly<Record<string, RuntimeConfigValue>>;
 };
 
-export type RuntimeConfigSource = 'none' | 'default' | 'path' | 'env';
-export type SelectedProject02RuntimeConfigOwner =
-  Readonly<{kind: 'home'; homeRoot: string}> | Readonly<{kind: 'standalone'}>;
-export type SelectedProject02RuntimeConfigLocation = {
-  readonly source: Exclude<RuntimeConfigSource, 'none'>;
-  readonly path: string;
-  readonly canonicalPath: string;
-  /** Owner of the selected file, distinct from its effective runtime home. */
-  readonly owner: SelectedProject02RuntimeConfigOwner;
-  /** Overridable for the effective runtime; never re-derived after load. */
-  readonly runtimeHomeRoot?: string;
-};
+/** 'none' is an absent file; a file that exists, however broken, is 'path'. */
+export type RuntimeConfigSource = 'none' | 'path';
 type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 
 export type RuntimeConfigFieldScope = 'global' | 'character';
@@ -107,19 +95,11 @@ export function runtimeConfigDiagnosticLocation(
 export type LoadedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
-  /** Immutable operator selection provenance, independent from file absence. */
-  readonly selectedConfig?: SelectedProject02RuntimeConfigLocation;
   /** Survives failed validation so control can repair the real document. */
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
-
-export type SelectedLoadedProject02RuntimeConfig =
-  LoadedProject02RuntimeConfig & {
-    readonly path: string;
-    readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
-  };
 
 type RuntimeConfigFieldSource = 'config' | 'missing';
 

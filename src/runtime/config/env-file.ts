@@ -3,13 +3,11 @@ import {parseEnv} from 'node:util';
 import {readTextFileSync} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
-import {defaultRuntimeConfigEnvPath} from './load.ts';
+import {createProject02HomeLayout} from '../storage/layout-contract.ts';
 import {
   assertResolvedProject02HomeAdoptable,
   type ResolvedProject02ConfigLocation,
-  type ResolvedProject02RuntimeLocation,
 } from './location.ts';
-import {runtimeConfigEnvVarName} from './types.ts';
 
 export class RuntimeEnvFileError extends Error {
   readonly path: string | undefined;
@@ -21,19 +19,15 @@ export class RuntimeEnvFileError extends Error {
   }
 }
 
-function runtimeConfigEnvPathForLocation(
-  runtimeLocation: Pick<ResolvedProject02RuntimeLocation, 'homeRoot'>,
-): string {
-  return defaultRuntimeConfigEnvPath(runtimeLocation.homeRoot);
-}
-
 export function loadRuntimeConfigEnvFile(options: {
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly env?: NodeJS.ProcessEnv;
   readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
-  const envPath = runtimeConfigEnvPathForLocation(options.runtimeLocation);
+  const envPath = createProject02HomeLayout({
+    homeRoot: options.runtimeLocation.homeRoot,
+  }).envPath;
   const env = options.env ?? process.env;
 
   try {
@@ -70,42 +64,6 @@ export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
       }.`,
     );
   }
-}
-
-export function shouldReadDefaultDotEnvForRuntimeLocation(options: {
-  readonly location: {
-    readonly configPath?: string;
-    readonly storeRoot?: string;
-  };
-  readonly env?: NodeJS.ProcessEnv;
-}): boolean {
-  const env = options.env ?? process.env;
-
-  return (
-    options.location.configPath === undefined &&
-    options.location.storeRoot === undefined &&
-    !runtimeConfigEnvSelectsConfig(env)
-  );
-}
-
-export function defaultDotEnvForRuntimeLocation(
-  defaultEnv: NodeJS.ProcessEnv,
-  location: {readonly configPath?: string; readonly storeRoot?: string},
-): NodeJS.ProcessEnv {
-  if (
-    defaultEnv[runtimeConfigEnvVarName] === undefined ||
-    (location.configPath === undefined && location.storeRoot === undefined)
-  ) {
-    return defaultEnv;
-  }
-
-  const env = {...defaultEnv};
-  Reflect.deleteProperty(env, runtimeConfigEnvVarName);
-  return env;
-}
-
-function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
-  return (env[runtimeConfigEnvVarName]?.trim().length ?? 0) > 0;
 }
 
 /**

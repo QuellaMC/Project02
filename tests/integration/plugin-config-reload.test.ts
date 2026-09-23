@@ -79,7 +79,6 @@ function authoredFingerprint(options: {
     runtimeLocation: runtimeLocationForTest({
       configPath: options.configPath,
       storeRoot: options.storeRoot,
-      env: {},
     }),
     manifest: manifest as Parameters<
       typeof inspectRuntimePluginConfig
@@ -103,16 +102,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
@@ -134,7 +130,6 @@ describe('configured runtime plugin reloader', () => {
     const authored = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
-      env: {},
     });
 
     writeFileSync(
@@ -209,16 +204,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
 
@@ -302,13 +294,11 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot,
-        env: {},
       }),
-      loadedConfig: loadRuntimeConfigForTest({configPath, storeRoot, env: {}}),
+      loadedConfig: loadRuntimeConfigForTest({configPath, storeRoot}),
       catalogSnapshot: {
         ...discovery,
         diagnostics: discovery.reservedIdDiagnostics,
@@ -362,16 +352,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
@@ -413,16 +400,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
@@ -460,16 +444,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const entry = activationPlan.catalogEntries['demo-config'];
@@ -541,16 +522,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const entry = activationPlan.catalogEntries['demo-config'];
@@ -626,16 +604,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
@@ -668,16 +643,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const entry = activationPlan.catalogEntries['demo-config'];
@@ -741,14 +713,12 @@ describe('configured runtime plugin reloader', () => {
     const loadedConfig = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
-      env: {},
     });
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig,
         configPath,
         storeRoot,
-        env: {},
       }),
       loadedConfig,
     });
@@ -864,16 +834,13 @@ describe('configured runtime plugin reloader', () => {
         loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
-          env: {},
         }),
         configPath,
         storeRoot: storeRoot,
-        env: {},
       }),
       loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
-        env: {},
       }),
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});

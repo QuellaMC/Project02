@@ -10,7 +10,7 @@ import {requiredSecretPlugin} from '../support/runtime-config-activation-fixture
 
 const globalDocument: Project02RuntimeConfig = {
   version: runtimeConfigVersion,
-  project02: {storeRoot: '/home', character: 'mira'},
+  project02: {character: 'mira'},
   plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
 };
 

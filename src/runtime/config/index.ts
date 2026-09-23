@@ -5,17 +5,13 @@ export {
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 export {
-  defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
   RuntimeEnvFileError,
-  shouldReadDefaultDotEnvForRuntimeLocation,
 } from './env-file.ts';
 export {
-  assertProject02ReloadedConfigUsesBoundHome,
   assertResolvedProject02HomeAdoptable,
   assertResolvedProject02HomeCurrent,
-  assertSelectedProject02HomeAdoptable,
   bindProject02CharacterRuntimeLocation,
   loadProject02RuntimeConfigForLocation,
   loadProject02RuntimeConfigWithLocation,
@@ -23,7 +19,6 @@ export {
   requireResolvedProject02RuntimeLocation,
   requireResolvedRuntimeConfigScopeTarget,
   resolveRuntimeConfigScopeTarget,
-  runtimeConfigLocationUsesDefaultConfigPath,
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
@@ -119,7 +114,6 @@ export {
   defaultProject02UserDisplayName,
   roleModelProviderEnvVarName,
   runtimeConfigDiagnosticLocation,
-  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
@@ -134,7 +128,6 @@ export {
   type RuntimeConfigInspectShape,
   type RedactedPluginRuntimeConfig,
   type ResolvedPluginRuntimeConfig,
-  type SelectedLoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginActivationStatusShape,

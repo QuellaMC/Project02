@@ -59,10 +59,10 @@ async function runConfigMutationChild(options: {
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-activation-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-    'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] }, env: {} });',
+    'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] } });',
     'applyRuntimeConfigControlOperation({',
     'pluginManifests: [],',
-    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation: configLocation, env: {}, scope: 'global' }),",
+    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation: configLocation, scope: 'global' }),",
     "  request: { kind: 'plugin_activation', manifest: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
     '});',
   ].join('\n');

@@ -962,20 +962,16 @@ describe('host-owned runtime plugin management tools', () => {
       'project02-plugin-config-location-binding-',
     );
     const manifest = configurablePluginManifest();
-    const configPathA = writeRuntimeConfig(join(storeRoot, 'config-a.json'), {
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [manifest.id]: {
           config: {tone: 'cool'},
         },
       },
     });
-    const location = runtimeLocationForTest({
-      configPath: configPathA,
-      storeRoot,
-    });
+    const location = runtimeLocationForTest({configPath, storeRoot});
     const callerOwnedLocation = {
       ...location,
-      selectedConfig: {...location.selectedConfig},
       characterScope: {...location.characterScope},
     };
 

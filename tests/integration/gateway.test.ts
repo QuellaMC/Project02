@@ -244,36 +244,6 @@ describe('gateway façade', () => {
     );
   });
 
-  it('keeps the bound home when the document redirects its store', async () => {
-    const homeA = await createGatewayHome();
-    const homeB = join(
-      createTestTempRoot('project02-gateway-redirect-'),
-      'other',
-    );
-
-    await ensureInitializedProject02Store({homeRoot: homeB});
-    writeTestCharacterPackage(homeB, {id: 'zeta', displayName: 'Zeta'});
-
-    const configPath = join(homeA, 'config.json');
-
-    writeRuntimeConfig(configPath, {project02: {storeRoot: homeA}});
-
-    const gateway = createGateway({location: {configPath}, env: {}});
-
-    expect(gateway.health().characters.map(character => character.id)).toEqual([
-      'mira',
-    ]);
-
-    // Another window redirects the document's store; the running gateway
-    // keeps the home it bound.
-    writeRuntimeConfig(configPath, {project02: {storeRoot: homeB}});
-
-    expect(gateway.health().characters.map(character => character.id)).toEqual([
-      'mira',
-    ]);
-    await gateway.stop();
-  });
-
   it('reloads the global config for an explicit retry', async () => {
     const homeRoot = await createGatewayHome();
 
@@ -2099,16 +2069,6 @@ describe('gateway façade', () => {
     expect(broken.status === 'refused' && broken.message).toContain(
       'invalid_descriptor',
     );
-
-    // A document that now names another home describes a daemon that is
-    // not this one.
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {storeRoot: join(homeRoot, '..', 'elsewhere')},
-    });
-    expect(gateway.configView({scope: 'global'})).toMatchObject({
-      status: 'refused',
-      reason: 'config_unloadable',
-    });
 
     writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
     expect(gateway.configView({scope: 'global'})).toMatchObject({

@@ -1,5 +1,5 @@
 import {writeFileSync} from 'node:fs';
-import {dirname} from 'node:path';
+import {basename, dirname} from 'node:path';
 
 import {
   bindProject02CharacterRuntimeLocation,
@@ -8,7 +8,6 @@ import {
   inspectConfiguredPlugins,
   loadProject02RuntimeConfigWithLocation,
   resolveRuntimeConfigScopeTarget,
-  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type InspectConfiguredPlugin,
   type LoadedProject02RuntimeConfig,
@@ -17,7 +16,6 @@ import {
   type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigCharacterScope,
-  type SelectedLoadedProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
 import type {RuntimePluginCatalogSnapshot} from '../../src/app/activation.ts';
@@ -27,21 +25,64 @@ import {
   type RuntimePluginFactoryDefinition,
 } from '../../src/app/plugin-catalog.ts';
 import {homeRootForCharacterDataDir} from '../../src/runtime/storage/index.ts';
+import {createTestTempRoot} from './temp-root.ts';
 import {
   createRuntimePluginConfigControlBinding,
   type RuntimePluginConfigControlBinding,
   type RuntimePluginConfigControlHostState,
 } from '../../src/plugins/index.ts';
 
-type TestRuntimeLocationOptions = {
+type TestRuntimeLocationOptions = TestHomeSelection & {
   readonly loadedConfig?: LoadedProject02RuntimeConfig;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
   readonly character?: string;
   readonly characterId?: string;
   readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly env?: NodeJS.ProcessEnv;
 };
+
+/** The home, named directly or through the config file that sits in it. */
+type TestHomeSelection = {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+};
+
+function storeRootForTest(
+  options: TestHomeSelection & {
+    readonly loadedConfig?: LoadedProject02RuntimeConfig;
+    readonly characterScope?: RuntimeConfigCharacterScope;
+  },
+): string {
+  if (options.configPath !== undefined) {
+    if (basename(options.configPath) !== 'config.json') {
+      throw new TypeError(
+        `Test config path "${options.configPath}" is not a home's config.json.`,
+      );
+    }
+
+    const homeRoot = dirname(options.configPath);
+
+    if (options.storeRoot !== undefined && options.storeRoot !== homeRoot) {
+      throw new TypeError(
+        `Test config path "${options.configPath}" is not inside the store root "${options.storeRoot}".`,
+      );
+    }
+
+    return homeRoot;
+  }
+
+  if (options.storeRoot !== undefined) {
+    return options.storeRoot;
+  }
+
+  if (options.characterScope !== undefined) {
+    return homeRootForCharacterDataDir(options.characterScope.dataRoot);
+  }
+
+  // Never the working directory's default home: a test must not read the
+  // developer's own store.
+  return options.loadedConfig?.path === undefined
+    ? createTestTempRoot('project02-test-home-')
+    : dirname(options.loadedConfig.path);
+}
 
 export function runtimeLocationForTest(
   options: TestRuntimeLocationOptions = {},
@@ -50,32 +91,11 @@ export function runtimeLocationForTest(
     options.character ??
     options.characterId ??
     options.characterScope?.characterId;
-  const storeRoot =
-    options.storeRoot ??
-    (options.characterScope === undefined
-      ? undefined
-      : homeRootForCharacterDataDir(options.characterScope.dataRoot));
-  const selection = {
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(storeRoot === undefined ? {} : {storeRoot}),
-    ...(character === undefined ? {} : {character}),
-  };
-  const selectedSnapshot = loadProject02RuntimeConfigWithLocation(
-    options.loadedConfig === undefined
-      ? {
-          selection,
-          ...(options.env === undefined ? {} : {env: options.env}),
-        }
-      : selectedRuntimeLocationInputsForTest(
-          options.loadedConfig,
-          selection,
-          options.env,
-        ),
-  );
+  const storeRoot = storeRootForTest(options);
   const runtimeLocation = bindProject02CharacterRuntimeLocation({
-    configLocation: selectedSnapshot.configLocation,
+    configLocation: loadProject02RuntimeConfigWithLocation({
+      selection: {storeRoot},
+    }).configLocation,
     characterId: character ?? 'mira',
   });
 
@@ -94,134 +114,24 @@ export function runtimeLocationForTest(
   return runtimeLocation;
 }
 
-function selectedRuntimeLocationInputsForTest(
-  loadedConfig: LoadedProject02RuntimeConfig,
-  selection: Readonly<{
-    configPath?: string;
-    storeRoot?: string;
-    character?: string;
-  }>,
-  env: NodeJS.ProcessEnv | undefined,
-): Readonly<{
-  selection: Readonly<{
-    configPath?: string;
-    storeRoot?: string;
-    character?: string;
-  }>;
-  env: NodeJS.ProcessEnv;
-}> {
-  if (selection.configPath !== undefined || selection.storeRoot !== undefined) {
-    return {selection, env: env ?? {}};
-  }
-
-  const selectedConfig = loadedConfig.selectedConfig;
-
-  if (selectedConfig !== undefined) {
-    if (selectedConfig.source === 'default') {
-      return {
-        selection: {
-          ...selection,
-          storeRoot:
-            selectedConfig.owner.kind === 'home'
-              ? selectedConfig.owner.homeRoot
-              : dirname(selectedConfig.path),
-        },
-        env: env ?? {},
-      };
-    }
-
-    if (selectedConfig.source === 'path') {
-      return {
-        selection: {
-          ...selection,
-          configPath: selectedConfig.path,
-          ...(selectedConfig.runtimeHomeRoot === undefined
-            ? {}
-            : {storeRoot: selectedConfig.runtimeHomeRoot}),
-        },
-        env: env ?? {},
-      };
-    }
-
-    return {
-      selection,
-      env: {
-        ...(env ?? {}),
-        [runtimeConfigEnvVarName]: selectedConfig.path,
-      },
-    };
-  }
-
-  const configuredStoreRoot = loadedConfig.config?.project02?.storeRoot;
-
-  if (configuredStoreRoot !== undefined) {
-    return {
-      selection: {
-        ...selection,
-        storeRoot: configuredStoreRoot,
-        ...(loadedConfig.path === undefined
-          ? {}
-          : {configPath: loadedConfig.path}),
-      },
-      env: env ?? {},
-    };
-  }
-
-  if (loadedConfig.path === undefined) {
-    return {selection, env: env ?? {}};
-  }
-
-  if (loadedConfig.source === 'env') {
-    return {
-      selection,
-      env: {
-        ...(env ?? {}),
-        [runtimeConfigEnvVarName]: loadedConfig.path,
-      },
-    };
-  }
-
-  return loadedConfig.source === 'path'
-    ? {
-        selection: {...selection, configPath: loadedConfig.path},
-        env: env ?? {},
-      }
-    : {
-        selection: {...selection, storeRoot: dirname(loadedConfig.path)},
-        env: env ?? {},
-      };
-}
-
 /** The location half of the one production load, bound to no character. */
 export function configLocationForTest(
-  options: {
-    readonly configPath?: string;
-    readonly storeRoot?: string;
-    readonly env?: NodeJS.ProcessEnv;
-  } = {},
+  options: TestHomeSelection = {},
 ): ResolvedProject02ConfigLocation {
-  const {env, ...selection} = options;
+  const storeRoot = storeRootForTest(options);
 
-  return loadProject02RuntimeConfigWithLocation({
-    selection,
-    ...(env === undefined ? {} : {env}),
-  }).configLocation;
+  return loadProject02RuntimeConfigWithLocation({selection: {storeRoot}})
+    .configLocation;
 }
 
 /** The loaded half of the one production load; the other half is the location. */
 export function loadRuntimeConfigForTest(
-  options: {
-    readonly configPath?: string;
-    readonly storeRoot?: string;
-    readonly env?: NodeJS.ProcessEnv;
-  } = {},
-): SelectedLoadedProject02RuntimeConfig {
-  const {env, ...selection} = options;
+  options: TestHomeSelection = {},
+): LoadedProject02RuntimeConfig {
+  const storeRoot = storeRootForTest(options);
 
-  return loadProject02RuntimeConfigWithLocation({
-    selection,
-    ...(env === undefined ? {} : {env}),
-  }).loadedConfig;
+  return loadProject02RuntimeConfigWithLocation({selection: {storeRoot}})
+    .loadedConfig;
 }
 
 export function runtimeConfigSnapshotForTest(
@@ -263,19 +173,15 @@ export type RuntimePluginConfigControlStateForTestOptions = Omit<
   Readonly<{
     runtimeLocation?: ResolvedProject02RuntimeLocation;
     configScope?: 'global' | 'character';
-    env?: NodeJS.ProcessEnv;
   }>;
 
 export function runtimePluginConfigControlStateForTest(
   options: RuntimePluginConfigControlStateForTestOptions,
 ): RuntimePluginConfigControlHostState {
   const {
-    runtimeLocation = runtimeLocationForTest({
-      ...(options.env === undefined ? {} : {env: options.env}),
-    }),
+    runtimeLocation = runtimeLocationForTest(),
     configScope = 'global',
     control,
-    env,
     ...state
   } = options;
 
@@ -286,7 +192,6 @@ export function runtimePluginConfigControlStateForTest(
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation,
         scope: configScope,
-        ...(env === undefined ? {} : {env}),
       }),
     }),
   });
@@ -296,21 +201,12 @@ export function writeRuntimeConfig(
   path: string,
   config: Readonly<Record<string, unknown>>,
 ): string {
-  const {
-    storeRoot,
-    defaultMemoryProvider,
-    roleModelProvider,
-    project02,
-    ...rest
-  } = config;
+  const {defaultMemoryProvider, roleModelProvider, project02, ...rest} = config;
   const project02Config =
     project02 ??
-    (storeRoot === undefined &&
-    defaultMemoryProvider === undefined &&
-    roleModelProvider === undefined
+    (defaultMemoryProvider === undefined && roleModelProvider === undefined
       ? undefined
       : {
-          ...(storeRoot === undefined ? {} : {storeRoot}),
           ...(defaultMemoryProvider === undefined
             ? {}
             : {defaultMemoryProvider}),
@@ -345,16 +241,22 @@ export type RuntimeConfigCheck = {
  * The character's activation plan, resolved the way a startup resolves it
  * and never constructing a plugin: what a config check reports.
  */
-export async function checkRuntimeConfigForTest(options: {
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-  readonly character?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-}): Promise<RuntimeConfigCheck> {
-  const {env, factories, ...location} = options;
+export async function checkRuntimeConfigForTest(
+  options: TestHomeSelection & {
+    readonly character?: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly factories?: Readonly<
+      Record<string, RuntimePluginFactoryDefinition>
+    >;
+  },
+): Promise<RuntimeConfigCheck> {
+  const {env, factories, character, ...selection} = options;
+  const storeRoot = storeRootForTest(selection);
   const startup = await resolveRuntimeCliStartup({
-    location,
+    location: {
+      storeRoot,
+      ...(character === undefined ? {} : {character}),
+    },
     ...(env === undefined ? {} : {env}),
     ...(factories === undefined ? {} : {factories}),
   });

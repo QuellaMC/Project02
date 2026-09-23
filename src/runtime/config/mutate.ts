@@ -36,11 +36,9 @@ import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {canonicalRuntimeConfigPath} from './path.ts';
 import {
-  characterRuntimeConfigFieldScopeViolation,
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinition,
-  project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
 
 export type RuntimeConfigMutationResult = {
@@ -104,16 +102,7 @@ export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
   }
 }
 
-function bootstrapRuntimeConfig(options: {
-  readonly storeRoot?: string;
-}): Project02RuntimeConfig {
-  if (options.storeRoot !== undefined) {
-    return {
-      version: runtimeConfigVersion,
-      project02: Object.freeze({storeRoot: options.storeRoot}),
-    };
-  }
-
+function bootstrapRuntimeConfig(): Project02RuntimeConfig {
   return {version: runtimeConfigVersion};
 }
 
@@ -138,36 +127,13 @@ export async function ensureInitializedProject02Store(options: {
 
   try {
     if (!pathExistsSync(layout.configPath)) {
-      writeJsonAtomic(
-        layout.configPath,
-        bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
-        0o600,
-      );
+      writeJsonAtomic(layout.configPath, bootstrapRuntimeConfig(), 0o600);
     }
   } finally {
     await lock.release();
   }
 
   return layout;
-}
-
-/** Any path that writes an overlay must go through this dialect check. */
-export function assertOverlayLocatedCandidateStaysCharacterScoped(
-  candidate: Project02RuntimeConfig,
-): void {
-  const section = candidate.project02;
-
-  if (section === undefined) {
-    return;
-  }
-
-  for (const field of project02RuntimeConfigFieldDefinitions()) {
-    const violation = characterRuntimeConfigFieldScopeViolation(field);
-
-    if (violation !== undefined && section[field.name] !== undefined) {
-      throw new RuntimeConfigMutationError(violation);
-    }
-  }
 }
 
 export type RuntimeConfigAuthoredSnapshot = Readonly<{
@@ -224,32 +190,7 @@ export function createRuntimeConfigAuthoredSnapshot(
     });
   }
 
-  const selectedConfigPath =
-    loadedConfig.selectedConfig?.canonicalPath ?? loadedConfig.path;
-
-  if (selectedConfigPath === undefined) {
-    throw new TypeError(
-      'Absent runtime config bootstrap requires retained selection provenance.',
-    );
-  }
-
-  const bootstrapStoreRoot =
-    loadedConfig.selectedConfig?.runtimeHomeRoot ??
-    (loadedConfig.selectedConfig === undefined
-      ? undefined
-      : loadedConfig.selectedConfig.owner.kind === 'home'
-        ? loadedConfig.selectedConfig.owner.homeRoot
-        : undefined);
-  const canonicalBootstrapStoreRoot =
-    bootstrapStoreRoot === undefined
-      ? undefined
-      : canonicalRuntimeConfigMutationPath(bootstrapStoreRoot);
-
-  const validatedConfig = bootstrapRuntimeConfig({
-    ...(canonicalBootstrapStoreRoot === undefined
-      ? {}
-      : {storeRoot: canonicalBootstrapStoreRoot}),
-  });
+  const validatedConfig = bootstrapRuntimeConfig();
 
   return Object.freeze({
     document: createJsonBoundaryObjectSnapshot(validatedConfig, {
