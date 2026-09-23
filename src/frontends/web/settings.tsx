@@ -175,7 +175,7 @@ function FieldRow({
   const edit = page.edits.get(fieldKey);
   const problem = page.problems.get(fieldKey);
   const saved = page.saved === fieldKey;
-  const current = valueText(field.effective.value);
+  const current = valueText(field, field.effective.value);
   const shown = edit ?? current;
   const change = (text: string): void => {
     session.editSetting(fieldKey, text);

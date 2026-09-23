@@ -94,6 +94,17 @@ function view(fingerprint = 'f1'): OkView {
           field('settings', {valueType: 'object'}),
           field('endpoints', {valueType: 'array'}),
           untyped(field('mode', {allowedValues: ['true', 'off']})),
+          untyped(
+            field('note', {
+              effective: {
+                name: 'note',
+                secret: false,
+                source: 'config',
+                resolved: true,
+                value: 'true',
+              },
+            }),
+          ),
         ],
         diagnostics: [],
         fingerprint,
@@ -298,7 +309,7 @@ describe('web settings', () => {
       [
         hostFieldKey('userDisplayName'),
         '  Sam ',
-        {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'},
+        {kind: 'set', path: 'project02.userDisplayName', value: '  Sam '},
       ],
       [
         hostFieldKey('userDisplayName'),
@@ -431,13 +442,36 @@ describe('web settings', () => {
     ).toBe(false);
   });
 
-  it('reads a field name as words and a value as a box shows it', () => {
+  it('reads a field name as words, and shows a value so that it saves back as it was', () => {
+    const current = view();
+    const typed = (name: string) =>
+      current.plugins[0]?.fields.find(field => field.name === name);
+    const note = typed('note');
+    const tone = typed('tone');
+    const settings = typed('settings');
+
+    if (note === undefined || tone === undefined || settings === undefined) {
+      throw new Error('Expected the demo fields.');
+    }
+
     expect(readableName('userDisplayName')).toBe('User display name');
     expect(readableName('nvidiaApiKey')).toBe('Nvidia api key');
     expect(readableName('tone')).toBe('Tone');
-    expect(valueText(undefined)).toBe('');
-    expect(valueText('warm')).toBe('warm');
-    expect(valueText({from: 'home'})).toBe('{"from":"home"}');
-    expect(valueText(4096)).toBe('4096');
+    expect(valueText(tone, undefined)).toBe('');
+    expect(valueText(tone, 'warm')).toBe('warm');
+    expect(valueText(settings, {from: 'home'})).toBe('{"from":"home"}');
+    expect(valueText(field('tokens', {valueType: 'number'}), 4096)).toBe(
+      '4096',
+    );
+    // A field of no declared kind shows a string with its quotes, so the
+    // text shown is the text that saves it back as a string.
+    expect(valueText(note, 'true')).toBe('"true"');
+    expect(
+      operationFor(
+        current,
+        pluginFieldKey('demo-config', 'note'),
+        valueText(note, 'true'),
+      ),
+    ).toMatchObject({value: 'true'});
   });
 });

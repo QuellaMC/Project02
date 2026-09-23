@@ -331,43 +331,51 @@ export function readableName(name: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** A value as a box shows it: JSON for a structure, the text of anything else. */
-export function valueText(value: RuntimeConfigValue | undefined): string {
+/**
+ * A value as its box shows it, so that what is shown saves back as what
+ * it was: a field of no declared kind reads and writes JSON, quotes and
+ * all, and every declared kind shows its text.
+ */
+export function valueText(
+  field: RuntimePluginConfigFieldInspectShape,
+  value: RuntimeConfigValue | undefined,
+): string {
   if (value === undefined) {
     return '';
   }
 
-  return typeof value === 'string' ? value : JSON.stringify(value);
+  return typeof value === 'string' && !readsJson(field)
+    ? value
+    : JSON.stringify(value);
+}
+
+/** A structure, or a field of no declared kind, is typed as JSON; a choice among allowed values is never. */
+function readsJson(field: RuntimePluginConfigFieldInspectShape): boolean {
+  return (
+    field.allowedValues === undefined &&
+    (field.valueType === 'object' ||
+      field.valueType === 'array' ||
+      field.valueType === undefined)
+  );
 }
 
 function valueOf(
   field: RuntimePluginConfigFieldInspectShape,
   text: string,
 ): RuntimeConfigValue {
-  const {valueType} = field;
-
-  if (valueType === 'boolean') {
+  if (field.valueType === 'boolean') {
     return text === 'true';
   }
 
-  if (valueType === 'number') {
+  if (field.valueType === 'number') {
     const number = Number(text);
 
     return text.trim().length > 0 && Number.isFinite(number) ? number : text;
   }
 
-  // A choice from allowed values is one of those strings, whatever the
-  // field's kind; the daemon compares it as written.
-  if (
-    field.allowedValues === undefined &&
-    (valueType === 'object' || valueType === 'array' || valueType === undefined)
-  ) {
-    return parsedOrText(text);
-  }
-
-  // Every other kind is text: a single-line box has no edge whitespace a
-  // person means.
-  return text.trim();
+  // Everything else is the text as typed: the daemon judges it, and a
+  // credential or a path is sent exactly as written.
+  return readsJson(field) ? parsedOrText(text) : text;
 }
 
 function parsedOrText(text: string): RuntimeConfigValue {
