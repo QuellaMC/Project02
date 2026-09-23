@@ -6,8 +6,9 @@ import type {
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import {webSource, type Session} from './session.ts';
+import {SettingsScreen} from './settings.tsx';
 import {characterName} from './store.ts';
-import {Avatar, stateLabel, ThreadPane} from './thread.tsx';
+import {Avatar, StatePill, ThreadPane} from './thread.tsx';
 
 /** States a line cannot reach; the daemon holds a line through the rest. */
 const blockingStates = new Set<CharacterSummary['state']>([
@@ -47,16 +48,32 @@ export function App({session}: {readonly session: Session}) {
         ))}
       </header>
       <aside className="roster" aria-label="Characters">
-        <h1 className="roster-title">Characters</h1>
+        <div className="roster-header">
+          <h1 className="roster-title">Characters</h1>
+          <button
+            type="button"
+            className="secondary roster-settings"
+            onClick={() => {
+              void session.openSettings({scope: 'global'});
+            }}
+          >
+            Settings
+          </button>
+        </div>
         {health === undefined ? null : (
           <Roster
             characters={health.characters}
-            openId={thread?.characterId}
+            openId={
+              state.settings === undefined ? thread?.characterId : undefined
+            }
             onOpen={characterId => {
               void session.open(characterId);
             }}
             onStart={characterId => {
               void session.start(characterId);
+            }}
+            onSettings={characterId => {
+              void session.openSettings({scope: 'character', characterId});
             }}
           />
         )}
@@ -89,7 +106,13 @@ export function App({session}: {readonly session: Session}) {
             ))}
           </div>
         )}
-        {thread === undefined ? (
+        {state.settings !== undefined ? (
+          <SettingsScreen
+            state={state}
+            page={state.settings}
+            session={session}
+          />
+        ) : thread === undefined ? (
           <p className="muted empty">
             {health !== undefined && health.characters.length > 1
               ? 'Pick a character.'
@@ -115,11 +138,13 @@ function Roster({
   openId,
   onOpen,
   onStart,
+  onSettings,
 }: {
   readonly characters: readonly CharacterSummary[];
   readonly openId: string | undefined;
   readonly onOpen: (characterId: string) => void;
   readonly onStart: (characterId: string) => void;
+  readonly onSettings: (characterId: string) => void;
 }) {
   if (characters.length === 0) {
     return <p className="muted">No characters are installed.</p>;
@@ -141,11 +166,10 @@ function Roster({
           >
             <Avatar name={character.displayName} />
             <span className="roster-name">{character.displayName}</span>
-            <span className={`pill pill-${character.state}`}>
-              {stateLabel(character.state)}
-            </span>
+            <StatePill character={character} />
           </button>
-          {blockingStates.has(character.state) ? (
+          {/* Start is the retry for a character that is on; one that is off is turned on in its settings. */}
+          {character.enabled && blockingStates.has(character.state) ? (
             <button
               type="button"
               className="roster-start"
@@ -156,6 +180,17 @@ function Roster({
               Start
             </button>
           ) : null}
+          <button
+            type="button"
+            className="secondary roster-gear"
+            aria-label={`Settings for ${character.displayName}`}
+            title={`Settings for ${character.displayName}`}
+            onClick={() => {
+              onSettings(character.id);
+            }}
+          >
+            ⚙
+          </button>
           {character.diagnostic === undefined ? null : (
             <p className="muted small roster-note">{character.diagnostic}</p>
           )}

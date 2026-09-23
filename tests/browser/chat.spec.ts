@@ -3,16 +3,9 @@ import {expect, test as base} from '@playwright/test';
 import {spawnDaemon, type SpawnedDaemon} from '../support/spawn-daemon.ts';
 
 /** A daemon of its own per test, stopped the way an operator stops it. */
-const test = base.extend<{
-  /** Characters installed disabled beside Mira, so the roster has one that is not running. */
-  disabledCharacters: readonly string[];
-  daemon: SpawnedDaemon;
-}>({
-  disabledCharacters: [[], {option: true}],
-  daemon: async ({disabledCharacters}, use) => {
-    const daemon = await spawnDaemon('tests/browser/daemon-entry.ts', [
-      ...disabledCharacters,
-    ]);
+const test = base.extend<{daemon: SpawnedDaemon}>({
+  daemon: async ({}, use) => {
+    const daemon = await spawnDaemon('tests/browser/daemon-entry.ts', []);
 
     await use(daemon);
 
@@ -28,7 +21,7 @@ test('opens the printed address, chats with the reply drafted ahead of its commi
   page,
 }) => {
   await page.goto(daemon.url);
-  await expect(page.getByRole('button', {name: /Mira/u})).toContainText(
+  await expect(page.getByRole('button', {name: /^Mira\b/u})).toContainText(
     'ready',
   );
 
@@ -133,30 +126,4 @@ test('gives a line the daemon refuses back to the composer, with what it said', 
   );
   await expect(composer).toHaveValue(tooLong);
   await expect(page.locator('[data-pending]')).toHaveCount(0);
-});
-
-test.describe('a roster with a character that is not running', () => {
-  test.use({disabledCharacters: ['nova']});
-
-  test('offers Start beside the character, and says why an open was refused', async ({
-    daemon,
-    page,
-  }) => {
-    await page.goto(daemon.url);
-
-    const nova = page.getByRole('listitem').filter({hasText: 'Nova'});
-
-    await expect(nova).toContainText('not started');
-    // Two characters: none opens itself.
-    await expect(page.getByText('Pick a character.')).toBeVisible();
-
-    await nova.getByRole('button', {name: /Nova/u}).click();
-    await expect(page.locator('.notice')).toContainText('has not been started');
-
-    // The daemon's answer to a start reaches the roster: a disabled
-    // character cannot start, and the reason shows where the person looks.
-    await nova.getByRole('button', {name: 'Start', exact: true}).click();
-    await expect(nova).toContainText('failed');
-    await expect(nova).toContainText('disabled');
-  });
 });

@@ -15,6 +15,11 @@ import {
   type GatewayClient,
 } from '../../gateway/client/index.ts';
 import {
+  createSettingsVerbs,
+  noSettingsVerbs,
+  type SettingsVerbs,
+} from './settings-session.ts';
+import {
   applyEvent,
   composerChanged,
   confirmationGone,
@@ -35,7 +40,7 @@ import {
   type WebState,
 } from './store.ts';
 
-export type Session = {
+export type Session = SettingsVerbs & {
   readonly getState: () => WebState;
   readonly subscribe: (listener: () => void) => () => void;
   readonly compose: (text: string) => void;
@@ -67,6 +72,7 @@ export function createSession(address: string): Session {
   }
 
   const {getState, subscribe, apply, writtenFor} = createTabValue();
+  const settings = createSettingsVerbs({client, getState, apply});
   /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
   /**
@@ -207,6 +213,7 @@ export function createSession(address: string): Session {
           // for a frame this stream cannot send until the bootstrap ends.
           void accountForPending(accounting());
           openTheOnlyCharacter();
+          await settings.ready();
         },
         onLost: () => {
           apply(streamLost);
@@ -225,6 +232,7 @@ export function createSession(address: string): Session {
   });
 
   return {
+    ...settings.verbs,
     getState,
     subscribe,
     compose: text => {
@@ -578,6 +586,7 @@ function refusedSession(message: string): Session {
   const nothing = (): Promise<void> => Promise.resolve();
 
   return {
+    ...noSettingsVerbs,
     getState: () => state,
     subscribe: () => () => undefined,
     compose: () => undefined,

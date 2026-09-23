@@ -7,6 +7,7 @@ import {
   confirmationGone,
   connectionRefused,
   forgetWritten,
+  healthRead,
   historyPageRead,
   initialState,
   installSnapshot,
@@ -39,7 +40,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 3,
+    protocolVersion: 4,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -50,7 +51,7 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
 function ready(
   confirmations: readonly PendingConfirmation[] = [],
 ): GatewayReady {
-  return {protocolVersion: 3, health: health(mira), confirmations};
+  return {protocolVersion: 4, health: health(mira), confirmations};
 }
 
 /** A live tab with Mira's DM open and nothing shown yet. */
@@ -995,6 +996,23 @@ describe('web store', () => {
 
     expect(elsewhere.thread).toBe(state.thread);
     expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
+  });
+
+  it('replaces the roster with a fresh health read, keeping everything else', () => {
+    const state = opened();
+    const nova: CharacterSummary = {
+      id: 'nova',
+      displayName: 'Nova',
+      enabled: true,
+      state: 'starting',
+    };
+    const read = healthRead(state, health(mira, nova));
+
+    expect(read.health?.characters.map(character => character.id)).toEqual([
+      'mira',
+      'nova',
+    ]);
+    expect(read.thread).toBe(state.thread);
   });
 
   it('reports a refused address, and says on the thread itself when its page could not be read', () => {

@@ -8,6 +8,8 @@
  */
 import type {
   CharacterSummary,
+  ConfigTarget,
+  ConfigView,
   ConfirmationAnswerStatus,
   ConfirmationCancelReason,
   GatewayEvent,
@@ -80,6 +82,23 @@ export type TurnState = {
   readonly drafts: ReadonlyMap<string, string>;
 };
 
+/** The settings screen's state; its rules live in settings.ts. */
+export type SettingsPage = {
+  readonly target: ConfigTarget;
+  /** The first run's heading, shown until the person leaves the screen. */
+  readonly setup: boolean;
+  /** Absent while the first read is on its way; a refused view shows its message, never blank fields. */
+  readonly view?: ConfigView;
+  /** Field key → what is typed there and not saved; survives a re-read. */
+  readonly edits: ReadonlyMap<string, string>;
+  /** Field key → the daemon's refusal of the last change there. */
+  readonly problems: ReadonlyMap<string, string>;
+  /** The one field whose change is on its way. */
+  readonly saving?: string;
+  /** The field whose last change landed, until the person's next edit. */
+  readonly saved?: string;
+};
+
 export type WebState = {
   readonly connection: Connection;
   readonly health?: GatewayHealth;
@@ -87,6 +106,8 @@ export type WebState = {
   readonly confirmations: readonly PendingConfirmation[];
   /** The one open DM. */
   readonly thread?: Thread;
+  /** The settings screen, when one is open in front of the thread. */
+  readonly settings?: SettingsPage;
   /** Client message id → a pending line; kept across a switch of threads. */
   readonly pending: ReadonlyMap<string, PendingLine>;
   /**
@@ -222,6 +243,15 @@ export function connectionRefused(state: WebState, message: string): WebState {
     confirmations: [],
     turns: new Map(),
   };
+}
+
+/**
+ * The roster as the health verb reports it, read by a tab that changed
+ * config: whether a character is on is config, which no event carries,
+ * and the states that follow arrive as events.
+ */
+export function healthRead(state: WebState, health: GatewayHealth): WebState {
+  return {...state, health};
 }
 
 /** Said once: the same news twice — a frame seen again — is the same notice. */

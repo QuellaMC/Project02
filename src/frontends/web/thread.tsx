@@ -4,8 +4,26 @@ import type {CharacterSummary} from '../../gateway/api/index.ts';
 import type {Session} from './session.ts';
 import {composerText, type Thread, type WebState} from './store.ts';
 
-export function stateLabel(state: CharacterSummary['state']): string {
-  return state.replace('_', ' ');
+/** States a character rests in; one switched off and resting is off. */
+const restingStates = new Set<CharacterSummary['state']>([
+  'not_started',
+  'stopped',
+  'failed',
+]);
+
+/**
+ * A character's state as its pill says it. One that is switched off and
+ * not running says off instead; one still running or on its way down
+ * says so, since that is what the person sees happening.
+ */
+export function StatePill({character}: {readonly character: CharacterSummary}) {
+  const off = !character.enabled && restingStates.has(character.state);
+
+  return (
+    <span className={`pill pill-${off ? 'off' : character.state}`}>
+      {off ? 'off' : character.state.replace('_', ' ')}
+    </span>
+  );
 }
 
 export function Avatar({name}: {readonly name: string}) {
@@ -55,11 +73,7 @@ export function ThreadPane({
       <header className="thread-header">
         <Avatar name={name} />
         <h2 className="thread-name">{name}</h2>
-        {character === undefined ? null : (
-          <span className={`pill pill-${character.state}`}>
-            {stateLabel(character.state)}
-          </span>
-        )}
+        {character === undefined ? null : <StatePill character={character} />}
       </header>
       {thread.unread === undefined ? null : (
         <p className="notice" role="status">

@@ -80,6 +80,18 @@ export function createRuntimePluginConfigInspectShape(options: {
       : authoredPlugin?.enabled) ??
     options.defaultEnabled ??
     options.manifest.activation.defaultEnabled;
+  const enabledSource: RuntimeConfigEffectiveSource =
+    ownJsonRecordValue(
+      options.layeredConfig.characterConfig?.plugins,
+      options.manifest.id,
+    )?.enabled !== undefined
+      ? 'character'
+      : ownJsonRecordValue(
+            options.layeredConfig.globalConfig?.plugins,
+            options.manifest.id,
+          )?.enabled !== undefined
+        ? 'global'
+        : 'default';
   const diagnostics = Object.freeze(
     options.pluginResolution.diagnostics.filter(
       diagnostic =>
@@ -104,6 +116,7 @@ export function createRuntimePluginConfigInspectShape(options: {
     displayName: options.manifest.displayName,
     version: options.manifest.version,
     enabled: configuredEnabled,
+    enabledSource,
     activation,
     fields: Object.freeze(
       options.manifest.config.fields.map(field => {

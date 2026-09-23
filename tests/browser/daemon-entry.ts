@@ -2,7 +2,8 @@
  * A daemon for the browser suite, the way serve runs it: on a temporary
  * home, with the demo-config plugin enabled and a model scripted by the
  * line it reads. Character ids on the command line are installed disabled,
- * for a roster with a character that is not running. Spawned as a process
+ * for a roster with a character that is not running; `--fresh` leaves the
+ * home's provider unchosen, the way a first run finds it. Spawned as a process
  * (tests/support/spawn-daemon.ts), so Playwright's own loader never enters
  * the daemon's graph. Prints what serve prints; stops on SIGINT and
  * removes its home.
@@ -38,12 +39,16 @@ const onSignal = (): void => {
 process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
+const fresh = process.argv.includes('--fresh');
+const disabledIds = process.argv.slice(2).filter(arg => arg !== '--fresh');
+
 await ensureInitializedProject02Store({homeRoot});
 writeRuntimeConfig(join(homeRoot, 'config.json'), {
+  ...(fresh ? {} : {project02: {roleModelProvider: 'local'}}),
   plugins: {[demoConfigPluginId]: {enabled: true}},
 });
 
-for (const id of process.argv.slice(2)) {
+for (const id of disabledIds) {
   writeTestCharacterPackage(homeRoot, {
     id,
     displayName: id.slice(0, 1).toUpperCase() + id.slice(1),
