@@ -218,9 +218,8 @@
         &mdash; mem0 asks its backend to extract facts from them &mdash; and a
         provider exposes whichever namespaced tools its backend supports.
         Providers are disabled by default; enable one and, when several are
-        enabled, select it with
-        <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code
-        >. Activation keeps at most one selected, so by default an external
+        enabled, select it as <code>defaultMemoryProvider</code> in the home's
+        or the character's settings. Activation keeps at most one selected, so by default an external
         provider runs <em>alongside</em>
         curated memory rather than replacing it; an operator who explicitly
         disables
@@ -302,10 +301,10 @@
         always wins — on first install and on every package update. The model is
         the fenced writer: it may propose changes only to
         <code>agentMutable</code> fields, and credentials are never among them.
-        Credentials prefer env files; each character's own file, set with
-        <code>--character</code>, merges over the shared one, so two characters
-        can hold different accounts for the same memory service while a shared
-        account covers the rest.
+        A credential is entered in the settings and kept with that scope's
+        document, redacted on every read; a character's own value overrides the
+        home's, so two characters can hold different accounts for the same
+        memory service while a shared account covers the rest.
       </p>
 
       <h2>Picking a setup</h2>

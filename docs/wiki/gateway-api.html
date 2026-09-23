@@ -382,7 +382,7 @@ Content-Type: application/json
       </p>
 
       <pre><code>event: ready
-data: {"protocolVersion":2,"health":{…},"confirmations":[…]}
+data: {"protocolVersion":3,"health":{…},"confirmations":[…]}
 
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
@@ -602,32 +602,36 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
 
       <p>
         A view is what a settings page renders. Its <code>project02</code>
-        fields and each plugin's fields share one shape — what this scope
-        authored, what is in effect and which layer put it there, whether this
-        scope may author it, whether a change reloads the character. Defaults
-        are not resolved in: an unauthored field reads
+        fields, in the order a page shows them, and each plugin's fields share
+        one shape — what this scope authored, what is in effect and which layer
+        put it there, whether a change reloads the character. Whatever a view
+        offers, the scope can save: every host field is authorable at the home
+        and per character, and a plugin that belongs to a character
+        (<code>config.scope: "character_only"</code>) is absent from the home's
+        view. Defaults are not resolved in: an unauthored field reads
         <code>effective.source: "missing"</code> and its
         <code>defaultValueSummary</code> names what applies. The global scope
         resolves the home's document alone; a character's scope resolves the
-        merged view with that character's own secrets. A document that does not
-        load is refused with the diagnostic, never rendered as blank fields. The
-        store root is not a field: it is the home the daemon runs in, and health
-        names it.
+        merged view, that character's own values over the home's. A document
+        that does not load is refused with the diagnostic, never rendered as
+        blank fields; a character switched off is still viewed, and its
+        <code>enabled</code> field is the way back on. The home is not a field:
+        it is where the daemon runs, and health names it.
       </p>
 
       <p>
         A change names one operation — <code>set</code> or <code>unset</code> on
         <code>project02.&lt;field&gt;</code>, <code>plugin_enabled</code>,
-        <code>plugin_field_set</code>, <code>plugin_field_unset</code>,
-        <code>plugin_secret_set</code> — and carries the fingerprint the view
-        handed out. The daemon verifies it under the file locks, so a concurrent
-        edit from the console or another page is <code>refused</code> with
-        <code>conflict</code>, never clobbered: the page re-reads and the person
-        saves again. A secret is sent as its value; the daemon names its
-        environment variable and writes the scope's env file, and the view shows
-        only that the field is set. A write the daemon cannot make — a file
-        another writer holds for longer than it will wait, an unwritable home —
-        is <code>failed</code> with the reason.
+        <code>plugin_field_set</code>, <code>plugin_field_unset</code> — and
+        carries the fingerprint the view handed out. The daemon verifies it
+        under the file locks, so a concurrent edit from another page is
+        <code>refused</code> with <code>conflict</code>, never clobbered: the
+        page re-reads and the person saves again. A secret is sent as its value
+        and kept with the scope's document; every view shows only that it is
+        set, and a home write naming a character's own plugin is refused as
+        <code>invalid</code>. A write the daemon cannot make — a file another
+        writer holds for longer than it will wait, an unwritable home — is
+        <code>failed</code> with the reason.
       </p>
 
       <p>

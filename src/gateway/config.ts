@@ -50,8 +50,8 @@ import type {
 /**
  * How long a write waits for a file another writer holds. The lock's own
  * default is ten seconds per file, spent in a synchronous wait: fine for a
- * console, a frozen daemon for everyone else. A person who saved while the
- * console was saving simply tries again.
+ * terminal, a frozen daemon for everyone else. A person who saved while
+ * another page was saving simply tries again.
  */
 const writeLockWaitMs = 500;
 
@@ -96,9 +96,9 @@ export function readConfigView(
 }
 
 /**
- * Writes one change through the control transaction the console uses, so
- * the daemon and the console never race a live reload with a second
- * writer. Whatever the seam refuses is an outcome; a bug still throws.
+ * Writes one change through the one control transaction, so the daemon
+ * never races a live reload with a second writer. Whatever the seam
+ * refuses is an outcome; a bug still throws.
  */
 export async function applyConfigChange(
   home: Project02Home,
@@ -405,8 +405,8 @@ async function resolveWriteTarget(options: {
     return refusedChange(candidate.status, candidate.message);
   }
 
-  // A character's first valid write claims its data directory, as the
-  // console's does; the transaction then verifies the marker under its lock.
+  // A character's first valid write claims its data directory, as its
+  // first start does; the transaction then verifies the marker under its lock.
   await ensureCharacterDataDir({
     homeRoot: home.runtimeLocation.homeRoot,
     characterId: target.characterId,
