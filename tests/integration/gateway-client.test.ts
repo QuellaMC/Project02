@@ -51,7 +51,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 4});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 5});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},

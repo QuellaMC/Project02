@@ -21,6 +21,7 @@ import {
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {
   createConfirmationHome,
+  createGatewayTestHome,
   openDirect,
 } from '../support/gateway-fixtures.ts';
 import {
@@ -30,6 +31,7 @@ import {
   subscribeToEvents,
   testGatewayToken as token,
 } from '../support/gateway-http.ts';
+import {createScriptedAdapter} from '../support/scripted-adapter.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(): RoleModelAdapter {
@@ -217,7 +219,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 4,
+      protocolVersion: 5,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -428,9 +430,10 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 4,
+      protocolVersion: 5,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
+      turns: [],
     });
     expect(events.frames[0]).toBe(ready);
     await events.next(frame => frame.comment === 'ping');
@@ -485,6 +488,126 @@ describe('gateway over HTTP', () => {
 
     await late.ended;
     expect(late.frames).toEqual([]);
+    await server.close();
+    await gateway.stop();
+  });
+
+  it('hands a stream opened mid-reply the reply so far, named by its line, and lets no other submission end it', async () => {
+    const homeRoot = await createGatewayTestHome('project02-gateway-drafts-');
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const server = await startTestGatewayServer({gateway});
+
+    await gateway.startCharacter('mira');
+
+    const ref = await openDirect(gateway, 'mira');
+    const line = `slowly ${Array.from({length: 120}, (_, word) => `w${String(word)}`).join(' ')}`;
+    let deltas = 0;
+    const counting = gateway.events(event => {
+      if (
+        event.kind === 'turn_progress' &&
+        event.progress.kind === 'reply_delta'
+      ) {
+        deltas += 1;
+      }
+    });
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: line,
+      source: 'web',
+      clientMessageId: 'msg-slow',
+    });
+
+    await vi.waitFor(() => {
+      expect(deltas).toBeGreaterThanOrEqual(3);
+    });
+
+    // Nobody was listening before this stream: the daemon folded the turn
+    // for it all the same.
+    const first = await subscribeToEvents(server.baseUrl);
+    const ready = frameData(
+      await first.next(frame => frame.event === 'ready'),
+    ) as {
+      turns: {
+        characterId: string;
+        conversationId: string;
+        source: string;
+        clientMessageId: string;
+        drafts: {draftId: string; text: string}[];
+      }[];
+    };
+
+    expect(ready.turns).toHaveLength(1);
+    expect(ready.turns[0]).toMatchObject({
+      characterId: 'mira',
+      conversationId: ref.conversationId,
+      source: 'web',
+      clientMessageId: 'msg-slow',
+    });
+    expect(ready.turns[0]?.drafts).toHaveLength(1);
+    expect(ready.turns[0]?.drafts[0]?.text.startsWith('noted: slowly')).toBe(
+      true,
+    );
+    expect(
+      `noted: ${line}`.startsWith(ready.turns[0]?.drafts[0]?.text ?? '?'),
+    ).toBe(true);
+
+    // A submission the runtime refuses on the spot completes at once,
+    // while the reply is still being written.
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: 'someone-else',
+        text: 'not mine',
+        source: 'web',
+        clientMessageId: 'msg-other',
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'sender_not_supported',
+    });
+    await first.next(
+      frame =>
+        frame.event === 'turn_completed' &&
+        (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+          'msg-other',
+    );
+
+    const second = await subscribeToEvents(server.baseUrl);
+    const later = frameData(
+      await second.next(frame => frame.event === 'ready'),
+    ) as typeof ready;
+
+    expect(later.turns[0]).toMatchObject({clientMessageId: 'msg-slow'});
+    expect(later.turns[0]?.drafts[0]?.text.length ?? 0).toBeGreaterThanOrEqual(
+      ready.turns[0]?.drafts[0]?.text.length ?? 0,
+    );
+
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+    await second.next(
+      frame =>
+        frame.event === 'turn_completed' &&
+        (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+          'msg-slow',
+    );
+
+    const after = await subscribeToEvents(server.baseUrl);
+
+    expect(
+      (
+        frameData(await after.next(frame => frame.event === 'ready')) as {
+          turns: unknown[];
+        }
+      ).turns,
+    ).toEqual([]);
+    counting();
+    await first.cancel();
+    await second.cancel();
+    await after.cancel();
     await server.close();
     await gateway.stop();
   });
@@ -569,7 +692,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 4,
+          protocolVersion: 5,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},

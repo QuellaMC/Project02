@@ -27,6 +27,7 @@ import type {
   HistoryMessage,
   HistoryOutcome,
   PendingConfirmation,
+  RunningTurn,
 } from '../../src/gateway/api/index.ts';
 
 const mira: CharacterSummary = {
@@ -39,7 +40,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 4,
+    protocolVersion: 5,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -49,8 +50,9 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
 
 function ready(
   confirmations: readonly PendingConfirmation[] = [],
+  turns: readonly RunningTurn[] = [],
 ): GatewayReady {
-  return {protocolVersion: 4, health: health(mira), confirmations};
+  return {protocolVersion: 5, health: health(mira), confirmations, turns};
 }
 
 /** A live tab with Mira's DM open and nothing shown yet. */
@@ -177,19 +179,31 @@ describe('web store', () => {
     expect(streamLost(refused)).toBe(refused);
   });
 
-  it('installs every ready as the truth: roster and confirmations replace, every turn in progress drops, and what the thread shows stays on screen until its newest page replaces it', () => {
-    let state = applyEvent(
-      opened(),
+  it('installs every ready as the truth: roster, confirmations and the turns in progress replace, and what the thread shows stays on screen until its newest page replaces it', () => {
+    let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
+
+    state = applyEvent(
+      state,
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
     );
+    expect(state.turns.get(conversationId)?.drafts).toEqual([
+      {draftId: '1.0', text: 'I rem'},
+    ]);
 
-    state = applyEvent(state, userMessage('m-1', 'hello', 'line-1'));
-    state = installSnapshot(state, ready([confirmation('c-1')]));
+    const elsewhere: RunningTurn = {
+      characterId: 'nova',
+      conversationId: 'conv-2',
+      source: 'telegram:bot',
+      clientMessageId: 'line-7',
+      drafts: [{draftId: '1.0', text: 'as far as I '}],
+    };
+
+    state = installSnapshot(state, ready([confirmation('c-1')], [elsewhere]));
 
     expect(state.connection).toEqual({status: 'live'});
     expect(state.health?.characters).toEqual([mira]);
     expect(state.confirmations.map(pending => pending.id)).toEqual(['c-1']);
-    expect(state.turns.size).toBe(0);
+    expect([...state.turns]).toEqual([['conv-2', elsewhere]]);
     expect(state.thread).toMatchObject({
       stale: [{messageId: 'm-1'}],
       messages: [],
@@ -278,7 +292,7 @@ describe('web store', () => {
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
 
     expect(state.pending.size).toBe(0);
-    expect(state.turns.get(conversationId)?.busy).toBe(true);
+    expect(state.turns.get(conversationId)).toBeDefined();
     expect(state.thread?.messages).toEqual([
       {
         messageId: 'm-1',
@@ -291,11 +305,12 @@ describe('web store', () => {
   });
 
   it('fills a draft bubble per draft id, replaces it with its commit, and removes one withdrawn', () => {
-    let state = applyEvent(
-      opened(),
+    let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
+
+    state = applyEvent(
+      state,
       progress({kind: 'reply_delta', draftId: '1.0', text: 'I remember '}),
     );
-
     state = applyEvent(
       state,
       progress({kind: 'reply_delta', draftId: '1.0', text: 'you'}),
@@ -305,9 +320,9 @@ describe('web store', () => {
       progress({kind: 'reply_delta', draftId: '1.1', text: 'and'}),
     );
 
-    expect([...(state.turns.get(conversationId)?.drafts ?? [])]).toEqual([
-      ['1.0', 'I remember you'],
-      ['1.1', 'and'],
+    expect(state.turns.get(conversationId)?.drafts).toEqual([
+      {draftId: '1.0', text: 'I remember you'},
+      {draftId: '1.1', text: 'and'},
     ]);
 
     state = applyEvent(
@@ -326,8 +341,9 @@ describe('web store', () => {
       progress({kind: 'reply_withdrawn', draftId: '1.1'}),
     );
 
-    expect(state.turns.has(conversationId)).toBe(false);
+    expect(state.turns.get(conversationId)?.drafts).toEqual([]);
     expect(state.thread?.messages.map(message => message.text)).toEqual([
+      'hello',
       'I remember you',
     ]);
 
@@ -337,6 +353,22 @@ describe('web store', () => {
     );
 
     expect(unchanged).toBe(state);
+
+    // A turn ends at its own completion; another submission's ending on
+    // the same conversation — one the daemon refused on the spot — leaves
+    // it running, drafts and all.
+    state = applyEvent(
+      state,
+      progress({kind: 'reply_delta', draftId: '2.0', text: 'and then'}),
+    );
+
+    const other = applyEvent(
+      state,
+      completed('line-2', 'refused', 'wrong sender', false),
+    );
+
+    expect(other.turns).toBe(state.turns);
+    expect(applyEvent(other, completed('line-1')).turns.size).toBe(0);
   });
 
   it('keeps a reply being written in a thread the person left, whole, with its typing indicator, for when they come back', () => {
@@ -366,8 +398,11 @@ describe('web store', () => {
     state = threadOpened(state, mira);
 
     expect(state.turns.get(conversationId)).toEqual({
-      busy: true,
-      drafts: new Map([['1.0', 'I remember you']]),
+      characterId: 'mira',
+      conversationId,
+      source: 'web',
+      clientMessageId: 'line-1',
+      drafts: [{draftId: '1.0', text: 'I remember you'}],
     });
 
     // The commit takes the draft wherever the person is, and the turn's
@@ -384,10 +419,7 @@ describe('web store', () => {
       }),
     );
 
-    expect(state.turns.get(conversationId)).toEqual({
-      busy: true,
-      drafts: new Map(),
-    });
+    expect(state.turns.get(conversationId)?.drafts).toEqual([]);
 
     state = applyEvent(state, completed('line-1'));
 
@@ -985,8 +1017,12 @@ describe('web store', () => {
 
     expect(state.health?.characters[0]).toEqual(mira);
 
-    const elsewhere = applyEvent(
+    const away = applyEvent(
       state,
+      userMessage('m-9', 'hi there', 'line-9', 'conv-2'),
+    );
+    const elsewhere = applyEvent(
+      away,
       progress(
         {kind: 'reply_delta', draftId: '1.0', text: 'not here'},
         'conv-2',
@@ -994,7 +1030,9 @@ describe('web store', () => {
     );
 
     expect(elsewhere.thread).toBe(state.thread);
-    expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
+    expect(elsewhere.turns.get('conv-2')?.drafts).toEqual([
+      {draftId: '1.0', text: 'not here'},
+    ]);
   });
 
   it('takes the roster as the daemon says it after a change landed', () => {

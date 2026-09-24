@@ -6,7 +6,9 @@ import {
   gatewayProtocolVersion,
   type Gateway,
   type GatewayReady,
+  type RunningTurn,
 } from '../api/contract.ts';
+import {foldRunningTurns, type RunningTurns} from '../api/running-turns.ts';
 import type {ApiEnv} from './env.ts';
 
 export type EventStreamsOptions = {
@@ -23,10 +25,11 @@ export type EventStreams = {
   /**
    * Ends every open stream once the frames already queued for it are
    * written — a client that does not take them within the grace is
-   * dropped — and ends at once any stream that arrives later: a request
-   * can pass the stopping guard before it is set and reach its stream
-   * after. Shutdown awaits it after the gateway drained its turns, so the
-   * last reply rides out before the stream ends.
+   * dropped — ends at once any stream that arrives later (a request can
+   * pass the stopping guard before it is set and reach its stream after),
+   * and lets go of the gateway. Shutdown awaits it after the gateway
+   * drained its turns, so the last reply rides out before the stream
+   * ends.
    */
   readonly closeAll: () => Promise<void>;
 };
@@ -97,11 +100,16 @@ export function createFrameQueue(options: {
 }
 
 /**
- * One SSE stream per connection over the gateway's event fan-out. The
- * daemon's listener is registered and the snapshot taken in one breath,
- * so `ready` is exactly the state every later event moves on from: a
- * client installs it and reads on, with nothing to fetch and nothing to
- * order — the stream stays a hint, and the verbs the truth.
+ * The SSE streams over the gateway's event fan-out. One subscription,
+ * taken when the streams are created and kept as long as they live,
+ * formats every event once and hands the frame to each open stream in
+ * the same tick; it also folds the turns running, so a stream opened
+ * mid-reply finds the reply so far in its snapshot whether or not anyone
+ * was listening before. A stream's `ready` is taken in one synchronous
+ * breath with its registration, so it is exactly the state every later
+ * frame moves on from: a client installs it and reads on, with nothing to
+ * fetch and nothing to order — the stream stays a hint, and the verbs the
+ * truth.
  */
 export function createEventStreams(
   source: Pick<Gateway, 'events' | 'health' | 'pendingConfirmations'>,
@@ -110,7 +118,18 @@ export function createEventStreams(
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
   const graceMs = options.graceMs ?? clientGraceMs;
   const closers = new Set<() => Promise<void>>();
+  const attached = new Set<FrameQueue>();
+  let turns: RunningTurns = new Map();
   let closed = false;
+  const unsubscribe = source.events(event => {
+    turns = foldRunningTurns(turns, event);
+
+    const frame = formatEventFrame(event.kind, JSON.stringify(event));
+
+    for (const queue of attached) {
+      queue.push(frame);
+    }
+  });
 
   return Object.freeze({
     handler(c) {
@@ -124,6 +143,7 @@ export function createEventStreams(
     openCount: () => closers.size,
     closeAll: () => {
       closed = true;
+      unsubscribe();
 
       return Promise.all([...closers].map(close => close())).then(
         () => undefined,
@@ -164,26 +184,30 @@ export function createEventStreams(
     });
     closers.add(close);
 
-    const unsubscribe = source.events(event => {
-      queue.push(formatEventFrame(event.kind, JSON.stringify(event)));
-    });
+    // Snapshot and attachment in one breath: no event lands between them.
     const snapshot: GatewayReady = {
       protocolVersion: gatewayProtocolVersion,
       health: source.health(),
       confirmations: source.pendingConfirmations(),
+      turns: runningTurns(turns),
     };
 
-    try {
-      queue.push(formatEventFrame(readyEvent, JSON.stringify(snapshot)));
+    queue.push(formatEventFrame(readyEvent, JSON.stringify(snapshot)));
+    attached.add(queue);
 
+    try {
       while (await heartbeat.tick(heartbeatMs)) {
         queue.push(heartbeatFrame);
       }
     } finally {
-      unsubscribe();
+      attached.delete(queue);
       closers.delete(close);
     }
   }
+}
+
+function runningTurns(turns: RunningTurns): readonly RunningTurn[] {
+  return Object.freeze([...turns.values()]);
 }
 
 /**

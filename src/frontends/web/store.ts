@@ -6,20 +6,22 @@
  * value it was given. Nothing here touches the DOM, so the rules a page
  * follows are tested in Node with the rest of the suite.
  */
-import type {
-  CharacterSummary,
-  ConfigTarget,
-  ConfigView,
-  ConfirmationAnswerStatus,
-  ConfirmationCancelReason,
-  GatewayEvent,
-  GatewayHealth,
-  GatewayReady,
-  HistoryOutcome,
-  HistoryPage,
-  OpenOutcome,
-  PendingConfirmation,
-  TurnOutcome,
+import {
+  foldRunningTurns,
+  type CharacterSummary,
+  type ConfigTarget,
+  type ConfigView,
+  type ConfirmationAnswerStatus,
+  type ConfirmationCancelReason,
+  type GatewayEvent,
+  type GatewayHealth,
+  type GatewayReady,
+  type HistoryOutcome,
+  type HistoryPage,
+  type OpenOutcome,
+  type PendingConfirmation,
+  type RunningTurns,
+  type TurnOutcome,
 } from '../../gateway/api/index.ts';
 
 export type Connection =
@@ -70,18 +72,6 @@ export type Thread = {
   readonly unread?: string | undefined;
 };
 
-/**
- * A turn in progress, for every conversation and not only the one on
- * screen, because only the stream says it and no page read gives it
- * back: the typing indicator until the first delta or the end, and each
- * draft's text so far.
- */
-export type TurnState = {
-  readonly busy: boolean;
-  /** Draft id → the reply's text so far. */
-  readonly drafts: ReadonlyMap<string, string>;
-};
-
 /** The settings screen's state; its rules live in settings.ts. */
 export type SettingsPage = {
   readonly target: ConfigTarget;
@@ -125,8 +115,13 @@ export type WebState = {
    * line the daemon did not take comes back where it was written.
    */
   readonly composers: ReadonlyMap<string, string>;
-  /** Conversation id → the turn running there; absent when none is. */
-  readonly turns: ReadonlyMap<string, TurnState>;
+  /**
+   * The turns in progress, for every conversation and not only the one on
+   * screen, folded by the contract's one rule from the frames and installed
+   * from the snapshot: the typing indicator until the first delta or the
+   * end, and each draft's text so far.
+   */
+  readonly turns: RunningTurns;
   /**
    * What the page has to say that belongs to no thread: how a turn did
    * not complete, a confirmation that expired, a verb the daemon refused.
@@ -149,8 +144,6 @@ export type LineEnding = {
 };
 
 export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
-
-const noTurn: TurnState = {busy: false, drafts: new Map()};
 
 export const initialState: WebState = {
   connection: {status: 'connecting'},
@@ -177,10 +170,11 @@ export function composerText(state: WebState): string {
 }
 
 /**
- * Every `ready` is the truth: the roster and the waiting confirmations
- * replace, every turn in progress drops — how a turn ended is still news
- * — and what the thread shows is set aside for the newest page the
- * session reads next, kept on screen and stitched to nothing that comes.
+ * Every `ready` is the truth: the roster, the waiting confirmations and
+ * the turns in progress replace what the tab held — how a turn ended is
+ * still news — and what the thread shows is set aside for the newest page
+ * the session reads next, kept on screen and stitched to nothing that
+ * comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -192,7 +186,7 @@ export function installSnapshot(
     connection: {status: 'live'},
     health: snapshot.health,
     confirmations: snapshot.confirmations,
-    turns: new Map(),
+    turns: new Map(snapshot.turns.map(turn => [turn.conversationId, turn])),
     ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
   };
 
@@ -612,13 +606,11 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
           : thread,
       );
 
-      return withTurn(shown, event.conversationId, turn =>
-        turnProgress(turn, progress),
-      );
+      return withTurns(shown, event);
     }
     case 'turn_completed':
       return lineEnded(
-        withTurn(state, event.conversationId, () => noTurn),
+        withTurns(state, event),
         event.characterId,
         event.clientMessageId,
         {
@@ -644,41 +636,6 @@ function committed(
     : thread;
 }
 
-function turnProgress(
-  turn: TurnState,
-  progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
-): TurnState {
-  switch (progress.kind) {
-    case 'user_message':
-      return turn.busy ? turn : {...turn, busy: true};
-    case 'reply_delta': {
-      const drafts = new Map(turn.drafts);
-
-      drafts.set(
-        progress.draftId,
-        (drafts.get(progress.draftId) ?? '') + progress.text,
-      );
-
-      return {...turn, drafts};
-    }
-    case 'visible_reply':
-    case 'reply_withdrawn': {
-      if (!turn.drafts.has(progress.draftId)) {
-        return turn;
-      }
-
-      const drafts = new Map(turn.drafts);
-
-      drafts.delete(progress.draftId);
-
-      return {...turn, drafts};
-    }
-    case 'tool_calls_requested':
-    case 'tool_call_completed':
-      return turn;
-  }
-}
-
 function withThread(
   state: WebState,
   update: (thread: Thread) => Thread,
@@ -692,28 +649,11 @@ function withThread(
   return thread === state.thread ? state : {...state, thread};
 }
 
-/** A conversation's turn record, kept while it has news and dropped when it has none. */
-function withTurn(
-  state: WebState,
-  conversationId: string,
-  update: (turn: TurnState) => TurnState,
-): WebState {
-  const turn = state.turns.get(conversationId) ?? noTurn;
-  const next = update(turn);
+/** The turns in progress after one frame, by the contract's rule; no change is no new value. */
+function withTurns(state: WebState, event: GatewayEvent): WebState {
+  const turns = foldRunningTurns(state.turns, event);
 
-  if (next === turn) {
-    return state;
-  }
-
-  const turns = new Map(state.turns);
-
-  if (next.busy || next.drafts.size > 0) {
-    turns.set(conversationId, next);
-  } else if (!turns.delete(conversationId)) {
-    return state;
-  }
-
-  return {...state, turns};
+  return turns === state.turns ? state : {...state, turns};
 }
 
 /** The daemon took the line, whichever thread it went to; what its ending said stands. */

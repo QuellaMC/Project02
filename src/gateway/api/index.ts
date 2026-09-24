@@ -35,6 +35,8 @@ export {
   type OpenOutcome,
   type PendingConfirmation,
   type ReconcilePlan,
+  type RunningDraft,
+  type RunningTurn,
   type StartOutcome,
   type StorageFailure,
   type TurnIdentity,
@@ -42,6 +44,7 @@ export {
   type TurnOutcome,
   type Unsubscribe,
 } from './contract.ts';
+export {foldRunningTurns, type RunningTurns} from './running-turns.ts';
 export type {
   RuntimeConfigDiagnostic,
   RuntimeConfigValue,

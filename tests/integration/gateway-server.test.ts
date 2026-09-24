@@ -97,7 +97,7 @@ describe('gateway server lifecycle', () => {
     );
 
     expect(health.status).toBe(200);
-    await expect(health.json()).resolves.toMatchObject({protocolVersion: 4});
+    await expect(health.json()).resolves.toMatchObject({protocolVersion: 5});
 
     await server.close();
     await new Promise<void>(resolve => {
