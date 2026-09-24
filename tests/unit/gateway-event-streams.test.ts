@@ -1,15 +1,42 @@
 import {describe, expect, it, vi} from 'vitest';
 
 import {
+  createEventLog,
   createFrameQueue,
   formatEventFrame,
 } from '../../src/gateway/http/events.ts';
 
 describe('gateway event stream frames', () => {
-  it('formats an event as one SSE frame', () => {
+  it('formats an event as one SSE frame, with its id when it has one', () => {
     expect(formatEventFrame('ready', '{"protocolVersion":1}')).toBe(
       'event: ready\ndata: {"protocolVersion":1}\n\n',
     );
+    expect(formatEventFrame('state_changed', '{}', 'ab-7')).toBe(
+      'id: ab-7\nevent: state_changed\ndata: {}\n\n',
+    );
+  });
+
+  it('keeps the tail of the log within its budget, oldest out first, and answers an id it cannot reach with nothing', () => {
+    const frame = (seq: number): string => `event: e\ndata: ${String(seq)}\n\n`;
+    const log = createEventLog({maxBytes: 3 * frame(1).length});
+
+    expect(log.latest()).toBe(0);
+    // Before the first frame, the number before it is the tail.
+    expect(log.after(`${log.run}-0`)).toEqual([]);
+
+    for (let seq = 1; seq <= 5; seq += 1) {
+      expect(log.append(frame(seq))).toBe(seq);
+    }
+
+    expect(log.latest()).toBe(5);
+    expect(log.after(`${log.run}-5`)).toEqual([]);
+    expect(log.after(`${log.run}-3`)).toEqual([frame(4), frame(5)]);
+    // One before the oldest kept saw everything the tail has since lost.
+    expect(log.after(`${log.run}-2`)).toEqual([frame(3), frame(4), frame(5)]);
+    expect(log.after(`${log.run}-1`)).toBeUndefined();
+    expect(log.after(`${log.run}-6`)).toBeUndefined();
+    expect(log.after(`${'f'.repeat(16)}-3`)).toBeUndefined();
+    expect(log.after('yesterday')).toBeUndefined();
   });
 
   it('writes frames in order, one at a time, and reports the drain once the last one is out', async () => {

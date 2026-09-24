@@ -8,6 +8,10 @@ import {
   createGatewayClient,
   GatewayClientError,
 } from '../../src/gateway/client/index.ts';
+import {
+  createEventStreams,
+  formatEventFrame,
+} from '../../src/gateway/http/events.ts';
 import {createGateway, type GatewayEvent} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
@@ -186,6 +190,149 @@ describe('gateway reference client', () => {
       message: 'a verb of the bootstrap',
     });
     await close();
+  });
+
+  it('returns with the id of the last frame it applied, and is resumed rather than restarted when the daemon still holds it', async () => {
+    const gateway = createGateway({
+      location: {storeRoot: await createGatewayTestHome()},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    // The streams outlive the socket, as they do in the daemon.
+    const events = createEventStreams(gateway);
+    const first = await startTestGatewayServer({gateway, events});
+    const client = createGatewayClient({
+      url: `${first.baseUrl}/#token=${token}`,
+    });
+    const kinds: string[] = [];
+    const readies: boolean[] = [];
+    let resumed = 0;
+    const abort = new AbortController();
+    const following = client.events(event => kinds.push(event.kind), {
+      signal: abort.signal,
+      retryMs: 20,
+      onReady: ({reconnected}) => {
+        readies.push(reconnected);
+      },
+      onResumed: () => {
+        resumed += 1;
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(readies).toEqual([false]);
+    });
+    // The socket goes away under the stream; the daemon's log does not.
+    await first.close();
+    await gateway.startCharacter('mira');
+
+    const returned = await startTestGatewayServer({
+      gateway,
+      events,
+      port: first.port,
+    });
+
+    await vi.waitFor(() => {
+      expect(kinds).toEqual(['state_changed', 'state_changed']);
+    });
+    expect(resumed).toBe(1);
+    expect(readies).toEqual([false]);
+    abort.abort();
+    await following;
+    await returned.close();
+    await events.closeAll();
+    await gateway.stop();
+  });
+
+  it('asks for the frames after the last one it handed on, whether the stream was cut before or during a replay', async () => {
+    const run = 'a'.repeat(16);
+    const asked: (string | undefined)[] = [];
+    const frame = (seq: number): string =>
+      formatEventFrame(
+        'state_changed',
+        JSON.stringify({
+          kind: 'state_changed',
+          characterId: 'mira',
+          state: 'ready',
+        }),
+        `${run}-${String(seq)}`,
+      );
+    const app = new Hono().get('/api/events', c => {
+      const last = c.req.header('last-event-id');
+
+      asked.push(last);
+
+      return streamSSE(c, async stream => {
+        if (last === undefined) {
+          await stream.write(
+            formatEventFrame(
+              'ready',
+              JSON.stringify({
+                protocolVersion: 5,
+                health: {
+                  protocolVersion: 5,
+                  homeRoot: '/nowhere',
+                  config: {diagnostics: []},
+                  packages: {diagnostics: []},
+                  characters: [],
+                },
+                confirmations: [],
+                turns: [],
+              }),
+              `${run}-0`,
+            ),
+          );
+          await stream.write(frame(1));
+          await stream.write(frame(2));
+          await stream.write(frame(3));
+
+          return;
+        }
+
+        await stream.write(formatEventFrame('resumed', '{}'));
+
+        if (last === `${run}-3`) {
+          // A replay cut short after two of its frames.
+          await stream.write(frame(4));
+          await stream.write(frame(5));
+
+          return;
+        }
+
+        await stream.write(frame(6));
+
+        const open = {connection: true};
+
+        stream.onAbort(() => {
+          open.connection = false;
+        });
+
+        while (open.connection) {
+          await stream.sleep(20);
+        }
+      });
+    });
+    const server = await listen(app);
+    const client = createGatewayClient({baseUrl: server.baseUrl, token});
+    const applied: string[] = [];
+    let resumed = 0;
+    const abort = new AbortController();
+    const following = client.events(event => applied.push(event.kind), {
+      signal: abort.signal,
+      retryMs: 10,
+      onResumed: () => {
+        resumed += 1;
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(applied).toHaveLength(6);
+    });
+    expect(asked).toEqual([undefined, `${run}-3`, `${run}-5`]);
+    expect(resumed).toBe(2);
+    abort.abort();
+    await following;
+    await server.close();
   });
 
   it('says when the daemon severs the stream, and comes back when it returns on its port', async () => {

@@ -45,7 +45,17 @@ export async function createGatewayServer(
   });
   const server = createAdaptorServer({fetch: app.fetch});
   const responses = trackResponses(server);
-  const port = await listen(server, options.port);
+  let port: number;
+
+  try {
+    port = await listen(server, options.port);
+  } catch (error: unknown) {
+    // No server is handed back, so nothing else would let go of the
+    // gateway the streams subscribed to.
+    await events.closeAll();
+
+    throw error;
+  }
 
   return Object.freeze({
     port,

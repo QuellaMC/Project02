@@ -107,6 +107,33 @@ describe('gateway server lifecycle', () => {
     });
   });
 
+  it('lets go of the gateway when the socket cannot be bound', async () => {
+    const gateway = gatewayOver(
+      await createGatewayTestHome(),
+      heldAdapter().adapter,
+    );
+    let subscriptions = 0;
+    const counted = {
+      ...gateway,
+      events: (listener: Parameters<typeof gateway.events>[0]) => {
+        subscriptions += 1;
+
+        const unsubscribe = gateway.events(listener);
+
+        return () => {
+          subscriptions -= 1;
+          unsubscribe();
+        };
+      },
+    };
+
+    await expect(
+      createGatewayServer({gateway: counted, token, port: 65_536}),
+    ).rejects.toThrow();
+    expect(subscriptions).toBe(0);
+    await gateway.stop();
+  });
+
   it('does not wait on a client that stalled mid-body when it shuts down', async () => {
     const gateway = gatewayOver(
       await createGatewayTestHome(),

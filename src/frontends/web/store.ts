@@ -231,6 +231,17 @@ export function streamLost(state: WebState): WebState {
 }
 
 /**
+ * The stream is back where it left off: the daemon still held the last
+ * frame this tab applied, so what follows is what it missed, and nothing
+ * on screen moves. A refused address stays refused.
+ */
+export function streamResumed(state: WebState): WebState {
+  return state.connection.status === 'connecting'
+    ? {...state, connection: {status: 'live'}}
+    : state;
+}
+
+/**
  * The address will never work again: the page stops taking new lines,
  * and every confirmation waiting and every turn in progress goes, since
  * an answer would never reach the daemon and a draft would never be

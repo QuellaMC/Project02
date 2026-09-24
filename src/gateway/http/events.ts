@@ -1,3 +1,5 @@
+import {randomBytes} from 'node:crypto';
+
 import type {HttpBindings} from '@hono/node-server';
 import type {Context} from 'hono';
 import {streamSSE, type SSEStreamingApi} from 'hono/streaming';
@@ -16,6 +18,8 @@ export type EventStreamsOptions = {
   readonly heartbeatMs?: number;
   /** How long a client may leave one frame untaken before it is treated as gone; tests shorten it. */
   readonly graceMs?: number;
+  /** How much of the log is kept for a client that returns; tests shorten it. */
+  readonly replayBytes?: number;
 };
 
 export type EventStreams = {
@@ -40,8 +44,29 @@ export type FrameQueue = {
   drain(): Promise<boolean>;
 };
 
-/** The first frame on every stream; a client bootstraps on each one it sees. */
+/**
+ * The tail of the stream, numbered: what a client that returns with the
+ * id of the last frame it applied is handed before the live stream.
+ */
+export type EventLog = {
+  /** This run's id; an id from another run names frames this log never held. */
+  readonly run: string;
+  /** The number of the newest frame; 0 before the first. */
+  latest(): number;
+  /** Appends the frame under the next number and returns it. */
+  append(frame: string): number;
+  /**
+   * The frames after the one the id names, oldest first — none when the
+   * client holds the newest — or undefined when the id is from another
+   * run, names a frame the log no longer holds, or none it ever held.
+   */
+  after(lastEventId: string): readonly string[] | undefined;
+};
+
+/** The first frame on a stream that cannot be caught up: the snapshot. */
 export const readyEvent = 'ready';
+/** The first frame on a stream that is caught up instead: nothing to install. */
+export const resumedEvent = 'resumed';
 
 const defaultHeartbeatMs = 15_000;
 /**
@@ -51,11 +76,23 @@ const defaultHeartbeatMs = 15_000;
  * that stopped.
  */
 export const clientGraceMs = 2_000;
+/**
+ * How much of the stream is kept for a client that returns: minutes of a
+ * busy stream, since a reply is a few kilobytes a second. A client further
+ * back gets the snapshot, which is always right. Bytes, because a frame's
+ * size is not bounded by anything a person could name.
+ */
+const defaultReplayBytes = 1024 * 1024;
 const heartbeatFrame = ': ping\n\n';
+const eventIdPattern = /^([0-9a-f]{16})-([0-9]{1,15})$/u;
 
-/** SSE framing: the event name, one line of JSON, a blank line. */
-export function formatEventFrame(event: string, data: string): string {
-  return `event: ${event}\ndata: ${data}\n\n`;
+/** SSE framing: the id when the frame has one, the event name, one line of JSON, a blank line. */
+export function formatEventFrame(
+  event: string,
+  data: string,
+  id?: string,
+): string {
+  return `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${data}\n\n`;
 }
 
 /**
@@ -100,16 +137,63 @@ export function createFrameQueue(options: {
 }
 
 /**
+ * Keeps the newest frames up to a byte budget, oldest out first. An id is
+ * reachable from one before the oldest frame kept — a client that saw
+ * exactly up to it missed nothing the log has lost — to the newest.
+ */
+export function createEventLog(options: {readonly maxBytes: number}): EventLog {
+  const run = randomBytes(8).toString('hex');
+  const frames: {readonly seq: number; readonly frame: string}[] = [];
+  let latest = 0;
+  let bytes = 0;
+
+  return Object.freeze({
+    run,
+    latest: () => latest,
+    append(frame) {
+      latest += 1;
+      frames.push({seq: latest, frame});
+      bytes += Buffer.byteLength(frame);
+
+      while (bytes > options.maxBytes && frames.length > 0) {
+        bytes -= Buffer.byteLength(frames[0]?.frame ?? '');
+        frames.shift();
+      }
+
+      return latest;
+    },
+    after(lastEventId) {
+      const match = eventIdPattern.exec(lastEventId);
+
+      if (match === null || match[1] !== run) {
+        return undefined;
+      }
+
+      const seq = Number(match[2]);
+      const oldestKept = frames[0]?.seq ?? latest + 1;
+
+      if (seq < oldestKept - 1 || seq > latest) {
+        return undefined;
+      }
+
+      return frames.filter(kept => kept.seq > seq).map(kept => kept.frame);
+    },
+  });
+}
+
+/**
  * The SSE streams over the gateway's event fan-out. One subscription,
  * taken when the streams are created and kept as long as they live,
- * formats every event once and hands the frame to each open stream in
- * the same tick; it also folds the turns running, so a stream opened
- * mid-reply finds the reply so far in its snapshot whether or not anyone
- * was listening before. A stream's `ready` is taken in one synchronous
- * breath with its registration, so it is exactly the state every later
- * frame moves on from: a client installs it and reads on, with nothing to
- * fetch and nothing to order — the stream stays a hint, and the verbs the
- * truth.
+ * numbers and formats every event once, keeps the tail of the log, and
+ * hands the frame to each open stream in the same tick; it also folds the
+ * turns running, so a stream opened mid-reply finds the reply so far in
+ * its snapshot whether or not anyone was listening before. A stream
+ * opens with one of two frames, taken in one synchronous breath with its
+ * registration: a client that returns with the id of the last frame it
+ * applied gets `resumed` and exactly the frames after it; any other gets
+ * `ready`, the snapshot that is exactly the state every later frame moves
+ * on from. A client installs the one and reads on after either — the
+ * stream stays a hint, and the verbs the truth.
  */
 export function createEventStreams(
   source: Pick<Gateway, 'events' | 'health' | 'pendingConfirmations'>,
@@ -117,6 +201,9 @@ export function createEventStreams(
 ): EventStreams {
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
   const graceMs = options.graceMs ?? clientGraceMs;
+  const log = createEventLog({
+    maxBytes: options.replayBytes ?? defaultReplayBytes,
+  });
   const closers = new Set<() => Promise<void>>();
   const attached = new Set<FrameQueue>();
   let turns: RunningTurns = new Map();
@@ -124,7 +211,14 @@ export function createEventStreams(
   const unsubscribe = source.events(event => {
     turns = foldRunningTurns(turns, event);
 
-    const frame = formatEventFrame(event.kind, JSON.stringify(event));
+    const seq = log.latest() + 1;
+    const frame = formatEventFrame(
+      event.kind,
+      JSON.stringify(event),
+      `${log.run}-${String(seq)}`,
+    );
+
+    log.append(frame);
 
     for (const queue of attached) {
       queue.push(frame);
@@ -184,15 +278,34 @@ export function createEventStreams(
     });
     closers.add(close);
 
-    // Snapshot and attachment in one breath: no event lands between them.
-    const snapshot: GatewayReady = {
-      protocolVersion: gatewayProtocolVersion,
-      health: source.health(),
-      confirmations: source.pendingConfirmations(),
-      turns: runningTurns(turns),
-    };
+    // First frame and attachment in one breath: no event lands between.
+    const lastEventId = c.req.header('last-event-id');
+    const missed =
+      lastEventId === undefined ? undefined : log.after(lastEventId);
 
-    queue.push(formatEventFrame(readyEvent, JSON.stringify(snapshot)));
+    if (missed === undefined) {
+      const snapshot: GatewayReady = {
+        protocolVersion: gatewayProtocolVersion,
+        health: source.health(),
+        confirmations: source.pendingConfirmations(),
+        turns: runningTurns(turns),
+      };
+
+      queue.push(
+        formatEventFrame(
+          readyEvent,
+          JSON.stringify(snapshot),
+          `${log.run}-${String(log.latest())}`,
+        ),
+      );
+    } else {
+      queue.push(formatEventFrame(resumedEvent, '{}'));
+
+      for (const frame of missed) {
+        queue.push(frame);
+      }
+    }
+
     attached.add(queue);
 
     try {

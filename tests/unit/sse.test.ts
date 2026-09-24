@@ -18,11 +18,11 @@ describe('gateway client SSE parsing', () => {
     ]);
   });
 
-  it('joins multi-line data, strips one leading space, and skips unknown fields', () => {
+  it('joins multi-line data, strips one leading space, reads the id, and skips unknown fields', () => {
     expect(
       parseSseFrame(
         'event:state_changed\ndata: {"kind":\ndata:  "x"}\nid: 7\nretry',
       ),
-    ).toEqual({event: 'state_changed', data: '{"kind":\n "x"}'});
+    ).toEqual({id: '7', event: 'state_changed', data: '{"kind":\n "x"}'});
   });
 });

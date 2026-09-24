@@ -1,4 +1,5 @@
 export type SseFrame = {
+  readonly id?: string;
   readonly event?: string;
   readonly data?: string;
   readonly comment?: string;
@@ -41,6 +42,7 @@ export function createSseFrameSplitter(): {
 
 /** One frame's lines to its fields; unknown fields are skipped. */
 export function parseSseFrame(raw: string): SseFrame {
+  let id: string | undefined;
   let event: string | undefined;
   let comment: string | undefined;
   const data: string[] = [];
@@ -55,7 +57,9 @@ export function parseSseFrame(raw: string): SseFrame {
     const field = colon === -1 ? line : line.slice(0, colon);
     const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /u, '');
 
-    if (field === 'event') {
+    if (field === 'id') {
+      id = value;
+    } else if (field === 'event') {
       event = value;
     } else if (field === 'data') {
       data.push(value);
@@ -63,6 +67,7 @@ export function parseSseFrame(raw: string): SseFrame {
   }
 
   return Object.freeze({
+    ...(id === undefined ? {} : {id}),
     ...(event === undefined ? {} : {event}),
     ...(data.length === 0 ? {} : {data: data.join('\n')}),
     ...(comment === undefined ? {} : {comment}),
