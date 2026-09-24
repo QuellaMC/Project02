@@ -2,10 +2,14 @@
 
 End-to-end here means: the test drives a CLI entrypoint in-process via
 argv and captured stdio streams (`runServeCliFromArgs`,
-`runInspectCliFromArgs`, `runRuntimeConfigCliFromArgs`) — the whole
-composition root executes, but no packaged binary is spawned.
+`runInspectCliFromArgs`) — the whole composition root executes, but no
+packaged binary is spawned.
 
-Two exceptions spawn `node` against the real entry files:
+Three exceptions spawn `node` against the real entry files:
 `plugin-barrel-startup.test.ts` pins module-init-order safety, a property
-no import-graph rule can express, and `two-character-concurrency.test.ts`
-runs real `serve` processes to prove one home's leases across processes.
+no import-graph rule can express; `two-character-concurrency.test.ts`
+runs a real `serve` process to prove one home's leases across characters;
+and `serve-instances.test.ts` proves one daemon per home across
+processes — a second `serve` handing back the first's address, a crash
+succeeded on the same address, and SIGHUP as a stop. The last two run one
+file at a time, under the `processes` project.

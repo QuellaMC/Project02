@@ -5,7 +5,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import {createServer, type Server} from 'node:net';
+import {createServer, type AddressInfo, type Server} from 'node:net';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
@@ -18,6 +18,10 @@ import {
 } from '../../src/gateway/client/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
+import {
+  acquireLocalRuntimeDaemonLease,
+  writeDaemonRecord,
+} from '../../src/runtime/storage/index.ts';
 import {
   awaitCharacterReady,
   createGatewayTestHome,
@@ -145,6 +149,48 @@ function free(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+/** A paced reply under way: resolves once its first piece is on the stream. */
+function firstDelta(client: GatewayClient): Promise<void> {
+  return new Promise<void>(resolve => {
+    const abort = new AbortController();
+
+    void client.events(
+      event => {
+        if (
+          event.kind === 'turn_progress' &&
+          event.progress.kind === 'reply_delta'
+        ) {
+          resolve();
+          abort.abort();
+        }
+      },
+      {signal: abort.signal},
+    );
+  });
+}
+
+/** A slow reply from the scripted adapter, started and left running: a second or so of pieces. */
+async function startSlowTurn(client: GatewayClient) {
+  const opened = await client.openDirectConversation('mira');
+
+  if (opened.status !== 'opened') {
+    expect.fail(opened.message);
+  }
+
+  const turn = client.deliver({
+    conversationId: opened.conversationId,
+    senderId: opened.userParticipantId,
+    text: `slowly ${Array.from({length: 300}, (_, word) => `w${String(word)}`).join(' ')}`,
+    source: 'web',
+    clientMessageId: 'msg-slow',
+  });
+
+  await firstDelta(client);
+
+  // Wrapped: an async function would otherwise await the turn itself.
+  return {turn};
 }
 
 describe('serve', () => {
@@ -289,45 +335,101 @@ describe('serve', () => {
 
     await awaitCharacterReady(client, 'mira');
 
-    const opened = await client.openDirectConversation('mira');
-
-    if (opened.status !== 'opened') {
-      expect.fail(opened.message);
-    }
-
-    const line = `slowly ${Array.from({length: 80}, (_, word) => `w${String(word)}`).join(' ')}`;
-    const turn = client.deliver({
-      conversationId: opened.conversationId,
-      senderId: opened.userParticipantId,
-      text: line,
-      source: 'web',
-      clientMessageId: 'msg-slow',
-    });
-
     // Stopped mid-reply: the reply is finished first.
-    await new Promise<void>(resolve => {
-      const abort = new AbortController();
-
-      void client.events(
-        event => {
-          if (
-            event.kind === 'turn_progress' &&
-            event.progress.kind === 'reply_delta'
-          ) {
-            resolve();
-            abort.abort();
-          }
-        },
-        {signal: abort.signal},
-      );
-    });
-
+    const {turn} = await startSlowTurn(client);
     const stopped = serve.stop();
 
     await expect(turn).resolves.toMatchObject({status: 'completed'});
     await expect(stopped).resolves.toBe(0);
     expect(serve.stdout()).toContain('Stopping; finishing what is in flight.');
     expect(readRecord(storeRoot).running).toBeUndefined();
+  });
+
+  it("hands a second run the daemon's address and exits, and lets a later run start once the first has stopped", async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-second-');
+    const first = runServe(['--store', storeRoot]);
+    const url = await first.url;
+    const second = runServe(['--store', storeRoot]);
+
+    await expect(second.exit).resolves.toBe(0);
+    expect(second.stdout()).toBe(
+      `Already running on this home (pid ${String(process.pid)}).\nPROJECT02_GATEWAY=${url}\n`,
+    );
+    expect(second.stderr()).toBe('');
+    // The first is untouched.
+    await expect(createGatewayClient({url}).health()).resolves.toMatchObject({
+      protocolVersion: 5,
+    });
+    await expect(first.stop()).resolves.toBe(0);
+
+    const third = runServe(['--store', storeRoot]);
+
+    expect(await third.url).toBe(url);
+    await expect(third.stop()).resolves.toBe(0);
+  });
+
+  it('waits for a daemon that is stopping, then takes the home over on the same address', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-takeover-');
+    const first = runServe(['--store', storeRoot], {
+      adapter: createScriptedAdapter({
+        homeRoot: storeRoot,
+        characterId: 'mira',
+      }),
+    });
+    const url = await first.url;
+    const client = createGatewayClient({url});
+
+    await awaitCharacterReady(client, 'mira');
+
+    const {turn} = await startSlowTurn(client);
+    const stopping = first.stop();
+    const second = runServe(['--store', storeRoot]);
+
+    expect(await second.url).toBe(url);
+    expect(second.stderr()).toContain('is stopping; waiting to take over');
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+    await expect(stopping).resolves.toBe(0);
+    await expect(second.stop()).resolves.toBe(0);
+  }, 20_000);
+
+  it('says so when the home is held but nothing answers', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-silent-');
+    const lease = await acquireLocalRuntimeDaemonLease({homeRoot: storeRoot});
+
+    try {
+      // Held, and no address published yet.
+      const unpublished = runServe(['--store', storeRoot]);
+
+      await expect(unpublished.exit).resolves.toBe(1);
+      expect(unpublished.stderr()).toContain(
+        'has not published its address yet',
+      );
+
+      // Held, with a record naming a port nobody listens on.
+      const gone = await occupy(0);
+      const port = (gone.address() as AddressInfo).port;
+
+      await free(gone);
+      writeDaemonRecord({
+        homeRoot: storeRoot,
+        record: {
+          protocolVersion: 5,
+          token: 'stale-token',
+          port,
+          running: {pid: 1, startedAt: '2026-01-01T00:00:00.000Z'},
+        },
+      });
+
+      const silent = runServe(['--store', storeRoot]);
+
+      await expect(silent.exit).resolves.toBe(1);
+      expect(silent.stderr()).toContain(
+        `did not answer at http://127.0.0.1:${String(port)}/`,
+      );
+      expect(silent.stdout()).toBe('');
+    } finally {
+      await lease.release();
+    }
   });
 
   it('refuses the options a client owns', async () => {

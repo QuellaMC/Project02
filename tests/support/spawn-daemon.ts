@@ -13,6 +13,13 @@ export type SpawnedDaemon = {
   readonly child: ChildProcessWithoutNullStreams;
   /** The address a client opens: the line the daemon printed, past its name. */
   readonly url: string;
+  /**
+   * The exit code once the process ends on its own or on a signal the
+   * test sent itself; null when a signal ended it. A process that is
+   * ending must not be sent SIGINT on top: inside Node's own teardown the
+   * signal takes its default action.
+   */
+  readonly exited: Promise<number | null>;
   /** SIGINT, the way an operator stops it; resolves with the exit code. */
   readonly stop: () => Promise<{
     readonly code: number | null;
@@ -91,6 +98,7 @@ export async function spawnDaemon(
   return {
     child,
     url,
+    exited,
     stop: async () => {
       child.kill('SIGINT');
 
