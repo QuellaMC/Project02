@@ -184,6 +184,12 @@ export function createSession(address: string): Session {
         if (event.kind === 'state_changed' && event.state === 'ready') {
           void accountForPending(accounting());
         }
+
+        // Config moved, here or on another surface: a settings screen
+        // open shows what is there now.
+        if (event.kind === 'health_changed') {
+          void settings.changed();
+        }
       },
       {
         signal: new AbortController().signal,

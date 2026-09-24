@@ -87,8 +87,9 @@ export function settingsClosed(state: WebState): WebState {
 
 /**
  * The view replaces, and what is typed and what the daemon refused stay
- * beside it: a re-read after a save or a conflict must not take a
- * person's words. A view for another target is a read that was let go.
+ * beside it: a re-read after a save, a conflict or another surface's
+ * change must not take a person's words. A view for another target is a
+ * read that was let go.
  */
 export function configViewRead(
   state: WebState,

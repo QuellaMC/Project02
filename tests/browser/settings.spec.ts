@@ -76,7 +76,7 @@ test.describe('a fresh home', () => {
   });
 });
 
-test("saves a character's plugin field and secret, shows the secret only as set, and tells a stale page that someone saved first", async ({
+test("saves a character's plugin field and secret, shows the secret only as set, keeps a second page in step, and tells one that fell behind that someone saved first", async ({
   daemon,
   context,
   page,
@@ -106,8 +106,8 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   await expect(secret.getByLabel('Api key')).toHaveValue('');
   expect(await page.content()).not.toContain('sk-live-secret');
 
-  // A second page on the same screen reads the view now, then falls
-  // behind a save made here.
+  // A second page on the same screen follows a save made here without
+  // doing anything: the stream says config moved, and it reads again.
   const second = await context.newPage();
 
   await second.goto(daemon.url);
@@ -117,10 +117,24 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   );
 
   const note = row(page, 'plugins/demo-config/operatorNote');
+  const secondNote = row(second, 'plugins/demo-config/operatorNote').getByRole(
+    'textbox',
+    {name: 'Operator note'},
+  );
 
   await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
+  await expect(secondNote).toHaveValue('kept');
+
+  // A page whose read did not land is behind, and says so; its next save
+  // is told that someone saved first.
+  await second.route('**/api/config?*', route => route.abort(), {times: 1});
+  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept again');
+  await note.getByRole('button', {name: 'Save'}).click();
+  await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
+  await expect(second.locator('.notice')).toBeVisible();
+  await expect(secondNote).toHaveValue('kept');
 
   const staleSignoff = row(second, 'plugins/demo-config/signoff');
 
@@ -130,11 +144,7 @@ test("saves a character's plugin field and secret, shows the secret only as set,
     'Someone else saved first',
   );
   // The screen shows what is there now, with the person's own text still in its row.
-  await expect(
-    row(second, 'plugins/demo-config/operatorNote').getByRole('textbox', {
-      name: 'Operator note',
-    }),
-  ).toHaveValue('kept');
+  await expect(secondNote).toHaveValue('kept again');
   await expect(
     staleSignoff.getByRole('textbox', {name: 'Signoff'}),
   ).toHaveValue('bye');

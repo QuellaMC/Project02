@@ -50,6 +50,8 @@ export function createSettingsVerbs(tab: {
   readonly apply: (reduce: (state: WebState) => WebState) => void;
 }): {
   readonly verbs: SettingsVerbs;
+  /** Config moved, on this tab or another surface: a screen open reads its view again, with what is typed kept. */
+  readonly changed: () => Promise<void>;
   /** Every `ready`: a screen open re-reads its view; the first one judges the setup frame, once per tab. */
   readonly ready: () => Promise<void>;
 } {
@@ -114,14 +116,23 @@ export function createSettingsVerbs(tab: {
     apply(current => changeEnded(current, ticket, outcome));
 
     // The screen the change came from is read again, if it is still the
-    // one open. The roster needs no read: what the change did to it comes
-    // on the stream, to every tab.
+    // one open — at once, on the answer in hand, whether or not the frame
+    // that follows reaches this tab's stream. The roster needs no read:
+    // what the change did to it comes on the stream, to every tab.
     const open = getState().settings;
     const moved =
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
 
     if (moved && open !== undefined && sameTarget(open.target, page.target)) {
+      await readView(page.target);
+    }
+  };
+
+  const changed = async (): Promise<void> => {
+    const page = getState().settings;
+
+    if (page !== undefined) {
       await readView(page.target);
     }
   };
@@ -145,11 +156,10 @@ export function createSettingsVerbs(tab: {
         return change(key, undefined);
       },
     },
+    changed,
     async ready() {
-      const page = getState().settings;
-
-      if (page !== undefined) {
-        await readView(page.target);
+      if (getState().settings !== undefined) {
+        await changed();
 
         return;
       }
