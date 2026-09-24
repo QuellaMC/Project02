@@ -39,7 +39,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 3,
+    protocolVersion: 4,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -50,7 +50,7 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
 function ready(
   confirmations: readonly PendingConfirmation[] = [],
 ): GatewayReady {
-  return {protocolVersion: 3, health: health(mira), confirmations};
+  return {protocolVersion: 4, health: health(mira), confirmations};
 }
 
 /** A live tab with Mira's DM open and nothing shown yet. */
@@ -995,6 +995,26 @@ describe('web store', () => {
 
     expect(elsewhere.thread).toBe(state.thread);
     expect(elsewhere.turns.get('conv-2')?.drafts.get('1.0')).toBe('not here');
+  });
+
+  it('takes the roster as the daemon says it after a change landed', () => {
+    const state = opened();
+    const nova: CharacterSummary = {
+      id: 'nova',
+      displayName: 'Nova',
+      enabled: true,
+      state: 'starting',
+    };
+    const changed = applyEvent(state, {
+      kind: 'health_changed',
+      health: health({...mira, enabled: false}, nova),
+    });
+
+    expect(changed.health?.characters).toEqual([
+      {...mira, enabled: false},
+      nova,
+    ]);
+    expect(changed.thread).toBe(state.thread);
   });
 
   it('reports a refused address, and says on the thread itself when its page could not be read', () => {

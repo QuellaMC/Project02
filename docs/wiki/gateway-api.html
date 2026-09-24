@@ -382,7 +382,7 @@ Content-Type: application/json
       </p>
 
       <pre><code>event: ready
-data: {"protocolVersion":3,"health":{…},"confirmations":[…]}
+data: {"protocolVersion":4,"health":{…},"confirmations":[…]}
 
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
@@ -477,6 +477,19 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
               character is assembling afresh from the config on disk between
               turns, and a delivery sent meanwhile waits for it and lands on the
               same conversation.
+            </td>
+          </tr>
+          <tr>
+            <td><code>health_changed</code></td>
+            <td>
+              The daemon's whole state, read again the moment a config change
+              landed and before the pass that acts on it: the roster as config
+              now says it and the config and package problems as they stand,
+              the shape <code>GET /api/health</code> returns. Every surface
+              hears it, not only the one that wrote, and one showing config
+              reads its view again on it, so two windows on one screen stay
+              in step; what the pass then does to each character follows as
+              <code>state_changed</code>.
             </td>
           </tr>
           <tr>
@@ -604,7 +617,8 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         A view is what a settings page renders. Its <code>project02</code>
         fields, in the order a page shows them, and each plugin's fields share
         one shape — what this scope authored, what is in effect and which layer
-        put it there, whether a change reloads the character. Whatever a view
+        put it there, whether a change reloads the character; a plugin's switch
+        says the same of itself as <code>enabledSource</code>. Whatever a view
         offers, the scope can save: every host field is authorable at the home
         and per character, and a plugin that belongs to a character
         (<code>config.scope: "character_only"</code>) is absent from the home's
@@ -636,7 +650,8 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
 
       <p>
         <code>applied</code> means the bytes are on disk. What the change does
-        to running characters arrives as <code>state_changed</code>: the daemon
+        to the roster arrives as <code>health_changed</code> at once, and what
+        it does to running characters as <code>state_changed</code>: the daemon
         reconciles behind the answer, and a ready character whose assembly would
         now differ — its effective config, its plugin values including secrets,
         its package version — publishes <code>reloading</code>, finishes the

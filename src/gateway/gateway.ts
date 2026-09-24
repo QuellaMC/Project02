@@ -135,6 +135,12 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       const outcome = await applyConfigChange(loadHome(), change);
 
       if (outcome.status === 'applied') {
+        // What the change did to the roster is on the stream at once, to
+        // every surface and not only the one that wrote; the pass follows.
+        emit({
+          kind: 'health_changed',
+          health: readHealth(loadHome(), runtimes),
+        });
         reconcileBehind(startsInFlight, reconciler);
       }
 

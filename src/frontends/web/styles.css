@@ -407,3 +407,181 @@ code {
     grid-row: 3;
   }
 }
+
+/* The roster's way into settings: the home's link, and a gear per character. */
+.roster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 8px 10px;
+}
+
+.roster-header .roster-title {
+  margin: 0;
+}
+
+.roster-settings,
+.roster-gear {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.roster-item {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.pill-off {
+  opacity: 0.7;
+}
+
+.pill-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.pill-blocked {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.settings-title {
+  font-size: 16px;
+  margin: 0;
+  margin-right: auto;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.setup {
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  padding: 12px 14px;
+}
+
+.setup-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.setup-text {
+  margin: 0;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.field-name {
+  font-weight: 600;
+}
+
+.field-meta,
+.field-description,
+.field-problem {
+  margin: 0;
+}
+
+.field-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-control input[type='text'],
+.field-control input[type='password'],
+.field-control select,
+.field-control textarea {
+  flex: 1;
+  min-width: 12ch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+
+.field-control input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.field-value {
+  color: var(--muted);
+}
+
+.field-problem {
+  color: var(--danger);
+}
+
+.saved {
+  color: var(--accent);
+}
+
+.plugin {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.plugin .field {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 0 2px;
+}
+
+.plugin-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plugin-name {
+  margin: 0;
+  font-size: 15px;
+}

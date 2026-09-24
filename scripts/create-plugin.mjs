@@ -372,14 +372,9 @@ if (invokedDirectly) {
     console.log('  1. Edit the manifest and plugin behavior.');
     console.log('  2. pnpm check');
     console.log(
-      `  3. Enable it: add {"plugins": {"${id}": {"enabled": true}}} to the home's config.json,`,
+      '  3. pnpm serve, then open the address it prints in a browser',
     );
-    console.log(
-      '     or send plugin_enabled through POST /api/config (the settings page is the next roadmap step)',
-    );
-    console.log(
-      '  4. pnpm serve, then open the address it prints in a browser',
-    );
+    console.log(`  4. Settings -> Plugins -> ${id} -> Enabled`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

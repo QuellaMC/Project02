@@ -8,6 +8,8 @@
  */
 import type {
   CharacterSummary,
+  ConfigTarget,
+  ConfigView,
   ConfirmationAnswerStatus,
   ConfirmationCancelReason,
   GatewayEvent,
@@ -80,6 +82,32 @@ export type TurnState = {
   readonly drafts: ReadonlyMap<string, string>;
 };
 
+/** The settings screen's state; its rules live in settings.ts. */
+export type SettingsPage = {
+  readonly target: ConfigTarget;
+  /** The first run's heading, shown until the person leaves the screen. */
+  readonly setup: boolean;
+  /** Absent while the first read is on its way; a refused view shows its message, never blank fields. */
+  readonly view?: ConfigView;
+  /** Field key → what is typed there and not saved; survives a re-read. */
+  readonly edits: ReadonlyMap<string, string>;
+  /** Field key → the daemon's refusal of the last change there. */
+  readonly problems: ReadonlyMap<string, string>;
+  /**
+   * The one change on its way: its ticket, its row, and the text it
+   * carried — none for a secret, which the tab keeps no copy of. Its end
+   * is known by the ticket, so the end of a change sent from an earlier
+   * screen on the same target is not taken for this one's.
+   */
+  readonly saving?: {
+    readonly ticket: number;
+    readonly key: string;
+    readonly text?: string;
+  };
+  /** The field whose last change landed, until the person's next edit. */
+  readonly saved?: string;
+};
+
 export type WebState = {
   readonly connection: Connection;
   readonly health?: GatewayHealth;
@@ -87,6 +115,8 @@ export type WebState = {
   readonly confirmations: readonly PendingConfirmation[];
   /** The one open DM. */
   readonly thread?: Thread;
+  /** The settings screen, when one is open in front of the thread. */
+  readonly settings?: SettingsPage;
   /** Client message id → a pending line; kept across a switch of threads. */
   readonly pending: ReadonlyMap<string, PendingLine>;
   /**
@@ -554,6 +584,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ...character,
         maintenance: {at: event.at, message: event.message},
       }));
+    case 'health_changed':
+      // The daemon's word on the roster, in order with every state frame.
+      return {...state, health: event.health};
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state

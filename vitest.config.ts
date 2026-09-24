@@ -72,9 +72,11 @@ export default defineConfig({
       // its store, every rule a tab follows — is covered here.
       exclude: [
         'src/frontends/web/session.ts',
+        'src/frontends/web/settings-session.ts',
         'src/frontends/web/main.tsx',
         'src/frontends/web/app.tsx',
         'src/frontends/web/thread.tsx',
+        'src/frontends/web/settings.tsx',
       ],
       reporter: ['text', 'json-summary'],
       thresholds: {
