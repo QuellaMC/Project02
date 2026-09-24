@@ -63,21 +63,73 @@
       <h2>Finding the daemon</h2>
 
       <p>
-        <code>serve</code> binds <code>127.0.0.1</code> on port 4310, or a free
-        port when that one is taken, prints
-        <code>Gateway listening on port &lt;port&gt;</code>, brings the roster
-        up, and only then prints the one address it has — the line a client
-        reads, and the address a person opens:
+        <code>serve</code> claims its home — one daemon per home, held as a
+        lease in the home's lock directory for the daemon's lifetime — binds
+        <code>127.0.0.1</code> on the home's port, and prints the one address
+        it has the moment the socket is bound: the line a client reads, and
+        the address a person opens. The roster comes up on the stream after
+        it, so a character can still be <code>starting</code> when the
+        address is out.
       </p>
 
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:4310/#token=&lt;token&gt;</code></pre>
 
       <p>
-        The token is minted per run and travels in the URL fragment, so it never
-        reaches a server log or a referrer. Nothing that connects before that
-        line is printed can find a half-started daemon. The same address,
-        opened in a browser, is the web page: the daemon serves it from its
-        root, and the page takes the token from the fragment.
+        The same address is kept beside the config, in
+        <code>&lt;home&gt;/daemon.json</code> at mode 0600, written by the
+        daemon that holds the lease and by nothing else:
+      </p>
+
+      <pre><code>{
+  "protocolVersion": 5,
+  "token": "…",
+  "port": 4310,
+  "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
+}</code></pre>
+
+      <p>
+        The token and the port belong to the home, not to the run: a restart
+        answers on the same address, so an open tab reconnects on its own and
+        a bookmark keeps working. The token travels in the URL fragment, so it
+        never reaches a server log or a referrer; the same address, opened in
+        a browser, is the web page, served from the daemon's root, and the
+        page takes the token from the fragment. A first run takes port 4310,
+        or a free one when that is taken, and records it. A later run whose
+        recorded port another program has taken since takes a free one, says
+        so on stdout before the address, and records the new one — open tabs
+        and bookmarks then need the new address, which nothing can tell them.
+        <code>running</code> is removed by a clean stop and left behind by a
+        crash: a reader never trusts it without asking the address, and the
+        lease, not the record, is what says a daemon is alive. A record that
+        cannot be read is replaced, with a new token, and said on stderr.
+      </p>
+
+      <p>
+        A second <code>serve</code> on the same home does not start a second
+        daemon. It reads the record and asks the address for
+        <code>/api/health</code>: when the daemon answers as this home's, it
+        prints <em>Already running on this home (pid …)</em> and the same
+        address line, and exits 0 — which is also how anyone gets the address
+        of a daemon that has been running since yesterday. When the daemon
+        answers 503 it is stopping, and the second waits up to thirty seconds
+        for the lease and takes the home over on the same address. When
+        nothing answers — the holder has not published yet, a crash's record
+        names a port nobody listens on, the holder is on another machine — it
+        says so and exits 1.
+      </p>
+
+      <h2>Stopping</h2>
+
+      <p>
+        Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the
+        daemon prints <em>Stopping; finishing what is in flight</em>, requests
+        the stop at once (a boot still under way is joined, and its late
+        <code>ready</code> suppressed), finishes the turns it accepted, lets
+        the streams and answers drain, closes the socket, then rewrites the
+        record without <code>running</code> and releases the lease. A second
+        signal of any kind ends the process at once; the lease left behind is
+        the next start's to reclaim. On Windows, the console window's close
+        is a SIGHUP followed by a kill about ten seconds later.
       </p>
 
       <h2>The four wire rules</h2>
@@ -103,13 +155,19 @@
           <tr>
             <td>The stream is a hint; the verbs are the truth</td>
             <td>
-              Every stream opens with a <code>ready</code> frame that carries
-              the daemon's snapshot — health and the confirmations still waiting
-              — taken the instant the stream's listener was registered, so every
-              later event moves on from exactly that state. A client installs
-              the snapshot and reads on; what it wants of a conversation's
-              history it reads as one page, deduplicated by message id. There
-              are no event ids and no replay.
+              Every frame carries an id, and the daemon keeps a tail of the
+              stream — up to a megabyte of frames — for a client that returns
+              with <code>Last-Event-ID</code>: it opens with
+              <code>resumed</code> and exactly the frames it missed, in order,
+              then reads on. Any other stream — no id, an id from another run
+              of the daemon, one before the tail — opens with a
+              <code>ready</code> frame that carries the daemon's snapshot:
+              health, the confirmations still waiting, and the turns running
+              with their drafts so far, taken in one breath with the stream's
+              registration, so every later frame moves on from exactly that
+              state. A client installs the snapshot and reads on; what it
+              wants of a conversation's history it reads as one page,
+              deduplicated by message id. The log on disk stays the truth.
             </td>
           </tr>
           <tr>
@@ -373,31 +431,57 @@ Content-Type: application/json
 
       <p>
         <code>GET /api/events</code> answers <code>text/event-stream</code>.
-        Frames are <code>event: &lt;kind&gt;</code> plus one
-        <code>data:</code> line of JSON; a comment <code>: ping</code> arrives
-        every 15 seconds so an idle connection survives client timeouts. A
-        client that does not take a frame within two seconds is dropped; the
-        daemon never buffers for a client that is gone, and never judges one
-        by how many frames a burst left waiting.
+        Frames are <code>id: &lt;run&gt;-&lt;seq&gt;</code>,
+        <code>event: &lt;kind&gt;</code> and one <code>data:</code> line of
+        JSON — the id is a random id of this run of the daemon and a count
+        from one; a comment <code>: ping</code> arrives every 15 seconds so
+        an idle connection survives client timeouts. A client that does not
+        take a frame within two seconds is dropped; the daemon never buffers
+        for a client that is gone, and never judges one by how many frames a
+        burst left waiting. A client that returns sends the id of the last
+        frame it applied as <code>Last-Event-ID</code>; a <code>resumed</code>
+        frame carries no id, so the id it holds stands.
       </p>
 
-      <pre><code>event: ready
-data: {"protocolVersion":4,"health":{…},"confirmations":[…]}
+      <pre><code>id: 5f1c9a02b7e4d310-61
+event: ready
+data: {"protocolVersion":5,"health":{…},"confirmations":[…],"turns":[…]}
 
+id: 5f1c9a02b7e4d310-62
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
 
+id: 5f1c9a02b7e4d310-63
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"I remember "}}
 
+id: 5f1c9a02b7e4d310-64
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"you said "}}
 
+id: 5f1c9a02b7e4d310-65
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
 
+id: 5f1c9a02b7e4d310-66
 event: turn_completed
 data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed","committed":true}</code></pre>
+
+      <p>
+        The same stream to a client that returns after frame 63, with
+        <code>Last-Event-ID: 5f1c9a02b7e4d310-63</code>:
+      </p>
+
+      <pre><code>event: resumed
+data: {}
+
+id: 5f1c9a02b7e4d310-64
+event: turn_progress
+data: {…"progress":{"kind":"reply_delta","draftId":"1.0","text":"you said "}}
+
+id: 5f1c9a02b7e4d310-65
+event: turn_progress
+data: {…}</code></pre>
 
       <table>
         <thead>
@@ -412,8 +496,19 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
             <td>
               The protocol version and the daemon's snapshot at that instant:
               <code>health</code> (the roster, each character's state and last
-              maintenance failure) and <code>confirmations</code> still waiting.
-              A client installs it on every one it sees.
+              maintenance failure), <code>confirmations</code> still waiting,
+              and <code>turns</code> — each turn in progress, named by its
+              submission's <code>conversationId</code>, <code>source</code>
+              and <code>clientMessageId</code>, with its character and its open
+              drafts' text so far. A client installs it on every one it sees.
+            </td>
+          </tr>
+          <tr>
+            <td><code>resumed</code></td>
+            <td>
+              The first frame of a stream the daemon could catch up instead:
+              nothing to install, and what follows is exactly what the client
+              missed, in order, then the live stream.
             </td>
           </tr>
           <tr>
@@ -575,8 +670,16 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
           <tr>
             <td><code>ready</code></td>
             <td>
-              Drops every open draft: the snapshot carries none, the stream
-              is a hint, and the truth is on the newest history page.
+              Replaces every open draft with the ones the snapshot carries,
+              under their conversations: what a tab that never left would
+              hold. The truth about the thread stays on the newest history
+              page.
+            </td>
+          </tr>
+          <tr>
+            <td><code>resumed</code></td>
+            <td>
+              Nothing: the deltas that follow continue the drafts on screen.
             </td>
           </tr>
         </tbody>
@@ -600,9 +703,15 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
         stays small. A character's automatic recovery after a fatal turn lets
         its threads go; a delivery on a conversation the runtime let go of holds
         it again before running, so a client keeps its conversation id through
-        the episode. A reconnect gets its whole world in the
-        <code>ready</code> frame. A confirmation names the turn that raised it.
-        And a turn whose answer was lost is safe to send again under its id.
+        the episode. A delivery on a conversation this run of the daemon has
+        not opened — a tab that reconnected after a restart keeps its id — is
+        routed from the store's record of the conversation, so no client
+        reopens a thread after a restart; <code>unknown_conversation</code>
+        means a conversation the home does not hold. A reconnect gets its
+        whole world in the <code>ready</code> frame, or exactly what it missed
+        after <code>resumed</code>. A confirmation names the turn that raised
+        it. And a turn whose answer was lost is safe to send again under its
+        id.
       </p>
 
       <h2>Config</h2>
