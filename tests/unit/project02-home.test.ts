@@ -123,6 +123,24 @@ describe('project02 home initialization', () => {
     );
   });
 
+  it("counts the daemon's record as the home's own, and refuses one that is a symlink", async () => {
+    const homeRoot = createTestTempRoot('project02-home-record-');
+    const layout = createProject02HomeLayout({homeRoot});
+
+    // A record left behind in a home that lost its marker is not foreign.
+    writeFileSync(layout.daemonRecordPath, '{}\n');
+    await ensureInitializedProject02Home({homeRoot});
+    expect(existsSync(layout.schemaPath)).toBe(true);
+
+    const outside = createTestTempRoot('project02-home-record-target-');
+
+    rmSync(layout.daemonRecordPath);
+    symlinkSync(join(outside, 'daemon.json'), layout.daemonRecordPath);
+    await expect(ensureInitializedProject02Home({homeRoot})).rejects.toThrow(
+      'daemon record that is not a real file',
+    );
+  });
+
   it('rejects an initialized home whose conversations root became a symlink', async () => {
     const homeRoot = join(createTestTempRoot(), 'linked-conversations-home');
     const outside = createTestTempRoot('project02-conversations-target-');

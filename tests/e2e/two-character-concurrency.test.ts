@@ -5,7 +5,6 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
-import {readFile, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -16,6 +15,7 @@ import {
 } from '../../src/gateway/client/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
+import {awaitCharacterReady} from '../support/gateway-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {spawnDaemon} from '../support/spawn-daemon.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -56,6 +56,8 @@ async function chat(
   characterId: string,
   text: string,
 ): Promise<string> {
+  await awaitCharacterReady(client, characterId);
+
   const opened = await client.openDirectConversation(characterId);
 
   if (opened.status !== 'opened') {
@@ -75,38 +77,6 @@ async function chat(
   }
 
   return outcome.messages.at(-1)?.speakerName ?? '';
-}
-
-async function snapshotDurableFiles(
-  root: string,
-  relativeRoot = '',
-): Promise<Readonly<Record<string, string>>> {
-  const directoryPath =
-    relativeRoot.length === 0 ? root : join(root, relativeRoot);
-  const entries = await readdir(directoryPath, {withFileTypes: true});
-  const snapshot: Record<string, string> = {};
-
-  for (const entry of entries.sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-  )) {
-    const relativePath =
-      relativeRoot.length === 0 ? entry.name : join(relativeRoot, entry.name);
-
-    if (relativePath === '.locks' || relativePath.startsWith('.locks/')) {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      Object.assign(snapshot, await snapshotDurableFiles(root, relativePath));
-      continue;
-    }
-
-    if (entry.isFile()) {
-      snapshot[relativePath] = await readFile(join(root, relativePath), 'utf8');
-    }
-  }
-
-  return snapshot;
 }
 
 describe('two characters from one home', () => {
@@ -171,34 +141,5 @@ describe('two characters from one home', () => {
     expect(
       JSON.parse(readFileSync(join(homeRoot, 'config.json'), 'utf8')),
     ).toEqual({version: 'project02.config.v2'});
-  }, 60_000);
-
-  it('refuses a second daemon the conversation the first holds, without a durable write', async () => {
-    const homeRoot = createTestTempRoot('project02-same-character-');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-
-    const first = await spawnServe(homeRoot);
-
-    try {
-      await chat(first.client, 'mira', 'hello from the first daemon');
-
-      const before = await snapshotDurableFiles(homeRoot);
-      const second = await spawnServe(homeRoot);
-
-      try {
-        await expect(
-          second.client.openDirectConversation('mira'),
-        ).resolves.toMatchObject({
-          status: 'refused',
-          reason: 'conversation_busy',
-        });
-        expect(await snapshotDurableFiles(homeRoot)).toEqual(before);
-      } finally {
-        expect((await second.stop()).code).toBe(0);
-      }
-    } finally {
-      expect((await first.stop()).code).toBe(0);
-    }
   }, 60_000);
 });

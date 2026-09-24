@@ -706,6 +706,28 @@ describe('local runtime mutation locks', () => {
     await foreign.release();
   });
 
+  it('ends a wait when its signal aborts, as busy', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const target = {locksRoot, resourceKey: 'held-for-a-while'};
+    const holder = await acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 0,
+    });
+    const abort = new AbortController();
+    const waiting = acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 60_000,
+      signal: abort.signal,
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    abort.abort();
+    await expect(waiting).rejects.toBeInstanceOf(
+      LocalRuntimeMutationLockBusyError,
+    );
+    await holder.release();
+  });
+
   it('restarts the wait budget while the lock keeps changing hands', async () => {
     const locksRoot = await createTempLocksRoot();
     const target = {locksRoot, resourceKey: 'draining-queue'};

@@ -51,3 +51,5 @@ export type {
   RuntimePluginConfigFieldInspectShape,
   RuntimePluginConfigInspectShape,
 } from '../../runtime/config/index.ts';
+/** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
+export type {DaemonRecord} from '../../runtime/storage/index.ts';
