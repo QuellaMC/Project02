@@ -16,7 +16,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 3;
+export const gatewayProtocolVersion = 4;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be
@@ -381,6 +381,17 @@ export type GatewayEvent =
       readonly state: CharacterRuntimeState;
       /** Present when a failure caused the change. */
       readonly message?: string;
+    }
+  | {
+      /**
+       * The daemon's whole state read again the moment a config change
+       * landed, before the pass that acts on it: the roster as config now
+       * says it — who is on, who is installed — and the config and package
+       * problems as they stand. What the pass does to each character's
+       * state follows as `state_changed`.
+       */
+      readonly kind: 'health_changed';
+      readonly health: GatewayHealth;
     }
   | ({
       readonly kind: 'maintenance_failed';

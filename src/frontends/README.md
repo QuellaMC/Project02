@@ -29,3 +29,19 @@ and `thread.tsx` render the store — the roster, every confirmation
 waiting, the thread with its draft bubbles, the one-line composer. The
 browser suite under `tests/browser` drives the built page in Chromium
 against a real daemon.
+
+The settings screen is the page's one writer of config, over the daemon's
+two verbs. `settings.ts` holds its rules, pure and tested in Node: the
+screen's target and view, what is typed and not saved, one operation per
+change built from the field's shape, and how each outcome of a change
+ends — applied re-reads the view and leaves the roster to the stream, a
+refusal stays at its field, a conflict is said once with the person's
+text kept. `settings-session.ts`
+is the verbs over the tab's client, and `settings.tsx` renders one screen
+for the home and for a character, every row the field shape the view
+carries. The roster links to it: Settings for the home, a gear per
+character, and a character that is off shows so, with its switch on its
+own screen. A change saved on any surface reaches every screen open on
+it: the stream's `health_changed` frame is a tab's cue to read its view
+again, with what is typed kept. A fresh home opens on the home's screen
+framed as setup until a provider is chosen; the person leaves it.

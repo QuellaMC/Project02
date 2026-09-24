@@ -196,6 +196,8 @@ export type RuntimePluginConfigInspectShape = {
   readonly displayName: string;
   readonly version: string;
   readonly enabled: boolean;
+  /** Which document decides `enabled`: this character's, the home's, or the manifest's default. */
+  readonly enabledSource: RuntimeConfigEffectiveSource;
   readonly activation: RuntimePluginActivationStatusShape;
   readonly fields: readonly RuntimePluginConfigFieldInspectShape[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];

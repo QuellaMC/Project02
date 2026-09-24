@@ -125,18 +125,18 @@ open-ended input.
 ## Config fields
 
 Declared in `manifest.config.fields`; the same declarations drive runtime
-resolution, the daemon's config view, and the model-facing
+resolution, the settings page, and the model-facing
 `runtime.plugin.config` tools.
 
 - `config.scope: "global_with_character_overrides"` allows home
   settings with per-character overrides; `"character_only"` keeps the
-  plugin wholly per character — the home's config view does not list it, and
+  plugin wholly per character — the home's settings do not list it, and
   its `activation.defaultEnabled` must be `false`.
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
-- `secret: true` fields hold credentials. The operator writes one into
-  that scope's config document (through the daemon's config change, or by
-  hand), and it is kept as a plain string at mode 0600; a character's own value overrides the home's, so two
+- `secret: true` fields hold credentials. The operator enters one on the
+  settings page, at the home or for one character, and it is kept as a
+  plain string with that scope's config at mode 0600; a character's own value overrides the home's, so two
   characters can hold different accounts for one plugin. Reads always
   show secret fields redacted, and they cannot be `agentMutable`.
 - `agentMutable: true` lets the model propose updates through
@@ -189,11 +189,10 @@ ship config values, so its character works right after install with no
 setup. Materialization only fills what is missing: a field the operator
 has set keeps the operator's value, on first install and on every package
 update. Character-only, demo, and optional plugins ship `false` and are
-enabled in the home's `config.json` or a character's overlay — by hand,
-or through the daemon's `plugin_enabled` change; the settings page over
-that verb is the next roadmap step. A character-only plugin is enabled
-in a character's overlay or by that character's package; the home's
-config view does not list it.
+enabled on the settings page: the home's, or one character's (each is
+one `plugin_enabled` change through the daemon). A character-only
+plugin is enabled on a character's settings or by that character's
+package; the home's settings do not list it.
 
 ## Testing a package
 

@@ -217,7 +217,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 3,
+      protocolVersion: 4,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -428,7 +428,7 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 3,
+      protocolVersion: 4,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
     });
@@ -569,7 +569,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 3,
+          protocolVersion: 4,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},

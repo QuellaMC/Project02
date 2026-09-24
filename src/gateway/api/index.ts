@@ -42,3 +42,9 @@ export {
   type TurnOutcome,
   type Unsubscribe,
 } from './contract.ts';
+export type {
+  RuntimeConfigDiagnostic,
+  RuntimeConfigValue,
+  RuntimePluginConfigFieldInspectShape,
+  RuntimePluginConfigInspectShape,
+} from '../../runtime/config/index.ts';
