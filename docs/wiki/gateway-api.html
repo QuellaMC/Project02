@@ -110,12 +110,15 @@
         <code>/api/health</code>: when the daemon answers as this home's, it
         prints <em>Already running on this home (pid …)</em> and the same
         address line, and exits 0 — which is also how anyone gets the address
-        of a daemon that has been running since yesterday. When the daemon
-        answers 503 it is stopping, and the second waits up to thirty seconds
-        for the lease and takes the home over on the same address. When
-        nothing answers — the holder has not published yet, a crash's record
-        names a port nobody listens on, the holder is on another machine — it
-        says so and exits 1.
+        of a daemon that has been running since yesterday. A holder that does
+        not answer — it answers 503 because it is stopping, its socket has
+        already closed ahead of its lease, it has taken the lease but not yet
+        bound its socket, or a crash's record names a port nobody listens on
+        — is given up to thirty seconds: every half second the lease is tried
+        and the address asked again, so a stop-then-start takes the home over
+        on the same address and a start-twice hands the address back; when
+        the wait is up, or the holder is on another machine, it says so and
+        exits 1. Ctrl-C ends the wait at once.
       </p>
 
       <h2>Stopping</h2>
@@ -707,7 +710,9 @@ data: {…}</code></pre>
         not opened — a tab that reconnected after a restart keeps its id — is
         routed from the store's record of the conversation, so no client
         reopens a thread after a restart; <code>unknown_conversation</code>
-        means a conversation the home does not hold. A reconnect gets its
+        means a conversation the home does not hold, and a record that
+        cannot be read is refused <code>conversation_unreadable</code> with
+        the reason, never mistaken for one. A reconnect gets its
         whole world in the <code>ready</code> frame, or exactly what it missed
         after <code>resumed</code>. A confirmation names the turn that raised
         it. And a turn whose answer was lost is safe to send again under its

@@ -634,6 +634,33 @@ describe('gateway façade', () => {
       history.status === 'ok' ? history.messages.map(m => m.text) : history,
     ).toEqual(['before the restart', 'noted', 'after the restart', 'noted']);
     await restarted.stop();
+
+    // A record that cannot be read is said as such, never as a conversation
+    // that does not exist.
+    const blind = createGateway(options);
+    const conversationsRoot = join(homeRoot, 'conversations');
+
+    await blind.startCharacter('mira');
+    chmodSync(conversationsRoot, 0o000);
+
+    try {
+      const unreadable = await blind.deliver({
+        ...line,
+        clientMessageId: 'msg-3',
+      });
+
+      expect(unreadable).toMatchObject({
+        status: 'refused',
+        reason: 'conversation_unreadable',
+      });
+      expect(unreadable.status === 'refused' && unreadable.message).toContain(
+        ref.conversationId,
+      );
+    } finally {
+      chmodSync(conversationsRoot, 0o755);
+    }
+
+    await blind.stop();
   });
 
   it('restarts a character once after a fatal turn; queued work is refused, then chat resumes', async () => {

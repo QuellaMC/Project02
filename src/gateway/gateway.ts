@@ -36,7 +36,10 @@ import {
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
 import {applyConfigChange, readConfigView} from './config.ts';
-import {characterOfConversation} from './conversations.ts';
+import {
+  characterOfConversation,
+  type ConversationCharacter,
+} from './conversations.ts';
 import {readConversationHistory} from './history.ts';
 import {createReconciler, type Reconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
@@ -168,21 +171,21 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       // A conversation this run has not opened — a tab that reconnected
       // after a restart keeps its id — is routed from the store's record
       // of it, so no client has to remember to open it again.
-      const characterId =
-        conversationRoutes.get(message.conversationId) ??
-        (await routeFromStore(
-          conversationRoutes,
-          boundHome.runtimeLocation.homeRoot,
-          message.conversationId,
-        ));
+      const route = await routeOf(
+        conversationRoutes,
+        boundHome.runtimeLocation.homeRoot,
+        message.conversationId,
+      );
 
-      if (characterId === undefined) {
-        return refusedTurn(
-          'unknown_conversation',
-          `No conversation "${message.conversationId}" exists on this home.`,
-        );
+      if (route.status === 'unknown') {
+        return refusedTurn('unknown_conversation', route.message);
       }
 
+      if (route.status === 'failed') {
+        return refusedTurn('conversation_unreadable', route.error.message);
+      }
+
+      const {characterId} = route;
       const reach = reachable(runtimes, loadHome(), characterId);
 
       if ('refused' in reach) {
@@ -383,27 +386,32 @@ function reachable(
 }
 
 /**
- * The character a conversation belongs to, from the store, remembered as
- * the route once known. A record that cannot be read is no route: nothing
- * ran, and the refusal says so.
+ * The character a conversation belongs to: the route held from an open
+ * or an earlier delivery, else the store's record of it, remembered once
+ * found. A record that cannot be read is said as such — the conversation
+ * may well exist — and nothing runs.
  */
-async function routeFromStore(
+async function routeOf(
   routes: Map<string, string>,
   homeRoot: string,
   conversationId: string,
-): Promise<string | undefined> {
+): Promise<ConversationCharacter> {
+  const held = routes.get(conversationId);
+
+  if (held !== undefined) {
+    return {status: 'found', conversationId, characterId: held};
+  }
+
   const conversation = await characterOfConversation({
     homeRoot,
     conversationId,
   });
 
-  if (conversation.status !== 'found') {
-    return undefined;
+  if (conversation.status === 'found') {
+    routes.set(conversationId, conversation.characterId);
   }
 
-  routes.set(conversationId, conversation.characterId);
-
-  return conversation.characterId;
+  return conversation;
 }
 
 /**

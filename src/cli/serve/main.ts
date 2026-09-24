@@ -18,6 +18,7 @@ import {
   createGateway,
   createGatewayServer,
   type DaemonClaim,
+  type DaemonClaimOutcome,
   type DaemonRecord,
   type Gateway,
   type GatewayHealth,
@@ -41,10 +42,12 @@ import {CliUsageError} from '../shared/usage-error.ts';
 
 export const defaultGatewayPort = 4310;
 
-/** How long a second serve waits for the daemon that holds the home to answer. */
+/** How long one question to the daemon that holds the home may take. */
 const probeMs = 5_000;
-/** How long a second serve waits for a stopping daemon to let the home go. */
-const takeOverWaitMs = 30_000;
+/** How long a second serve keeps asking a holder that does not answer, and trying its lease. */
+const defaultHoldWaitMs = 30_000;
+/** Between two tries. */
+const holdRetryMs = 500;
 
 /** Where `pnpm build:web` puts the page: beside the source, under dist. */
 const uiRoot = fileURLToPath(new URL('../../../dist/web/', import.meta.url));
@@ -63,6 +66,8 @@ export type ServeCliOptions = {
    * home's own. Tests inject 0, a free port.
    */
   readonly port?: number;
+  /** How long a second run waits for a holder that does not answer; tests shorten it. */
+  readonly holdWaitMs?: number;
 };
 
 type ServeCliFlags = {
@@ -98,7 +103,7 @@ export async function runServeCliFromArgs(
     const claimed = await claimDaemonHome({homeRoot});
 
     if (claimed.status === 'held') {
-      return await handOver(gateway, homeRoot, claimed.record, options);
+      return await handOver(gateway, homeRoot, claimed, options);
     }
 
     return await serve(gateway, claimed.claim, options);
@@ -221,99 +226,142 @@ async function serve(
 /**
  * A second serve on a held home is a client of the daemon that holds it.
  * It asks the address the record names and hands it back when the daemon
- * answers — the person wanted the app, and has it; waits for a daemon
- * that is stopping, and takes the home over; and says so when nothing
- * answers: the holder has not published yet, a crash left a record naming
- * a port nobody listens on, or the holder is on another machine.
+ * answers as this home's — the person wanted the app, and has it. A
+ * holder that does not answer is on its way out (its socket closes before
+ * its lease goes), on its way up (its lease is taken before its socket
+ * binds), or gone: for a while, every half second, the lease is tried and
+ * the address asked again, so a stop-then-start takes the home over and a
+ * start-twice hands the address back; then it says so.
  */
 async function handOver(
   gateway: Gateway,
   homeRoot: string,
-  record: DaemonRecord | undefined,
+  first: Extract<DaemonClaimOutcome, {status: 'held'}>,
   options: ServeCliOptions,
 ): Promise<number> {
-  if (record === undefined) {
-    options.stderr.write(
-      'Another daemon holds this home but has not published its address yet; ' +
-        'if it is starting, run this again in a moment.\n',
-    );
+  const deadline = Date.now() + (options.holdWaitMs ?? defaultHoldWaitMs);
+  let held = first;
+  let waiting = false;
 
-    return 1;
+  for (;;) {
+    const answer = await askHolder(homeRoot, held.record, options.signal);
+
+    if (answer.status === 'running') {
+      options.stdout.write(`Already running on this home${answer.pid}.\n`);
+      options.stdout.write(`${gatewayUrlEnvVarName}=${answer.address}\n`);
+
+      return 0;
+    }
+
+    if (options.signal.aborted) {
+      return 1;
+    }
+
+    if (Date.now() >= deadline) {
+      options.stderr.write(
+        `Another daemon holds this home but ${answer.why}, still; run this again once it has started or stopped.\n`,
+      );
+
+      return 1;
+    }
+
+    if (!waiting) {
+      waiting = true;
+      options.stderr.write(
+        `Another daemon holds this home but ${answer.why}; waiting for it.\n`,
+      );
+    }
+
+    await pause(holdRetryMs, options.signal);
+
+    const claimed = await claimDaemonHome({homeRoot});
+
+    if (claimed.status === 'claimed') {
+      return await serve(gateway, claimed.claim, options);
+    }
+
+    held = claimed;
+  }
+}
+
+/**
+ * One question to the daemon the record names, under its own deadline
+ * and the stop signal: running here, or why not.
+ */
+async function askHolder(
+  homeRoot: string,
+  record: DaemonRecord | undefined,
+  signal: AbortSignal,
+): Promise<
+  | {readonly status: 'running'; readonly address: string; readonly pid: string}
+  | {readonly status: 'silent'; readonly why: string}
+> {
+  if (record === undefined) {
+    return {status: 'silent', why: 'has not published its address yet'};
   }
 
   const origin = `http://127.0.0.1:${String(record.port)}/`;
   const probe = AbortSignal.timeout(probeMs);
-  let health: GatewayHealth | undefined;
+  let health: GatewayHealth;
 
   try {
     health = await createGatewayClient({
       baseUrl: origin,
       token: record.token,
-    }).health({signal: probe});
+    }).health({signal: AbortSignal.any([probe, signal])});
   } catch (error: unknown) {
     if (error instanceof GatewayClientError && error.status === 503) {
-      return await takeOver(gateway, homeRoot, options);
+      return {status: 'silent', why: 'is stopping'};
     }
 
-    options.stderr.write(
-      `Another daemon holds this home but did not answer at ${origin}${
+    return {
+      status: 'silent',
+      why: `did not answer at ${origin}${
         probe.aborted
           ? ` within ${String(probeMs / 1000)} seconds`
-          : `: ${describe(error)}`
-      }; if it is starting, run this again in a moment.\n`,
-    );
-
-    return 1;
+          : signal.aborted
+            ? ''
+            : `: ${describe(error)}`
+      }`,
+    };
   }
 
   if (health.homeRoot !== homeRoot) {
-    options.stderr.write(
-      `Another daemon holds this home, but the one at ${origin} serves ${health.homeRoot}; ' +
-        'if it is starting, run this again in a moment.\n`,
-    );
-
-    return 1;
+    return {
+      status: 'silent',
+      why: `the one at ${origin} serves ${health.homeRoot}`,
+    };
   }
 
-  options.stdout.write(
-    `Already running on this home${
-      record.running === undefined ? '' : ` (pid ${String(record.running.pid)})`
-    }.\n`,
-  );
-  options.stdout.write(
-    `${gatewayUrlEnvVarName}=${origin}#token=${record.token}\n`,
-  );
-
-  return 0;
+  return {
+    status: 'running',
+    address: `${origin}#token=${record.token}`,
+    pid:
+      record.running === undefined
+        ? ''
+        : ` (pid ${String(record.running.pid)})`,
+  };
 }
 
-/** The holder is on its way out: its turn drains, then this run is the daemon. */
-async function takeOver(
-  gateway: Gateway,
-  homeRoot: string,
-  options: ServeCliOptions,
-): Promise<number> {
-  options.stderr.write(
-    'The daemon on this home is stopping; waiting to take over.\n',
-  );
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve();
 
-  const claimed = await claimDaemonHome({
-    homeRoot,
-    waitTimeoutMs: takeOverWaitMs,
-    signal: options.signal,
-  });
-
-  if (claimed.status === 'held') {
-    if (!options.signal.aborted) {
-      options.stderr.write(
-        'The daemon on this home is still stopping; run this again once it has stopped.\n',
-      );
+      return;
     }
 
-    return 1;
-  }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
 
-  return await serve(gateway, claimed.claim, options);
+    signal.addEventListener('abort', onAbort, {once: true});
+  });
 }
 
 /** The home is let go last; a lease that would not go is the exit code. */

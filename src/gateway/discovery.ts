@@ -41,20 +41,18 @@ export type DaemonClaimOutcome =
   | {readonly status: 'held'; readonly record?: DaemonRecord};
 
 /**
- * Takes the home's daemon lease — at once, or within a wait that the
- * signal can end — and reads what the last run left: its token, kept, and
- * its port, to bind again. Nothing is written until `publish`.
+ * Takes the home's daemon lease, at once or not at all, and reads what
+ * the last run left: its token, kept, and its port, to bind again.
+ * Nothing is written until `publish`.
  */
 export async function claimDaemonHome(options: {
   readonly homeRoot: string;
-  readonly waitTimeoutMs?: number;
-  readonly signal?: AbortSignal;
 }): Promise<DaemonClaimOutcome> {
   const {homeRoot} = options;
   let lease;
 
   try {
-    lease = await acquireLocalRuntimeDaemonLease(options);
+    lease = await acquireLocalRuntimeDaemonLease({homeRoot});
   } catch (error: unknown) {
     if (
       error instanceof LocalRuntimeStorageContractError &&

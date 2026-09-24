@@ -13,6 +13,7 @@ which `pnpm serve` builds first) at its root, and prints the
 the moment the socket is bound, while the roster comes up on the stream.
 The token and the port belong to the home and are kept in
 `<home>/daemon.json`, so a restart is the same address. A second `serve`
-on a held home prints the running daemon's address and exits, waits for one
-that is stopping, or says that nothing answered. Ctrl-C, SIGTERM and SIGHUP
+on a held home prints the running daemon's address and exits, keeps trying
+for a while one that does not answer — stopping, or not yet bound — and
+takes the home over when its lease goes, or says so when the wait is up. Ctrl-C, SIGTERM and SIGHUP
 are one stop: it finishes what was accepted, then lets the home go.

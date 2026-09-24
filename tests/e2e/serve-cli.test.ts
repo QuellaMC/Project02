@@ -9,7 +9,7 @@ import {createServer, type AddressInfo, type Server} from 'node:net';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {runServeCliFromArgs} from '../../src/cli/serve/main.ts';
 import {
@@ -44,6 +44,7 @@ function runServe(
   options: {
     readonly adapter?: RoleModelAdapter;
     readonly signal?: AbortSignal;
+    readonly holdWaitMs?: number;
   } = {},
 ) {
   const abort = new AbortController();
@@ -73,6 +74,9 @@ function runServe(
     roleModelAdapter: options.adapter ?? adapter,
     signal: options.signal ?? abort.signal,
     port: 0,
+    ...(options.holdWaitMs === undefined
+      ? {}
+      : {holdWaitMs: options.holdWaitMs}),
   });
 
   return {
@@ -386,51 +390,80 @@ describe('serve', () => {
     const second = runServe(['--store', storeRoot]);
 
     expect(await second.url).toBe(url);
-    expect(second.stderr()).toContain('is stopping; waiting to take over');
+    expect(second.stderr()).toContain(
+      'holds this home but is stopping; waiting for it',
+    );
     await expect(turn).resolves.toMatchObject({status: 'completed'});
     await expect(stopping).resolves.toBe(0);
     await expect(second.stop()).resolves.toBe(0);
   }, 20_000);
 
-  it('says so when the home is held but nothing answers', async () => {
+  it('keeps trying a holder that does not answer — taking the home when its lease goes, saying so when the wait is up, and stopping at once when asked', async () => {
     const storeRoot = await createGatewayTestHome('project02-serve-silent-');
+    const gone = await occupy(0);
+    const port = (gone.address() as AddressInfo).port;
+
+    await free(gone);
+
+    // Held, with a record naming a port nobody listens on: the holder's
+    // socket has gone before its lease, which is what a stop looks like
+    // from outside.
+    writeDaemonRecord({
+      homeRoot: storeRoot,
+      record: {
+        protocolVersion: 5,
+        token: 'stale-token',
+        port,
+        running: {pid: 1, startedAt: '2026-01-01T00:00:00.000Z'},
+      },
+    });
+
     const lease = await acquireLocalRuntimeDaemonLease({homeRoot: storeRoot});
+    const patient = runServe(['--store', storeRoot]);
 
-    try {
-      // Held, and no address published yet.
-      const unpublished = runServe(['--store', storeRoot]);
-
-      await expect(unpublished.exit).resolves.toBe(1);
-      expect(unpublished.stderr()).toContain(
-        'has not published its address yet',
-      );
-
-      // Held, with a record naming a port nobody listens on.
-      const gone = await occupy(0);
-      const port = (gone.address() as AddressInfo).port;
-
-      await free(gone);
-      writeDaemonRecord({
-        homeRoot: storeRoot,
-        record: {
-          protocolVersion: 5,
-          token: 'stale-token',
-          port,
-          running: {pid: 1, startedAt: '2026-01-01T00:00:00.000Z'},
-        },
-      });
-
-      const silent = runServe(['--store', storeRoot]);
-
-      await expect(silent.exit).resolves.toBe(1);
-      expect(silent.stderr()).toContain(
+    await vi.waitFor(() => {
+      expect(patient.stderr()).toContain(
         `did not answer at http://127.0.0.1:${String(port)}/`,
       );
-      expect(silent.stdout()).toBe('');
+    });
+    expect(patient.stderr()).toContain('waiting for it');
+    await lease.release();
+    // The lease went: this run is the daemon, on the home's token and port.
+    expect(await patient.url).toBe(
+      `http://127.0.0.1:${String(port)}/#token=stale-token`,
+    );
+    await expect(patient.stop()).resolves.toBe(0);
+
+    // Held with no address yet, for longer than the wait allows.
+    const held = await acquireLocalRuntimeDaemonLease({homeRoot: storeRoot});
+
+    try {
+      const expired = runServe(['--store', storeRoot], {holdWaitMs: 700});
+
+      await expect(expired.exit).resolves.toBe(1);
+      expect(expired.stderr()).toContain(
+        'run this again once it has started or stopped',
+      );
+      expect(expired.stdout()).toBe('');
+
+      // Asked to stop while waiting: at once, and quietly.
+      const abort = new AbortController();
+      const cancelled = runServe(['--store', storeRoot], {
+        signal: abort.signal,
+      });
+      const started = performance.now();
+
+      await vi.waitFor(() => {
+        expect(cancelled.stderr()).toContain('waiting for it');
+      });
+      abort.abort();
+      await expect(cancelled.exit).resolves.toBe(1);
+      expect(performance.now() - started).toBeLessThan(3_000);
+      expect(cancelled.stdout()).toBe('');
     } finally {
-      await lease.release();
+      await held.release();
     }
-  });
+  }, 20_000);
 
   it('refuses the options a client owns', async () => {
     for (const [args, message] of [

@@ -75,6 +75,8 @@ export type GatewayVisibleMessage = {
 export type GatewayRefusalReason =
   | 'unknown_character'
   | 'unknown_conversation'
+  /** The conversation's record could not be read; the message says why. */
+  | 'conversation_unreadable'
   | 'conversation_busy'
   | 'sender_not_supported'
   | 'character_unavailable'

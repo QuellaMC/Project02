@@ -100,13 +100,10 @@ export function writeDaemonRecord(
  * One daemon per home: the lease a daemon holds for its lifetime, beside
  * the conversation-writer leases and under the same rules — refused at
  * once while held by a live process on this host, reclaimed from a dead
- * one. A wait, when one is asked for, ends early when its signal aborts.
+ * one.
  */
 export async function acquireLocalRuntimeDaemonLease(
-  options: Project02HomeLayoutOptions & {
-    readonly waitTimeoutMs?: number;
-    readonly signal?: AbortSignal;
-  },
+  options: Project02HomeLayoutOptions = {},
 ): Promise<LocalRuntimeMutationLockLease> {
   const layout = createProject02HomeLayout(options);
 
@@ -115,9 +112,8 @@ export async function acquireLocalRuntimeDaemonLease(
   return await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
     resourceKey: 'daemon',
-    waitTimeoutMs: options.waitTimeoutMs ?? 0,
+    waitTimeoutMs: 0,
     busyCode: 'storage_busy',
-    ...(options.signal === undefined ? {} : {signal: options.signal}),
   });
 }
 

@@ -42,8 +42,6 @@ type AcquireLocalRuntimeMutationLockOptions = {
   readonly incompleteGraceMs?: number;
   readonly busyCode?: LocalRuntimeMutationLockBusyCode;
   readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
-  /** Ends a wait early, as busy: a person who cancels does not wait out the budget. */
-  readonly signal?: AbortSignal;
 };
 
 export type LocalRuntimeMutationLockOwnerToken = object;
@@ -170,14 +168,7 @@ export async function acquireLocalRuntimeMutationLock(
     }
 
     if (attempt.status === 'contended') {
-      if (options.signal?.aborted === true) {
-        throw new LocalRuntimeMutationLockBusyError(
-          normalized.busyCode,
-          `Local runtime mutation resource is busy: ${normalized.resourceKey}; the wait was cancelled.`,
-        );
-      }
-
-      await delay(wait.remainingRetryDelayMs(), options.signal);
+      await delay(wait.remainingRetryDelayMs());
     }
   }
 }
@@ -951,22 +942,9 @@ function randomizedRetryDelayMs(): number {
   return 10 + Math.floor(Math.random() * 91);
 }
 
-/** Sleeps, or returns at once when the signal aborts meanwhile. */
-async function delay(
-  milliseconds: number,
-  signal: AbortSignal | undefined,
-): Promise<void> {
+async function delay(milliseconds: number): Promise<void> {
   await new Promise<void>(resolveDelay => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolveDelay();
-    }, milliseconds);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolveDelay();
-    };
-
-    signal?.addEventListener('abort', onAbort, {once: true});
+    setTimeout(resolveDelay, milliseconds);
   });
 }
 
