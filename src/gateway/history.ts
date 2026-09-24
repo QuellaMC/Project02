@@ -1,8 +1,6 @@
 import {
   characterDataDirPath,
-  createLocalRuntimeConversationStore,
   listConversationSegments,
-  LocalRuntimeConversationStoreError,
   LocalRuntimeStorageContractError,
   readCommittedConversationMessages,
 } from '../runtime/storage/index.ts';
@@ -11,6 +9,7 @@ import type {
   HistoryOutcome,
   HistoryPage,
 } from './api/contract.ts';
+import {characterOfConversation} from './conversations.ts';
 
 type CommittedMessage = ReturnType<
   typeof readCommittedConversationMessages
@@ -98,45 +97,24 @@ export async function readConversationHistory(options: {
     return refused('invalid_page', invalidPageMessage);
   }
 
-  let conversation;
+  const conversation = await characterOfConversation(options);
 
-  try {
-    conversation = await createLocalRuntimeConversationStore({
-      homeRoot: options.homeRoot,
-    }).readConversation(options.conversationId);
-  } catch (error: unknown) {
-    if (
-      error instanceof LocalRuntimeConversationStoreError &&
-      error.code === 'conversation_not_found'
-    ) {
-      return refused('unknown_conversation', error.message);
-    }
-
-    if (error instanceof LocalRuntimeStorageContractError) {
-      return error.code === 'invalid_conversation_id'
-        ? refused('unknown_conversation', error.message)
-        : storageFailure(error);
-    }
-
-    throw error;
+  if (conversation.status === 'unknown') {
+    return refused('unknown_conversation', conversation.message);
   }
 
-  const character = conversation.participants.find(
-    participant => participant.kind === 'character',
-  );
-
-  if (character === undefined) {
-    return refused(
-      'unknown_conversation',
-      `Conversation "${conversation.id}" has no character to read it from.`,
-    );
+  if (conversation.status === 'failed') {
+    return storageFailure(conversation.error);
   }
 
   try {
     return assemblePage({
-      storeRoot: characterDataDirPath(options.homeRoot, character.id),
-      characterId: character.id,
-      conversationId: conversation.id,
+      storeRoot: characterDataDirPath(
+        options.homeRoot,
+        conversation.characterId,
+      ),
+      characterId: conversation.characterId,
+      conversationId: conversation.conversationId,
       page,
     });
   } catch (error: unknown) {

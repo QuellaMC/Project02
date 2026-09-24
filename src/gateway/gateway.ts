@@ -23,8 +23,6 @@ import {
   type GatewayEventListener,
   type GatewayHealth,
   type GatewayMessage,
-  type HistoryOutcome,
-  type HistoryPage,
   type OpenOutcome,
   type PendingConfirmation,
   type ReconcilePlan,
@@ -38,6 +36,7 @@ import {
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
 import {applyConfigChange, readConfigView} from './config.ts';
+import {characterOfConversation} from './conversations.ts';
 import {readConversationHistory} from './history.ts';
 import {createReconciler, type Reconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
@@ -53,6 +52,10 @@ export type CreateGatewayOptions = Project02HomeOptions & {
 };
 
 type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
+
+const invalidStampMessage =
+  'A message names its source and its own id as single tokens: ' +
+  'letters, digits, and any of ":._-", at most 64 characters.';
 
 /**
  * The façade the daemon holds behind its socket: the registry of character
@@ -77,18 +80,9 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const submissions = createSubmissionLedger();
   let stopped = false;
 
-  // A client rendering bug must not break a character's turn: listener
-  // failures stay the listener's problem.
   const emit = (event: GatewayEvent): void => {
-    for (const listener of [...listeners]) {
-      try {
-        listener(event);
-      } catch {
-        // Isolation is the rule; there is no one to report a listener to.
-      }
-    }
+    emitTo(listeners, event);
   };
-
   const runtimeFor = createRuntimeFactory({
     options,
     loadHome,
@@ -118,16 +112,12 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     health(): GatewayHealth {
       return readHealth(loadHome(), runtimes);
     },
-    history(
-      conversationId: string,
-      page?: HistoryPage,
-    ): Promise<HistoryOutcome> {
-      return readConversationHistory({
+    history: (conversationId, page) =>
+      readConversationHistory({
         homeRoot: boundHome.runtimeLocation.homeRoot,
         conversationId,
         ...(page === undefined ? {} : {page}),
-      });
-    },
+      }),
     startCharacter,
     reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
     configView: target => readConfigView(loadHome(), target),
@@ -147,19 +137,17 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       return outcome;
     },
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
-      const runtime = runtimes.get(characterId);
-      // The roster is the truth about what is installed: a runtime kept
-      // after its package left is stopped, not a character to reach.
-      const roster = listProject02Characters(loadHome()).characters;
+      const reach = reachable(runtimes, loadHome(), characterId);
 
-      if (
-        runtime === undefined ||
-        !roster.some(character => character.id === characterId)
-      ) {
-        return notStartedOutcome(characterId, roster);
+      if ('refused' in reach) {
+        return reach.refused;
       }
 
-      const outcome = await onHeldThread(startsInFlight, runtime, held => held);
+      const outcome = await onHeldThread(
+        startsInFlight,
+        reach.runtime,
+        held => held,
+      );
 
       if (outcome.status === 'opened') {
         conversationRoutes.set(outcome.conversationId, characterId);
@@ -174,24 +162,34 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         !isValidClientStamp(message.source) ||
         !isValidClientStamp(message.clientMessageId)
       ) {
-        return refusedTurn(
-          'invalid_message',
-          'A message names its source and its own id as single tokens: ' +
-            'letters, digits, and any of ":._-", at most 64 characters.',
-        );
+        return refusedTurn('invalid_message', invalidStampMessage);
       }
 
-      const characterId = conversationRoutes.get(message.conversationId);
-      const runtime =
-        characterId === undefined ? undefined : runtimes.get(characterId);
+      // A conversation this run has not opened — a tab that reconnected
+      // after a restart keeps its id — is routed from the store's record
+      // of it, so no client has to remember to open it again.
+      const characterId =
+        conversationRoutes.get(message.conversationId) ??
+        (await routeFromStore(
+          conversationRoutes,
+          boundHome.runtimeLocation.homeRoot,
+          message.conversationId,
+        ));
 
-      if (characterId === undefined || runtime === undefined) {
+      if (characterId === undefined) {
         return refusedTurn(
           'unknown_conversation',
-          'The gateway holds no open conversation ' +
-            `"${message.conversationId}".`,
+          `No conversation "${message.conversationId}" exists on this home.`,
         );
       }
+
+      const reach = reachable(runtimes, loadHome(), characterId);
+
+      if ('refused' in reach) {
+        return turnNotRun(characterId, message, reach.refused);
+      }
+
+      const {runtime} = reach;
 
       return submissions.submit(message, async () => {
         // A recovery or a reload lets the thread go; a client that opened
@@ -346,6 +344,66 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
     return reload;
   }
+}
+
+// A client rendering bug must not break a character's turn: listener
+// failures stay the listener's problem.
+function emitTo(
+  listeners: ReadonlySet<GatewayEventListener>,
+  event: GatewayEvent,
+): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(event);
+    } catch {
+      // Isolation is the rule; there is no one to report a listener to.
+    }
+  }
+}
+
+/**
+ * The runtime a character is reached through, or the refusal. The roster
+ * is the truth about what is installed: a runtime kept after its package
+ * left is stopped, not a character to reach.
+ */
+function reachable(
+  runtimes: Runtimes,
+  home: Project02Home,
+  characterId: string,
+):
+  | {readonly runtime: LocalCharacterRuntime}
+  | {readonly refused: Extract<OpenOutcome, {status: 'refused'}>} {
+  const runtime = runtimes.get(characterId);
+  const roster = listProject02Characters(home).characters;
+
+  return runtime === undefined ||
+    !roster.some(character => character.id === characterId)
+    ? {refused: notStartedOutcome(characterId, roster)}
+    : {runtime};
+}
+
+/**
+ * The character a conversation belongs to, from the store, remembered as
+ * the route once known. A record that cannot be read is no route: nothing
+ * ran, and the refusal says so.
+ */
+async function routeFromStore(
+  routes: Map<string, string>,
+  homeRoot: string,
+  conversationId: string,
+): Promise<string | undefined> {
+  const conversation = await characterOfConversation({
+    homeRoot,
+    conversationId,
+  });
+
+  if (conversation.status !== 'found') {
+    return undefined;
+  }
+
+  routes.set(conversationId, conversation.characterId);
+
+  return conversation.characterId;
 }
 
 /**
@@ -574,7 +632,7 @@ function refusedStart(
 function notStartedOutcome(
   characterId: string,
   roster: readonly Project02CharacterListing[],
-): OpenOutcome {
+): Extract<OpenOutcome, {status: 'refused'}> {
   const installed = roster.some(character => character.id === characterId);
 
   return Object.freeze({
