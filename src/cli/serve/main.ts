@@ -213,9 +213,9 @@ async function serve(
     return await released(claim, options.stderr, stopProblems === 0 ? 0 : 1);
   } catch (error: unknown) {
     // The socket never opened, or a bug escaped: leave nothing running,
-    // and let the home go.
+    // and let the home go — a lease that would not go is said too.
     await (server === undefined ? gateway.stop() : server.close());
-    await claim.release();
+    await released(claim, options.stderr, 1);
 
     throw error;
   } finally {
@@ -272,7 +272,11 @@ async function handOver(
       );
     }
 
-    await pause(holdRetryMs, options.signal);
+    // A stop that lands during the pause: the home is not claimed on the
+    // way out, even if its holder let go meanwhile.
+    if (await pause(holdRetryMs, options.signal)) {
+      return 1;
+    }
 
     const claimed = await claimDaemonHome({homeRoot});
 
@@ -343,21 +347,22 @@ async function askHolder(
   };
 }
 
-function pause(ms: number, signal: AbortSignal): Promise<void> {
+/** Sleeps; resolves true when the signal ended the sleep, or had already fired. */
+function pause(ms: number, signal: AbortSignal): Promise<boolean> {
   return new Promise(resolve => {
     if (signal.aborted) {
-      resolve();
+      resolve(true);
 
       return;
     }
 
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);
-      resolve();
+      resolve(false);
     }, ms);
     const onAbort = (): void => {
       clearTimeout(timer);
-      resolve();
+      resolve(true);
     };
 
     signal.addEventListener('abort', onAbort, {once: true});

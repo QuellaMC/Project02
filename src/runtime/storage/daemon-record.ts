@@ -8,7 +8,10 @@
  * record — is what says a daemon is alive.
  */
 import {isJsonRecord} from '../../shared/json-boundary.ts';
-import {atomicReplaceFileSync} from './atomic-file.ts';
+import {
+  atomicReplaceFileSync,
+  cleanupAbandonedAtomicReplacementFilesSync,
+} from './atomic-file.ts';
 import {assertProject02HomeAdoptableSync} from './home.ts';
 import {
   createProject02HomeLayout,
@@ -74,13 +77,18 @@ export function readDaemonRecord(
     : {status: 'ok', record};
 }
 
-/** Whole, at 0600: a token is a credential, like the key beside it in config.json. */
+/**
+ * Whole, at 0600: a token is a credential, like the key beside it in
+ * config.json. A replacement a killed writer left behind is removed first;
+ * the caller holds the daemon lease, so no other writer is mid-flight.
+ */
 export function writeDaemonRecord(
   options: Project02HomeLayoutOptions & {readonly record: DaemonRecord},
 ): void {
   const path = createProject02HomeLayout(options).daemonRecordPath;
 
   try {
+    cleanupAbandonedAtomicReplacementFilesSync(path);
     atomicReplaceFileSync({
       targetPath: path,
       content: `${JSON.stringify(options.record, null, 2)}\n`,

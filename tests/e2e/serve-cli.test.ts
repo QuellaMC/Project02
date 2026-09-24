@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -45,6 +46,7 @@ function runServe(
     readonly adapter?: RoleModelAdapter;
     readonly signal?: AbortSignal;
     readonly holdWaitMs?: number;
+    readonly port?: number;
   } = {},
 ) {
   const abort = new AbortController();
@@ -73,7 +75,7 @@ function runServe(
     pluginHost: createRuntimePluginHost({plugins: []}),
     roleModelAdapter: options.adapter ?? adapter,
     signal: options.signal ?? abort.signal,
-    port: 0,
+    port: options.port ?? 0,
     ...(options.holdWaitMs === undefined
       ? {}
       : {holdWaitMs: options.holdWaitMs}),
@@ -446,7 +448,9 @@ describe('serve', () => {
       );
       expect(expired.stdout()).toBe('');
 
-      // Asked to stop while waiting: at once, and quietly.
+      // Asked to stop while waiting: at once, and quietly — even when the
+      // holder lets go in that same moment, the home is not taken on the
+      // way out.
       const abort = new AbortController();
       const cancelled = runServe(['--store', storeRoot], {
         signal: abort.signal,
@@ -457,6 +461,7 @@ describe('serve', () => {
         expect(cancelled.stderr()).toContain('waiting for it');
       });
       abort.abort();
+      await held.release();
       await expect(cancelled.exit).resolves.toBe(1);
       expect(performance.now() - started).toBeLessThan(3_000);
       expect(cancelled.stdout()).toBe('');
@@ -464,6 +469,22 @@ describe('serve', () => {
       await held.release();
     }
   }, 20_000);
+
+  it('leaves nothing behind when the socket cannot be bound', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-unbound-');
+    const unbound = runServe(['--store', storeRoot], {port: 65_536});
+
+    await expect(unbound.exit).resolves.toBe(1);
+    expect(unbound.stderr()).toContain('Error: ');
+    expect(unbound.stdout()).toBe('');
+    expect(existsSync(join(storeRoot, 'daemon.json'))).toBe(false);
+
+    // The home was let go: the next run is the daemon.
+    const next = runServe(['--store', storeRoot]);
+
+    await next.url;
+    await expect(next.stop()).resolves.toBe(0);
+  });
 
   it('refuses the options a client owns', async () => {
     for (const [args, message] of [

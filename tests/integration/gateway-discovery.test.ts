@@ -1,3 +1,6 @@
+import {existsSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+
 import {describe, expect, it} from 'vitest';
 
 import {claimDaemonHome} from '../../src/gateway/index.ts';
@@ -20,7 +23,15 @@ describe("the daemon's claim on a home", () => {
       status: 'held',
     });
 
+    // A replacement a killed writer left behind goes with the first write.
+    const abandoned = join(
+      homeRoot,
+      '.daemon.json.4242.00000000-0000-4000-8000-000000000000.tmp',
+    );
+
+    writeFileSync(abandoned, '{');
     expect(first.claim.publish(4310)).toBeUndefined();
+    expect(existsSync(abandoned)).toBe(false);
     await expect(claimDaemonHome({homeRoot})).resolves.toMatchObject({
       status: 'held',
       record: {
