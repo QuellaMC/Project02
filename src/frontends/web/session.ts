@@ -35,6 +35,7 @@ import {
   noticed,
   pageUnread,
   streamLost,
+  streamResumed,
   threadOpened,
   type PendingLine,
   type WebState,
@@ -223,6 +224,12 @@ export function createSession(address: string): Session {
         },
         onLost: () => {
           apply(streamLost);
+        },
+        onResumed: () => {
+          // Nothing was missed, so nothing is installed; a connection is
+          // still the moment to account for the lines this tab holds.
+          apply(streamResumed);
+          void accountForPending(accounting());
         },
       },
     )

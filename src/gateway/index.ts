@@ -7,6 +7,11 @@
 export * from './api/index.ts';
 export {createGateway, type CreateGatewayOptions} from './gateway.ts';
 export {
+  claimDaemonHome,
+  type DaemonClaim,
+  type DaemonClaimOutcome,
+} from './discovery.ts';
+export {
   createGatewayServer,
   type GatewayServer,
   type GatewayServerOptions,

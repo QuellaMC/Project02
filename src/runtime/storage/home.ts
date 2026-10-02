@@ -137,6 +137,11 @@ function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
       label: 'conversations root',
     },
     {path: layout.configPath, kind: 'file' as const, label: 'config file'},
+    {
+      path: layout.daemonRecordPath,
+      kind: 'file' as const,
+      label: 'daemon record',
+    },
   ]) {
     if (isPresentButNot(describeRealEntry(entry.path), entry.kind)) {
       throw new LocalRuntimeStorageContractError(
@@ -251,7 +256,10 @@ function isProject02HomeControlEntry(
     return entry.isDirectory() || entry.isSymbolicLink();
   }
 
-  if (entryPath === layout.configPath) {
+  if (
+    entryPath === layout.configPath ||
+    entryPath === layout.daemonRecordPath
+  ) {
     // Mutations canonicalize through links and would rewrite the target.
     return entry.isFile();
   }

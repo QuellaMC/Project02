@@ -50,12 +50,15 @@ export class LocalRuntimeStorageContractError extends Error {
 }
 
 // Home lock families: runtime-control-file:* for the global config,
-// conversations-catalog for conversation creation, and
-// conversation-writer:* for one process owning an open conversation.
+// conversations-catalog for conversation creation, conversation-writer:*
+// for one process owning an open conversation, and daemon for the one
+// process serving the home.
 export type Project02HomeLayout = {
   readonly homeRoot: string;
   readonly configPath: string;
   readonly schemaPath: string;
+  /** Where the daemon serving this home says it listens; see daemon-record.ts. */
+  readonly daemonRecordPath: string;
   readonly locksRoot: string;
   readonly pluginPackagesRoot: string;
   readonly characterPackagesRoot: string;
@@ -160,6 +163,8 @@ const configFileName = 'config.json';
 
 const schemaFileName = 'schema.json';
 
+const daemonRecordFileName = 'daemon.json';
+
 const sessionCatalogFileName = 'sessions.jsonl';
 
 const sessionsDirectoryName = 'sessions';
@@ -203,6 +208,7 @@ export function createProject02HomeLayout(
     homeRoot,
     configPath: join(homeRoot, configFileName),
     schemaPath: join(homeRoot, schemaFileName),
+    daemonRecordPath: join(homeRoot, daemonRecordFileName),
     locksRoot: join(homeRoot, locksDirectoryName),
     pluginPackagesRoot: join(homeRoot, pluginsDirectoryName),
     characterPackagesRoot: join(homeRoot, charactersDirectoryName),

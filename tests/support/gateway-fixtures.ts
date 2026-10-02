@@ -2,6 +2,7 @@ import {join} from 'node:path';
 
 import {expect} from 'vitest';
 
+import type {GatewayClient} from '../../src/gateway/client/index.ts';
 import {createGateway, type Gateway} from '../../src/gateway/index.ts';
 import {
   createDemoConfigPluginManifest,
@@ -95,6 +96,46 @@ export function authoredTone(
   inspected: ReturnType<typeof inspectRuntimePluginConfig>,
 ): unknown {
   return inspected.fields.find(field => field.name === 'tone')?.authored.value;
+}
+
+/**
+ * Resolves once the character is ready, from the stream: the address a
+ * daemon prints no longer implies its roster is up.
+ */
+export function awaitCharacterReady(
+  client: GatewayClient,
+  characterId: string,
+): Promise<void> {
+  const abort = new AbortController();
+  const isReady = (
+    summary: {readonly id: string; readonly state: string} | undefined,
+  ): boolean => summary?.id === characterId && summary.state === 'ready';
+
+  return new Promise<void>((resolve, reject) => {
+    client
+      .events(
+        event => {
+          if (
+            event.kind === 'state_changed' &&
+            event.characterId === characterId &&
+            event.state === 'ready'
+          ) {
+            resolve();
+            abort.abort();
+          }
+        },
+        {
+          signal: abort.signal,
+          onReady: ({snapshot}) => {
+            if (snapshot.health.characters.some(isReady)) {
+              resolve();
+              abort.abort();
+            }
+          },
+        },
+      )
+      .catch(reject);
+  });
 }
 
 /** Opens the DM or fails the test with the outcome's own message. */

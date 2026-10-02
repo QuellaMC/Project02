@@ -35,6 +35,8 @@ export {
   type OpenOutcome,
   type PendingConfirmation,
   type ReconcilePlan,
+  type RunningDraft,
+  type RunningTurn,
   type StartOutcome,
   type StorageFailure,
   type TurnIdentity,
@@ -42,9 +44,12 @@ export {
   type TurnOutcome,
   type Unsubscribe,
 } from './contract.ts';
+export {foldRunningTurns, type RunningTurns} from './running-turns.ts';
 export type {
   RuntimeConfigDiagnostic,
   RuntimeConfigValue,
   RuntimePluginConfigFieldInspectShape,
   RuntimePluginConfigInspectShape,
 } from '../../runtime/config/index.ts';
+/** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
+export type {DaemonRecord} from '../../runtime/storage/index.ts';
