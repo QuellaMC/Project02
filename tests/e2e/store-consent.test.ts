@@ -99,7 +99,7 @@ describe('store consent gate', () => {
     const run = serve(storeRoot, ['--init'], pipedStdin());
 
     await vi.waitFor(() => {
-      expect(run.stdout()).toContain('Gateway listening on port');
+      expect(run.stdout()).toContain('PROJECT02_GATEWAY=');
     });
     expect(run.stdout()).not.toContain('Create one there?');
     expect(readdirSync(storeRoot)).toEqual(
@@ -113,7 +113,7 @@ describe('store consent gate', () => {
     const run = serve(storeRoot, [], interactiveStdin('y\n'));
 
     await vi.waitFor(() => {
-      expect(run.stdout()).toContain('Gateway listening on port');
+      expect(run.stdout()).toContain('PROJECT02_GATEWAY=');
     });
     expect(run.stdout()).toContain(
       `No Project02 store at "${storeRoot}". Create one there? [y/N]`,

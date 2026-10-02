@@ -1,3 +1,7 @@
+import {mkdtempSync, realpathSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
 import {expect, test as base} from '@playwright/test';
 
 import {spawnDaemon, type SpawnedDaemon} from '../support/spawn-daemon.ts';
@@ -51,25 +55,56 @@ test('opens the printed address, chats with the reply drafted ahead of its commi
   );
 });
 
-test('says it is connecting once the daemon stops, and keeps the thread', async ({
-  daemon,
-  page,
-}) => {
-  await page.goto(daemon.url);
+base(
+  'says it is connecting once the daemon stops, comes back on the same address once another starts on the home, and answers the next line without a click',
+  async ({page}) => {
+    // A home the test owns, so two daemons can share it; two characters,
+    // so no thread opens itself and a restart cannot hide behind that.
+    const homeRoot = realpathSync.native(
+      mkdtempSync(join(tmpdir(), 'project02-browser-home-')),
+    );
+    const start = () =>
+      spawnDaemon('tests/browser/daemon-entry.ts', [
+        '--home',
+        homeRoot,
+        'nova',
+      ]);
+    let daemon = await start();
 
-  const composer = page.getByRole('textbox', {name: 'Message Mira'});
-  const reply = page.locator('.bubble-theirs .bubble-text');
+    try {
+      await page.goto(daemon.url);
+      await page.getByRole('button', {name: /^Mira\b/u}).click();
 
-  await composer.fill('hello');
-  await composer.press('Enter');
-  await expect(reply).toHaveText('noted: hello');
+      const composer = page.getByRole('textbox', {name: 'Message Mira'});
+      const replies = page.locator('.bubble-theirs .bubble-text');
 
-  const stopped = await daemon.stop();
+      await composer.fill('hello');
+      await composer.press('Enter');
+      await expect(replies).toHaveText(['noted: hello']);
 
-  expect(stopped.code, stopped.stderr).toBe(0);
-  await expect(page.getByText('Connecting…')).toBeVisible();
-  await expect(reply).toHaveText('noted: hello');
-});
+      const stopped = await daemon.stop();
+
+      expect(stopped.code, stopped.stderr).toBe(0);
+      await expect(page.getByText('Connecting…')).toBeVisible();
+      await expect(replies).toHaveText(['noted: hello']);
+
+      const url = daemon.url;
+
+      daemon = await start();
+      expect(daemon.url).toBe(url);
+      await expect(page.getByText('Connecting…')).toHaveCount(0);
+      await expect(replies).toHaveText(['noted: hello']);
+      await composer.fill('again');
+      await composer.press('Enter');
+      await expect(replies).toHaveText(['noted: hello', 'noted: again']);
+    } finally {
+      const stopped = await daemon.stop();
+
+      expect(stopped.code, stopped.stderr).toBe(0);
+      rmSync(homeRoot, {recursive: true, force: true});
+    }
+  },
+);
 
 test('shows a confirmation card for a tool round and lets the turn finish once approved', async ({
   daemon,

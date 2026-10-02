@@ -38,6 +38,13 @@ export {
   project02HomeCreationIsNew,
 } from './home.ts';
 export {
+  acquireLocalRuntimeDaemonLease,
+  readDaemonRecord,
+  writeDaemonRecord,
+  type DaemonRecord,
+  type DaemonRecordReading,
+} from './daemon-record.ts';
+export {
   createLocalRuntimeSessionHistoryFeed,
   listConversationSegments,
   readCommittedConversationMessages,

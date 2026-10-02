@@ -1,12 +1,13 @@
 /**
  * A daemon for the browser suite, the way serve runs it: on a temporary
- * home, with the demo-config plugin enabled and a model scripted by the
- * line it reads. Character ids on the command line are installed disabled,
- * for a roster with a character that is not running; `--fresh` leaves the
- * home's provider unchosen, the way a first run finds it. Spawned as a process
- * (tests/support/spawn-daemon.ts), so Playwright's own loader never enters
- * the daemon's graph. Prints what serve prints; stops on SIGINT and
- * removes its home.
+ * home — or one the test owns, given as `--home <dir>`, so two daemons can
+ * share it across a restart — with the demo-config plugin enabled and a
+ * model scripted by the line it reads. Character ids on the command line
+ * are installed disabled, for a roster with a character that is not
+ * running; `--fresh` leaves the home's provider unchosen, the way a first
+ * run finds it. Spawned as a process (tests/support/spawn-daemon.ts), so
+ * Playwright's own loader never enters the daemon's graph. Prints what
+ * serve prints; stops on SIGINT and removes a home of its own.
  */
 import {mkdtempSync, realpathSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -27,10 +28,11 @@ import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createScriptedAdapter} from '../support/scripted-adapter.ts';
 
-const tempRoot = realpathSync.native(
-  mkdtempSync(join(tmpdir(), 'project02-browser-')),
+const args = process.argv.slice(2);
+const homeFlag = args.indexOf('--home');
+const {homeRoot, own} = chooseHome(
+  homeFlag === -1 ? undefined : args[homeFlag + 1],
 );
-const homeRoot = join(tempRoot, 'home');
 const abort = new AbortController();
 const onSignal = (): void => {
   abort.abort();
@@ -39,8 +41,11 @@ const onSignal = (): void => {
 process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
-const fresh = process.argv.includes('--fresh');
-const disabledIds = process.argv.slice(2).filter(arg => arg !== '--fresh');
+const fresh = args.includes('--fresh');
+const disabledIds = args.filter(
+  (arg, index) =>
+    arg !== '--fresh' && arg !== '--home' && args[index - 1] !== '--home',
+);
 
 await ensureInitializedProject02Store({homeRoot});
 writeRuntimeConfig(join(homeRoot, 'config.json'), {
@@ -73,5 +78,23 @@ try {
     },
   );
 } finally {
-  rmSync(tempRoot, {recursive: true, force: true});
+  if (own !== undefined) {
+    rmSync(own, {recursive: true, force: true});
+  }
+}
+
+/** The home given, or a temporary one of this process's own, removed at the end. */
+function chooseHome(given: string | undefined): {
+  readonly homeRoot: string;
+  readonly own?: string;
+} {
+  if (given !== undefined) {
+    return {homeRoot: given};
+  }
+
+  const own = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'project02-browser-')),
+  );
+
+  return {homeRoot: join(own, 'home'), own};
 }

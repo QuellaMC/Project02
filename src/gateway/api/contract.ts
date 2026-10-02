@@ -16,7 +16,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 4;
+export const gatewayProtocolVersion = 5;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be
@@ -75,6 +75,8 @@ export type GatewayVisibleMessage = {
 export type GatewayRefusalReason =
   | 'unknown_character'
   | 'unknown_conversation'
+  /** The conversation's record could not be read; the message says why. */
+  | 'conversation_unreadable'
   | 'conversation_busy'
   | 'sender_not_supported'
   | 'character_unavailable'
@@ -322,15 +324,35 @@ export type PendingConfirmation = {
   readonly turn?: TurnIdentity;
 };
 
+/** One open draft of a running turn: the reply's text so far under that id. */
+export type RunningDraft = {
+  readonly draftId: string;
+  readonly text: string;
+};
+
+/**
+ * A turn in progress, as the stream has told it so far: the submission it
+ * runs for, its character, and each open draft's text. What a surface that
+ * had been listening all along would hold; `foldRunningTurns` is the one
+ * way to build it.
+ */
+export type RunningTurn = TurnIdentity & {
+  readonly characterId: string;
+  readonly drafts: readonly RunningDraft[];
+};
+
 /**
  * The first frame on every event stream: the daemon's state at the moment
  * the stream started listening, so a client that connects — or comes back
  * — installs it and then reads events, with nothing to fetch and order.
+ * The turns running carry their drafts, so a tab opened mid-reply shows
+ * the reply as it is written.
  */
 export type GatewayReady = {
   readonly protocolVersion: typeof gatewayProtocolVersion;
   readonly health: GatewayHealth;
   readonly confirmations: readonly PendingConfirmation[];
+  readonly turns: readonly RunningTurn[];
 };
 
 /**

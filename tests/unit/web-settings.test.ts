@@ -116,9 +116,9 @@ function view(fingerprint = 'f1'): OkView {
 /** A live tab with Mira's thread open and her settings screen in front of it. */
 function opened(target: ConfigTarget = mira): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 4,
+    protocolVersion: 5,
     health: {
-      protocolVersion: 4,
+      protocolVersion: 5,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
@@ -127,6 +127,7 @@ function opened(target: ConfigTarget = mira): WebState {
       ],
     },
     confirmations: [],
+    turns: [],
   });
 
   return settingsOpened(

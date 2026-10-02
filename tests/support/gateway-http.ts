@@ -69,8 +69,12 @@ export async function startTestGatewayServer(options: {
   readonly port?: number;
   /** Another token, for a daemon that came back as a different run. */
   readonly token?: string;
+  /** Streams to keep across a socket that goes away and returns; `close` leaves them to their owner. */
+  readonly events?: EventStreams;
 }): Promise<TestGatewayServer> {
-  const events = createEventStreams(options.gateway, options.streams ?? {});
+  const events =
+    options.events ??
+    createEventStreams(options.gateway, options.streams ?? {});
   const lifecycle = {stopping: false};
   const app = createGatewayApp({
     gateway: options.gateway,
@@ -85,7 +89,10 @@ export async function startTestGatewayServer(options: {
     events,
     lifecycle,
     async close() {
-      await events.closeAll();
+      if (options.events === undefined) {
+        await events.closeAll();
+      }
+
       await server.close();
     },
   };
@@ -109,9 +116,13 @@ export type EventSubscription = {
 export async function subscribeToEvents(
   baseUrl: string,
   token = testGatewayToken,
+  lastEventId?: string,
 ): Promise<EventSubscription> {
   const response = await fetch(`${baseUrl}/api/events`, {
-    headers: {authorization: `Bearer ${token}`},
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(lastEventId === undefined ? {} : {'last-event-id': lastEventId}),
+    },
   });
 
   if (!response.ok || response.body === null) {

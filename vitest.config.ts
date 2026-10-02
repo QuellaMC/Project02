@@ -6,6 +6,7 @@ const processSpawningTests = [
   'tests/integration/runtime-config-concurrency.test.ts',
   'tests/integration/session-store-concurrency.test.ts',
   'tests/e2e/two-character-concurrency.test.ts',
+  'tests/e2e/serve-instances.test.ts',
 ];
 
 export default defineConfig({

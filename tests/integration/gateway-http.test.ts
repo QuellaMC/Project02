@@ -7,7 +7,10 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {createGatewayApp} from '../../src/gateway/http/app.ts';
 import type {ApiEnv} from '../../src/gateway/http/env.ts';
-import {createEventStreams} from '../../src/gateway/http/events.ts';
+import {
+  createEventStreams,
+  formatEventFrame,
+} from '../../src/gateway/http/events.ts';
 import {
   createGateway,
   type GatewayEvent,
@@ -21,6 +24,7 @@ import {
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {
   createConfirmationHome,
+  createGatewayTestHome,
   openDirect,
 } from '../support/gateway-fixtures.ts';
 import {
@@ -29,7 +33,9 @@ import {
   startTestGatewayServer,
   subscribeToEvents,
   testGatewayToken as token,
+  type SseFrame,
 } from '../support/gateway-http.ts';
+import {createScriptedAdapter} from '../support/scripted-adapter.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(): RoleModelAdapter {
@@ -217,7 +223,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 4,
+      protocolVersion: 5,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -392,7 +398,7 @@ describe('gateway over HTTP', () => {
     expect(missing.status).toBe(404);
     expect(await errorOf(missing)).toMatchObject({code: 'not_found'});
   });
-  it('opens every stream with ready, then carries the turn in order — the draft ahead of the durable reply, whatever breath it comes in', async () => {
+  it('opens every stream with ready, numbers every frame, then carries the turn in order — the draft ahead of the durable reply, whatever breath it comes in — and hands a stream that returns with an id exactly what it missed', async () => {
     const homeRoot = join(createTestTempRoot('project02-gateway-sse-'), 'home');
 
     await ensureInitializedProject02Store({homeRoot});
@@ -428,9 +434,10 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 4,
+      protocolVersion: 5,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
+      turns: [],
     });
     expect(events.frames[0]).toBe(ready);
     await events.next(frame => frame.comment === 'ping');
@@ -475,6 +482,58 @@ describe('gateway over HTTP', () => {
     ).toBe(text);
     expect(server.events.openCount()).toBe(1);
 
+    // Every frame after ready carries the next number of one run, and the
+    // ready frame the number it continues from.
+    const ids = events.frames.flatMap(frame =>
+      frame.id === undefined ? [] : [frame.id],
+    );
+    const run = ids[0]?.split('-')[0] ?? '';
+
+    expect(ids[0]).toBe(`${run}-0`);
+    expect(ids.slice(1)).toEqual(
+      ids.slice(1).map((_, index) => `${run}-${String(index + 1)}`),
+    );
+
+    // A stream that returns with the id of frame 3 is resumed with the
+    // frames after it, byte for byte, then reads on with everyone else.
+    const back = await subscribeToEvents(server.baseUrl, token, ids[3]);
+    const resumed = await back.next(frame => frame.event === 'resumed');
+
+    expect(back.frames[0]).toBe(resumed);
+    expect(resumed.id).toBeUndefined();
+    await back.next(frame => frame.event === 'turn_completed');
+
+    const numbered = (subscription: {readonly frames: readonly SseFrame[]}) =>
+      subscription.frames.filter(frame => frame.id !== undefined);
+
+    expect(numbered(back)).toEqual(numbered(events).slice(4));
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'again',
+      source: 'web',
+      clientMessageId: 'msg-2',
+    });
+
+    const [onFirst, onBack] = await Promise.all([
+      events.next(
+        frame =>
+          frame.event === 'turn_completed' &&
+          (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+            'msg-2',
+      ),
+      back.next(
+        frame =>
+          frame.event === 'turn_completed' &&
+          (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+            'msg-2',
+      ),
+    ]);
+
+    expect(onBack.id).toBe(onFirst.id);
+    await back.cancel();
+
     // Shutdown ends the stream, and a stream arriving after that ends at
     // once: its request passed the stopping guard before the guard was set.
     await server.events.closeAll();
@@ -485,6 +544,218 @@ describe('gateway over HTTP', () => {
 
     await late.ended;
     expect(late.frames).toEqual([]);
+    await server.close();
+    await gateway.stop();
+  });
+
+  it('resumes a stream from any frame the tail still reaches, and starts one over from any it does not', async () => {
+    // Only the streams are under test: a fan-out the test drives directly,
+    // with a tail that keeps exactly three of the frames it is fed.
+    const listeners = new Set<GatewayEventListener>();
+    const event = {
+      kind: 'state_changed',
+      characterId: 'mira',
+      state: 'ready',
+    } satisfies GatewayEvent;
+    const frameBytes = formatEventFrame(
+      event.kind,
+      JSON.stringify(event),
+      `${'0'.repeat(16)}-1`,
+    ).length;
+    const streams = createEventStreams(
+      {
+        events(listener) {
+          listeners.add(listener);
+
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        health: () => ({
+          protocolVersion: 5,
+          homeRoot: '/nowhere',
+          config: {diagnostics: []},
+          packages: {diagnostics: []},
+          characters: [],
+        }),
+        pendingConfirmations: () => [],
+      },
+      {heartbeatMs: 20, replayBytes: 3 * frameBytes + 1},
+    );
+    const app = new Hono<ApiEnv>().get('/api/events', c => streams.handler(c));
+    const server = await listen(app);
+    const first = await subscribeToEvents(server.baseUrl);
+    const ready = await first.next(frame => frame.event === 'ready');
+    const run = ready.id?.split('-')[0] ?? '';
+    // What a stream opened with this id gets before its first heartbeat.
+    const opening = async (lastEventId: string) => {
+      const stream = await subscribeToEvents(
+        server.baseUrl,
+        token,
+        lastEventId,
+      );
+
+      await stream.next(frame => frame.comment === 'ping');
+      await stream.cancel();
+
+      return {
+        first: stream.frames[0]?.event,
+        replayed: stream.frames.flatMap(frame =>
+          frame.id === undefined ? [] : [frame.id],
+        ),
+      };
+    };
+
+    expect(ready.id).toBe(`${run}-0`);
+    // Before the first event, the ready frame's own id is the tail.
+    expect(await opening(`${run}-0`)).toEqual({first: 'resumed', replayed: []});
+
+    for (let count = 0; count < 5; count += 1) {
+      for (const listener of listeners) {
+        listener(event);
+      }
+    }
+
+    await first.next(frame => frame.id === `${run}-5`);
+    // The newest frame: resumed, nothing to replay.
+    expect(await opening(`${run}-5`)).toEqual({first: 'resumed', replayed: []});
+    // One before the oldest kept: nothing the tail lost was missed.
+    expect(await opening(`${run}-2`)).toEqual({
+      first: 'resumed',
+      replayed: [`${run}-3`, `${run}-4`, `${run}-5`],
+    });
+    // Evicted, past the newest, another run, not an id at all: the snapshot.
+    for (const lastEventId of [
+      `${run}-1`,
+      `${run}-6`,
+      `${'f'.repeat(16)}-3`,
+      'yesterday',
+    ]) {
+      expect((await opening(lastEventId)).first).toBe('ready');
+    }
+
+    await first.cancel();
+    await streams.closeAll();
+    expect(listeners.size).toBe(0);
+    await server.close();
+  });
+
+  it('hands a stream opened mid-reply the reply so far, named by its line, and lets no other submission end it', async () => {
+    const homeRoot = await createGatewayTestHome('project02-gateway-drafts-');
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const server = await startTestGatewayServer({gateway});
+
+    await gateway.startCharacter('mira');
+
+    const ref = await openDirect(gateway, 'mira');
+    const line = `slowly ${Array.from({length: 120}, (_, word) => `w${String(word)}`).join(' ')}`;
+    let deltas = 0;
+    const counting = gateway.events(event => {
+      if (
+        event.kind === 'turn_progress' &&
+        event.progress.kind === 'reply_delta'
+      ) {
+        deltas += 1;
+      }
+    });
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: line,
+      source: 'web',
+      clientMessageId: 'msg-slow',
+    });
+
+    await vi.waitFor(() => {
+      expect(deltas).toBeGreaterThanOrEqual(3);
+    });
+
+    // Nobody was listening before this stream: the daemon folded the turn
+    // for it all the same.
+    const first = await subscribeToEvents(server.baseUrl);
+    const ready = frameData(
+      await first.next(frame => frame.event === 'ready'),
+    ) as {
+      turns: {
+        characterId: string;
+        conversationId: string;
+        source: string;
+        clientMessageId: string;
+        drafts: {draftId: string; text: string}[];
+      }[];
+    };
+
+    expect(ready.turns).toHaveLength(1);
+    expect(ready.turns[0]).toMatchObject({
+      characterId: 'mira',
+      conversationId: ref.conversationId,
+      source: 'web',
+      clientMessageId: 'msg-slow',
+    });
+    expect(ready.turns[0]?.drafts).toHaveLength(1);
+    expect(ready.turns[0]?.drafts[0]?.text.startsWith('noted: slowly')).toBe(
+      true,
+    );
+    expect(
+      `noted: ${line}`.startsWith(ready.turns[0]?.drafts[0]?.text ?? '?'),
+    ).toBe(true);
+
+    // A submission the runtime refuses on the spot completes at once,
+    // while the reply is still being written.
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: 'someone-else',
+        text: 'not mine',
+        source: 'web',
+        clientMessageId: 'msg-other',
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'sender_not_supported',
+    });
+    await first.next(
+      frame =>
+        frame.event === 'turn_completed' &&
+        (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+          'msg-other',
+    );
+
+    const second = await subscribeToEvents(server.baseUrl);
+    const later = frameData(
+      await second.next(frame => frame.event === 'ready'),
+    ) as typeof ready;
+
+    expect(later.turns[0]).toMatchObject({clientMessageId: 'msg-slow'});
+    expect(later.turns[0]?.drafts[0]?.text.length ?? 0).toBeGreaterThanOrEqual(
+      ready.turns[0]?.drafts[0]?.text.length ?? 0,
+    );
+
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+    await second.next(
+      frame =>
+        frame.event === 'turn_completed' &&
+        (frameData(frame) as {clientMessageId: string}).clientMessageId ===
+          'msg-slow',
+    );
+
+    const after = await subscribeToEvents(server.baseUrl);
+
+    expect(
+      (
+        frameData(await after.next(frame => frame.event === 'ready')) as {
+          turns: unknown[];
+        }
+      ).turns,
+    ).toEqual([]);
+    counting();
+    await first.cancel();
+    await second.cancel();
+    await after.cancel();
     await server.close();
     await gateway.stop();
   });
@@ -569,7 +840,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 4,
+          protocolVersion: 5,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},

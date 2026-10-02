@@ -559,7 +559,7 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('refuses a conversation it never attached', async () => {
+  it('refuses a conversation the home does not hold', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({location: {storeRoot: homeRoot}});
 
@@ -575,6 +575,92 @@ describe('gateway façade', () => {
       status: 'refused',
       reason: 'unknown_conversation',
     });
+  });
+
+  it('routes a delivery on a conversation an earlier run opened, with no open in this one', async () => {
+    const homeRoot = await createGatewayHome();
+    const options = {
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const earlier = createGateway(options);
+
+    await earlier.startCharacter('mira');
+
+    const ref = await open(earlier, 'mira');
+
+    await expect(
+      earlier.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'before the restart',
+        source: 'web',
+        clientMessageId: 'msg-1',
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+    await earlier.stop();
+
+    // The daemon came back with an empty memory; the tab kept its id.
+    const restarted = createGateway(options);
+    const line = {
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'after the restart',
+      source: 'web',
+      clientMessageId: 'msg-2',
+    };
+
+    // Not running yet: the thread exists, its character does not answer.
+    await expect(restarted.deliver(line)).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'character_unavailable',
+    });
+    await restarted.startCharacter('mira');
+    await expect(restarted.deliver(line)).resolves.toMatchObject({
+      status: 'completed',
+      conversationId: ref.conversationId,
+    });
+    await expect(
+      restarted.openDirectConversation('mira'),
+    ).resolves.toMatchObject({
+      status: 'opened',
+      conversationId: ref.conversationId,
+    });
+
+    const history = await restarted.history(ref.conversationId);
+
+    expect(
+      history.status === 'ok' ? history.messages.map(m => m.text) : history,
+    ).toEqual(['before the restart', 'noted', 'after the restart', 'noted']);
+    await restarted.stop();
+
+    // A record that cannot be read is said as such, never as a conversation
+    // that does not exist.
+    const blind = createGateway(options);
+    const conversationsRoot = join(homeRoot, 'conversations');
+
+    await blind.startCharacter('mira');
+    chmodSync(conversationsRoot, 0o000);
+
+    try {
+      const unreadable = await blind.deliver({
+        ...line,
+        clientMessageId: 'msg-3',
+      });
+
+      expect(unreadable).toMatchObject({
+        status: 'refused',
+        reason: 'conversation_unreadable',
+      });
+      expect(unreadable.status === 'refused' && unreadable.message).toContain(
+        ref.conversationId,
+      );
+    } finally {
+      chmodSync(conversationsRoot, 0o755);
+    }
+
+    await blind.stop();
   });
 
   it('restarts a character once after a fatal turn; queued work is refused, then chat resumes', async () => {

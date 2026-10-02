@@ -51,9 +51,15 @@ export type GatewayEventsOptions = {
   /**
    * Runs when the stream ends before the caller aborts it — the daemon
    * down, stopping, or gone from its socket — and a reconnect is coming;
-   * the next `ready` says it is back.
+   * the next `ready` or `resumed` says it is back.
    */
   readonly onLost?: () => void;
+  /**
+   * Runs when a reconnect resumed the stream: the daemon still held the
+   * frame this client last applied, so what follows is exactly what it
+   * missed, in order, and nothing is installed.
+   */
+  readonly onResumed?: () => void;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
 };
@@ -103,7 +109,9 @@ export type GatewayClient = {
   ): Promise<ConfigChangeOutcome>;
   /**
    * Follows the event stream until the signal aborts, reconnecting after
-   * the daemon closes it. A refused token or a wrong protocol rejects; a
+   * the daemon closes it with the id of the last frame it handed on, so a
+   * daemon that still holds that frame resumes the stream instead of
+   * starting it over. A refused token or a wrong protocol rejects; a
    * daemon that is down or stopping is waited for.
    */
   events(
@@ -228,26 +236,39 @@ export function createGatewayClient(
       const aborted = (): boolean => signal.aborted;
       const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
       let reconnected = false;
+      // The id of the last frame handed on and applied, sent back on
+      // every reconnect: a frame the caller never applied is asked for
+      // again, and a `resumed` frame carries no id and moves nothing.
+      const cursor = {lastEventId: undefined as string | undefined};
 
       while (!aborted()) {
         try {
           const response = await guardedFetch(`${baseUrl}/api/events`, {
-            headers,
+            headers:
+              cursor.lastEventId === undefined
+                ? headers
+                : {...headers, 'last-event-id': cursor.lastEventId},
             signal,
           });
 
           await rejectUnlessOk(response);
           await followStream(
             response,
-            listener,
-            async snapshot => {
-              const wasReconnect = reconnected;
+            {
+              listener,
+              async onReady(snapshot) {
+                const wasReconnect = reconnected;
 
-              reconnected = true;
-              await eventsOptions.onReady?.({
-                reconnected: wasReconnect,
-                snapshot,
-              });
+                reconnected = true;
+                await eventsOptions.onReady?.({
+                  reconnected: wasReconnect,
+                  snapshot,
+                });
+              },
+              onResumed: () => {
+                eventsOptions.onResumed?.();
+              },
+              cursor,
             },
             signal,
           );
@@ -412,11 +433,18 @@ async function ownFailure<T>(run: () => T | Promise<T>): Promise<T> {
   }
 }
 
+type StreamFollower = {
+  readonly listener: (event: GatewayEvent) => void;
+  readonly onReady: (snapshot: GatewayReady) => void | Promise<void>;
+  readonly onResumed: () => void;
+  /** Advanced only once a frame's callback returned: what is applied is what is asked for next. */
+  readonly cursor: {lastEventId: string | undefined};
+};
+
 /** Reads the stream until the daemon ends it, handing each event on. */
 async function followStream(
   response: Response,
-  listener: (event: GatewayEvent) => void,
-  onReady: (snapshot: GatewayReady) => void | Promise<void>,
+  follower: StreamFollower,
   signal: AbortSignal,
 ): Promise<void> {
   if (response.body === null) {
@@ -454,13 +482,21 @@ async function followStream(
           // The daemon is this codebase: past the protocol check, the
           // snapshot is the contract's shape.
           await bootstrapOrAbort(
-            () => ownFailure(() => onReady(data as GatewayReady)),
+            () => ownFailure(() => follower.onReady(data as GatewayReady)),
             signal,
           );
+        } else if (frame.event === 'resumed') {
+          await ownFailure(() => {
+            follower.onResumed();
+          });
         } else if (isGatewayEvent(data)) {
           await ownFailure(() => {
-            listener(data);
+            follower.listener(data);
           });
+        }
+
+        if (frame.id !== undefined) {
+          follower.cursor.lastEventId = frame.id;
         }
       }
     }
