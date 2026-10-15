@@ -7,7 +7,7 @@ import {
   loadProject02RuntimeConfigForLocation,
   readCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
-  runtimeConfigDiagnosticMatchesPlugin,
+  runtimeConfigDiagnosticMatchesSection,
   type ResolvedProject02RuntimeLocation,
 } from '../runtime/config/index.ts';
 import {
@@ -93,7 +93,11 @@ export function createConfiguredRuntimePluginReloader(options: {
       const blockingDiagnostics = freshResolvedConfig.diagnostics.filter(
         diagnostic =>
           diagnostic.scope === 'global' ||
-          runtimeConfigDiagnosticMatchesPlugin({diagnostic, pluginId}),
+          runtimeConfigDiagnosticMatchesSection({
+            diagnostic,
+            namespace: 'plugins',
+            id: pluginId,
+          }),
       );
 
       if (diagnosticsHaveErrors(blockingDiagnostics)) {

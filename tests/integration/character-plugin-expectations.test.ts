@@ -112,17 +112,20 @@ describe('character plugin enforcement', () => {
       {
         severity: 'error',
         code: 'character_required_plugin_missing',
-        pluginId: 'missing-required',
+        namespace: 'plugins',
+        id: 'missing-required',
       },
       {
         severity: 'error',
         code: 'character_required_plugin_disabled',
-        pluginId: 'disabled-required',
+        namespace: 'plugins',
+        id: 'disabled-required',
       },
       {
         severity: 'warning',
         code: 'character_recommended_plugin_missing',
-        pluginId: 'missing-recommended',
+        namespace: 'plugins',
+        id: 'missing-recommended',
       },
     ]);
     expect(diagnostics[1]?.message).toContain(

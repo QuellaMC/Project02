@@ -9,7 +9,10 @@ import {
 import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimeSectionConfigInspectShape} from './inspect.ts';
-import {resolveRuntimeSectionConfigs} from './resolve.ts';
+import {
+  resolveRuntimeSectionConfigs,
+  runtimeConfigDiagnosticMatchesSection,
+} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
@@ -20,12 +23,12 @@ import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,
+  RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionDeclaration,
+  RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
   RuntimeConfigSections,
   RuntimeConfigValue,
-  RuntimePluginActivationStatusShape,
-  RuntimePluginConfigInspectShape,
 } from './types.ts';
 
 export type RuntimeConfigControlOperation = Extract<
@@ -75,9 +78,9 @@ export function inspectRuntimePluginConfig(options: {
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly sections: RuntimeConfigSections;
-  readonly activation?: RuntimePluginActivationStatusShape;
+  readonly activation?: RuntimeConfigSectionActivationShape;
   readonly defaultEnabled?: boolean;
-}): RuntimePluginConfigInspectShape {
+}): RuntimeConfigSectionInspectShape {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
   const loadedConfig = loadProject02RuntimeConfigForLocation(
     options.runtimeLocation,
@@ -208,8 +211,11 @@ function assertRuntimeSectionConfigCandidateValid(options: {
   const blockingDiagnostic = resolved.diagnostics.find(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      diagnostic.scope === 'plugin' &&
-      diagnostic.pluginId === options.declaration.id,
+      runtimeConfigDiagnosticMatchesSection({
+        diagnostic,
+        namespace: options.namespace,
+        id: options.declaration.id,
+      }),
   );
 
   if (blockingDiagnostic !== undefined) {

@@ -406,7 +406,7 @@ describe('host-owned runtime plugin management tools', () => {
     const apiKeyAuthored = requiredJsonObject(apiKey['authored']);
     const apiKeyEffective = requiredJsonObject(apiKey['effective']);
 
-    expect(output['pluginId']).toBe(manifest.id);
+    expect(output).toMatchObject({namespace: 'plugins', id: manifest.id});
     expect(output['enabled']).toBe(true);
     expect(output['activation']).toEqual({
       enabled: false,
@@ -460,7 +460,7 @@ describe('host-owned runtime plugin management tools', () => {
 
     const output = requiredJsonObject(result.output);
 
-    expect(output['pluginId']).toBe(manifest.id);
+    expect(output).toMatchObject({namespace: 'plugins', id: manifest.id});
     expect(output['activation']).toEqual({
       enabled: false,
       status: 'disabled',

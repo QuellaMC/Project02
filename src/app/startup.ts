@@ -674,7 +674,7 @@ async function materializeCharacterDataDir(
               'character_package_plugin_auto_enabled',
               `Character package "${characterId}" enabled plugin "${pluginId}" in the character config.`,
               `${runtimeConfigSectionPath('plugins', pluginId)}.enabled`,
-              {pluginId},
+              {namespace: 'plugins', id: pluginId},
             ),
           ),
       ),
@@ -763,8 +763,8 @@ function declaredInvalidPackageDiagnostics(options: {
       .filter(
         diagnostic =>
           diagnostic.code.startsWith('runtime_plugin_package_') &&
-          diagnostic.scope === 'plugin' &&
-          declaredIds.has(diagnostic.pluginId),
+          diagnostic.scope === 'section' &&
+          declaredIds.has(diagnostic.id),
       )
       .map(diagnostic =>
         Object.freeze({

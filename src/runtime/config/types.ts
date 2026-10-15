@@ -133,14 +133,16 @@ export type RuntimeConfigDiagnostic =
       readonly scope: 'global';
     })
   | (RuntimeConfigDiagnosticBase & {
-      readonly scope: 'plugin';
-      readonly pluginId: string;
-      readonly pluginConfigField?: string;
+      readonly scope: 'section';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+      readonly field?: string;
     });
 
-export type RuntimeConfigDiagnosticPluginMetadata = {
-  readonly pluginId: string;
-  readonly pluginConfigField?: string;
+export type RuntimeConfigDiagnosticSectionMetadata = {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
+  readonly field?: string;
 };
 
 /** One spelling of a diagnostic's location for every operator surface. */
@@ -222,7 +224,7 @@ export type RuntimeConfigInspectShape = {
   readonly fingerprint: string;
 };
 
-export type RuntimePluginConfigFieldInspectShape = {
+export type RuntimeConfigFieldInspectShape = {
   readonly name: string;
   readonly description: string;
   readonly required: boolean;
@@ -242,21 +244,22 @@ export type RuntimePluginConfigFieldInspectShape = {
 };
 
 /** What the activation plan decided; carries no scope-authoring judgement. */
-export type RuntimePluginActivationStatusShape = {
+export type RuntimeConfigSectionActivationShape = {
   readonly enabled: boolean;
   readonly status: 'active' | 'disabled' | 'blocked';
   readonly reasons: readonly string[];
 };
 
-export type RuntimePluginConfigInspectShape = {
-  readonly pluginId: string;
+export type RuntimeConfigSectionInspectShape = {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
   readonly displayName: string;
   readonly version: string;
   readonly enabled: boolean;
   /** Which document decides `enabled`: this character's, the home's, or the manifest's default. */
   readonly enabledSource: RuntimeConfigEffectiveSource;
-  readonly activation: RuntimePluginActivationStatusShape;
-  readonly fields: readonly RuntimePluginConfigFieldInspectShape[];
+  readonly activation: RuntimeConfigSectionActivationShape;
+  readonly fields: readonly RuntimeConfigFieldInspectShape[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
 };

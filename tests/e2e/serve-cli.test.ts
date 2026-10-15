@@ -212,7 +212,7 @@ describe('serve', () => {
     );
     expect(url).toContain('/#token=');
     expect(readRecord(storeRoot)).toMatchObject({
-      protocolVersion: 5,
+      protocolVersion: 6,
       token: tokenOf(url),
       port: portOf(url),
       running: {pid: process.pid},
@@ -227,7 +227,7 @@ describe('serve', () => {
     expect(serve.stderr()).toBe('');
     await expect(client.health()).rejects.toMatchObject({code: 'unreachable'});
     expect(readRecord(storeRoot)).toEqual({
-      protocolVersion: 5,
+      protocolVersion: 6,
       token: tokenOf(url),
       port: portOf(url),
     });
@@ -364,7 +364,7 @@ describe('serve', () => {
     expect(second.stderr()).toBe('');
     // The first is untouched.
     await expect(createGatewayClient({url}).health()).resolves.toMatchObject({
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     await expect(first.stop()).resolves.toBe(0);
 
@@ -413,7 +413,7 @@ describe('serve', () => {
     writeDaemonRecord({
       homeRoot: storeRoot,
       record: {
-        protocolVersion: 5,
+        protocolVersion: 6,
         token: 'stale-token',
         port,
         running: {pid: 1, startedAt: '2026-01-01T00:00:00.000Z'},

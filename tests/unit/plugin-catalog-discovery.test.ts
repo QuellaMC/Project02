@@ -65,9 +65,9 @@ describe('runtime plugin catalog discovery classification', () => {
 
 function diagnosticNamesBrokenPackage(diagnostic: {
   readonly scope: string;
-  readonly pluginId?: string;
+  readonly id?: string;
 }): boolean {
-  return diagnostic.scope === 'plugin' && diagnostic.pluginId === 'broken.pkg';
+  return diagnostic.scope === 'section' && diagnostic.id === 'broken.pkg';
 }
 
 function loadedConfig(

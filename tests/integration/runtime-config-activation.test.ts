@@ -293,7 +293,8 @@ describe('runtime config activation planning', () => {
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_config_required_value_missing',
-        pluginId: plugin.manifest.id,
+        namespace: 'plugins',
+        id: plugin.manifest.id,
       }),
     );
     expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
@@ -356,7 +357,8 @@ describe('runtime config activation planning', () => {
           severity: 'error',
           code: 'runtime_config_required_value_missing',
           path: `plugins.${plugin.manifest.id}.config.endpoint`,
-          pluginId: plugin.manifest.id,
+          namespace: 'plugins',
+          id: plugin.manifest.id,
         }),
       ]),
     );
@@ -743,7 +745,8 @@ describe('runtime config activation planning', () => {
           severity: 'error',
           code: 'default_memory_provider_unavailable',
           path: 'project02.defaultMemoryProvider',
-          pluginId: plugin.manifest.id,
+          namespace: 'plugins',
+          id: plugin.manifest.id,
         }),
       ]),
     );
@@ -874,7 +877,8 @@ describe('runtime config activation planning', () => {
           severity: 'error',
           code: 'default_memory_provider_unavailable',
           path: 'project02.defaultMemoryProvider',
-          pluginId: plugin.manifest.id,
+          namespace: 'plugins',
+          id: plugin.manifest.id,
         }),
       ]),
     );

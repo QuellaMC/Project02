@@ -13,8 +13,8 @@ import {
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
-  type RuntimePluginConfigFieldInspectShape,
-  type RuntimePluginConfigInspectShape,
+  type RuntimeConfigFieldInspectShape,
+  type RuntimeConfigSectionInspectShape,
   inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
@@ -115,7 +115,8 @@ describe('runtime plugin config control', () => {
     });
 
     expect(inspected).toMatchObject({
-      pluginId: fixturePluginId,
+      namespace: 'plugins',
+      id: fixturePluginId,
       displayName: 'Config Control Fixture',
       version: '1.0.0',
       enabled: true,
@@ -678,7 +679,7 @@ describe('runtime plugin config control', () => {
       sections: {plugins: [plugin.manifest]},
     });
 
-    expect(before.pluginId).toBe('operator.rebind-inspect');
+    expect(before.id).toBe('operator.rebind-inspect');
 
     // Rebound after the fact, to a store the runtime would refuse.
     writeFileSync(
@@ -968,9 +969,9 @@ function configControlManifest(
 }
 
 function inspectField(
-  inspected: RuntimePluginConfigInspectShape,
+  inspected: RuntimeConfigSectionInspectShape,
   fieldName: string,
-): RuntimePluginConfigFieldInspectShape {
+): RuntimeConfigFieldInspectShape {
   const field = inspected.fields.find(
     candidate => candidate.name === fieldName,
   );

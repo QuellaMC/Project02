@@ -2093,12 +2093,10 @@ describe('gateway façade', () => {
       authored: {configured: true, value: 'Global Name'},
       effectiveSource: 'global',
     });
-    expect(global.plugins.map(plugin => plugin.pluginId)).toContain(
-      'demo-config',
-    );
+    expect(global.sections.map(section => section.id)).toContain('demo-config');
     // A plugin that belongs to a character is not the home's to show or
     // to change.
-    expect(global.plugins.map(plugin => plugin.pluginId)).not.toContain(
+    expect(global.sections.map(section => section.id)).not.toContain(
       'character-state',
     );
     await expect(
@@ -2106,8 +2104,9 @@ describe('gateway façade', () => {
         target: {scope: 'global'},
         expectedFingerprint: global.fingerprint,
         operation: {
-          kind: 'plugin_enabled',
-          pluginId: 'character-state',
+          kind: 'section_enabled',
+          namespace: 'plugins',
+          id: 'character-state',
           enabled: true,
         },
       }),
@@ -2133,7 +2132,7 @@ describe('gateway façade', () => {
     // Never started, yet the view says what a start will run: the plugin
     // her package requires is active, not waiting to be materialized.
     expect(
-      character.plugins.find(plugin => plugin.pluginId === 'character-state'),
+      character.sections.find(section => section.id === 'character-state'),
     ).toMatchObject({enabled: true, activation: {status: 'active'}});
 
     // A package the catalog cannot publish is an error the runtime acts on,
@@ -2286,8 +2285,9 @@ describe('gateway façade', () => {
     ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
     await expect(
       change({
-        kind: 'plugin_field_set',
-        pluginId: 'nope',
+        kind: 'section_field_set',
+        namespace: 'plugins',
+        id: 'nope',
         field: 'x',
         value: 1,
       }),

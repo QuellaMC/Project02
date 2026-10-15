@@ -15,7 +15,7 @@ import {
   type ResolvedProject02RuntimeConfig,
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigDiagnosticSectionMetadata,
   type RuntimeConfigFieldScope,
   type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionMap,
@@ -223,13 +223,16 @@ export function diagnosticsHaveErrors(
   return diagnostics.some(diagnostic => diagnostic.severity === 'error');
 }
 
-export function runtimeConfigDiagnosticMatchesPlugin(options: {
+export function runtimeConfigDiagnosticMatchesSection(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
-  readonly pluginId: string;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
 }): boolean {
   return (
-    options.diagnostic.scope === 'plugin' &&
-    options.diagnostic.pluginId === options.pluginId
+    options.diagnostic.scope === 'section' &&
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one namespace until connectors join; lint reports this directive unused once a second one does
+    options.diagnostic.namespace === options.namespace &&
+    options.diagnostic.id === options.id
   );
 }
 
@@ -352,6 +355,7 @@ function resolveSectionConfigField(options: {
  * reads the resolved value; every other reader is handed it redacted.
  */
 function resolveSecretField(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly field: RuntimeConfigFieldDeclaration;
   readonly rawValue: RuntimeConfigValue | undefined;
@@ -506,8 +510,9 @@ function pushUnknownSectionConfigFieldDiagnostics(options: {
           fieldName,
         ),
         {
-          pluginId: options.declaration.id,
-          pluginConfigField: fieldName,
+          namespace: options.namespace,
+          id: options.declaration.id,
+          field: fieldName,
         },
       ),
     );
@@ -515,12 +520,14 @@ function pushUnknownSectionConfigFieldDiagnostics(options: {
 }
 
 function sectionFieldDiagnosticMetadata(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly field: RuntimeConfigFieldDeclaration;
-}): RuntimeConfigDiagnosticPluginMetadata {
+}): RuntimeConfigDiagnosticSectionMetadata {
   return {
-    pluginId: options.declaration.id,
-    pluginConfigField: options.field.name,
+    namespace: options.namespace,
+    id: options.declaration.id,
+    field: options.field.name,
   };
 }
 

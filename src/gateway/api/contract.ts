@@ -2,9 +2,10 @@ import type {CharacterPackageDiagnostic} from '../../characters/index.ts';
 import type {RuntimePluginToolConfirmationRequest} from '../../plugins/index.ts';
 import type {
   RuntimeConfigDiagnostic,
+  RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionInspectShape,
+  RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
-  RuntimePluginConfigFieldInspectShape,
-  RuntimePluginConfigInspectShape,
 } from '../../runtime/config/index.ts';
 import type {
   LocalRuntimeTurnProgressEvent,
@@ -16,7 +17,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 5;
+export const gatewayProtocolVersion = 6;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be
@@ -227,8 +228,8 @@ export type ConfigView =
       readonly status: 'ok';
       readonly fingerprint: string;
       readonly diagnostics: readonly RuntimeConfigDiagnostic[];
-      readonly project02: readonly RuntimePluginConfigFieldInspectShape[];
-      readonly plugins: readonly RuntimePluginConfigInspectShape[];
+      readonly project02: readonly RuntimeConfigFieldInspectShape[];
+      readonly sections: readonly RuntimeConfigSectionInspectShape[];
     }
   | {
       readonly status: 'refused';
@@ -252,20 +253,23 @@ export type ConfigChange = {
       }
     | {readonly kind: 'unset'; readonly path: string}
     | {
-        readonly kind: 'plugin_enabled';
-        readonly pluginId: string;
+        readonly kind: 'section_enabled';
+        readonly namespace: RuntimeConfigSectionNamespace;
+        readonly id: string;
         /** Absent clears this scope's value instead of deciding it. */
         readonly enabled?: boolean;
       }
     | {
-        readonly kind: 'plugin_field_set';
-        readonly pluginId: string;
+        readonly kind: 'section_field_set';
+        readonly namespace: RuntimeConfigSectionNamespace;
+        readonly id: string;
         readonly field: string;
         readonly value: RuntimeConfigValue;
       }
     | {
-        readonly kind: 'plugin_field_unset';
-        readonly pluginId: string;
+        readonly kind: 'section_field_unset';
+        readonly namespace: RuntimeConfigSectionNamespace;
+        readonly id: string;
         readonly field: string;
       };
 };

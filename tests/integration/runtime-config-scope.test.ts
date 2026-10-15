@@ -33,7 +33,7 @@ import {
   resolveLayeredProject02RuntimeConfig,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
-  type RuntimePluginConfigFieldInspectShape,
+  type RuntimeConfigFieldInspectShape,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   inspectRuntimePluginConfig,
@@ -737,7 +737,7 @@ describe('plugin manifest config scope policy', () => {
     });
     const fieldsOf = (
       targetScope: 'global' | 'character',
-    ): Record<string, RuntimePluginConfigFieldInspectShape> =>
+    ): Record<string, RuntimeConfigFieldInspectShape> =>
       Object.fromEntries(
         createProject02ConfigFieldInspectShapes({
           layeredConfig: createLayeredProject02RuntimeConfigSnapshot({

@@ -175,7 +175,7 @@ function validateMaterializationManifests(
           `plugin "${manifest.id}" has invalid manifest policy: ` +
           validated.details,
         runtimeConfigSectionPath('plugins', manifest.id),
-        {pluginId: manifest.id},
+        {namespace: 'plugins', id: manifest.id},
       ),
     );
   }
@@ -228,7 +228,7 @@ export function enforceCharacterPluginExpectations(options: {
             `plugin package under the home plugins directory` +
             `${level === 'required' ? ' or remove it from the character package' : ''}.`,
           runtimeConfigSectionPath('plugins', pluginId),
-          {pluginId},
+          {namespace: 'plugins', id: pluginId},
         ),
       );
       return;
@@ -246,7 +246,7 @@ export function enforceCharacterPluginExpectations(options: {
           } plugin "${pluginId}", which is disabled. Enable it in the ` +
             "character's settings.",
           `${runtimeConfigSectionPath('plugins', pluginId)}.enabled`,
-          {pluginId},
+          {namespace: 'plugins', id: pluginId},
         ),
       );
     }

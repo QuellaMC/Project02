@@ -207,7 +207,8 @@ describe('runtime config loading and resolution', () => {
         severity: 'error',
         code: 'runtime_config_unknown_plugin_wrapper_field',
         path: 'plugins.character-state.enable',
-        pluginId: 'character-state',
+        namespace: 'plugins',
+        id: 'character-state',
       }),
     ]);
 
@@ -282,7 +283,8 @@ describe('runtime config loading and resolution', () => {
         severity: 'error',
         code: 'runtime_config_unknown_plugin_wrapper_field',
         path: 'plugins.unknown.enable',
-        pluginId: 'unknown',
+        namespace: 'plugins',
+        id: 'unknown',
       }),
     ]);
 
@@ -334,7 +336,8 @@ describe('runtime config loading and resolution', () => {
         expect.objectContaining({
           code: 'runtime_config_unknown_plugin_wrapper_field',
           path: 'plugins.unknown.enable',
-          pluginId: 'unknown',
+          namespace: 'plugins',
+          id: 'unknown',
         }),
       ]),
     );
@@ -368,7 +371,8 @@ describe('runtime config loading and resolution', () => {
         severity: 'error',
         code: 'runtime_config_unknown_plugin_wrapper_field',
         path: 'plugins.bad.enable',
-        pluginId: 'bad',
+        namespace: 'plugins',
+        id: 'bad',
       }),
     ]);
 
@@ -429,7 +433,8 @@ describe('runtime config loading and resolution', () => {
         expect.objectContaining({
           code: 'runtime_config_unknown_plugin_wrapper_field',
           path: 'plugins.bad.enable',
-          pluginId: 'bad',
+          namespace: 'plugins',
+          id: 'bad',
         }),
       ]),
     );
@@ -438,7 +443,8 @@ describe('runtime config loading and resolution', () => {
         expect.objectContaining({
           code: 'runtime_config_unknown_plugin_wrapper_field',
           path: 'plugins.bad.enable',
-          pluginId: 'bad',
+          namespace: 'plugins',
+          id: 'bad',
         }),
       ]),
     );
@@ -915,8 +921,9 @@ describe('runtime config loading and resolution', () => {
           severity: 'error',
           code: 'runtime_config_required_value_missing',
           path: `plugins.${pluginId}.config.${fieldName}`,
-          pluginId,
-          pluginConfigField: fieldName,
+          namespace: 'plugins',
+          id: pluginId,
+          field: fieldName,
         }),
       );
     },
@@ -981,8 +988,9 @@ describe('runtime config loading and resolution', () => {
           severity: 'error',
           code: 'runtime_config_required_secret_missing',
           path: 'plugins.memory.required.config.apiKey',
-          pluginId: 'memory.required',
-          pluginConfigField: 'apiKey',
+          namespace: 'plugins',
+          id: 'memory.required',
+          field: 'apiKey',
         }),
       ]),
     );
@@ -1422,7 +1430,8 @@ describe('runtime config loading and resolution', () => {
           severity: 'error',
           code: 'default_memory_provider_not_memory_provider',
           path: 'project02.defaultMemoryProvider',
-          pluginId: 'character-state',
+          namespace: 'plugins',
+          id: 'character-state',
         }),
       ]),
     );

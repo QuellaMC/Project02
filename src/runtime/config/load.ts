@@ -14,7 +14,7 @@ import {
   type Project02RuntimeConfig,
   type Project02RuntimeSectionConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigDiagnosticSectionMetadata,
   type RuntimeConfigSectionMap,
   type RuntimeConfigSectionNamespace,
   type RuntimeConfigValue,
@@ -447,6 +447,7 @@ function optionalSectionConfigs(
         }
 
         pushUnknownRuntimeSectionConfigFieldDiagnostics({
+          namespace,
           id,
           path,
           value: sectionValue,
@@ -535,6 +536,7 @@ function pushUnknownRuntimeConfigFieldDiagnostics(
 }
 
 function pushUnknownRuntimeSectionConfigFieldDiagnostics(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
   readonly id: string;
   readonly path: string;
   readonly value: Readonly<Record<string, unknown>>;
@@ -548,7 +550,7 @@ function pushUnknownRuntimeSectionConfigFieldDiagnostics(options: {
     messageForField: field =>
       `Unknown plugin wrapper field "${field}" for plugin "${options.id}".`,
     pathForField: field => `${options.path}.${field}`,
-    metadataForField: () => ({pluginId: options.id}),
+    metadataForField: () => ({namespace: options.namespace, id: options.id}),
   });
 }
 
@@ -561,7 +563,7 @@ function pushUnknownFieldDiagnostics(options: {
   readonly pathForField: (field: string) => string;
   readonly metadataForField?: (
     field: string,
-  ) => RuntimeConfigDiagnosticPluginMetadata;
+  ) => RuntimeConfigDiagnosticSectionMetadata;
 }): void {
   const allowedFields = new Set(options.allowedFields);
 

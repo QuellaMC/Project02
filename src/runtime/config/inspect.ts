@@ -4,13 +4,13 @@ import type {
   ResolvedProject02RuntimeConfig,
   RuntimeConfigInspectShape,
   RuntimeConfigEffectiveSource,
+  RuntimeConfigFieldInspectShape,
   RuntimeConfigFieldScope,
+  RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionDeclaration,
+  RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionMap,
   RuntimeConfigSectionNamespace,
-  RuntimePluginActivationStatusShape,
-  RuntimePluginConfigFieldInspectShape,
-  RuntimePluginConfigInspectShape,
   RuntimeConfigValue,
 } from './types.ts';
 import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
@@ -18,7 +18,7 @@ import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
-  runtimeConfigDiagnosticMatchesPlugin,
+  runtimeConfigDiagnosticMatchesSection,
   type ResolvedRuntimeSectionConfigs,
 } from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
@@ -51,9 +51,9 @@ export function createRuntimeSectionConfigInspectShape(options: {
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly fingerprint: string;
-  readonly activation?: RuntimePluginActivationStatusShape;
+  readonly activation?: RuntimeConfigSectionActivationShape;
   readonly defaultEnabled?: boolean;
-}): RuntimePluginConfigInspectShape {
+}): RuntimeConfigSectionInspectShape {
   const {namespace, declaration} = options;
   const targetConfig =
     options.targetScope === 'global'
@@ -100,9 +100,10 @@ export function createRuntimeSectionConfigInspectShape(options: {
     options.sectionResolution.diagnostics.filter(
       diagnostic =>
         diagnostic.scope === 'global' ||
-        runtimeConfigDiagnosticMatchesPlugin({
+        runtimeConfigDiagnosticMatchesSection({
           diagnostic,
-          pluginId: declaration.id,
+          namespace,
+          id: declaration.id,
         }),
     ),
   );
@@ -116,7 +117,8 @@ export function createRuntimeSectionConfigInspectShape(options: {
   });
 
   return Object.freeze({
-    pluginId: declaration.id,
+    namespace,
+    id: declaration.id,
     displayName: declaration.displayName,
     version: declaration.version,
     enabled: configuredEnabled,
@@ -176,7 +178,7 @@ export function createRuntimeSectionConfigInspectShape(options: {
     ),
     diagnostics,
     fingerprint: options.fingerprint,
-  } satisfies RuntimePluginConfigInspectShape);
+  } satisfies RuntimeConfigSectionInspectShape);
 }
 
 /**
@@ -188,7 +190,7 @@ export function createRuntimeSectionConfigInspectShape(options: {
 export function createProject02ConfigFieldInspectShapes(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-}): readonly RuntimePluginConfigFieldInspectShape[] {
+}): readonly RuntimeConfigFieldInspectShape[] {
   const {globalConfig, characterConfig} = options.layeredConfig;
   const targetConfig =
     options.targetScope === 'global' ? globalConfig : characterConfig;
@@ -240,7 +242,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
           resolved: true,
           ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
         }),
-      } satisfies RuntimePluginConfigFieldInspectShape);
+      } satisfies RuntimeConfigFieldInspectShape);
     }),
   );
 }
@@ -286,10 +288,10 @@ function authoredSectionField(
 
 function sectionActivationInspection(options: {
   readonly configuredEnabled: boolean;
-  readonly diagnostics: RuntimePluginConfigInspectShape['diagnostics'];
+  readonly diagnostics: RuntimeConfigSectionInspectShape['diagnostics'];
   readonly declaration: RuntimeConfigSectionDeclaration;
-  readonly activation?: RuntimePluginActivationStatusShape;
-}): RuntimePluginActivationStatusShape {
+  readonly activation?: RuntimeConfigSectionActivationShape;
+}): RuntimeConfigSectionActivationShape {
   if (options.activation !== undefined) {
     return Object.freeze({
       enabled: options.activation.enabled,

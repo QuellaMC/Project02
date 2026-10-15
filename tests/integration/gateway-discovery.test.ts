@@ -43,7 +43,7 @@ describe("the daemon's claim on a home", () => {
     await expect(first.claim.release()).resolves.toBeUndefined();
     expect(readDaemonRecord({homeRoot})).toEqual({
       status: 'ok',
-      record: {protocolVersion: 5, token: first.claim.token, port: 4310},
+      record: {protocolVersion: 6, token: first.claim.token, port: 4310},
     });
 
     const second = await claimDaemonHome({homeRoot});

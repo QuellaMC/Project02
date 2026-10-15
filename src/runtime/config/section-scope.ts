@@ -123,6 +123,7 @@ function sectionScopeDiagnostics(options: {
   if (section.enabled !== undefined && activationViolation !== undefined) {
     diagnostics.push(
       sectionScopeDiagnostic({
+        namespace: options.namespace,
         declaration: options.declaration,
         code: activationViolation.code,
         path: activationViolation.path,
@@ -149,6 +150,7 @@ function sectionScopeDiagnostics(options: {
     if (violation !== undefined) {
       diagnostics.push(
         sectionScopeDiagnostic({
+          namespace: options.namespace,
           declaration: options.declaration,
           fieldName: field.name,
           code: violation.code,
@@ -163,6 +165,7 @@ function sectionScopeDiagnostics(options: {
 }
 
 function sectionScopeDiagnostic(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly fieldName?: string;
   readonly code: string;
@@ -175,10 +178,9 @@ function sectionScopeDiagnostic(options: {
     options.message,
     options.path,
     {
-      pluginId: options.declaration.id,
-      ...(options.fieldName === undefined
-        ? {}
-        : {pluginConfigField: options.fieldName}),
+      namespace: options.namespace,
+      id: options.declaration.id,
+      ...(options.fieldName === undefined ? {} : {field: options.fieldName}),
     },
   );
 }

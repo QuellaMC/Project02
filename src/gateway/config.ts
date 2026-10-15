@@ -25,6 +25,7 @@ import {
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   resolveRuntimeSectionConfigs,
+  runtimeConfigSectionNamespaces,
   simulateCharacterOverlayCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
@@ -34,8 +35,8 @@ import {
   type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigFieldScope,
+  type RuntimeConfigSectionActivationShape,
   type RuntimeConfigSections,
-  type RuntimePluginActivationStatusShape,
 } from '../runtime/config/index.ts';
 import {
   ensureCharacterDataDir,
@@ -59,14 +60,14 @@ const writeLockWaitMs = 500;
 type ScopeResolution = {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-  readonly manifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly pluginResolution: Parameters<
     typeof createRuntimeSectionConfigInspectShape
   >[0]['sectionResolution'];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
   readonly activationByPluginId?: Readonly<
-    Record<string, RuntimePluginActivationStatusShape>
+    Record<string, RuntimeConfigSectionActivationShape>
   >;
   readonly defaultEnabledPluginIds: readonly string[];
 };
@@ -167,8 +168,7 @@ function resolveGlobalScope(
     }),
     classificationConfig: layeredConfig.effective,
   });
-  const manifests = manifestsOf(catalog.catalogEntries);
-  const sections = {plugins: manifests};
+  const sections = {plugins: manifestsOf(catalog.catalogEntries)};
   // Location-free: the global document resolves through no character.
   const pluginResolution = resolveRuntimeSectionConfigs({
     config: layeredConfig.effective.config,
@@ -182,7 +182,7 @@ function resolveGlobalScope(
   return {
     layeredConfig,
     targetScope: 'global',
-    manifests,
+    sections,
     pluginResolution,
     diagnostics: [
       ...loaded.diagnostics,
@@ -242,7 +242,7 @@ function resolveCharacterScope(
   }
 
   const plan = startup.activationPlan;
-  const manifests = manifestsOf(plan.catalogEntries);
+  const sections = {plugins: manifestsOf(plan.catalogEntries)};
 
   return {
     // The overlay the plan was made from — for a never-started character
@@ -252,7 +252,7 @@ function resolveCharacterScope(
       overlayConfig: startup.overlayLoadedConfig ?? overlay,
     }),
     targetScope: 'character',
-    manifests,
+    sections,
     pluginResolution: plan.resolvedConfig,
     // The activation's diagnostics carry the resolution's plus what the
     // catalog could not publish — the errors the runtime itself acts on.
@@ -262,7 +262,7 @@ function resolveCharacterScope(
         .document,
       characterScope: runtimeLocation.characterScope,
       overlay,
-      sections: {plugins: manifests},
+      sections,
     }),
     ...(plan.pluginConfigControl.activationByPluginId === undefined
       ? {}
@@ -289,30 +289,33 @@ function viewOf(resolution: ScopeResolution): ConfigView {
         ),
       ),
     ),
-    // A plugin that belongs to a character is not the home's to show.
-    plugins: Object.freeze(
-      resolution.manifests
-        .filter(
-          manifest =>
-            targetScope === 'character' ||
-            manifest.config.scope !== 'character_only',
-        )
-        .map(manifest => {
-          const activation = resolution.activationByPluginId?.[manifest.id];
+    sections: Object.freeze(
+      runtimeConfigSectionNamespaces.flatMap(namespace =>
+        resolution.sections[namespace]
+          // A section that belongs to a character is not the home's to show.
+          .filter(
+            declaration =>
+              targetScope === 'character' ||
+              declaration.config.scope !== 'character_only',
+          )
+          .map(declaration => {
+            const activation =
+              resolution.activationByPluginId?.[declaration.id];
 
-          return createRuntimeSectionConfigInspectShape({
-            layeredConfig,
-            targetScope,
-            sectionResolution: resolution.pluginResolution,
-            namespace: 'plugins',
-            declaration: manifest,
-            fingerprint,
-            ...(activation === undefined ? {} : {activation}),
-            defaultEnabled: resolution.defaultEnabledPluginIds.includes(
-              manifest.id,
-            ),
-          });
-        }),
+            return createRuntimeSectionConfigInspectShape({
+              layeredConfig,
+              targetScope,
+              sectionResolution: resolution.pluginResolution,
+              namespace,
+              declaration,
+              fingerprint,
+              ...(activation === undefined ? {} : {activation}),
+              defaultEnabled: resolution.defaultEnabledPluginIds.includes(
+                declaration.id,
+              ),
+            });
+          }),
+      ),
     ),
   });
 }
@@ -341,17 +344,17 @@ function prepareControlRequest(
 
   const manifest = installedRuntimePluginCatalogEntry(
     catalogEntries,
-    operation.pluginId,
+    operation.id,
   )?.manifest;
 
   if (manifest === undefined) {
-    return `Plugin "${operation.pluginId}" is not installed.`;
+    return `Plugin "${operation.id}" is not installed.`;
   }
 
-  if (operation.kind === 'plugin_enabled') {
+  if (operation.kind === 'section_enabled') {
     return {
       kind: 'section_activation',
-      namespace: 'plugins',
+      namespace: operation.namespace,
       declaration: manifest,
       ...(operation.enabled === undefined ? {} : {enabled: operation.enabled}),
     };
@@ -359,11 +362,11 @@ function prepareControlRequest(
 
   return {
     kind: 'section_field',
-    namespace: 'plugins',
+    namespace: operation.namespace,
     declaration: manifest,
     actor: 'operator',
     fieldOperation:
-      operation.kind === 'plugin_field_set'
+      operation.kind === 'section_field_set'
         ? {kind: 'set', fieldName: operation.field, value: operation.value}
         : {kind: 'unset', fieldName: operation.field},
   };
