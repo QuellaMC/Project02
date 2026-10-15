@@ -419,7 +419,7 @@ function assemblyIdentity(
       plan.activation.enabledPluginIds.map(pluginId => [
         pluginId,
         {
-          config: plan.resolvedConfig.pluginConfigs[pluginId],
+          config: plan.resolvedConfig.sectionConfigs.plugins[pluginId],
           version: installedRuntimePluginCatalogEntry(
             plan.catalogEntries,
             pluginId,

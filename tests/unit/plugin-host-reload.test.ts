@@ -196,8 +196,9 @@ function reloadHost(options: {
     inspectRuntimePluginConfig({
       targetScope: 'global',
       runtimeLocation,
-      manifest,
-      pluginManifests: [manifest],
+      namespace: 'plugins',
+      declaration: manifest,
+      sections: {plugins: [manifest]},
     });
   let calls = 0;
 

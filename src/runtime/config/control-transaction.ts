@@ -46,15 +46,15 @@ import type {
   LoadedProject02RuntimeConfig,
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,
+  RuntimeConfigSections,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
-import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 
 export type RuntimeConfigControlSnapshot = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly globalDocument: JsonBoundaryObject;
-  /** Installed manifests; fingerprints need them to redact secret fields. */
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  /** Installed declarations; fingerprints need them to redact secret fields. */
+  readonly sections: RuntimeConfigSections;
   /** Validated globalDocument, including the absent-file bootstrap. */
   readonly validatedGlobalConfig?: Project02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
@@ -94,7 +94,7 @@ type RuntimeConfigControlLockPlan = {
 export function readRuntimeConfigControlSnapshot(
   target: ResolvedRuntimeConfigScopeTarget,
   options: {
-    readonly pluginManifests: readonly RuntimePluginManifest[];
+    readonly sections: RuntimeConfigSections;
     readonly requireCharacterMarker?: boolean;
   },
 ): RuntimeConfigControlSnapshot {
@@ -108,14 +108,14 @@ export function readRuntimeConfigControlSnapshot(
   return snapshotFromLoadedGlobal({
     target,
     loadedConfig,
-    pluginManifests: options.pluginManifests,
+    sections: options.sections,
     requireCharacterMarker: options.requireCharacterMarker ?? true,
   });
 }
 
 type ApplyRuntimeConfigControlTransactionOptions<T> = {
   readonly target: ResolvedRuntimeConfigScopeTarget;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly expectedFingerprint?: string;
   /** How long to wait for a file another writer holds; the lock's default otherwise. */
   readonly lockWaitTimeoutMs?: number;
@@ -144,7 +144,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     const snapshot = snapshotFromLoadedGlobal({
       target,
       loadedConfig,
-      pluginManifests: options.pluginManifests,
+      sections: options.sections,
       // A character write lands only in a directory the initializer claimed.
       requireCharacterMarker: true,
     });
@@ -187,14 +187,14 @@ export function applyRuntimeConfigControlTransaction<T>(
                   source: 'overlay',
                   config: preparation.preparedCandidate.config,
                 },
-                pluginManifests: snapshot.pluginManifests,
+                sections: snapshot.sections,
               })
             : layeredRuntimeConfigFingerprintForScope({
                 globalConfig: preparation.preparedCandidate.config,
                 characterScope:
                   snapshot.characterRuntimeLocation?.characterScope,
                 overlay: snapshot.characterOverlay?.overlay,
-                pluginManifests: snapshot.pluginManifests,
+                sections: snapshot.sections,
               }),
       } satisfies RuntimeConfigMutationResult),
       context: preparation.context,
@@ -211,7 +211,7 @@ export function verifyRuntimeConfigControlExpectation(
     | 'runtimeLocation'
     | 'characterRuntimeLocation'
     | 'characterOverlay'
-    | 'pluginManifests'
+    | 'sections'
   >,
   expectedFingerprint: string,
 ): void {
@@ -219,7 +219,7 @@ export function verifyRuntimeConfigControlExpectation(
     globalConfig: snapshot.globalDocument,
     characterScope: snapshot.characterRuntimeLocation?.characterScope,
     overlay: snapshot.characterOverlay?.overlay,
-    pluginManifests: snapshot.pluginManifests,
+    sections: snapshot.sections,
   });
 
   if (expectedFingerprint !== currentFingerprint) {
@@ -250,7 +250,7 @@ export function assertGlobalConfigLoadableForCharacterScope(
 function snapshotFromLoadedGlobal(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly requireCharacterMarker: boolean;
 }): RuntimeConfigControlSnapshot {
   if (options.target.scope === 'character') {
@@ -286,7 +286,7 @@ function snapshotFromLoadedGlobal(options: {
   return Object.freeze({
     loadedConfig: options.loadedConfig,
     globalDocument: globalSnapshot.document,
-    pluginManifests: options.pluginManifests,
+    sections: options.sections,
     ...(globalSnapshot.validatedConfig === undefined
       ? {}
       : {validatedGlobalConfig: globalSnapshot.validatedConfig}),

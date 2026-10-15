@@ -19,12 +19,12 @@ import {
   createProject02ConfigFieldInspectShapes,
   createRuntimeConfigAuthoredSnapshot,
   createRuntimeConfigFingerprint,
-  createRuntimePluginConfigInspectShape,
+  createRuntimeSectionConfigInspectShape,
   layeredRuntimeConfigFingerprintForScope,
   project02RuntimeConfigFieldDefinitions,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
-  resolveRuntimePluginConfigs,
+  resolveRuntimeSectionConfigs,
   simulateCharacterOverlayCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
@@ -34,6 +34,7 @@ import {
   type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigFieldScope,
+  type RuntimeConfigSections,
   type RuntimePluginActivationStatusShape,
 } from '../runtime/config/index.ts';
 import {
@@ -60,8 +61,8 @@ type ScopeResolution = {
   readonly targetScope: RuntimeConfigFieldScope;
   readonly manifests: readonly RuntimePluginManifest[];
   readonly pluginResolution: Parameters<
-    typeof createRuntimePluginConfigInspectShape
-  >[0]['pluginResolution'];
+    typeof createRuntimeSectionConfigInspectShape
+  >[0]['sectionResolution'];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
   readonly activationByPluginId?: Readonly<
@@ -117,11 +118,11 @@ export async function applyConfigChange(
       return refusedChange('invalid', prepared);
     }
 
-    const pluginManifests = manifestsOf(catalog.catalogEntries);
+    const sections = {plugins: manifestsOf(catalog.catalogEntries)};
     const target = await resolveWriteTarget({
       home,
       target: change.target,
-      pluginManifests,
+      sections,
       request: prepared,
       expectedFingerprint: change.expectedFingerprint,
     });
@@ -132,7 +133,7 @@ export async function applyConfigChange(
 
     const result = applyRuntimeConfigControlOperation({
       target,
-      pluginManifests,
+      sections,
       expectedFingerprint: change.expectedFingerprint,
       request: prepared,
       lockWaitTimeoutMs: writeLockWaitMs,
@@ -167,12 +168,15 @@ function resolveGlobalScope(
     classificationConfig: layeredConfig.effective,
   });
   const manifests = manifestsOf(catalog.catalogEntries);
+  const sections = {plugins: manifests};
   // Location-free: the global document resolves through no character.
-  const pluginResolution = resolveRuntimePluginConfigs({
+  const pluginResolution = resolveRuntimeSectionConfigs({
     config: layeredConfig.effective.config,
-    pluginManifests: manifests,
-    validateInactivePluginConfigs: true,
-    defaultEnabledPluginIds: new Set(catalog.defaultEnabledPluginIds),
+    sections,
+    validateInactiveSectionConfigs: true,
+    defaultEnabledSectionIds: {
+      plugins: new Set(catalog.defaultEnabledPluginIds),
+    },
   });
 
   return {
@@ -187,7 +191,7 @@ function resolveGlobalScope(
     ],
     fingerprint: createRuntimeConfigFingerprint(
       createRuntimeConfigAuthoredSnapshot(loaded).document,
-      manifests,
+      sections,
     ),
     defaultEnabledPluginIds: catalog.defaultEnabledPluginIds,
   };
@@ -258,7 +262,7 @@ function resolveCharacterScope(
         .document,
       characterScope: runtimeLocation.characterScope,
       overlay,
-      pluginManifests: manifests,
+      sections: {plugins: manifests},
     }),
     ...(plan.pluginConfigControl.activationByPluginId === undefined
       ? {}
@@ -296,11 +300,12 @@ function viewOf(resolution: ScopeResolution): ConfigView {
         .map(manifest => {
           const activation = resolution.activationByPluginId?.[manifest.id];
 
-          return createRuntimePluginConfigInspectShape({
+          return createRuntimeSectionConfigInspectShape({
             layeredConfig,
             targetScope,
-            pluginResolution: resolution.pluginResolution,
-            manifest,
+            sectionResolution: resolution.pluginResolution,
+            namespace: 'plugins',
+            declaration: manifest,
             fingerprint,
             ...(activation === undefined ? {} : {activation}),
             defaultEnabled: resolution.defaultEnabledPluginIds.includes(
@@ -345,15 +350,17 @@ function prepareControlRequest(
 
   if (operation.kind === 'plugin_enabled') {
     return {
-      kind: 'plugin_activation',
-      manifest,
+      kind: 'section_activation',
+      namespace: 'plugins',
+      declaration: manifest,
       ...(operation.enabled === undefined ? {} : {enabled: operation.enabled}),
     };
   }
 
   return {
-    kind: 'plugin_config',
-    manifest,
+    kind: 'section_field',
+    namespace: 'plugins',
+    declaration: manifest,
     actor: 'operator',
     fieldOperation:
       operation.kind === 'plugin_field_set'
@@ -365,7 +372,7 @@ function prepareControlRequest(
 async function resolveWriteTarget(options: {
   readonly home: Project02Home;
   readonly target: ConfigTarget;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly request: RuntimeConfigControlRequest;
   readonly expectedFingerprint: string;
 }): Promise<ResolvedRuntimeConfigScopeTarget | RefusedChange> {
@@ -396,7 +403,7 @@ async function resolveWriteTarget(options: {
   // directory for a character that never started.
   const candidate = simulateCharacterOverlayCandidate({
     target: scopeTarget,
-    pluginManifests: options.pluginManifests,
+    sections: options.sections,
     request: options.request,
     expectedFingerprint: options.expectedFingerprint,
   });

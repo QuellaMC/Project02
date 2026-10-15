@@ -29,6 +29,7 @@ import {
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticIsReadinessFailure,
+  runtimeConfigSectionPath,
   simulateCharacterOverlayCandidate,
   withRuntimeConfigDiagnosticOrigin,
   type LoadedProject02CharacterOverlayConfig,
@@ -572,7 +573,7 @@ function characterMaterializationOperation(
       runtimeLocation: input.runtimeLocation,
       scope: 'character',
     }),
-    pluginManifests: input.pluginManifests,
+    sections: {plugins: input.pluginManifests},
     characterMaterialization: {
       document: input.document,
       fillMissingFields:
@@ -672,7 +673,7 @@ async function materializeCharacterDataDir(
               'warning',
               'character_package_plugin_auto_enabled',
               `Character package "${characterId}" enabled plugin "${pluginId}" in the character config.`,
-              `plugins.${pluginId}.enabled`,
+              `${runtimeConfigSectionPath('plugins', pluginId)}.enabled`,
               {pluginId},
             ),
           ),

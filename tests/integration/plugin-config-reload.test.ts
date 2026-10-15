@@ -74,15 +74,19 @@ function authoredFingerprint(options: {
     throw new Error('demo-config manifest missing from the plan');
   }
 
+  const declaration = manifest as Parameters<
+    typeof inspectRuntimePluginConfig
+  >[0]['declaration'];
+
   return inspectRuntimePluginConfig({
     targetScope: 'character',
     runtimeLocation: runtimeLocationForTest({
       configPath: options.configPath,
       storeRoot: options.storeRoot,
     }),
-    manifest: manifest as Parameters<
-      typeof inspectRuntimePluginConfig
-    >[0]['manifest'],
+    namespace: 'plugins',
+    declaration,
+    sections: {plugins: [declaration]},
   }).fingerprint;
 }
 
@@ -232,7 +236,9 @@ describe('configured runtime plugin reloader', () => {
       characterId: 'mira',
     });
     expect(
-      activationPlan.resolvedConfig.pluginConfigs['demo-config']?.['tone'],
+      activationPlan.resolvedConfig.sectionConfigs.plugins['demo-config']?.[
+        'tone'
+      ],
     ).toMatchObject({value: 'formal'});
 
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
@@ -307,8 +313,9 @@ describe('configured runtime plugin reloader', () => {
     const inspectedFingerprint = inspectRuntimePluginConfig({
       runtimeLocation: activationPlan.runtimeLocation,
       targetScope: 'global',
-      manifest,
-      pluginManifests: [manifest],
+      namespace: 'plugins',
+      declaration: manifest,
+      sections: {plugins: [manifest]},
     }).fingerprint;
 
     await createConfiguredProject02PluginHostFromPlan({activationPlan});

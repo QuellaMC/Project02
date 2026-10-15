@@ -1,9 +1,11 @@
-import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
-import type {
-  Project02RuntimeConfig,
-  RuntimeConfigCharacterScope,
-  RuntimeConfigValue,
+import {
+  runtimeConfigSectionNamespaces,
+  type Project02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
+  type RuntimeConfigSectionNamespace,
+  type RuntimeConfigSections,
+  type RuntimeConfigValue,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
@@ -13,16 +15,16 @@ import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
  * Fingerprints are shown to surfaces that must never see a secret -- the
  * model reads one back from `runtime.plugin.config` -- and an unsalted
  * hash of a mostly-known document lets a weak plaintext secret be guessed
- * offline. Every fingerprint therefore takes the manifests and replaces
- * authored values of secret-declared fields with a constant: presence is
- * hashed, the value never is.
+ * offline. Every fingerprint therefore takes the section declarations and
+ * replaces authored values of secret-declared fields with a constant:
+ * presence is hashed, the value never is.
  */
 export function createRuntimeConfigFingerprint(
   value: RuntimeConfigValue | Project02RuntimeConfig | JsonBoundaryObject,
-  pluginManifests: readonly RuntimePluginManifest[],
+  sections: RuntimeConfigSections,
 ): string {
   return createCanonicalJsonFingerprint(
-    redactAuthoredSecretFields(value, secretFieldsByPlugin(pluginManifests)),
+    redactAuthoredSecretFields(value, secretFieldsBySection(sections)),
   );
 }
 
@@ -39,9 +41,9 @@ export function createLayeredRuntimeConfigFingerprint(options: {
     LoadedProject02CharacterOverlayConfig,
     'source' | 'config' | 'authoredDocument'
   >;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
 }): string {
-  const secretFields = secretFieldsByPlugin(options.pluginManifests);
+  const secretFields = secretFieldsBySection(options.sections);
   const {source, config, authoredDocument} = options.overlay;
 
   return createCanonicalJsonFingerprint({
@@ -70,31 +72,38 @@ export function layeredRuntimeConfigFingerprintForScope(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
 }): string {
   return options.characterScope === undefined || options.overlay === undefined
-    ? createRuntimeConfigFingerprint(
-        options.globalConfig,
-        options.pluginManifests,
-      )
+    ? createRuntimeConfigFingerprint(options.globalConfig, options.sections)
     : createLayeredRuntimeConfigFingerprint({
         globalConfig: options.globalConfig,
         characterId: options.characterScope.characterId,
         overlay: options.overlay,
-        pluginManifests: options.pluginManifests,
+        sections: options.sections,
       });
 }
 
-function secretFieldsByPlugin(
-  pluginManifests: readonly RuntimePluginManifest[],
-): ReadonlyMap<string, ReadonlySet<string>> {
+type SecretFieldsBySection = ReadonlyMap<
+  RuntimeConfigSectionNamespace,
+  ReadonlyMap<string, ReadonlySet<string>>
+>;
+
+function secretFieldsBySection(
+  sections: RuntimeConfigSections,
+): SecretFieldsBySection {
   return new Map(
-    pluginManifests.map(manifest => [
-      manifest.id,
-      new Set(
-        manifest.config.fields
-          .filter(field => field.secret)
-          .map(field => field.name),
+    runtimeConfigSectionNamespaces.map(namespace => [
+      namespace,
+      new Map(
+        sections[namespace].map(declaration => [
+          declaration.id,
+          new Set(
+            declaration.config.fields
+              .filter(field => field.secret)
+              .map(field => field.name),
+          ),
+        ]),
       ),
     ]),
   );
@@ -102,21 +111,19 @@ function secretFieldsByPlugin(
 
 /**
  * Walks only the well-formed `project02.<field>` and
- * `plugins.<id>.config.<field>` positions, so an invalid authored document
- * still fingerprints as its own bytes.
+ * `<namespace>.<id>.config.<field>` positions, so an invalid authored
+ * document still fingerprints as its own bytes.
  */
 function redactAuthoredSecretFields(
   document: unknown,
-  secretFields: ReadonlyMap<string, ReadonlySet<string>>,
+  secretFields: SecretFieldsBySection,
 ): unknown {
   if (!isPlainRecord(document)) {
     return document;
   }
 
   const project02 = document['project02'];
-  const plugins = document['plugins'];
-
-  return {
+  const redacted: Record<string, unknown> = {
     ...document,
     ...(isPlainRecord(project02)
       ? {
@@ -128,10 +135,20 @@ function redactAuthoredSecretFields(
           ),
         }
       : {}),
-    ...(isPlainRecord(plugins)
-      ? {plugins: redactPluginSecrets(plugins, secretFields)}
-      : {}),
   };
+
+  for (const namespace of runtimeConfigSectionNamespaces) {
+    const sections = document[namespace];
+
+    if (isPlainRecord(sections)) {
+      redacted[namespace] = redactSectionSecrets(
+        sections,
+        secretFields.get(namespace),
+      );
+    }
+  }
+
+  return redacted;
 }
 
 const secretHostFieldNames: ReadonlySet<string> = new Set(
@@ -140,29 +157,29 @@ const secretHostFieldNames: ReadonlySet<string> = new Set(
     .map(field => field.name),
 );
 
-function redactPluginSecrets(
-  plugins: Record<string, unknown>,
-  secretFields: ReadonlyMap<string, ReadonlySet<string>>,
+function redactSectionSecrets(
+  sections: Record<string, unknown>,
+  secretFields: ReadonlyMap<string, ReadonlySet<string>> | undefined,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(plugins).map(([pluginId, pluginConfig]) => {
-      const fields = secretFields.get(pluginId);
+    Object.entries(sections).map(([id, section]) => {
+      const fields = secretFields?.get(id);
 
       if (
         fields === undefined ||
         fields.size === 0 ||
-        !isPlainRecord(pluginConfig) ||
-        !isPlainRecord(pluginConfig['config'])
+        !isPlainRecord(section) ||
+        !isPlainRecord(section['config'])
       ) {
-        return [pluginId, pluginConfig];
+        return [id, section];
       }
 
       return [
-        pluginId,
+        id,
         {
-          ...pluginConfig,
+          ...section,
           config: Object.fromEntries(
-            Object.entries(pluginConfig['config']).map(([name, value]) => [
+            Object.entries(section['config']).map(([name, value]) => [
               name,
               fields.has(name) ? {$secret: 'authored'} : value,
             ]),

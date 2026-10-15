@@ -40,6 +40,7 @@ import {
   resolveRuntimeConfigScopeTarget,
   resolveLayeredProject02RuntimeConfigWithSnapshot,
   runtimeConfigDiagnosticMatchesPlugin,
+  runtimeConfigSectionPath,
   type EffectiveProject02RuntimeConfigSnapshot,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
@@ -299,9 +300,9 @@ export function prepareConfiguredProject02PluginActivation(options: {
       loadedConfig: options.loadedConfig,
       runtimeLocation: options.runtimeLocation,
       overlayConfig,
-      pluginManifests,
-      defaultEnabledPluginIds,
-      validateInactivePluginConfigs:
+      sections: {plugins: pluginManifests},
+      defaultEnabledSectionIds: {plugins: defaultEnabledPluginIds},
+      validateInactiveSectionConfigs:
         options.validateInactivePluginConfigs === true,
     });
   const activation = resolveRuntimePluginActivation({
@@ -626,7 +627,7 @@ export function resolveRuntimePluginActivation(options: {
           'warning',
           'trusted_context_not_first_party',
           `Plugin "${manifest.id}" requests trusted_context access, which only bundled first-party packages can hold.`,
-          `plugins.${manifest.id}`,
+          runtimeConfigSectionPath('plugins', manifest.id),
           {pluginId: manifest.id},
         ),
       );
@@ -891,7 +892,7 @@ function unknownPluginDiagnostics(options: {
       continue;
     }
 
-    addUnknown(pluginId, `plugins.${pluginId}`);
+    addUnknown(pluginId, runtimeConfigSectionPath('plugins', pluginId));
   }
 
   if (options.defaultMemoryProviderId !== undefined) {

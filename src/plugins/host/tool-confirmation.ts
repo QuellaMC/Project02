@@ -14,8 +14,8 @@ import type {
 } from '../api/contract.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
+  RuntimeConfigFieldDeclaration,
   RuntimePlugin,
-  RuntimePluginConfigField,
   RuntimePluginContext,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginJsonObject,
@@ -221,7 +221,7 @@ async function applyApprovedRuntimePluginConfigEffect(options: {
   readonly liveApply: RuntimePluginConfigLiveApply;
 }): Promise<RuntimePluginToolCallResult> {
   const {effect} = options;
-  let field: RuntimePluginConfigField;
+  let field: RuntimeConfigFieldDeclaration;
 
   try {
     field = applyPreparedRuntimePluginConfigEffect({
@@ -305,7 +305,7 @@ async function applyApprovedRuntimePluginConfigEffect(options: {
 function describeLiveApplyOutcome(
   outcome: RuntimePluginConfigLiveApplyOutcome,
   effect: PreparedRuntimePluginConfigEffect,
-  field: RuntimePluginConfigField,
+  field: RuntimeConfigFieldDeclaration,
 ): {
   readonly appliesTo: 'now' | 'next_launch';
   readonly note?: string;

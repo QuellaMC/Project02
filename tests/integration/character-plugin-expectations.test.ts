@@ -209,7 +209,7 @@ describe('first-selection materialization through startup', () => {
       throw new Error('Expected the package override to activate.');
     }
     expect(
-      first.activationPlan.resolvedConfig.pluginConfigs['demo-config'],
+      first.activationPlan.resolvedConfig.sectionConfigs.plugins['demo-config'],
     ).toMatchObject({
       tone: {value: 'warm'},
       signoff: {value: 'Global One'},
@@ -231,7 +231,9 @@ describe('first-selection materialization through startup', () => {
       throw new Error('Expected inherited global changes to resolve.');
     }
     expect(
-      second.activationPlan.resolvedConfig.pluginConfigs['demo-config'],
+      second.activationPlan.resolvedConfig.sectionConfigs.plugins[
+        'demo-config'
+      ],
     ).toMatchObject({
       tone: {value: 'warm'},
       signoff: {value: 'Global Two'},
@@ -412,7 +414,7 @@ describe('first-selection materialization through startup', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
-      pluginManifests: [],
+      sections: {plugins: []},
       target,
       request: {
         kind: 'document',

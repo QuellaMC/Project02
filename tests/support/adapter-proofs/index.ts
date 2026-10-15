@@ -4,9 +4,9 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
+  type RuntimeConfigFieldDeclaration,
   type RuntimePlugin,
   type RuntimePluginAccessMap,
-  type RuntimePluginConfigField,
   type RuntimePluginContextItem,
   type RuntimePluginDeclaration,
   type RuntimePluginEvidenceKind,
@@ -577,7 +577,7 @@ function createTidepoolManifest(options: {
   readonly fixture: JsonRecord;
   readonly manifestId: string;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
-  readonly configFields: readonly RuntimePluginConfigField[];
+  readonly configFields: readonly RuntimeConfigFieldDeclaration[];
   readonly activationReasons: readonly string[];
 }): RuntimePluginManifest {
   return createRuntimePluginManifestForAdapter({
@@ -608,7 +608,7 @@ function createMemoryGatewayManifest(options: {
   readonly version: string;
   readonly description: string;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
-  readonly configFields: readonly RuntimePluginConfigField[];
+  readonly configFields: readonly RuntimeConfigFieldDeclaration[];
   readonly configFingerprint: string;
 }): RuntimePluginManifest {
   return createRuntimePluginManifestForAdapter({
@@ -644,7 +644,7 @@ function createRuntimePluginManifestForAdapter(options: {
   readonly description: string;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
   readonly providedTools: readonly RuntimePluginProvidedTool[];
-  readonly configFields: readonly RuntimePluginConfigField[];
+  readonly configFields: readonly RuntimeConfigFieldDeclaration[];
   readonly configFingerprint?: string;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activationReasons: readonly string[];
@@ -738,7 +738,7 @@ function createProvidedToolFromSchema(options: {
 
 function configFieldsFromSchema(
   schema: JsonRecord,
-): readonly RuntimePluginConfigField[] {
+): readonly RuntimeConfigFieldDeclaration[] {
   const properties = optionalRecord(schema['properties'], 'schema.properties');
   const required = new Set(
     optionalStringArray(schema['required'], 'schema.required'),
@@ -769,7 +769,7 @@ function configFieldsFromSchema(
 
 function configFieldsFromConfigRecord(
   config: JsonRecord,
-): readonly RuntimePluginConfigField[] {
+): readonly RuntimeConfigFieldDeclaration[] {
   return Object.freeze(
     Object.entries(config).map(([name, value]) => {
       const configField = requiredRecord(value, `config.${name}`);
@@ -798,7 +798,7 @@ function createConfigField(options: {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
-}): RuntimePluginConfigField {
+}): RuntimeConfigFieldDeclaration {
   return {
     name: options.name,
     description: options.description,

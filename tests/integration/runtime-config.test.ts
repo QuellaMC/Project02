@@ -46,6 +46,7 @@ describe('runtime config loading and resolution', () => {
         loadedConfig: loaded,
         storeRoot: storeRoot,
       }),
+      sections: {plugins: []},
     });
 
     expect(loaded.source).toBe('none');
@@ -75,6 +76,7 @@ describe('runtime config loading and resolution', () => {
         loadedConfig: loadRuntimeConfigForTest({storeRoot}),
         storeRoot: storeRoot,
       }),
+      sections: {plugins: []},
     });
 
     expect(resolved.project02.userDisplayName).toBe('Mike');
@@ -89,6 +91,7 @@ describe('runtime config loading and resolution', () => {
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
           storeRoot,
         }),
+        sections: {plugins: []},
       });
 
     writeRuntimeConfig(configPath, {project02: {}});
@@ -119,6 +122,7 @@ describe('runtime config loading and resolution', () => {
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           configPath,
         }),
+        sections: {plugins: []},
       });
 
     writeRuntimeConfig(configPath, {});
@@ -472,20 +476,22 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        pluginManifests: [manifest],
+        sections: {plugins: [manifest]},
       });
     const first = resolveWithSecret('first-secret');
     const second = resolveWithSecret('second-secret');
 
-    expect(first.pluginConfigs['character-state']?.['apiKey']).toMatchObject({
+    expect(
+      first.sectionConfigs.plugins['character-state']?.['apiKey'],
+    ).toMatchObject({
       value: 'first-secret',
       source: 'config',
       resolved: true,
     });
     expect(
-      first.redactedPluginConfigs['character-state']?.['apiKey'],
+      first.redactedSectionConfigs.plugins['character-state']?.['apiKey'],
     ).toMatchObject({value: '[redacted]', source: 'config', resolved: true});
-    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
+    expect(JSON.stringify(first.redactedSectionConfigs.plugins)).not.toContain(
       'first-secret',
     );
     expect(first.effectiveConfigFingerprint).not.toContain('first-secret');
@@ -510,7 +516,7 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        pluginManifests: [plugin.manifest],
+        sections: {plugins: [plugin.manifest]},
       });
     const enabledFirst = resolveWith(true, 'first-secret');
     const enabledSecond = resolveWith(true, 'second-secret');
@@ -522,9 +528,9 @@ describe('runtime config loading and resolution', () => {
     expect(enabledFirst.effectiveConfigFingerprint).not.toBe(
       disabled.effectiveConfigFingerprint,
     );
-    expect(JSON.stringify(enabledFirst.redactedPluginConfigs)).not.toContain(
-      'first-secret',
-    );
+    expect(
+      JSON.stringify(enabledFirst.redactedSectionConfigs.plugins),
+    ).not.toContain('first-secret');
     expect(enabledFirst.effectiveConfigFingerprint).not.toContain(
       'first-secret',
     );
@@ -589,15 +595,17 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        pluginManifests: [manifest],
+        sections: {plugins: [manifest]},
       });
     const first = resolveWith('first');
     const second = resolveWith('second');
 
-    expect(first.pluginConfigs['character-state']?.['apiKey']?.value).toBe(
-      'first-api-key',
-    );
-    expect(first.redactedPluginConfigs['character-state']).toMatchObject({
+    expect(
+      first.sectionConfigs.plugins['character-state']?.['apiKey']?.value,
+    ).toBe('first-api-key');
+    expect(
+      first.redactedSectionConfigs.plugins['character-state'],
+    ).toMatchObject({
       apiKey: {
         secret: false,
         value: '[redacted]',
@@ -613,13 +621,13 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
-    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
+    expect(JSON.stringify(first.redactedSectionConfigs.plugins)).not.toContain(
       'first-api-key',
     );
-    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
+    expect(JSON.stringify(first.redactedSectionConfigs.plugins)).not.toContain(
       'first-token',
     );
-    expect(JSON.stringify(first.redactedPluginConfigs)).not.toContain(
+    expect(JSON.stringify(first.redactedSectionConfigs.plugins)).not.toContain(
       'first-nested-token',
     );
     expect(first.effectiveConfigFingerprint).toBe(
@@ -664,21 +672,21 @@ describe('runtime config loading and resolution', () => {
     ];
     const fromConfig = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-      pluginManifests: manifests,
+      sections: {plugins: manifests},
     });
 
     // A key typed into config is the key; the plugin reads it as written.
     expect(
-      fromConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
+      fromConfig.sectionConfigs.plugins[plugin.manifest.id]?.['apiKey'],
     ).toMatchObject({
       source: 'config',
       resolved: true,
       value: 'plaintext-secret',
     });
     // Redacted views never show the value.
-    expect(JSON.stringify(fromConfig.redactedPluginConfigs)).not.toContain(
-      'plaintext-secret',
-    );
+    expect(
+      JSON.stringify(fromConfig.redactedSectionConfigs.plugins),
+    ).not.toContain('plaintext-secret');
 
     // A shape other than a string is rejected, never silently ignored.
     const invalid = resolveProject02RuntimeConfig({
@@ -700,7 +708,7 @@ describe('runtime config loading and resolution', () => {
           ),
         }),
       }),
-      pluginManifests: manifests,
+      sections: {plugins: manifests},
     });
 
     expect(invalid.diagnostics).toEqual(
@@ -729,9 +737,10 @@ describe('runtime config loading and resolution', () => {
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
-      pluginManifests: [requiredSecretPlugin().manifest],
+      sections: {plugins: [requiredSecretPlugin().manifest]},
     });
-    const resolvedField = resolved.pluginConfigs['memory.required']?.['apiKey'];
+    const resolvedField =
+      resolved.sectionConfigs.plugins['memory.required']?.['apiKey'];
 
     expect(resolvedField).toMatchObject({
       source: 'config',

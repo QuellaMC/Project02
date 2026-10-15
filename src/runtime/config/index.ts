@@ -37,7 +37,7 @@ export {
 export {
   createProject02ConfigFieldInspectShapes,
   createRuntimeConfigInspectShape,
-  createRuntimePluginConfigInspectShape,
+  createRuntimeSectionConfigInspectShape,
   inspectConfiguredPlugins,
   type InspectConfiguredPlugin,
 } from './inspect.ts';
@@ -87,24 +87,25 @@ export {
 } from './mutate.ts';
 export {redactRuntimeConfigValue} from './redact.ts';
 export {
-  runtimePluginScopeDiagnostics,
-  runtimePluginScopeViolation,
-  type RuntimePluginScopeOperation,
-  type RuntimePluginScopeViolation,
-} from './plugin-scope.ts';
+  runtimeSectionScopeDiagnostics,
+  runtimeSectionScopeViolation,
+  type RuntimeSectionScopeOperation,
+  type RuntimeSectionScopeViolation,
+} from './section-scope.ts';
 export {
   diagnosticsHaveErrors,
   resolveProject02RuntimeConfig,
-  resolveRuntimePluginConfigs,
+  resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticMatchesPlugin,
-  type ResolveRuntimePluginConfigsOptions,
-  type ResolvedRuntimePluginConfigs,
+  type ResolveRuntimeSectionConfigsOptions,
+  type ResolvedRuntimeSectionConfigs,
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
   runtimeConfigValueMatchesField,
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
+export {runtimeConfigSectionPath} from './path.ts';
 export {
   defaultProject02UserDisplayName,
   runtimeConfigDiagnosticLocation,
@@ -112,7 +113,7 @@ export {
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
+  type Project02RuntimeSectionConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
@@ -120,9 +121,10 @@ export {
   type RuntimeConfigEffectiveSource,
   type RuntimeConfigFieldScope,
   type RuntimeConfigInspectShape,
-  type RedactedPluginRuntimeConfig,
-  type ResolvedPluginRuntimeConfig,
+  type RedactedRuntimeSectionConfig,
+  type ResolvedRuntimeSectionConfig,
   type RuntimeConfigMutationOperation,
+  type RuntimeConfigSections,
   type RuntimeConfigValue,
   type RuntimePluginActivationStatusShape,
   type RuntimePluginConfigFieldInspectShape,

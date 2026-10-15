@@ -24,8 +24,9 @@ export function demoConfigToneChangeOutput(
       storeRoot: homeRoot,
       character: characterId,
     }),
-    manifest,
-    pluginManifests: [manifest],
+    namespace: 'plugins',
+    declaration: manifest,
+    sections: {plugins: [manifest]},
   });
 
   return JSON.stringify({

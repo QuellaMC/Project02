@@ -1003,7 +1003,7 @@ describe('inspect CLI plugin evidence', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
-      pluginManifests: [],
+      sections: {plugins: []},
       target,
       request: {
         kind: 'document',

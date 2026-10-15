@@ -92,13 +92,15 @@ describe('runtime config canonical path locking', () => {
     };
 
     expect(() =>
-      readRuntimeConfigControlSnapshot(redirectedTarget, {pluginManifests: []}),
+      readRuntimeConfigControlSnapshot(redirectedTarget, {
+        sections: {plugins: []},
+      }),
     ).toThrow(
       'Runtime config scope target must be created by resolveRuntimeConfigScopeTarget()',
     );
     expect(() =>
       applyRuntimeConfigControlOperation({
-        pluginManifests: [],
+        sections: {plugins: []},
         target: redirectedTarget,
         request: {
           kind: 'document',

@@ -29,9 +29,9 @@ export function createConfiguredRuntimePluginReloader(options: {
 }): RuntimePluginReloader {
   const {catalogEntries, pluginConfigControl, runtimeLocation} =
     options.activationPlan;
-  const pluginManifests = Object.values(catalogEntries).map(
-    entry => entry.manifest,
-  );
+  const sections = {
+    plugins: Object.values(catalogEntries).map(entry => entry.manifest),
+  };
   const defaultEnabledPluginIds = new Set(
     pluginConfigControl.defaultEnabledPluginIds ?? [],
   );
@@ -70,7 +70,7 @@ export function createConfiguredRuntimePluginReloader(options: {
             .document,
           characterScope: state.runtimeLocation.characterScope,
           overlay: state.overlay,
-          pluginManifests,
+          sections,
         });
       const authoredState = loadAuthoredState();
       const authoredFingerprint = authoredFingerprintOf(authoredState);
@@ -85,8 +85,8 @@ export function createConfiguredRuntimePluginReloader(options: {
         loadedConfig: authoredState.loaded,
         runtimeLocation: authoredState.runtimeLocation,
         overlayConfig: authoredState.overlay,
-        pluginManifests,
-        defaultEnabledPluginIds,
+        sections,
+        defaultEnabledSectionIds: {plugins: defaultEnabledPluginIds},
       });
 
       // Another plugin's bad config must not strand this rebuild.
@@ -111,11 +111,13 @@ export function createConfiguredRuntimePluginReloader(options: {
           characterId: authoredState.runtimeLocation.characterScope.characterId,
           userDisplayName: freshResolvedConfig.project02.userDisplayName,
           resolvedConfig:
-            ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ??
-            {},
+            ownJsonRecordValue(
+              freshResolvedConfig.sectionConfigs.plugins,
+              pluginId,
+            ) ?? {},
           redactedConfig:
             ownJsonRecordValue(
-              freshResolvedConfig.redactedPluginConfigs,
+              freshResolvedConfig.redactedSectionConfigs.plugins,
               pluginId,
             ) ?? {},
         },

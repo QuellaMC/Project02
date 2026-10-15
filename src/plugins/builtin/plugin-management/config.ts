@@ -122,8 +122,9 @@ export function inspectRuntimePluginConfigForControl(options: {
   );
 
   return requiredRuntimePluginConfigControl(options.state).inspectConfig({
-    manifest: options.manifest,
-    pluginManifests: options.state.pluginManifests,
+    namespace: 'plugins',
+    declaration: options.manifest,
+    sections: {plugins: options.state.pluginManifests},
     ...(activation === undefined ? {} : {activation}),
     ...(options.state.defaultEnabledPluginIds === undefined
       ? {}

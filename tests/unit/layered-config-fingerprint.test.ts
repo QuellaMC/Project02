@@ -26,27 +26,37 @@ describe('layered runtime config fingerprint', () => {
     // hashing the value would let a weak passphrase be guessed offline
     // against an otherwise known document.
     expect(
-      createRuntimeConfigFingerprint(withSecret('hunter2'), [manifest]),
+      createRuntimeConfigFingerprint(withSecret('hunter2'), {
+        plugins: [manifest],
+      }),
     ).toBe(
-      createRuntimeConfigFingerprint(withSecret('other-value'), [manifest]),
+      createRuntimeConfigFingerprint(withSecret('other-value'), {
+        plugins: [manifest],
+      }),
     );
 
     // Setting or clearing the secret still changes the fingerprint, and a
     // non-secret field's value still counts.
     expect(
-      createRuntimeConfigFingerprint(withSecret('hunter2'), [manifest]),
+      createRuntimeConfigFingerprint(withSecret('hunter2'), {
+        plugins: [manifest],
+      }),
     ).not.toBe(
       createRuntimeConfigFingerprint(
         {
           version: runtimeConfigVersion,
           plugins: {'demo-config': {config: {tone: 'warm'}}},
         },
-        [manifest],
+        {plugins: [manifest]},
       ),
     );
     expect(
-      createRuntimeConfigFingerprint(withSecret('hunter2'), [manifest]),
-    ).not.toBe(createRuntimeConfigFingerprint(withSecret('hunter2'), []));
+      createRuntimeConfigFingerprint(withSecret('hunter2'), {
+        plugins: [manifest],
+      }),
+    ).not.toBe(
+      createRuntimeConfigFingerprint(withSecret('hunter2'), {plugins: []}),
+    );
 
     // A malformed value at a secret field -- which an inactive plugin's
     // config never had validated -- is still a value, so only its
@@ -57,8 +67,12 @@ describe('layered runtime config fingerprint', () => {
     });
 
     expect(
-      createRuntimeConfigFingerprint(malformed('weak-passcode'), [manifest]),
-    ).toBe(createRuntimeConfigFingerprint(malformed('other'), [manifest]));
+      createRuntimeConfigFingerprint(malformed('weak-passcode'), {
+        plugins: [manifest],
+      }),
+    ).toBe(
+      createRuntimeConfigFingerprint(malformed('other'), {plugins: [manifest]}),
+    );
   });
 
   it('hashes no secret value of an overlay that fails validation', () => {
@@ -69,7 +83,7 @@ describe('layered runtime config fingerprint', () => {
       readonly tone: string;
     }) =>
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [manifest],
+        sections: {plugins: [manifest]},
         globalConfig: globalDocument,
         characterId: 'mira',
         // A negative context window fails validation, so the loader keeps
@@ -110,25 +124,25 @@ describe('layered runtime config fingerprint', () => {
   it('never collides with the per-file fingerprint of the same global document', () => {
     expect(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        sections: {plugins: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'none'},
       }),
-    ).not.toBe(createRuntimeConfigFingerprint(globalDocument, []));
+    ).not.toBe(createRuntimeConfigFingerprint(globalDocument, {plugins: []}));
   });
 
   it('distinguishes an absent overlay from an empty overlay document', () => {
     expect(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        sections: {plugins: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'none'},
       }),
     ).not.toBe(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        sections: {plugins: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'overlay', config: {version: runtimeConfigVersion}},
@@ -138,7 +152,7 @@ describe('layered runtime config fingerprint', () => {
 
   it('folds the character id and the overlay content', () => {
     const base = createLayeredRuntimeConfigFingerprint({
-      pluginManifests: [],
+      sections: {plugins: []},
       globalConfig: globalDocument,
       characterId: 'mira',
       overlay: {source: 'none'},
@@ -146,7 +160,7 @@ describe('layered runtime config fingerprint', () => {
 
     expect(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        sections: {plugins: []},
         globalConfig: globalDocument,
         characterId: 'nova',
         overlay: {source: 'none'},
@@ -154,7 +168,7 @@ describe('layered runtime config fingerprint', () => {
     ).not.toBe(base);
     expect(
       createLayeredRuntimeConfigFingerprint({
-        pluginManifests: [],
+        sections: {plugins: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {

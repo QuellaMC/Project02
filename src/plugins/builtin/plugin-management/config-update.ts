@@ -9,7 +9,7 @@ import {
 import {runtimeIdentityMatchesContext} from '../../api/identity.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
-  RuntimePluginConfigField,
+  RuntimeConfigFieldDeclaration,
   RuntimePluginContext,
   RuntimePluginJsonObject,
   RuntimePluginToolCallExecutionResult,
@@ -88,7 +88,7 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
 export function applyPreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-}): RuntimePluginConfigField {
+}): RuntimeConfigFieldDeclaration {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
   );
@@ -112,7 +112,7 @@ export function applyPreparedRuntimePluginConfigEffect(options: {
         };
   const control = requiredRuntimePluginConfigControl(options.state);
   const field = control.validateOperation({
-    manifest,
+    declaration: manifest,
     actor: 'agent',
     operation,
   });
@@ -126,11 +126,12 @@ export function applyPreparedRuntimePluginConfigEffect(options: {
 
   const result = control.applyOperation({
     target,
-    pluginManifests: options.state.pluginManifests,
+    sections: {plugins: options.state.pluginManifests},
     expectedFingerprint: options.effect.expectedFingerprint,
     request: {
-      kind: 'plugin_config',
-      manifest,
+      kind: 'section_field',
+      namespace: 'plugins',
+      declaration: manifest,
       actor: 'agent',
       fieldOperation: operation,
     },
@@ -228,7 +229,7 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(optio
   const field = requiredRuntimePluginConfigControl(
     options.state,
   ).validateOperation({
-    manifest,
+    declaration: manifest,
     actor: 'agent',
     operation,
   });
@@ -289,7 +290,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
 
   let operation: RuntimePluginConfigFieldControlOperation;
   let expectedFingerprint: string;
-  let field: RuntimePluginConfigField;
+  let field: RuntimeConfigFieldDeclaration;
 
   try {
     operation = pluginConfigOperationFromInput(options.call.input);
@@ -298,7 +299,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     );
     field = requiredRuntimePluginConfigControl(options.state).validateOperation(
       {
-        manifest,
+        declaration: manifest,
         actor: 'agent',
         operation,
       },
@@ -341,11 +342,12 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
       options.state,
     ).prepareOperation({
       target,
-      pluginManifests: options.state.pluginManifests,
+      sections: {plugins: options.state.pluginManifests},
       expectedFingerprint,
       request: {
-        kind: 'plugin_config',
-        manifest,
+        kind: 'section_field',
+        namespace: 'plugins',
+        declaration: manifest,
         actor: 'agent',
         fieldOperation: operation,
       },
@@ -388,7 +390,7 @@ function preparedRuntimePluginConfigUpdateResult(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly manifest: {readonly id: string};
-  readonly field: RuntimePluginConfigField;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly operation: RuntimePluginConfigFieldControlOperation;
   readonly expectedFingerprint: string;
   readonly resultFingerprint: string;
@@ -452,7 +454,7 @@ function preparedRuntimePluginConfigUpdateResult(options: {
 /** What the model hears once the change is written: whether it is already in effect. */
 export function appliedRuntimePluginConfigUpdateOutput(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
-  readonly field: RuntimePluginConfigField;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly appliesTo: 'now' | 'next_launch';
   readonly note?: string;
 }): RuntimePluginJsonObject {
@@ -505,7 +507,7 @@ function pluginConfigOperationFromInput(
 
 function pluginConfigChangePreview(options: {
   readonly pluginId: string;
-  readonly field: RuntimePluginConfigField;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly operation: RuntimePluginConfigFieldControlOperation;
   readonly expectedFingerprint: string;
   readonly authored: {

@@ -355,7 +355,7 @@ describe('layered config control against a rebound character-data directory', ()
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        pluginManifests: [],
+        sections: {plugins: []},
         target,
         request: {
           kind: 'document',
@@ -380,7 +380,7 @@ describe('layered config control against a rebound character-data directory', ()
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        pluginManifests: [],
+        sections: {plugins: []},
         target,
         expectedFingerprint: 'sha256:not-even-compared',
         request: {

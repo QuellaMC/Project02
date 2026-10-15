@@ -5,19 +5,21 @@ import type {
   RuntimeConfigInspectShape,
   RuntimeConfigEffectiveSource,
   RuntimeConfigFieldScope,
+  RuntimeConfigSectionDeclaration,
+  RuntimeConfigSectionMap,
+  RuntimeConfigSectionNamespace,
   RuntimePluginActivationStatusShape,
   RuntimePluginConfigFieldInspectShape,
   RuntimePluginConfigInspectShape,
   RuntimeConfigValue,
 } from './types.ts';
 import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
-import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
   runtimeConfigDiagnosticMatchesPlugin,
-  type ResolvedRuntimePluginConfigs,
+  type ResolvedRuntimeSectionConfigs,
 } from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
 
@@ -38,97 +40,99 @@ export function createRuntimeConfigInspectShape(
   } satisfies RuntimeConfigInspectShape);
 }
 
-export function createRuntimePluginConfigInspectShape(options: {
+export function createRuntimeSectionConfigInspectShape(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
-  /** The plugin half of a resolution; a location-free one serves too. */
-  readonly pluginResolution: Pick<
-    ResolvedRuntimePluginConfigs,
-    'redactedPluginConfigs' | 'diagnostics'
+  /** The sections' half of a resolution; a location-free one serves too. */
+  readonly sectionResolution: Pick<
+    ResolvedRuntimeSectionConfigs,
+    'redactedSectionConfigs' | 'diagnostics'
   >;
-  readonly manifest: RuntimePluginManifest;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
   readonly fingerprint: string;
   readonly activation?: RuntimePluginActivationStatusShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
+  const {namespace, declaration} = options;
   const targetConfig =
     options.targetScope === 'global'
       ? options.layeredConfig.globalConfig
       : options.layeredConfig.characterConfig;
-  const authoredPlugin = ownJsonRecordValue(
-    targetConfig?.plugins,
-    options.manifest.id,
+  const authoredSection = ownJsonRecordValue(
+    targetConfig?.[namespace],
+    declaration.id,
   );
-  const effectivePlugin = ownJsonRecordValue(
-    options.layeredConfig.effective.config?.plugins,
-    options.manifest.id,
+  const effectiveSection = ownJsonRecordValue(
+    options.layeredConfig.effective.config?.[namespace],
+    declaration.id,
   );
   const effectiveFields = ownJsonRecordValue(
-    options.pluginResolution.redactedPluginConfigs,
-    options.manifest.id,
+    options.sectionResolution.redactedSectionConfigs[namespace],
+    declaration.id,
   );
 
   if (effectiveFields === undefined) {
     throw new TypeError(
-      `Resolved runtime config is missing manifest metadata for plugin "${options.manifest.id}".`,
+      `Resolved runtime config is missing manifest metadata for plugin "${declaration.id}".`,
     );
   }
 
   const configuredEnabled =
     (options.targetScope === 'character'
-      ? effectivePlugin?.enabled
-      : authoredPlugin?.enabled) ??
+      ? effectiveSection?.enabled
+      : authoredSection?.enabled) ??
     options.defaultEnabled ??
-    options.manifest.activation.defaultEnabled;
+    declaration.activation.defaultEnabled;
   const enabledSource: RuntimeConfigEffectiveSource =
     ownJsonRecordValue(
-      options.layeredConfig.characterConfig?.plugins,
-      options.manifest.id,
+      options.layeredConfig.characterConfig?.[namespace],
+      declaration.id,
     )?.enabled !== undefined
       ? 'character'
       : ownJsonRecordValue(
-            options.layeredConfig.globalConfig?.plugins,
-            options.manifest.id,
+            options.layeredConfig.globalConfig?.[namespace],
+            declaration.id,
           )?.enabled !== undefined
         ? 'global'
         : 'default';
   const diagnostics = Object.freeze(
-    options.pluginResolution.diagnostics.filter(
+    options.sectionResolution.diagnostics.filter(
       diagnostic =>
         diagnostic.scope === 'global' ||
         runtimeConfigDiagnosticMatchesPlugin({
           diagnostic,
-          pluginId: options.manifest.id,
+          pluginId: declaration.id,
         }),
     ),
   );
-  const activation = runtimePluginConfigActivationInspection({
+  const activation = sectionActivationInspection({
     configuredEnabled,
     diagnostics,
-    manifest: options.manifest,
+    declaration,
     ...(options.activation === undefined
       ? {}
       : {activation: options.activation}),
   });
 
   return Object.freeze({
-    pluginId: options.manifest.id,
-    displayName: options.manifest.displayName,
-    version: options.manifest.version,
+    pluginId: declaration.id,
+    displayName: declaration.displayName,
+    version: declaration.version,
     enabled: configuredEnabled,
     enabledSource,
     activation,
     fields: Object.freeze(
-      options.manifest.config.fields.map(field => {
+      declaration.config.fields.map(field => {
         const authoredValue = ownJsonRecordValue(
-          authoredPlugin?.config,
+          authoredSection?.config,
           field.name,
         );
         const effective = ownJsonRecordValue(effectiveFields, field.name);
 
         if (effective === undefined) {
           throw new TypeError(
-            `Resolved runtime config is missing field "${field.name}" for plugin "${options.manifest.id}".`,
+            `Resolved runtime config is missing field "${field.name}" for plugin "${declaration.id}".`,
           );
         }
 
@@ -160,9 +164,10 @@ export function createRuntimePluginConfigInspectShape(options: {
                   ),
                 }),
           }),
-          effectiveSource: effectivePluginConfigFieldSource({
+          effectiveSource: effectiveSectionFieldSource({
             layeredConfig: options.layeredConfig,
-            pluginId: options.manifest.id,
+            namespace,
+            id: declaration.id,
             fieldName: field.name,
           }),
           effective,
@@ -240,45 +245,49 @@ export function createProject02ConfigFieldInspectShapes(options: {
   );
 }
 
-function effectivePluginConfigFieldSource(options: {
+function effectiveSectionFieldSource(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
-  readonly pluginId: string;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
   readonly fieldName: string;
 }): RuntimeConfigEffectiveSource {
   if (
-    authoredPluginConfigField(
+    authoredSectionField(
       options.layeredConfig.characterConfig,
-      options.pluginId,
+      options.namespace,
+      options.id,
       options.fieldName,
     ) !== undefined
   ) {
     return 'character';
   }
 
-  return authoredPluginConfigField(
+  return authoredSectionField(
     options.layeredConfig.globalConfig,
-    options.pluginId,
+    options.namespace,
+    options.id,
     options.fieldName,
   ) === undefined
     ? 'default'
     : 'global';
 }
 
-function authoredPluginConfigField(
+function authoredSectionField(
   config: Project02RuntimeConfig | undefined,
-  pluginId: string,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
   fieldName: string,
 ): RuntimeConfigValue | undefined {
   return ownJsonRecordValue(
-    ownJsonRecordValue(config?.plugins, pluginId)?.config,
+    ownJsonRecordValue(config?.[namespace], id)?.config,
     fieldName,
   );
 }
 
-function runtimePluginConfigActivationInspection(options: {
+function sectionActivationInspection(options: {
   readonly configuredEnabled: boolean;
   readonly diagnostics: RuntimePluginConfigInspectShape['diagnostics'];
-  readonly manifest: RuntimePluginManifest;
+  readonly declaration: RuntimeConfigSectionDeclaration;
   readonly activation?: RuntimePluginActivationStatusShape;
 }): RuntimePluginActivationStatusShape {
   if (options.activation !== undefined) {
@@ -308,7 +317,10 @@ function runtimePluginConfigActivationInspection(options: {
     status: options.configuredEnabled ? 'active' : 'disabled',
     reasons: Object.freeze(
       options.configuredEnabled
-        ? [...options.manifest.activation.reasons, 'config_inspection_active']
+        ? [
+            ...options.declaration.activation.reasons,
+            'config_inspection_active',
+          ]
         : ['config_inspection_disabled'],
     ),
   });
@@ -350,7 +362,7 @@ type ConfiguredPluginActivationView = {
     }[];
   };
   readonly resolvedConfig: {
-    readonly redactedPluginConfigs: Readonly<Record<string, unknown>>;
+    readonly redactedSectionConfigs: RuntimeConfigSectionMap<unknown>;
   };
 };
 
@@ -361,7 +373,7 @@ export function inspectConfiguredPlugins(
   return Object.freeze(
     runtimeConfig.activation.plugins.map(plugin => {
       const config = ownJsonRecordValue(
-        runtimeConfig.resolvedConfig.redactedPluginConfigs,
+        runtimeConfig.resolvedConfig.redactedSectionConfigs.plugins,
         plugin.pluginId,
       );
 
