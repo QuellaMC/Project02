@@ -171,7 +171,7 @@ describe('runtime plugin config control', () => {
         pluginManifests: [manifest],
         globalConfig: authoredConfig,
         characterId: 'mira',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     );
     expect(inspectedWithChangedSecret.fingerprint).toBe(inspected.fingerprint);
@@ -622,7 +622,7 @@ describe('runtime plugin config control', () => {
           pluginManifests: [],
           globalConfig: invalidConfig,
           characterId: 'mira',
-          overlayConfig: null,
+          overlay: {source: 'none'},
         }),
         request: {
           kind: 'plugin_config',
@@ -792,7 +792,7 @@ describe('runtime plugin config control', () => {
         pluginManifests: [],
         globalConfig: expectedConfig,
         characterId: 'mira',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     );
     expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
@@ -825,7 +825,7 @@ describe('runtime plugin config control', () => {
         pluginManifests: [],
         globalConfig: bootstrapBase,
         characterId: 'mira',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     );
 

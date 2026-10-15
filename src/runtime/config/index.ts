@@ -32,6 +32,7 @@ export {
 export {
   createLayeredRuntimeConfigFingerprint,
   createRuntimeConfigFingerprint,
+  layeredRuntimeConfigFingerprintForScope,
 } from './fingerprint.ts';
 export {
   createProject02ConfigFieldInspectShapes,
@@ -48,7 +49,6 @@ export {
 export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction.ts';
 export {
   characterOverlayConfigPath,
-  layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,

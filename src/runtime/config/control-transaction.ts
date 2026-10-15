@@ -11,7 +11,10 @@ import {
   type LocalRuntimeMutationLockTarget,
   type LocalRuntimeMutationLocksLeaseSync,
 } from '../storage/mutation-lock.ts';
-import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
+import {
+  createLayeredRuntimeConfigFingerprint,
+  layeredRuntimeConfigFingerprintForScope,
+} from './fingerprint.ts';
 import {RuntimeConfigLocationError} from './load.ts';
 import {
   blockingRuntimeConfigLayerDiagnostic,
@@ -26,7 +29,6 @@ import {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
-  layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,
@@ -181,7 +183,10 @@ export function applyRuntimeConfigControlTransaction<T>(
             ? createLayeredRuntimeConfigFingerprint({
                 globalConfig: snapshot.globalDocument,
                 characterId: target.runtimeLocation.characterScope.characterId,
-                overlayConfig: preparation.preparedCandidate.config,
+                overlay: {
+                  source: 'overlay',
+                  config: preparation.preparedCandidate.config,
+                },
                 pluginManifests: snapshot.pluginManifests,
               })
             : layeredRuntimeConfigFingerprintForScope({

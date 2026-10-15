@@ -19,7 +19,10 @@ import {
   verifyRuntimeConfigControlExpectation,
   type RuntimeConfigControlSnapshot,
 } from './control-transaction.ts';
-import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
+import {
+  createLayeredRuntimeConfigFingerprint,
+  layeredRuntimeConfigFingerprintForScope,
+} from './fingerprint.ts';
 import {
   requireResolvedRuntimeConfigScopeTarget,
   type ResolvedRuntimeConfigScopeTarget,
@@ -31,10 +34,7 @@ import {
   type PreparedRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
-import {
-  layeredRuntimeConfigFingerprintForScope,
-  type LoadedProject02CharacterOverlayConfig,
-} from './overlay.ts';
+import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -440,7 +440,7 @@ function scopedPreparedCandidateFingerprint(options: {
     return createLayeredRuntimeConfigFingerprint({
       globalConfig: options.snapshot.globalDocument,
       characterId: options.target.runtimeLocation.characterScope.characterId,
-      overlayConfig: options.candidate,
+      overlay: {source: 'overlay', config: options.candidate},
       pluginManifests: options.snapshot.pluginManifests,
     });
   }

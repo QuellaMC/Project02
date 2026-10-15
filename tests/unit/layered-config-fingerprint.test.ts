@@ -61,13 +61,59 @@ describe('layered runtime config fingerprint', () => {
     ).toBe(createRuntimeConfigFingerprint(malformed('other'), [manifest]));
   });
 
+  it('hashes no secret value of an overlay that fails validation', () => {
+    const manifest = requiredSecretPlugin('demo-config').manifest;
+    const fingerprint = (authored: {
+      readonly nvidiaApiKey: string;
+      readonly apiKey: string;
+      readonly tone: string;
+    }) =>
+      createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [manifest],
+        globalConfig: globalDocument,
+        characterId: 'mira',
+        // A negative context window fails validation, so the loader keeps
+        // only the authored document.
+        overlay: {
+          source: 'overlay',
+          authoredDocument: {
+            version: runtimeConfigVersion,
+            project02: {
+              contextWindowTokens: -1,
+              nvidiaApiKey: authored.nvidiaApiKey,
+            },
+            plugins: {
+              'demo-config': {
+                config: {apiKey: authored.apiKey, tone: authored.tone},
+              },
+            },
+          },
+        },
+      });
+    const authored = {
+      nvidiaApiKey: 'hunter2',
+      apiKey: 'swordfish',
+      tone: 'warm',
+    };
+
+    expect(fingerprint({...authored, nvidiaApiKey: 'other-value'})).toBe(
+      fingerprint(authored),
+    );
+    expect(fingerprint({...authored, apiKey: 'other-value'})).toBe(
+      fingerprint(authored),
+    );
+    expect(fingerprint({...authored, tone: 'velvet'})).not.toBe(
+      fingerprint(authored),
+    );
+  });
+
   it('never collides with the per-file fingerprint of the same global document', () => {
     expect(
       createLayeredRuntimeConfigFingerprint({
         pluginManifests: [],
         globalConfig: globalDocument,
         characterId: 'mira',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     ).not.toBe(createRuntimeConfigFingerprint(globalDocument, []));
   });
@@ -78,14 +124,14 @@ describe('layered runtime config fingerprint', () => {
         pluginManifests: [],
         globalConfig: globalDocument,
         characterId: 'mira',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     ).not.toBe(
       createLayeredRuntimeConfigFingerprint({
         pluginManifests: [],
         globalConfig: globalDocument,
         characterId: 'mira',
-        overlayConfig: {version: runtimeConfigVersion},
+        overlay: {source: 'overlay', config: {version: runtimeConfigVersion}},
       }),
     );
   });
@@ -95,7 +141,7 @@ describe('layered runtime config fingerprint', () => {
       pluginManifests: [],
       globalConfig: globalDocument,
       characterId: 'mira',
-      overlayConfig: null,
+      overlay: {source: 'none'},
     });
 
     expect(
@@ -103,7 +149,7 @@ describe('layered runtime config fingerprint', () => {
         pluginManifests: [],
         globalConfig: globalDocument,
         characterId: 'nova',
-        overlayConfig: null,
+        overlay: {source: 'none'},
       }),
     ).not.toBe(base);
     expect(
@@ -111,9 +157,12 @@ describe('layered runtime config fingerprint', () => {
         pluginManifests: [],
         globalConfig: globalDocument,
         characterId: 'mira',
-        overlayConfig: {
-          version: runtimeConfigVersion,
-          plugins: {'demo-config': {config: {tone: 'velvet'}}},
+        overlay: {
+          source: 'overlay',
+          config: {
+            version: runtimeConfigVersion,
+            plugins: {'demo-config': {config: {tone: 'velvet'}}},
+          },
         },
       }),
     ).not.toBe(base);

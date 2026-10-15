@@ -1,8 +1,6 @@
 import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
-import {
-  layeredRuntimeConfigFingerprintForScope,
-  readCharacterOverlayForScope,
-} from './overlay.ts';
+import {layeredRuntimeConfigFingerprintForScope} from './fingerprint.ts';
+import {readCharacterOverlayForScope} from './overlay.ts';
 import {
   assertResolvedProject02HomeAdoptable,
   loadProject02RuntimeConfigForLocation,
@@ -24,13 +22,11 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
-  RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
   RuntimePluginActivationStatusShape,
   RuntimePluginConfigInspectShape,
 } from './types.ts';
-import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
@@ -114,27 +110,12 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.defaultEnabled === undefined
       ? {}
       : {defaultEnabled: options.defaultEnabled}),
-    fingerprint: layeredControlFingerprint({
+    fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: mutationBase,
       characterScope,
-      overlayConfig,
+      overlay: overlayConfig,
       pluginManifests: manifests,
     }),
-  });
-}
-
-function layeredControlFingerprint(options: {
-  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
-  readonly overlayConfig:
-    ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-}): string {
-  return layeredRuntimeConfigFingerprintForScope({
-    globalConfig: options.globalConfig,
-    characterScope: options.characterScope,
-    overlay: options.overlayConfig,
-    pluginManifests: options.pluginManifests,
   });
 }
 

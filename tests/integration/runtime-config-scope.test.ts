@@ -239,7 +239,7 @@ describe('scope-aware runtime config mutations', () => {
         pluginManifests: [],
         globalConfig,
         characterId: 'mira',
-        overlayConfig: result.config,
+        overlay: {source: 'overlay', config: result.config},
       }),
     );
   });
@@ -897,7 +897,7 @@ function resolveScopedExpected(homeRoot: string): string {
     pluginManifests: [],
     globalConfig: loaded.config,
     characterId: 'mira',
-    overlayConfig: null,
+    overlay: {source: 'none'},
   });
 }
 

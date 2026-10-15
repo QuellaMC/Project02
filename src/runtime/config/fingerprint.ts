@@ -1,5 +1,10 @@
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
-import type {Project02RuntimeConfig, RuntimeConfigValue} from './types.ts';
+import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
+import type {
+  Project02RuntimeConfig,
+  RuntimeConfigCharacterScope,
+  RuntimeConfigValue,
+} from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
@@ -22,27 +27,62 @@ export function createRuntimeConfigFingerprint(
 }
 
 /**
- * A null overlay means an absent file, distinct from an empty document.
- * The layer envelope keeps this value off any single-file fingerprint.
+ * An absent overlay hashes apart from an empty one, and the layer envelope
+ * keeps this value off any single-file fingerprint. An invalid overlay hashes
+ * as its authored document, not as one sentinel, so an edit to a broken
+ * overlay stays visible; its wrapper stops a collision with a config.
  */
 export function createLayeredRuntimeConfigFingerprint(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterId: string;
-  readonly overlayConfig: RuntimeConfigValue | Project02RuntimeConfig | null;
+  readonly overlay: Pick<
+    LoadedProject02CharacterOverlayConfig,
+    'source' | 'config' | 'authoredDocument'
+  >;
   readonly pluginManifests: readonly RuntimePluginManifest[];
 }): string {
   const secretFields = secretFieldsByPlugin(options.pluginManifests);
+  const {source, config, authoredDocument} = options.overlay;
 
   return createCanonicalJsonFingerprint({
     layers: {
       global: redactAuthoredSecretFields(options.globalConfig, secretFields),
       character:
-        options.overlayConfig === null
+        source === 'none'
           ? null
-          : redactAuthoredSecretFields(options.overlayConfig, secretFields),
+          : config !== undefined
+            ? redactAuthoredSecretFields(config, secretFields)
+            : authoredDocument === undefined
+              ? {$overlayUnreadable: true}
+              : {
+                  $overlayInvalid: redactAuthoredSecretFields(
+                    authoredDocument,
+                    secretFields,
+                  ),
+                },
     },
     characterId: options.characterId,
   });
+}
+
+/** The one composition, so any two sites comparing fingerprints agree. */
+export function layeredRuntimeConfigFingerprintForScope(options: {
+  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
+  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
+}): string {
+  return options.characterScope === undefined || options.overlay === undefined
+    ? createRuntimeConfigFingerprint(
+        options.globalConfig,
+        options.pluginManifests,
+      )
+    : createLayeredRuntimeConfigFingerprint({
+        globalConfig: options.globalConfig,
+        characterId: options.characterScope.characterId,
+        overlay: options.overlay,
+        pluginManifests: options.pluginManifests,
+      });
 }
 
 function secretFieldsByPlugin(
