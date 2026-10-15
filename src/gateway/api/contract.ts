@@ -239,8 +239,10 @@ export type ConfigView =
 
 /**
  * One change to one document, bound to the fingerprint the view handed
- * out: a concurrent edit is a conflict, never a clobber. A secret is sent
- * as its value and kept with the scope's config, redacted on every read.
+ * out: a concurrent edit is a conflict. The fingerprint hashes a secret's
+ * presence, never its value, so two pages replacing the same secret at once
+ * both succeed and the later value stands. A secret is sent as its value
+ * and kept with the scope's config, redacted on every read.
  */
 export type ConfigChange = {
   readonly target: ConfigTarget;

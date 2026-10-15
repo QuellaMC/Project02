@@ -52,3 +52,10 @@ closes leaves its user lines in the conversation's record of taken lines
 later run completes what it reads from any segment the record does not
 cover, so a line an earlier run took is refused wherever it sits, and a
 store older than the record grows one at its first rotation.
+
+`config/` resolves the home's config document and each character's overlay
+over it, and is the one path that writes them. Every setting but the
+host's own belongs to a declared section, which lives under a namespace —
+`plugins` is the only one — and is keyed by namespace, then id, in every
+map the module keeps; one function, `runtimeConfigSectionPath`, spells the
+path of a section and of each of its fields.

@@ -81,7 +81,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 5,
+  "protocolVersion": 6,
   "token": "…",
   "port": 4310,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -448,7 +448,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":5,"health":{…},"confirmations":[…],"turns":[…]}
+data: {"protocolVersion":6,"health":{…},"confirmations":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -749,12 +749,15 @@ data: {…}</code></pre>
 
       <p>
         A change names one operation — <code>set</code> or <code>unset</code> on
-        <code>project02.&lt;field&gt;</code>, <code>plugin_enabled</code>,
-        <code>plugin_field_set</code>, <code>plugin_field_unset</code> — and
+        <code>project02.&lt;field&gt;</code>, or <code>section_enabled</code>,
+        <code>section_field_set</code>, <code>section_field_unset</code> on a
+        section named by its <code>namespace</code> and <code>id</code> — and
         carries the fingerprint the view handed out. The daemon verifies it
         under the file locks, so a concurrent edit from another page is
-        <code>refused</code> with <code>conflict</code>, never clobbered: the
-        page re-reads and the person saves again. A secret is sent as its value
+        <code>refused</code> with <code>conflict</code>: the page re-reads and
+        the person saves again. The fingerprint hashes a secret's presence,
+        never its value, so two pages replacing the same secret at once both
+        succeed and the later value stands. A secret is sent as its value
         and kept with the scope's document; every view shows only that it is
         set, and a home write naming a character's own plugin is refused as
         <code>invalid</code>. A write the daemon cannot make — a file another
