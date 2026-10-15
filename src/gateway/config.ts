@@ -26,6 +26,7 @@ import {
   resolveRuntimeConfigScopeTarget,
   resolveRuntimeSectionConfigs,
   runtimeConfigSectionNamespaces,
+  runtimeSectionValueAuthorable,
   simulateCharacterOverlayCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
@@ -159,18 +160,22 @@ function resolveGlobalScope(
     return refusedView('config_unloadable', blocking.message);
   }
 
+  // Discovery reads no config, so it goes first: the merge needs its
+  // declarations, and classifying what it could not publish needs the merge.
+  const discovery = discoverRuntimePluginCatalog({
+    storeRoot: home.runtimeLocation.homeRoot,
+  });
+  const sections = {plugins: manifestsOf(discovery.catalogEntries)};
   const layeredConfig = createLayeredProject02RuntimeConfigSnapshot({
     loadedConfig: loaded,
+    sections,
   });
   const catalog = classifyRuntimePluginCatalogDiscovery({
-    discovery: discoverRuntimePluginCatalog({
-      storeRoot: home.runtimeLocation.homeRoot,
-    }),
+    discovery,
     classificationConfig: layeredConfig.effective,
   });
-  const sections = {plugins: manifestsOf(catalog.catalogEntries)};
   // Location-free: the global document resolves through no character.
-  const pluginResolution = resolveRuntimeSectionConfigs({
+  const resolution = resolveRuntimeSectionConfigs({
     config: layeredConfig.effective.config,
     sections,
     validateInactiveSectionConfigs: true,
@@ -183,11 +188,18 @@ function resolveGlobalScope(
     layeredConfig,
     targetScope: 'global',
     sections,
-    pluginResolution,
+    // As a character's resolution does, it carries what the merge left out.
+    pluginResolution: {
+      redactedSectionConfigs: resolution.redactedSectionConfigs,
+      diagnostics: [
+        ...layeredConfig.effective.diagnostics,
+        ...resolution.diagnostics,
+      ],
+    },
     diagnostics: [
-      ...loaded.diagnostics,
+      ...layeredConfig.effective.diagnostics,
       ...catalog.diagnostics,
-      ...pluginResolution.diagnostics,
+      ...resolution.diagnostics,
     ],
     fingerprint: createRuntimeConfigFingerprint(
       createRuntimeConfigAuthoredSnapshot(loaded).document,
@@ -250,6 +262,7 @@ function resolveCharacterScope(
     layeredConfig: createLayeredProject02RuntimeConfigSnapshot({
       loadedConfig: home.loadedConfig,
       overlayConfig: startup.overlayLoadedConfig ?? overlay,
+      sections,
     }),
     targetScope: 'character',
     sections,
@@ -292,11 +305,9 @@ function viewOf(resolution: ScopeResolution): ConfigView {
     sections: Object.freeze(
       runtimeConfigSectionNamespaces.flatMap(namespace =>
         resolution.sections[namespace]
-          // A section that belongs to a character is not the home's to show.
-          .filter(
-            declaration =>
-              targetScope === 'character' ||
-              declaration.config.scope !== 'character_only',
+          // A section whose switch a target may not set is not its to show.
+          .filter(declaration =>
+            runtimeSectionValueAuthorable({declaration, target: targetScope}),
           )
           .map(declaration => {
             const activation =

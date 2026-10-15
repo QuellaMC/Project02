@@ -9,6 +9,7 @@ import {
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticIsReadinessFailure,
   runtimeConfigSectionPath,
+  runtimeSectionScopeDiagnostics,
   validateProject02RuntimeConfig,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -105,18 +106,27 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
+  const sections = {plugins: options.pluginManifests};
   const resolved = resolveRuntimeSectionConfigs({
     config: validated.config,
-    sections: {plugins: options.pluginManifests},
+    sections,
     validateInactiveSectionConfigs: true,
-    authoredScope: 'character',
   });
-  // A readiness failure may still be met by the global layer.
-  const blocking = resolved.diagnostics.filter(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
-  );
+  const blocking = [
+    // A package writes the overlay, so a value outside a character's scope
+    // refuses it, as it refuses any write; only a loaded document warns.
+    ...runtimeSectionScopeDiagnostics({
+      config: validated.config,
+      sections,
+      authoredScope: 'character',
+    }),
+    // A readiness failure may still be met by the global layer.
+    ...resolved.diagnostics.filter(
+      diagnostic =>
+        diagnostic.severity === 'error' &&
+        !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
+    ),
+  ];
 
   if (blocking.length > 0) {
     return invalidMaterialization([

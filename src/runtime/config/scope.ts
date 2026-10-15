@@ -389,6 +389,8 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
   readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 }): PreparedScopedRuntimeConfigControlCandidate {
+  const {sections} = options.snapshot;
+
   if (options.target.scope === 'global') {
     if (options.operation === undefined) {
       throw new TypeError(
@@ -396,13 +398,24 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
       );
     }
 
+    const {validateCandidate} = options;
+
     return Object.freeze({
       preparedCandidate: prepareRuntimeConfigMutationCandidate({
         loadedConfig: options.snapshot.loadedConfig,
         operation: options.operation,
-        ...(options.validateCandidate === undefined
+        ...(validateCandidate === undefined
           ? {}
-          : {validateCandidate: options.validateCandidate}),
+          : {
+              validateCandidate: candidate => {
+                validateCandidate(
+                  mergeCharacterOverlayDocument({
+                    globalConfig: candidate,
+                    sections,
+                  }),
+                );
+              },
+            }),
       }),
       commit: true,
       operation: options.operation,
@@ -440,7 +453,11 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
       }
 
       options.validateCandidate?.(
-        mergeCharacterOverlayDocument(globalConfig, candidate),
+        mergeCharacterOverlayDocument({
+          globalConfig,
+          characterConfig: candidate,
+          sections,
+        }),
       );
     },
   });

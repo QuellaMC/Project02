@@ -64,6 +64,8 @@ function characterIsEnabled(home: Project02Home, characterId: string): boolean {
       createLayeredProject02RuntimeConfigSnapshot({
         loadedConfig: home.loadedConfig,
         overlayConfig: overlay,
+        // Only the host's own switch is read, and host fields have no declaration.
+        sections: {plugins: []},
       }).effective.config?.project02?.enabled ?? true
     );
   } catch {

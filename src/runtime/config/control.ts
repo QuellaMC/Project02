@@ -205,7 +205,6 @@ function assertRuntimeSectionConfigCandidateValid(options: {
   const resolved = resolveRuntimeSectionConfigs({
     config: options.config,
     sections: sectionsIncludingTarget(options),
-    skipSectionScopeValidation: true,
     validateInactiveSectionConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(

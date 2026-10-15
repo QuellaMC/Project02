@@ -16,7 +16,6 @@ import {
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticSectionMetadata,
-  type RuntimeConfigFieldScope,
   type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionMap,
   type RuntimeConfigSectionNamespace,
@@ -30,7 +29,6 @@ import {
 } from '../../shared/json-boundary.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
-import {runtimeSectionScopeDiagnostics} from './section-scope.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -41,9 +39,6 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly defaultEnabledSectionIds?: Readonly<
     Partial<Record<RuntimeConfigSectionNamespace, ReadonlySet<string>>>
   >;
-  readonly authoredScope?: RuntimeConfigFieldScope;
-  /** Set after per-layer validation; the merged document loses origins. */
-  readonly skipSectionScopeValidation?: boolean;
 };
 
 type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
@@ -73,16 +68,7 @@ export type ResolvedRuntimeSectionConfigs = Readonly<{
 export function resolveRuntimeSectionConfigs(
   options: ResolveRuntimeSectionConfigsOptions,
 ): ResolvedRuntimeSectionConfigs {
-  const diagnostics: RuntimeConfigDiagnostic[] =
-    options.skipSectionScopeValidation === true
-      ? []
-      : [
-          ...runtimeSectionScopeDiagnostics({
-            config: options.config,
-            sections: options.sections,
-            authoredScope: options.authoredScope ?? 'global',
-          }),
-        ];
+  const diagnostics: RuntimeConfigDiagnostic[] = [];
   const sectionConfigs = createRuntimeConfigSectionMap(namespace =>
     Object.fromEntries(
       options.sections[namespace].map(declaration => [
@@ -125,20 +111,6 @@ export function resolveRuntimeSectionConfigs(
   });
 }
 
-export function resolveProject02RuntimeConfig(
-  options: ResolveProject02RuntimeConfigOptions,
-): ResolvedProject02RuntimeConfig {
-  const {loadedConfig, ...effectiveOptions} = options;
-
-  return resolveEffectiveProject02RuntimeConfig({
-    ...effectiveOptions,
-    config: loadedConfig.config,
-    source: loadedConfig.source,
-    ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
-    diagnostics: loadedConfig.diagnostics,
-  });
-}
-
 /** Mutation code must not use this; it needs a real loader-owned snapshot. */
 export function resolveEffectiveProject02RuntimeConfig(
   options: ResolveEffectiveProject02RuntimeConfigOptions,
@@ -153,8 +125,6 @@ export function resolveEffectiveProject02RuntimeConfig(
     ...(options.defaultEnabledSectionIds === undefined
       ? {}
       : {defaultEnabledSectionIds: options.defaultEnabledSectionIds}),
-    authoredScope: options.authoredScope ?? 'global',
-    skipSectionScopeValidation: options.skipSectionScopeValidation === true,
   });
   const diagnostics = Object.freeze([
     ...options.diagnostics,

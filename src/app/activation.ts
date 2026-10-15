@@ -143,16 +143,18 @@ export function createRuntimePluginCatalogSnapshot(options: {
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+  const discovery = discoverRuntimePluginCatalog({
+    storeRoot: options.runtimeLocation.homeRoot,
+  });
 
   return classifyRuntimePluginCatalogDiscovery({
-    discovery: discoverRuntimePluginCatalog({
-      storeRoot: options.runtimeLocation.homeRoot,
-    }),
+    discovery,
     classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
       loadedConfig: options.loadedConfig,
       ...(options.overlayConfig === undefined
         ? {}
         : {overlayConfig: options.overlayConfig}),
+      sections: {plugins: activationPluginManifests(discovery.catalogEntries)},
     }).effective,
   });
 }

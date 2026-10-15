@@ -15,6 +15,7 @@ import {
   runtimePluginKindValues,
   runtimePluginToolConcurrencyValues,
   runtimePluginToolValidationOwnerValues,
+  type RuntimeConfigSectionScope,
   type RuntimeConfigValueType,
   type RuntimePluginAccessMap,
   type RuntimePluginDeclaration,
@@ -49,6 +50,9 @@ import {
   requiredSourceReferences,
   requiredStringArray,
 } from './validation-primitives.ts';
+
+const configScopeWords =
+  '"global_with_character_overrides", "character_only" or "global_only"';
 
 export function createRuntimePluginManifest(
   value: unknown,
@@ -451,7 +455,7 @@ function requiredConfigMetadata(
   if (!isOneOf(scope, runtimeConfigSectionScopeValues)) {
     return reject(
       'malformed_manifest',
-      'Plugin config scope must be "global_with_character_overrides" or "character_only".',
+      `Plugin config scope must be ${configScopeWords}.`,
     );
   }
 
@@ -478,6 +482,21 @@ function requiredConfigMetadata(
       return reject(
         'duplicate_declaration',
         `Plugin config field "${field.value.name}" is declared more than once.`,
+      );
+    }
+
+    // A field shows only inside its section's block, so it may narrow the
+    // section's scope but never reach a screen the section is left off.
+    if (
+      field.value.scope !== undefined &&
+      field.value.scope !== scope &&
+      scope !== 'global_with_character_overrides'
+    ) {
+      return reject(
+        'malformed_manifest',
+        `Plugin config field "${field.value.name}" cannot be "${field.value.scope}" ` +
+          `in a "${scope}" config: a field's scope must equal its config's, ` +
+          'or narrow "global_with_character_overrides".',
       );
     }
 
@@ -519,6 +538,15 @@ function requiredConfigField(
   );
   const required = requiredBoolean(value['required'], 'required');
   const secret = requiredBoolean(value['secret'], 'secret');
+  const scopeValue = value['scope'];
+  const scope =
+    scopeValue === undefined ||
+    isOneOf(scopeValue, runtimeConfigSectionScopeValues)
+      ? accept(scopeValue)
+      : reject(
+          'malformed_manifest',
+          `Plugin config field scope must be ${configScopeWords}.`,
+        );
   const valueType = optionalRuntimePluginConfigValueType(value['valueType']);
   const defaultValueSummary = optionalString(
     value['defaultValueSummary'],
@@ -544,6 +572,7 @@ function requiredConfigField(
   if (description.status === 'rejected') return description;
   if (required.status === 'rejected') return required;
   if (secret.status === 'rejected') return secret;
+  if (scope.status === 'rejected') return scope;
   if (valueType.status === 'rejected') return valueType;
   if (defaultValueSummary.status === 'rejected') return defaultValueSummary;
   if (allowedValues.status === 'rejected') return allowedValues;
@@ -563,6 +592,7 @@ function requiredConfigField(
     description: description.value,
     required: required.value,
     secret: secret.value,
+    scope: scope.value,
     valueType: valueType.value,
     defaultValueSummary: defaultValueSummary.value,
     allowedValues: allowedValues.value,
@@ -577,6 +607,7 @@ function acceptRuntimePluginConfigField(options: {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
+  readonly scope: RuntimeConfigSectionScope | undefined;
   readonly valueType: RuntimeConfigValueType | undefined;
   readonly defaultValueSummary: string | undefined;
   readonly allowedValues: readonly string[] | undefined;
@@ -590,6 +621,7 @@ function acceptRuntimePluginConfigField(options: {
       description: options.description,
       required: options.required,
       secret: options.secret,
+      ...(options.scope === undefined ? {} : {scope: options.scope}),
       ...(options.valueType === undefined
         ? {}
         : {valueType: options.valueType}),

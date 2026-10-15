@@ -59,6 +59,8 @@ export type RuntimeConfigFieldDeclaration = {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
+  /** Narrows the section's scope for this field; absent, it takes the section's. */
+  readonly scope?: RuntimeConfigSectionScope;
   readonly valueType?: RuntimeConfigValueType;
   readonly defaultValueSummary?: string;
   readonly allowedValues?: readonly string[];

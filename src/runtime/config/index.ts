@@ -89,12 +89,12 @@ export {redactRuntimeConfigValue} from './redact.ts';
 export {
   runtimeSectionScopeDiagnostics,
   runtimeSectionScopeViolation,
+  runtimeSectionValueAuthorable,
   type RuntimeSectionScopeOperation,
   type RuntimeSectionScopeViolation,
 } from './section-scope.ts';
 export {
   diagnosticsHaveErrors,
-  resolveProject02RuntimeConfig,
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticMatchesSection,
   type ResolveRuntimeSectionConfigsOptions,

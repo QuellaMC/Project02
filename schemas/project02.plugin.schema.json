@@ -120,8 +120,8 @@
           "required": ["scope", "fields"],
           "properties": {
             "scope": {
-              "enum": ["global_with_character_overrides", "character_only"],
-              "description": "Whether enablement and settings may be authored globally with character overrides, or only in character/package config. Secret fields follow the same scope."
+              "$ref": "#/definitions/configScope",
+              "description": "Where the plugin's switch and settings are set: in the home's settings with each character free to override them (global_with_character_overrides), in each character's settings only (character_only), or in the home's settings only (global_only). A field with no scope of its own takes this one."
             },
             "fields": {
               "type": "array",
@@ -132,7 +132,61 @@
             "fingerprint": {
               "type": "string"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "character_only"
+                  }
+                },
+                "required": ["scope"]
+              },
+              "then": {
+                "description": "A field cannot widen a character_only config.",
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "const": "character_only"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "scope": {
+                    "const": "global_only"
+                  }
+                },
+                "required": ["scope"]
+              },
+              "then": {
+                "description": "A field cannot widen a global_only config.",
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "const": "global_only"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
         },
         "firstParty": {
           "type": "boolean"
@@ -242,6 +296,13 @@
     "accessLevel": {
       "enum": ["none", "read", "write"]
     },
+    "configScope": {
+      "enum": [
+        "global_with_character_overrides",
+        "character_only",
+        "global_only"
+      ]
+    },
     "configField": {
       "type": "object",
       "additionalProperties": false,
@@ -265,6 +326,10 @@
         "secret": {
           "type": "boolean",
           "description": "A credential, stored as a plain string with the scope's config at mode 0600. Reads are always redacted, and secret fields cannot be agentMutable."
+        },
+        "scope": {
+          "$ref": "#/definitions/configScope",
+          "description": "This field's own scope. In a global_with_character_overrides config it may narrow the field to each character's settings (character_only) or to the home's (global_only); in any other config it may only repeat the config's scope."
         },
         "valueType": {
           "enum": [

@@ -13,6 +13,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   characterOnlyConfigPlugin,
+  fieldScopedConfigPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
@@ -29,15 +30,18 @@ import {
   characterOverlayConfigPath,
   createLayeredProject02RuntimeConfigSnapshot,
   createProject02ConfigFieldInspectShapes,
+  diagnosticsHaveErrors,
   readCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
+  type RuntimeConfigControlRequest,
   type RuntimeConfigFieldInspectShape,
+  type RuntimeConfigFieldScope,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   inspectRuntimePluginConfig,
-  resolveProject02RuntimeConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -46,6 +50,7 @@ import {
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
 import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
+import type {RuntimePluginManifest} from '../../src/plugins/index.ts';
 
 function seededHome(): {
   readonly homeRoot: string;
@@ -587,56 +592,156 @@ describe('scope-aware runtime config mutations', () => {
 });
 
 describe('plugin manifest config scope policy', () => {
-  it('rejects every globally authored setting of a character-only plugin', () => {
-    const plugin = characterOnlyConfigPlugin('scope.character-only');
-    const configPath = join(
-      createTestTempRoot('project02-config-scope-policy-'),
-      'config.json',
-    );
-    const loadedConfig = Object.freeze({
-      source: 'path' as const,
-      path: configPath,
-      config: {
-        version: runtimeConfigVersion,
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-            config: {
-              setting: 'global-value',
-              apiKey: 'secret',
-            },
-          },
+  it('warns of each value authored outside its scope and keeps it out of every effective document', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const sections = {
+      plugins: [
+        characterOnlyConfigPlugin('scope.character-only').manifest,
+        fieldScopedConfigPlugin('scope.field-scoped').manifest,
+      ],
+    };
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'scope.character-only': {
+          enabled: true,
+          config: {setting: 'home', apiKey: 'secret'},
         },
-      } as const,
-      diagnostics: Object.freeze([]),
+        'scope.field-scoped': {
+          config: {homeSetting: 'home', ownSetting: 'home'},
+        },
+      },
     });
-    const resolved = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({loadedConfig}),
-      loadedConfig,
-      sections: {plugins: [plugin.manifest]},
-      validateInactiveSectionConfigs: true,
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {
+        'scope.field-scoped': {
+          config: {homeSetting: 'mira', ownSetting: 'mira'},
+        },
+      },
     });
 
-    expect(resolved.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'runtime_config_character_only_plugin_enabled_globally',
-          path: `plugins.${plugin.manifest.id}.enabled`,
-        }),
-        expect.objectContaining({
-          code: 'runtime_config_character_only_plugin_field_globally',
-          path: `plugins.${plugin.manifest.id}.config.setting`,
-        }),
-      ]),
+    const homeWarnings = [
+      'plugins.scope.character-only.enabled',
+      'plugins.scope.character-only.config.setting',
+      // Secrets included: a character-only plugin is self-contained, and
+      // its credential belongs beside its overlay, not in the home config.
+      'plugins.scope.character-only.config.apiKey',
+      'plugins.scope.field-scoped.config.ownSetting',
+    ].map(path => ({severity: 'warning', path, character: undefined}));
+    const expectResolution = (
+      characterId: string,
+      ownSetting: object,
+      warnings: readonly object[],
+    ) => {
+      const runtimeLocation = runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterId,
+      });
+      const {layeredConfig, resolvedConfig} =
+        resolveLayeredProject02RuntimeConfigWithSnapshot({
+          runtimeLocation,
+          loadedConfig: loadRuntimeConfigForTest({storeRoot: homeRoot}),
+          overlayConfig: readCharacterOverlayForScope(
+            runtimeLocation.characterScope,
+          ).overlay,
+          sections,
+          validateInactiveSectionConfigs: true,
+        });
+
+      expect(
+        resolvedConfig.diagnostics
+          .filter(
+            diagnostic =>
+              diagnostic.code === 'runtime_config_authored_outside_scope',
+          )
+          .map(diagnostic => ({
+            severity: diagnostic.severity,
+            path: diagnostic.path,
+            character: diagnostic.origin?.characterId,
+          })),
+      ).toEqual(warnings);
+      expect(diagnosticsHaveErrors(resolvedConfig.diagnostics)).toBe(false);
+      expect(
+        layeredConfig.effective.config?.plugins?.['scope.character-only']
+          ?.enabled,
+      ).toBeUndefined();
+      expect(resolvedConfig.sectionConfigs.plugins).toMatchObject({
+        'scope.character-only': {
+          setting: {source: 'missing'},
+          apiKey: {source: 'missing'},
+        },
+        'scope.field-scoped': {
+          homeSetting: {source: 'config', value: 'home'},
+          ownSetting,
+        },
+      });
+    };
+
+    // Mira has an overlay; Nova has none, and reads the same home.
+    expectResolution('mira', {source: 'config', value: 'mira'}, [
+      ...homeWarnings,
+      {
+        severity: 'warning',
+        path: 'plugins.scope.field-scoped.config.homeSetting',
+        character: 'mira',
+      },
+    ]);
+    expectResolution('nova', {source: 'missing'}, homeWarnings);
+  });
+
+  it('refuses a write outside its scope, in both directions', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = fieldScopedConfigPlugin('scope.field-writes');
+    const homeOnly: RuntimePluginManifest = {
+      ...plugin.manifest,
+      id: 'scope.home-only',
+      config: {scope: 'global_only', fields: []},
+    };
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    const write =
+      (scope: RuntimeConfigFieldScope, request: RuntimeConfigControlRequest) =>
+      () =>
+        applyRuntimeConfigControlOperation({
+          sections: {plugins: [plugin.manifest, homeOnly]},
+          target: resolveRuntimeConfigScopeTarget({
+            runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
+            scope,
+          }),
+          request,
+        });
+    const setField = (fieldName: string): RuntimeConfigControlRequest => ({
+      kind: 'section_field',
+      namespace: 'plugins',
+      declaration: plugin.manifest,
+      actor: 'operator',
+      fieldOperation: {kind: 'set', fieldName, value: 'misplaced'},
+    });
+    const globalBefore = readFileSync(configPath, 'utf8');
+
+    expect(write('global', setField('ownSetting'))).toThrow(
+      'Setting "ownSetting" of "scope.field-writes" belongs to a character',
     );
-    // Secrets included: a character-only plugin is self-contained, and
-    // its credential belongs beside its overlay, not in the home config.
-    expect(resolved.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: 'runtime_config_character_only_plugin_field_globally',
-        path: `plugins.${plugin.manifest.id}.config.apiKey`,
+    expect(write('character', setField('homeSetting'))).toThrow(
+      'Setting "homeSetting" of "scope.field-writes" belongs to the home',
+    );
+    expect(
+      write('character', {
+        kind: 'section_activation',
+        namespace: 'plugins',
+        declaration: homeOnly,
+        enabled: true,
       }),
-    );
+    ).toThrow('The switch of "scope.home-only" belongs to the home');
+    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
+    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 
   it("layers a character's own secret over the home's, in the documents", async () => {
@@ -742,6 +847,7 @@ describe('plugin manifest config scope policy', () => {
         createProject02ConfigFieldInspectShapes({
           layeredConfig: createLayeredProject02RuntimeConfigSnapshot({
             loadedConfig,
+            sections: {plugins: []},
             ...(targetScope === 'global'
               ? {}
               : {
@@ -1125,6 +1231,41 @@ describe('plugin inspection target authorship', () => {
     });
     expect(globalView.fingerprint).toBe(characterView.fingerprint);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(true);
+  });
+
+  it('lists each target only the fields it may set, sourced only from layers its scope permits', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = fieldScopedConfigPlugin('scope.field-view');
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    // Each value sits only in the layer its field's scope forbids.
+    writeRuntimeConfig(configPath, {
+      plugins: {'scope.field-view': {config: {ownSetting: 'home'}}},
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {'scope.field-view': {config: {homeSetting: 'mira'}}},
+    });
+
+    const fieldsOf = (targetScope: RuntimeConfigFieldScope) =>
+      inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
+        targetScope,
+        namespace: 'plugins',
+        declaration: plugin.manifest,
+        sections: {plugins: [plugin.manifest]},
+      }).fields.map(field => [field.name, field.effectiveSource]);
+
+    expect(fieldsOf('global')).toEqual([
+      ['sharedSetting', 'default'],
+      ['homeSetting', 'default'],
+    ]);
+    expect(fieldsOf('character')).toEqual([
+      ['sharedSetting', 'default'],
+      ['ownSetting', 'default'],
+    ]);
   });
 });
 
