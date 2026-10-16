@@ -1,15 +1,15 @@
 import type {
   ConfigTarget,
   RuntimeConfigDiagnostic,
-  RuntimePluginConfigFieldInspectShape,
-  RuntimePluginConfigInspectShape,
+  RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionInspectShape,
 } from '../../gateway/api/index.ts';
 import type {Session} from './session.ts';
 import {
   hostFieldKey,
-  pluginFieldKey,
-  pluginKey,
   readableName,
+  sectionFieldKey,
+  sectionKey,
   valueText,
 } from './settings.ts';
 import {characterName, type SettingsPage, type WebState} from './store.ts';
@@ -55,6 +55,10 @@ export function SettingsScreen({
     scope: target.scope,
     busy: page.saving !== undefined || state.connection.status === 'refused',
   };
+  const plugins =
+    view?.status === 'ok'
+      ? Object.groupBy(view.sections, section => section.namespace).plugins
+      : undefined;
 
   return (
     <section className="settings" aria-label={title}>
@@ -105,13 +109,13 @@ export function SettingsScreen({
               />
             ))}
             <h3 className="section-title">Plugins</h3>
-            {view.plugins.length === 0 ? (
+            {plugins === undefined ? (
               <p className="muted">No plugins are installed.</p>
             ) : (
-              view.plugins.map(plugin => (
-                <PluginBlock
-                  key={plugin.pluginId}
-                  plugin={plugin}
+              plugins.map(section => (
+                <SectionBlock
+                  key={section.id}
+                  section={section}
                   context={context}
                 />
               ))
@@ -147,7 +151,7 @@ function Diagnostics({
 
 /** Where a row's value comes from, as the view says it. */
 function whereText(
-  field: RuntimePluginConfigFieldInspectShape,
+  field: RuntimeConfigFieldInspectShape,
   scope: ConfigTarget['scope'],
 ): string {
   if (field.authored.configured) {
@@ -167,7 +171,7 @@ function FieldRow({
   context,
 }: {
   readonly fieldKey: string;
-  readonly field: RuntimePluginConfigFieldInspectShape;
+  readonly field: RuntimeConfigFieldInspectShape;
   readonly context: RowContext;
 }) {
   const {page, session, scope, busy} = context;
@@ -239,19 +243,19 @@ function FieldRow({
   );
 }
 
-function PluginBlock({
-  plugin,
+function SectionBlock({
+  section,
   context,
 }: {
-  readonly plugin: RuntimePluginConfigInspectShape;
+  readonly section: RuntimeConfigSectionInspectShape;
   readonly context: RowContext;
 }) {
   const {page, session, scope, busy} = context;
-  const key = pluginKey(plugin.pluginId);
+  const key = sectionKey(section.namespace, section.id);
   const authoredHere =
-    plugin.enabledSource === (scope === 'global' ? 'global' : 'character');
+    section.enabledSource === (scope === 'global' ? 'global' : 'character');
   const where =
-    plugin.enabledSource === 'default'
+    section.enabledSource === 'default'
       ? 'default'
       : authoredHere
         ? scope === 'global'
@@ -260,15 +264,15 @@ function PluginBlock({
         : "from the home's settings";
   // Activation is a per-character decision, so only a character's screen
   // shows how the plan judged it and why.
-  const activation = scope === 'character' ? plugin.activation : undefined;
+  const activation = scope === 'character' ? section.activation : undefined;
 
   return (
-    <div className="plugin" data-plugin={plugin.pluginId}>
+    <div className="plugin" data-plugin={section.id}>
       <div className="plugin-header">
         <h4 className="plugin-name">
-          {plugin.displayName}{' '}
+          {section.displayName}{' '}
           <span className="muted small">
-            {plugin.pluginId} · {plugin.version}
+            {section.id} · {section.version}
           </span>
         </h4>
         {activation === undefined ? null : (
@@ -288,10 +292,10 @@ function PluginBlock({
         <div className="field-control">
           <input
             type="checkbox"
-            aria-label={`${plugin.displayName} enabled`}
+            aria-label={`${section.displayName} enabled`}
             checked={
               page.edits.get(key) === undefined
-                ? plugin.enabled
+                ? section.enabled
                 : page.edits.get(key) === 'true'
             }
             disabled={busy}
@@ -322,17 +326,17 @@ function PluginBlock({
           </p>
         )}
       </div>
-      {plugin.fields.map(field => (
+      {section.fields.map(field => (
         <FieldRow
           key={field.name}
-          fieldKey={pluginFieldKey(plugin.pluginId, field.name)}
+          fieldKey={sectionFieldKey(section.namespace, section.id, field.name)}
           field={field}
           context={context}
         />
       ))}
       <Diagnostics
-        diagnostics={plugin.diagnostics.filter(
-          diagnostic => diagnostic.scope === 'plugin',
+        diagnostics={section.diagnostics.filter(
+          diagnostic => diagnostic.scope === 'section',
         )}
       />
     </div>
@@ -349,7 +353,7 @@ function FieldControl({
   onChange,
   onSave,
 }: {
-  readonly field: RuntimePluginConfigFieldInspectShape;
+  readonly field: RuntimeConfigFieldInspectShape;
   readonly name: string;
   readonly shown: string;
   readonly edit: string | undefined;

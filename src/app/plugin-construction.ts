@@ -75,12 +75,12 @@ export async function instantiateRuntimePluginPackages(options: {
           userDisplayName: options.resolvedConfig.project02.userDisplayName,
           resolvedConfig:
             ownJsonRecordValue(
-              options.resolvedConfig.pluginConfigs,
+              options.resolvedConfig.sectionConfigs.plugins,
               entry.manifest.id,
             ) ?? {},
           redactedConfig:
             ownJsonRecordValue(
-              options.resolvedConfig.redactedPluginConfigs,
+              options.resolvedConfig.redactedSectionConfigs.plugins,
               entry.manifest.id,
             ) ?? {},
         },

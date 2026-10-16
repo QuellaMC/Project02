@@ -55,7 +55,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 5});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 6});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},
@@ -268,9 +268,9 @@ describe('gateway reference client', () => {
             formatEventFrame(
               'ready',
               JSON.stringify({
-                protocolVersion: 5,
+                protocolVersion: 6,
                 health: {
-                  protocolVersion: 5,
+                  protocolVersion: 6,
                   homeRoot: '/nowhere',
                   config: {diagnostics: []},
                   packages: {diagnostics: []},

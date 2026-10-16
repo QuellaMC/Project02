@@ -7,7 +7,7 @@ import {
   createRuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import type {RuntimePluginFactoryInput} from '../../src/plugins/api/factory.ts';
-import type {ResolvedPluginRuntimeConfig} from '../../src/runtime/config/index.ts';
+import type {ResolvedRuntimeSectionConfig} from '../../src/runtime/config/index.ts';
 import {createProject02Plugin} from '../../src/plugins/packages/mem0/index.ts';
 import {
   createMem0PluginFromInput,
@@ -882,7 +882,7 @@ function mem0FactoryInput(
 
 function resolvedConfig(
   values: Readonly<Record<string, string | number>>,
-): ResolvedPluginRuntimeConfig {
+): ResolvedRuntimeSectionConfig {
   return Object.freeze(
     Object.fromEntries(
       Object.entries(values).map(([name, value]) => [

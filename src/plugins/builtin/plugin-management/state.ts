@@ -1,6 +1,6 @@
 import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {RuntimePluginManifest} from '../../api/types.ts';
-import type {RuntimePluginActivationStatusShape} from '../../../runtime/config/index.ts';
+import type {RuntimeConfigSectionActivationShape} from '../../../runtime/config/index.ts';
 import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
 import {
   requireResolvedRuntimeConfigScopeTarget,
@@ -11,7 +11,7 @@ import {
 export type RuntimePluginInventoryHostState = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly activationByPluginId?: Readonly<
-    Record<string, RuntimePluginActivationStatusShape>
+    Record<string, RuntimeConfigSectionActivationShape>
   >;
   readonly defaultEnabledPluginIds?: readonly string[];
 };

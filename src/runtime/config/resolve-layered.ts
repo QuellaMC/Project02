@@ -4,16 +4,18 @@ import {
   resolveEffectiveProject02RuntimeConfig,
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
-import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
+import {runtimeSectionScopeDiagnostics} from './section-scope.ts';
 import {withRuntimeConfigDiagnosticOrigin} from './diagnostic.ts';
 import {
+  runtimeConfigSectionNamespaces,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
+  type Project02RuntimeSectionConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigSectionMap,
 } from './types.ts';
 
 export type EffectiveProject02RuntimeConfigSnapshot = {
@@ -103,16 +105,15 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
     });
   }
 
-  const manifests = effectiveOptions.pluginManifests ?? [];
   const scopeDiagnostics = [
-    ...runtimePluginScopeDiagnostics({
+    ...runtimeSectionScopeDiagnostics({
       config: loadedConfig.config,
-      manifests,
+      sections: effectiveOptions.sections,
       authoredScope: 'global',
     }),
-    ...runtimePluginScopeDiagnostics({
+    ...runtimeSectionScopeDiagnostics({
       config: overlayConfig.config,
-      manifests,
+      sections: effectiveOptions.sections,
       authoredScope: 'character',
     }).map(diagnostic =>
       withRuntimeConfigDiagnosticOrigin(diagnostic, {
@@ -134,7 +135,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
         ...layeredConfig.effective.diagnostics,
         ...scopeDiagnostics,
       ]),
-      skipPluginScopeValidation: true,
+      skipSectionScopeValidation: true,
     }),
   });
 }
@@ -148,15 +149,25 @@ export function mergeCharacterOverlayDocument(
     globalDocument?.project02,
     overlayDocument.project02,
   );
-  const plugins = mergedPluginSections(
-    globalDocument?.plugins,
-    overlayDocument.plugins,
-  );
+  let sections: Partial<
+    RuntimeConfigSectionMap<Project02RuntimeSectionConfig>
+  > = {};
+
+  for (const namespace of runtimeConfigSectionNamespaces) {
+    const merged = mergedSectionConfigs(
+      globalDocument?.[namespace],
+      overlayDocument[namespace],
+    );
+
+    if (merged !== undefined) {
+      sections = {...sections, [namespace]: merged};
+    }
+  }
 
   return Object.freeze({
     version: runtimeConfigVersion,
     ...(project02 === undefined ? {} : {project02}),
-    ...(plugins === undefined ? {} : {plugins}),
+    ...sections,
   } satisfies Project02RuntimeConfig);
 }
 
@@ -169,44 +180,44 @@ function mergedProject02Section(
     : Object.freeze({...globalSection, ...overlaySection});
 }
 
-function mergedPluginSections(
-  globalSection:
-    Readonly<Record<string, Project02RuntimePluginConfig>> | undefined,
-  overlaySection:
-    Readonly<Record<string, Project02RuntimePluginConfig>> | undefined,
-): Readonly<Record<string, Project02RuntimePluginConfig>> | undefined {
-  if (overlaySection === undefined) {
-    return globalSection;
+function mergedSectionConfigs(
+  globalSections:
+    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined,
+  overlaySections:
+    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined,
+): Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined {
+  if (overlaySections === undefined) {
+    return globalSections;
   }
 
-  const pluginIds = [
+  const ids = [
     ...new Set([
-      ...Object.keys(globalSection ?? {}),
-      ...Object.keys(overlaySection),
+      ...Object.keys(globalSections ?? {}),
+      ...Object.keys(overlaySections),
     ]),
   ].sort((a, b) => a.localeCompare(b));
 
   return Object.freeze(
     Object.fromEntries(
-      pluginIds.map(pluginId => {
-        const globalPlugin = globalSection?.[pluginId];
-        const overlayPlugin = overlaySection[pluginId];
-        const enabled = overlayPlugin?.enabled ?? globalPlugin?.enabled;
+      ids.map(id => {
+        const globalSection = globalSections?.[id];
+        const overlaySection = overlaySections[id];
+        const enabled = overlaySection?.enabled ?? globalSection?.enabled;
         const config =
-          globalPlugin?.config === undefined &&
-          overlayPlugin?.config === undefined
+          globalSection?.config === undefined &&
+          overlaySection?.config === undefined
             ? undefined
             : Object.freeze({
-                ...globalPlugin?.config,
-                ...overlayPlugin?.config,
+                ...globalSection?.config,
+                ...overlaySection?.config,
               });
 
         return [
-          pluginId,
+          id,
           Object.freeze({
             ...(enabled === undefined ? {} : {enabled}),
             ...(config === undefined ? {} : {config}),
-          } satisfies Project02RuntimePluginConfig),
+          } satisfies Project02RuntimeSectionConfig),
         ];
       }),
     ),

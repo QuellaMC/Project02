@@ -68,7 +68,11 @@
       The host fields are declared once, in the field registry, in the order the settings
       page renders them: what a person decides first, then the knobs, then the switch. Each field
       carries its description, value type, allowed values, default summary, and whether it is
-      a secret. Plugin fields come from <code>RuntimePluginManifest.config.fields</code>, which
+      a secret. Every other setting belongs to a declared section, kept under a namespace of
+      the document — <code>plugins</code> today — at <code>&lt;namespace&gt;.&lt;id&gt;</code>,
+      its fields at <code>&lt;namespace&gt;.&lt;id&gt;.config.&lt;field&gt;</code>. Every
+      section is declared the same way, and a plugin manifest is such a declaration as it
+      stands. Plugin fields come from <code>RuntimePluginManifest.config.fields</code>, which
       is likewise the single source for value types, allowed values, secret handling, reload
       requirements, and whether an ordinary non-secret field is agent-mutable. A secret field
       is never agent-mutable.

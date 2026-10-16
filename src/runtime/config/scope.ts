@@ -1,5 +1,4 @@
 /** One control operation, aimed at the global config or one overlay. */
-import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
   isJsonBoundaryObject,
   ownJsonRecordValue,
@@ -8,7 +7,7 @@ import {
 } from '../../shared/json-boundary.ts';
 import {
   assertRuntimeConfigControlOperation,
-  runtimePluginConfigControlMutation,
+  runtimeSectionFieldControlMutation,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
@@ -19,7 +18,10 @@ import {
   verifyRuntimeConfigControlExpectation,
   type RuntimeConfigControlSnapshot,
 } from './control-transaction.ts';
-import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
+import {
+  createLayeredRuntimeConfigFingerprint,
+  layeredRuntimeConfigFingerprintForScope,
+} from './fingerprint.ts';
 import {
   requireResolvedRuntimeConfigScopeTarget,
   type ResolvedRuntimeConfigScopeTarget,
@@ -31,21 +33,21 @@ import {
   type PreparedRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
-import {
-  layeredRuntimeConfigFingerprintForScope,
-  type LoadedProject02CharacterOverlayConfig,
-} from './overlay.ts';
+import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
-import {runtimePluginScopeViolation} from './plugin-scope.ts';
+import {runtimeSectionScopeViolation} from './section-scope.ts';
 import {
   runtimeConfigVersion,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
+  type Project02RuntimeSectionConfig,
   type RuntimeConfigMutationOperation,
+  type RuntimeConfigSectionDeclaration,
+  type RuntimeConfigSectionNamespace,
+  type RuntimeConfigSections,
 } from './types.ts';
 
 export type RuntimeConfigControlRequest =
@@ -54,14 +56,16 @@ export type RuntimeConfigControlRequest =
       readonly operation: RuntimeConfigControlOperation;
     }
   | {
-      readonly kind: 'plugin_activation';
-      readonly manifest: RuntimePluginManifest;
+      readonly kind: 'section_activation';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly declaration: RuntimeConfigSectionDeclaration;
       /** Absent clears the authored value instead of deciding it. */
       readonly enabled?: boolean;
     }
   | {
-      readonly kind: 'plugin_config';
-      readonly manifest: RuntimePluginManifest;
+      readonly kind: 'section_field';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly declaration: RuntimeConfigSectionDeclaration;
       readonly actor: RuntimePluginConfigControlActor;
       readonly fieldOperation: RuntimePluginConfigFieldControlOperation;
     };
@@ -81,14 +85,14 @@ export type RuntimeConfigControlApplyResult = RuntimeConfigMutationResult & {
   readonly materialization: RuntimeConfigCharacterMaterializationOutcome;
 };
 
-type RuntimePluginConfigControlRequest = Extract<
+type RuntimeSectionFieldControlRequest = Extract<
   RuntimeConfigControlRequest,
-  {readonly kind: 'plugin_config'}
+  {readonly kind: 'section_field'}
 >;
 
 export function applyRuntimeConfigControlOperation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly expectedFingerprint?: string;
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
@@ -115,7 +119,11 @@ export function applyRuntimeConfigControlOperation(options: {
     );
   }
 
-  const mutation = normalizedControlMutation(target, options.request);
+  const mutation = normalizedControlMutation(
+    target,
+    options.request,
+    options.sections,
+  );
 
   if (target.scope === 'global' && mutation.operation === undefined) {
     throw new TypeError('Global runtime config control requires an operation.');
@@ -123,7 +131,7 @@ export function applyRuntimeConfigControlOperation(options: {
 
   const transaction = applyRuntimeConfigControlTransaction({
     target,
-    pluginManifests: options.pluginManifests,
+    sections: options.sections,
     ...(options.expectedFingerprint === undefined
       ? {}
       : {expectedFingerprint: options.expectedFingerprint}),
@@ -166,7 +174,7 @@ export type SimulatedCharacterOverlayCandidate =
  */
 export function simulateCharacterOverlayCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly sections: RuntimeConfigSections;
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
   readonly expectedFingerprint?: string;
@@ -179,11 +187,15 @@ export function simulateCharacterOverlayCandidate(options: {
     );
   }
 
-  const mutation = normalizedControlMutation(target, options.request);
+  const mutation = normalizedControlMutation(
+    target,
+    options.request,
+    options.sections,
+  );
 
   try {
     const snapshot = readRuntimeConfigControlSnapshot(target, {
-      pluginManifests: options.pluginManifests,
+      sections: options.sections,
       requireCharacterMarker: false,
     });
 
@@ -232,15 +244,19 @@ export function simulateCharacterOverlayCandidate(options: {
 
 export function prepareRuntimeConfigControlOperation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly request: RuntimePluginConfigControlRequest;
+  readonly sections: RuntimeConfigSections;
+  readonly request: RuntimeSectionFieldControlRequest;
   readonly expectedFingerprint: string;
 }): {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
 } {
   const target = requireResolvedRuntimeConfigScopeTarget(options.target);
-  const mutation = normalizedControlMutation(target, options.request);
+  const mutation = normalizedControlMutation(
+    target,
+    options.request,
+    options.sections,
+  );
 
   if (mutation.operation === undefined) {
     throw new TypeError(
@@ -249,7 +265,7 @@ export function prepareRuntimeConfigControlOperation(options: {
   }
 
   const snapshot = readRuntimeConfigControlSnapshot(target, {
-    pluginManifests: options.pluginManifests,
+    sections: options.sections,
   });
   verifyRuntimeConfigControlExpectation(snapshot, options.expectedFingerprint);
   const prepared = prepareScopedRuntimeConfigControlCandidate({
@@ -279,6 +295,7 @@ type NormalizedRuntimeConfigControlMutation = {
 function normalizedControlMutation(
   target: ResolvedRuntimeConfigScopeTarget,
   request: RuntimeConfigControlRequest | undefined,
+  sections: RuntimeConfigSections,
 ): NormalizedRuntimeConfigControlMutation {
   if (request === undefined) {
     return {};
@@ -294,9 +311,10 @@ function normalizedControlMutation(
     return {operation: request.operation};
   }
 
-  if (request.kind === 'plugin_activation') {
-    const violation = runtimePluginScopeViolation({
-      manifest: request.manifest,
+  if (request.kind === 'section_activation') {
+    const violation = runtimeSectionScopeViolation({
+      namespace: request.namespace,
+      declaration: request.declaration,
       authoredScope: target.scope,
       operation: {kind: 'activation'},
     });
@@ -305,19 +323,23 @@ function normalizedControlMutation(
       throw new RuntimeConfigMutationError(violation.message);
     }
 
+    const section = {namespace: request.namespace, id: request.declaration.id};
+
     return {
       operation:
         request.enabled === undefined
-          ? {kind: 'plugin_activation_clear', pluginId: request.manifest.id}
+          ? {kind: 'section_activation_clear', ...section}
           : {
-              kind: request.enabled ? 'plugin_enable' : 'plugin_disable',
-              pluginId: request.manifest.id,
+              kind: request.enabled ? 'section_enable' : 'section_disable',
+              ...section,
             },
     };
   }
 
-  return runtimePluginConfigControlMutation({
-    manifest: request.manifest,
+  return runtimeSectionFieldControlMutation({
+    namespace: request.namespace,
+    declaration: request.declaration,
+    sections,
     actor: request.actor,
     operation: request.fieldOperation,
     authoredScope: target.scope,
@@ -440,8 +462,8 @@ function scopedPreparedCandidateFingerprint(options: {
     return createLayeredRuntimeConfigFingerprint({
       globalConfig: options.snapshot.globalDocument,
       characterId: options.target.runtimeLocation.characterScope.characterId,
-      overlayConfig: options.candidate,
-      pluginManifests: options.snapshot.pluginManifests,
+      overlay: {source: 'overlay', config: options.candidate},
+      sections: options.snapshot.sections,
     });
   }
 
@@ -449,7 +471,7 @@ function scopedPreparedCandidateFingerprint(options: {
     globalConfig: options.candidate,
     characterScope: options.snapshot.characterRuntimeLocation?.characterScope,
     overlay: options.snapshot.characterOverlay?.overlay,
-    pluginManifests: options.snapshot.pluginManifests,
+    sections: options.snapshot.sections,
   });
 }
 
@@ -597,7 +619,7 @@ function authoredOverlaySection(
 
 function mergeCharacterPluginMaterialization(
   existing: JsonBoundaryObject | undefined,
-  defaults: Project02RuntimePluginConfig,
+  defaults: Project02RuntimeSectionConfig,
 ): {
   readonly plugin: JsonBoundaryObject;
   readonly changed: boolean;
@@ -631,7 +653,7 @@ function mergeCharacterPluginMaterialization(
 
 function mergeMissingCharacterPluginConfig(options: {
   readonly current: AuthoredOverlaySection;
-  readonly defaults: Project02RuntimePluginConfig['config'];
+  readonly defaults: Project02RuntimeSectionConfig['config'];
   readonly createEmpty: boolean;
 }): {
   readonly value: JsonBoundaryObject | undefined;

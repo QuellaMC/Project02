@@ -1,7 +1,7 @@
 import type {
   RuntimeConfigDiagnostic,
   RuntimeConfigDiagnosticOrigin,
-  RuntimeConfigDiagnosticPluginMetadata,
+  RuntimeConfigDiagnosticSectionMetadata,
 } from './types.ts';
 
 export function withRuntimeConfigDiagnosticOrigin(
@@ -35,7 +35,7 @@ export function createRuntimeConfigDiagnostic(
   code: string,
   message: string,
   path?: string,
-  metadata?: RuntimeConfigDiagnosticPluginMetadata,
+  metadata?: RuntimeConfigDiagnosticSectionMetadata,
 ): RuntimeConfigDiagnostic {
   const base = {
     severity,
@@ -48,10 +48,9 @@ export function createRuntimeConfigDiagnostic(
     ? Object.freeze({...base, scope: 'global'})
     : Object.freeze({
         ...base,
-        scope: 'plugin',
-        pluginId: metadata.pluginId,
-        ...(metadata.pluginConfigField === undefined
-          ? {}
-          : {pluginConfigField: metadata.pluginConfigField}),
+        scope: 'section',
+        namespace: metadata.namespace,
+        id: metadata.id,
+        ...(metadata.field === undefined ? {} : {field: metadata.field}),
       });
 }

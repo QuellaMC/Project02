@@ -6,8 +6,9 @@ import {
 } from '../plugins/index.ts';
 import {
   createRuntimeConfigDiagnostic,
-  resolveRuntimePluginConfigs,
+  resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticIsReadinessFailure,
+  runtimeConfigSectionPath,
   validateProject02RuntimeConfig,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -104,10 +105,10 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
-  const resolved = resolveRuntimePluginConfigs({
+  const resolved = resolveRuntimeSectionConfigs({
     config: validated.config,
-    pluginManifests: options.pluginManifests,
-    validateInactivePluginConfigs: true,
+    sections: {plugins: options.pluginManifests},
+    validateInactiveSectionConfigs: true,
     authoredScope: 'character',
   });
   // A readiness failure may still be met by the global layer.
@@ -146,7 +147,9 @@ function packagedSecretFieldPaths(
     ([pluginId, pluginConfig]) =>
       (secretFieldsByPlugin.get(pluginId) ?? [])
         .filter(fieldName => pluginConfig.config?.[fieldName] !== undefined)
-        .map(fieldName => `plugins.${pluginId}.config.${fieldName}`),
+        .map(fieldName =>
+          runtimeConfigSectionPath('plugins', pluginId, fieldName),
+        ),
   );
 }
 
@@ -171,8 +174,8 @@ function validateMaterializationManifests(
         `Cannot materialize character plugin config because installed ` +
           `plugin "${manifest.id}" has invalid manifest policy: ` +
           validated.details,
-        `plugins.${manifest.id}`,
-        {pluginId: manifest.id},
+        runtimeConfigSectionPath('plugins', manifest.id),
+        {namespace: 'plugins', id: manifest.id},
       ),
     );
   }
@@ -224,8 +227,8 @@ export function enforceCharacterPluginExpectations(options: {
           } plugin "${pluginId}", which is not installed. Install the ` +
             `plugin package under the home plugins directory` +
             `${level === 'required' ? ' or remove it from the character package' : ''}.`,
-          `plugins.${pluginId}`,
-          {pluginId},
+          runtimeConfigSectionPath('plugins', pluginId),
+          {namespace: 'plugins', id: pluginId},
         ),
       );
       return;
@@ -242,8 +245,8 @@ export function enforceCharacterPluginExpectations(options: {
             level === 'required' ? 'requires' : 'recommends'
           } plugin "${pluginId}", which is disabled. Enable it in the ` +
             "character's settings.",
-          `plugins.${pluginId}.enabled`,
-          {pluginId},
+          `${runtimeConfigSectionPath('plugins', pluginId)}.enabled`,
+          {namespace: 'plugins', id: pluginId},
         ),
       );
     }

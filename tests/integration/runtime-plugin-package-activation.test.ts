@@ -139,7 +139,8 @@ describe('configured runtime plugin package activation', () => {
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
         code: 'trusted_context_not_first_party',
-        pluginId: characterStatePluginId,
+        namespace: 'plugins',
+        id: characterStatePluginId,
       }),
     );
   });
@@ -218,7 +219,8 @@ describe('configured runtime plugin package activation', () => {
 
     expect(configured.resolvedConfig.diagnostics).not.toContainEqual(
       expect.objectContaining({
-        pluginId: manifest.id,
+        namespace: 'plugins',
+        id: manifest.id,
         code: 'runtime_config_required_value_missing',
       }),
     );
@@ -308,7 +310,8 @@ describe('configured runtime plugin package activation', () => {
       expect.objectContaining({
         severity: 'warning',
         code: 'runtime_plugin_package_invalid_descriptor',
-        pluginId: manifest.id,
+        namespace: 'plugins',
+        id: manifest.id,
       }),
     );
     expect(
@@ -346,7 +349,8 @@ describe('configured runtime plugin package activation', () => {
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_plugin_package_invalid_descriptor',
-        pluginId: manifest.id,
+        namespace: 'plugins',
+        id: manifest.id,
       }),
     );
     expect(
@@ -441,7 +445,8 @@ describe('configured runtime plugin package activation', () => {
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_plugin_package_invalid_descriptor',
-        pluginId: manifest.id,
+        namespace: 'plugins',
+        id: manifest.id,
       }),
     );
   });
@@ -472,7 +477,8 @@ describe('configured runtime plugin package activation', () => {
       expect.objectContaining({
         severity: 'error',
         code: 'runtime_plugin_package_package_id_mismatch',
-        pluginId: manifest.id,
+        namespace: 'plugins',
+        id: manifest.id,
       }),
     );
     expect(
@@ -511,7 +517,8 @@ describe('configured runtime plugin package activation', () => {
       expect.objectContaining({
         severity: 'warning',
         code: 'runtime_plugin_package_reserved_plugin_id',
-        pluginId: characterStatePluginId,
+        namespace: 'plugins',
+        id: characterStatePluginId,
       }),
     );
     expect(

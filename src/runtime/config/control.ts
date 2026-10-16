@@ -1,8 +1,6 @@
 import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
-import {
-  layeredRuntimeConfigFingerprintForScope,
-  readCharacterOverlayForScope,
-} from './overlay.ts';
+import {layeredRuntimeConfigFingerprintForScope} from './fingerprint.ts';
+import {readCharacterOverlayForScope} from './overlay.ts';
 import {
   assertResolvedProject02HomeAdoptable,
   loadProject02RuntimeConfigForLocation,
@@ -10,27 +8,28 @@ import {
 } from './location.ts';
 import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
-import {createRuntimePluginConfigInspectShape} from './inspect.ts';
-import {resolveRuntimePluginConfigs} from './resolve.ts';
+import {createRuntimeSectionConfigInspectShape} from './inspect.ts';
+import {
+  resolveRuntimeSectionConfigs,
+  runtimeConfigDiagnosticMatchesSection,
+} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
 } from './schema.ts';
-import {runtimePluginScopeViolation} from './plugin-scope.ts';
+import {runtimeSectionScopeViolation} from './section-scope.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import type {
-  RuntimePluginConfigField,
-  RuntimePluginManifest,
-} from '../../plugins/api/index.ts';
+import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
-  RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
+  RuntimeConfigSectionActivationShape,
+  RuntimeConfigSectionDeclaration,
+  RuntimeConfigSectionInspectShape,
+  RuntimeConfigSectionNamespace,
+  RuntimeConfigSections,
   RuntimeConfigValue,
-  RuntimePluginActivationStatusShape,
-  RuntimePluginConfigInspectShape,
 } from './types.ts';
-import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
@@ -46,13 +45,13 @@ export function assertRuntimeConfigControlOperation(
     case 'set':
     case 'unset':
       return;
-    case 'plugin_enable':
-    case 'plugin_disable':
+    case 'section_enable':
+    case 'section_disable':
       throw new TypeError(
         'Plugin activation must be changed through manifest-aware control.',
       );
-    case 'plugin_config_set':
-    case 'plugin_config_unset':
+    case 'section_field_set':
+    case 'section_field_unset':
       throw new TypeError(
         'Plugin config fields must be changed through manifest-aware control.',
       );
@@ -76,11 +75,12 @@ export function inspectRuntimePluginConfig(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   /** The one document this inspection's control operation can mutate. */
   readonly targetScope: 'global' | 'character';
-  readonly manifest: RuntimePluginManifest;
-  readonly pluginManifests?: readonly RuntimePluginManifest[];
-  readonly activation?: RuntimePluginActivationStatusShape;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly sections: RuntimeConfigSections;
+  readonly activation?: RuntimeConfigSectionActivationShape;
   readonly defaultEnabled?: boolean;
-}): RuntimePluginConfigInspectShape {
+}): RuntimeConfigSectionInspectShape {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
   const loadedConfig = loadProject02RuntimeConfigForLocation(
     options.runtimeLocation,
@@ -88,58 +88,43 @@ export function inspectRuntimePluginConfig(options: {
   const characterScope = options.runtimeLocation.characterScope;
   // A rebound data directory must not feed an overlay into model-visible config.
   const overlayConfig = readCharacterOverlayForScope(characterScope).overlay;
-  const manifests = manifestsIncludingTarget(
-    options.manifest,
-    options.pluginManifests,
-  );
+  const sections = sectionsIncludingTarget(options);
   const {layeredConfig, resolvedConfig} =
     resolveLayeredProject02RuntimeConfigWithSnapshot({
       loadedConfig,
       runtimeLocation: options.runtimeLocation,
       overlayConfig,
-      pluginManifests: manifests,
-      validateInactivePluginConfigs: true,
+      sections,
+      validateInactiveSectionConfigs: true,
     });
   const mutationBase =
     createRuntimeConfigAuthoredSnapshot(loadedConfig).document;
 
-  return createRuntimePluginConfigInspectShape({
+  return createRuntimeSectionConfigInspectShape({
     layeredConfig,
     targetScope: options.targetScope,
-    pluginResolution: resolvedConfig,
-    manifest: options.manifest,
+    sectionResolution: resolvedConfig,
+    namespace: options.namespace,
+    declaration: options.declaration,
     ...(options.activation === undefined
       ? {}
       : {activation: options.activation}),
     ...(options.defaultEnabled === undefined
       ? {}
       : {defaultEnabled: options.defaultEnabled}),
-    fingerprint: layeredControlFingerprint({
+    fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: mutationBase,
       characterScope,
-      overlayConfig,
-      pluginManifests: manifests,
+      overlay: overlayConfig,
+      sections,
     }),
   });
 }
 
-function layeredControlFingerprint(options: {
-  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
-  readonly overlayConfig:
-    ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-}): string {
-  return layeredRuntimeConfigFingerprintForScope({
-    globalConfig: options.globalConfig,
-    characterScope: options.characterScope,
-    overlay: options.overlayConfig,
-    pluginManifests: options.pluginManifests,
-  });
-}
-
-export function runtimePluginConfigControlMutation(options: {
-  readonly manifest: RuntimePluginManifest;
+export function runtimeSectionFieldControlMutation(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly sections: RuntimeConfigSections;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
   readonly authoredScope?: 'global' | 'character';
@@ -147,8 +132,9 @@ export function runtimePluginConfigControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
-  const scopeViolation = runtimePluginScopeViolation({
-    manifest: options.manifest,
+  const scopeViolation = runtimeSectionScopeViolation({
+    namespace: options.namespace,
+    declaration: options.declaration,
     authoredScope: options.authoredScope ?? 'global',
     operation: {
       kind: 'field',
@@ -163,14 +149,17 @@ export function runtimePluginConfigControlMutation(options: {
   const field = validateRuntimePluginConfigControlOperation(options);
 
   return {
-    operation: runtimePluginConfigMutationOperation(options.operation, {
-      pluginId: options.manifest.id,
+    operation: runtimeSectionFieldMutationOperation(options.operation, {
+      namespace: options.namespace,
+      id: options.declaration.id,
       fieldName: field.name,
     }),
     validateCandidate: config => {
-      assertRuntimePluginConfigCandidateValid({
+      assertRuntimeSectionConfigCandidateValid({
         config,
-        manifest: options.manifest,
+        namespace: options.namespace,
+        declaration: options.declaration,
+        sections: options.sections,
         operation: options.operation,
       });
     },
@@ -183,44 +172,50 @@ function fieldNameOf(
   return operation.fieldName;
 }
 
-function runtimePluginConfigMutationOperation(
+function runtimeSectionFieldMutationOperation(
   operation: RuntimePluginConfigFieldControlOperation,
   target: {
-    readonly pluginId: string;
+    readonly namespace: RuntimeConfigSectionNamespace;
+    readonly id: string;
     readonly fieldName: string;
   },
 ): RuntimeConfigMutationOperation {
   switch (operation.kind) {
     case 'set':
       return {
-        kind: 'plugin_config_set',
+        kind: 'section_field_set',
         ...target,
         value: operation.value,
       };
     case 'unset':
       return {
-        kind: 'plugin_config_unset',
+        kind: 'section_field_unset',
         ...target,
       };
   }
 }
 
-function assertRuntimePluginConfigCandidateValid(options: {
+function assertRuntimeSectionConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
-  readonly manifest: RuntimePluginManifest;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly sections: RuntimeConfigSections;
   readonly operation: RuntimePluginConfigFieldControlOperation;
 }): void {
-  const resolved = resolveRuntimePluginConfigs({
+  const resolved = resolveRuntimeSectionConfigs({
     config: options.config,
-    pluginManifests: [options.manifest],
-    skipPluginScopeValidation: true,
-    validateInactivePluginConfigs: true,
+    sections: sectionsIncludingTarget(options),
+    skipSectionScopeValidation: true,
+    validateInactiveSectionConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      diagnostic.scope === 'plugin' &&
-      diagnostic.pluginId === options.manifest.id,
+      runtimeConfigDiagnosticMatchesSection({
+        diagnostic,
+        namespace: options.namespace,
+        id: options.declaration.id,
+      }),
   );
 
   if (blockingDiagnostic !== undefined) {
@@ -231,21 +226,21 @@ function assertRuntimePluginConfigCandidateValid(options: {
 }
 
 export function validateRuntimePluginConfigControlOperation(options: {
-  readonly manifest: RuntimePluginManifest;
+  readonly declaration: RuntimeConfigSectionDeclaration;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
-}): RuntimePluginConfigField {
-  const field = options.manifest.config.fields.find(
+}): RuntimeConfigFieldDeclaration {
+  const field = options.declaration.config.fields.find(
     candidate => candidate.name === options.operation.fieldName,
   );
 
   if (field === undefined) {
-    const declaredFieldNames = options.manifest.config.fields
+    const declaredFieldNames = options.declaration.config.fields
       .map(candidate => candidate.name)
       .join(', ');
 
     throw new TypeError(
-      `Plugin "${options.manifest.id}" does not declare config field "${options.operation.fieldName}". ` +
+      `Plugin "${options.declaration.id}" does not declare config field "${options.operation.fieldName}". ` +
         `Declared fields: ${declaredFieldNames.length === 0 ? 'none' : declaredFieldNames}.`,
     );
   }
@@ -305,14 +300,20 @@ function runtimeConfigControlValueRequiresRedaction(
   );
 }
 
-function manifestsIncludingTarget(
-  target: RuntimePluginManifest,
-  manifests: readonly RuntimePluginManifest[] | undefined,
-): readonly RuntimePluginManifest[] {
+function sectionsIncludingTarget(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly sections: RuntimeConfigSections;
+}): RuntimeConfigSections {
   const byId = new Map(
-    (manifests ?? []).map(manifest => [manifest.id, manifest] as const),
+    options.sections[options.namespace].map(
+      declaration => [declaration.id, declaration] as const,
+    ),
   );
 
-  byId.set(target.id, target);
-  return Object.freeze([...byId.values()]);
+  byId.set(options.declaration.id, options.declaration);
+  return Object.freeze({
+    ...options.sections,
+    [options.namespace]: Object.freeze([...byId.values()]),
+  });
 }

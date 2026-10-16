@@ -41,7 +41,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 5,
+    protocolVersion: 6,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -53,7 +53,7 @@ function ready(
   confirmations: readonly PendingConfirmation[] = [],
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
-  return {protocolVersion: 5, health: health(mira), confirmations, turns};
+  return {protocolVersion: 6, health: health(mira), confirmations, turns};
 }
 
 /** A live tab with Mira's DM open and nothing shown yet. */

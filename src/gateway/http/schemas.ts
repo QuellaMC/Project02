@@ -1,6 +1,7 @@
 import {Ajv, type JSONSchemaType, type SchemaObject} from 'ajv';
 
 import {clientStampPattern} from '../../core/index.ts';
+import {runtimeConfigSectionNamespaces} from '../../runtime/config/index.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import type {
   ConfigChange,
@@ -99,6 +100,11 @@ function operationBranch(
 
 const anyValue: SchemaObject = {};
 
+const sectionNamespace: SchemaObject = {
+  type: 'string',
+  enum: runtimeConfigSectionNamespaces,
+};
+
 const configChangeSchema: SchemaObject = {
   type: 'object',
   properties: {
@@ -126,17 +132,23 @@ const configChangeSchema: SchemaObject = {
         operationBranch('set', {path: identifier, value: anyValue}),
         operationBranch('unset', {path: identifier}),
         operationBranch(
-          'plugin_enabled',
-          {pluginId: identifier, enabled: {type: 'boolean'}},
+          'section_enabled',
+          {
+            namespace: sectionNamespace,
+            id: identifier,
+            enabled: {type: 'boolean'},
+          },
           ['enabled'],
         ),
-        operationBranch('plugin_field_set', {
-          pluginId: identifier,
+        operationBranch('section_field_set', {
+          namespace: sectionNamespace,
+          id: identifier,
           field: identifier,
           value: anyValue,
         }),
-        operationBranch('plugin_field_unset', {
-          pluginId: identifier,
+        operationBranch('section_field_unset', {
+          namespace: sectionNamespace,
+          id: identifier,
           field: identifier,
         }),
       ],

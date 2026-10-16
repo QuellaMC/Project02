@@ -47,9 +47,10 @@ export {
 export {foldRunningTurns, type RunningTurns} from './running-turns.ts';
 export type {
   RuntimeConfigDiagnostic,
+  RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionInspectShape,
+  RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
-  RuntimePluginConfigFieldInspectShape,
-  RuntimePluginConfigInspectShape,
 } from '../../runtime/config/index.ts';
 /** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
 export type {DaemonRecord} from '../../runtime/storage/index.ts';

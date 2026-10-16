@@ -39,14 +39,15 @@ import {
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   resolveLayeredProject02RuntimeConfigWithSnapshot,
-  runtimeConfigDiagnosticMatchesPlugin,
+  runtimeConfigDiagnosticMatchesSection,
+  runtimeConfigSectionPath,
   type EffectiveProject02RuntimeConfigSnapshot,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeLocation,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimePluginActivationStatusShape,
+  type RuntimeConfigSectionActivationShape,
 } from '../runtime/config/index.ts';
 import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
 import {
@@ -68,7 +69,7 @@ export type RuntimePluginActivationSnapshot = {
   readonly enabled: boolean;
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
-  readonly activationStatus: RuntimePluginActivationStatusShape['status'];
+  readonly activationStatus: RuntimeConfigSectionActivationShape['status'];
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
@@ -182,14 +183,14 @@ export function discoverRuntimePluginCatalog(options: {
   );
   const reservedIdDiagnostics = discovery.packages
     .filter(item => isHostScopedFirstPartyRuntimePluginId(item.manifest.id))
-    .map((item): RuntimeConfigDiagnostic =>
-      Object.freeze({
-        severity: 'error',
-        code: 'runtime_plugin_package_reserved_system_service_id',
-        message: `Bundled runtime plugin package id "${item.manifest.id}" is reserved for a bootstrap system service.`,
-        scope: 'plugin',
-        pluginId: item.manifest.id,
-      }),
+    .map(item =>
+      createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_plugin_package_reserved_system_service_id',
+        `Bundled runtime plugin package id "${item.manifest.id}" is reserved for a bootstrap system service.`,
+        undefined,
+        {namespace: 'plugins', id: item.manifest.id},
+      ),
     );
   const composition = composeRuntimePluginCatalog({
     discoveredPackages: ordinaryPackages,
@@ -299,9 +300,9 @@ export function prepareConfiguredProject02PluginActivation(options: {
       loadedConfig: options.loadedConfig,
       runtimeLocation: options.runtimeLocation,
       overlayConfig,
-      pluginManifests,
-      defaultEnabledPluginIds,
-      validateInactivePluginConfigs:
+      sections: {plugins: pluginManifests},
+      defaultEnabledSectionIds: {plugins: defaultEnabledPluginIds},
+      validateInactiveSectionConfigs:
         options.validateInactivePluginConfigs === true,
     });
   const activation = resolveRuntimePluginActivation({
@@ -353,7 +354,7 @@ function activationCatalogComposition(options: {
 
 function runtimePluginConfigActivationByPluginId(
   activation: RuntimePluginActivationResult,
-): Readonly<Record<string, RuntimePluginActivationStatusShape>> {
+): Readonly<Record<string, RuntimeConfigSectionActivationShape>> {
   return Object.freeze(
     Object.fromEntries(
       activation.plugins.map(plugin => [
@@ -362,7 +363,7 @@ function runtimePluginConfigActivationByPluginId(
           enabled: plugin.enabled,
           status: plugin.activationStatus,
           reasons: Object.freeze([...plugin.activationReasons]),
-        } satisfies RuntimePluginActivationStatusShape),
+        } satisfies RuntimeConfigSectionActivationShape),
       ]),
     ),
   );
@@ -626,8 +627,8 @@ export function resolveRuntimePluginActivation(options: {
           'warning',
           'trusted_context_not_first_party',
           `Plugin "${manifest.id}" requests trusted_context access, which only bundled first-party packages can hold.`,
-          `plugins.${manifest.id}`,
-          {pluginId: manifest.id},
+          runtimeConfigSectionPath('plugins', manifest.id),
+          {namespace: 'plugins', id: manifest.id},
         ),
       );
     }
@@ -652,9 +653,10 @@ export function resolveRuntimePluginActivation(options: {
         ]),
         diagnostics: Object.freeze(
           diagnostics.filter(diagnostic =>
-            runtimeConfigDiagnosticMatchesPlugin({
+            runtimeConfigDiagnosticMatchesSection({
               diagnostic,
-              pluginId: manifest.id,
+              namespace: 'plugins',
+              id: manifest.id,
             }),
           ),
         ),
@@ -694,9 +696,10 @@ function pluginHasRuntimeConfigErrors(options: {
   return options.diagnostics.some(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      runtimeConfigDiagnosticMatchesPlugin({
+      runtimeConfigDiagnosticMatchesSection({
         diagnostic,
-        pluginId: options.pluginId,
+        namespace: 'plugins',
+        id: options.pluginId,
       }),
   );
 }
@@ -707,9 +710,10 @@ function isKnownPluginRuntimeConfigDiagnostic(options: {
 }): boolean {
   for (const pluginId of options.knownPluginIds) {
     if (
-      runtimeConfigDiagnosticMatchesPlugin({
+      runtimeConfigDiagnosticMatchesSection({
         diagnostic: options.diagnostic,
-        pluginId,
+        namespace: 'plugins',
+        id: pluginId,
       })
     ) {
       return true;
@@ -745,20 +749,13 @@ function runtimePluginPackageDiagnostic(options: {
     (configuredPluginId !== undefined && !hasDiscoveredWinner)
       ? 'error'
       : 'warning';
-  const base = {
+  return createRuntimeConfigDiagnostic(
     severity,
-    code: `runtime_plugin_package_${diagnostic.code}`,
-    message: diagnostic.message,
-    path: diagnostic.path,
-  } as const;
-
-  return pluginId === undefined
-    ? Object.freeze({...base, scope: 'global'})
-    : Object.freeze({
-        ...base,
-        scope: 'plugin',
-        pluginId,
-      });
+    `runtime_plugin_package_${diagnostic.code}`,
+    diagnostic.message,
+    diagnostic.path,
+    pluginId === undefined ? undefined : {namespace: 'plugins', id: pluginId},
+  );
 }
 
 function activationPluginManifests(
@@ -807,7 +804,7 @@ function activationDecision(options: {
   readonly configErrors: boolean;
 }): {
   readonly enabled: boolean;
-  readonly status: RuntimePluginActivationStatusShape['status'];
+  readonly status: RuntimeConfigSectionActivationShape['status'];
   readonly reasons: readonly string[];
 } {
   if (options.configuredEnabled === false) {
@@ -891,7 +888,7 @@ function unknownPluginDiagnostics(options: {
       continue;
     }
 
-    addUnknown(pluginId, `plugins.${pluginId}`);
+    addUnknown(pluginId, runtimeConfigSectionPath('plugins', pluginId));
   }
 
   if (options.defaultMemoryProviderId !== undefined) {
@@ -908,7 +905,7 @@ function unknownPluginDiagnostics(options: {
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
         path,
-        {pluginId},
+        {namespace: 'plugins', id: pluginId},
       ),
     ),
   );
@@ -951,7 +948,7 @@ function defaultMemoryProviderDecision(options: {
               'default_memory_provider_not_memory_provider',
               `Default memory provider "${options.configDefaultMemoryProvider}" is a "${knownPlugin.kind}" plugin, not a memory_provider plugin.`,
               'project02.defaultMemoryProvider',
-              {pluginId: knownPlugin.id},
+              {namespace: 'plugins', id: knownPlugin.id},
             ),
           ],
         };
@@ -971,7 +968,7 @@ function defaultMemoryProviderDecision(options: {
             'project02.defaultMemoryProvider',
             knownMemoryProvider === undefined
               ? undefined
-              : {pluginId: knownMemoryProvider.id},
+              : {namespace: 'plugins', id: knownMemoryProvider.id},
           ),
         ],
       };
