@@ -1,5 +1,6 @@
 import {join} from 'node:path';
 
+import {localUserSpeaker} from '../../../core/index.ts';
 import {createMemoryProviderRuntimePlugin} from '../../builtin/memory-provider/index.ts';
 import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
@@ -28,7 +29,6 @@ const mem0PluginDescriptorUrl = new URL(
   './project02.plugin.json',
   import.meta.url,
 );
-const mem0DefaultUserId = 'project02-user';
 
 export type Mem0PluginTransport = {
   readonly fetchFn?: Mem0FetchFunction;
@@ -54,9 +54,9 @@ export function createMem0PluginFromInput(
 ): RuntimePlugin {
   const provider = createMem0MemoryProvider({
     backend: configuredMem0Backend(input, transport),
-    userId: configuredStringValue(input, 'userId') ?? mem0DefaultUserId,
+    userId: defaultedStringValue(input, 'userId'),
     agentId: input.characterId ?? 'default',
-    userName: input.userDisplayName ?? 'You',
+    userName: input.userDisplayName ?? localUserSpeaker.displayName,
   });
 
   return createMemoryProviderRuntimePlugin(provider, {
@@ -68,7 +68,7 @@ function configuredMem0Backend(
   input: RuntimePluginFactoryInput,
   transport: Mem0PluginTransport,
 ): Mem0Backend {
-  const backendKind = configuredStringValue(input, 'backend') ?? 'platform';
+  const backendKind = defaultedStringValue(input, 'backend');
   const apiKey = configuredStringValue(input, 'apiKey');
   const baseUrl = configuredStringValue(input, 'baseUrl');
 
@@ -287,6 +287,27 @@ function configuredEmbedderDims(
   return typeof value === 'number' && Number.isInteger(value) && value > 0
     ? value
     : 'invalid';
+}
+
+/**
+ * For a field whose manifest declares a default, which the resolver
+ * applies wherever nothing sets the field: a value always arrives unless
+ * the field was set blank, and the plugin never supplies one of its own.
+ */
+function defaultedStringValue(
+  input: RuntimePluginFactoryInput,
+  fieldName: string,
+): string {
+  const value = configuredStringValue(input, fieldName);
+
+  if (value === undefined) {
+    throw new TypeError(
+      `Mem0 config field "${fieldName}" has no value: it is set blank, or ` +
+        'arrived without the default its manifest declares.',
+    );
+  }
+
+  return value;
 }
 
 function configuredStringValue(

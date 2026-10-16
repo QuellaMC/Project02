@@ -1,12 +1,14 @@
-import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
+import {localUserSpeaker} from '../../core/index.ts';
+import {
+  runtimeConfigValueMatchesField,
+  type RuntimeConfigFieldDeclaration,
+} from '../../plugins/api/index.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import type {ResolvedProject02RuntimeLocation} from './location.ts';
 import {runtimeConfigSectionPath} from './path.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
   createRuntimeConfigSectionMap,
-  defaultProject02ContextWindowTokens,
-  defaultProject02UserDisplayName,
   runtimeConfigSectionNamespaces,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
@@ -28,7 +30,11 @@ import {
   ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
-import {runtimeConfigValueMatchesField} from './schema.ts';
+import {
+  defaultProject02ContextWindowTokens,
+  defaultProject02Enabled,
+  defaultProject02RoleModelProvider,
+} from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -147,10 +153,7 @@ export function resolveEffectiveProject02RuntimeConfig(
     effectiveConfigFingerprint: createRuntimeConfigFingerprint(
       effectiveFingerprintInput({
         config,
-        storeRoot,
-        character: project02.character,
-        enabled: project02.enabled,
-        userDisplayName: project02.userDisplayName,
+        project02,
         redactedSectionConfigs: sectionResolution.redactedSectionConfigs,
       }),
       options.sections,
@@ -169,13 +172,14 @@ function resolvedProject02HostSection(options: {
   return Object.freeze({
     storeRoot: options.storeRoot,
     character: options.character,
-    enabled: authored?.enabled ?? true,
+    enabled: authored?.enabled ?? defaultProject02Enabled,
     // Trimmed here: the strict speaker constructor would crash on padding.
     userDisplayName: (
-      authored?.userDisplayName ?? defaultProject02UserDisplayName
+      authored?.userDisplayName ?? localUserSpeaker.displayName
     ).trim(),
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
-    roleModelProvider: authored?.roleModelProvider ?? 'local',
+    roleModelProvider:
+      authored?.roleModelProvider ?? defaultProject02RoleModelProvider,
     ...(authored?.nvidiaApiKey === undefined
       ? {}
       : {nvidiaApiKey: authored.nvidiaApiKey}),
@@ -204,6 +208,20 @@ export function runtimeConfigDiagnosticMatchesSection(options: {
     options.diagnostic.namespace === options.namespace &&
     options.diagnostic.id === options.id
   );
+}
+
+/** A field no layer its scope permits has authored takes its declared default. */
+export function unauthoredRuntimeConfigField(
+  field: RuntimeConfigFieldDeclaration,
+): ResolvedRuntimeConfigField {
+  return field.defaultValue === undefined
+    ? fieldResult({field, source: 'missing', resolved: !field.required})
+    : fieldResult({
+        field,
+        source: 'default',
+        resolved: true,
+        value: field.defaultValue,
+      });
 }
 
 function resolveSectionConfig(options: {
@@ -285,11 +303,7 @@ function resolveSectionConfigField(options: {
       );
     }
 
-    return fieldResult({
-      field: options.field,
-      source: 'missing',
-      resolved: !options.field.required,
-    });
+    return unauthoredRuntimeConfigField(options.field);
   }
 
   if (!runtimeConfigValueMatchesField(options.rawValue, options.field)) {
@@ -382,11 +396,7 @@ function resolveSecretField(options: {
     );
   }
 
-  return fieldResult({
-    field: options.field,
-    source: 'missing',
-    resolved: !options.field.required,
-  });
+  return unauthoredRuntimeConfigField(options.field);
 }
 
 function shouldValidateSectionConfig(options: {
@@ -524,31 +534,25 @@ function fieldResult(options: {
 
 function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly storeRoot: string;
-  readonly character: string;
-  readonly enabled: boolean;
-  readonly userDisplayName: string;
+  readonly project02: ResolvedProject02RuntimeConfig['project02'];
   readonly redactedSectionConfigs: RuntimeConfigSectionMap<RedactedRuntimeSectionConfig>;
 }): RuntimeConfigValue {
+  const {project02} = options;
   const activation = sectionActivationFingerprintInput(options.config);
 
   return Object.freeze({
     version: options.config?.version ?? 'none',
     project02: Object.freeze({
-      storeRoot: options.storeRoot,
-      character: options.character,
-      enabled: options.enabled,
-      userDisplayName: options.userDisplayName,
-      defaultMemoryProvider:
-        options.config?.project02?.defaultMemoryProvider ?? null,
-      roleModelProvider:
-        options.config?.project02?.roleModelProvider ?? 'local',
+      storeRoot: project02.storeRoot,
+      character: project02.character,
+      enabled: project02.enabled,
+      userDisplayName: project02.userDisplayName,
+      defaultMemoryProvider: project02.defaultMemoryProvider ?? null,
+      roleModelProvider: project02.roleModelProvider,
       // Presence only: this fingerprint is shown, so the key never is.
-      nvidiaApiKeySet: options.config?.project02?.nvidiaApiKey !== undefined,
-      nvidiaModel: options.config?.project02?.nvidiaModel ?? null,
-      contextWindowTokens:
-        options.config?.project02?.contextWindowTokens ??
-        defaultProject02ContextWindowTokens,
+      nvidiaApiKeySet: project02.nvidiaApiKey !== undefined,
+      nvidiaModel: project02.nvidiaModel ?? null,
+      contextWindowTokens: project02.contextWindowTokens,
     }),
     sections: options.redactedSectionConfigs,
     ...(activation === undefined ? {} : {activation}),

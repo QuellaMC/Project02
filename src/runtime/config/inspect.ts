@@ -18,6 +18,7 @@ import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
   runtimeConfigDiagnosticMatchesSection,
+  unauthoredRuntimeConfigField,
   type ResolvedRuntimeSectionConfigs,
 } from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
@@ -150,9 +151,6 @@ export function createRuntimeSectionConfigInspectShape(options: {
             ...(field.valueType === undefined
               ? {}
               : {valueType: field.valueType}),
-            ...(field.defaultValueSummary === undefined
-              ? {}
-              : {defaultValueSummary: field.defaultValueSummary}),
             ...(field.allowedValues === undefined
               ? {}
               : {allowedValues: Object.freeze([...field.allowedValues])}),
@@ -184,9 +182,8 @@ export function createRuntimeSectionConfigInspectShape(options: {
 
 /**
  * The host fields in the shape plugin fields already take, so a settings
- * page renders one component for both. Defaults are not resolved here: an
- * unauthored field reads `missing`, and `defaultValueSummary` names what
- * applies — the runtime applies it, a page only shows it.
+ * page renders one component for both: an unauthored field carries its
+ * declared default as its effective value, as a section's field does.
  */
 export function createProject02ConfigFieldInspectShapes(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
@@ -218,9 +215,6 @@ export function createProject02ConfigFieldInspectShapes(options: {
         required: field.required,
         secret: field.secret,
         ...(field.valueType === undefined ? {} : {valueType: field.valueType}),
-        ...(field.defaultValueSummary === undefined
-          ? {}
-          : {defaultValueSummary: field.defaultValueSummary}),
         ...(field.allowedValues === undefined
           ? {}
           : {allowedValues: Object.freeze([...field.allowedValues])}),
@@ -236,13 +230,16 @@ export function createProject02ConfigFieldInspectShapes(options: {
             : globalValue !== undefined
               ? 'global'
               : 'default',
-        effective: Object.freeze({
-          name: field.name,
-          secret: field.secret,
-          source: effectiveValue === undefined ? 'missing' : 'config',
-          resolved: true,
-          ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
-        }),
+        effective:
+          effectiveValue === undefined
+            ? unauthoredRuntimeConfigField(field)
+            : Object.freeze({
+                name: field.name,
+                secret: field.secret,
+                source: 'config',
+                resolved: true,
+                value: effectiveValue,
+              }),
       } satisfies RuntimeConfigFieldInspectShape);
     }),
   );

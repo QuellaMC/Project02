@@ -25,10 +25,6 @@ export type RuntimeConfigValue =
 type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
-/** A safe floor for small local models; a stopgap until providers report their own limit. */
-export const defaultProject02ContextWindowTokens = 32768;
-export const defaultProject02UserDisplayName = 'You';
-
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {
@@ -163,7 +159,7 @@ export type LoadedProject02RuntimeConfig = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-type RuntimeConfigFieldSource = 'config' | 'missing';
+type RuntimeConfigFieldSource = 'config' | 'default' | 'missing';
 
 /** Distinct from RuntimeConfigFieldSource, which says how a field resolves. */
 export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;
@@ -230,7 +226,6 @@ export type RuntimeConfigFieldInspectShape = {
   readonly required: boolean;
   readonly secret: boolean;
   readonly valueType?: RuntimeConfigValueType;
-  readonly defaultValueSummary?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable: boolean;
   readonly reloadRequired: boolean;

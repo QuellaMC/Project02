@@ -26,6 +26,7 @@ import type {
   RuntimePluginCompatibilityMetadata,
   RuntimePluginConfigMetadata,
   RuntimePluginContextItem,
+  RuntimePluginJsonValue,
   RuntimePluginManifest,
   RuntimePluginProvidedTool,
   RuntimePluginRuntimePolicy,
@@ -500,6 +501,12 @@ function requiredConfigMetadata(
       );
     }
 
+    const defaultValueRejection = configFieldDefaultValueRejection(field.value);
+
+    if (defaultValueRejection !== undefined) {
+      return defaultValueRejection;
+    }
+
     seenNames.add(field.value.name);
     fields.push(field.value);
   }
@@ -548,10 +555,7 @@ function requiredConfigField(
           `Plugin config field scope must be ${configScopeWords}.`,
         );
   const valueType = optionalRuntimePluginConfigValueType(value['valueType']);
-  const defaultValueSummary = optionalString(
-    value['defaultValueSummary'],
-    'defaultValueSummary',
-  );
+  const defaultValue = optionalConfigFieldDefaultValue(value['defaultValue']);
   const allowedValues =
     value['allowedValues'] === undefined
       ? accept(undefined)
@@ -574,7 +578,7 @@ function requiredConfigField(
   if (secret.status === 'rejected') return secret;
   if (scope.status === 'rejected') return scope;
   if (valueType.status === 'rejected') return valueType;
-  if (defaultValueSummary.status === 'rejected') return defaultValueSummary;
+  if (defaultValue.status === 'rejected') return defaultValue;
   if (allowedValues.status === 'rejected') return allowedValues;
   if (agentMutable.status === 'rejected') return agentMutable;
   if (reloadRequired.status === 'rejected') return reloadRequired;
@@ -594,7 +598,7 @@ function requiredConfigField(
     secret: secret.value,
     scope: scope.value,
     valueType: valueType.value,
-    defaultValueSummary: defaultValueSummary.value,
+    defaultValue: defaultValue.value,
     allowedValues: allowedValues.value,
     agentMutable: agentMutable.value,
     reloadRequired: reloadRequired.value,
@@ -609,7 +613,7 @@ function acceptRuntimePluginConfigField(options: {
   readonly secret: boolean;
   readonly scope: RuntimeConfigSectionScope | undefined;
   readonly valueType: RuntimeConfigValueType | undefined;
-  readonly defaultValueSummary: string | undefined;
+  readonly defaultValue: RuntimePluginJsonValue | undefined;
   readonly allowedValues: readonly string[] | undefined;
   readonly agentMutable: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
@@ -625,9 +629,9 @@ function acceptRuntimePluginConfigField(options: {
       ...(options.valueType === undefined
         ? {}
         : {valueType: options.valueType}),
-      ...(options.defaultValueSummary === undefined
+      ...(options.defaultValue === undefined
         ? {}
-        : {defaultValueSummary: options.defaultValueSummary}),
+        : {defaultValue: options.defaultValue}),
       ...(options.allowedValues === undefined
         ? {}
         : {
@@ -659,6 +663,102 @@ function optionalRuntimePluginConfigValueType(
   }
 
   return accept(value);
+}
+
+function optionalConfigFieldDefaultValue(
+  value: unknown,
+): RuntimePluginValidationResult<RuntimePluginJsonValue | undefined> {
+  if (value === undefined) {
+    return accept(undefined);
+  }
+
+  try {
+    return accept(
+      createJsonBoundarySnapshot(value, {
+        field: 'Plugin config field defaultValue',
+      }),
+    );
+  } catch (error: unknown) {
+    return reject(
+      'malformed_manifest',
+      error instanceof Error
+        ? error.message
+        : 'Plugin config field defaultValue must be a JSON value.',
+    );
+  }
+}
+
+/**
+ * A default is what a field takes wherever nothing sets it, so it is a
+ * value the field accepts; a credential, or a value its operator must
+ * choose, is never one a manifest decides.
+ */
+function configFieldDefaultValueRejection(
+  field: RuntimeConfigFieldDeclaration,
+): RuntimePluginValidationResult<never> | undefined {
+  if (field.defaultValue === undefined) {
+    return undefined;
+  }
+
+  if (field.secret) {
+    return reject(
+      'malformed_manifest',
+      `Plugin config field "${field.name}" is secret and cannot declare a ` +
+        'defaultValue: a credential never ships in a manifest.',
+    );
+  }
+
+  if (field.required) {
+    return reject(
+      'malformed_manifest',
+      `Plugin config field "${field.name}" is required and cannot declare a ` +
+        'defaultValue: a required field is one its operator must set.',
+    );
+  }
+
+  return runtimeConfigValueMatchesField(field.defaultValue, field)
+    ? undefined
+    : reject(
+        'malformed_manifest',
+        `Plugin config field "${field.name}" defaultValue must be a value ` +
+          'of its valueType, and one of its allowedValues when it has them.',
+      );
+}
+
+/** Beside the declaration it reads, so a manifest's default and every authored value meet one judge. */
+export function runtimeConfigValueMatchesField(
+  value: RuntimePluginJsonValue,
+  field: RuntimeConfigFieldDeclaration,
+): boolean {
+  if (
+    field.allowedValues !== undefined &&
+    (typeof value !== 'string' || !field.allowedValues.includes(value))
+  ) {
+    return false;
+  }
+
+  switch (field.valueType) {
+    case undefined:
+      return true;
+    case 'string':
+    case 'path':
+    case 'enum':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'object':
+      return (
+        typeof value === 'object' && value !== null && !Array.isArray(value)
+      );
+    case 'array':
+      return Array.isArray(value);
+    case 'secret':
+      return field.secret && typeof value === 'string';
+  }
+
+  return true;
 }
 
 function requiredRuntimePolicy(

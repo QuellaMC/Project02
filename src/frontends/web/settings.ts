@@ -329,8 +329,8 @@ export function rowAt(view: ConfigView, key: string): SettingsRow | undefined {
 
 /**
  * A fresh home has chosen no provider: the home's view says so of
- * `roleModelProvider`, unauthored and with nothing in effect. That is the
- * whole judgement behind the first run's frame.
+ * `roleModelProvider`, unauthored and with only its default in effect.
+ * That is the whole judgement behind the first run's frame.
  */
 export function setupNeeded(view: ConfigView): boolean {
   if (view.status !== 'ok') {
@@ -344,7 +344,7 @@ export function setupNeeded(view: ConfigView): boolean {
   return (
     provider !== undefined &&
     !provider.authored.configured &&
-    provider.effective.source === 'missing'
+    provider.effective.source === 'default'
   );
 }
 

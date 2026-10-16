@@ -180,9 +180,6 @@ function modelVisiblePluginConfigInspection(
       required: field.required,
       sensitive: field.secret,
       ...(field.valueType === undefined ? {} : {valueType: field.valueType}),
-      ...(field.defaultValueSummary === undefined
-        ? {}
-        : {defaultValueSummary: field.defaultValueSummary}),
       ...(field.allowedValues === undefined
         ? {}
         : {allowedValues: field.allowedValues}),

@@ -162,7 +162,7 @@ function whereText(
     return "from the home's settings";
   }
 
-  return `default: ${field.defaultValueSummary ?? 'none'}`;
+  return `default: ${field.effective.value === undefined ? 'none' : valueText(field, field.effective.value)}`;
 }
 
 function FieldRow({
@@ -387,8 +387,8 @@ function FieldControl({
         type="checkbox"
         aria-label={name}
         // What was just flipped shows at once; the view says the rest. A
-        // field nothing has set is neither on nor off here — its summary
-        // says what applies — and a click decides it.
+        // field nothing has set and that has no default is neither on nor
+        // off here, and a click decides it.
         checked={
           edit !== undefined ? edit === 'true' : field.effective.value === true
         }

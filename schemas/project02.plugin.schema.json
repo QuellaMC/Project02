@@ -343,8 +343,8 @@
             "enum"
           ]
         },
-        "defaultValueSummary": {
-          "type": "string"
+        "defaultValue": {
+          "description": "What the field takes wherever no settings set it: a value of its valueType, and one of its allowedValues when it has them. A secret or a required field declares none."
         },
         "allowedValues": {
           "$ref": "#/definitions/stringArray"
@@ -379,6 +379,25 @@
                 }
               },
               "required": ["agentMutable"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "defaultValue": true
+            },
+            "required": ["defaultValue"]
+          },
+          "then": {
+            "description": "A secret or a required field declares no default.",
+            "properties": {
+              "required": {
+                "const": false
+              },
+              "secret": {
+                "const": false
+              }
             }
           }
         }

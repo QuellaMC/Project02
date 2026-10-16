@@ -62,7 +62,8 @@ export type RuntimeConfigFieldDeclaration = {
   /** Narrows the section's scope for this field; absent, it takes the section's. */
   readonly scope?: RuntimeConfigSectionScope;
   readonly valueType?: RuntimeConfigValueType;
-  readonly defaultValueSummary?: string;
+  /** Taken wherever no layer the field's scope permits sets a value. */
+  readonly defaultValue?: RuntimePluginJsonValue;
   readonly allowedValues?: readonly string[];
   readonly agentMutable?: boolean;
   readonly reloadRequired?: boolean;

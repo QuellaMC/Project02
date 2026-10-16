@@ -302,6 +302,74 @@ describe('plugin package descriptor schema parity', () => {
     });
   });
 
+  it("accepts a default of the field's own type; the schema refuses one on a secret or a required field and defaultValueSummary as unknown, and the code validator refuses those and one of another type", () => {
+    const descriptor = validDescriptor();
+    const manifest = descriptor['manifest'];
+
+    if (!isJsonRecord(manifest)) {
+      throw new Error('Expected the demo descriptor to carry a manifest.');
+    }
+
+    const withField = (field: Readonly<Record<string, unknown>>) => ({
+      ...descriptor,
+      manifest: {
+        ...manifest,
+        config: {
+          scope: 'global_with_character_overrides',
+          fields: [
+            {
+              name: 'mirror',
+              description: 'On unless someone turns it off.',
+              required: false,
+              secret: false,
+              valueType: 'boolean',
+              redactionLabels: [],
+              ...field,
+            },
+          ],
+        },
+      },
+    });
+    const ownType = withField({defaultValue: true});
+
+    expect(
+      validateAgainstSchema(ownType),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseRuntimePluginPackageDescriptor(ownType).status).toBe(
+      'accepted',
+    );
+
+    expect(
+      validateAgainstSchema(withField({defaultValue: true, secret: true})),
+    ).toBe(false);
+    expect(
+      validateAgainstSchema(withField({defaultValue: true, required: true})),
+    ).toBe(false);
+    expect(
+      validateAgainstSchema(withField({defaultValueSummary: 'true'})),
+    ).toBe(false);
+    expect(validateAgainstSchema.errors).toContainEqual(
+      expect.objectContaining({
+        keyword: 'additionalProperties',
+        params: {additionalProperty: 'defaultValueSummary'},
+      }),
+    );
+
+    // A default's type has one judge, the code validator: the schema
+    // cannot even say allowedValues.
+    for (const field of [
+      {defaultValue: 'on'},
+      {defaultValue: true, secret: true},
+      {defaultValue: true, required: true},
+    ]) {
+      expect(
+        parseRuntimePluginPackageDescriptor(withField(field)).status,
+        JSON.stringify(field),
+      ).toBe('rejected');
+    }
+  });
+
   it('accepts a string $schema key, and its absence, in both validators', () => {
     const descriptor = validDescriptor();
 

@@ -13,13 +13,13 @@ import {
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticMatchesSection,
 } from './resolve.ts';
-import {
-  runtimeConfigFieldValueMismatchMessage,
-  runtimeConfigValueMatchesField,
-} from './schema.ts';
+import {runtimeConfigFieldValueMismatchMessage} from './schema.ts';
 import {runtimeSectionScopeViolation} from './section-scope.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
+import {
+  runtimeConfigValueMatchesField,
+  type RuntimeConfigFieldDeclaration,
+} from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
   RuntimeConfigMutationOperation,

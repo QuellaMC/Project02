@@ -50,7 +50,10 @@ import {
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
 import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
-import type {RuntimePluginManifest} from '../../src/plugins/index.ts';
+import {
+  createRuntimePlugin,
+  type RuntimePluginManifest,
+} from '../../src/plugins/index.ts';
 
 function seededHome(): {
   readonly homeRoot: string;
@@ -826,6 +829,64 @@ describe('plugin manifest config scope policy', () => {
     });
   });
 
+  it('resolves a declared default beneath every layer, and what a layer sets over it', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const {manifest} = createRuntimePlugin({
+      manifest: {
+        ...requiredSecretPlugin('scope.defaulted').manifest,
+        config: {
+          scope: 'global_with_character_overrides',
+          fields: [
+            {
+              name: 'mirror',
+              description: 'On unless someone turns it off.',
+              required: false,
+              secret: false,
+              valueType: 'boolean',
+              defaultValue: true,
+              redactionLabels: [],
+            },
+          ],
+        },
+      },
+    });
+    const setMirror = (path: string, mirror: boolean) => {
+      writeRuntimeConfig(path, {
+        plugins: {'scope.defaulted': {config: {mirror}}},
+      });
+    };
+    const miraMirror = () => {
+      const runtimeLocation = runtimeLocationForTest({storeRoot: homeRoot});
+
+      return resolveLayeredProject02RuntimeConfig({
+        runtimeLocation,
+        loadedConfig: loadRuntimeConfigForTest({storeRoot: homeRoot}),
+        overlayConfig: readCharacterOverlayForScope(
+          runtimeLocation.characterScope,
+        ).overlay,
+        sections: {plugins: [manifest]},
+      }).sectionConfigs.plugins['scope.defaulted']?.['mirror'];
+    };
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    expect(miraMirror()).toMatchObject({
+      source: 'default',
+      resolved: true,
+      value: true,
+    });
+
+    setMirror(configPath, false);
+    expect(miraMirror()).toMatchObject({source: 'config', value: false});
+
+    setMirror(configPath, true);
+    setMirror(characterOverlayConfigPath(dataRoot), false);
+    expect(miraMirror()).toMatchObject({source: 'config', value: false});
+  });
+
   it('inspects the host fields in the plugin field shape, per scope', async () => {
     const {homeRoot, dataRoot} = seededHome();
 
@@ -877,8 +938,7 @@ describe('plugin manifest config scope policy', () => {
     expect(character['roleModelProvider']).toMatchObject({
       authored: {configured: false},
       effectiveSource: 'default',
-      effective: {source: 'missing'},
-      defaultValueSummary: 'local',
+      effective: {source: 'default', resolved: true, value: 'local'},
       allowedValues: ['local', 'nvidia'],
     });
     expect(global['userDisplayName']).toMatchObject({

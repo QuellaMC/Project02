@@ -102,12 +102,10 @@ export {
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
-  runtimeConfigValueMatchesField,
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 export {runtimeConfigSectionPath} from './path.ts';
 export {
-  defaultProject02UserDisplayName,
   runtimeConfigDiagnosticLocation,
   runtimeConfigSectionNamespaces,
   runtimeConfigVersion,
