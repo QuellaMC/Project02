@@ -78,7 +78,7 @@ describe('character overlay that cannot be inspected', () => {
       characterScope: {characterId: 'mira', dataRoot},
     };
     const unreadableFingerprint = layeredRuntimeConfigFingerprintForScope({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       ...scope,
       overlay,
     });
@@ -87,7 +87,7 @@ describe('character overlay that cannot be inspected', () => {
 
     expect(
       layeredRuntimeConfigFingerprintForScope({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         ...scope,
         overlay: readCharacterOverlayForScope(scope.characterScope).overlay,
       }),

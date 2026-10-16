@@ -85,7 +85,7 @@ export async function createConfirmationHome(
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
   await gateway.startCharacter(characterId);

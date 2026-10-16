@@ -211,7 +211,6 @@ export function runtimeConfigDiagnosticMatchesSection(options: {
 }): boolean {
   return (
     options.diagnostic.scope === 'section' &&
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one namespace until connectors join; lint reports this directive unused once a second one does
     options.diagnostic.namespace === options.namespace &&
     options.diagnostic.id === options.id
   );

@@ -27,6 +27,7 @@ import {
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
 import {canonicalRuntimeConfigPath, runtimeConfigSectionPath} from './path.ts';
+import {unknownConnectorDiagnostics} from './connectors.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -328,6 +329,8 @@ function parseProject02RuntimeConfig(value: unknown): {
       sections = {...sections, [namespace]: configs};
     }
   }
+
+  diagnostics.push(...unknownConnectorDiagnostics(sections));
 
   if (diagnostics.some(item => item.severity === 'error')) {
     return {

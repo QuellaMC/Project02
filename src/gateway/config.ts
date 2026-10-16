@@ -19,6 +19,7 @@ import {
   createProject02ConfigFieldInspectShapes,
   createRuntimeConfigAuthoredSnapshot,
   createRuntimeConfigFingerprint,
+  createRuntimeConfigSections,
   createRuntimeSectionConfigInspectShape,
   layeredRuntimeConfigFingerprintForScope,
   project02RuntimeConfigFieldDefinitions,
@@ -120,7 +121,9 @@ export async function applyConfigChange(
       return refusedChange('invalid', prepared);
     }
 
-    const sections = {plugins: manifestsOf(catalog.catalogEntries)};
+    const sections = createRuntimeConfigSections({
+      plugins: manifestsOf(catalog.catalogEntries),
+    });
     const target = await resolveWriteTarget({
       home,
       target: change.target,
@@ -165,7 +168,9 @@ function resolveGlobalScope(
   const discovery = discoverRuntimePluginCatalog({
     storeRoot: home.runtimeLocation.homeRoot,
   });
-  const sections = {plugins: manifestsOf(discovery.catalogEntries)};
+  const sections = createRuntimeConfigSections({
+    plugins: manifestsOf(discovery.catalogEntries),
+  });
   const layeredConfig = createLayeredProject02RuntimeConfigSnapshot({
     loadedConfig: loaded,
     sections,
@@ -255,7 +260,9 @@ function resolveCharacterScope(
   }
 
   const plan = startup.activationPlan;
-  const sections = {plugins: manifestsOf(plan.catalogEntries)};
+  const sections = createRuntimeConfigSections({
+    plugins: manifestsOf(plan.catalogEntries),
+  });
 
   return {
     // The overlay the plan was made from — for a never-started character

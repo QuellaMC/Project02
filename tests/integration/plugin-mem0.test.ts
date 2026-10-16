@@ -894,7 +894,7 @@ function resolvedConfig(
       plugins: {[mem0PluginId]: {config: values}},
     },
     target: 'character',
-    sections: {plugins: [createMem0PluginManifest()]},
+    sections: {plugins: [createMem0PluginManifest()], connectors: []},
   }).sectionConfigs.plugins[mem0PluginId];
 
   if (resolved === undefined) {

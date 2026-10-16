@@ -9,7 +9,10 @@ import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 export const runtimeConfigVersion = 'project02.config.v2';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
 /** The document's top-level stanzas that hold declared sections by id. */
-export const runtimeConfigSectionNamespaces = ['plugins'] as const;
+export const runtimeConfigSectionNamespaces = [
+  'plugins',
+  'connectors',
+] as const;
 
 export type RuntimeConfigSectionNamespace =
   (typeof runtimeConfigSectionNamespaces)[number];
@@ -41,6 +44,7 @@ export type Project02RuntimeConfig = {
   readonly version: typeof runtimeConfigVersion;
   readonly project02?: Project02HostConfig;
   readonly plugins?: Readonly<Record<string, Project02RuntimeSectionConfig>>;
+  readonly connectors?: Readonly<Record<string, Project02RuntimeSectionConfig>>;
 };
 
 export type Project02RuntimeSectionConfig = {

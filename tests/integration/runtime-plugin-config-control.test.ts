@@ -90,7 +90,7 @@ describe('runtime plugin config control', () => {
       runtimeLocation: runtimeLocationForTest({configPath, storeRoot: root}),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     writeRuntimeConfig(configPath, {
@@ -111,7 +111,7 @@ describe('runtime plugin config control', () => {
       runtimeLocation: runtimeLocationForTest({configPath, storeRoot: root}),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(inspected).toMatchObject({
@@ -172,7 +172,7 @@ describe('runtime plugin config control', () => {
     // The manifest names the secret field, so its value stays out of the hash.
     expect(inspected.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
         globalConfig: authoredConfig,
         characterId: 'mira',
         overlay: {source: 'none'},
@@ -207,7 +207,7 @@ describe('runtime plugin config control', () => {
 
       namespace: 'plugins',
       declaration: configControlManifest(),
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
     });
 
     expect(inspected.diagnostics).toEqual(
@@ -239,7 +239,7 @@ describe('runtime plugin config control', () => {
     });
 
     const setResult = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -280,7 +280,7 @@ describe('runtime plugin config control', () => {
     expect(readConfigFile(fixture.configPath)).toEqual(expectedAfterSet);
 
     const unsetResult = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: setResult.fingerprint,
       request: {
@@ -332,13 +332,13 @@ describe('runtime plugin config control', () => {
     // With no character lens, the fingerprint is the global document's
     // alone — the one a daemon's global view hands out.
     const result = applyRuntimeConfigControlOperation({
-      sections: {plugins: [fixture.manifest]},
+      sections: {plugins: [fixture.manifest], connectors: []},
       target,
       expectedFingerprint: createRuntimeConfigFingerprint(
         createRuntimeConfigAuthoredSnapshot(
           loadRuntimeConfigForTest({configPath: fixture.configPath}),
         ).document,
-        {plugins: [fixture.manifest]},
+        {plugins: [fixture.manifest], connectors: []},
       ),
       request: {
         kind: 'section_field',
@@ -368,7 +368,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -401,7 +401,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -430,7 +430,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -462,7 +462,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -497,7 +497,7 @@ describe('runtime plugin config control', () => {
     // overlay. Removing a credential is the unset operation.
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -549,7 +549,7 @@ describe('runtime plugin config control', () => {
     ] as const) {
       expect(() =>
         applyRuntimeConfigControlOperation({
-          sections: {plugins: []},
+          sections: {plugins: [], connectors: []},
           target,
           expectedFingerprint: fixture.fingerprint,
           request: {
@@ -577,7 +577,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -632,10 +632,10 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: createLayeredRuntimeConfigFingerprint({
-          sections: {plugins: []},
+          sections: {plugins: [], connectors: []},
           globalConfig: invalidConfig,
           characterId: 'mira',
           overlay: {source: 'none'},
@@ -675,7 +675,7 @@ describe('runtime plugin config control', () => {
 
       namespace: 'plugins',
       declaration: plugin.manifest,
-      sections: {plugins: [plugin.manifest]},
+      sections: {plugins: [plugin.manifest], connectors: []},
     });
 
     expect(before.id).toBe('operator.rebind-inspect');
@@ -698,7 +698,7 @@ describe('runtime plugin config control', () => {
 
         namespace: 'plugins',
         declaration: plugin.manifest,
-        sections: {plugins: [plugin.manifest]},
+        sections: {plugins: [plugin.manifest], connectors: []},
       }),
     ).toThrow('holds history for character "nova"');
   });
@@ -733,7 +733,7 @@ describe('runtime plugin config control', () => {
       scope: 'global',
     });
     const committed = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -751,7 +751,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -793,7 +793,7 @@ describe('runtime plugin config control', () => {
       scope: 'global',
     });
     const options = {
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -813,7 +813,7 @@ describe('runtime plugin config control', () => {
 
     expect(prepared.resultFingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: expectedConfig,
         characterId: 'mira',
         overlay: {source: 'none'},
@@ -839,7 +839,7 @@ describe('runtime plugin config control', () => {
 
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const bootstrapBase: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
@@ -848,7 +848,7 @@ describe('runtime plugin config control', () => {
     expect(existsSync(configPath)).toBe(false);
     expect(inspected.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: bootstrapBase,
         characterId: 'mira',
         overlay: {source: 'none'},
@@ -856,7 +856,7 @@ describe('runtime plugin config control', () => {
     );
 
     const result = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           storeRoot: storeRoot,
@@ -1027,7 +1027,7 @@ function createSeededControlFixture(): {
 
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     }).fingerprint,
   };
 }

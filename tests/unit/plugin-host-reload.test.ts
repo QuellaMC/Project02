@@ -198,7 +198,7 @@ function reloadHost(options: {
       runtimeLocation,
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
   let calls = 0;
 

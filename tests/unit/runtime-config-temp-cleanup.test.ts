@@ -44,7 +44,7 @@ describe('runtime config atomic temporary-file cleanup', () => {
     const plugin = requiredSecretPlugin('memory');
 
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({storeRoot}),
         scope: 'global',

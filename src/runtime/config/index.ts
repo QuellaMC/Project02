@@ -29,6 +29,7 @@ export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,
 } from './plugin-control-capability.ts';
+export {builtInConnectors, createRuntimeConfigSections} from './connectors.ts';
 export {
   createLayeredRuntimeConfigFingerprint,
   createRuntimeConfigFingerprint,

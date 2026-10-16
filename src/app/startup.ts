@@ -2,6 +2,7 @@ import {
   classifyRuntimePluginCatalogDiscovery,
   discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
+  runtimeConfigDiagnosticConcernsCharacter,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
@@ -25,6 +26,7 @@ import {
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
+  createRuntimeConfigSections,
   diagnosticsHaveErrors,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
@@ -356,11 +358,11 @@ function planRuntimeCliActivationStartup(input: {
       ? {}
       : {factoryOverrides: options.factories}),
   });
-  const catalogSections = {
+  const catalogSections = createRuntimeConfigSections({
     plugins: Object.values(catalogDiscovery.catalogEntries).map(
       entry => entry.manifest,
     ),
-  };
+  });
   const buildPlanState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
   ): StartupPlanState => {
@@ -579,7 +581,7 @@ function characterMaterializationOperation(
       runtimeLocation: input.runtimeLocation,
       scope: 'character',
     }),
-    sections: {plugins: input.pluginManifests},
+    sections: createRuntimeConfigSections({plugins: input.pluginManifests}),
     characterMaterialization: {
       document: input.document,
       fillMissingFields:
@@ -738,6 +740,7 @@ function materializationConfigPreflightDiagnostics(
     plan.resolvedConfig.diagnostics.filter(
       diagnostic =>
         diagnostic.severity === 'error' &&
+        runtimeConfigDiagnosticConcernsCharacter(diagnostic) &&
         // A missing credential is one plugin's readiness failure, reported
         // by activation; it does not make the document invalid.
         !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&

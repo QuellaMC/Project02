@@ -97,7 +97,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         request: {
           kind: 'section_field',
@@ -130,7 +130,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         request: {
           kind: 'section_field',
@@ -178,7 +178,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         request: {
           kind: 'document',
@@ -214,7 +214,7 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       request: {
         kind: 'document',
@@ -248,7 +248,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(result.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig,
         characterId: 'mira',
         overlay: {source: 'overlay', config: result.config},
@@ -273,7 +273,7 @@ describe('scope-aware runtime config mutations', () => {
     // A character's credential lands in its own overlay, never in the
     // home's document, so two characters can hold different accounts.
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       request: {
         kind: 'section_field',
@@ -313,7 +313,7 @@ describe('scope-aware runtime config mutations', () => {
     };
 
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       request: {
         kind: 'section_field',
@@ -365,7 +365,7 @@ describe('scope-aware runtime config mutations', () => {
     // the pending value satisfies the required secret it supplies.
     applyRuntimeConfigControlOperation({
       target,
-      sections: {plugins: [requiredSecretManifest]},
+      sections: {plugins: [requiredSecretManifest], connectors: []},
       request: {
         kind: 'section_field',
         namespace: 'plugins',
@@ -396,7 +396,7 @@ describe('scope-aware runtime config mutations', () => {
     // The marker is proof that the guarded initializer ran.
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         request: {
           kind: 'document',
@@ -424,7 +424,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const freshExpected = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       request: {
         kind: 'document',
@@ -437,7 +437,7 @@ describe('scope-aware runtime config mutations', () => {
     }).fingerprint;
 
     const committed = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: freshExpected,
       request: {
@@ -453,7 +453,7 @@ describe('scope-aware runtime config mutations', () => {
     expect(committed.config.project02?.['userDisplayName']).toBe('Second');
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: freshExpected,
         request: {
@@ -492,7 +492,7 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: expected,
       request: {
@@ -529,7 +529,7 @@ describe('scope-aware runtime config mutations', () => {
     });
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target: bareTarget,
         expectedFingerprint: resolveScopedExpected(bareHome),
         request: {
@@ -604,6 +604,7 @@ describe('plugin manifest config scope policy', () => {
         characterOnlyConfigPlugin('scope.character-only').manifest,
         fieldScopedConfigPlugin('scope.field-scoped').manifest,
       ],
+      connectors: [],
     };
 
     writeRuntimeConfig(configPath, {
@@ -715,7 +716,7 @@ describe('plugin manifest config scope policy', () => {
       (scope: RuntimeConfigFieldScope, request: RuntimeConfigControlRequest) =>
       () =>
         applyRuntimeConfigControlOperation({
-          sections: {plugins: [plugin.manifest, homeOnly]},
+          sections: {plugins: [plugin.manifest, homeOnly], connectors: []},
           target: resolveRuntimeConfigScopeTarget({
             runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
             scope,
@@ -752,7 +753,7 @@ describe('plugin manifest config scope policy', () => {
   it('requires of a target only what its scope can supply', () => {
     const {homeRoot, configPath} = seededHome();
     const {manifest} = requiredCharacterFieldConfigPlugin('scope.required-own');
-    const sections = {plugins: [manifest]};
+    const sections = {plugins: [manifest], connectors: []};
     const runtimeLocation = runtimeLocationForTest({storeRoot: homeRoot});
     const diagnosticsOf = (
       overlayConfig?: LoadedProject02CharacterOverlayConfig,
@@ -845,7 +846,7 @@ describe('plugin manifest config scope policy', () => {
         overlayConfig: readCharacterOverlayForScope(
           runtimeLocation.characterScope,
         ).overlay,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       }).sectionConfigs.plugins['scope.layered-secrets']?.['apiKey'];
     };
 
@@ -918,7 +919,7 @@ describe('plugin manifest config scope policy', () => {
         overlayConfig: readCharacterOverlayForScope(
           runtimeLocation.characterScope,
         ).overlay,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       }).sectionConfigs.plugins['scope.defaulted']?.['mirror'];
     };
 
@@ -962,7 +963,7 @@ describe('plugin manifest config scope policy', () => {
         createProject02ConfigFieldInspectShapes({
           layeredConfig: createLayeredProject02RuntimeConfigSnapshot({
             loadedConfig,
-            sections: {plugins: []},
+            sections: {plugins: [], connectors: []},
             ...(targetScope === 'global'
               ? {}
               : {
@@ -1028,7 +1029,7 @@ describe('plugin manifest config scope policy', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target: globalTarget,
         request: {
           kind: 'section_activation',
@@ -1040,7 +1041,7 @@ describe('plugin manifest config scope policy', () => {
     ).toThrow('belongs to a character');
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target: globalTarget,
         request: {
           kind: 'section_field',
@@ -1058,7 +1059,7 @@ describe('plugin manifest config scope policy', () => {
     // Nor may the home clear or unset what it never owned.
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target: globalTarget,
         request: {
           kind: 'section_activation',
@@ -1069,7 +1070,7 @@ describe('plugin manifest config scope policy', () => {
     ).toThrow('belongs to a character');
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target: globalTarget,
         request: {
           kind: 'section_field',
@@ -1083,7 +1084,7 @@ describe('plugin manifest config scope policy', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
 
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target: characterTarget,
       request: {
         kind: 'section_activation',
@@ -1093,7 +1094,7 @@ describe('plugin manifest config scope policy', () => {
       },
     });
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target: characterTarget,
       request: {
         kind: 'section_field',
@@ -1130,7 +1131,7 @@ function resolveScopedExpected(homeRoot: string): string {
   }
 
   return createLayeredRuntimeConfigFingerprint({
-    sections: {plugins: []},
+    sections: {plugins: [], connectors: []},
     globalConfig: loaded.config,
     characterId: 'mira',
     overlay: {source: 'none'},
@@ -1166,7 +1167,7 @@ describe('character-scoped plugin control capability', () => {
       targetScope: 'character',
       namespace: 'plugins',
       declaration: plugin.manifest,
-      sections: {plugins: [plugin.manifest]},
+      sections: {plugins: [plugin.manifest], connectors: []},
     }).fingerprint;
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const globalBefore = readFileSync(configPath, 'utf8');
@@ -1179,7 +1180,7 @@ describe('character-scoped plugin control capability', () => {
     });
     const prepared = capability.prepareOperation({
       target,
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       expectedFingerprint: fingerprint,
       request: {
         kind: 'section_field',
@@ -1200,7 +1201,7 @@ describe('character-scoped plugin control capability', () => {
 
     const applied = capability.applyOperation({
       target,
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       expectedFingerprint: fingerprint,
       request: {
         kind: 'section_field',
@@ -1248,7 +1249,7 @@ describe('plugin inspection target authorship', () => {
       targetScope: 'character',
       namespace: 'plugins',
       declaration: plugin.manifest,
-      sections: {plugins: [plugin.manifest]},
+      sections: {plugins: [plugin.manifest], connectors: []},
     });
     const settings = inspected.fields.find(field => field.name === 'settings');
 
@@ -1284,7 +1285,7 @@ describe('plugin inspection target authorship', () => {
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       namespace: 'plugins' as const,
       declaration: plugin.manifest,
-      sections: {plugins: [plugin.manifest]},
+      sections: {plugins: [plugin.manifest], connectors: []},
     };
 
     const target = resolveRuntimeConfigScopeTarget({
@@ -1292,7 +1293,7 @@ describe('plugin inspection target authorship', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: inspectRuntimePluginConfig({
         ...base,
@@ -1369,7 +1370,7 @@ describe('plugin inspection target authorship', () => {
         targetScope,
         namespace: 'plugins',
         declaration: plugin.manifest,
-        sections: {plugins: [plugin.manifest]},
+        sections: {plugins: [plugin.manifest], connectors: []},
       }).fields.map(field => [field.name, field.effectiveSource]);
 
     expect(fieldsOf('global')).toEqual([
@@ -1398,7 +1399,7 @@ describe('scoped writes over a broken global layer', () => {
         scope: 'character',
       });
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         request: {
           kind: 'document',
@@ -1428,7 +1429,7 @@ describe('stale global expectations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         target,
         expectedFingerprint: 'stale-fingerprint',
         request: {
