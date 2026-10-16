@@ -1,6 +1,5 @@
 import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
 import type {
-  Project02RuntimeConfig,
   ResolvedProject02RuntimeConfig,
   RuntimeConfigInspectShape,
   RuntimeConfigEffectiveSource,
@@ -19,9 +18,14 @@ import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
   runtimeConfigDiagnosticMatchesSection,
+  unauthoredRuntimeConfigField,
   type ResolvedRuntimeSectionConfigs,
 } from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
+import {
+  runtimeSectionSupplyingLayer,
+  runtimeSectionValueAuthorable,
+} from './section-scope.ts';
 
 export function createRuntimeConfigInspectShape(
   resolvedConfig: ResolvedProject02RuntimeConfig,
@@ -55,14 +59,17 @@ export function createRuntimeSectionConfigInspectShape(options: {
   readonly defaultEnabled?: boolean;
 }): RuntimeConfigSectionInspectShape {
   const {namespace, declaration} = options;
-  const targetConfig =
-    options.targetScope === 'global'
-      ? options.layeredConfig.globalConfig
-      : options.layeredConfig.characterConfig;
-  const authoredSection = ownJsonRecordValue(
-    targetConfig?.[namespace],
-    declaration.id,
-  );
+  const layers = {
+    global: ownJsonRecordValue(
+      options.layeredConfig.globalConfig?.[namespace],
+      declaration.id,
+    ),
+    character: ownJsonRecordValue(
+      options.layeredConfig.characterConfig?.[namespace],
+      declaration.id,
+    ),
+  };
+  const authoredSection = layers[options.targetScope];
   const effectiveSection = ownJsonRecordValue(
     options.layeredConfig.effective.config?.[namespace],
     declaration.id,
@@ -85,17 +92,7 @@ export function createRuntimeSectionConfigInspectShape(options: {
     options.defaultEnabled ??
     declaration.activation.defaultEnabled;
   const enabledSource: RuntimeConfigEffectiveSource =
-    ownJsonRecordValue(
-      options.layeredConfig.characterConfig?.[namespace],
-      declaration.id,
-    )?.enabled !== undefined
-      ? 'character'
-      : ownJsonRecordValue(
-            options.layeredConfig.globalConfig?.[namespace],
-            declaration.id,
-          )?.enabled !== undefined
-        ? 'global'
-        : 'default';
+    runtimeSectionSupplyingLayer({declaration, layers}) ?? 'default';
   const diagnostics = Object.freeze(
     options.sectionResolution.diagnostics.filter(
       diagnostic =>
@@ -125,56 +122,58 @@ export function createRuntimeSectionConfigInspectShape(options: {
     enabledSource,
     activation,
     fields: Object.freeze(
-      declaration.config.fields.map(field => {
-        const authoredValue = ownJsonRecordValue(
-          authoredSection?.config,
-          field.name,
-        );
-        const effective = ownJsonRecordValue(effectiveFields, field.name);
-
-        if (effective === undefined) {
-          throw new TypeError(
-            `Resolved runtime config is missing field "${field.name}" for plugin "${declaration.id}".`,
+      declaration.config.fields
+        .filter(field =>
+          runtimeSectionValueAuthorable({
+            declaration,
+            field,
+            target: options.targetScope,
+          }),
+        )
+        .map(field => {
+          const authoredValue = ownJsonRecordValue(
+            authoredSection?.config,
+            field.name,
           );
-        }
+          const effective = ownJsonRecordValue(effectiveFields, field.name);
 
-        return Object.freeze({
-          name: field.name,
-          description: field.description,
-          required: field.required,
-          secret: field.secret,
-          ...(field.valueType === undefined
-            ? {}
-            : {valueType: field.valueType}),
-          ...(field.defaultValueSummary === undefined
-            ? {}
-            : {defaultValueSummary: field.defaultValueSummary}),
-          ...(field.allowedValues === undefined
-            ? {}
-            : {allowedValues: Object.freeze([...field.allowedValues])}),
-          agentMutable: field.agentMutable === true && !field.secret,
-          reloadRequired: field.reloadRequired !== false,
-          authored: Object.freeze({
-            configured: authoredValue !== undefined,
-            ...(authoredValue === undefined
+          if (effective === undefined) {
+            throw new TypeError(
+              `Resolved runtime config is missing field "${field.name}" for plugin "${declaration.id}".`,
+            );
+          }
+
+          return Object.freeze({
+            name: field.name,
+            description: field.description,
+            required: field.required,
+            secret: field.secret,
+            ...(field.valueType === undefined
               ? {}
-              : {
-                  value: redactAuthoredPluginConfigValue(
-                    authoredValue,
-                    field.name,
-                    field.secret,
-                  ),
-                }),
-          }),
-          effectiveSource: effectiveSectionFieldSource({
-            layeredConfig: options.layeredConfig,
-            namespace,
-            id: declaration.id,
-            fieldName: field.name,
-          }),
-          effective,
-        });
-      }),
+              : {valueType: field.valueType}),
+            ...(field.allowedValues === undefined
+              ? {}
+              : {allowedValues: Object.freeze([...field.allowedValues])}),
+            agentMutable: field.agentMutable === true && !field.secret,
+            reloadRequired: field.reloadRequired !== false,
+            authored: Object.freeze({
+              configured: authoredValue !== undefined,
+              ...(authoredValue === undefined
+                ? {}
+                : {
+                    value: redactAuthoredPluginConfigValue(
+                      authoredValue,
+                      field.name,
+                      field.secret,
+                    ),
+                  }),
+            }),
+            effectiveSource:
+              runtimeSectionSupplyingLayer({declaration, field, layers}) ??
+              'default',
+            effective,
+          });
+        }),
     ),
     diagnostics,
     fingerprint: options.fingerprint,
@@ -183,9 +182,8 @@ export function createRuntimeSectionConfigInspectShape(options: {
 
 /**
  * The host fields in the shape plugin fields already take, so a settings
- * page renders one component for both. Defaults are not resolved here: an
- * unauthored field reads `missing`, and `defaultValueSummary` names what
- * applies — the runtime applies it, a page only shows it.
+ * page renders one component for both: an unauthored field carries its
+ * declared default as its effective value, as a section's field does.
  */
 export function createProject02ConfigFieldInspectShapes(options: {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
@@ -217,9 +215,6 @@ export function createProject02ConfigFieldInspectShapes(options: {
         required: field.required,
         secret: field.secret,
         ...(field.valueType === undefined ? {} : {valueType: field.valueType}),
-        ...(field.defaultValueSummary === undefined
-          ? {}
-          : {defaultValueSummary: field.defaultValueSummary}),
         ...(field.allowedValues === undefined
           ? {}
           : {allowedValues: Object.freeze([...field.allowedValues])}),
@@ -235,54 +230,18 @@ export function createProject02ConfigFieldInspectShapes(options: {
             : globalValue !== undefined
               ? 'global'
               : 'default',
-        effective: Object.freeze({
-          name: field.name,
-          secret: field.secret,
-          source: effectiveValue === undefined ? 'missing' : 'config',
-          resolved: true,
-          ...(effectiveValue === undefined ? {} : {value: effectiveValue}),
-        }),
+        effective:
+          effectiveValue === undefined
+            ? unauthoredRuntimeConfigField(field, field.required)
+            : Object.freeze({
+                name: field.name,
+                secret: field.secret,
+                source: 'config',
+                resolved: true,
+                value: effectiveValue,
+              }),
       } satisfies RuntimeConfigFieldInspectShape);
     }),
-  );
-}
-
-function effectiveSectionFieldSource(options: {
-  readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
-  readonly namespace: RuntimeConfigSectionNamespace;
-  readonly id: string;
-  readonly fieldName: string;
-}): RuntimeConfigEffectiveSource {
-  if (
-    authoredSectionField(
-      options.layeredConfig.characterConfig,
-      options.namespace,
-      options.id,
-      options.fieldName,
-    ) !== undefined
-  ) {
-    return 'character';
-  }
-
-  return authoredSectionField(
-    options.layeredConfig.globalConfig,
-    options.namespace,
-    options.id,
-    options.fieldName,
-  ) === undefined
-    ? 'default'
-    : 'global';
-}
-
-function authoredSectionField(
-  config: Project02RuntimeConfig | undefined,
-  namespace: RuntimeConfigSectionNamespace,
-  id: string,
-  fieldName: string,
-): RuntimeConfigValue | undefined {
-  return ownJsonRecordValue(
-    ownJsonRecordValue(config?.[namespace], id)?.config,
-    fieldName,
   );
 }
 

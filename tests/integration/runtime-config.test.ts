@@ -10,7 +10,7 @@ import {
 import {
   characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
-  resolveProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {
   hostScopedFirstPartyRuntimePluginIds,
@@ -41,7 +41,7 @@ describe('runtime config loading and resolution', () => {
   it('preserves no-config behavior with source none and default store root', () => {
     const storeRoot = createTestTempRoot('project02-config-empty-');
     const loaded = loadRuntimeConfigForTest({storeRoot});
-    const resolved = resolveProject02RuntimeConfig({
+    const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loaded,
         storeRoot: storeRoot,
@@ -71,7 +71,7 @@ describe('runtime config loading and resolution', () => {
       project02: {userDisplayName: '  Mike  '},
     });
 
-    const resolved = resolveProject02RuntimeConfig({
+    const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({storeRoot}),
         storeRoot: storeRoot,
@@ -86,7 +86,7 @@ describe('runtime config loading and resolution', () => {
     const storeRoot = createTestTempRoot('project02-config-context-window-');
     const configPath = join(storeRoot, 'config.json');
     const resolveFrom = () =>
-      resolveProject02RuntimeConfig({
+      resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
           storeRoot,
@@ -117,7 +117,7 @@ describe('runtime config loading and resolution', () => {
     );
     const configPath = join(storeRoot, 'config.json');
     const resolveFrom = () =>
-      resolveProject02RuntimeConfig({
+      resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           configPath,
@@ -473,7 +473,7 @@ describe('runtime config loading and resolution', () => {
       'config.json',
     );
     const resolveWithSecret = (apiKey: string) =>
-      resolveProject02RuntimeConfig({
+      resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({
             configPath: writeRuntimeConfig(configPath, {
@@ -513,7 +513,7 @@ describe('runtime config loading and resolution', () => {
       'config.json',
     );
     const resolveWith = (enabled: boolean, apiKey: string) =>
-      resolveProject02RuntimeConfig({
+      resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({
             configPath: writeRuntimeConfig(configPath, {
@@ -581,7 +581,7 @@ describe('runtime config loading and resolution', () => {
       'config.json',
     );
     const resolveWith = (prefix: string) =>
-      resolveProject02RuntimeConfig({
+      resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadRuntimeConfigForTest({
             configPath: writeRuntimeConfig(configPath, {
@@ -676,7 +676,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     ];
-    const fromConfig = resolveProject02RuntimeConfig({
+    const fromConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
       sections: {plugins: manifests},
     });
@@ -695,7 +695,7 @@ describe('runtime config loading and resolution', () => {
     ).not.toContain('plaintext-secret');
 
     // A shape other than a string is rejected, never silently ignored.
-    const invalid = resolveProject02RuntimeConfig({
+    const invalid = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({
           configPath: writeRuntimeConfig(
@@ -739,7 +739,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     );
-    const resolved = resolveProject02RuntimeConfig({
+    const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),

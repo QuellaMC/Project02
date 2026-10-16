@@ -23,7 +23,6 @@ import {
   type Project02HostConfig,
   type Project02RuntimeSectionConfig,
   resolveLayeredProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 
@@ -276,21 +275,15 @@ describe('character overlay config loader', () => {
 });
 
 describe('layered runtime config resolution', () => {
-  it('is byte-identical to the global resolve without an overlay', () => {
+  it('resolves an absent overlay file exactly as no overlay', () => {
     const loadedConfig = loadedGlobalConfig({
       project02: {userDisplayName: 'Global Name'},
     });
-    const globalResolved = resolveProject02RuntimeConfig({
+    const globalResolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
       sections: {plugins: []},
     });
 
-    expect(
-      resolveLayeredProject02RuntimeConfig({
-        ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
-        sections: {plugins: []},
-      }),
-    ).toEqual(globalResolved);
     expect(
       resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({
@@ -361,7 +354,7 @@ describe('layered runtime config resolution', () => {
       },
     });
 
-    const globalOnly = resolveProject02RuntimeConfig({
+    const globalOnly = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
 
       sections: {plugins: [plugin.manifest]},
@@ -422,7 +415,7 @@ describe('layered runtime config resolution', () => {
   });
 
   it('changes the effective fingerprint when character-scoped values change', () => {
-    const base = resolveProject02RuntimeConfig({
+    const base = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
           project02: {userDisplayName: 'One'},
@@ -433,7 +426,7 @@ describe('layered runtime config resolution', () => {
       }),
       sections: {plugins: []},
     });
-    const renamedUser = resolveProject02RuntimeConfig({
+    const renamedUser = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
           project02: {userDisplayName: 'Two'},
@@ -444,7 +437,7 @@ describe('layered runtime config resolution', () => {
       }),
       sections: {plugins: []},
     });
-    const otherCharacter = resolveProject02RuntimeConfig({
+    const otherCharacter = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         character: 'nova',
         loadedConfig: loadedGlobalConfig({

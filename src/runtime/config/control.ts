@@ -13,15 +13,16 @@ import {
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticMatchesSection,
 } from './resolve.ts';
-import {
-  runtimeConfigFieldValueMismatchMessage,
-  runtimeConfigValueMatchesField,
-} from './schema.ts';
+import {runtimeConfigFieldValueMismatchMessage} from './schema.ts';
 import {runtimeSectionScopeViolation} from './section-scope.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
+import {
+  runtimeConfigValueMatchesField,
+  type RuntimeConfigFieldDeclaration,
+} from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
+  RuntimeConfigFieldScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionDeclaration,
@@ -132,10 +133,11 @@ export function runtimeSectionFieldControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
+  const authoredScope = options.authoredScope ?? 'global';
   const scopeViolation = runtimeSectionScopeViolation({
     namespace: options.namespace,
     declaration: options.declaration,
-    authoredScope: options.authoredScope ?? 'global',
+    authoredScope,
     operation: {
       kind: 'field',
       fieldName: fieldNameOf(options.operation),
@@ -157,6 +159,7 @@ export function runtimeSectionFieldControlMutation(options: {
     validateCandidate: config => {
       assertRuntimeSectionConfigCandidateValid({
         config,
+        authoredScope,
         namespace: options.namespace,
         declaration: options.declaration,
         sections: options.sections,
@@ -197,6 +200,7 @@ function runtimeSectionFieldMutationOperation(
 
 function assertRuntimeSectionConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
+  readonly authoredScope: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly sections: RuntimeConfigSections;
@@ -204,8 +208,8 @@ function assertRuntimeSectionConfigCandidateValid(options: {
 }): void {
   const resolved = resolveRuntimeSectionConfigs({
     config: options.config,
+    target: options.authoredScope,
     sections: sectionsIncludingTarget(options),
-    skipSectionScopeValidation: true,
     validateInactiveSectionConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(

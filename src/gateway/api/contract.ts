@@ -218,10 +218,11 @@ export type ConfigTarget =
 
 /**
  * What a settings page renders: the fingerprint a write must present, the
- * documents' diagnostics, and the host fields and every installed plugin
- * in one field shape. Defaults are not resolved in — an unauthored field
- * reads `missing` and its summary names what applies. A document that
- * does not load is refused with the reason, never rendered as blank fields.
+ * documents' diagnostics, and the host fields and every section the target
+ * may set, in one field shape. An unauthored field carries its declared
+ * default as its effective value, marked `default`, and reads `missing`
+ * when it has none. A document that does not load is refused with the
+ * reason, never rendered as blank fields.
  */
 export type ConfigView =
   | {

@@ -7,7 +7,11 @@ import {
   createRuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import type {RuntimePluginFactoryInput} from '../../src/plugins/api/factory.ts';
-import type {ResolvedRuntimeSectionConfig} from '../../src/runtime/config/index.ts';
+import {
+  resolveRuntimeSectionConfigs,
+  runtimeConfigVersion,
+  type ResolvedRuntimeSectionConfig,
+} from '../../src/runtime/config/index.ts';
 import {createProject02Plugin} from '../../src/plugins/packages/mem0/index.ts';
 import {
   createMem0PluginFromInput,
@@ -880,23 +884,24 @@ function mem0FactoryInput(
   };
 }
 
+/** What the resolver hands the plugin for these settings, declared defaults applied. */
 function resolvedConfig(
   values: Readonly<Record<string, string | number>>,
 ): ResolvedRuntimeSectionConfig {
-  return Object.freeze(
-    Object.fromEntries(
-      Object.entries(values).map(([name, value]) => [
-        name,
-        Object.freeze({
-          name,
-          secret: name.toLowerCase().includes('apikey'),
-          source: 'config' as const,
-          resolved: true,
-          value,
-        }),
-      ]),
-    ),
-  );
+  const resolved = resolveRuntimeSectionConfigs({
+    config: {
+      version: runtimeConfigVersion,
+      plugins: {[mem0PluginId]: {config: values}},
+    },
+    target: 'character',
+    sections: {plugins: [createMem0PluginManifest()]},
+  }).sectionConfigs.plugins[mem0PluginId];
+
+  if (resolved === undefined) {
+    throw new Error('Expected the mem0 section to resolve.');
+  }
+
+  return resolved;
 }
 
 function mem0AfterTurnContext(userSpeakerName = 'Configured Name') {

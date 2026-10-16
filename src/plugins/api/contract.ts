@@ -136,6 +136,7 @@ export const runtimeConfigValueTypeValues = [
 export const runtimeConfigSectionScopeValues = [
   'global_with_character_overrides',
   'character_only',
+  'global_only',
 ] as const;
 
 export type RuntimePluginKind = (typeof runtimePluginKindValues)[number];

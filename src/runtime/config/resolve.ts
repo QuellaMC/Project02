@@ -1,12 +1,15 @@
-import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
+import {localUserSpeaker} from '../../core/index.ts';
+import {
+  runtimeConfigValueMatchesField,
+  type RuntimeConfigFieldDeclaration,
+} from '../../plugins/api/index.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import type {ResolvedProject02RuntimeLocation} from './location.ts';
 import {runtimeConfigSectionPath} from './path.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
+import {runtimeSectionValueLayers} from './section-scope.ts';
 import {
   createRuntimeConfigSectionMap,
-  defaultProject02ContextWindowTokens,
-  defaultProject02UserDisplayName,
   runtimeConfigSectionNamespaces,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
@@ -29,8 +32,11 @@ import {
   ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
-import {runtimeConfigValueMatchesField} from './schema.ts';
-import {runtimeSectionScopeDiagnostics} from './section-scope.ts';
+import {
+  defaultProject02ContextWindowTokens,
+  defaultProject02Enabled,
+  defaultProject02RoleModelProvider,
+} from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -41,9 +47,6 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly defaultEnabledSectionIds?: Readonly<
     Partial<Record<RuntimeConfigSectionNamespace, ReadonlySet<string>>>
   >;
-  readonly authoredScope?: RuntimeConfigFieldScope;
-  /** Set after per-layer validation; the merged document loses origins. */
-  readonly skipSectionScopeValidation?: boolean;
 };
 
 type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
@@ -51,6 +54,7 @@ type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
   'loadedConfig'
 > & {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly source: RuntimeConfigSource;
   readonly path?: string;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -61,6 +65,8 @@ export type ResolveRuntimeSectionConfigsOptions = Omit<
   'loadedConfig' | 'runtimeLocation'
 > & {
   readonly config: Project02RuntimeConfig | undefined;
+  /** Whose effective document `config` is. */
+  readonly target: RuntimeConfigFieldScope;
 };
 
 export type ResolvedRuntimeSectionConfigs = Readonly<{
@@ -73,22 +79,14 @@ export type ResolvedRuntimeSectionConfigs = Readonly<{
 export function resolveRuntimeSectionConfigs(
   options: ResolveRuntimeSectionConfigsOptions,
 ): ResolvedRuntimeSectionConfigs {
-  const diagnostics: RuntimeConfigDiagnostic[] =
-    options.skipSectionScopeValidation === true
-      ? []
-      : [
-          ...runtimeSectionScopeDiagnostics({
-            config: options.config,
-            sections: options.sections,
-            authoredScope: options.authoredScope ?? 'global',
-          }),
-        ];
+  const diagnostics: RuntimeConfigDiagnostic[] = [];
   const sectionConfigs = createRuntimeConfigSectionMap(namespace =>
     Object.fromEntries(
       options.sections[namespace].map(declaration => [
         declaration.id,
         resolveSectionConfig({
           config: options.config,
+          target: options.target,
           namespace,
           declaration,
           validateInactiveSectionConfigs:
@@ -125,20 +123,6 @@ export function resolveRuntimeSectionConfigs(
   });
 }
 
-export function resolveProject02RuntimeConfig(
-  options: ResolveProject02RuntimeConfigOptions,
-): ResolvedProject02RuntimeConfig {
-  const {loadedConfig, ...effectiveOptions} = options;
-
-  return resolveEffectiveProject02RuntimeConfig({
-    ...effectiveOptions,
-    config: loadedConfig.config,
-    source: loadedConfig.source,
-    ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
-    diagnostics: loadedConfig.diagnostics,
-  });
-}
-
 /** Mutation code must not use this; it needs a real loader-owned snapshot. */
 export function resolveEffectiveProject02RuntimeConfig(
   options: ResolveEffectiveProject02RuntimeConfigOptions,
@@ -147,14 +131,13 @@ export function resolveEffectiveProject02RuntimeConfig(
   const storeRoot = options.runtimeLocation.homeRoot;
   const sectionResolution = resolveRuntimeSectionConfigs({
     config,
+    target: options.target,
     sections: options.sections,
     validateInactiveSectionConfigs:
       options.validateInactiveSectionConfigs === true,
     ...(options.defaultEnabledSectionIds === undefined
       ? {}
       : {defaultEnabledSectionIds: options.defaultEnabledSectionIds}),
-    authoredScope: options.authoredScope ?? 'global',
-    skipSectionScopeValidation: options.skipSectionScopeValidation === true,
   });
   const diagnostics = Object.freeze([
     ...options.diagnostics,
@@ -177,10 +160,7 @@ export function resolveEffectiveProject02RuntimeConfig(
     effectiveConfigFingerprint: createRuntimeConfigFingerprint(
       effectiveFingerprintInput({
         config,
-        storeRoot,
-        character: project02.character,
-        enabled: project02.enabled,
-        userDisplayName: project02.userDisplayName,
+        project02,
         redactedSectionConfigs: sectionResolution.redactedSectionConfigs,
       }),
       options.sections,
@@ -199,13 +179,14 @@ function resolvedProject02HostSection(options: {
   return Object.freeze({
     storeRoot: options.storeRoot,
     character: options.character,
-    enabled: authored?.enabled ?? true,
+    enabled: authored?.enabled ?? defaultProject02Enabled,
     // Trimmed here: the strict speaker constructor would crash on padding.
     userDisplayName: (
-      authored?.userDisplayName ?? defaultProject02UserDisplayName
+      authored?.userDisplayName ?? localUserSpeaker.displayName
     ).trim(),
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
-    roleModelProvider: authored?.roleModelProvider ?? 'local',
+    roleModelProvider:
+      authored?.roleModelProvider ?? defaultProject02RoleModelProvider,
     ...(authored?.nvidiaApiKey === undefined
       ? {}
       : {nvidiaApiKey: authored.nvidiaApiKey}),
@@ -236,8 +217,24 @@ export function runtimeConfigDiagnosticMatchesSection(options: {
   );
 }
 
+/** A field no layer its scope permits has authored takes its declared default. */
+export function unauthoredRuntimeConfigField(
+  field: RuntimeConfigFieldDeclaration,
+  required: boolean,
+): ResolvedRuntimeConfigField {
+  return field.defaultValue === undefined
+    ? fieldResult({field, source: 'missing', resolved: !required})
+    : fieldResult({
+        field,
+        source: 'default',
+        resolved: true,
+        value: field.defaultValue,
+      });
+}
+
 function resolveSectionConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly validateInactiveSectionConfigs: boolean;
@@ -284,6 +281,7 @@ function resolveSectionConfig(options: {
 
 function resolveSectionConfigField(options: {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly field: RuntimeConfigFieldDeclaration;
@@ -297,13 +295,22 @@ function resolveSectionConfigField(options: {
     options.declaration.id,
     options.field.name,
   );
+  // A target is held only to values its layers can supply; a value only
+  // another target's layers supply is that target's to report missing.
+  const required =
+    options.field.required &&
+    runtimeSectionValueLayers({
+      declaration: options.declaration,
+      field: options.field,
+      target: options.target,
+    }).length > 0;
 
   if (options.field.secret) {
-    return resolveSecretField({...options, path});
+    return resolveSecretField({...options, path, required});
   }
 
   if (options.rawValue === undefined) {
-    if (options.field.required && options.validateReadiness) {
+    if (required && options.validateReadiness) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
@@ -315,11 +322,7 @@ function resolveSectionConfigField(options: {
       );
     }
 
-    return fieldResult({
-      field: options.field,
-      source: 'missing',
-      resolved: !options.field.required,
-    });
+    return unauthoredRuntimeConfigField(options.field, required);
   }
 
   if (!runtimeConfigValueMatchesField(options.rawValue, options.field)) {
@@ -361,6 +364,7 @@ function resolveSecretField(options: {
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
+  readonly required: boolean;
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
@@ -400,7 +404,7 @@ function resolveSecretField(options: {
     });
   }
 
-  if (options.field.required && options.validateReadiness) {
+  if (options.required && options.validateReadiness) {
     options.diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
@@ -412,11 +416,7 @@ function resolveSecretField(options: {
     );
   }
 
-  return fieldResult({
-    field: options.field,
-    source: 'missing',
-    resolved: !options.field.required,
-  });
+  return unauthoredRuntimeConfigField(options.field, options.required);
 }
 
 function shouldValidateSectionConfig(options: {
@@ -554,31 +554,25 @@ function fieldResult(options: {
 
 function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly storeRoot: string;
-  readonly character: string;
-  readonly enabled: boolean;
-  readonly userDisplayName: string;
+  readonly project02: ResolvedProject02RuntimeConfig['project02'];
   readonly redactedSectionConfigs: RuntimeConfigSectionMap<RedactedRuntimeSectionConfig>;
 }): RuntimeConfigValue {
+  const {project02} = options;
   const activation = sectionActivationFingerprintInput(options.config);
 
   return Object.freeze({
     version: options.config?.version ?? 'none',
     project02: Object.freeze({
-      storeRoot: options.storeRoot,
-      character: options.character,
-      enabled: options.enabled,
-      userDisplayName: options.userDisplayName,
-      defaultMemoryProvider:
-        options.config?.project02?.defaultMemoryProvider ?? null,
-      roleModelProvider:
-        options.config?.project02?.roleModelProvider ?? 'local',
+      storeRoot: project02.storeRoot,
+      character: project02.character,
+      enabled: project02.enabled,
+      userDisplayName: project02.userDisplayName,
+      defaultMemoryProvider: project02.defaultMemoryProvider ?? null,
+      roleModelProvider: project02.roleModelProvider,
       // Presence only: this fingerprint is shown, so the key never is.
-      nvidiaApiKeySet: options.config?.project02?.nvidiaApiKey !== undefined,
-      nvidiaModel: options.config?.project02?.nvidiaModel ?? null,
-      contextWindowTokens:
-        options.config?.project02?.contextWindowTokens ??
-        defaultProject02ContextWindowTokens,
+      nvidiaApiKeySet: project02.nvidiaApiKey !== undefined,
+      nvidiaModel: project02.nvidiaModel ?? null,
+      contextWindowTokens: project02.contextWindowTokens,
     }),
     sections: options.redactedSectionConfigs,
     ...(activation === undefined ? {} : {activation}),

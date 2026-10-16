@@ -356,6 +356,11 @@ function planRuntimeCliActivationStartup(input: {
       ? {}
       : {factoryOverrides: options.factories}),
   });
+  const catalogSections = {
+    plugins: Object.values(catalogDiscovery.catalogEntries).map(
+      entry => entry.manifest,
+    ),
+  };
   const buildPlanState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
   ): StartupPlanState => {
@@ -368,6 +373,7 @@ function planRuntimeCliActivationStartup(input: {
         ...(overlayLoadedConfig === undefined
           ? {}
           : {overlayConfig: overlayLoadedConfig}),
+        sections: catalogSections,
       }).effective,
     });
 

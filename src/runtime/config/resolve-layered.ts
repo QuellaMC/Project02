@@ -1,10 +1,19 @@
-/** Layer precedence: plugin defaults, then global config, then the overlay. */
+/**
+ * Layer precedence: plugin defaults, then global config, then the overlay,
+ * each value taken only from the layers its scope permits.
+ */
+import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {
   resolveEffectiveProject02RuntimeConfig,
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
-import {runtimeSectionScopeDiagnostics} from './section-scope.ts';
+import {
+  runtimeSectionScopeDiagnostics,
+  runtimeSectionSupplyingLayer,
+  type RuntimeSectionLayers,
+} from './section-scope.ts';
 import {withRuntimeConfigDiagnosticOrigin} from './diagnostic.ts';
 import {
   runtimeConfigSectionNamespaces,
@@ -15,7 +24,10 @@ import {
   type Project02RuntimeSectionConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionMap,
+  type RuntimeConfigSections,
+  type RuntimeConfigValue,
 } from './types.ts';
 
 export type EffectiveProject02RuntimeConfigSnapshot = {
@@ -39,31 +51,58 @@ export type ResolveLayeredProject02RuntimeConfigOptions =
     readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   };
 
-/** Keeps authored layers so ownership is never re-derived from the merge. */
+/**
+ * Keeps authored layers so ownership is never re-derived from the merge.
+ * Given an overlay it is that character's effective document; given none,
+ * the home's.
+ */
 export function createLayeredProject02RuntimeConfigSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
+  readonly sections: RuntimeConfigSections;
 }): LayeredProject02RuntimeConfigSnapshot {
-  const characterConfig = options.overlayConfig?.config;
-  const effectiveConfig =
-    characterConfig === undefined
-      ? options.loadedConfig.config
-      : mergeCharacterOverlayDocument(
-          options.loadedConfig.config,
-          characterConfig,
-        );
+  const {loadedConfig, overlayConfig, sections} = options;
+  const globalConfig = loadedConfig.config;
+  const characterConfig = overlayConfig?.config;
   const effective = Object.freeze({
-    ...(effectiveConfig === undefined ? {} : {config: effectiveConfig}),
+    ...(globalConfig === undefined && characterConfig === undefined
+      ? {}
+      : {
+          config: mergeCharacterOverlayDocument({
+            globalConfig,
+            ...(characterConfig === undefined ? {} : {characterConfig}),
+            sections,
+          }),
+        }),
     diagnostics: Object.freeze([
-      ...options.loadedConfig.diagnostics,
-      ...(options.overlayConfig?.diagnostics ?? []),
+      ...loadedConfig.diagnostics,
+      ...(overlayConfig?.diagnostics ?? []),
+      // Judged per raw layer: the merge has already left out what they find.
+      ...runtimeSectionScopeDiagnostics({
+        config: globalConfig,
+        sections,
+        authoredScope: 'global',
+      }),
+      ...(overlayConfig === undefined
+        ? []
+        : runtimeSectionScopeDiagnostics({
+            config: characterConfig,
+            sections,
+            authoredScope: 'character',
+          }).map(diagnostic =>
+            withRuntimeConfigDiagnosticOrigin(diagnostic, {
+              scope: 'character',
+              characterId: overlayConfig.characterId,
+              ...(overlayConfig.path === undefined
+                ? {}
+                : {path: overlayConfig.path}),
+            }),
+          )),
     ]),
   } satisfies EffectiveProject02RuntimeConfigSnapshot);
 
   return Object.freeze({
-    ...(options.loadedConfig.config === undefined
-      ? {}
-      : {globalConfig: options.loadedConfig.config}),
+    ...(globalConfig === undefined ? {} : {globalConfig}),
     ...(characterConfig === undefined ? {} : {characterConfig}),
     effective,
   });
@@ -83,81 +122,45 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   const layeredConfig = createLayeredProject02RuntimeConfigSnapshot({
     loadedConfig,
     ...(overlayConfig === undefined ? {} : {overlayConfig}),
+    sections: effectiveOptions.sections,
   });
-  const source = loadedConfig.source;
-  const path = loadedConfig.path;
-
-  // With no overlay this must equal the global resolve, fingerprint included.
-  if (
-    overlayConfig === undefined ||
-    (overlayConfig.config === undefined &&
-      overlayConfig.diagnostics.length === 0)
-  ) {
-    return Object.freeze({
-      layeredConfig,
-      resolvedConfig: resolveEffectiveProject02RuntimeConfig({
-        ...effectiveOptions,
-        config: layeredConfig.effective.config,
-        source,
-        ...(path === undefined ? {} : {path}),
-        diagnostics: layeredConfig.effective.diagnostics,
-      }),
-    });
-  }
-
-  const scopeDiagnostics = [
-    ...runtimeSectionScopeDiagnostics({
-      config: loadedConfig.config,
-      sections: effectiveOptions.sections,
-      authoredScope: 'global',
-    }),
-    ...runtimeSectionScopeDiagnostics({
-      config: overlayConfig.config,
-      sections: effectiveOptions.sections,
-      authoredScope: 'character',
-    }).map(diagnostic =>
-      withRuntimeConfigDiagnosticOrigin(diagnostic, {
-        scope: 'character',
-        characterId: overlayConfig.characterId,
-        ...(overlayConfig.path === undefined ? {} : {path: overlayConfig.path}),
-      }),
-    ),
-  ];
 
   return Object.freeze({
     layeredConfig,
     resolvedConfig: resolveEffectiveProject02RuntimeConfig({
       ...effectiveOptions,
       config: layeredConfig.effective.config,
-      source,
-      ...(path === undefined ? {} : {path}),
-      diagnostics: Object.freeze([
-        ...layeredConfig.effective.diagnostics,
-        ...scopeDiagnostics,
-      ]),
-      skipSectionScopeValidation: true,
+      target: overlayConfig === undefined ? 'global' : 'character',
+      source: loadedConfig.source,
+      ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
+      diagnostics: layeredConfig.effective.diagnostics,
     }),
   });
 }
 
-/** Exported so candidate validation judges exactly what the resolver sees. */
-export function mergeCharacterOverlayDocument(
-  globalDocument: Project02RuntimeConfig | undefined,
-  overlayDocument: Project02RuntimeConfig,
-): Project02RuntimeConfig {
+/**
+ * A character's effective document, and with no overlay the home's.
+ * Exported so candidate validation judges exactly what the resolver sees.
+ */
+export function mergeCharacterOverlayDocument(options: {
+  readonly globalConfig: Project02RuntimeConfig | undefined;
+  readonly characterConfig?: Project02RuntimeConfig;
+  readonly sections: RuntimeConfigSections;
+}): Project02RuntimeConfig {
   const project02 = mergedProject02Section(
-    globalDocument?.project02,
-    overlayDocument.project02,
+    options.globalConfig?.project02,
+    options.characterConfig?.project02,
   );
   let sections: Partial<
     RuntimeConfigSectionMap<Project02RuntimeSectionConfig>
   > = {};
 
   for (const namespace of runtimeConfigSectionNamespaces) {
-    const merged = mergedSectionConfigs(
-      globalDocument?.[namespace],
-      overlayDocument[namespace],
-    );
+    const merged = mergedSectionConfigs({
+      globalSections: options.globalConfig?.[namespace],
+      characterSections: options.characterConfig?.[namespace],
+      declarations: options.sections[namespace],
+    });
 
     if (merged !== undefined) {
       sections = {...sections, [namespace]: merged};
@@ -180,46 +183,98 @@ function mergedProject02Section(
     : Object.freeze({...globalSection, ...overlaySection});
 }
 
-function mergedSectionConfigs(
-  globalSections:
-    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined,
-  overlaySections:
-    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined,
-): Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined {
-  if (overlaySections === undefined) {
-    return globalSections;
+function mergedSectionConfigs(options: {
+  readonly globalSections:
+    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined;
+  readonly characterSections:
+    Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined;
+  readonly declarations: readonly RuntimeConfigSectionDeclaration[];
+}): Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined {
+  const {globalSections, characterSections} = options;
+
+  if (globalSections === undefined && characterSections === undefined) {
+    return undefined;
   }
 
   const ids = [
     ...new Set([
       ...Object.keys(globalSections ?? {}),
-      ...Object.keys(overlaySections),
+      ...Object.keys(characterSections ?? {}),
     ]),
   ].sort((a, b) => a.localeCompare(b));
 
   return Object.freeze(
     Object.fromEntries(
-      ids.map(id => {
-        const globalSection = globalSections?.[id];
-        const overlaySection = overlaySections[id];
-        const enabled = overlaySection?.enabled ?? globalSection?.enabled;
-        const config =
-          globalSection?.config === undefined &&
-          overlaySection?.config === undefined
-            ? undefined
-            : Object.freeze({
-                ...globalSection?.config,
-                ...overlaySection?.config,
-              });
-
-        return [
-          id,
-          Object.freeze({
-            ...(enabled === undefined ? {} : {enabled}),
-            ...(config === undefined ? {} : {config}),
-          } satisfies Project02RuntimeSectionConfig),
-        ];
-      }),
+      ids.map(id => [
+        id,
+        mergedSection(
+          options.declarations.find(declaration => declaration.id === id),
+          {
+            global: ownJsonRecordValue(globalSections, id),
+            character: ownJsonRecordValue(characterSections, id),
+          },
+        ),
+      ]),
     ),
   );
+}
+
+/**
+ * A declared switch or field takes the value of the layer its scope lets
+ * supply it. What no declaration describes, an unknown id or field, keeps
+ * the overlay over the home, so its diagnostics keep their evidence.
+ */
+function mergedSection(
+  declaration: RuntimeConfigSectionDeclaration | undefined,
+  layers: RuntimeSectionLayers,
+): Project02RuntimeSectionConfig {
+  const {global, character} = layers;
+  const overlayOverHome =
+    global?.config === undefined && character?.config === undefined
+      ? undefined
+      : {...global?.config, ...character?.config};
+  const enabled =
+    declaration === undefined
+      ? (character?.enabled ?? global?.enabled)
+      : suppliedSection(declaration, undefined, layers)?.enabled;
+  const config =
+    overlayOverHome === undefined || declaration === undefined
+      ? overlayOverHome
+      : Object.fromEntries(
+          Object.keys(overlayOverHome).flatMap(
+            (name): [string, RuntimeConfigValue][] => {
+              const field = declaration.config.fields.find(
+                candidate => candidate.name === name,
+              );
+              const value =
+                field === undefined
+                  ? overlayOverHome[name]
+                  : ownJsonRecordValue(
+                      suppliedSection(declaration, field, layers)?.config,
+                      name,
+                    );
+
+              return value === undefined ? [] : [[name, value]];
+            },
+          ),
+        );
+
+  return Object.freeze({
+    ...(enabled === undefined ? {} : {enabled}),
+    ...(config === undefined ? {} : {config: Object.freeze(config)}),
+  } satisfies Project02RuntimeSectionConfig);
+}
+
+function suppliedSection(
+  declaration: RuntimeConfigSectionDeclaration,
+  field: RuntimeConfigFieldDeclaration | undefined,
+  layers: RuntimeSectionLayers,
+): Project02RuntimeSectionConfig | undefined {
+  const layer = runtimeSectionSupplyingLayer({
+    declaration,
+    ...(field === undefined ? {} : {field}),
+    layers,
+  });
+
+  return layer === undefined ? undefined : layers[layer];
 }

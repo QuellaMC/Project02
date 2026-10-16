@@ -134,6 +134,91 @@ export function characterOnlyConfigPlugin(id: string) {
   });
 }
 
+/** A layered section with a field of each narrower scope, and one of none. */
+export function fieldScopedConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: 'Test plugin whose fields narrow its layered scope.',
+      config: {
+        scope: 'global_with_character_overrides',
+        fields: [
+          {
+            name: 'sharedSetting',
+            description: "The home's, unless a character sets its own.",
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+          },
+          {
+            name: 'homeSetting',
+            description: "The home's alone.",
+            required: false,
+            secret: false,
+            scope: 'global_only',
+            valueType: 'string',
+            redactionLabels: [],
+          },
+          {
+            name: 'ownSetting',
+            description: "Each character's alone.",
+            required: false,
+            secret: false,
+            scope: 'character_only',
+            valueType: 'string',
+            redactionLabels: [],
+          },
+        ],
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_field_scoped'],
+      },
+    },
+  });
+}
+
+/** A layered section, on by default, requiring a field only a character sets. */
+export function requiredCharacterFieldConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: "Test plugin whose required field is each character's.",
+      config: {
+        scope: 'global_with_character_overrides',
+        fields: [
+          {
+            name: 'sharedSetting',
+            description: "The home's, unless a character sets its own.",
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+          },
+          {
+            name: 'ownSetting',
+            description: "Each character's alone, and each must set it.",
+            required: true,
+            secret: false,
+            scope: 'character_only',
+            valueType: 'string',
+            redactionLabels: [],
+          },
+        ],
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_required_character_field'],
+      },
+    },
+  });
+}
+
 export function memoryProviderPlugin(id: string) {
   return createMemoryProviderRuntimePlugin({
     id,
