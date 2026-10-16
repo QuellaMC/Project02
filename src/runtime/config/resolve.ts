@@ -314,7 +314,7 @@ function resolveSectionConfigField(options: {
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_required_value_missing',
-          `Required config field "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
+          `Required config field "${options.field.name}" is missing for section "${options.declaration.id}".`,
           path,
           sectionFieldDiagnosticMetadata(options),
         ),
@@ -408,7 +408,7 @@ function resolveSecretField(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_required_secret_missing',
-        `Required secret "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
+        `Required secret "${options.field.name}" is missing for section "${options.declaration.id}".`,
         options.path,
         sectionFieldDiagnosticMetadata(options),
       ),
@@ -502,7 +502,7 @@ function pushUnknownSectionConfigFieldDiagnostics(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_unknown_plugin_config_field',
-        `Unknown config field "${fieldName}" for plugin "${options.declaration.id}".`,
+        `Unknown config field "${fieldName}" for section "${options.declaration.id}".`,
         runtimeConfigSectionPath(
           options.namespace,
           options.declaration.id,

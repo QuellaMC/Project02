@@ -384,7 +384,7 @@ describe('runtime plugin config control', () => {
         },
       }),
     ).toThrow(
-      `Plugin "${fixturePluginId}" does not declare config field "unknownField". ` +
+      `Section "${fixturePluginId}" does not declare config field "unknownField". ` +
         'Declared fields: mode, label, operatorOnly, retries, settings, apiKey.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
@@ -415,7 +415,7 @@ describe('runtime plugin config control', () => {
           },
         },
       }),
-    ).toThrow('Required plugin config field "mode" cannot be unset.');
+    ).toThrow('Required config field "mode" cannot be unset.');
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
 
@@ -528,7 +528,7 @@ describe('runtime plugin config control', () => {
           fieldName: 'retries',
           value: 'three',
         },
-        'Plugin config field "retries" must be a finite number; received a string.',
+        'Config field "retries" must be a finite number; received a string.',
       ],
       [
         {
@@ -536,7 +536,7 @@ describe('runtime plugin config control', () => {
           fieldName: 'mode',
           value: 'unsupported',
         },
-        'Plugin config field "mode" must be one of: local, remote; received a string that is not an allowed value.',
+        'Config field "mode" must be one of: local, remote; received a string that is not an allowed value.',
       ],
       [
         {
@@ -544,7 +544,7 @@ describe('runtime plugin config control', () => {
           fieldName: 'retries',
           value: Number.NaN,
         },
-        'Plugin config field "retries" must be a finite number; received a number.',
+        'Config field "retries" must be a finite number; received a number.',
       ],
     ] as const) {
       expect(() =>
@@ -597,7 +597,7 @@ describe('runtime plugin config control', () => {
         },
       }),
     ).toThrow(
-      'Plugin config field "settings" value contains content that must stay redacted and cannot be written.',
+      'Config field "settings" value contains content that must stay redacted and cannot be written.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -653,7 +653,7 @@ describe('runtime plugin config control', () => {
         },
       }),
     ).toThrow(
-      'Cannot update plugin config because the resulting config is invalid: Unknown config field "undeclaredSibling"',
+      `Cannot update section "${fixturePluginId}" because the resulting config is invalid: Unknown config field "undeclaredSibling"`,
     );
     expect(readConfigFile(fixture.configPath)).toEqual(invalidConfig);
   });

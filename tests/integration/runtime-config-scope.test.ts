@@ -544,7 +544,7 @@ describe('scope-aware runtime config mutations', () => {
           },
         },
       }),
-    ).toThrow('Cannot update plugin config');
+    ).toThrow('Cannot update section "scope.merged"');
     // A fresh overlay would move the layered fingerprint for a failed change.
     expect(
       existsSync(

@@ -24,6 +24,7 @@ import {
   assertResolvedProject02HomeAdoptable,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
+  characterOverlayFromDocument,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
   createRuntimeConfigSections,
@@ -614,17 +615,15 @@ function simulateCharacterMaterialization(
     return {status: 'invalid', message: simulated.message};
   }
 
-  // This overlay describes a file that has not been written yet.
+  // This overlay describes a file that has not been written yet, so it is
+  // judged as the loader will judge that file, warnings included.
   return Object.freeze({
     status: 'valid',
-    overlay: Object.freeze({
-      scope: 'character',
+    overlay: characterOverlayFromDocument({
       characterId,
-      source: 'overlay',
       path: input.runtimeLocation.overlayPath,
-      config: simulated.document,
-      diagnostics: Object.freeze([]),
-    } satisfies LoadedProject02CharacterOverlayConfig),
+      document: simulated.document,
+    }),
   });
 }
 

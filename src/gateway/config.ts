@@ -3,12 +3,12 @@ import {
   classifyRuntimePluginCatalogDiscovery,
   discoverRuntimePluginCatalog,
   prepareProject02CharacterActivation,
+  runtimeConfigDiagnosticConcernsCharacter,
   type Project02Home,
 } from '../app/index.ts';
-import {
-  installedRuntimePluginCatalogEntry,
-  type RuntimePluginCatalogEntry,
-  type RuntimePluginManifest,
+import type {
+  RuntimePluginCatalogEntry,
+  RuntimePluginManifest,
 } from '../plugins/index.ts';
 import {
   applyRuntimeConfigControlOperation,
@@ -38,6 +38,7 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimeConfigFieldScope,
   type RuntimeConfigSectionActivationShape,
+  type RuntimeConfigSectionNamespace,
   type RuntimeConfigSections,
 } from '../runtime/config/index.ts';
 import {
@@ -68,10 +69,19 @@ type ScopeResolution = {
   >[0]['sectionResolution'];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
-  readonly activationByPluginId?: Readonly<
-    Record<string, RuntimeConfigSectionActivationShape>
+  /** A section with no entry here judges its own activation. */
+  readonly sectionActivations: Readonly<
+    Partial<
+      Record<
+        RuntimeConfigSectionNamespace,
+        Readonly<Record<string, RuntimeConfigSectionActivationShape>>
+      >
+    >
   >;
-  readonly defaultEnabledPluginIds: readonly string[];
+  /** A namespace with no set here leaves each section its declared default. */
+  readonly defaultEnabledSectionIds: Readonly<
+    Partial<Record<RuntimeConfigSectionNamespace, ReadonlySet<string>>>
+  >;
 };
 
 export function readConfigView(
@@ -112,18 +122,15 @@ export async function applyConfigChange(
     const catalog = discoverRuntimePluginCatalog({
       storeRoot: home.runtimeLocation.homeRoot,
     });
-    const prepared = prepareControlRequest(
-      change.operation,
-      catalog.catalogEntries,
-    );
+    const sections = createRuntimeConfigSections({
+      plugins: manifestsOf(catalog.catalogEntries),
+    });
+    const prepared = prepareControlRequest(change.operation, sections);
 
     if (typeof prepared === 'string') {
       return refusedChange('invalid', prepared);
     }
 
-    const sections = createRuntimeConfigSections({
-      plugins: manifestsOf(catalog.catalogEntries),
-    });
     const target = await resolveWriteTarget({
       home,
       target: change.target,
@@ -179,15 +186,16 @@ function resolveGlobalScope(
     discovery,
     classificationConfig: layeredConfig.effective,
   });
+  const defaultEnabledSectionIds = {
+    plugins: new Set(catalog.defaultEnabledPluginIds),
+  };
   // Location-free: the global document resolves through no character.
   const resolution = resolveRuntimeSectionConfigs({
     config: layeredConfig.effective.config,
     target: 'global',
     sections,
     validateInactiveSectionConfigs: true,
-    defaultEnabledSectionIds: {
-      plugins: new Set(catalog.defaultEnabledPluginIds),
-    },
+    defaultEnabledSectionIds,
   });
 
   return {
@@ -211,7 +219,9 @@ function resolveGlobalScope(
       createRuntimeConfigAuthoredSnapshot(loaded).document,
       sections,
     ),
-    defaultEnabledPluginIds: catalog.defaultEnabledPluginIds,
+    // No character is activated here, so every section judges its own.
+    sectionActivations: {},
+    defaultEnabledSectionIds,
   };
 }
 
@@ -260,6 +270,8 @@ function resolveCharacterScope(
   }
 
   const plan = startup.activationPlan;
+  const {activationByPluginId, defaultEnabledPluginIds = []} =
+    plan.pluginConfigControl;
   const sections = createRuntimeConfigSections({
     plugins: manifestsOf(plan.catalogEntries),
   });
@@ -275,9 +287,16 @@ function resolveCharacterScope(
     targetScope: 'character',
     sections,
     pluginResolution: plan.resolvedConfig,
-    // The activation's diagnostics carry the resolution's plus what the
-    // catalog could not publish — the errors the runtime itself acts on.
-    diagnostics: plan.activation.diagnostics,
+    // The activation carries what the runtime acts on: the resolution's
+    // diagnostics that concern the character, and what the catalog could
+    // not publish. The rest of the resolution, of the sections resolved
+    // beside the character, is the person's to read here too.
+    diagnostics: [
+      ...plan.activation.diagnostics,
+      ...plan.resolvedConfig.diagnostics.filter(
+        diagnostic => !runtimeConfigDiagnosticConcernsCharacter(diagnostic),
+      ),
+    ],
     fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: createRuntimeConfigAuthoredSnapshot(home.loadedConfig)
         .document,
@@ -285,11 +304,9 @@ function resolveCharacterScope(
       overlay,
       sections,
     }),
-    ...(plan.pluginConfigControl.activationByPluginId === undefined
-      ? {}
-      : {activationByPluginId: plan.pluginConfigControl.activationByPluginId}),
-    defaultEnabledPluginIds:
-      plan.pluginConfigControl.defaultEnabledPluginIds ?? [],
+    sectionActivations:
+      activationByPluginId === undefined ? {} : {plugins: activationByPluginId},
+    defaultEnabledSectionIds: {plugins: new Set(defaultEnabledPluginIds)},
   };
 }
 
@@ -319,7 +336,10 @@ function viewOf(resolution: ScopeResolution): ConfigView {
           )
           .map(declaration => {
             const activation =
-              resolution.activationByPluginId?.[declaration.id];
+              resolution.sectionActivations[namespace]?.[declaration.id];
+            const defaultEnabled = resolution.defaultEnabledSectionIds[
+              namespace
+            ]?.has(declaration.id);
 
             return createRuntimeSectionConfigInspectShape({
               layeredConfig,
@@ -329,9 +349,7 @@ function viewOf(resolution: ScopeResolution): ConfigView {
               declaration,
               fingerprint,
               ...(activation === undefined ? {} : {activation}),
-              defaultEnabled: resolution.defaultEnabledPluginIds.includes(
-                declaration.id,
-              ),
+              ...(defaultEnabled === undefined ? {} : {defaultEnabled}),
             });
           }),
       ),
@@ -342,7 +360,7 @@ function viewOf(resolution: ScopeResolution): ConfigView {
 /** A wire operation becomes the control seam's own request, ids resolved. */
 function prepareControlRequest(
   operation: ConfigChange['operation'],
-  catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
+  sections: RuntimeConfigSections,
 ): RuntimeConfigControlRequest | string {
   if (operation.kind === 'set' || operation.kind === 'unset') {
     if (
@@ -361,20 +379,19 @@ function prepareControlRequest(
     return {kind: 'document', operation};
   }
 
-  const manifest = installedRuntimePluginCatalogEntry(
-    catalogEntries,
-    operation.id,
-  )?.manifest;
+  const declaration = sections[operation.namespace].find(
+    candidate => candidate.id === operation.id,
+  );
 
-  if (manifest === undefined) {
-    return `Plugin "${operation.id}" is not installed.`;
+  if (declaration === undefined) {
+    return `Section "${operation.id}" under ${operation.namespace} does not exist.`;
   }
 
   if (operation.kind === 'section_enabled') {
     return {
       kind: 'section_activation',
       namespace: operation.namespace,
-      declaration: manifest,
+      declaration,
       ...(operation.enabled === undefined ? {} : {enabled: operation.enabled}),
     };
   }
@@ -382,7 +399,7 @@ function prepareControlRequest(
   return {
     kind: 'section_field',
     namespace: operation.namespace,
-    declaration: manifest,
+    declaration,
     actor: 'operator',
     fieldOperation:
       operation.kind === 'section_field_set'

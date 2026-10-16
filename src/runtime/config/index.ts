@@ -50,6 +50,7 @@ export {
 export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction.ts';
 export {
   characterOverlayConfigPath,
+  characterOverlayFromDocument,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,

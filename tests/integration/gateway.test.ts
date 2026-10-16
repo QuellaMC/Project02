@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -42,6 +43,7 @@ import {
   authoredTone,
   createConfirmationHome,
 } from '../support/gateway-fixtures.ts';
+import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -131,6 +133,34 @@ async function createGatewayHome(): Promise<string> {
   );
 
   await ensureInitializedProject02Store({homeRoot});
+
+  return homeRoot;
+}
+
+/**
+ * Mira and Nova, with Telegram authored for the home and for Mira, and in
+ * each document a connector this version does not have.
+ */
+async function createTelegramHome(): Promise<string> {
+  const homeRoot = await createGatewayHome();
+
+  writeTestCharacterPackage(homeRoot, {id: 'nova', displayName: 'Nova'});
+  writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    connectors: {
+      telegram: {config: {managementBotToken: '123456:home'}},
+      discord: {},
+    },
+  });
+  await ensureCharacterDataDir({homeRoot, characterId: 'mira'});
+  writeRuntimeConfig(
+    join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+    {
+      connectors: {
+        telegram: {config: {botToken: '987654:mira'}},
+        signal: {},
+      },
+    },
+  );
 
   return homeRoot;
 }
@@ -2342,6 +2372,285 @@ describe('gateway façade', () => {
     expect(gateway.configView({scope: 'global'})).toMatchObject({
       fingerprint: view.fingerprint,
     });
+  });
+
+  it('shows Telegram on each screen with the rows that belong there, and warns of a connector this version does not have', async () => {
+    const homeRoot = await createTelegramHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
+    const home = gateway.configView({scope: 'global'});
+    const mira = gateway.configView({scope: 'character', characterId: 'mira'});
+
+    if (home.status !== 'ok') {
+      expect.fail(home.message);
+    }
+
+    if (mira.status !== 'ok') {
+      expect.fail(mira.message);
+    }
+
+    // On until someone turns it off; a bot is one character's, the
+    // management bot the home's, and a token shows only as set.
+    expect(
+      home.sections.find(section => section.namespace === 'connectors'),
+    ).toMatchObject({
+      id: 'telegram',
+      enabled: true,
+      enabledSource: 'default',
+      activation: {status: 'active'},
+      fields: [
+        {
+          name: 'managementBotToken',
+          authored: {configured: true, value: '[redacted]'},
+        },
+        {name: 'mirror', effective: {source: 'default', value: true}},
+      ],
+    });
+    expect(
+      mira.sections.find(section => section.namespace === 'connectors'),
+    ).toMatchObject({
+      id: 'telegram',
+      enabled: true,
+      activation: {status: 'active'},
+      fields: [
+        {name: 'botToken', authored: {configured: true, value: '[redacted]'}},
+        {name: 'mirror'},
+      ],
+    });
+    expect(JSON.stringify([home, mira])).not.toMatch(/123456:home|987654:mira/);
+    expect(home.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'runtime_config_unknown_connector',
+        path: 'connectors.discord',
+      }),
+    );
+    expect(mira.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'runtime_config_unknown_connector',
+        path: 'connectors.signal',
+      }),
+    );
+  });
+
+  it('saves a connector setting into the document of the screen it was saved on, and reloads no one', async () => {
+    const homeRoot = await createTelegramHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await expect(gateway.reconcile()).resolves.toMatchObject({
+      starting: ['mira', 'nova'],
+    });
+
+    const events: GatewayEvent['kind'][] = [];
+
+    gateway.events(event => {
+      events.push(event.kind);
+    });
+
+    for (const [target, field, value, document] of [
+      [{scope: 'global'}, 'mirror', false, join(homeRoot, 'config.json')],
+      [
+        {scope: 'character', characterId: 'mira'},
+        'botToken',
+        '987654:replaced',
+        join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      ],
+    ] as const) {
+      const before = gateway.configView(target);
+
+      if (before.status !== 'ok') {
+        expect.fail(before.message);
+      }
+
+      const applied = await gateway.applyConfigChange({
+        target,
+        expectedFingerprint: before.fingerprint,
+        operation: {
+          kind: 'section_field_set',
+          namespace: 'connectors',
+          id: 'telegram',
+          field,
+          value,
+        },
+      });
+
+      if (applied.status !== 'applied') {
+        expect.fail(applied.message);
+      }
+
+      expect(gateway.configView(target)).toMatchObject({
+        fingerprint: applied.fingerprint,
+      });
+      expect(JSON.parse(readFileSync(document, 'utf8'))).toHaveProperty(
+        ['connectors', 'telegram', 'config', field],
+        value,
+      );
+      await expect(gateway.reconcile()).resolves.toEqual({
+        starting: [],
+        stopping: [],
+        reloading: [],
+      });
+    }
+
+    const home = gateway.configView({scope: 'global'});
+
+    if (home.status !== 'ok') {
+      expect.fail(home.message);
+    }
+
+    await expect(
+      gateway.applyConfigChange({
+        target: {scope: 'global'},
+        expectedFingerprint: home.fingerprint,
+        operation: {
+          kind: 'section_field_set',
+          namespace: 'connectors',
+          id: 'discord',
+          field: 'botToken',
+          value: 'anything',
+        },
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid'});
+    // Every surface heard of each save, and no character so much as
+    // changed state: no one is built from a connector's settings.
+    expect(events).toEqual(['health_changed', 'health_changed']);
+    await gateway.stop();
+  });
+
+  it('keeps a plugin and a connector that share an id apart on the screen, in the document and in their problems', async () => {
+    const homeRoot = await createTelegramHome();
+    const packageRoot = join(homeRoot, 'plugins', 'telegram');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(join(packageRoot, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(
+      join(packageRoot, 'project02.plugin.json'),
+      `${JSON.stringify({
+        format: 'project02.plugin.v1',
+        entry: './index.mjs',
+        manifest: {
+          ...firstPartyPlugin('telegram', {defaultEnabled: false}).manifest,
+          firstParty: false,
+          config: {
+            scope: 'global_with_character_overrides',
+            fields: [
+              {
+                name: 'chatId',
+                description: 'The chat it posts to.',
+                required: false,
+                secret: false,
+                valueType: 'string',
+                redactionLabels: [],
+              },
+            ],
+          },
+        },
+      })}\n`,
+    );
+    writeFileSync(
+      join(packageRoot, 'index.mjs'),
+      "throw new Error('never imported: the host is injected');\n",
+    );
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const mira = gateway.configView({scope: 'character', characterId: 'mira'});
+
+    if (mira.status !== 'ok') {
+      expect.fail(mira.message);
+    }
+
+    // Each by its own rule: the plugin installed and off, the connector on
+    // by its default.
+    expect(
+      mira.sections.filter(section => section.id === 'telegram'),
+    ).toMatchObject([
+      {
+        namespace: 'plugins',
+        enabled: false,
+        activation: {status: 'disabled'},
+        fields: [{name: 'chatId'}],
+      },
+      {
+        namespace: 'connectors',
+        enabled: true,
+        activation: {status: 'active'},
+        fields: [{name: 'botToken'}, {name: 'mirror'}],
+      },
+    ]);
+
+    for (const [namespace, field, value] of [
+      ['plugins', 'chatId', 'home-chat'],
+      ['connectors', 'mirror', false],
+    ] as const) {
+      const view = gateway.configView({scope: 'global'});
+
+      if (view.status !== 'ok') {
+        expect.fail(view.message);
+      }
+
+      await expect(
+        gateway.applyConfigChange({
+          target: {scope: 'global'},
+          expectedFingerprint: view.fingerprint,
+          operation: {
+            kind: 'section_field_set',
+            namespace,
+            id: 'telegram',
+            field,
+            value,
+          },
+        }),
+      ).resolves.toMatchObject({status: 'applied'});
+    }
+
+    const written: unknown = JSON.parse(
+      readFileSync(join(homeRoot, 'config.json'), 'utf8'),
+    );
+
+    expect(written).toHaveProperty(['plugins', 'telegram'], {
+      config: {chatId: 'home-chat'},
+    });
+    expect(written).toHaveProperty(['connectors', 'telegram'], {
+      config: {managementBotToken: '123456:home', mirror: false},
+    });
+
+    // A hand edit breaks the connector's stanza: the connector is blocked
+    // by it, and the plugin of the same name hears nothing of it.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      plugins: {telegram: {config: {chatId: 'home-chat'}}},
+      connectors: {telegram: {config: {mirror: 'yes'}}},
+    });
+
+    const home = gateway.configView({scope: 'global'});
+
+    if (home.status !== 'ok') {
+      expect.fail(home.message);
+    }
+
+    expect(
+      home.sections.filter(section => section.id === 'telegram'),
+    ).toMatchObject([
+      {namespace: 'plugins', activation: {status: 'disabled'}, diagnostics: []},
+      {
+        namespace: 'connectors',
+        activation: {status: 'blocked'},
+        diagnostics: [
+          {
+            code: 'runtime_config_value_type_invalid',
+            path: 'connectors.telegram.config.mirror',
+          },
+        ],
+      },
+    ]);
+    await gateway.stop();
   });
 
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {

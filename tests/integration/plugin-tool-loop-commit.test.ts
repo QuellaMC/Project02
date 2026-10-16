@@ -1061,8 +1061,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(result.status).toBe('completed');
     expect(rejection?.result).toMatchObject({
       status: 'rejected',
-      message:
-        'Plugin config field "tone" must be a string; received a number.',
+      message: 'Config field "tone" must be a string; received a number.',
     });
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
       {configured: true, value: 'warm'},

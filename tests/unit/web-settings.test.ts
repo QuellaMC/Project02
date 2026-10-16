@@ -316,7 +316,7 @@ describe('web settings', () => {
     const invalid = changeEnded(typed, 1, {
       status: 'refused',
       reason: 'invalid',
-      message: 'Plugin config field "tone" must be one of: neutral, warm.',
+      message: 'Config field "tone" must be one of: neutral, warm.',
     });
 
     expect(invalid.settings?.problems.get(tone)).toContain('must be one of');
