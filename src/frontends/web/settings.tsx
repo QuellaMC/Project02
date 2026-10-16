@@ -8,6 +8,8 @@ import type {Session} from './session.ts';
 import {
   hostFieldKey,
   readableName,
+  screenDiagnostics,
+  sectionDiagnostics,
   sectionFieldKey,
   sectionKey,
   valueText,
@@ -55,10 +57,10 @@ export function SettingsScreen({
     scope: target.scope,
     busy: page.saving !== undefined || state.connection.status === 'refused',
   };
-  const plugins =
-    view?.status === 'ok'
-      ? Object.groupBy(view.sections, section => section.namespace).plugins
-      : undefined;
+  const groups = Object.groupBy(
+    view?.status === 'ok' ? view.sections : [],
+    section => section.namespace,
+  );
 
   return (
     <section className="settings" aria-label={title}>
@@ -94,12 +96,8 @@ export function SettingsScreen({
           </p>
         ) : (
           <>
-            <Diagnostics
-              diagnostics={view.diagnostics.filter(
-                diagnostic => diagnostic.scope === 'global',
-              )}
-            />
-            <h3 className="section-title">Host</h3>
+            <Diagnostics diagnostics={screenDiagnostics(view)} />
+            <h3 className="group-title">Host</h3>
             {view.project02.map(field => (
               <FieldRow
                 key={field.name}
@@ -108,18 +106,28 @@ export function SettingsScreen({
                 context={context}
               />
             ))}
-            <h3 className="section-title">Plugins</h3>
-            {plugins === undefined ? (
+            <h3 className="group-title">Plugins</h3>
+            {groups.plugins === undefined ? (
               <p className="muted">No plugins are installed.</p>
             ) : (
-              plugins.map(section => (
+              groups.plugins.map(section => (
                 <SectionBlock
                   key={section.id}
                   section={section}
+                  diagnostics={sectionDiagnostics(view, section)}
                   context={context}
                 />
               ))
             )}
+            <h3 className="group-title">Messaging apps</h3>
+            {groups.connectors?.map(section => (
+              <SectionBlock
+                key={section.id}
+                section={section}
+                diagnostics={sectionDiagnostics(view, section)}
+                context={context}
+              />
+            ))}
           </>
         )}
       </div>
@@ -245,9 +253,11 @@ function FieldRow({
 
 function SectionBlock({
   section,
+  diagnostics,
   context,
 }: {
   readonly section: RuntimeConfigSectionInspectShape;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly context: RowContext;
 }) {
   const {page, session, scope, busy} = context;
@@ -267,9 +277,9 @@ function SectionBlock({
   const activation = scope === 'character' ? section.activation : undefined;
 
   return (
-    <div className="plugin" data-plugin={section.id}>
-      <div className="plugin-header">
-        <h4 className="plugin-name">
+    <div className="section" data-section={key}>
+      <div className="section-header">
+        <h4 className="section-name">
           {section.displayName}{' '}
           <span className="muted small">
             {section.id} · {section.version}
@@ -288,6 +298,9 @@ function SectionBlock({
           {activation === undefined || activation.reasons.length === 0
             ? ''
             : ` · ${activation.reasons.join(', ')}`}
+          {scope === 'global'
+            ? ' · Characters that set their own switch keep it'
+            : ''}
         </p>
         <div className="field-control">
           <input
@@ -334,11 +347,7 @@ function SectionBlock({
           context={context}
         />
       ))}
-      <Diagnostics
-        diagnostics={section.diagnostics.filter(
-          diagnostic => diagnostic.scope === 'section',
-        )}
-      />
+      <Diagnostics diagnostics={diagnostics} />
     </div>
   );
 }

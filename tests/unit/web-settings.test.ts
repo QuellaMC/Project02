@@ -9,6 +9,8 @@ import {
   operationFor,
   readableName,
   rowAt,
+  screenDiagnostics,
+  sectionDiagnostics,
   sectionFieldKey,
   sectionKey,
   settingsClosed,
@@ -25,7 +27,9 @@ import {
 import type {
   ConfigTarget,
   ConfigView,
+  RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionInspectShape,
   RuntimeConfigValue,
 } from '../../src/gateway/api/index.ts';
 
@@ -488,6 +492,82 @@ describe('web settings', () => {
         'warm',
       ),
     ).toBeUndefined();
+  });
+
+  it("finds a connector's rows by their keys and builds its operations with the namespace, and says at the top only what no listed section's block says", () => {
+    const telegram: RuntimeConfigSectionInspectShape = {
+      namespace: 'connectors',
+      id: 'telegram',
+      displayName: 'Telegram',
+      version: '1.0.0',
+      enabled: true,
+      enabledSource: 'default',
+      activation: {enabled: true, status: 'active', reasons: []},
+      fields: [
+        field('botToken', {secret: true, valueType: 'secret'}),
+        defaulted('mirror', true, {valueType: 'boolean'}),
+      ],
+      diagnostics: [],
+      fingerprint: 'f1',
+    };
+    const unknownField: RuntimeConfigDiagnostic = {
+      severity: 'warning',
+      code: 'runtime_config_unknown_top_level_field',
+      message: 'Unknown runtime config field "theme".',
+      path: 'theme',
+      scope: 'global',
+    };
+    const unknownPlugin: RuntimeConfigDiagnostic = {
+      severity: 'warning',
+      code: 'runtime_config_unknown_plugin',
+      message: 'Runtime config references unknown plugin "telegram".',
+      path: 'plugins.telegram',
+      scope: 'section',
+      namespace: 'plugins',
+      id: 'telegram',
+    };
+    const misplaced: RuntimeConfigDiagnostic = {
+      severity: 'warning',
+      code: 'runtime_config_authored_outside_scope',
+      message:
+        'Setting "managementBotToken" of "telegram" belongs to the home.',
+      path: 'connectors.telegram.config.managementBotToken',
+      scope: 'section',
+      namespace: 'connectors',
+      id: 'telegram',
+      field: 'managementBotToken',
+    };
+    const base = view();
+    const current: OkView = {
+      ...base,
+      diagnostics: [unknownField, unknownPlugin, misplaced],
+      sections: [...base.sections, telegram],
+    };
+
+    expect(
+      operationFor(current, sectionKey('connectors', 'telegram'), 'false'),
+    ).toEqual({
+      kind: 'section_enabled',
+      namespace: 'connectors',
+      id: 'telegram',
+      enabled: false,
+    });
+    expect(
+      operationFor(
+        current,
+        sectionFieldKey('connectors', 'telegram', 'mirror'),
+        'false',
+      ),
+    ).toEqual({
+      kind: 'section_field_set',
+      namespace: 'connectors',
+      id: 'telegram',
+      field: 'mirror',
+      value: false,
+    });
+    // A plugin named like a listed connector is not that connector.
+    expect(screenDiagnostics(current)).toEqual([unknownField, unknownPlugin]);
+    expect(sectionDiagnostics(current, telegram)).toEqual([misplaced]);
   });
 
   it('judges the first run by the home provider alone: unauthored, with only its default in effect', () => {
