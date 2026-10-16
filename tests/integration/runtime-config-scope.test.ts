@@ -14,6 +14,7 @@ import {describe, expect, it} from 'vitest';
 import {
   characterOnlyConfigPlugin,
   fieldScopedConfigPlugin,
+  requiredCharacterFieldConfigPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
@@ -36,6 +37,7 @@ import {
   resolveLayeredProject02RuntimeConfigWithSnapshot,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
+  type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigControlRequest,
   type RuntimeConfigFieldInspectShape,
   type RuntimeConfigFieldScope,
@@ -745,6 +747,58 @@ describe('plugin manifest config scope policy', () => {
     ).toThrow('The switch of "scope.home-only" belongs to the home');
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
+  });
+
+  it('requires of a target only what its scope can supply', () => {
+    const {homeRoot, configPath} = seededHome();
+    const {manifest} = requiredCharacterFieldConfigPlugin('scope.required-own');
+    const sections = {plugins: [manifest]};
+    const runtimeLocation = runtimeLocationForTest({storeRoot: homeRoot});
+    const diagnosticsOf = (
+      overlayConfig?: LoadedProject02CharacterOverlayConfig,
+    ) =>
+      resolveLayeredProject02RuntimeConfig({
+        runtimeLocation,
+        loadedConfig: loadRuntimeConfigForTest({storeRoot: homeRoot}),
+        ...(overlayConfig === undefined ? {} : {overlayConfig}),
+        sections,
+      }).diagnostics.map(({severity, code, path}) => ({severity, code, path}));
+
+    applyRuntimeConfigControlOperation({
+      sections,
+      target: resolveRuntimeConfigScopeTarget({
+        runtimeLocation,
+        scope: 'global',
+      }),
+      request: {
+        kind: 'section_field',
+        namespace: 'plugins',
+        declaration: manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'sharedSetting',
+          value: 'home',
+        },
+      },
+    });
+
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
+      plugins: {'scope.required-own': {config: {sharedSetting: 'home'}}},
+    });
+    // What the home's settings show: nothing missing, so nothing blocks it.
+    expect(diagnosticsOf()).toEqual([]);
+    expect(
+      diagnosticsOf(
+        readCharacterOverlayForScope(runtimeLocation.characterScope).overlay,
+      ),
+    ).toEqual([
+      {
+        severity: 'error',
+        code: 'runtime_config_required_value_missing',
+        path: 'plugins.scope.required-own.config.ownSetting',
+      },
+    ]);
   });
 
   it("layers a character's own secret over the home's, in the documents", async () => {

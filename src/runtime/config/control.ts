@@ -22,6 +22,7 @@ import {
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
+  RuntimeConfigFieldScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionDeclaration,
@@ -132,10 +133,11 @@ export function runtimeSectionFieldControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
+  const authoredScope = options.authoredScope ?? 'global';
   const scopeViolation = runtimeSectionScopeViolation({
     namespace: options.namespace,
     declaration: options.declaration,
-    authoredScope: options.authoredScope ?? 'global',
+    authoredScope,
     operation: {
       kind: 'field',
       fieldName: fieldNameOf(options.operation),
@@ -157,6 +159,7 @@ export function runtimeSectionFieldControlMutation(options: {
     validateCandidate: config => {
       assertRuntimeSectionConfigCandidateValid({
         config,
+        authoredScope,
         namespace: options.namespace,
         declaration: options.declaration,
         sections: options.sections,
@@ -197,6 +200,7 @@ function runtimeSectionFieldMutationOperation(
 
 function assertRuntimeSectionConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
+  readonly authoredScope: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly sections: RuntimeConfigSections;
@@ -204,6 +208,7 @@ function assertRuntimeSectionConfigCandidateValid(options: {
 }): void {
   const resolved = resolveRuntimeSectionConfigs({
     config: options.config,
+    target: options.authoredScope,
     sections: sectionsIncludingTarget(options),
     validateInactiveSectionConfigs: true,
   });

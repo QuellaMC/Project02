@@ -7,6 +7,7 @@ import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import type {ResolvedProject02RuntimeLocation} from './location.ts';
 import {runtimeConfigSectionPath} from './path.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
+import {runtimeSectionValueLayers} from './section-scope.ts';
 import {
   createRuntimeConfigSectionMap,
   runtimeConfigSectionNamespaces,
@@ -18,6 +19,7 @@ import {
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticSectionMetadata,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionMap,
   type RuntimeConfigSectionNamespace,
@@ -52,6 +54,7 @@ type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
   'loadedConfig'
 > & {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly source: RuntimeConfigSource;
   readonly path?: string;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -62,6 +65,8 @@ export type ResolveRuntimeSectionConfigsOptions = Omit<
   'loadedConfig' | 'runtimeLocation'
 > & {
   readonly config: Project02RuntimeConfig | undefined;
+  /** Whose effective document `config` is. */
+  readonly target: RuntimeConfigFieldScope;
 };
 
 export type ResolvedRuntimeSectionConfigs = Readonly<{
@@ -81,6 +86,7 @@ export function resolveRuntimeSectionConfigs(
         declaration.id,
         resolveSectionConfig({
           config: options.config,
+          target: options.target,
           namespace,
           declaration,
           validateInactiveSectionConfigs:
@@ -125,6 +131,7 @@ export function resolveEffectiveProject02RuntimeConfig(
   const storeRoot = options.runtimeLocation.homeRoot;
   const sectionResolution = resolveRuntimeSectionConfigs({
     config,
+    target: options.target,
     sections: options.sections,
     validateInactiveSectionConfigs:
       options.validateInactiveSectionConfigs === true,
@@ -213,9 +220,10 @@ export function runtimeConfigDiagnosticMatchesSection(options: {
 /** A field no layer its scope permits has authored takes its declared default. */
 export function unauthoredRuntimeConfigField(
   field: RuntimeConfigFieldDeclaration,
+  required: boolean,
 ): ResolvedRuntimeConfigField {
   return field.defaultValue === undefined
-    ? fieldResult({field, source: 'missing', resolved: !field.required})
+    ? fieldResult({field, source: 'missing', resolved: !required})
     : fieldResult({
         field,
         source: 'default',
@@ -226,6 +234,7 @@ export function unauthoredRuntimeConfigField(
 
 function resolveSectionConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly validateInactiveSectionConfigs: boolean;
@@ -272,6 +281,7 @@ function resolveSectionConfig(options: {
 
 function resolveSectionConfigField(options: {
   readonly config: Project02RuntimeConfig | undefined;
+  readonly target: RuntimeConfigFieldScope;
   readonly namespace: RuntimeConfigSectionNamespace;
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly field: RuntimeConfigFieldDeclaration;
@@ -285,13 +295,22 @@ function resolveSectionConfigField(options: {
     options.declaration.id,
     options.field.name,
   );
+  // A target is held only to values its layers can supply; a value only
+  // another target's layers supply is that target's to report missing.
+  const required =
+    options.field.required &&
+    runtimeSectionValueLayers({
+      declaration: options.declaration,
+      field: options.field,
+      target: options.target,
+    }).length > 0;
 
   if (options.field.secret) {
-    return resolveSecretField({...options, path});
+    return resolveSecretField({...options, path, required});
   }
 
   if (options.rawValue === undefined) {
-    if (options.field.required && options.validateReadiness) {
+    if (required && options.validateReadiness) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
@@ -303,7 +322,7 @@ function resolveSectionConfigField(options: {
       );
     }
 
-    return unauthoredRuntimeConfigField(options.field);
+    return unauthoredRuntimeConfigField(options.field, required);
   }
 
   if (!runtimeConfigValueMatchesField(options.rawValue, options.field)) {
@@ -345,6 +364,7 @@ function resolveSecretField(options: {
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
+  readonly required: boolean;
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
@@ -384,7 +404,7 @@ function resolveSecretField(options: {
     });
   }
 
-  if (options.field.required && options.validateReadiness) {
+  if (options.required && options.validateReadiness) {
     options.diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
@@ -396,7 +416,7 @@ function resolveSecretField(options: {
     );
   }
 
-  return unauthoredRuntimeConfigField(options.field);
+  return unauthoredRuntimeConfigField(options.field, options.required);
 }
 
 function shouldValidateSectionConfig(options: {

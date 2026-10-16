@@ -181,6 +181,44 @@ export function fieldScopedConfigPlugin(id: string) {
   });
 }
 
+/** A layered section, on by default, requiring a field only a character sets. */
+export function requiredCharacterFieldConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: "Test plugin whose required field is each character's.",
+      config: {
+        scope: 'global_with_character_overrides',
+        fields: [
+          {
+            name: 'sharedSetting',
+            description: "The home's, unless a character sets its own.",
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+          },
+          {
+            name: 'ownSetting',
+            description: "Each character's alone, and each must set it.",
+            required: true,
+            secret: false,
+            scope: 'character_only',
+            valueType: 'string',
+            redactionLabels: [],
+          },
+        ],
+      },
+      activation: {
+        defaultEnabled: true,
+        reasons: ['test_required_character_field'],
+      },
+    },
+  });
+}
+
 export function memoryProviderPlugin(id: string) {
   return createMemoryProviderRuntimePlugin({
     id,

@@ -130,6 +130,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
     resolvedConfig: resolveEffectiveProject02RuntimeConfig({
       ...effectiveOptions,
       config: layeredConfig.effective.config,
+      target: overlayConfig === undefined ? 'global' : 'character',
       source: loadedConfig.source,
       ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
       diagnostics: layeredConfig.effective.diagnostics,

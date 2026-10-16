@@ -109,6 +109,7 @@ export function planCharacterPackagePluginMaterialization(options: {
   const sections = {plugins: options.pluginManifests};
   const resolved = resolveRuntimeSectionConfigs({
     config: validated.config,
+    target: 'character',
     sections,
     validateInactiveSectionConfigs: true,
   });

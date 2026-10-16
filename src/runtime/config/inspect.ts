@@ -232,7 +232,7 @@ export function createProject02ConfigFieldInspectShapes(options: {
               : 'default',
         effective:
           effectiveValue === undefined
-            ? unauthoredRuntimeConfigField(field)
+            ? unauthoredRuntimeConfigField(field, field.required)
             : Object.freeze({
                 name: field.name,
                 secret: field.secret,

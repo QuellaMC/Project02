@@ -893,6 +893,7 @@ function resolvedConfig(
       version: runtimeConfigVersion,
       plugins: {[mem0PluginId]: {config: values}},
     },
+    target: 'character',
     sections: {plugins: [createMem0PluginManifest()]},
   }).sectionConfigs.plugins[mem0PluginId];
 

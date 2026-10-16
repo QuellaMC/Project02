@@ -177,6 +177,7 @@ function resolveGlobalScope(
   // Location-free: the global document resolves through no character.
   const resolution = resolveRuntimeSectionConfigs({
     config: layeredConfig.effective.config,
+    target: 'global',
     sections,
     validateInactiveSectionConfigs: true,
     defaultEnabledSectionIds: {
