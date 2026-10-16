@@ -21,6 +21,7 @@ import {
   parseRuntimePluginPackageDescriptor,
   readRuntimePluginPackageDescriptor,
 } from '../../src/plugins/api/package-descriptor.ts';
+import {isJsonRecord} from '../../src/shared/json-boundary.ts';
 import {
   bundledRuntimePluginPackageRoot,
   maxRuntimePluginPackageMetadataBytes,
@@ -232,6 +233,142 @@ describe('plugin package descriptor schema parity', () => {
       );
     },
   );
+
+  it("accepts a field scope that narrows its config's and refuses one that widens it, in both validators", () => {
+    const descriptor = validDescriptor();
+    const manifest = descriptor['manifest'];
+
+    if (!isJsonRecord(manifest)) {
+      throw new Error('Expected the demo descriptor to carry a manifest.');
+    }
+
+    const withConfig = (
+      scope: string,
+      fields: readonly {readonly name: string; readonly scope?: string}[],
+    ) => ({
+      ...descriptor,
+      manifest: {
+        ...manifest,
+        config: {
+          scope,
+          fields: fields.map(field => ({
+            ...field,
+            description: `The ${field.name} setting.`,
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+          })),
+        },
+      },
+    });
+    const verdicts = (candidate: Record<string, unknown>) => [
+      validateAgainstSchema(candidate),
+      parseRuntimePluginPackageDescriptor(candidate).status,
+    ];
+
+    expect(verdicts(withConfig('global_only', [{name: 'tone'}]))).toEqual([
+      true,
+      'accepted',
+    ]);
+    expect(
+      verdicts(
+        withConfig('global_with_character_overrides', [
+          {name: 'ownSetting', scope: 'character_only'},
+          {name: 'homeSetting', scope: 'global_only'},
+        ]),
+      ),
+    ).toEqual([true, 'accepted']);
+
+    const widened = withConfig('character_only', [
+      {name: 'homeSetting', scope: 'global_only'},
+    ]);
+
+    expect(validateAgainstSchema(widened)).toBe(false);
+    expect(validateAgainstSchema.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: '/manifest/config/fields/0/scope',
+      }),
+    );
+    expect(parseRuntimePluginPackageDescriptor(widened)).toEqual({
+      status: 'rejected',
+      issue: {
+        code: 'invalid_manifest',
+        message:
+          'Plugin config field "homeSetting" cannot be "global_only" in a ' +
+          '"character_only" config: a field\'s scope must equal its ' +
+          'config\'s, or narrow "global_with_character_overrides".',
+      },
+    });
+  });
+
+  it("accepts a default of the field's own type; the schema refuses one on a secret or a required field and defaultValueSummary as unknown, and the code validator refuses those and one of another type", () => {
+    const descriptor = validDescriptor();
+    const manifest = descriptor['manifest'];
+
+    if (!isJsonRecord(manifest)) {
+      throw new Error('Expected the demo descriptor to carry a manifest.');
+    }
+
+    const withField = (field: Readonly<Record<string, unknown>>) => ({
+      ...descriptor,
+      manifest: {
+        ...manifest,
+        config: {
+          scope: 'global_with_character_overrides',
+          fields: [
+            {
+              name: 'mirror',
+              description: 'On unless someone turns it off.',
+              required: false,
+              secret: false,
+              valueType: 'boolean',
+              redactionLabels: [],
+              ...field,
+            },
+          ],
+        },
+      },
+    });
+    const ownType = withField({defaultValue: true});
+
+    expect(
+      validateAgainstSchema(ownType),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseRuntimePluginPackageDescriptor(ownType).status).toBe(
+      'accepted',
+    );
+
+    expect(
+      validateAgainstSchema(withField({defaultValue: true, secret: true})),
+    ).toBe(false);
+    expect(
+      validateAgainstSchema(withField({defaultValue: true, required: true})),
+    ).toBe(false);
+    expect(
+      validateAgainstSchema(withField({defaultValueSummary: 'true'})),
+    ).toBe(false);
+    expect(validateAgainstSchema.errors).toContainEqual(
+      expect.objectContaining({
+        keyword: 'additionalProperties',
+        params: {additionalProperty: 'defaultValueSummary'},
+      }),
+    );
+
+    // A default's type has one judge, the code validator: the schema
+    // cannot even say allowedValues.
+    for (const field of [
+      {defaultValue: 'on'},
+      {defaultValue: true, secret: true},
+      {defaultValue: true, required: true},
+    ]) {
+      expect(
+        parseRuntimePluginPackageDescriptor(withField(field)).status,
+        JSON.stringify(field),
+      ).toBe('rejected');
+    }
+  });
 
   it('accepts a string $schema key, and its absence, in both validators', () => {
     const descriptor = validDescriptor();

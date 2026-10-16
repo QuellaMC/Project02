@@ -806,7 +806,6 @@ describe('runtime plugin config metadata', () => {
               required: true,
               secret: false,
               valueType: 'enum',
-              defaultValueSummary: 'local',
               allowedValues: ['local', 'cloud'],
               agentMutable: true,
               reloadRequired: true,

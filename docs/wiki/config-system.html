@@ -19,12 +19,12 @@
 
     <p>
       A Project02 home holds one versioned global JSON document plus one optional overlay per
-      character. Every setting — the host's and each plugin's — is authorable in both, and a
-      character's value wins over the home's. One loader, schema, redaction, inspection, and
-      target-aware mutation path serves the daemon's config verbs, runtime activation, and the
-      model-facing tools. The config engine lives under <code>src/runtime/config</code>;
-      model-facing plugin operations are adapters over that boundary, never a second config
-      system.
+      character. Every setting — the host's and each plugin's — is authorable in both unless
+      its scope keeps it to one, and a character's value wins over the home's. One loader,
+      schema, redaction, inspection, and target-aware mutation path serves the daemon's config
+      verbs, runtime activation, and the model-facing tools. The config engine lives under
+      <code>src/runtime/config</code>; model-facing plugin operations are adapters over that
+      boundary, never a second config system.
     </p>
 
     <p class="rule">
@@ -67,15 +67,17 @@
     <p>
       The host fields are declared once, in the field registry, in the order the settings
       page renders them: what a person decides first, then the knobs, then the switch. Each field
-      carries its description, value type, allowed values, default summary, and whether it is
+      carries its description, value type, allowed values, default value, and whether it is
       a secret. Every other setting belongs to a declared section, kept under a namespace of
       the document — <code>plugins</code> today — at <code>&lt;namespace&gt;.&lt;id&gt;</code>,
       its fields at <code>&lt;namespace&gt;.&lt;id&gt;.config.&lt;field&gt;</code>. Every
       section is declared the same way, and a plugin manifest is such a declaration as it
       stands. Plugin fields come from <code>RuntimePluginManifest.config.fields</code>, which
-      is likewise the single source for value types, allowed values, secret handling, reload
-      requirements, and whether an ordinary non-secret field is agent-mutable. A secret field
-      is never agent-mutable.
+      is likewise the single source for value types, allowed values, default values, secret
+      handling, reload requirements, and whether an ordinary non-secret field is agent-mutable.
+      A secret field is never agent-mutable. The resolver applies a field's declared default
+      value wherever no permitted layer authored the field, and the settings page shows it as
+      the field's effective value.
     </p>
 
     <h2>One schema and three representations</h2>
@@ -101,7 +103,7 @@
 
     <p>
       Installed characters are enabled unless <code>project02.enabled</code> says otherwise —
-      it layers like every other field, so a global <code>false</code> switches them all off
+      it layers like every other host field, so a global <code>false</code> switches them all off
       and a character's overlay value overrides it. A character switched off keeps its settings
       readable, and the same field switches it back on. An absent character field keeps
       inheriting future global changes; global values are never copied into the overlay. On
@@ -126,21 +128,27 @@
     <h2>Plugin config scopes</h2>
 
     <p>
-      Every plugin manifest declares <code>config.scope</code>. One shared rule applies it to
-      raw config loading, the daemon's config verbs, package defaults, and approved model
-      writes.
+      Every plugin manifest declares <code>config.scope</code> for its switch and fields, and a
+      field may declare its own to narrow it: in a <code>global_with_character_overrides</code>
+      plugin a field may be <code>character_only</code> or <code>global_only</code>, and a field
+      that would widen its plugin's scope is rejected. One shared rule applies a scope to raw
+      config loading, the daemon's config verbs, package defaults, approved model writes, and
+      the merge, which takes each value only from a layer its scope permits:
     </p>
 
     <table>
       <thead><tr><th>Policy</th><th>Home config</th><th>Character package or overlay</th></tr></thead>
       <tbody>
-        <tr><td><code>global_with_character_overrides</code></td><td>Enablement and every field.</td><td>Enablement and every field, overriding the home.</td></tr>
-        <tr><td><code>character_only</code></td><td>Nothing: the home's view leaves the plugin out, and a home write naming it is refused.</td><td>Enablement and every field.</td></tr>
+        <tr><td><code>global_with_character_overrides</code></td><td>The home's value, and each character's unless that character sets its own.</td><td>The character's value, overriding the home's.</td></tr>
+        <tr><td><code>character_only</code></td><td>Nothing: the home's view leaves it out, and a home write naming it is refused.</td><td>The character's value.</td></tr>
+        <tr><td><code>global_only</code></td><td>The value for the home and for every character.</td><td>Nothing: a character's view leaves it out, and a character write naming it is refused.</td></tr>
       </tbody>
     </table>
 
     <p>
-      Secret fields follow their plugin's scope like any other setting.
+      A value found where its scope forbids it never takes effect: it is reported as the
+      warning <code>runtime_config_authored_outside_scope</code> at its path, and blocks
+      nothing. Secret fields follow their scope like any other setting.
       <code>character-state</code> is character-only: it belongs wholly to the character that
       runs it.
     </p>

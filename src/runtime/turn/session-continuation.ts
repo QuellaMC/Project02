@@ -9,7 +9,7 @@ import type {
   ContextSummarizer,
   SessionContinuationPlan,
 } from '../evidence/records.ts';
-import {defaultProject02ContextWindowTokens} from '../config/types.ts';
+import {defaultProject02ContextWindowTokens} from '../config/schema.ts';
 import {
   capSummaryText,
   mechanicalSummary,

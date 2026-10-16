@@ -89,12 +89,12 @@ export {redactRuntimeConfigValue} from './redact.ts';
 export {
   runtimeSectionScopeDiagnostics,
   runtimeSectionScopeViolation,
+  runtimeSectionValueAuthorable,
   type RuntimeSectionScopeOperation,
   type RuntimeSectionScopeViolation,
 } from './section-scope.ts';
 export {
   diagnosticsHaveErrors,
-  resolveProject02RuntimeConfig,
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticMatchesSection,
   type ResolveRuntimeSectionConfigsOptions,
@@ -102,12 +102,10 @@ export {
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
-  runtimeConfigValueMatchesField,
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 export {runtimeConfigSectionPath} from './path.ts';
 export {
-  defaultProject02UserDisplayName,
   runtimeConfigDiagnosticLocation,
   runtimeConfigSectionNamespaces,
   runtimeConfigVersion,

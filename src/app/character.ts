@@ -8,8 +8,8 @@ import {
 import {selectCharacterId, type CharacterProfile} from '../core/index.ts';
 import {
   bindProject02CharacterRuntimeLocation,
-  createLayeredProject02RuntimeConfigSnapshot,
   readCharacterOverlayForScope,
+  resolveLayeredProject02RuntimeConfig,
 } from '../runtime/config/index.ts';
 import type {RoleModelCharacterRef} from '../role-model/index.ts';
 import {createCanonicalJsonFingerprint} from '../shared/canonical-json.ts';
@@ -53,19 +53,20 @@ export function listProject02Characters(
 
 function characterIsEnabled(home: Project02Home, characterId: string): boolean {
   try {
-    const {overlay} = readCharacterOverlayForScope(
-      bindProject02CharacterRuntimeLocation({
-        configLocation: home.runtimeLocation,
-        characterId,
-      }).characterScope,
-    );
+    const runtimeLocation = bindProject02CharacterRuntimeLocation({
+      configLocation: home.runtimeLocation,
+      characterId,
+    });
 
-    return (
-      createLayeredProject02RuntimeConfigSnapshot({
-        loadedConfig: home.loadedConfig,
-        overlayConfig: overlay,
-      }).effective.config?.project02?.enabled ?? true
-    );
+    return resolveLayeredProject02RuntimeConfig({
+      loadedConfig: home.loadedConfig,
+      overlayConfig: readCharacterOverlayForScope(
+        runtimeLocation.characterScope,
+      ).overlay,
+      runtimeLocation,
+      // Only the host's own switch is read, and it belongs to no section.
+      sections: {plugins: []},
+    }).project02.enabled;
   } catch {
     // One character's damaged data directory must not take the roster
     // down; the damage speaks, in full, when that character is started.

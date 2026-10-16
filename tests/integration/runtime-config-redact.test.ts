@@ -8,7 +8,7 @@ import {
   runtimeConfigSnapshotForTest,
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
-import {resolveProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
+import {resolveLayeredProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {
   runtimePluginContractVersion,
   type RuntimePluginManifest,
@@ -38,7 +38,7 @@ describe('runtime config redaction', () => {
       },
     );
 
-    const resolved = resolveProject02RuntimeConfig({
+    const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
@@ -101,7 +101,7 @@ describe('runtime config redaction', () => {
       },
     );
 
-    const resolved = resolveProject02RuntimeConfig({
+    const resolved = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),

@@ -1,10 +1,13 @@
 import {
   isValidSpeakerDisplayName,
+  localUserSpeaker,
   maxSpeakerDisplayNameLength,
 } from '../../core/index.ts';
-import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
 import {
-  defaultProject02ContextWindowTokens,
+  runtimeConfigValueMatchesField,
+  type RuntimeConfigFieldDeclaration,
+} from '../../plugins/api/index.ts';
+import {
   project02RoleModelProviderValues,
   type RuntimeConfigValue,
 } from './types.ts';
@@ -18,6 +21,13 @@ export type Project02ConfigFieldDefinition = RuntimeConfigFieldDeclaration & {
   /** Narrows `valueType` where the field's real rule is stricter. */
   readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
+
+// Stated once: each declaration below carries its default, and code that
+// needs the value typed reads the same name.
+export const defaultProject02Enabled = true;
+export const defaultProject02RoleModelProvider = 'local';
+/** A safe floor for small local models; a stopgap until providers report their own limit. */
+export const defaultProject02ContextWindowTokens = 32768;
 
 const project02ConfigFieldDefinitions = Object.freeze([
   Object.freeze({
@@ -33,7 +43,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     required: false,
     secret: false,
     valueType: 'string',
-    defaultValueSummary: 'You',
+    defaultValue: localUserSpeaker.displayName,
     // Must accept exactly what `createUserSpeaker` accepts, or chat throws
     // later. Trimmed because resolution trims before constructing the speaker.
     acceptsValue: value =>
@@ -54,7 +64,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     required: false,
     secret: false,
     valueType: 'enum',
-    defaultValueSummary: 'local',
+    defaultValue: defaultProject02RoleModelProvider,
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
     agentMutable: false,
@@ -102,7 +112,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     required: false,
     secret: false,
     valueType: 'number',
-    defaultValueSummary: String(defaultProject02ContextWindowTokens),
+    defaultValue: defaultProject02ContextWindowTokens,
     acceptsValue: value =>
       typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
     redactionLabels: Object.freeze([]),
@@ -135,7 +145,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     required: false,
     secret: false,
     valueType: 'boolean',
-    defaultValueSummary: 'true',
+    defaultValue: defaultProject02Enabled,
     redactionLabels: Object.freeze([]),
     agentMutable: false,
     reloadRequired: true,
@@ -156,41 +166,6 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
   return Object.freeze(
     project02ConfigFieldDefinitions.map(field => field.name),
   );
-}
-
-export function runtimeConfigValueMatchesField(
-  value: RuntimeConfigValue,
-  field: RuntimeConfigFieldDeclaration,
-): boolean {
-  if (
-    field.allowedValues !== undefined &&
-    (typeof value !== 'string' || !field.allowedValues.includes(value))
-  ) {
-    return false;
-  }
-
-  switch (field.valueType) {
-    case undefined:
-      return true;
-    case 'string':
-    case 'path':
-    case 'enum':
-      return typeof value === 'string';
-    case 'number':
-      return typeof value === 'number' && Number.isFinite(value);
-    case 'boolean':
-      return typeof value === 'boolean';
-    case 'object':
-      return (
-        typeof value === 'object' && value !== null && !Array.isArray(value)
-      );
-    case 'array':
-      return Array.isArray(value);
-    case 'secret':
-      return field.secret && typeof value === 'string';
-  }
-
-  return true;
 }
 
 /**

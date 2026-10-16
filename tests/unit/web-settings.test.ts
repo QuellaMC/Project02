@@ -26,6 +26,7 @@ import type {
   ConfigTarget,
   ConfigView,
   RuntimeConfigFieldInspectShape,
+  RuntimeConfigValue,
 } from '../../src/gateway/api/index.ts';
 
 const home: ConfigTarget = {scope: 'global'};
@@ -50,6 +51,18 @@ function field(
   };
 }
 
+/** A field nothing has set, carrying its declared default. */
+function defaulted(
+  name: string,
+  value: RuntimeConfigValue,
+  shape: Partial<RuntimeConfigFieldInspectShape> = {},
+): RuntimeConfigFieldInspectShape {
+  return field(name, {
+    ...shape,
+    effective: {name, secret: false, source: 'default', resolved: true, value},
+  });
+}
+
 type OkView = Extract<ConfigView, {status: 'ok'}>;
 
 /** A field whose manifest declares no valueType. */
@@ -70,15 +83,14 @@ function view(fingerprint = 'f1'): OkView {
     fingerprint,
     diagnostics: [],
     project02: [
-      field('userDisplayName', {defaultValueSummary: 'You'}),
-      field('roleModelProvider', {
+      defaulted('userDisplayName', 'You'),
+      defaulted('roleModelProvider', 'local', {
         valueType: 'enum',
         allowedValues: ['local', 'nvidia'],
-        defaultValueSummary: 'local',
       }),
       field('nvidiaApiKey', {secret: true, valueType: 'secret'}),
       field('contextWindowTokens', {valueType: 'number'}),
-      field('enabled', {valueType: 'boolean', defaultValueSummary: 'true'}),
+      defaulted('enabled', true, {valueType: 'boolean'}),
     ],
     sections: [
       {
@@ -478,7 +490,7 @@ describe('web settings', () => {
     ).toBeUndefined();
   });
 
-  it('judges the first run by the home provider alone: unauthored and nothing in effect', () => {
+  it('judges the first run by the home provider alone: unauthored, with only its default in effect', () => {
     const fresh = view();
 
     expect(setupNeeded(fresh)).toBe(true);

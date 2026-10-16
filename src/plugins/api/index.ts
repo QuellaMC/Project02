@@ -103,6 +103,7 @@ export {
   createRuntimePluginContextItem,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
+  runtimeConfigValueMatchesField,
   validateRuntimePluginContextItem,
   validateRuntimePluginManifest,
 } from './manifest-validation.ts';

@@ -7,7 +7,7 @@ import {
   runtimeConfigDiagnosticIsReadinessFailure,
   runtimeConfigDiagnosticMatchesSection,
   type RuntimeConfigDiagnostic,
-  resolveProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {runtimeConfigSnapshotForTest} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -72,7 +72,7 @@ describe('runtime config diagnostic plugin matching', () => {
       }),
       diagnostics: Object.freeze([]),
     });
-    const resolvedConfig = resolveProject02RuntimeConfig({
+    const resolvedConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
 
       sections: {plugins: []},
@@ -128,7 +128,7 @@ describe('runtime config diagnostic plugin matching', () => {
       }),
       diagnostics: Object.freeze([]),
     });
-    const resolvedConfig = resolveProject02RuntimeConfig({
+    const resolvedConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig}),
       sections: {plugins: [manifest]},
     });

@@ -30,7 +30,7 @@
           "secret": false,
           "valueType": "string",
           "allowedValues": ["platform", "server", "oss"],
-          "defaultValueSummary": "platform",
+          "defaultValue": "platform",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
@@ -61,7 +61,7 @@
           "required": false,
           "secret": false,
           "valueType": "string",
-          "defaultValueSummary": "project02-user",
+          "defaultValue": "project02-user",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true

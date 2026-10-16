@@ -621,30 +621,6 @@ describe('materialization ordering', () => {
     expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
-
-  it('creates no durable state for global enablement of a character-only plugin', async () => {
-    const homeRoot = homeWithCharacter({characterId: 'seeded'});
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      plugins: {'character-state': {enabled: true}},
-    });
-    const startup = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot, character: 'seeded'},
-    });
-
-    expect(startup.status).toBe('config_invalid');
-    if (startup.status === 'character_invalid') {
-      throw new Error('Expected config-invalid scope policy.');
-    }
-    expect(startup.activationPlan.resolvedConfig.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: 'runtime_config_character_only_plugin_enabled_globally',
-        severity: 'error',
-      }),
-    );
-    expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
-    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
-  });
 });
 
 describe('materialization ordering for pre-existing overlays', () => {

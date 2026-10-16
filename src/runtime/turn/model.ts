@@ -25,7 +25,7 @@ import {
 } from '../../role-model/index.ts';
 import {localUserSpeaker, type VisibleMessage} from '../../core/index.ts';
 import {conversationHistoryFromRawEvents} from '../evidence/conversation-history.ts';
-import {defaultProject02ContextWindowTokens} from '../config/types.ts';
+import {defaultProject02ContextWindowTokens} from '../config/schema.ts';
 import {
   runRoleModelLoop,
   type RoleModelAdapter,

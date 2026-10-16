@@ -364,7 +364,7 @@
             <td>
               → <code>ConfigView</code>: <code>ok</code> with the fingerprint a
               write must present, the documents' diagnostics, the host fields
-              and every installed plugin in one field shape; or
+              and every section the scope may set, in one field shape; or
               <code>refused</code> (<code>unknown_character</code>,
               <code>config_unloadable</code>). A query naming no such target is
               a 400. Described below.
@@ -734,17 +734,22 @@ data: {…}</code></pre>
         put it there, whether a change reloads the character; a plugin's switch
         says the same of itself as <code>enabledSource</code>. Whatever a view
         offers, the scope can save: every host field is authorable at the home
-        and per character, and a plugin that belongs to a character
-        (<code>config.scope: "character_only"</code>) is absent from the home's
-        view. Defaults are not resolved in: an unauthored field reads
-        <code>effective.source: "missing"</code> and its
-        <code>defaultValueSummary</code> names what applies. The global scope
-        resolves the home's document alone; a character's scope resolves the
-        merged view, that character's own values over the home's. A document
-        that does not load is refused with the diagnostic, never rendered as
-        blank fields; a character switched off is still viewed, and its
-        <code>enabled</code> field is the way back on. The home is not a field:
-        it is where the daemon runs, and health names it.
+        and per character, a plugin or field that belongs to a character
+        (<code>"character_only"</code>) is absent from the home's view, and one
+        that belongs to the home (<code>"global_only"</code>) from a character's.
+        The global scope resolves the home's document alone; a character's
+        scope resolves the merged view, that character's own values over the
+        home's. Either way, a value is taken only from a layer its plugin's or
+        field's scope permits: one found elsewhere never takes effect, and the
+        view's diagnostics carry it as the warning
+        <code>runtime_config_authored_outside_scope</code> at its path. A field
+        no such layer authored carries its declared default as its effective
+        value, <code>effective.source: "default"</code>, and reads
+        <code>"missing"</code> when it has none. A document that does not load
+        is refused with the diagnostic, never rendered as blank fields; a
+        character switched off is still viewed, and its <code>enabled</code>
+        field is the way back on. The home is not a field: it is where the
+        daemon runs, and health names it.
       </p>
 
       <p>
@@ -759,7 +764,7 @@ data: {…}</code></pre>
         never its value, so two pages replacing the same secret at once both
         succeed and the later value stands. A secret is sent as its value
         and kept with the scope's document; every view shows only that it is
-        set, and a home write naming a character's own plugin is refused as
+        set, and a write naming what the scope's view leaves out is refused as
         <code>invalid</code>. A write the daemon cannot make — a file another
         writer holds for longer than it will wait, an unwritable home — is
         <code>failed</code> with the reason.
