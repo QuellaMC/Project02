@@ -34,10 +34,13 @@ import {
   RuntimeConfigMutationError,
   type LayeredProject02RuntimeConfigSnapshot,
   type ResolvedRuntimeConfigScopeTarget,
+  type ResolvedRuntimeSectionConfigs,
   type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigFieldScope,
   type RuntimeConfigSectionActivationShape,
+  type RuntimeConfigSectionDeclaration,
+  type RuntimeConfigSectionInspectShape,
   type RuntimeConfigSectionNamespace,
   type RuntimeConfigSections,
 } from '../runtime/config/index.ts';
@@ -60,13 +63,11 @@ import type {
  */
 const writeLockWaitMs = 500;
 
-type ScopeResolution = {
+export type ScopeResolution = {
   readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
   readonly targetScope: RuntimeConfigFieldScope;
   readonly sections: RuntimeConfigSections;
-  readonly pluginResolution: Parameters<
-    typeof createRuntimeSectionConfigInspectShape
-  >[0]['sectionResolution'];
+  readonly sectionResolution: ResolvedRuntimeSectionConfigs;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
   /** A section with no entry here judges its own activation. */
@@ -88,18 +89,28 @@ export function readConfigView(
   home: Project02Home,
   target: ConfigTarget,
 ): ConfigView {
+  const resolution = resolveScope(home, target);
+
+  return 'status' in resolution ? resolution : viewOf(resolution);
+}
+
+/**
+ * A target's settings resolved, or why they cannot be: the one resolution
+ * the settings view and a connector's read are both made from.
+ */
+export function resolveScope(
+  home: Project02Home,
+  target: ConfigTarget,
+): ScopeResolution | RefusedView {
   try {
     // A home replaced under the daemon belongs to a daemon that is not
     // this one; a view over it would mix its files with this home's
     // catalog, and every save would refuse anyway.
     assertResolvedProject02HomeCurrent(home.runtimeLocation);
 
-    const resolution =
-      target.scope === 'global'
-        ? resolveGlobalScope(home)
-        : resolveCharacterScope(home, target.characterId);
-
-    return 'status' in resolution ? resolution : viewOf(resolution);
+    return target.scope === 'global'
+      ? resolveGlobalScope(home)
+      : resolveCharacterScope(home, target.characterId);
   } catch (error: unknown) {
     if (unloadable(error)) {
       return refusedView('config_unloadable', error.message);
@@ -203,8 +214,8 @@ function resolveGlobalScope(
     targetScope: 'global',
     sections,
     // As a character's resolution does, it carries what the merge left out.
-    pluginResolution: {
-      redactedSectionConfigs: resolution.redactedSectionConfigs,
+    sectionResolution: {
+      ...resolution,
       diagnostics: [
         ...layeredConfig.effective.diagnostics,
         ...resolution.diagnostics,
@@ -286,7 +297,7 @@ function resolveCharacterScope(
     }),
     targetScope: 'character',
     sections,
-    pluginResolution: plan.resolvedConfig,
+    sectionResolution: plan.resolvedConfig,
     // The activation carries what the runtime acts on: the resolution's
     // diagnostics that concern the character, and what the catalog could
     // not publish. The rest of the resolution, of the sections resolved
@@ -334,26 +345,34 @@ function viewOf(resolution: ScopeResolution): ConfigView {
           .filter(declaration =>
             runtimeSectionValueAuthorable({declaration, target: targetScope}),
           )
-          .map(declaration => {
-            const activation =
-              resolution.sectionActivations[namespace]?.[declaration.id];
-            const defaultEnabled = resolution.defaultEnabledSectionIds[
-              namespace
-            ]?.has(declaration.id);
-
-            return createRuntimeSectionConfigInspectShape({
-              layeredConfig,
-              targetScope,
-              sectionResolution: resolution.pluginResolution,
-              namespace,
-              declaration,
-              fingerprint,
-              ...(activation === undefined ? {} : {activation}),
-              ...(defaultEnabled === undefined ? {} : {defaultEnabled}),
-            });
-          }),
+          .map(declaration =>
+            sectionViewOf(resolution, namespace, declaration),
+          ),
       ),
     ),
+  });
+}
+
+/** A section as the target's screen shows it, and as a connector's read judges it. */
+export function sectionViewOf(
+  resolution: ScopeResolution,
+  namespace: RuntimeConfigSectionNamespace,
+  declaration: RuntimeConfigSectionDeclaration,
+): RuntimeConfigSectionInspectShape {
+  const activation = resolution.sectionActivations[namespace]?.[declaration.id];
+  const defaultEnabled = resolution.defaultEnabledSectionIds[namespace]?.has(
+    declaration.id,
+  );
+
+  return createRuntimeSectionConfigInspectShape({
+    layeredConfig: resolution.layeredConfig,
+    targetScope: resolution.targetScope,
+    sectionResolution: resolution.sectionResolution,
+    namespace,
+    declaration,
+    fingerprint: resolution.fingerprint,
+    ...(activation === undefined ? {} : {activation}),
+    ...(defaultEnabled === undefined ? {} : {defaultEnabled}),
   });
 }
 

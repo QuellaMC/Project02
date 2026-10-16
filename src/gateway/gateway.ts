@@ -36,6 +36,7 @@ import {
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
 import {applyConfigChange, readConfigView} from './config.ts';
+import {readConnectorConfig} from './connector-config.ts';
 import {
   characterOfConversation,
   type ConversationCharacter,
@@ -139,6 +140,8 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
       return outcome;
     },
+    connectorConfig: connectorId =>
+      readConnectorConfig(loadHome(), connectorId),
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const reach = reachable(runtimes, loadHome(), characterId);
 

@@ -353,8 +353,8 @@ function resolveSectionConfigField(options: {
 }
 
 /**
- * A secret is a plain string in whichever layer authored it. The plugin
- * reads the resolved value; every other reader is handed it redacted.
+ * A secret is a plain string in whichever layer authored it. The section's
+ * owner reads the resolved value; every other reader is handed it redacted.
  */
 function resolveSecretField(options: {
   readonly namespace: RuntimeConfigSectionNamespace;

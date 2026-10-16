@@ -127,6 +127,7 @@ export {
   type ResolvedRuntimeSectionConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigSectionActivationShape,
+  type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionInspectShape,
   type RuntimeConfigSectionNamespace,
   type RuntimeConfigSections,

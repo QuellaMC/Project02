@@ -2653,6 +2653,151 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('hands a connector what each entry runs on, for the home and for every character that is on, each by its own switch', async () => {
+    const homeRoot = await createTelegramHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
+    const homeConfig = join(homeRoot, 'config.json');
+    const miraConfig = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'config.json',
+    );
+    const active: unknown = expect.objectContaining({status: 'active'});
+    const disabled: unknown = expect.objectContaining({status: 'disabled'});
+
+    writeRuntimeConfig(miraConfig, {
+      connectors: {
+        telegram: {config: {botToken: '987654:mira', mirror: false}},
+      },
+    });
+    // Each token in the clear where it belongs, and Mirror as authored or
+    // as its default.
+    expect(gateway.connectorConfig('telegram')).toEqual({
+      status: 'ok',
+      connectorId: 'telegram',
+      home: {
+        activation: active,
+        values: {managementBotToken: '123456:home', mirror: true},
+      },
+      characters: [
+        {
+          characterId: 'mira',
+          activation: active,
+          values: {botToken: '987654:mira', mirror: false},
+        },
+        {characterId: 'nova', activation: active, values: {mirror: true}},
+      ],
+    });
+
+    writeRuntimeConfig(homeConfig, {
+      connectors: {
+        telegram: {config: {managementBotToken: '123456:home', mirror: false}},
+      },
+    });
+    expect(gateway.connectorConfig('telegram')).toMatchObject({
+      characters: [
+        {characterId: 'mira'},
+        {characterId: 'nova', values: {mirror: false}},
+      ],
+    });
+
+    // A bot is one character's: a token in the home's document is never
+    // used, for a character with an overlay or without one, and stops
+    // nothing.
+    writeRuntimeConfig(homeConfig, {
+      connectors: {
+        telegram: {
+          config: {
+            managementBotToken: '123456:home',
+            mirror: false,
+            botToken: '111111:home',
+          },
+        },
+      },
+    });
+    expect(gateway.connectorConfig('telegram')).toEqual({
+      status: 'ok',
+      connectorId: 'telegram',
+      home: {
+        activation: active,
+        values: {managementBotToken: '123456:home', mirror: false},
+      },
+      characters: [
+        {
+          characterId: 'mira',
+          activation: active,
+          values: {botToken: '987654:mira', mirror: false},
+        },
+        {characterId: 'nova', activation: active, values: {mirror: false}},
+      ],
+    });
+
+    // The home's switch is a default: a character that set her own keeps
+    // it.
+    writeRuntimeConfig(homeConfig, {
+      connectors: {
+        telegram: {
+          enabled: false,
+          config: {
+            managementBotToken: '123456:home',
+            mirror: false,
+            botToken: '111111:home',
+          },
+        },
+      },
+    });
+    writeRuntimeConfig(miraConfig, {
+      connectors: {
+        telegram: {
+          enabled: true,
+          config: {botToken: '987654:mira', mirror: false},
+        },
+      },
+    });
+    expect(gateway.connectorConfig('telegram')).toEqual({
+      status: 'ok',
+      connectorId: 'telegram',
+      home: {activation: disabled, values: {}},
+      characters: [
+        {
+          characterId: 'mira',
+          activation: active,
+          values: {botToken: '987654:mira', mirror: false},
+        },
+        {characterId: 'nova', activation: disabled, values: {}},
+      ],
+    });
+
+    await ensureCharacterDataDir({homeRoot, characterId: 'nova'});
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'nova'), 'config.json'),
+      {project02: {enabled: false}},
+    );
+    expect(gateway.connectorConfig('telegram')).toMatchObject({
+      characters: [{characterId: 'mira'}],
+    });
+  });
+
+  it('refuses a connector this version does not have, and a home document that does not load', async () => {
+    const homeRoot = await createTelegramHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}});
+
+    // The home's document names it, and still this version has none.
+    expect(gateway.connectorConfig('discord')).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_connector',
+    });
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json', 'utf8');
+
+    const home = gateway.configView({scope: 'global'});
+
+    expect(home).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
+    expect(gateway.connectorConfig('telegram')).toEqual(home);
+  });
+
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {
     const homeRoot = await createGatewayHome();
     const options = {
