@@ -11,7 +11,10 @@ import type {
   RuntimePluginToolCall,
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
-import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
+import {
+  createRuntimeConfigSections,
+  type RuntimePluginConfigControlCapability,
+} from '../../../runtime/config/index.ts';
 import {requiredRuntimePluginConfigControl} from './state.ts';
 
 type RuntimePluginConfigInspection = ReturnType<
@@ -124,7 +127,9 @@ export function inspectRuntimePluginConfigForControl(options: {
   return requiredRuntimePluginConfigControl(options.state).inspectConfig({
     namespace: 'plugins',
     declaration: options.manifest,
-    sections: {plugins: options.state.pluginManifests},
+    sections: createRuntimeConfigSections({
+      plugins: options.state.pluginManifests,
+    }),
     ...(activation === undefined ? {} : {activation}),
     ...(options.state.defaultEnabledPluginIds === undefined
       ? {}

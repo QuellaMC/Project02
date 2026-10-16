@@ -8,6 +8,7 @@ import {
 import {selectCharacterId, type CharacterProfile} from '../core/index.ts';
 import {
   bindProject02CharacterRuntimeLocation,
+  createRuntimeConfigSections,
   readCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
 } from '../runtime/config/index.ts';
@@ -65,7 +66,7 @@ function characterIsEnabled(home: Project02Home, characterId: string): boolean {
       ).overlay,
       runtimeLocation,
       // Only the host's own switch is read, and it belongs to no section.
-      sections: {plugins: []},
+      sections: createRuntimeConfigSections({plugins: []}),
     }).project02.enabled;
   } catch {
     // One character's damaged data directory must not take the roster

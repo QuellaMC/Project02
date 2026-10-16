@@ -26,7 +26,7 @@ export function demoConfigToneChangeOutput(
     }),
     namespace: 'plugins',
     declaration: manifest,
-    sections: {plugins: [manifest]},
+    sections: {plugins: [manifest], connectors: []},
   });
 
   return JSON.stringify({

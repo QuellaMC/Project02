@@ -314,6 +314,35 @@ describe('gateway over HTTP', () => {
     await gateway.stop();
   });
 
+  it("answers a connector's read under a 200, uncached, and only to the token on loopback", async () => {
+    const {request, gateway} = await createHttpHarness();
+    const path = '/api/connectors/telegram/config';
+
+    const read = await request(path);
+
+    expect(read.status).toBe(200);
+    expect(read.headers.get('cache-control')).toBe('no-store');
+
+    const body: unknown = await read.json();
+
+    expect(body).toMatchObject({status: 'ok', connectorId: 'telegram'});
+    expect(body).toEqual(gateway.connectorConfig('telegram'));
+
+    const noToken = await request(path, {headers: {authorization: ''}});
+
+    expect(noToken.status).toBe(401);
+    expect(await errorOf(noToken)).toMatchObject({code: 'unauthorized'});
+
+    const foreignHost = await request(path, {
+      headers: {host: 'evil.example:80'},
+    });
+
+    expect(foreignHost.status).toBe(421);
+    expect(await errorOf(foreignHost)).toMatchObject({
+      code: 'misdirected_host',
+    });
+  });
+
   it('answers an unknown API route with the envelope, behind the same auth', async () => {
     const {request} = await createHttpHarness();
 

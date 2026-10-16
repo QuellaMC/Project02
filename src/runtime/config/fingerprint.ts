@@ -1,3 +1,4 @@
+import {createRuntimeConfigSections} from './connectors.ts';
 import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {
   runtimeConfigSectionNamespaces,
@@ -15,9 +16,10 @@ import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
  * Fingerprints are shown to surfaces that must never see a secret -- the
  * model reads one back from `runtime.plugin.config` -- and an unsalted
  * hash of a mostly-known document lets a weak plaintext secret be guessed
- * offline. Every fingerprint therefore takes the section declarations and
- * replaces authored values of secret-declared fields with a constant:
- * presence is hashed, the value never is.
+ * offline. Every fingerprint therefore takes the section declarations,
+ * beside the built-in ones it knows itself, and replaces authored values of
+ * secret-declared fields with a constant: presence is hashed, the value
+ * never is.
  */
 export function createRuntimeConfigFingerprint(
   value: RuntimeConfigValue | Project02RuntimeConfig | JsonBoundaryObject,
@@ -89,23 +91,34 @@ type SecretFieldsBySection = ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 >;
 
+// Unioned with what a caller passes, so no caller can leave a built-in
+// section's secret out by passing fewer declarations.
+const builtInSections = createRuntimeConfigSections({plugins: []});
+
 function secretFieldsBySection(
   sections: RuntimeConfigSections,
 ): SecretFieldsBySection {
   return new Map(
-    runtimeConfigSectionNamespaces.map(namespace => [
-      namespace,
-      new Map(
-        sections[namespace].map(declaration => [
+    runtimeConfigSectionNamespaces.map(namespace => {
+      const secretFields = new Map<string, ReadonlySet<string>>();
+
+      for (const declaration of [
+        ...builtInSections[namespace],
+        ...sections[namespace],
+      ]) {
+        secretFields.set(
           declaration.id,
-          new Set(
-            declaration.config.fields
+          new Set([
+            ...(secretFields.get(declaration.id) ?? []),
+            ...declaration.config.fields
               .filter(field => field.secret)
               .map(field => field.name),
-          ),
-        ]),
-      ),
-    ]),
+          ]),
+        );
+      }
+
+      return [namespace, secretFields];
+    }),
   );
 }
 

@@ -381,6 +381,29 @@
             </td>
           </tr>
           <tr>
+            <td>connector config</td>
+            <td><code>GET /api/connectors/:id/config</code></td>
+            <td>
+              → <code>ConnectorConfigView</code>: <code>ok</code> with an
+              entry for the home and one for each installed character that is
+              switched on and whose own document loads, in roster order; or
+              <code>refused</code> (<code>unknown_connector</code>,
+              <code>config_unloadable</code>). An entry is the section's own
+              <code>activation</code> — its <code>status</code> is
+              <code>active</code>, <code>disabled</code> or
+              <code>blocked</code>, with the reasons — and the
+              <code>values</code> it runs on, by field name: each field its
+              target may set that holds a present, valid value, authored where
+              its scope permits or declared as its default, and none unless
+              the entry is active. The home's switch is a default, not a master
+              switch, so a connector reads each entry's own activation and
+              never combines two. Secrets are in the clear, as on no other
+              read, because a token is what a connector exists to use: a
+              connector is the owner's own program, on loopback under the
+              home's token, which already writes them.
+            </td>
+          </tr>
+          <tr>
             <td>events</td>
             <td><code>GET /api/events</code></td>
             <td>SSE, described below.</td>
@@ -600,6 +623,33 @@ data: {…}</code></pre>
         </tbody>
       </table>
 
+      <p>
+        A connector needs no event of its own for config; it keeps its read
+        of <code>GET /api/connectors/:id/config</code> current by one rule:
+      </p>
+
+      <ul>
+        <li>
+          Read it on every <code>ready</code>: that is the first read, taken
+          after the subscription so no change can fall between them, and the
+          read after any outage the daemon could not replay.
+        </li>
+        <li>Read it again on every <code>health_changed</code>.</li>
+        <li>
+          Apply only the answer to the newest read, so an older answer never
+          overwrites a newer one.
+        </li>
+        <li>
+          Retry a read that failed, with a backoff, instead of waiting for the
+          next change.
+        </li>
+        <li>
+          A stream the daemon resumed replayed what was missed,
+          <code>health_changed</code> included, so <code>resumed</code> needs
+          no read.
+        </li>
+      </ul>
+
       <h2>The sync rule</h2>
 
       <p class="rule">
@@ -737,6 +787,8 @@ data: {…}</code></pre>
         and per character, a plugin or field that belongs to a character
         (<code>"character_only"</code>) is absent from the home's view, and one
         that belongs to the home (<code>"global_only"</code>) from a character's.
+        A connector's settings, under <code>connectors</code>, are a section
+        like a plugin's, and what is said here of a plugin holds for them.
         The global scope resolves the home's document alone; a character's
         scope resolves the merged view, that character's own values over the
         home's. Either way, a value is taken only from a layer its plugin's or
@@ -778,9 +830,10 @@ data: {…}</code></pre>
         now differ — its effective config, its plugin values including secrets,
         its package version — publishes <code>reloading</code>, finishes the
         turn in flight, assembles afresh, and publishes <code>ready</code>. A
-        global change a character overrides costs it nothing. A reload that
-        cannot assemble lands in <code>failed</code> with the diagnostic, and
-        the next change or start retries it.
+        global change a character overrides costs it nothing, and so does a
+        change to a connector's section, from which no character is built. A
+        reload that cannot assemble lands in <code>failed</code> with the
+        diagnostic, and the next change or start retries it.
       </p>
 
       <h2>Storage failures are outcomes</h2>

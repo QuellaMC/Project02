@@ -4,12 +4,17 @@ import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {
+  activateProject02Character,
   createConfiguredProject02PluginHostFromPlan,
+  loadProject02Home,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
 import {
+  builtInConnectors,
   characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
+  createRuntimeConfigSections,
+  inspectRuntimePluginConfig,
   resolveLayeredProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -28,6 +33,7 @@ import {
 } from '../support/runtime-config.ts';
 import {
   activationPluginById,
+  createInitializedTestStoreRoot,
   initializeCharacterDataForHost,
   memoryProviderPlugin,
   requiredDottedConfigPlugin,
@@ -46,7 +52,7 @@ describe('runtime config loading and resolution', () => {
         loadedConfig: loaded,
         storeRoot: storeRoot,
       }),
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
     });
 
     expect(loaded.source).toBe('none');
@@ -76,7 +82,7 @@ describe('runtime config loading and resolution', () => {
         loadedConfig: loadRuntimeConfigForTest({storeRoot}),
         storeRoot: storeRoot,
       }),
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
     });
 
     expect(resolved.project02.userDisplayName).toBe('Mike');
@@ -91,7 +97,7 @@ describe('runtime config loading and resolution', () => {
           loadedConfig: loadRuntimeConfigForTest({storeRoot}),
           storeRoot,
         }),
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
       });
 
     writeRuntimeConfig(configPath, {project02: {}});
@@ -122,7 +128,7 @@ describe('runtime config loading and resolution', () => {
           loadedConfig: loadRuntimeConfigForTest({configPath}),
           configPath,
         }),
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
       });
 
     writeRuntimeConfig(configPath, {});
@@ -450,6 +456,74 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
+  it('leaves a character exactly as it was when a hand edit breaks a connector section, which blocks only itself', async () => {
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-connector-error-',
+    );
+    const reportMira = () => {
+      const startup = activateProject02Character(
+        loadProject02Home({location: {storeRoot}}),
+        {characterId: 'mira', stage: 'report'},
+      );
+
+      if (startup.status === 'character_invalid') {
+        throw new Error('Expected the bundled mira to resolve.');
+      }
+
+      return startup;
+    };
+    const telegram = builtInConnectors.find(
+      connector => connector.id === 'telegram',
+    );
+
+    if (telegram === undefined) {
+      throw new Error('Expected the built-in Telegram connector.');
+    }
+
+    const clean = reportMira();
+
+    // Only a hand edit writes this: Mirror is declared a boolean.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      connectors: {telegram: {config: {mirror: 'yes'}}},
+    });
+
+    const broken = reportMira();
+
+    expect(clean.status).toBe('resolved');
+    expect(broken.status).toBe('resolved');
+    expect(broken.activationPlan.activation).toEqual(
+      clean.activationPlan.activation,
+    );
+    // The rest of what the gateway's assembly identity hashes: the host's
+    // settings and the plugins' values.
+    expect(broken.activationPlan.resolvedConfig.project02).toEqual(
+      clean.activationPlan.resolvedConfig.project02,
+    );
+    expect(broken.activationPlan.resolvedConfig.sectionConfigs.plugins).toEqual(
+      clean.activationPlan.resolvedConfig.sectionConfigs.plugins,
+    );
+    expect(broken.activationPlan.resolvedConfig.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_config_value_type_invalid',
+        path: 'connectors.telegram.config.mirror',
+      }),
+    );
+    expect(
+      inspectRuntimePluginConfig({
+        runtimeLocation: broken.activationPlan.runtimeLocation,
+        targetScope: 'character',
+        namespace: 'connectors',
+        declaration: telegram,
+        sections: createRuntimeConfigSections({plugins: []}),
+      }).activation,
+    ).toEqual({
+      enabled: false,
+      status: 'blocked',
+      reasons: ['runtime_config_error:runtime_config_value_type_invalid'],
+    });
+  });
+
   it('redacts an inline secret and keeps the fingerprint independent of its value', () => {
     const plugin = createCharacterStatePlugin();
     const manifest = {
@@ -482,7 +556,7 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
     const first = resolveWithSecret('first-secret');
     const second = resolveWithSecret('second-secret');
@@ -522,7 +596,7 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        sections: {plugins: [plugin.manifest]},
+        sections: {plugins: [plugin.manifest], connectors: []},
       });
     const enabledFirst = resolveWith(true, 'first-secret');
     const enabledSecond = resolveWith(true, 'second-secret');
@@ -601,7 +675,7 @@ describe('runtime config loading and resolution', () => {
           }),
           configPath,
         }),
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
     const first = resolveWith('first');
     const second = resolveWith('second');
@@ -678,7 +752,7 @@ describe('runtime config loading and resolution', () => {
     ];
     const fromConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-      sections: {plugins: manifests},
+      sections: {plugins: manifests, connectors: []},
     });
 
     // A key typed into config is the key; the plugin reads it as written.
@@ -714,7 +788,7 @@ describe('runtime config loading and resolution', () => {
           ),
         }),
       }),
-      sections: {plugins: manifests},
+      sections: {plugins: manifests, connectors: []},
     });
 
     expect(invalid.diagnostics).toEqual(
@@ -743,7 +817,7 @@ describe('runtime config loading and resolution', () => {
       ...runtimeConfigSnapshotForTest({
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
-      sections: {plugins: [requiredSecretPlugin().manifest]},
+      sections: {plugins: [requiredSecretPlugin().manifest], connectors: []},
     });
     const resolvedField =
       resolved.sectionConfigs.plugins['memory.required']?.['apiKey'];

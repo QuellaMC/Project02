@@ -28,10 +28,12 @@ describe('layered runtime config fingerprint', () => {
     expect(
       createRuntimeConfigFingerprint(withSecret('hunter2'), {
         plugins: [manifest],
+        connectors: [],
       }),
     ).toBe(
       createRuntimeConfigFingerprint(withSecret('other-value'), {
         plugins: [manifest],
+        connectors: [],
       }),
     );
 
@@ -40,6 +42,7 @@ describe('layered runtime config fingerprint', () => {
     expect(
       createRuntimeConfigFingerprint(withSecret('hunter2'), {
         plugins: [manifest],
+        connectors: [],
       }),
     ).not.toBe(
       createRuntimeConfigFingerprint(
@@ -47,15 +50,19 @@ describe('layered runtime config fingerprint', () => {
           version: runtimeConfigVersion,
           plugins: {'demo-config': {config: {tone: 'warm'}}},
         },
-        {plugins: [manifest]},
+        {plugins: [manifest], connectors: []},
       ),
     );
     expect(
       createRuntimeConfigFingerprint(withSecret('hunter2'), {
         plugins: [manifest],
+        connectors: [],
       }),
     ).not.toBe(
-      createRuntimeConfigFingerprint(withSecret('hunter2'), {plugins: []}),
+      createRuntimeConfigFingerprint(withSecret('hunter2'), {
+        plugins: [],
+        connectors: [],
+      }),
     );
 
     // A malformed value at a secret field -- which an inactive plugin's
@@ -69,9 +76,13 @@ describe('layered runtime config fingerprint', () => {
     expect(
       createRuntimeConfigFingerprint(malformed('weak-passcode'), {
         plugins: [manifest],
+        connectors: [],
       }),
     ).toBe(
-      createRuntimeConfigFingerprint(malformed('other'), {plugins: [manifest]}),
+      createRuntimeConfigFingerprint(malformed('other'), {
+        plugins: [manifest],
+        connectors: [],
+      }),
     );
   });
 
@@ -83,7 +94,7 @@ describe('layered runtime config fingerprint', () => {
       readonly tone: string;
     }) =>
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         // A negative context window fails validation, so the loader keeps
@@ -121,28 +132,67 @@ describe('layered runtime config fingerprint', () => {
     );
   });
 
+  it('hashes a built-in connector secret by presence with no declarations passed', () => {
+    const telegram = (botToken?: string) => ({
+      telegram: {config: botToken === undefined ? {} : {botToken}},
+    });
+    const validOverlay = (botToken?: string) => ({
+      source: 'overlay' as const,
+      config: {
+        version: runtimeConfigVersion,
+        connectors: telegram(botToken),
+      } satisfies Project02RuntimeConfig,
+    });
+    const invalidOverlay = (botToken?: string) => ({
+      source: 'overlay' as const,
+      authoredDocument: {
+        version: runtimeConfigVersion,
+        project02: {contextWindowTokens: -1},
+        connectors: telegram(botToken),
+      },
+    });
+
+    for (const overlay of [validOverlay, invalidOverlay]) {
+      const fingerprint = (botToken?: string) =>
+        createLayeredRuntimeConfigFingerprint({
+          sections: {plugins: [], connectors: []},
+          globalConfig: globalDocument,
+          characterId: 'mira',
+          overlay: overlay(botToken),
+        });
+
+      expect(fingerprint('987654:BB')).toBe(fingerprint('other-token'));
+      expect(fingerprint('987654:BB')).not.toBe(fingerprint());
+    }
+  });
+
   it('never collides with the per-file fingerprint of the same global document', () => {
     expect(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'none'},
       }),
-    ).not.toBe(createRuntimeConfigFingerprint(globalDocument, {plugins: []}));
+    ).not.toBe(
+      createRuntimeConfigFingerprint(globalDocument, {
+        plugins: [],
+        connectors: [],
+      }),
+    );
   });
 
   it('distinguishes an absent overlay from an empty overlay document', () => {
     expect(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'none'},
       }),
     ).not.toBe(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {source: 'overlay', config: {version: runtimeConfigVersion}},
@@ -152,7 +202,7 @@ describe('layered runtime config fingerprint', () => {
 
   it('folds the character id and the overlay content', () => {
     const base = createLayeredRuntimeConfigFingerprint({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       globalConfig: globalDocument,
       characterId: 'mira',
       overlay: {source: 'none'},
@@ -160,7 +210,7 @@ describe('layered runtime config fingerprint', () => {
 
     expect(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: globalDocument,
         characterId: 'nova',
         overlay: {source: 'none'},
@@ -168,7 +218,7 @@ describe('layered runtime config fingerprint', () => {
     ).not.toBe(base);
     expect(
       createLayeredRuntimeConfigFingerprint({
-        sections: {plugins: []},
+        sections: {plugins: [], connectors: []},
         globalConfig: globalDocument,
         characterId: 'mira',
         overlay: {

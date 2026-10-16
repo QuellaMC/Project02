@@ -9,7 +9,7 @@ import {
   prepareRuntimeConfigControlOperation,
 } from './scope.ts';
 
-/** Lets plugins use runtime config without value-importing it (arch rule). */
+/** Config control as a grant the composition root injects into a plugin host, or withholds. */
 export type RuntimePluginConfigControlCapability = Readonly<{
   validateOperation: typeof validateRuntimePluginConfigControlOperation;
   prepareOperation: typeof prepareRuntimeConfigControlOperation;

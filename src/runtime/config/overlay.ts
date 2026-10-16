@@ -55,18 +55,11 @@ function loadProject02CharacterOverlayConfig(options: {
     } satisfies LoadedProject02CharacterOverlayConfig);
   }
 
-  const origin: RuntimeConfigDiagnosticOrigin = Object.freeze({
-    scope: 'character',
-    characterId: options.characterId,
-    path,
-  });
-
   // A symlink would let authored settings live outside the data directory.
   if (overlayEntry.kind === 'link') {
     return loadedOverlay({
       ...options,
       path,
-      origin,
       diagnostics: [
         createRuntimeConfigDiagnostic(
           'error',
@@ -84,17 +77,31 @@ function loadProject02CharacterOverlayConfig(options: {
     return loadedOverlay({
       ...options,
       path,
-      origin,
       diagnostics: [document.diagnostic],
     });
   }
 
-  const accepted = validateProject02RuntimeConfig(document.value);
+  return characterOverlayFromDocument({
+    characterId: options.characterId,
+    path,
+    document: document.value,
+  });
+}
+
+/**
+ * What the loader makes of an overlay's document: the one in its file, or
+ * the one a commit is about to write there, judged before it exists.
+ */
+export function characterOverlayFromDocument(options: {
+  readonly characterId: string;
+  readonly path: string;
+  readonly document: unknown;
+}): LoadedProject02CharacterOverlayConfig {
+  const accepted = validateProject02RuntimeConfig(options.document);
 
   return loadedOverlay({
-    ...options,
-    path,
-    origin,
+    characterId: options.characterId,
+    path: options.path,
     ...(accepted.authoredDocument === undefined
       ? {}
       : {authoredDocument: accepted.authoredDocument}),
@@ -106,11 +113,15 @@ function loadProject02CharacterOverlayConfig(options: {
 function loadedOverlay(options: {
   readonly characterId: string;
   readonly path: string;
-  readonly origin: RuntimeConfigDiagnosticOrigin;
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 }): LoadedProject02CharacterOverlayConfig {
+  const origin: RuntimeConfigDiagnosticOrigin = Object.freeze({
+    scope: 'character',
+    characterId: options.characterId,
+    path: options.path,
+  });
   const hasErrors = options.diagnostics.some(
     diagnostic => diagnostic.severity === 'error',
   );
@@ -129,7 +140,7 @@ function loadedOverlay(options: {
       : {config: options.config}),
     diagnostics: Object.freeze(
       options.diagnostics.map(diagnostic =>
-        withRuntimeConfigDiagnosticOrigin(diagnostic, options.origin),
+        withRuntimeConfigDiagnosticOrigin(diagnostic, origin),
       ),
     ),
   } satisfies LoadedProject02CharacterOverlayConfig);

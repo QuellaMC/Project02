@@ -11,11 +11,15 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
+  RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
 } from '../../gateway/api/index.ts';
 import {noticed, type SettingsPage, type WebState} from './store.ts';
+
+type OkView = Extract<ConfigView, {status: 'ok'}>;
 
 /** One row the screen can change, found by its key. */
 export type SettingsRow =
@@ -325,6 +329,46 @@ export function rowAt(view: ConfigView, key: string): SettingsRow | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * What the screen says at its top: every diagnostic no listed section's
+ * block says, so one about the whole document, or about a section this
+ * screen does not list, is still said.
+ */
+export function screenDiagnostics(
+  view: OkView,
+): readonly RuntimeConfigDiagnostic[] {
+  return view.diagnostics.filter(
+    diagnostic =>
+      !view.sections.some(section => namesSection(diagnostic, section)),
+  );
+}
+
+/**
+ * What a section's block says: every diagnostic of the view that names
+ * it. The section's own list holds only what resolving its values found;
+ * the view's also holds what the character's activation and the plugin
+ * catalog found of it.
+ */
+export function sectionDiagnostics(
+  view: OkView,
+  section: RuntimeConfigSectionInspectShape,
+): readonly RuntimeConfigDiagnostic[] {
+  return view.diagnostics.filter(diagnostic =>
+    namesSection(diagnostic, section),
+  );
+}
+
+function namesSection(
+  diagnostic: RuntimeConfigDiagnostic,
+  section: RuntimeConfigSectionInspectShape,
+): boolean {
+  return (
+    diagnostic.scope === 'section' &&
+    diagnostic.namespace === section.namespace &&
+    diagnostic.id === section.id
+  );
 }
 
 /**

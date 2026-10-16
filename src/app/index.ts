@@ -4,6 +4,7 @@ export {
   discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   resolveRuntimePluginActivation,
+  runtimeConfigDiagnosticConcernsCharacter,
   type PreparedProject02PluginActivationPlan,
   type Project02ConfiguredPluginActivation,
   type RuntimePluginActivationResult,

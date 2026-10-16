@@ -267,4 +267,33 @@ describe('runtime config loader validation', () => {
         Object.isFrozen(Reflect.get(stored, 'object')),
     ).toBe(true);
   });
+
+  it('loads a connectors stanza as it loads a plugin stanza, and warns of a connector this version does not have', () => {
+    const telegram = {
+      enabled: false,
+      config: {managementBotToken: '123456:AA', mirror: false},
+    };
+    const loaded = validateProject02RuntimeConfig({
+      version: runtimeConfigVersion,
+      connectors: {telegram, discord: {enabled: true}},
+    });
+
+    expect(loaded.config?.connectors?.['telegram']).toEqual(telegram);
+    // The only diagnostic is the unknown id's: the key itself is known.
+    expect(loaded.diagnostics).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'runtime_config_unknown_connector',
+        path: 'connectors.discord',
+      }),
+    ]);
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        connectors: {telegram: 'on'},
+      }).diagnostics,
+    ).toEqual([
+      expect.objectContaining({severity: 'error', path: 'connectors.telegram'}),
+    ]);
+  });
 });

@@ -2,6 +2,7 @@
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   createRuntimeConfigAuthoredSnapshot,
+  createRuntimeConfigSections,
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
   loadProject02RuntimeConfigForLocation,
@@ -29,9 +30,9 @@ export function createConfiguredRuntimePluginReloader(options: {
 }): RuntimePluginReloader {
   const {catalogEntries, pluginConfigControl, runtimeLocation} =
     options.activationPlan;
-  const sections = {
+  const sections = createRuntimeConfigSections({
     plugins: Object.values(catalogEntries).map(entry => entry.manifest),
-  };
+  });
   const defaultEnabledPluginIds = new Set(
     pluginConfigControl.defaultEnabledPluginIds ?? [],
   );

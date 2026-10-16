@@ -417,7 +417,7 @@ describe('first-selection materialization through startup', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       request: {
         kind: 'document',

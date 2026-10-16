@@ -34,6 +34,7 @@ import {
   assertResolvedProject02HomeAdoptable,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
+  createRuntimeConfigSections,
   createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
   readCharacterOverlayForScope,
@@ -154,7 +155,9 @@ export function createRuntimePluginCatalogSnapshot(options: {
       ...(options.overlayConfig === undefined
         ? {}
         : {overlayConfig: options.overlayConfig}),
-      sections: {plugins: activationPluginManifests(discovery.catalogEntries)},
+      sections: createRuntimeConfigSections({
+        plugins: activationPluginManifests(discovery.catalogEntries),
+      }),
     }).effective,
   });
 }
@@ -302,7 +305,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
       loadedConfig: options.loadedConfig,
       runtimeLocation: options.runtimeLocation,
       overlayConfig,
-      sections: {plugins: pluginManifests},
+      sections: createRuntimeConfigSections({plugins: pluginManifests}),
       defaultEnabledSectionIds: {plugins: defaultEnabledPluginIds},
       validateInactiveSectionConfigs:
         options.validateInactivePluginConfigs === true,
@@ -526,6 +529,18 @@ function assertCharacterRuntimeInitialized(
   }
 }
 
+/**
+ * A character is built from the host's own settings and its plugin
+ * sections. A section of another namespace is resolved beside it, never
+ * into it, so its diagnostics are that section's to report and never the
+ * character's to judge.
+ */
+export function runtimeConfigDiagnosticConcernsCharacter(
+  diagnostic: RuntimeConfigDiagnostic,
+): boolean {
+  return diagnostic.scope === 'global' || diagnostic.namespace === 'plugins';
+}
+
 export function resolveRuntimePluginActivation(options: {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
@@ -547,7 +562,9 @@ export function resolveRuntimePluginActivation(options: {
             defaultMemoryProviderId: config.project02.defaultMemoryProvider,
           }),
     }),
-    ...options.resolvedConfig.diagnostics,
+    ...options.resolvedConfig.diagnostics.filter(
+      runtimeConfigDiagnosticConcernsCharacter,
+    ),
     ...(options.catalogDiagnostics ?? []),
   ]);
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({

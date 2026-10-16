@@ -121,6 +121,9 @@ export function createApiRouter(
     .post('/config', jsonBody(configChangeBody), async c =>
       c.json(await gateway.applyConfigChange(c.req.valid('json')), 200),
     )
+    .get('/connectors/:id/config', c =>
+      c.json(gateway.connectorConfig(c.req.param('id')), 200),
+    )
     .get('/events', c => events.handler(c))
     .all('/*', c =>
       c.json(errorBody('not_found', `No API route at ${c.req.path}.`), 404),

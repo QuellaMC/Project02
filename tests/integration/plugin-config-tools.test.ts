@@ -149,7 +149,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: targetManifest,
-      sections: {plugins: [targetManifest]},
+      sections: {plugins: [targetManifest], connectors: []},
     });
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
@@ -159,7 +159,7 @@ describe('host-owned runtime plugin management tools', () => {
       scope: 'global',
     });
     const prepared = prepareRuntimeConfigControlOperation({
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
       target,
       expectedFingerprint: before.fingerprint,
       request: {
@@ -633,7 +633,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     }).fingerprint;
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
@@ -702,7 +702,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
@@ -737,7 +737,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(before.diagnostics).toContainEqual(
@@ -768,7 +768,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     }).fingerprint;
     let request: RuntimePluginToolConfirmationRequest | undefined;
     const host = createRuntimePluginHost({
@@ -822,7 +822,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       }).fields.find(field => field.name === 'tone')?.authored.configured,
     ).toBe(false);
   });
@@ -845,7 +845,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
@@ -880,7 +880,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(result).toMatchObject({
@@ -920,7 +920,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: mutableManifest,
-      sections: {plugins: [mutableManifest]},
+      sections: {plugins: [mutableManifest], connectors: []},
     });
     let previewTarget: RuntimePluginJsonValue | undefined;
     const host = createRuntimePluginHost({
@@ -1070,7 +1070,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const host = createRuntimePluginHost({
       storeRoot,
@@ -1085,7 +1085,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       toolConfirmationHandler: () => {
         applyRuntimeConfigControlOperation({
-          sections: {plugins: []},
+          sections: {plugins: [], connectors: []},
           target: resolveRuntimeConfigScopeTarget({
             runtimeLocation: runtimeLocationForTest({
               configPath: configPath,
@@ -1125,7 +1125,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(result).toMatchObject({
@@ -1151,7 +1151,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const host = createRuntimePluginHost({
       storeRoot,
@@ -1187,7 +1187,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       }).fingerprint,
     ).toBe(before.fingerprint);
   });
@@ -1206,7 +1206,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
@@ -1263,7 +1263,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const host = createRuntimePluginHost({
       storeRoot,
@@ -1300,7 +1300,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       }).fingerprint,
     ).toBe(before.fingerprint);
   });
@@ -1322,7 +1322,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
       const approvalDelayMs = 30_000;
       const host = createRuntimePluginHost({
@@ -1385,7 +1385,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
       let approvalDelayMs = 0;
       const host = createRuntimePluginHost({
@@ -1434,7 +1434,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
 
       expect(result).toMatchObject({
@@ -1454,7 +1454,7 @@ describe('host-owned runtime plugin management tools', () => {
         }),
         namespace: 'plugins',
         declaration: manifest,
-        sections: {plugins: [manifest]},
+        sections: {plugins: [manifest], connectors: []},
       });
 
       expect(
@@ -1480,7 +1480,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const callerOwnedValue = {mode: 'approved-value'};
     const host = createRuntimePluginHost({
@@ -1523,7 +1523,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(result).toMatchObject({
@@ -1554,7 +1554,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     let request: RuntimePluginToolConfirmationRequest | undefined;
     const host = createRuntimePluginHost({
@@ -1588,7 +1588,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
 
     expect(result).toMatchObject({
@@ -1619,7 +1619,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({

@@ -3,6 +3,7 @@ import type {RuntimePluginToolConfirmationRequest} from '../../plugins/index.ts'
 import type {
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
@@ -243,7 +244,8 @@ export type ConfigView =
  * out: a concurrent edit is a conflict. The fingerprint hashes a secret's
  * presence, never its value, so two pages replacing the same secret at once
  * both succeed and the later value stands. A secret is sent as its value
- * and kept with the scope's config, redacted on every read.
+ * and kept with the scope's config, redacted on every read but
+ * `connectorConfig`.
  */
 export type ConfigChange = {
   readonly target: ConfigTarget;
@@ -291,6 +293,41 @@ export type ConfigChangeOutcome =
       readonly message: string;
     }
   | {readonly status: 'failed'; readonly message: string};
+
+/**
+ * What a connector runs on: an entry for the home, and one for each
+ * installed character that is switched on, in roster order. Each entry
+ * carries its section's own activation, as the settings page shows it. The
+ * home's switch is a default, not a master switch, so a connector reads
+ * each entry's own and never combines two. An id this version has no
+ * connector for, or a home document that does not load, is refused with
+ * the reason.
+ */
+export type ConnectorConfigView =
+  | {
+      readonly status: 'ok';
+      readonly connectorId: string;
+      readonly home: ConnectorConfigEntry;
+      readonly characters: readonly (ConnectorConfigEntry & {
+        readonly characterId: string;
+      })[];
+    }
+  | {
+      readonly status: 'refused';
+      readonly reason: 'unknown_connector' | 'config_unloadable';
+      readonly message: string;
+    };
+
+/**
+ * `values` holds every field the entry's target may set that has a
+ * present, valid value, as authored or as its declared default, secrets in
+ * the clear; a field that is missing, blank or of the wrong type is absent,
+ * and nothing is there unless the entry is active.
+ */
+export type ConnectorConfigEntry = {
+  readonly activation: RuntimeConfigSectionActivationShape;
+  readonly values: Readonly<Record<string, RuntimeConfigValue>>;
+};
 
 /** `settled` says the start ran; the summary's state says how it ended. */
 export type StartOutcome =
@@ -514,6 +551,8 @@ export type Gateway = {
   configView(target: ConfigTarget): ConfigView;
   /** Writes through the one control transaction; reconcile applies it behind the answer. */
   applyConfigChange(change: ConfigChange): Promise<ConfigChangeOutcome>;
+  /** A connector reads it again on every `ready` and every `health_changed`. */
+  connectorConfig(connectorId: string): ConnectorConfigView;
   /** Makes the running set match the config: at boot, and after any change. */
   reconcile(): Promise<ReconcilePlan>;
   stop(): Promise<void>;

@@ -75,7 +75,7 @@ describe('runtime config diagnostic plugin matching', () => {
     const resolvedConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
 
-      sections: {plugins: []},
+      sections: {plugins: [], connectors: []},
     });
     const activation = resolveRuntimePluginActivation({
       effectiveConfig: loadedConfig,
@@ -130,7 +130,7 @@ describe('runtime config diagnostic plugin matching', () => {
     });
     const resolvedConfig = resolveLayeredProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig}),
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     });
     const activationInput = {
       effectiveConfig: loadedConfig,

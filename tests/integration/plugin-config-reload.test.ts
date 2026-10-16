@@ -86,7 +86,7 @@ function authoredFingerprint(options: {
     }),
     namespace: 'plugins',
     declaration,
-    sections: {plugins: [declaration]},
+    sections: {plugins: [declaration], connectors: []},
   }).fingerprint;
 }
 
@@ -315,7 +315,7 @@ describe('configured runtime plugin reloader', () => {
       targetScope: 'global',
       namespace: 'plugins',
       declaration: manifest,
-      sections: {plugins: [manifest]},
+      sections: {plugins: [manifest], connectors: []},
     }).fingerprint;
 
     await createConfiguredProject02PluginHostFromPlan({activationPlan});

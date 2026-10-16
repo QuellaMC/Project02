@@ -8,6 +8,7 @@ import {
   type ConfigChangeOutcome,
   type ConfigTarget,
   type ConfigView,
+  type ConnectorConfigView,
   type GatewayReady,
   type GatewayConfirmationDecision,
   type GatewayEvent,
@@ -107,6 +108,10 @@ export type GatewayClient = {
     change: ConfigChange,
     options?: GatewayCallOptions,
   ): Promise<ConfigChangeOutcome>;
+  connectorConfig(
+    connectorId: string,
+    options?: GatewayCallOptions,
+  ): Promise<ConnectorConfigView>;
   /**
    * Follows the event stream until the signal aborts, reconnecting after
    * the daemon closes it with the id of the last frame it handed on, so a
@@ -229,6 +234,14 @@ export function createGatewayClient(
     applyConfigChange: async (change, callOptions) =>
       readOutcome<ConfigChangeOutcome>(
         await api.config.$post({json: change}, requestInit(callOptions)),
+        callOptions,
+      ),
+    connectorConfig: async (connectorId, callOptions) =>
+      readOutcome<ConnectorConfigView>(
+        await api.connectors[':id'].config.$get(
+          {param: {id: connectorId}},
+          requestInit(callOptions),
+        ),
         callOptions,
       ),
     async events(listener, eventsOptions) {

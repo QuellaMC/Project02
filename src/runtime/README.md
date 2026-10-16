@@ -56,7 +56,8 @@ store older than the record grows one at its first rotation.
 `config/` resolves the home's config document and each character's overlay
 over it, and is the one path that writes them. Every setting but the
 host's own belongs to a declared section, which lives under a namespace —
-`plugins` is the only one — and is keyed by namespace, then id, in every
+`plugins`, or `connectors`, whose sections are built in, declared in
+`config/connectors.ts` — and is keyed by namespace, then id, in every
 map the module keeps; one function, `runtimeConfigSectionPath`, spells the
 path of a section and of each of its fields. Another,
 `runtimeSectionValueLayers`, says which layer may supply a value, by a
