@@ -21,6 +21,8 @@ config owner's two verbs — the view a settings page renders (the host's
 fields and the `sections`, one list over every namespace), and the change
 that goes through the one control transaction (a section's operations name
 it by namespace and id), applied by reconcile behind the answer;
+`connector-config.ts` is the one read a connector makes, resolved through
+the same functions as the view and handing out values, not field shapes;
 `submissions.ts` is the turn ledger that makes a resubmitted message join
 its turn instead of starting another; a line an earlier run of the daemon
 already put on any segment of the conversation is refused by the runtime
