@@ -1,22 +1,26 @@
-import type {
-  RuntimePluginConfigField,
-  RuntimePluginManifest,
-} from '../../plugins/api/index.ts';
+import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import type {ResolvedProject02RuntimeLocation} from './location.ts';
+import {runtimeConfigSectionPath} from './path.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
+  createRuntimeConfigSectionMap,
   defaultProject02ContextWindowTokens,
   defaultProject02UserDisplayName,
+  runtimeConfigSectionNamespaces,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
-  type RedactedPluginRuntimeConfig,
-  type ResolvedPluginRuntimeConfig,
+  type RedactedRuntimeSectionConfig,
+  type ResolvedRuntimeSectionConfig,
   type ResolvedProject02RuntimeConfig,
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigDiagnosticSectionMetadata,
   type RuntimeConfigFieldScope,
+  type RuntimeConfigSectionDeclaration,
+  type RuntimeConfigSectionMap,
+  type RuntimeConfigSectionNamespace,
+  type RuntimeConfigSections,
   type RuntimeConfigSource,
   type RuntimeConfigValue,
 } from './types.ts';
@@ -26,17 +30,20 @@ import {
 } from '../../shared/json-boundary.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
-import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
+import {runtimeSectionScopeDiagnostics} from './section-scope.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly pluginManifests?: readonly RuntimePluginManifest[];
-  readonly validateInactivePluginConfigs?: boolean;
-  readonly defaultEnabledPluginIds?: ReadonlySet<string>;
+  readonly sections: RuntimeConfigSections;
+  readonly validateInactiveSectionConfigs?: boolean;
+  /** Overrides a declaration's own default where a namespace lists its ids. */
+  readonly defaultEnabledSectionIds?: Readonly<
+    Partial<Record<RuntimeConfigSectionNamespace, ReadonlySet<string>>>
+  >;
   readonly authoredScope?: RuntimeConfigFieldScope;
   /** Set after per-layer validation; the merged document loses origins. */
-  readonly skipPluginScopeValidation?: boolean;
+  readonly skipSectionScopeValidation?: boolean;
 };
 
 type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
@@ -49,64 +56,71 @@ type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-export type ResolveRuntimePluginConfigsOptions = {
+export type ResolveRuntimeSectionConfigsOptions = Omit<
+  ResolveProject02RuntimeConfigOptions,
+  'loadedConfig' | 'runtimeLocation'
+> & {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly validateInactivePluginConfigs?: boolean;
-  readonly defaultEnabledPluginIds?: ReadonlySet<string>;
-  readonly authoredScope?: RuntimeConfigFieldScope;
-  readonly skipPluginScopeValidation?: boolean;
 };
 
-export type ResolvedRuntimePluginConfigs = Readonly<{
-  pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
-  redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
+export type ResolvedRuntimeSectionConfigs = Readonly<{
+  sectionConfigs: RuntimeConfigSectionMap<ResolvedRuntimeSectionConfig>;
+  redactedSectionConfigs: RuntimeConfigSectionMap<RedactedRuntimeSectionConfig>;
   diagnostics: readonly RuntimeConfigDiagnostic[];
 }>;
 
 /** Needs no filesystem location, so package planning can call it too. */
-export function resolveRuntimePluginConfigs(
-  options: ResolveRuntimePluginConfigsOptions,
-): ResolvedRuntimePluginConfigs {
+export function resolveRuntimeSectionConfigs(
+  options: ResolveRuntimeSectionConfigsOptions,
+): ResolvedRuntimeSectionConfigs {
   const diagnostics: RuntimeConfigDiagnostic[] =
-    options.skipPluginScopeValidation === true
+    options.skipSectionScopeValidation === true
       ? []
       : [
-          ...runtimePluginScopeDiagnostics({
+          ...runtimeSectionScopeDiagnostics({
             config: options.config,
-            manifests: options.pluginManifests,
+            sections: options.sections,
             authoredScope: options.authoredScope ?? 'global',
           }),
         ];
-  const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
-  const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
-
-  for (const manifest of options.pluginManifests) {
-    const resolved = resolvePluginConfig({
-      config: options.config,
-      manifest,
-      validateInactivePluginConfigs:
-        options.validateInactivePluginConfigs === true,
-      defaultEnabled:
-        options.defaultEnabledPluginIds?.has(manifest.id) ??
-        manifest.activation.defaultEnabled,
-      diagnostics,
-    });
-
-    pluginConfigs[manifest.id] = resolved;
-    redactedPluginConfigs[manifest.id] = Object.freeze(
-      Object.fromEntries(
-        Object.entries(resolved).map(([name, field]) => [
-          name,
-          redactResolvedRuntimeConfigField(field),
-        ]),
-      ),
-    );
-  }
+  const sectionConfigs = createRuntimeConfigSectionMap(namespace =>
+    Object.fromEntries(
+      options.sections[namespace].map(declaration => [
+        declaration.id,
+        resolveSectionConfig({
+          config: options.config,
+          namespace,
+          declaration,
+          validateInactiveSectionConfigs:
+            options.validateInactiveSectionConfigs === true,
+          defaultEnabled:
+            options.defaultEnabledSectionIds?.[namespace]?.has(
+              declaration.id,
+            ) ?? declaration.activation.defaultEnabled,
+          diagnostics,
+        }),
+      ]),
+    ),
+  );
+  const redactedSectionConfigs = createRuntimeConfigSectionMap(namespace =>
+    Object.fromEntries(
+      Object.entries(sectionConfigs[namespace]).map(([id, resolved]) => [
+        id,
+        Object.freeze(
+          Object.fromEntries(
+            Object.entries(resolved).map(([name, field]) => [
+              name,
+              redactResolvedRuntimeConfigField(field),
+            ]),
+          ),
+        ),
+      ]),
+    ),
+  );
 
   return Object.freeze({
-    pluginConfigs: Object.freeze(pluginConfigs),
-    redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
+    sectionConfigs,
+    redactedSectionConfigs,
     diagnostics: Object.freeze(diagnostics),
   });
 }
@@ -131,20 +145,20 @@ export function resolveEffectiveProject02RuntimeConfig(
 ): ResolvedProject02RuntimeConfig {
   const config = options.config;
   const storeRoot = options.runtimeLocation.homeRoot;
-  const pluginResolution = resolveRuntimePluginConfigs({
+  const sectionResolution = resolveRuntimeSectionConfigs({
     config,
-    pluginManifests: options.pluginManifests ?? [],
-    validateInactivePluginConfigs:
-      options.validateInactivePluginConfigs === true,
-    ...(options.defaultEnabledPluginIds === undefined
+    sections: options.sections,
+    validateInactiveSectionConfigs:
+      options.validateInactiveSectionConfigs === true,
+    ...(options.defaultEnabledSectionIds === undefined
       ? {}
-      : {defaultEnabledPluginIds: options.defaultEnabledPluginIds}),
+      : {defaultEnabledSectionIds: options.defaultEnabledSectionIds}),
     authoredScope: options.authoredScope ?? 'global',
-    skipPluginScopeValidation: options.skipPluginScopeValidation === true,
+    skipSectionScopeValidation: options.skipSectionScopeValidation === true,
   });
   const diagnostics = Object.freeze([
     ...options.diagnostics,
-    ...pluginResolution.diagnostics,
+    ...sectionResolution.diagnostics,
   ]);
   const project02 = resolvedProject02HostSection({
     config,
@@ -157,8 +171,8 @@ export function resolveEffectiveProject02RuntimeConfig(
     source: options.source,
     ...(options.path === undefined ? {} : {path: options.path}),
     project02,
-    pluginConfigs: pluginResolution.pluginConfigs,
-    redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
+    sectionConfigs: sectionResolution.sectionConfigs,
+    redactedSectionConfigs: sectionResolution.redactedSectionConfigs,
     diagnostics,
     effectiveConfigFingerprint: createRuntimeConfigFingerprint(
       effectiveFingerprintInput({
@@ -167,9 +181,9 @@ export function resolveEffectiveProject02RuntimeConfig(
         character: project02.character,
         enabled: project02.enabled,
         userDisplayName: project02.userDisplayName,
-        redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
+        redactedSectionConfigs: sectionResolution.redactedSectionConfigs,
       }),
-      options.pluginManifests ?? [],
+      options.sections,
     ),
   } satisfies ResolvedProject02RuntimeConfig);
 }
@@ -209,69 +223,80 @@ export function diagnosticsHaveErrors(
   return diagnostics.some(diagnostic => diagnostic.severity === 'error');
 }
 
-export function runtimeConfigDiagnosticMatchesPlugin(options: {
+export function runtimeConfigDiagnosticMatchesSection(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
-  readonly pluginId: string;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
 }): boolean {
   return (
-    options.diagnostic.scope === 'plugin' &&
-    options.diagnostic.pluginId === options.pluginId
+    options.diagnostic.scope === 'section' &&
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one namespace until connectors join; lint reports this directive unused once a second one does
+    options.diagnostic.namespace === options.namespace &&
+    options.diagnostic.id === options.id
   );
 }
 
-function resolvePluginConfig(options: {
+function resolveSectionConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly manifest: RuntimePluginManifest;
-  readonly validateInactivePluginConfigs: boolean;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly validateInactiveSectionConfigs: boolean;
   readonly defaultEnabled: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
-}): ResolvedPluginRuntimeConfig {
-  const configuredPlugin = ownJsonRecordValue(
-    options.config?.plugins,
-    options.manifest.id,
+}): ResolvedRuntimeSectionConfig {
+  const configuredSection = ownJsonRecordValue(
+    options.config?.[options.namespace],
+    options.declaration.id,
   );
-  const validateReadiness = shouldValidatePluginConfig({
+  const validateReadiness = shouldValidateSectionConfig({
     config: options.config,
-    manifest: options.manifest,
+    namespace: options.namespace,
+    declaration: options.declaration,
     defaultEnabled: options.defaultEnabled,
   });
   const validateConfig =
-    options.validateInactivePluginConfigs || validateReadiness;
+    options.validateInactiveSectionConfigs || validateReadiness;
 
   if (validateConfig) {
-    pushUnknownPluginConfigFieldDiagnostics({
-      manifest: options.manifest,
-      rawConfig: configuredPlugin?.config,
+    pushUnknownSectionConfigFieldDiagnostics({
+      namespace: options.namespace,
+      declaration: options.declaration,
+      rawConfig: configuredSection?.config,
       diagnostics: options.diagnostics,
     });
   }
 
   return Object.freeze(
     Object.fromEntries(
-      options.manifest.config.fields.map(field => [
+      options.declaration.config.fields.map(field => [
         field.name,
-        resolvePluginConfigField({
+        resolveSectionConfigField({
           ...options,
           validateConfig,
           validateReadiness,
           field,
-          rawValue: ownJsonRecordValue(configuredPlugin?.config, field.name),
+          rawValue: ownJsonRecordValue(configuredSection?.config, field.name),
         }),
       ]),
     ),
   );
 }
 
-function resolvePluginConfigField(options: {
+function resolveSectionConfigField(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly manifest: RuntimePluginManifest;
-  readonly field: RuntimePluginConfigField;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
-  const path = `plugins.${options.manifest.id}.config.${options.field.name}`;
+  const path = runtimeConfigSectionPath(
+    options.namespace,
+    options.declaration.id,
+    options.field.name,
+  );
 
   if (options.field.secret) {
     return resolveSecretField({...options, path});
@@ -283,9 +308,9 @@ function resolvePluginConfigField(options: {
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_required_value_missing',
-          `Required config field "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
+          `Required config field "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
           path,
-          pluginConfigDiagnosticMetadata(options),
+          sectionFieldDiagnosticMetadata(options),
         ),
       );
     }
@@ -305,7 +330,7 @@ function resolvePluginConfigField(options: {
           'runtime_config_value_type_invalid',
           `Config field "${options.field.name}" does not match its declared metadata.`,
           path,
-          pluginConfigDiagnosticMetadata(options),
+          sectionFieldDiagnosticMetadata(options),
         ),
       );
     }
@@ -330,8 +355,9 @@ function resolvePluginConfigField(options: {
  * reads the resolved value; every other reader is handed it redacted.
  */
 function resolveSecretField(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly field: RuntimePluginConfigField;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
@@ -353,7 +379,7 @@ function resolveSecretField(options: {
           'runtime_config_secret_value_invalid',
           `Secret config field "${options.field.name}" must be a non-blank string.`,
           options.path,
-          pluginConfigDiagnosticMetadata(options),
+          sectionFieldDiagnosticMetadata(options),
         ),
       );
     }
@@ -379,9 +405,9 @@ function resolveSecretField(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_required_secret_missing',
-        `Required secret "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
+        `Required secret "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
         options.path,
-        pluginConfigDiagnosticMetadata(options),
+        sectionFieldDiagnosticMetadata(options),
       ),
     );
   }
@@ -393,14 +419,15 @@ function resolveSecretField(options: {
   });
 }
 
-function shouldValidatePluginConfig(options: {
+function shouldValidateSectionConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly manifest: RuntimePluginManifest;
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
   readonly defaultEnabled: boolean;
 }): boolean {
   const configured = ownJsonRecordValue(
-    options.config?.plugins,
-    options.manifest.id,
+    options.config?.[options.namespace],
+    options.declaration.id,
   );
 
   if (configured?.enabled === false) {
@@ -408,9 +435,9 @@ function shouldValidatePluginConfig(options: {
   }
 
   if (
-    !pluginCanRequireConfigValidation({
+    !sectionCanRequireConfigValidation({
       config: options.config,
-      manifest: options.manifest,
+      declaration: options.declaration,
     })
   ) {
     return false;
@@ -427,12 +454,12 @@ function shouldValidatePluginConfig(options: {
   return true;
 }
 
-function pluginCanRequireConfigValidation(options: {
+function sectionCanRequireConfigValidation(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly manifest: RuntimePluginManifest;
+  readonly declaration: RuntimeConfigSectionDeclaration;
 }): boolean {
   if (
-    options.manifest.kind !== 'memory_provider' ||
+    options.declaration.kind !== 'memory_provider' ||
     options.config?.project02?.defaultMemoryProvider === undefined
   ) {
     return true;
@@ -443,16 +470,17 @@ function pluginCanRequireConfigValidation(options: {
 
 function isSelectedDefaultMemoryProvider(options: {
   readonly config: Project02RuntimeConfig | undefined;
-  readonly manifest: RuntimePluginManifest;
+  readonly declaration: RuntimeConfigSectionDeclaration;
 }): boolean {
   return (
-    options.manifest.kind === 'memory_provider' &&
-    options.config?.project02?.defaultMemoryProvider === options.manifest.id
+    options.declaration.kind === 'memory_provider' &&
+    options.config?.project02?.defaultMemoryProvider === options.declaration.id
   );
 }
 
-function pushUnknownPluginConfigFieldDiagnostics(options: {
-  readonly manifest: RuntimePluginManifest;
+function pushUnknownSectionConfigFieldDiagnostics(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
   readonly rawConfig: Readonly<Record<string, RuntimeConfigValue>> | undefined;
   readonly diagnostics: RuntimeConfigDiagnostic[];
 }): void {
@@ -461,7 +489,7 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
   }
 
   const declaredFields = new Set(
-    options.manifest.config.fields.map(field => field.name),
+    options.declaration.config.fields.map(field => field.name),
   );
 
   for (const fieldName of Object.keys(options.rawConfig).sort((a, b) =>
@@ -475,29 +503,36 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_unknown_plugin_config_field',
-        `Unknown config field "${fieldName}" for plugin "${options.manifest.id}".`,
-        `plugins.${options.manifest.id}.config.${fieldName}`,
+        `Unknown config field "${fieldName}" for plugin "${options.declaration.id}".`,
+        runtimeConfigSectionPath(
+          options.namespace,
+          options.declaration.id,
+          fieldName,
+        ),
         {
-          pluginId: options.manifest.id,
-          pluginConfigField: fieldName,
+          namespace: options.namespace,
+          id: options.declaration.id,
+          field: fieldName,
         },
       ),
     );
   }
 }
 
-function pluginConfigDiagnosticMetadata(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly field: RuntimePluginConfigField;
-}): RuntimeConfigDiagnosticPluginMetadata {
+function sectionFieldDiagnosticMetadata(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly declaration: RuntimeConfigSectionDeclaration;
+  readonly field: RuntimeConfigFieldDeclaration;
+}): RuntimeConfigDiagnosticSectionMetadata {
   return {
-    pluginId: options.manifest.id,
-    pluginConfigField: options.field.name,
+    namespace: options.namespace,
+    id: options.declaration.id,
+    field: options.field.name,
   };
 }
 
 function fieldResult(options: {
-  readonly field: RuntimePluginConfigField;
+  readonly field: RuntimeConfigFieldDeclaration;
   readonly source: ResolvedRuntimeConfigField['source'];
   readonly resolved: boolean;
   readonly value?: RuntimeConfigValue;
@@ -523,11 +558,9 @@ function effectiveFingerprintInput(options: {
   readonly character: string;
   readonly enabled: boolean;
   readonly userDisplayName: string;
-  readonly redactedPluginConfigs: Readonly<
-    Record<string, RedactedPluginRuntimeConfig>
-  >;
+  readonly redactedSectionConfigs: RuntimeConfigSectionMap<RedactedRuntimeSectionConfig>;
 }): RuntimeConfigValue {
-  const pluginActivation = pluginActivationFingerprintInput(options.config);
+  const activation = sectionActivationFingerprintInput(options.config);
 
   return Object.freeze({
     version: options.config?.version ?? 'none',
@@ -547,27 +580,27 @@ function effectiveFingerprintInput(options: {
         options.config?.project02?.contextWindowTokens ??
         defaultProject02ContextWindowTokens,
     }),
-    plugins: options.redactedPluginConfigs,
-    ...(pluginActivation === undefined ? {} : {pluginActivation}),
+    sections: options.redactedSectionConfigs,
+    ...(activation === undefined ? {} : {activation}),
   });
 }
 
-function pluginActivationFingerprintInput(
+function sectionActivationFingerprintInput(
   config: Project02RuntimeConfig | undefined,
 ): RuntimeConfigValue | undefined {
-  const plugins = config?.plugins;
-
-  if (plugins === undefined) {
-    return undefined;
-  }
-
   const activation: Record<string, RuntimeConfigValue> = {};
 
-  for (const [pluginId, pluginConfig] of Object.entries(plugins)) {
-    if (pluginConfig.enabled !== undefined) {
-      activation[pluginId] = Object.freeze({
-        enabled: pluginConfig.enabled,
-      });
+  for (const namespace of runtimeConfigSectionNamespaces) {
+    const enabledById: Record<string, RuntimeConfigValue> = {};
+
+    for (const [id, section] of Object.entries(config?.[namespace] ?? {})) {
+      if (section.enabled !== undefined) {
+        enabledById[id] = Object.freeze({enabled: section.enabled});
+      }
+    }
+
+    if (Object.keys(enabledById).length > 0) {
+      activation[namespace] = Object.freeze(enabledById);
     }
   }
 

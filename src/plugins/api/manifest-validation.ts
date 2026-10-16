@@ -7,22 +7,22 @@ import {
   beforeRoleModelFailureBehaviorValues,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
-  runtimePluginConfigScopeValues,
-  runtimePluginConfigValueTypeValues,
+  runtimeConfigSectionScopeValues,
+  runtimeConfigValueTypeValues,
   runtimePluginContextItemKindValues,
   runtimePluginContractVersion,
   runtimePluginDeclarationValues,
   runtimePluginKindValues,
   runtimePluginToolConcurrencyValues,
   runtimePluginToolValidationOwnerValues,
+  type RuntimeConfigValueType,
   type RuntimePluginAccessMap,
-  type RuntimePluginConfigValueType,
   type RuntimePluginDeclaration,
 } from './contract.ts';
 import type {
+  RuntimeConfigFieldDeclaration,
   RuntimePluginActivationMetadata,
   RuntimePluginCompatibilityMetadata,
-  RuntimePluginConfigField,
   RuntimePluginConfigMetadata,
   RuntimePluginContextItem,
   RuntimePluginManifest,
@@ -448,7 +448,7 @@ function requiredConfigMetadata(
 
   const scope = value['scope'];
 
-  if (!isOneOf(scope, runtimePluginConfigScopeValues)) {
+  if (!isOneOf(scope, runtimeConfigSectionScopeValues)) {
     return reject(
       'malformed_manifest',
       'Plugin config scope must be "global_with_character_overrides" or "character_only".',
@@ -464,7 +464,7 @@ function requiredConfigMetadata(
     );
   }
 
-  const fields: RuntimePluginConfigField[] = [];
+  const fields: RuntimeConfigFieldDeclaration[] = [];
   const seenNames = new Set<string>();
 
   for (const fieldValue of fieldsValue) {
@@ -504,7 +504,7 @@ function requiredConfigMetadata(
 
 function requiredConfigField(
   value: unknown,
-): RuntimePluginValidationResult<RuntimePluginConfigField> {
+): RuntimePluginValidationResult<RuntimeConfigFieldDeclaration> {
   if (!isRecord(value)) {
     return reject(
       'malformed_manifest',
@@ -577,13 +577,13 @@ function acceptRuntimePluginConfigField(options: {
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
-  readonly valueType: RuntimePluginConfigValueType | undefined;
+  readonly valueType: RuntimeConfigValueType | undefined;
   readonly defaultValueSummary: string | undefined;
   readonly allowedValues: readonly string[] | undefined;
   readonly agentMutable: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
   readonly redactionLabels: readonly string[];
-}): RuntimePluginValidationResult<RuntimePluginConfigField> {
+}): RuntimePluginValidationResult<RuntimeConfigFieldDeclaration> {
   return accept(
     Object.freeze({
       name: options.name,
@@ -608,18 +608,18 @@ function acceptRuntimePluginConfigField(options: {
         ? {}
         : {reloadRequired: options.reloadRequired}),
       redactionLabels: freezeRedactedStrings(options.redactionLabels),
-    } satisfies RuntimePluginConfigField),
+    } satisfies RuntimeConfigFieldDeclaration),
   );
 }
 
 function optionalRuntimePluginConfigValueType(
   value: unknown,
-): RuntimePluginValidationResult<RuntimePluginConfigValueType | undefined> {
+): RuntimePluginValidationResult<RuntimeConfigValueType | undefined> {
   if (value === undefined) {
     return accept(undefined);
   }
 
-  if (!isOneOf(value, runtimePluginConfigValueTypeValues)) {
+  if (!isOneOf(value, runtimeConfigValueTypeValues)) {
     return reject(
       'malformed_manifest',
       'Plugin config field valueType is not supported.',

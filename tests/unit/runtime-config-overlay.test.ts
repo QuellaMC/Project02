@@ -21,7 +21,7 @@ import {
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
-  type Project02RuntimePluginConfig,
+  type Project02RuntimeSectionConfig,
   resolveLayeredProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
@@ -43,7 +43,7 @@ function loadCharacterOverlay(
 
 function overlayFingerprint(dataRoot: string, characterId = 'mira'): string {
   return layeredRuntimeConfigFingerprintForScope({
-    pluginManifests: [],
+    sections: {plugins: []},
     globalConfig: {version: runtimeConfigVersion},
     characterScope: {characterId, dataRoot},
     overlay: loadCharacterOverlay(dataRoot, characterId),
@@ -52,7 +52,7 @@ function overlayFingerprint(dataRoot: string, characterId = 'mira'): string {
 
 function loadedGlobalConfig(options: {
   readonly project02?: Project02HostConfig;
-  readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
+  readonly plugins?: Readonly<Record<string, Project02RuntimeSectionConfig>>;
 }): LoadedProject02RuntimeConfig {
   return {
     source: 'path',
@@ -68,7 +68,7 @@ function loadedGlobalConfig(options: {
 
 function loadedOverlay(options: {
   readonly project02?: Project02HostConfig;
-  readonly plugins?: Readonly<Record<string, Project02RuntimePluginConfig>>;
+  readonly plugins?: Readonly<Record<string, Project02RuntimeSectionConfig>>;
 }): LoadedProject02CharacterOverlayConfig {
   return {
     scope: 'character',
@@ -282,11 +282,13 @@ describe('layered runtime config resolution', () => {
     });
     const globalResolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+      sections: {plugins: []},
     });
 
     expect(
       resolveLayeredProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+        sections: {plugins: []},
       }),
     ).toEqual(globalResolved);
     expect(
@@ -307,6 +309,7 @@ describe('layered runtime config resolution', () => {
           source: 'none',
           diagnostics: [],
         },
+        sections: {plugins: []},
       }),
     ).toEqual(globalResolved);
   });
@@ -333,6 +336,7 @@ describe('layered runtime config resolution', () => {
         characterId: overlay.characterId,
       }),
       overlayConfig: overlay,
+      sections: {plugins: []},
     });
 
     expect(resolved.project02).toMatchObject({
@@ -360,7 +364,7 @@ describe('layered runtime config resolution', () => {
     const globalOnly = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
 
-      pluginManifests: [plugin.manifest],
+      sections: {plugins: [plugin.manifest]},
     });
     // Disabled globally: config is not validated, fields resolve as-is.
     expect(globalOnly.diagnostics).toEqual([]);
@@ -378,7 +382,7 @@ describe('layered runtime config resolution', () => {
         }).characterId,
       }),
 
-      pluginManifests: [plugin.manifest],
+      sections: {plugins: [plugin.manifest]},
       overlayConfig: loadedOverlay({
         plugins: {
           'demo.layered': {
@@ -389,7 +393,7 @@ describe('layered runtime config resolution', () => {
       }),
     });
 
-    expect(reEnabled.pluginConfigs['demo.layered']).toMatchObject({
+    expect(reEnabled.sectionConfigs.plugins['demo.layered']).toMatchObject({
       settings: {resolved: true, value: {from: 'overlay'}},
       endpoints: {resolved: true, value: ['global']},
     });
@@ -407,7 +411,7 @@ describe('layered runtime config resolution', () => {
       loadedConfig: loadedGlobalConfig({
         plugins: {'demo.layered': {enabled: true}},
       }),
-      pluginManifests: [plugin.manifest],
+      sections: {plugins: [plugin.manifest]},
       overlayConfig: loadedOverlay({
         plugins: {'demo.layered': {enabled: false}},
       }),
@@ -427,6 +431,7 @@ describe('layered runtime config resolution', () => {
       loadedConfig: loadedGlobalConfig({
         project02: {userDisplayName: 'One'},
       }),
+      sections: {plugins: []},
     });
     const renamedUser = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
@@ -437,6 +442,7 @@ describe('layered runtime config resolution', () => {
       loadedConfig: loadedGlobalConfig({
         project02: {userDisplayName: 'Two'},
       }),
+      sections: {plugins: []},
     });
     const otherCharacter = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
@@ -448,6 +454,7 @@ describe('layered runtime config resolution', () => {
       loadedConfig: loadedGlobalConfig({
         project02: {userDisplayName: 'One'},
       }),
+      sections: {plugins: []},
     });
     const overlayApplied = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
@@ -464,6 +471,7 @@ describe('layered runtime config resolution', () => {
       overlayConfig: loadedOverlay({
         project02: {userDisplayName: 'Two'},
       }),
+      sections: {plugins: []},
     });
 
     expect(renamedUser.effectiveConfigFingerprint).not.toBe(

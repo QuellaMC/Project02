@@ -101,8 +101,9 @@ async function createConfigEffectTestFixture(label: string) {
         configPath: configPath,
         storeRoot: homeRoot,
       }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
+      namespace: 'plugins',
+      declaration: targetPlugin.manifest,
+      sections: {plugins: [targetPlugin.manifest]},
     });
 
   return {
@@ -1049,8 +1050,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
         configPath: fixture.configPath,
         storeRoot: fixture.homeRoot,
       }),
-      manifest: fixture.targetPlugin.manifest,
-      pluginManifests: [fixture.targetPlugin.manifest],
+      namespace: 'plugins',
+      declaration: fixture.targetPlugin.manifest,
+      sections: {plugins: [fixture.targetPlugin.manifest]},
     });
     const rejection = toolRoundsByRound[1]
       ?.flatMap(round => round.toolCalls)

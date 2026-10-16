@@ -172,7 +172,7 @@ const globalExpectationMutationScript = [
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
-  'pluginManifests: [],',
+  'sections: { plugins: [] },',
   '  target,',
   '  expectedFingerprint: process.argv[3],',
   '  request: {',
@@ -189,7 +189,7 @@ const characterMutationScript = [
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
-  'pluginManifests: [],',
+  'sections: { plugins: [] },',
   '  target,',
   '  request: {',
   "    kind: 'document',",
@@ -206,7 +206,7 @@ const barrieredGlobalExpectationMutationScript = [
   '});',
   'try {',
   '  applyRuntimeConfigControlOperation({',
-  '  pluginManifests: [],',
+  '  sections: { plugins: [] },',
   '    target,',
   '    expectedFingerprint: process.argv[3],',
   '    request: {',
@@ -228,7 +228,7 @@ const barrieredCharacterMutationScript = [
   "  runtimeLocation, scope: 'character',",
   '});',
   'applyRuntimeConfigControlOperation({',
-  'pluginManifests: [],',
+  'sections: { plugins: [] },',
   '  target,',
   '  request: {',
   "    kind: 'document',",
@@ -272,7 +272,7 @@ async function createLayeredHome(): Promise<{
   const {applyRuntimeConfigControlOperation} =
     await import('../../src/runtime/config/index.ts');
   const seeded = applyRuntimeConfigControlOperation({
-    pluginManifests: [],
+    sections: {plugins: []},
     target: resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot}),
       scope: 'global',

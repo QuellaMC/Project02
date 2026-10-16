@@ -122,7 +122,7 @@ export const runtimePluginHealthStatusValues = [
   'unavailable',
 ] as const;
 
-export const runtimePluginConfigValueTypeValues = [
+export const runtimeConfigValueTypeValues = [
   'string',
   'number',
   'boolean',
@@ -133,7 +133,7 @@ export const runtimePluginConfigValueTypeValues = [
   'enum',
 ] as const;
 
-export const runtimePluginConfigScopeValues = [
+export const runtimeConfigSectionScopeValues = [
   'global_with_character_overrides',
   'character_only',
 ] as const;
@@ -174,10 +174,10 @@ export type RuntimePluginPolicyOutcome =
   (typeof runtimePluginPolicyOutcomeValues)[number];
 export type RuntimePluginHealthStatus =
   (typeof runtimePluginHealthStatusValues)[number];
-export type RuntimePluginConfigValueType =
-  (typeof runtimePluginConfigValueTypeValues)[number];
-export type RuntimePluginConfigScope =
-  (typeof runtimePluginConfigScopeValues)[number];
+export type RuntimeConfigValueType =
+  (typeof runtimeConfigValueTypeValues)[number];
+export type RuntimeConfigSectionScope =
+  (typeof runtimeConfigSectionScopeValues)[number];
 
 // Contract vocabulary: the runtime's turn model and codecs match on it.
 export const runtimePluginBeforeRoleModelCallRejectionReason =

@@ -13,11 +13,11 @@ import type {
 } from '../../shared/json-boundary.ts';
 import type {
   runtimePluginContractVersion,
+  RuntimeConfigSectionScope,
+  RuntimeConfigValueType,
   RuntimePluginAccessMap,
   RuntimePluginAccessSnapshot,
   RuntimePluginBeforeRoleModelFailureBehavior,
-  RuntimePluginConfigScope,
-  RuntimePluginConfigValueType,
   RuntimePluginToolConcurrency,
   RuntimePluginContextItemKind,
   RuntimePluginDeclaration,
@@ -54,12 +54,12 @@ export type RuntimePluginCompatibilityMetadata = {
   readonly hostContractVersions: readonly string[];
 };
 
-export type RuntimePluginConfigField = {
+export type RuntimeConfigFieldDeclaration = {
   readonly name: string;
   readonly description: string;
   readonly required: boolean;
   readonly secret: boolean;
-  readonly valueType?: RuntimePluginConfigValueType;
+  readonly valueType?: RuntimeConfigValueType;
   readonly defaultValueSummary?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable?: boolean;
@@ -68,8 +68,8 @@ export type RuntimePluginConfigField = {
 };
 
 export type RuntimePluginConfigMetadata = {
-  readonly scope: RuntimePluginConfigScope;
-  readonly fields: readonly RuntimePluginConfigField[];
+  readonly scope: RuntimeConfigSectionScope;
+  readonly fields: readonly RuntimeConfigFieldDeclaration[];
   readonly fingerprint?: string;
 };
 

@@ -43,9 +43,10 @@ describe('runtime config redaction', () => {
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
-      pluginManifests: [dottedConfigManifest()],
+      sections: {plugins: [dottedConfigManifest()]},
     });
-    const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
+    const redacted =
+      resolved.redactedSectionConfigs.plugins['memory.dotted-redaction'];
 
     expect(redacted?.['api.key']).toMatchObject({
       secret: false,
@@ -105,9 +106,10 @@ describe('runtime config redaction', () => {
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
-      pluginManifests: [dottedConfigManifest()],
+      sections: {plugins: [dottedConfigManifest()]},
     });
-    const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
+    const redacted =
+      resolved.redactedSectionConfigs.plugins['memory.dotted-redaction'];
 
     expect(redacted?.['metadata']?.value).toEqual({
       api: {

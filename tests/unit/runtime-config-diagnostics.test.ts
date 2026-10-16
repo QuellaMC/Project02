@@ -5,7 +5,7 @@ import {describe, expect, it} from 'vitest';
 import {
   runtimeConfigVersion,
   runtimeConfigDiagnosticIsReadinessFailure,
-  runtimeConfigDiagnosticMatchesPlugin,
+  runtimeConfigDiagnosticMatchesSection,
   type RuntimeConfigDiagnostic,
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
@@ -49,8 +49,9 @@ function codedDiagnostic(code: string): RuntimeConfigDiagnostic {
     code,
     message: 'test diagnostic',
     path: 'plugins.memory.config.field',
-    scope: 'plugin',
-    pluginId: 'memory',
+    scope: 'section',
+    namespace: 'plugins',
+    id: 'memory',
   });
 }
 
@@ -74,7 +75,7 @@ describe('runtime config diagnostic plugin matching', () => {
     const resolvedConfig = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
 
-      pluginManifests: [],
+      sections: {plugins: []},
     });
     const activation = resolveRuntimePluginActivation({
       effectiveConfig: loadedConfig,
@@ -86,19 +87,22 @@ describe('runtime config diagnostic plugin matching', () => {
     );
 
     expect(unknownDiagnostic).toMatchObject({
-      pluginId: 'memory.config',
+      namespace: 'plugins',
+      id: 'memory.config',
       path: 'plugins.memory.config',
     });
     expect(
-      runtimeConfigDiagnosticMatchesPlugin({
+      runtimeConfigDiagnosticMatchesSection({
         diagnostic: unknownDiagnostic as RuntimeConfigDiagnostic,
-        pluginId: 'memory.config',
+        namespace: 'plugins',
+        id: 'memory.config',
       }),
     ).toBe(true);
     expect(
-      runtimeConfigDiagnosticMatchesPlugin({
+      runtimeConfigDiagnosticMatchesSection({
         diagnostic: unknownDiagnostic as RuntimeConfigDiagnostic,
-        pluginId: 'memory',
+        namespace: 'plugins',
+        id: 'memory',
       }),
     ).toBe(false);
   });
@@ -126,7 +130,7 @@ describe('runtime config diagnostic plugin matching', () => {
     });
     const resolvedConfig = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig}),
-      pluginManifests: [manifest],
+      sections: {plugins: [manifest]},
     });
     const activationInput = {
       effectiveConfig: loadedConfig,
@@ -153,7 +157,8 @@ describe('runtime config diagnostic plugin matching', () => {
       expect.objectContaining({
         severity: 'warning',
         code: 'trusted_context_not_first_party',
-        pluginId: 'memory.curated.fixture',
+        namespace: 'plugins',
+        id: 'memory.curated.fixture',
       }),
     );
     expect(grantedSnapshot?.grantedAccess).toEqual({trusted_context: 'write'});
@@ -172,9 +177,10 @@ describe('runtime config diagnostic plugin matching', () => {
     );
 
     expect(
-      runtimeConfigDiagnosticMatchesPlugin({
+      runtimeConfigDiagnosticMatchesSection({
         diagnostic: globalDiagnostic,
-        pluginId: 'memory',
+        namespace: 'plugins',
+        id: 'memory',
       }),
     ).toBe(false);
   });
@@ -183,8 +189,8 @@ describe('runtime config diagnostic plugin matching', () => {
 function diagnostic(
   severity: RuntimeConfigDiagnostic['severity'],
   path: string,
-  pluginId?: string,
-  pluginConfigField?: string,
+  id?: string,
+  field?: string,
 ): RuntimeConfigDiagnostic {
   const base = {
     severity,
@@ -193,12 +199,13 @@ function diagnostic(
     path,
   } as const;
 
-  return pluginId === undefined
+  return id === undefined
     ? Object.freeze({...base, scope: 'global'})
     : Object.freeze({
         ...base,
-        scope: 'plugin',
-        pluginId,
-        ...(pluginConfigField === undefined ? {} : {pluginConfigField}),
+        scope: 'section',
+        namespace: 'plugins',
+        id,
+        ...(field === undefined ? {} : {field}),
       });
 }

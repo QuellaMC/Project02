@@ -61,9 +61,9 @@ async function runConfigMutationChild(options: {
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
     'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] } });',
     'applyRuntimeConfigControlOperation({',
-    'pluginManifests: [],',
+    'sections: { plugins: [] },',
     "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation: configLocation, scope: 'global' }),",
-    "  request: { kind: 'plugin_activation', manifest: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
+    "  request: { kind: 'section_activation', namespace: 'plugins', declaration: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
     '});',
   ].join('\n');
 

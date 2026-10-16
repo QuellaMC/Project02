@@ -7,10 +7,10 @@ import {
   fieldEdited,
   hostFieldKey,
   operationFor,
-  pluginFieldKey,
-  pluginKey,
   readableName,
   rowAt,
+  sectionFieldKey,
+  sectionKey,
   settingsClosed,
   settingsOpened,
   setupNeeded,
@@ -25,7 +25,7 @@ import {
 import type {
   ConfigTarget,
   ConfigView,
-  RuntimePluginConfigFieldInspectShape,
+  RuntimeConfigFieldInspectShape,
 } from '../../src/gateway/api/index.ts';
 
 const home: ConfigTarget = {scope: 'global'};
@@ -33,8 +33,8 @@ const mira: ConfigTarget = {scope: 'character', characterId: 'mira'};
 
 function field(
   name: string,
-  shape: Partial<RuntimePluginConfigFieldInspectShape> = {},
-): RuntimePluginConfigFieldInspectShape {
+  shape: Partial<RuntimeConfigFieldInspectShape> = {},
+): RuntimeConfigFieldInspectShape {
   return {
     name,
     description: `${name}.`,
@@ -54,8 +54,8 @@ type OkView = Extract<ConfigView, {status: 'ok'}>;
 
 /** A field whose manifest declares no valueType. */
 function untyped(
-  shape: RuntimePluginConfigFieldInspectShape,
-): RuntimePluginConfigFieldInspectShape {
+  shape: RuntimeConfigFieldInspectShape,
+): RuntimeConfigFieldInspectShape {
   const {valueType, ...rest} = shape;
 
   void valueType;
@@ -80,9 +80,10 @@ function view(fingerprint = 'f1'): OkView {
       field('contextWindowTokens', {valueType: 'number'}),
       field('enabled', {valueType: 'boolean', defaultValueSummary: 'true'}),
     ],
-    plugins: [
+    sections: [
       {
-        pluginId: 'demo-config',
+        namespace: 'plugins',
+        id: 'demo-config',
         displayName: 'Demo Config',
         version: '1.0.0',
         enabled: true,
@@ -116,9 +117,9 @@ function view(fingerprint = 'f1'): OkView {
 /** A live tab with Mira's thread open and her settings screen in front of it. */
 function opened(target: ConfigTarget = mira): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 5,
+    protocolVersion: 6,
     health: {
-      protocolVersion: 5,
+      protocolVersion: 6,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
@@ -141,8 +142,8 @@ function opened(target: ConfigTarget = mira): WebState {
   );
 }
 
-const tone = pluginFieldKey('demo-config', 'tone');
-const secret = pluginFieldKey('demo-config', 'apiKey');
+const tone = sectionFieldKey('plugins', 'demo-config', 'tone');
+const secret = sectionFieldKey('plugins', 'demo-config', 'apiKey');
 
 describe('web settings', () => {
   it('opens on a target with the thread kept behind it, and closes back to the chat letting edits go', () => {
@@ -376,8 +377,9 @@ describe('web settings', () => {
         secret,
         '123',
         {
-          kind: 'plugin_field_set',
-          pluginId: 'demo-config',
+          kind: 'section_field_set',
+          namespace: 'plugins',
+          id: 'demo-config',
           field: 'apiKey',
           value: '123',
         },
@@ -386,8 +388,9 @@ describe('web settings', () => {
         tone,
         'warm',
         {
-          kind: 'plugin_field_set',
-          pluginId: 'demo-config',
+          kind: 'section_field_set',
+          namespace: 'plugins',
+          id: 'demo-config',
           field: 'tone',
           value: 'warm',
         },
@@ -395,45 +398,58 @@ describe('web settings', () => {
       [
         tone,
         undefined,
-        {kind: 'plugin_field_unset', pluginId: 'demo-config', field: 'tone'},
+        {
+          kind: 'section_field_unset',
+          namespace: 'plugins',
+          id: 'demo-config',
+          field: 'tone',
+        },
       ],
       [
-        pluginFieldKey('demo-config', 'settings'),
+        sectionFieldKey('plugins', 'demo-config', 'settings'),
         '{"from": "page"}',
         {
-          kind: 'plugin_field_set',
-          pluginId: 'demo-config',
+          kind: 'section_field_set',
+          namespace: 'plugins',
+          id: 'demo-config',
           field: 'settings',
           value: {from: 'page'},
         },
       ],
       [
-        pluginFieldKey('demo-config', 'endpoints'),
+        sectionFieldKey('plugins', 'demo-config', 'endpoints'),
         'not json',
         {
-          kind: 'plugin_field_set',
-          pluginId: 'demo-config',
+          kind: 'section_field_set',
+          namespace: 'plugins',
+          id: 'demo-config',
           field: 'endpoints',
           value: 'not json',
         },
       ],
       [
-        pluginKey('demo-config'),
+        sectionKey('plugins', 'demo-config'),
         'true',
-        {kind: 'plugin_enabled', pluginId: 'demo-config', enabled: true},
+        {
+          kind: 'section_enabled',
+          namespace: 'plugins',
+          id: 'demo-config',
+          enabled: true,
+        },
       ],
       [
-        pluginKey('demo-config'),
+        sectionKey('plugins', 'demo-config'),
         undefined,
-        {kind: 'plugin_enabled', pluginId: 'demo-config'},
+        {kind: 'section_enabled', namespace: 'plugins', id: 'demo-config'},
       ],
       ['plugins/nobody/tone', 'warm', undefined],
       [
-        pluginFieldKey('demo-config', 'mode'),
+        sectionFieldKey('plugins', 'demo-config', 'mode'),
         'true',
         {
-          kind: 'plugin_field_set',
-          pluginId: 'demo-config',
+          kind: 'section_field_set',
+          namespace: 'plugins',
+          id: 'demo-config',
           field: 'mode',
           value: 'true',
         },
@@ -444,12 +460,15 @@ describe('web settings', () => {
       expect(operationFor(current, key, text), key).toEqual(operation);
     }
 
-    expect(rowAt(current, pluginKey('demo-config'))).toEqual({
-      kind: 'plugin_enabled',
-      pluginId: 'demo-config',
+    expect(rowAt(current, sectionKey('plugins', 'demo-config'))).toEqual({
+      kind: 'section_enabled',
+      namespace: 'plugins',
+      id: 'demo-config',
     });
     // Two rows never share a key, whatever the names: a slash is in no id.
-    expect(pluginKey('a.b')).not.toBe(pluginFieldKey('a', 'b'));
+    expect(sectionKey('plugins', 'a.b')).not.toBe(
+      sectionFieldKey('plugins', 'a', 'b'),
+    );
     expect(
       operationFor(
         {status: 'refused', reason: 'config_unloadable', message: 'no'},
@@ -491,7 +510,7 @@ describe('web settings', () => {
   it('reads a field name as words, and shows a value so that it saves back as it was', () => {
     const current = view();
     const typed = (name: string) =>
-      current.plugins[0]?.fields.find(field => field.name === name);
+      current.sections[0]?.fields.find(field => field.name === name);
     const note = typed('note');
     const tone = typed('tone');
     const settings = typed('settings');
@@ -515,7 +534,7 @@ describe('web settings', () => {
     expect(
       operationFor(
         current,
-        pluginFieldKey('demo-config', 'note'),
+        sectionFieldKey('plugins', 'demo-config', 'note'),
         valueText(note, 'true'),
       ),
     ).toMatchObject({value: 'true'});

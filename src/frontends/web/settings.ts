@@ -11,8 +11,9 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
+  RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
-  RuntimePluginConfigFieldInspectShape,
 } from '../../gateway/api/index.ts';
 import {noticed, type SettingsPage, type WebState} from './store.ts';
 
@@ -20,31 +21,43 @@ import {noticed, type SettingsPage, type WebState} from './store.ts';
 export type SettingsRow =
   | {
       readonly kind: 'host';
-      readonly field: RuntimePluginConfigFieldInspectShape;
+      readonly field: RuntimeConfigFieldInspectShape;
     }
   | {
-      readonly kind: 'plugin_field';
-      readonly pluginId: string;
-      readonly field: RuntimePluginConfigFieldInspectShape;
+      readonly kind: 'section_field';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+      readonly field: RuntimeConfigFieldInspectShape;
     }
-  | {readonly kind: 'plugin_enabled'; readonly pluginId: string};
+  | {
+      readonly kind: 'section_enabled';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+    };
 
 /**
  * Keys: `project02.<field>` for a host field — its path on the wire —
- * `plugins/<id>` for a plugin's switch and `plugins/<id>/<field>` for its
- * field. A slash appears in no plugin id and no field name, so two rows
- * never share a key whatever their names.
+ * `<namespace>/<id>` for a section's switch and `<namespace>/<id>/<field>`
+ * for its field. A slash appears in no namespace, id or field name, so two
+ * rows never share a key whatever their names.
  */
 export function hostFieldKey(name: string): string {
   return `project02.${name}`;
 }
 
-export function pluginKey(pluginId: string): string {
-  return `plugins/${pluginId}`;
+export function sectionKey(
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
+): string {
+  return `${namespace}/${id}`;
 }
 
-export function pluginFieldKey(pluginId: string, name: string): string {
-  return `${pluginKey(pluginId)}/${name}`;
+export function sectionFieldKey(
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
+  name: string,
+): string {
+  return `${sectionKey(namespace, id)}/${name}`;
 }
 
 export function sameTarget(left: ConfigTarget, right: ConfigTarget): boolean {
@@ -133,7 +146,7 @@ export function changeSent(
     const row =
       settings.view?.status === 'ok' ? rowAt(settings.view, key) : undefined;
     const secret =
-      row !== undefined && row.kind !== 'plugin_enabled' && row.field.secret;
+      row !== undefined && row.kind !== 'section_enabled' && row.field.secret;
     const edits = new Map(settings.edits);
     const problems = new Map(settings.problems);
     const text = edits.get(key);
@@ -260,23 +273,26 @@ export function operationFor(
       return text === undefined
         ? {kind: 'unset', path: key}
         : {kind: 'set', path: key, value: valueOf(row.field, text)};
-    case 'plugin_field':
+    case 'section_field':
       return text === undefined
         ? {
-            kind: 'plugin_field_unset',
-            pluginId: row.pluginId,
+            kind: 'section_field_unset',
+            namespace: row.namespace,
+            id: row.id,
             field: row.field.name,
           }
         : {
-            kind: 'plugin_field_set',
-            pluginId: row.pluginId,
+            kind: 'section_field_set',
+            namespace: row.namespace,
+            id: row.id,
             field: row.field.name,
             value: valueOf(row.field, text),
           };
-    case 'plugin_enabled':
+    case 'section_enabled':
       return {
-        kind: 'plugin_enabled',
-        pluginId: row.pluginId,
+        kind: 'section_enabled',
+        namespace: row.namespace,
+        id: row.id,
         ...(text === undefined ? {} : {enabled: text === 'true'}),
       };
   }
@@ -294,17 +310,17 @@ export function rowAt(view: ConfigView, key: string): SettingsRow | undefined {
     return {kind: 'host', field: host};
   }
 
-  for (const plugin of view.plugins) {
-    if (pluginKey(plugin.pluginId) === key) {
-      return {kind: 'plugin_enabled', pluginId: plugin.pluginId};
+  for (const {namespace, id, fields} of view.sections) {
+    if (sectionKey(namespace, id) === key) {
+      return {kind: 'section_enabled', namespace, id};
     }
 
-    const field = plugin.fields.find(
-      candidate => pluginFieldKey(plugin.pluginId, candidate.name) === key,
+    const field = fields.find(
+      candidate => sectionFieldKey(namespace, id, candidate.name) === key,
     );
 
     if (field !== undefined) {
-      return {kind: 'plugin_field', pluginId: plugin.pluginId, field};
+      return {kind: 'section_field', namespace, id, field};
     }
   }
 
@@ -348,7 +364,7 @@ export function readableName(name: string): string {
  * all, and every declared kind shows its text.
  */
 export function valueText(
-  field: RuntimePluginConfigFieldInspectShape,
+  field: RuntimeConfigFieldInspectShape,
   value: RuntimeConfigValue | undefined,
 ): string {
   if (value === undefined) {
@@ -361,7 +377,7 @@ export function valueText(
 }
 
 /** A structure, or a field of no declared kind, is typed as JSON; a choice among allowed values is never. */
-function readsJson(field: RuntimePluginConfigFieldInspectShape): boolean {
+function readsJson(field: RuntimeConfigFieldInspectShape): boolean {
   return (
     field.allowedValues === undefined &&
     (field.valueType === 'object' ||
@@ -371,7 +387,7 @@ function readsJson(field: RuntimePluginConfigFieldInspectShape): boolean {
 }
 
 function valueOf(
-  field: RuntimePluginConfigFieldInspectShape,
+  field: RuntimeConfigFieldInspectShape,
   text: string,
 ): RuntimeConfigValue {
   if (field.secret) {
@@ -416,7 +432,7 @@ function isSwitch(page: SettingsPage, key: string): boolean {
 
   return (
     row !== undefined &&
-    (row.kind === 'plugin_enabled' || row.field.valueType === 'boolean')
+    (row.kind === 'section_enabled' || row.field.valueType === 'boolean')
   );
 }
 

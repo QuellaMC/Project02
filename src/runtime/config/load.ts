@@ -7,13 +7,16 @@ import {
 import {createProject02HomeLayout} from '../storage/layout-contract.ts';
 import {isProject02CharacterDataOwnedPath} from '../storage/character-data.ts';
 import {
+  runtimeConfigSectionNamespaces,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
+  type Project02RuntimeSectionConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigDiagnosticSectionMetadata,
+  type RuntimeConfigSectionMap,
+  type RuntimeConfigSectionNamespace,
   type RuntimeConfigValue,
 } from './types.ts';
 import {
@@ -23,7 +26,7 @@ import {
   type JsonBoundaryObject,
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
-import {canonicalRuntimeConfigPath} from './path.ts';
+import {canonicalRuntimeConfigPath, runtimeConfigSectionPath} from './path.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -34,10 +37,13 @@ import {
 const project02RuntimeConfigFields = Object.freeze([
   'version',
   'project02',
-  'plugins',
+  ...runtimeConfigSectionNamespaces,
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
-const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
+const project02RuntimeSectionConfigFields = Object.freeze([
+  'enabled',
+  'config',
+]);
 
 const maxProject02RuntimeConfigBytes = 256 * 1_024;
 const runtimeConfigJsonBoundaryLimits = Object.freeze({
@@ -307,7 +313,21 @@ function parseProject02RuntimeConfig(value: unknown): {
     value['project02'],
     diagnostics,
   );
-  const plugins = optionalPluginConfigs(value['plugins'], diagnostics);
+  let sections: Partial<
+    RuntimeConfigSectionMap<Project02RuntimeSectionConfig>
+  > = {};
+
+  for (const namespace of runtimeConfigSectionNamespaces) {
+    const configs = optionalSectionConfigs(
+      namespace,
+      value[namespace],
+      diagnostics,
+    );
+
+    if (configs !== undefined) {
+      sections = {...sections, [namespace]: configs};
+    }
+  }
 
   if (diagnostics.some(item => item.severity === 'error')) {
     return {
@@ -319,7 +339,7 @@ function parseProject02RuntimeConfig(value: unknown): {
     config: Object.freeze({
       version: runtimeConfigVersion,
       ...(project02 === undefined ? {} : {project02}),
-      ...(plugins === undefined ? {} : {plugins}),
+      ...sections,
     } satisfies Project02RuntimeConfig),
     diagnostics,
   };
@@ -388,10 +408,11 @@ function project02HostConfigFieldDiagnostic(
   );
 }
 
-function optionalPluginConfigs(
+function optionalSectionConfigs(
+  namespace: RuntimeConfigSectionNamespace,
   value: unknown,
   diagnostics: RuntimeConfigDiagnostic[],
-): Readonly<Record<string, Project02RuntimePluginConfig>> | undefined {
+): Readonly<Record<string, Project02RuntimeSectionConfig>> | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -400,9 +421,9 @@ function optionalPluginConfigs(
     diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
-        'runtime_config_plugins_not_object',
-        'Runtime config plugins must be an object.',
-        'plugins',
+        `runtime_config_${namespace}_not_object`,
+        `Runtime config ${namespace} must be an object.`,
+        namespace,
       ),
     );
     return undefined;
@@ -410,43 +431,47 @@ function optionalPluginConfigs(
 
   return Object.freeze(
     Object.fromEntries(
-      Object.entries(value).flatMap(([pluginId, pluginValue]) => {
-        if (!isJsonRecord(pluginValue)) {
+      Object.entries(value).flatMap(([id, sectionValue]) => {
+        const path = runtimeConfigSectionPath(namespace, id);
+
+        if (!isJsonRecord(sectionValue)) {
           diagnostics.push(
             createRuntimeConfigDiagnostic(
               'error',
               'runtime_config_plugin_not_object',
-              `Runtime config plugin "${pluginId}" must be an object.`,
-              `plugins.${pluginId}`,
+              `Runtime config plugin "${id}" must be an object.`,
+              path,
             ),
           );
           return [];
         }
 
-        pushUnknownRuntimePluginConfigFieldDiagnostics({
-          pluginId,
-          value: pluginValue,
+        pushUnknownRuntimeSectionConfigFieldDiagnostics({
+          namespace,
+          id,
+          path,
+          value: sectionValue,
           diagnostics,
         });
 
         const enabled = optionalBoolean(
-          pluginValue['enabled'],
-          `plugins.${pluginId}.enabled`,
+          sectionValue['enabled'],
+          `${path}.enabled`,
           diagnostics,
         );
         const config = optionalConfigRecord(
-          pluginValue['config'],
-          `plugins.${pluginId}.config`,
+          sectionValue['config'],
+          `${path}.config`,
           diagnostics,
         );
 
         return [
           [
-            pluginId,
+            id,
             Object.freeze({
               ...(enabled === undefined ? {} : {enabled}),
               ...(config === undefined ? {} : {config}),
-            } satisfies Project02RuntimePluginConfig),
+            } satisfies Project02RuntimeSectionConfig),
           ],
         ];
       }),
@@ -510,20 +535,22 @@ function pushUnknownRuntimeConfigFieldDiagnostics(
   });
 }
 
-function pushUnknownRuntimePluginConfigFieldDiagnostics(options: {
-  readonly pluginId: string;
+function pushUnknownRuntimeSectionConfigFieldDiagnostics(options: {
+  readonly namespace: RuntimeConfigSectionNamespace;
+  readonly id: string;
+  readonly path: string;
   readonly value: Readonly<Record<string, unknown>>;
   readonly diagnostics: RuntimeConfigDiagnostic[];
 }): void {
   pushUnknownFieldDiagnostics({
     value: options.value,
-    allowedFields: project02RuntimePluginConfigFields,
+    allowedFields: project02RuntimeSectionConfigFields,
     diagnostics: options.diagnostics,
     code: 'runtime_config_unknown_plugin_wrapper_field',
     messageForField: field =>
-      `Unknown plugin wrapper field "${field}" for plugin "${options.pluginId}".`,
-    pathForField: field => `plugins.${options.pluginId}.${field}`,
-    metadataForField: () => ({pluginId: options.pluginId}),
+      `Unknown plugin wrapper field "${field}" for plugin "${options.id}".`,
+    pathForField: field => `${options.path}.${field}`,
+    metadataForField: () => ({namespace: options.namespace, id: options.id}),
   });
 }
 
@@ -536,7 +563,7 @@ function pushUnknownFieldDiagnostics(options: {
   readonly pathForField: (field: string) => string;
   readonly metadataForField?: (
     field: string,
-  ) => RuntimeConfigDiagnosticPluginMetadata;
+  ) => RuntimeConfigDiagnosticSectionMetadata;
 }): void {
   const allowedFields = new Set(options.allowedFields);
 

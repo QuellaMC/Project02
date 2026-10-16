@@ -1,7 +1,7 @@
 import type {RuntimePlugin, RuntimePluginManifest} from './types.ts';
 import type {
-  RedactedPluginRuntimeConfig,
-  ResolvedPluginRuntimeConfig,
+  RedactedRuntimeSectionConfig,
+  ResolvedRuntimeSectionConfig,
 } from '../../runtime/config/index.ts';
 
 export type RuntimePluginFactoryInput = {
@@ -12,8 +12,8 @@ export type RuntimePluginFactoryInput = {
   readonly characterId?: string;
   /** Resolved user display name; absent only for direct factory callers. */
   readonly userDisplayName?: string;
-  readonly resolvedConfig: ResolvedPluginRuntimeConfig;
-  readonly redactedConfig: RedactedPluginRuntimeConfig;
+  readonly resolvedConfig: ResolvedRuntimeSectionConfig;
+  readonly redactedConfig: RedactedRuntimeSectionConfig;
 };
 
 export type RuntimePluginFactoryFunction = (

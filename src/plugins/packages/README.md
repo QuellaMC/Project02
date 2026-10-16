@@ -126,7 +126,9 @@ open-ended input.
 
 Declared in `manifest.config.fields`; the same declarations drive runtime
 resolution, the settings page, and the model-facing
-`runtime.plugin.config` tools.
+`runtime.plugin.config` tools. The manifest is the declaration of the
+plugin's section in the config document, `plugins.<id>`, and the runtime
+reads it as it stands.
 
 - `config.scope: "global_with_character_overrides"` allows home
   settings with per-character overrides; `"character_only"` keeps the
@@ -190,7 +192,7 @@ setup. Materialization only fills what is missing: a field the operator
 has set keeps the operator's value, on first install and on every package
 update. Character-only, demo, and optional plugins ship `false` and are
 enabled on the settings page: the home's, or one character's (each is
-one `plugin_enabled` change through the daemon). A character-only
+one `section_enabled` change through the daemon). A character-only
 plugin is enabled on a character's settings or by that character's
 package; the home's settings do not list it.
 

@@ -1,4 +1,5 @@
 import {canonicalPath, PathResolutionError} from '../../shared/real-path.ts';
+import type {RuntimeConfigSectionNamespace} from './types.ts';
 
 export {PathResolutionError as RuntimeConfigPathResolutionError};
 
@@ -17,4 +18,15 @@ export function canonicalRuntimeConfigPath(
   } catch (error: unknown) {
     throw error instanceof PathResolutionError ? toDomainError(error) : error;
   }
+}
+
+/** One spelling of a section's place in a document, or a field's, in every namespace. */
+export function runtimeConfigSectionPath(
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
+  field?: string,
+): string {
+  return field === undefined
+    ? `${namespace}.${id}`
+    : `${namespace}.${id}.config.${field}`;
 }

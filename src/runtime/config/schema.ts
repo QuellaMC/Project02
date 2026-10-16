@@ -2,14 +2,14 @@ import {
   isValidSpeakerDisplayName,
   maxSpeakerDisplayNameLength,
 } from '../../core/index.ts';
-import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
+import type {RuntimeConfigFieldDeclaration} from '../../plugins/api/index.ts';
 import {
   defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
   type RuntimeConfigValue,
 } from './types.ts';
 
-export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
+export type Project02ConfigFieldDefinition = RuntimeConfigFieldDeclaration & {
   readonly path: string;
   readonly invalidValueCode: string;
   readonly invalidValueMessage: string;
@@ -160,7 +160,7 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
 
 export function runtimeConfigValueMatchesField(
   value: RuntimeConfigValue,
-  field: RuntimePluginConfigField,
+  field: RuntimeConfigFieldDeclaration,
 ): boolean {
   if (
     field.allowedValues !== undefined &&
@@ -209,7 +209,7 @@ export function project02RuntimeConfigFieldAcceptsValue(
 }
 
 export function runtimeConfigFieldValueMismatchMessage(
-  field: RuntimePluginConfigField,
+  field: RuntimeConfigFieldDeclaration,
   value: RuntimeConfigValue,
 ): string {
   const received = runtimeConfigValueKindLabel(value);
@@ -244,7 +244,7 @@ function runtimeConfigValueKindLabel(value: RuntimeConfigValue): string {
 }
 
 function runtimeConfigValueTypeLabel(
-  valueType: RuntimePluginConfigField['valueType'],
+  valueType: RuntimeConfigFieldDeclaration['valueType'],
 ): string {
   switch (valueType) {
     case 'string':

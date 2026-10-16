@@ -1,6 +1,9 @@
 /** A reload problem never undoes the written change; the old instance keeps serving. */
 import {registeredRuntimePluginLifecycleHooks} from '../api/index.ts';
-import type {RuntimePlugin, RuntimePluginConfigField} from '../api/index.ts';
+import type {
+  RuntimeConfigFieldDeclaration,
+  RuntimePlugin,
+} from '../api/index.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 
 export type RuntimePluginReloadResult =
@@ -30,7 +33,7 @@ export type RuntimePluginConfigLiveApplyOutcome =
 /** Brings a written config change into the running host, or says why not. */
 export type RuntimePluginConfigLiveApply = (change: {
   readonly pluginId: string;
-  readonly field: RuntimePluginConfigField;
+  readonly field: RuntimeConfigFieldDeclaration;
   /** The authored fingerprint after the write; the reloader rebuilds only against it. */
   readonly configFingerprint: string;
 }) => Promise<RuntimePluginConfigLiveApplyOutcome>;

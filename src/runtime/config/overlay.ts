@@ -9,10 +9,6 @@ import {
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 import {
-  createLayeredRuntimeConfigFingerprint,
-  createRuntimeConfigFingerprint,
-} from './fingerprint.ts';
-import {
   readProject02RuntimeConfigDocument,
   validateProject02RuntimeConfig,
 } from './load.ts';
@@ -21,10 +17,8 @@ import {
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticOrigin,
-  type RuntimeConfigValue,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
-import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 
 export type LoadedProject02CharacterOverlayConfig = {
   readonly scope: 'character';
@@ -141,26 +135,6 @@ function loadedOverlay(options: {
   } satisfies LoadedProject02CharacterOverlayConfig);
 }
 
-/**
- * Invalid bytes fingerprint distinctly, not as one sentinel, so an edit to a
- * broken overlay stays visible. The wrapper stops a collision with a config.
- */
-function characterOverlayFingerprintLayer(
-  overlay: LoadedProject02CharacterOverlayConfig,
-): Project02RuntimeConfig | RuntimeConfigValue | null {
-  if (overlay.source === 'none') {
-    return null;
-  }
-
-  if (overlay.config !== undefined) {
-    return overlay.config;
-  }
-
-  return overlay.authoredDocument === undefined
-    ? Object.freeze({$overlayUnreadable: true})
-    : Object.freeze({$overlayInvalid: overlay.authoredDocument});
-}
-
 export type RuntimeConfigCharacterOverlaySnapshot = {
   readonly marker?: LocalRuntimeCharacterDataStorageSchemaMarker;
   readonly overlay: LoadedProject02CharacterOverlayConfig;
@@ -182,24 +156,4 @@ export function readCharacterOverlayForScope(
       characterId: scope.characterId,
     }),
   } satisfies RuntimeConfigCharacterOverlaySnapshot);
-}
-
-/** The one composition, so any two sites comparing fingerprints agree. */
-export function layeredRuntimeConfigFingerprintForScope(options: {
-  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
-  readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-}): string {
-  return options.characterScope === undefined || options.overlay === undefined
-    ? createRuntimeConfigFingerprint(
-        options.globalConfig,
-        options.pluginManifests,
-      )
-    : createLayeredRuntimeConfigFingerprint({
-        globalConfig: options.globalConfig,
-        characterId: options.characterScope.characterId,
-        overlayConfig: characterOverlayFingerprintLayer(options.overlay),
-        pluginManifests: options.pluginManifests,
-      });
 }

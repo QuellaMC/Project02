@@ -30,11 +30,12 @@ import {
   type Project02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigMutationOperation,
+  type RuntimeConfigSectionNamespace,
   type RuntimeConfigValue,
 } from './types.ts';
 import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import {canonicalRuntimeConfigPath} from './path.ts';
+import {canonicalRuntimeConfigPath, runtimeConfigSectionPath} from './path.ts';
 import {
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldAcceptsValue,
@@ -272,23 +273,30 @@ function mutateConfig(
       return setConfigPath(config, operation.path, operation.value);
     case 'unset':
       return unsetConfigPath(config, operation.path);
-    case 'plugin_enable':
-      return setPluginEnabled(config, operation.pluginId, true);
-    case 'plugin_disable':
-      return setPluginEnabled(config, operation.pluginId, false);
-    case 'plugin_activation_clear':
-      return clearPluginEnabled(config, operation.pluginId);
-    case 'plugin_config_set':
-      return setPluginConfigField(
+    case 'section_enable':
+      return setSectionEnabled(config, operation.namespace, operation.id, true);
+    case 'section_disable':
+      return setSectionEnabled(
         config,
-        operation.pluginId,
+        operation.namespace,
+        operation.id,
+        false,
+      );
+    case 'section_activation_clear':
+      return clearSectionEnabled(config, operation.namespace, operation.id);
+    case 'section_field_set':
+      return setSectionField(
+        config,
+        operation.namespace,
+        operation.id,
         operation.fieldName,
         operation.value,
       );
-    case 'plugin_config_unset':
-      return unsetPluginConfigField(
+    case 'section_field_unset':
+      return unsetSectionField(
         config,
-        operation.pluginId,
+        operation.namespace,
+        operation.id,
         operation.fieldName,
       );
   }
@@ -319,107 +327,116 @@ function validateMutatedRuntimeConfig(
   return accepted.config;
 }
 
-function setPluginEnabled(
+function setSectionEnabled(
   config: JsonBoundaryObject,
-  pluginId: string,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
   enabled: boolean,
 ): JsonBoundaryObject {
-  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
-  const currentPlugin =
+  const sections = authoredObjectValue(config[namespace], namespace) ?? {};
+  const currentSection =
     authoredObjectValue(
-      ownJsonRecordValue(plugins, pluginId),
-      `plugins.${pluginId}`,
+      ownJsonRecordValue(sections, id),
+      runtimeConfigSectionPath(namespace, id),
     ) ?? {};
-  const nextPlugins = {...plugins};
+  const nextSections = {...sections};
 
-  nextPlugins[pluginId] = freezeJsonObject({
-    ...currentPlugin,
+  nextSections[id] = freezeJsonObject({
+    ...currentSection,
     enabled,
   });
 
-  return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
+  return freezeJsonObject({
+    ...config,
+    [namespace]: freezeJsonObject(nextSections),
+  });
 }
 
-/** Removes the authored flag, leaving the rest of the plugin's entry. */
-function clearPluginEnabled(
+/** Removes the authored flag, leaving the rest of the section's entry. */
+function clearSectionEnabled(
   config: JsonBoundaryObject,
-  pluginId: string,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
 ): JsonBoundaryObject {
-  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
-  const currentPlugin = authoredObjectValue(
-    ownJsonRecordValue(plugins, pluginId),
-    `plugins.${pluginId}`,
+  const sections = authoredObjectValue(config[namespace], namespace) ?? {};
+  const currentSection = authoredObjectValue(
+    ownJsonRecordValue(sections, id),
+    runtimeConfigSectionPath(namespace, id),
   );
 
-  if (currentPlugin === undefined) {
+  if (currentSection === undefined) {
     return config;
   }
 
-  const {enabled: removedEnabled, ...rest} = currentPlugin;
-  const nextPlugins = {...plugins};
+  const {enabled: removedEnabled, ...rest} = currentSection;
+  const nextSections = {...sections};
 
   void removedEnabled;
-  nextPlugins[pluginId] = freezeJsonObject(rest);
+  nextSections[id] = freezeJsonObject(rest);
 
-  return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
+  return freezeJsonObject({
+    ...config,
+    [namespace]: freezeJsonObject(nextSections),
+  });
 }
 
-function setPluginConfigField(
+function setSectionField(
   config: JsonBoundaryObject,
-  pluginId: string,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
   fieldName: string,
   value: RuntimeConfigValue,
 ): JsonBoundaryObject {
-  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
-  const currentPlugin =
-    authoredObjectValue(
-      ownJsonRecordValue(plugins, pluginId),
-      `plugins.${pluginId}`,
-    ) ?? {};
+  const sectionPath = runtimeConfigSectionPath(namespace, id);
+  const sections = authoredObjectValue(config[namespace], namespace) ?? {};
+  const currentSection =
+    authoredObjectValue(ownJsonRecordValue(sections, id), sectionPath) ?? {};
   const currentFields =
     authoredObjectValue(
-      ownJsonRecordValue(currentPlugin, 'config'),
-      `plugins.${pluginId}.config`,
+      ownJsonRecordValue(currentSection, 'config'),
+      `${sectionPath}.config`,
     ) ?? {};
-  const nextPlugins = {...plugins};
+  const nextSections = {...sections};
 
-  nextPlugins[pluginId] = freezeJsonObject({
-    ...currentPlugin,
+  nextSections[id] = freezeJsonObject({
+    ...currentSection,
     config: freezeJsonObject({
       ...currentFields,
       [fieldName]: snapshotMutationValue(
         value,
-        `plugins.${pluginId}.config.${fieldName}`,
+        runtimeConfigSectionPath(namespace, id, fieldName),
       ),
     }),
   });
 
   return freezeJsonObject({
     ...config,
-    plugins: freezeJsonObject(nextPlugins),
+    [namespace]: freezeJsonObject(nextSections),
   });
 }
 
-function unsetPluginConfigField(
+function unsetSectionField(
   config: JsonBoundaryObject,
-  pluginId: string,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
   fieldName: string,
 ): JsonBoundaryObject {
-  const plugins = authoredObjectValue(config['plugins'], 'plugins');
-  const currentPluginValue =
-    plugins === undefined ? undefined : ownJsonRecordValue(plugins, pluginId);
+  const sectionPath = runtimeConfigSectionPath(namespace, id);
+  const sections = authoredObjectValue(config[namespace], namespace);
+  const currentSectionValue =
+    sections === undefined ? undefined : ownJsonRecordValue(sections, id);
 
-  if (currentPluginValue === undefined) {
+  if (currentSectionValue === undefined) {
     return config;
   }
 
-  const currentPlugin = requiredAuthoredObjectValue(
-    currentPluginValue,
-    `plugins.${pluginId}`,
+  const currentSection = requiredAuthoredObjectValue(
+    currentSectionValue,
+    sectionPath,
   );
   const currentFields = authoredObjectValue(
-    ownJsonRecordValue(currentPlugin, 'config'),
-    `plugins.${pluginId}.config`,
+    ownJsonRecordValue(currentSection, 'config'),
+    `${sectionPath}.config`,
   );
 
   if (
@@ -430,17 +447,18 @@ function unsetPluginConfigField(
   }
 
   const nextFields = jsonObjectWithout(currentFields, fieldName);
-  const nextPlugin = jsonObjectWithout(currentPlugin, 'config');
+  const nextSection = jsonObjectWithout(currentSection, 'config');
 
   if (Object.keys(nextFields).length > 0) {
-    nextPlugin['config'] = freezeJsonObject(nextFields);
+    nextSection['config'] = freezeJsonObject(nextFields);
   }
 
-  return setOrDeletePluginWrapper(
+  return setOrDeleteSection(
     config,
-    plugins ?? {},
-    pluginId,
-    freezeJsonObject(nextPlugin),
+    namespace,
+    sections ?? {},
+    id,
+    freezeJsonObject(nextSection),
   );
 }
 
@@ -579,39 +597,46 @@ function parseConfigPath(path: string): readonly string[] {
   return Object.freeze(parts);
 }
 
-function setOrDeletePluginWrapper(
+function setOrDeleteSection(
   config: JsonBoundaryObject,
-  plugins: JsonBoundaryObject,
-  pluginId: string,
-  pluginConfig: JsonBoundaryObject,
+  namespace: RuntimeConfigSectionNamespace,
+  sections: JsonBoundaryObject,
+  id: string,
+  section: JsonBoundaryObject,
 ): JsonBoundaryObject {
-  const nextPlugins = {...plugins};
+  const nextSections = {...sections};
 
-  if (Object.keys(pluginConfig).length === 0) {
-    return freezeConfigWithPluginWrappers(
+  if (Object.keys(section).length === 0) {
+    return freezeConfigWithSections(
       config,
-      jsonObjectWithout(plugins, pluginId),
+      namespace,
+      jsonObjectWithout(sections, id),
     );
   }
 
-  nextPlugins[pluginId] = pluginConfig;
-  return freezeConfigWithPluginWrappers(config, freezeJsonObject(nextPlugins));
+  nextSections[id] = section;
+  return freezeConfigWithSections(
+    config,
+    namespace,
+    freezeJsonObject(nextSections),
+  );
 }
 
-function freezeConfigWithPluginWrappers(
+function freezeConfigWithSections(
   config: JsonBoundaryObject,
-  plugins: JsonBoundaryObject,
+  namespace: RuntimeConfigSectionNamespace,
+  sections: JsonBoundaryObject,
 ): JsonBoundaryObject {
-  const pluginEntries = Object.entries(plugins);
+  const sectionEntries = Object.entries(sections);
 
-  if (pluginEntries.length > 0) {
+  if (sectionEntries.length > 0) {
     return freezeJsonObject({
       ...config,
-      plugins,
+      [namespace]: sections,
     });
   }
 
-  return freezeJsonObject(jsonObjectWithout(config, 'plugins'));
+  return freezeJsonObject(jsonObjectWithout(config, namespace));
 }
 
 function authoredObjectValue(
