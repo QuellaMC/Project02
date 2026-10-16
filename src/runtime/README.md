@@ -58,4 +58,8 @@ over it, and is the one path that writes them. Every setting but the
 host's own belongs to a declared section, which lives under a namespace —
 `plugins` is the only one — and is keyed by namespace, then id, in every
 map the module keeps; one function, `runtimeConfigSectionPath`, spells the
-path of a section and of each of its fields.
+path of a section and of each of its fields. Another,
+`runtimeSectionValueLayers`, says which layer may supply a value, by a
+field's own scope or else its section's; the merge, the views and the
+refusal of a write are all built on it, and where no permitted layer
+authored a field, the resolver applies its declared default.

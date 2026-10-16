@@ -71,8 +71,9 @@ fall back to a constant of your own; never derive an identity from
 `storeRoot`, whose layout is the runtime's to change.
 
 `userDisplayName` is what the user is called in this store, for a package
-that records or shows who spoke. It is absent until the store sets one, so
-carry your own fallback rather than a second copy of the setting.
+that records or shows who spoke. It is absent only when a factory is
+called outside a host, so carry your own fallback rather than a second
+copy of the setting.
 
 Bundled packages import host helpers directly, an installed package cannot:
 its captured artifact resolves only its own files, so a memory provider
@@ -133,9 +134,20 @@ reads it as it stands.
 - `config.scope: "global_with_character_overrides"` allows home
   settings with per-character overrides; `"character_only"` keeps the
   plugin wholly per character — the home's settings do not list it, and
-  its `activation.defaultEnabled` must be `false`.
+  its `activation.defaultEnabled` must be `false`; `"global_only"` keeps
+  it wholly the home's: every character takes the home's settings, and
+  a character's settings do not list it.
+- A field's own `scope` narrows its plugin's: in a
+  `"global_with_character_overrides"` plugin, a `"character_only"` field
+  is set per character alone and a `"global_only"` field at the home
+  alone. A field without one takes its plugin's scope, and one that would
+  widen it is rejected at manifest validation.
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
+- `defaultValue` is what a field takes wherever no settings set it, a
+  value its `valueType` and `allowedValues` accept. It arrives in
+  `resolvedConfig` as the field's value, so a plugin keeps no fallback
+  of its own. A secret or a required field cannot declare one.
 - `secret: true` fields hold credentials. The operator enters one on the
   settings page, at the home or for one character, and it is kept as a
   plain string with that scope's config at mode 0600; a character's own value overrides the home's, so two

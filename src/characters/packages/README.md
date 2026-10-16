@@ -66,13 +66,16 @@ changes or removes existing character values, including an explicit
 `enabled: false`. Package authors must bump `meta.version` when plugin
 declarations or defaults change.
 
-Plugin manifests declare `config.scope`:
+Plugin manifests declare `config.scope`, and a field may narrow it with
+a `scope` of its own:
 
 - `global_with_character_overrides` permits home enablement and
   settings, with per-character overrides.
 - `character_only` permits enablement and settings only in a character
   package or character config -- secrets included, so such a plugin is
   wholly self-contained, and the home's settings do not list it.
+- `global_only` permits them only in the home's config, so a package
+  may not name them, and a character's settings do not list them.
 
 A package still carries no credentials of its own: secret fields are the
 operator's, entered on the settings page for the home or for the character.
