@@ -224,7 +224,7 @@ function assertRuntimeSectionConfigCandidateValid(options: {
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(
-      `Cannot update plugin config because the resulting config is invalid: ${blockingDiagnostic.message}`,
+      `Cannot update section "${options.declaration.id}" because the resulting config is invalid: ${blockingDiagnostic.message}`,
     );
   }
 }
@@ -244,7 +244,7 @@ export function validateRuntimePluginConfigControlOperation(options: {
       .join(', ');
 
     throw new TypeError(
-      `Plugin "${options.declaration.id}" does not declare config field "${options.operation.fieldName}". ` +
+      `Section "${options.declaration.id}" does not declare config field "${options.operation.fieldName}". ` +
         `Declared fields: ${declaredFieldNames.length === 0 ? 'none' : declaredFieldNames}.`,
     );
   }
@@ -265,7 +265,7 @@ export function validateRuntimePluginConfigControlOperation(options: {
 
   if (options.operation.kind === 'unset' && field.required) {
     throw new TypeError(
-      `Required plugin config field "${field.name}" cannot be unset.`,
+      `Required config field "${field.name}" cannot be unset.`,
     );
   }
 
@@ -286,7 +286,7 @@ export function validateRuntimePluginConfigControlOperation(options: {
       )
     ) {
       throw new TypeError(
-        `Plugin config field "${field.name}" value contains content that must stay redacted and cannot be written.`,
+        `Config field "${field.name}" value contains content that must stay redacted and cannot be written.`,
       );
     }
   }

@@ -27,6 +27,7 @@ import {
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
 import {canonicalRuntimeConfigPath, runtimeConfigSectionPath} from './path.ts';
+import {unknownConnectorDiagnostics} from './connectors.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -329,6 +330,8 @@ function parseProject02RuntimeConfig(value: unknown): {
     }
   }
 
+  diagnostics.push(...unknownConnectorDiagnostics(sections));
+
   if (diagnostics.some(item => item.severity === 'error')) {
     return {
       diagnostics,
@@ -439,7 +442,7 @@ function optionalSectionConfigs(
             createRuntimeConfigDiagnostic(
               'error',
               'runtime_config_plugin_not_object',
-              `Runtime config plugin "${id}" must be an object.`,
+              `Runtime config section "${id}" must be an object.`,
               path,
             ),
           );
@@ -493,7 +496,7 @@ function optionalConfigRecord(
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_plugin_config_not_object',
-        'Plugin config must be an object.',
+        'Section config must be an object.',
         path,
       ),
     );
@@ -548,7 +551,7 @@ function pushUnknownRuntimeSectionConfigFieldDiagnostics(options: {
     diagnostics: options.diagnostics,
     code: 'runtime_config_unknown_plugin_wrapper_field',
     messageForField: field =>
-      `Unknown plugin wrapper field "${field}" for plugin "${options.id}".`,
+      `Unknown wrapper field "${field}" for section "${options.id}".`,
     pathForField: field => `${options.path}.${field}`,
     metadataForField: () => ({namespace: options.namespace, id: options.id}),
   });

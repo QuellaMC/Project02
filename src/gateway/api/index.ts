@@ -18,6 +18,8 @@ export {
   type ConfirmationAnswerStatus,
   type ConfirmationCancelReason,
   type ConfirmationSettlement,
+  type ConnectorConfigEntry,
+  type ConnectorConfigView,
   type Gateway,
   type GatewayConfirmationDecision,
   type GatewayErrorBody,
@@ -48,6 +50,7 @@ export {foldRunningTurns, type RunningTurns} from './running-turns.ts';
 export type {
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
+  RuntimeConfigSectionActivationShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
   RuntimeConfigValue,

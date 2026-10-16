@@ -492,7 +492,7 @@ code {
   margin: 0;
 }
 
-.section-title {
+.group-title {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -559,7 +559,7 @@ code {
   color: var(--accent);
 }
 
-.plugin {
+.section {
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -568,20 +568,20 @@ code {
   background: var(--surface);
 }
 
-.plugin .field {
+.section .field {
   border: 0;
   border-top: 1px solid var(--line);
   border-radius: 0;
   padding: 8px 0 2px;
 }
 
-.plugin-header {
+.section-header {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.plugin-name {
+.section-name {
   margin: 0;
   font-size: 15px;
 }

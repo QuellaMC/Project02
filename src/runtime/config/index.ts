@@ -29,6 +29,7 @@ export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,
 } from './plugin-control-capability.ts';
+export {builtInConnectors, createRuntimeConfigSections} from './connectors.ts';
 export {
   createLayeredRuntimeConfigFingerprint,
   createRuntimeConfigFingerprint,
@@ -49,6 +50,7 @@ export {
 export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction.ts';
 export {
   characterOverlayConfigPath,
+  characterOverlayFromDocument,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,
@@ -125,6 +127,7 @@ export {
   type ResolvedRuntimeSectionConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigSectionActivationShape,
+  type RuntimeConfigSectionDeclaration,
   type RuntimeConfigSectionInspectShape,
   type RuntimeConfigSectionNamespace,
   type RuntimeConfigSections,

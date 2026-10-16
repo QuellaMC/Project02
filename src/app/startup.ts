@@ -2,6 +2,7 @@ import {
   classifyRuntimePluginCatalogDiscovery,
   discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
+  runtimeConfigDiagnosticConcernsCharacter,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
@@ -23,8 +24,10 @@ import {
   assertResolvedProject02HomeAdoptable,
   bindProject02CharacterRuntimeLocation,
   blockingRuntimeConfigLayerDiagnostic,
+  characterOverlayFromDocument,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
+  createRuntimeConfigSections,
   diagnosticsHaveErrors,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
@@ -356,11 +359,11 @@ function planRuntimeCliActivationStartup(input: {
       ? {}
       : {factoryOverrides: options.factories}),
   });
-  const catalogSections = {
+  const catalogSections = createRuntimeConfigSections({
     plugins: Object.values(catalogDiscovery.catalogEntries).map(
       entry => entry.manifest,
     ),
-  };
+  });
   const buildPlanState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
   ): StartupPlanState => {
@@ -579,7 +582,7 @@ function characterMaterializationOperation(
       runtimeLocation: input.runtimeLocation,
       scope: 'character',
     }),
-    sections: {plugins: input.pluginManifests},
+    sections: createRuntimeConfigSections({plugins: input.pluginManifests}),
     characterMaterialization: {
       document: input.document,
       fillMissingFields:
@@ -612,17 +615,15 @@ function simulateCharacterMaterialization(
     return {status: 'invalid', message: simulated.message};
   }
 
-  // This overlay describes a file that has not been written yet.
+  // This overlay describes a file that has not been written yet, so it is
+  // judged as the loader will judge that file, warnings included.
   return Object.freeze({
     status: 'valid',
-    overlay: Object.freeze({
-      scope: 'character',
+    overlay: characterOverlayFromDocument({
       characterId,
-      source: 'overlay',
       path: input.runtimeLocation.overlayPath,
-      config: simulated.document,
-      diagnostics: Object.freeze([]),
-    } satisfies LoadedProject02CharacterOverlayConfig),
+      document: simulated.document,
+    }),
   });
 }
 
@@ -738,6 +739,7 @@ function materializationConfigPreflightDiagnostics(
     plan.resolvedConfig.diagnostics.filter(
       diagnostic =>
         diagnostic.severity === 'error' &&
+        runtimeConfigDiagnosticConcernsCharacter(diagnostic) &&
         // A missing credential is one plugin's readiness failure, reported
         // by activation; it does not make the document invalid.
         !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&

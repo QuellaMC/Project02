@@ -46,7 +46,7 @@ function storeWithAuthoredPluginConfig(config: unknown): string {
 
 function simulateMaterialization(storeRoot: string) {
   return simulateCharacterOverlayCandidate({
-    sections: {plugins: []},
+    sections: {plugins: [], connectors: []},
     target: resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({storeRoot, characterId}),
       scope: 'character',

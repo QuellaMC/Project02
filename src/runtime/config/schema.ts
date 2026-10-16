@@ -191,13 +191,13 @@ export function runtimeConfigFieldValueMismatchMessage(
 
   if (field.allowedValues !== undefined) {
     return (
-      `Plugin config field "${field.name}" must be one of: ` +
+      `Config field "${field.name}" must be one of: ` +
       `${field.allowedValues.join(', ')}; received ${received}` +
       `${typeof value === 'string' ? ' that is not an allowed value' : ''}.`
     );
   }
 
-  return `Plugin config field "${field.name}" must be ${runtimeConfigValueTypeLabel(
+  return `Config field "${field.name}" must be ${runtimeConfigValueTypeLabel(
     field.valueType,
   )}; received ${received}.`;
 }

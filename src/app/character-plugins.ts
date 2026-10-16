@@ -6,6 +6,7 @@ import {
 } from '../plugins/index.ts';
 import {
   createRuntimeConfigDiagnostic,
+  createRuntimeConfigSections,
   resolveRuntimeSectionConfigs,
   runtimeConfigDiagnosticIsReadinessFailure,
   runtimeConfigSectionPath,
@@ -106,7 +107,9 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
-  const sections = {plugins: options.pluginManifests};
+  const sections = createRuntimeConfigSections({
+    plugins: options.pluginManifests,
+  });
   const resolved = resolveRuntimeSectionConfigs({
     config: validated.config,
     target: 'character',

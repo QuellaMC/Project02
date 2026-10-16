@@ -211,7 +211,6 @@ export function runtimeConfigDiagnosticMatchesSection(options: {
 }): boolean {
   return (
     options.diagnostic.scope === 'section' &&
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one namespace until connectors join; lint reports this directive unused once a second one does
     options.diagnostic.namespace === options.namespace &&
     options.diagnostic.id === options.id
   );
@@ -315,7 +314,7 @@ function resolveSectionConfigField(options: {
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_required_value_missing',
-          `Required config field "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
+          `Required config field "${options.field.name}" is missing for section "${options.declaration.id}".`,
           path,
           sectionFieldDiagnosticMetadata(options),
         ),
@@ -354,8 +353,8 @@ function resolveSectionConfigField(options: {
 }
 
 /**
- * A secret is a plain string in whichever layer authored it. The plugin
- * reads the resolved value; every other reader is handed it redacted.
+ * A secret is a plain string in whichever layer authored it. The section's
+ * owner reads the resolved value; every other reader is handed it redacted.
  */
 function resolveSecretField(options: {
   readonly namespace: RuntimeConfigSectionNamespace;
@@ -409,7 +408,7 @@ function resolveSecretField(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_required_secret_missing',
-        `Required secret "${options.field.name}" is missing for plugin "${options.declaration.id}".`,
+        `Required secret "${options.field.name}" is missing for section "${options.declaration.id}".`,
         options.path,
         sectionFieldDiagnosticMetadata(options),
       ),
@@ -503,7 +502,7 @@ function pushUnknownSectionConfigFieldDiagnostics(options: {
       createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_unknown_plugin_config_field',
-        `Unknown config field "${fieldName}" for plugin "${options.declaration.id}".`,
+        `Unknown config field "${fieldName}" for section "${options.declaration.id}".`,
         runtimeConfigSectionPath(
           options.namespace,
           options.declaration.id,

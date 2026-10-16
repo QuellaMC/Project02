@@ -26,7 +26,7 @@ const test = base.extend<{
   },
 });
 
-/** The row of one field, host or plugin, by its key. */
+/** The row of one field, host or section, by its key. */
 function row(page: Page, key: string) {
   return page.locator(`[data-field="${key}"]`);
 }
@@ -34,7 +34,7 @@ function row(page: Page, key: string) {
 test.describe('a fresh home', () => {
   test.use({freshHome: true});
 
-  test('opens on the setup frame; a saved name reloads the character, a saved provider stays, and Chat leads to the composer', async ({
+  test("opens on the setup frame with the home's messaging app settings; a saved name reloads the character, a saved provider stays, and Chat leads to the composer", async ({
     daemon,
     page,
   }) => {
@@ -42,6 +42,19 @@ test.describe('a fresh home', () => {
     await expect(
       page.getByRole('heading', {name: 'Set up your home'}),
     ).toBeVisible();
+
+    // A bot answers as one character, so its token is not the home's to set.
+    await expect(
+      page.getByRole('heading', {name: 'Messaging apps'}),
+    ).toBeVisible();
+    await expect(
+      row(page, 'connectors/telegram/managementBotToken'),
+    ).toBeVisible();
+    await expect(row(page, 'connectors/telegram/mirror')).toBeVisible();
+    await expect(row(page, 'connectors/telegram/botToken')).toHaveCount(0);
+    await expect(row(page, 'connectors/telegram')).toContainText(
+      'Characters that set their own switch keep it',
+    );
 
     const name = row(page, 'project02.userDisplayName');
 
@@ -76,7 +89,7 @@ test.describe('a fresh home', () => {
   });
 });
 
-test("saves a character's plugin field and secret, shows the secret only as set, keeps a second page in step, and tells one that fell behind that someone saved first", async ({
+test("saves a character's plugin field and secret and her bot token, shows a secret only as set, keeps a second page in step, and tells one that fell behind that someone saved first", async ({
   daemon,
   context,
   page,
@@ -105,6 +118,15 @@ test("saves a character's plugin field and secret, shows the secret only as set,
   await expect(secret).not.toContainText('not set');
   await expect(secret.getByLabel('Api key')).toHaveValue('');
   expect(await page.content()).not.toContain('sk-live-secret');
+
+  const botToken = row(page, 'connectors/telegram/botToken');
+
+  await expect(botToken).toContainText('not set');
+  await botToken.getByLabel('Bot token').fill('4242:telegram-bot-token');
+  await botToken.getByRole('button', {name: 'Replace'}).click();
+  await expect(botToken).not.toContainText('not set');
+  await expect(botToken).toContainText('set');
+  expect(await page.content()).not.toContain('4242:telegram-bot-token');
 
   // A second page on the same screen follows a save made here without
   // doing anything: the stream says config moved, and it reads again.

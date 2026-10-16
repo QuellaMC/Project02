@@ -16,10 +16,11 @@ import type {
   RuntimePluginProvidedTool,
   RuntimePluginToolCall,
 } from '../../api/types.ts';
-import type {
-  RuntimeConfigValue,
-  RuntimePluginConfigControlCapability,
-  RuntimePluginConfigFieldControlOperation,
+import {
+  createRuntimeConfigSections,
+  type RuntimeConfigValue,
+  type RuntimePluginConfigControlCapability,
+  type RuntimePluginConfigFieldControlOperation,
 } from '../../../runtime/config/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
@@ -126,7 +127,9 @@ export function applyPreparedRuntimePluginConfigEffect(options: {
 
   const result = control.applyOperation({
     target,
-    sections: {plugins: options.state.pluginManifests},
+    sections: createRuntimeConfigSections({
+      plugins: options.state.pluginManifests,
+    }),
     expectedFingerprint: options.effect.expectedFingerprint,
     request: {
       kind: 'section_field',
@@ -342,7 +345,9 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
       options.state,
     ).prepareOperation({
       target,
-      sections: {plugins: options.state.pluginManifests},
+      sections: createRuntimeConfigSections({
+        plugins: options.state.pluginManifests,
+      }),
       expectedFingerprint,
       request: {
         kind: 'section_field',

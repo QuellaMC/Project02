@@ -109,6 +109,15 @@ describe('gateway reference client', () => {
     await close();
   });
 
+  it('reads what a connector runs on', async () => {
+    const {client, gateway, close} = await startServer();
+    const view = await client.connectorConfig('telegram');
+
+    expect(view).toMatchObject({status: 'ok', connectorId: 'telegram'});
+    expect(view).toEqual(gateway.connectorConfig('telegram'));
+    await close();
+  });
+
   it('reports a transport refusal as the envelope, and refuses a URL without a token', async () => {
     const {server, close} = await startServer();
     const wrong = createGatewayClient({baseUrl: server.baseUrl, token: 'nope'});

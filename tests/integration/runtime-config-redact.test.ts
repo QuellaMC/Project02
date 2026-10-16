@@ -43,7 +43,7 @@ describe('runtime config redaction', () => {
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
-      sections: {plugins: [dottedConfigManifest()]},
+      sections: {plugins: [dottedConfigManifest()], connectors: []},
     });
     const redacted =
       resolved.redactedSectionConfigs.plugins['memory.dotted-redaction'];
@@ -106,7 +106,7 @@ describe('runtime config redaction', () => {
         loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
-      sections: {plugins: [dottedConfigManifest()]},
+      sections: {plugins: [dottedConfigManifest()], connectors: []},
     });
     const redacted =
       resolved.redactedSectionConfigs.plugins['memory.dotted-redaction'];
