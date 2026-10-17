@@ -28,7 +28,7 @@ import type {RuntimePluginHost} from '../../plugins/index.ts';
 import type {RoleModelAdapter} from '../../role-model/index.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {pathExistsSync} from '../../shared/file-system.ts';
-import {isMainModule} from '../shared/main-module.ts';
+import {isMainModule, stopSignal} from '../../shared/main-module.ts';
 import {
   matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
@@ -435,29 +435,12 @@ function aborted(signal: AbortSignal): Promise<void> {
 }
 
 if (isMainModule(import.meta.url)) {
-  const abort = new AbortController();
-  // A closed terminal sends SIGHUP: an ordinary way to stop, not the one
-  // that skips the release.
-  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
-  // The first signal of any kind starts the stop; a second of any kind
-  // ends the process the default way — the escape hatch when shutdown
-  // itself hangs. The lease left behind is the next start's to reclaim.
-  const onSignal = (): void => {
-    for (const signal of signals) {
-      process.off(signal, onSignal);
-    }
-
-    abort.abort();
-  };
-
-  for (const signal of signals) {
-    process.on(signal, onSignal);
-  }
-
+  // A second signal ends the process before the release; the lease left
+  // behind is the next start's to reclaim.
   process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
     stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
-    signal: abort.signal,
+    signal: stopSignal(),
   });
 }

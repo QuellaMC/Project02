@@ -7,6 +7,7 @@ const processSpawningTests = [
   'tests/integration/session-store-concurrency.test.ts',
   'tests/e2e/two-character-concurrency.test.ts',
   'tests/e2e/serve-instances.test.ts',
+  'tests/e2e/telegram-process.test.ts',
 ];
 
 export default defineConfig({
@@ -70,7 +71,9 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       // The page's session and its components run only in a browser; the
       // browser suite is their cover. Everything else the page owns —
-      // its store, every rule a tab follows — is covered here.
+      // its store, every rule a tab follows — is covered here. The
+      // connector's entry runs in a process the process test spawns, out
+      // of coverage's sight; that test is its cover.
       exclude: [
         'src/frontends/web/session.ts',
         'src/frontends/web/settings-session.ts',
@@ -78,6 +81,7 @@ export default defineConfig({
         'src/frontends/web/app.tsx',
         'src/frontends/web/thread.tsx',
         'src/frontends/web/settings.tsx',
+        'src/frontends/telegram/main.ts',
       ],
       reporter: ['text', 'json-summary'],
       thresholds: {

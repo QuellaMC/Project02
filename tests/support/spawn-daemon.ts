@@ -1,18 +1,20 @@
 /**
- * A real daemon process, for a suite that must cross the process boundary:
- * the concurrency suite proving one home's leases, the browser suite
- * driving the built page. `entry` is a script that runs serve and prints
- * what serve prints. Nothing here imports vitest, so Playwright's worker
- * can use it too.
+ * A real process, for a suite that must cross the process boundary: the
+ * daemon — for the concurrency suite proving one home's leases, the
+ * browser suite driving the built page — or a connector beside it.
+ * `entry` is a script that runs one and prints what it prints. Nothing
+ * here imports vitest, so Playwright's worker can use it too.
  */
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 
 import {gatewayUrlEnvVarName} from '../../src/gateway/client/index.ts';
 
-export type SpawnedDaemon = {
+export type SpawnedProcess = {
   readonly child: ChildProcessWithoutNullStreams;
-  /** The address a client opens: the line the daemon printed, past its name. */
-  readonly url: string;
+  /** The line it printed that made it ready. */
+  readonly line: string;
+  /** Everything it had printed on stdout once ready. */
+  readonly stdout: string;
   /**
    * The exit code once the process ends on its own or on a signal the
    * test sent itself; null when a signal ended it. A process that is
@@ -27,16 +29,36 @@ export type SpawnedDaemon = {
   }>;
 };
 
+export type SpawnedDaemon = SpawnedProcess & {
+  /** The address a client opens: the line the daemon printed, past its name. */
+  readonly url: string;
+};
+
+const addressPrefix = `${gatewayUrlEnvVarName}=`;
+
 /** Ready once the daemon printed its address. */
 export async function spawnDaemon(
   entry: string,
   args: readonly string[],
 ): Promise<SpawnedDaemon> {
+  const daemon = await spawnProcess(entry, args, line =>
+    line.startsWith(addressPrefix),
+  );
+
+  return {...daemon, url: daemon.line.slice(addressPrefix.length)};
+}
+
+/** Ready once it printed a line on stdout that `ready` accepts. */
+export async function spawnProcess(
+  entry: string,
+  args: readonly string[],
+  ready: (line: string) => boolean,
+): Promise<SpawnedProcess> {
   const child = spawn(process.execPath, [entry, ...args], {
     cwd: process.cwd(),
     stdio: 'pipe',
   });
-  // Taken now, not at stop: a daemon that died on its own has already
+  // Taken now, not at stop: a process that died on its own has already
   // fired its exit, and a listener added afterwards would wait forever.
   const exited = new Promise<number | null>(resolve => {
     child.once('exit', resolve);
@@ -48,7 +70,10 @@ export async function spawnDaemon(
     stderr += chunk;
   });
 
-  const url = await new Promise<string>((resolveUrl, rejectUrl) => {
+  const {line, stdout} = await new Promise<{
+    readonly line: string;
+    readonly stdout: string;
+  }>((resolveReady, rejectReady) => {
     let stdout = '';
     // An idle deadline, not a total one: a suite cold-starts several real
     // Node processes, so any fixed budget goes flaky under load.
@@ -57,8 +82,8 @@ export async function spawnDaemon(
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         child.kill();
-        rejectUrl(
-          new Error(`Timed out waiting for the daemon: ${stdout}${stderr}`),
+        rejectReady(
+          new Error(`Timed out waiting for ${entry}: ${stdout}${stderr}`),
         );
       }, 20_000);
     };
@@ -68,13 +93,12 @@ export async function spawnDaemon(
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
 
-      const line = stdout
-        .split('\n')
-        .find(candidate => candidate.startsWith(`${gatewayUrlEnvVarName}=`));
+      // The last piece is a line still being written.
+      const line = stdout.split('\n').slice(0, -1).find(ready);
 
       if (line !== undefined) {
         clearTimeout(timeout);
-        resolveUrl(line.slice(gatewayUrlEnvVarName.length + 1));
+        resolveReady({line, stdout});
 
         return;
       }
@@ -83,13 +107,13 @@ export async function spawnDaemon(
     });
     child.once('error', error => {
       clearTimeout(timeout);
-      rejectUrl(error);
+      rejectReady(error);
     });
     child.once('exit', code => {
       clearTimeout(timeout);
-      rejectUrl(
+      rejectReady(
         new Error(
-          `The daemon exited before its address (${String(code)}): ${stderr}`,
+          `${entry} exited before it was ready (${String(code)}): ${stderr}`,
         ),
       );
     });
@@ -97,7 +121,8 @@ export async function spawnDaemon(
 
   return {
     child,
-    url,
+    line,
+    stdout,
     exited,
     stop: async () => {
       child.kill('SIGINT');
