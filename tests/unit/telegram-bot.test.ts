@@ -2,6 +2,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import type {
   BotApi,
+  BotApiOutcome,
   TelegramUpdate,
 } from '../../src/frontends/telegram/bot-api.ts';
 import {startBot, type BotRules} from '../../src/frontends/telegram/bot.ts';
@@ -16,11 +17,15 @@ const unused = (): never => {
 };
 
 /**
- * Telegram as a bot meets it: it names the bot, the first poll hands on
- * the updates given, and every poll after waits until the bot stops.
+ * Telegram as a bot meets it: it names the bot, answers the polls as
+ * given, in order, and every poll after waits until the bot stops.
  */
-function telegramWith(updates: readonly TelegramUpdate[] = []): BotApi {
-  let polls = 0;
+function telegramWith(
+  polls: readonly BotApiOutcome<readonly TelegramUpdate[]>[] = [
+    {ok: true, result: []},
+  ],
+): BotApi {
+  const answers = [...polls];
 
   return {
     getMe: () =>
@@ -33,14 +38,17 @@ function telegramWith(updates: readonly TelegramUpdate[] = []): BotApi {
           username: 'mira_bot',
         },
       }),
-    getUpdates: ({signal}) =>
-      polls++ === 0 && updates.length > 0
-        ? Promise.resolve({ok: true, result: updates})
-        : new Promise(resolve => {
+    getUpdates: ({signal}) => {
+      const answer = answers.shift();
+
+      return answer === undefined
+        ? new Promise(resolve => {
             signal.addEventListener('abort', () => {
               resolve({ok: true, result: []});
             });
-          }),
+          })
+        : Promise.resolve(answer);
+    },
     sendMessage: unused,
     editMessageText: unused,
     deleteMessage: unused,
@@ -101,7 +109,53 @@ function miraOver(api: BotApi) {
   };
 }
 
+const conflict = {
+  ok: false as const,
+  code: 409,
+  description:
+    'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running',
+};
+
 describe('a Telegram bot', () => {
+  it('writes nothing while another poller holds the token, and catches up from the snapshot when it polls again', async () => {
+    const installed: GatewayReady[] = [];
+    const dispatched: string[] = [];
+    const bot = startBot({
+      ...miraOver(telegramWith([conflict, {ok: true, result: []}])),
+      pacing: {conflictRetryMs: 200},
+      rules: () => ({
+        onUpdate: () => Promise.resolve(),
+        dispatch: event => {
+          dispatched.push(event.kind);
+        },
+        snapshot: ready => {
+          installed.push(ready);
+        },
+      }),
+      snapshot: () => snapshot,
+      settled: () => Promise.resolve(),
+    });
+    const frame = {
+      kind: 'health_changed' as const,
+      health: snapshot.health,
+    };
+
+    // Installed at the first poll; the 409 that answers it takes the token.
+    await new Promise(resolve => {
+      setTimeout(resolve, 50);
+    });
+    expect(installed).toEqual([snapshot]);
+    bot.dispatch(frame);
+    expect(dispatched).toEqual([]);
+    // The poll after the conflict's pause takes the token back.
+    await vi.waitFor(() => {
+      expect(installed).toEqual([snapshot, snapshot]);
+    });
+    bot.dispatch(frame);
+    expect(dispatched).toEqual(['health_changed']);
+    await bot.stop();
+  });
+
   it('installs the snapshot only once the settings it is shown by have been read', async () => {
     const installed: GatewayReady[] = [];
     const rules: BotRules = {
@@ -140,7 +194,7 @@ describe('a Telegram bot', () => {
       message: {messageId: 1, chatId: 1, chatType: 'private', text: 'hi'},
     };
     const bot = startBot({
-      ...miraOver(telegramWith([update])),
+      ...miraOver(telegramWith([{ok: true, result: [update]}])),
       rules: () => ({
         onUpdate: received => {
           handed.push(received);

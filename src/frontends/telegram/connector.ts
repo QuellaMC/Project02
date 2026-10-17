@@ -6,7 +6,6 @@ import {
   foldRunningTurns,
   type GatewayEvent,
   type GatewayHealth,
-  gatewayProtocolVersion,
   type GatewayReady,
 } from '../../gateway/api/index.ts';
 import {
@@ -207,9 +206,9 @@ async function followDaemon(
       },
     );
   } catch (error: unknown) {
-    const code = error instanceof GatewayClientError ? error.code : undefined;
+    const failure = error instanceof GatewayClientError ? error : undefined;
 
-    if (code === 'unauthorized') {
+    if (failure?.code === 'unauthorized') {
       notice(
         report,
         `Telegram connector: the daemon at ${baseUrl} refused the token in ${join(options.homeRoot, daemonRecordFileName)}; trying again.`,
@@ -218,10 +217,9 @@ async function followDaemon(
       return 'refused';
     }
 
-    if (code === 'protocol_mismatch') {
-      report(
-        `This connector speaks protocol ${String(gatewayProtocolVersion)}; the daemon speaks ${String(record.protocolVersion)}. Update one of them.`,
-      );
+    if (failure?.code === 'protocol_mismatch') {
+      // The daemon's own word on its version: the record may be a run behind.
+      report(`${failure.message} Update one of them.`);
 
       return 'protocol_mismatch';
     }
@@ -340,11 +338,11 @@ type BotTable = {
   dispatch(event: GatewayEvent): void;
   /**
    * Keeps the daemon's snapshot from a stream it did not resume, moved on
-   * by every frame since, for each bot started after; and hands it to the
-   * running bots once the settings read that follows a ready has been
-   * applied, the frames meanwhile folded into it and not handed on, and
-   * the bots' updates waiting, so nothing is shown or judged by settings
-   * that may have changed while the stream was away.
+   * by every frame since, for each bot started after; and hands it, as it
+   * came, to the running bots once the settings read that follows the
+   * ready has been applied, the frames since held and handed on in order
+   * after it, and the bots' updates waiting, so nothing is shown or
+   * judged by settings that may have changed while the stream was away.
    */
   snapshot(ready: GatewayReady): void;
   /**
@@ -370,8 +368,8 @@ function createBotTable(context: {
   const stopping = new Set<Promise<void>>();
   const notice = createNotice();
   let latest: GatewayReady | undefined;
-  /** A snapshot not handed on yet: the settings it is shown by are being read. */
-  let unread = false;
+  /** A snapshot not handed on yet, as it came: the settings it is shown by are being read. */
+  let unread: GatewayReady | undefined;
   /** The bots' updates wait for a settings read, and the frames with them: the stream was lost, or a ready came. */
   let holding = false;
   /** Frames since the loss, handed on in order once the settings are read; a ready supersedes them. */
@@ -472,11 +470,13 @@ function createBotTable(context: {
         return;
       }
 
-      if (unread && latest !== undefined) {
-        unread = false;
+      if (unread !== undefined) {
+        const ready = unread;
+
+        unread = undefined;
 
         for (const bot of running.values()) {
-          bot.snapshot(latest);
+          bot.snapshot(ready);
         }
       }
 
@@ -496,10 +496,6 @@ function createBotTable(context: {
         latest = movedOn(latest, event);
       }
 
-      if (unread) {
-        return;
-      }
-
       if (holding) {
         heldFrames.push(event);
 
@@ -512,7 +508,7 @@ function createBotTable(context: {
     },
     snapshot(ready) {
       latest = ready;
-      unread = true;
+      unread = ready;
       heldFrames.length = 0;
       hold();
     },

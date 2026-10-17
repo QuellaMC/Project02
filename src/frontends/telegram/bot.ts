@@ -117,6 +117,28 @@ export function startBot(options: {
   let client = options.client;
   let username: string | undefined;
   let rules = noRules;
+  /**
+   * Whether the token's polls are this bot's: they are from the poll it
+   * sends, since Telegram hands the token to the newest poller, until a
+   * 409 says another took them. Only an owner writes, so two connectors
+   * on one token do not both answer; one that polls again after a 409
+   * catches up from the snapshot.
+   */
+  let owning = false;
+  const installLatest = async (): Promise<void> => {
+    // A snapshot is installed by the settings it is shown by, read first.
+    await Promise.race([options.settled(), halted]);
+
+    if (stopped()) {
+      return;
+    }
+
+    const latest = options.snapshot();
+
+    if (latest !== undefined) {
+      rules.snapshot(latest);
+    }
+  };
   const refused = (): string => {
     const {bot, page} = botNames(settings);
 
@@ -178,21 +200,14 @@ export function startBot(options: {
       settled: () => Promise.race([options.settled(), halted]),
     });
 
-    // A snapshot is installed by the settings it is shown by, read first.
-    await Promise.race([options.settled(), halted]);
-
-    if (stopped()) {
-      return;
-    }
-
-    const latest = options.snapshot();
-
-    if (latest !== undefined) {
-      rules.snapshot(latest);
-    }
-
     const ended = await pollUpdates({
       api,
+      onPoll: async () => {
+        if (!owning) {
+          owning = true;
+          await installLatest();
+        }
+      },
       onUpdate: async update => {
         await Promise.race([options.settled(), halted]);
 
@@ -201,6 +216,10 @@ export function startBot(options: {
         }
       },
       report: problem => {
+        if (problem?.code === 'conflict') {
+          owning = false;
+        }
+
         report(problemSentence(problem, botNames(settings).bot));
       },
       signal,
@@ -223,10 +242,14 @@ export function startBot(options: {
       client = nextClient;
     },
     dispatch(event) {
-      rules.dispatch(event);
+      if (owning) {
+        rules.dispatch(event);
+      }
     },
     snapshot(ready) {
-      rules.snapshot(ready);
+      if (owning) {
+        rules.snapshot(ready);
+      }
     },
     async stop() {
       stopping.abort();
