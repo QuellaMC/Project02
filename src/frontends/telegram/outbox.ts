@@ -51,11 +51,10 @@ export type Outbox = {
 
 /** A reply as the chats show it while it is written. */
 type Draft = {
-  /** Chat id → the draft's message in that chat. */
-  readonly messages: Map<number, number>;
+  /** Chat id → the draft's message in that chat, and the words it shows. */
+  readonly messages: Map<number, {readonly messageId: number; shown: string}>;
   /** The text so far, for the next edit. */
   text: string;
-  shown: string;
   edit: NodeJS.Timeout | undefined;
 };
 
@@ -120,19 +119,17 @@ export function createOutbox(bot: BotContext): Outbox {
         }),
       ),
     );
-  /** Edits a message to the text, without buttons; one showing it already is as good as edited. */
+  /** Edits a message to the text, without buttons: whether it shows the text now, one showing it already as good as edited. */
   const edit = async (
     chatId: number,
     messageId: number,
     text: string,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const outcome = await call(() =>
       api.editMessageText({chatId, messageId, text, signal: bot.signal}),
     );
 
-    if (!notModified(outcome)) {
-      heard(chatId, outcome);
-    }
+    return notModified(outcome) || heard(chatId, outcome) !== undefined;
   };
   const paired = (): readonly number[] =>
     Object.keys(bot.settings().pairedUsers)
@@ -140,7 +137,8 @@ export function createOutbox(bot: BotContext): Outbox {
       .filter(chatId => Number.isSafeInteger(chatId) && !silent.has(chatId));
   /**
    * Brings the draft's message in every paired chat to the text: sent
-   * where it has none, edited where it shows other words; a chat paired no
+   * where it has none, edited where it shows other words, an edit that
+   * failed leaving the words for the next to try again; a chat paired no
    * longer gets no more of it. A draft shows what fits one message; its
    * commit sends the rest after.
    */
@@ -152,24 +150,25 @@ export function createOutbox(bot: BotContext): Outbox {
     const [first = '', ...rest] = pieces(text);
 
     for (const chatId of paired()) {
-      const messageId = draft.messages.get(chatId);
+      const message = draft.messages.get(chatId);
 
-      if (messageId === undefined) {
+      if (message === undefined) {
         const sent = await send(chatId, first);
 
         if (sent !== undefined) {
-          draft.messages.set(chatId, sent.messageId);
+          draft.messages.set(chatId, {messageId: sent.messageId, shown: first});
         }
-      } else if (first !== draft.shown) {
-        await edit(chatId, messageId, first);
+      } else if (
+        first !== message.shown &&
+        (await edit(chatId, message.messageId, first))
+      ) {
+        message.shown = first;
       }
 
       for (const piece of commit ? rest : []) {
         await send(chatId, piece);
       }
     }
-
-    draft.shown = first;
   };
   const forget = (draftId: string): Draft | undefined => {
     const draft = drafts.get(draftId);
@@ -184,7 +183,7 @@ export function createOutbox(bot: BotContext): Outbox {
 
     if (draft !== undefined) {
       void queue(async () => {
-        for (const [chatId, messageId] of draft.messages) {
+        for (const [chatId, {messageId}] of draft.messages) {
           heard(
             chatId,
             await call(() =>
@@ -270,7 +269,7 @@ export function createOutbox(bot: BotContext): Outbox {
 }
 
 function newDraft(text: string): Draft {
-  return {messages: new Map(), text, shown: '', edit: undefined};
+  return {messages: new Map(), text, edit: undefined};
 }
 
 function notModified(outcome: BotApiOutcome<unknown>): boolean {
