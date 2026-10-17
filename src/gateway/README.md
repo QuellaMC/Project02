@@ -58,9 +58,10 @@ when a count crosses zero, so health says which connectors are on the
 stream. `api/running-turns.ts` is the one fold that says what
 a running turn is; the daemon builds the snapshot's turns with it and the
 page folds its frames with it. `client/` is the reference client, one
-module for Node and for a browser tab — the web page and future
-connectors use it; it speaks the platform's fetch, each request under a
-signal of its own. It may value-import only `api/`, itself, `core`, and
+module for Node and for a browser tab — the web page and the Telegram
+connector use it; it speaks the platform's fetch unless its caller hands
+it another, as the connector hands it one over `node:http` without Node's
+five-minute bound, each request under a signal of its own. It may value-import only `api/`, itself, `core`, and
 `shared` (arch rule `clients-see-only-the-wire`), so no client grows a
 private path into the daemon.
 
