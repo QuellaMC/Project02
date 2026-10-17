@@ -157,12 +157,15 @@ export function createPairingSeam(seams: {
     });
 
     arm(request, field);
-    seams.emit(Object.freeze({kind: 'pairing_requested' as const, ...request}));
 
     return request;
   }
 
-  /** On the list, and on the clock until its deadline. */
+  /**
+   * On the list, on the clock until its deadline, and on the stream: a
+   * request put back after a failed write is announced again, so a surface
+   * that joined meanwhile shows it too, and one that has it keeps one card.
+   */
   function arm(request: PairingRequest, field: string): void {
     const timer = setTimeout(
       () => {
@@ -173,6 +176,7 @@ export function createPairingSeam(seams: {
 
     timer.unref();
     waiting.set(request.code, {request, field, timer});
+    seams.emit(Object.freeze({kind: 'pairing_requested' as const, ...request}));
   }
 
   async function settle(
