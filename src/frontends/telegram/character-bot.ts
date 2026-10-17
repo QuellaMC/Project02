@@ -7,6 +7,7 @@ import {
   type PendingConfirmation,
   type RunningTurn,
   type RunningTurns,
+  type TurnOutcome,
 } from '../../gateway/api/index.ts';
 import {
   backoffMs,
@@ -59,6 +60,8 @@ type Chat = {
   /** The stamp on every line this bot carries. */
   readonly source: string;
   thread: Extract<OpenOutcome, {readonly status: 'opened'}> | undefined;
+  /** The hand-offs to her, begun in the order the lines came: the next once the one before is on its way. */
+  handing: Promise<void>;
   /** Every running turn, folded by the contract's one rule; her DM's is the one shown. */
   turns: RunningTurns;
   /** Her turn frames from before her DM was known, folded and shown in order once it is. */
@@ -85,6 +88,7 @@ export function characterChat(
       characterId,
       source: `telegram:${bot.username}`,
       thread: undefined,
+      handing: Promise.resolve(),
       turns: new Map(),
       held: [],
     };
@@ -135,10 +139,16 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
   }
 }
 
+/** A line handed to her: the turn's outcome on its way, or why her DM could not be opened for it. */
+type Handoff =
+  {readonly delivery: Promise<TurnOutcome>} | {readonly refusal: string};
+
 /**
  * Carries a line to her, waiting as long as the bot runs: one that stops
- * gives up the wait, and the turn runs on. How a turn that ran ended is
- * the stream's to tell, before this answer arrives or after it, and for a
+ * gives up the wait, and the turn runs on. Lines are handed off in the
+ * order they came, each once the one before is on its way, since the
+ * daemon takes them as they arrive. How a turn that ran ended is the
+ * stream's to tell, before this answer arrives or after it, and for a
  * line from before a restart too; a refusal comes before any turn, and
  * only its answer says so — but for a line the daemon took already under
  * this id, which Telegram hands on again after a restart: that one is in.
@@ -150,29 +160,43 @@ async function carry(
   text: string,
 ): Promise<void> {
   const {outbox} = chat;
-
-  try {
+  const handoff: Promise<Handoff> = chat.handing.then(async () => {
     const thread = chat.thread ?? (await open(chat));
 
-    if (thread.status !== 'opened') {
+    return thread.status === 'opened'
+      ? {
+          delivery: chat.bot.client().deliver(
+            {
+              conversationId: thread.conversationId,
+              senderId: thread.userParticipantId,
+              text,
+              source: chat.source,
+              clientMessageId,
+            },
+            {signal: chat.bot.signal},
+          ),
+        }
+      : {refusal: thread.message};
+  });
+
+  chat.handing = handoff.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  try {
+    const handed = await handoff;
+
+    if ('refusal' in handed) {
       outbox.sayToPaired(
         chatId,
-        sentences.unavailable(nameOf(chat), thread.message),
+        sentences.unavailable(nameOf(chat), handed.refusal),
       );
 
       return;
     }
 
-    const outcome = await chat.bot.client().deliver(
-      {
-        conversationId: thread.conversationId,
-        senderId: thread.userParticipantId,
-        text,
-        source: chat.source,
-        clientMessageId,
-      },
-      {signal: chat.bot.signal},
-    );
+    const outcome = await handed.delivery;
 
     if (outcome.status === 'refused' && !turnCommittedTheLine(outcome)) {
       outbox.sayToPaired(
