@@ -56,4 +56,4 @@ export type {
   RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
 /** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
-export type {DaemonRecord} from '../../runtime/storage/index.ts';
+export type {DaemonRecord} from '../../shared/daemon-record.ts';

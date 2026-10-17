@@ -1,10 +1,12 @@
 import {isJsonRecord as isRecord} from '../../shared/json-boundary.ts';
 import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
+import {
+  daemonRecordFileName,
+  defaultProject02HomeRoot,
+} from '../../shared/daemon-record.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 import {isOneOf} from '../../shared/one-of.ts';
-
-export const defaultProject02HomeRoot = '.project02';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
@@ -57,7 +59,7 @@ export type Project02HomeLayout = {
   readonly homeRoot: string;
   readonly configPath: string;
   readonly schemaPath: string;
-  /** Where the daemon serving this home says it listens; see daemon-record.ts. */
+  /** Where the daemon serving this home says it listens; see src/shared/daemon-record.ts. */
   readonly daemonRecordPath: string;
   readonly locksRoot: string;
   readonly pluginPackagesRoot: string;
@@ -162,8 +164,6 @@ export type CreateLocalRuntimeSessionMetadataOptions = {
 const configFileName = 'config.json';
 
 const schemaFileName = 'schema.json';
-
-const daemonRecordFileName = 'daemon.json';
 
 const sessionCatalogFileName = 'sessions.jsonl';
 

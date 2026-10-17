@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {claimDaemonHome} from '../../src/gateway/index.ts';
-import {readDaemonRecord} from '../../src/runtime/storage/index.ts';
+import {readDaemonRecord} from '../../src/shared/daemon-record.ts';
 import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
 
 describe("the daemon's claim on a home", () => {
