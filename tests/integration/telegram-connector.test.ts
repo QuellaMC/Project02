@@ -1446,6 +1446,148 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('says nothing of a line Telegram hands on again that the daemon took already', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const shown = textsIn(telegram, miraToken, alice.id);
+
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await sleep(300);
+    expect(textsIn(telegram, miraToken, alice.id)).toEqual(shown);
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(lines.filter(line => line.role === 'user')).toHaveLength(1);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("goes quiet when Telegram refuses a bot's token while it runs, naming the settings page once", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+    telegram.revokeBot(miraToken);
+    await vi.waitFor(
+      () => {
+        expect(connector.stderr()).toContain(
+          "Telegram refused Mira's bot token. Replace it on Mira's settings page.",
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'from the web',
+      source: 'web',
+      clientMessageId: 'web-1',
+    });
+    await sleep(200);
+    expect(connector.stderr()).not.toContain('could not write');
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('asks again to open her DM when the daemon could not be reached for it, and shows the turns held meanwhile', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const transport = createNodeFetch();
+    let opens = 0;
+    // The first open finds the daemon stopping; the next finds it there.
+    const stumbling: typeof fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.pathname === '/api/conversations/open' && opens++ === 0) {
+        return Promise.resolve(new Response(null, {status: 503}));
+      }
+
+      return transport(input, init);
+    };
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram, stumbling);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'hello',
+      source: 'web',
+      clientMessageId: 'web-1',
+    });
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+          'You (web): hello',
+          'noted: ',
+          'noted: hello',
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    expect(opens).toBe(2);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("tells a line written while the daemon's socket is closed to be sent again", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,

@@ -1,5 +1,6 @@
 import {
   foldRunningTurns,
+  turnCommittedTheLine,
   type GatewayEvent,
   type GatewayReady,
   type OpenOutcome,
@@ -7,7 +8,12 @@ import {
   type RunningTurn,
   type RunningTurns,
 } from '../../gateway/api/index.ts';
-import type {TelegramMessage, TelegramUpdate} from './bot-api.ts';
+import {
+  backoffMs,
+  pause,
+  type TelegramMessage,
+  type TelegramUpdate,
+} from './bot-api.ts';
 import {
   botNames,
   daemonDown,
@@ -134,7 +140,8 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
  * gives up the wait, and the turn runs on. How a turn that ran ended is
  * the stream's to tell, before this answer arrives or after it, and for a
  * line from before a restart too; a refusal comes before any turn, and
- * only its answer says so.
+ * only its answer says so — but for a line the daemon took already under
+ * this id, which Telegram hands on again after a restart: that one is in.
  */
 async function carry(
   chat: Chat,
@@ -164,7 +171,7 @@ async function carry(
       {signal: chat.bot.signal},
     );
 
-    if (outcome.status === 'refused') {
+    if (outcome.status === 'refused' && !turnCommittedTheLine(outcome)) {
       outbox.say(chatId, sentences.unavailable(nameOf(chat), outcome.message));
     }
   } catch (error: unknown) {
@@ -196,12 +203,31 @@ async function open(chat: Chat): Promise<OpenOutcome> {
 }
 
 /**
- * Opens her DM before any line, so other surfaces' turns can be shown;
- * one she cannot take yet is opened once she is ready, or by the next
- * line, which tells its chat why when it cannot.
+ * Opens her DM before any line, so other surfaces' turns can be shown,
+ * asking again with a backoff while the daemon cannot be reached; one she
+ * cannot take yet is opened once she is ready, or by the next line, which
+ * tells its chat why when it cannot.
  */
 function openAhead(chat: Chat): void {
-  void open(chat).catch(rethrowUnlessTransport);
+  const {signal} = chat.bot;
+
+  void (async () => {
+    for (
+      let failures = 0;
+      !signal.aborted && chat.thread === undefined;
+      failures += 1
+    ) {
+      try {
+        await open(chat);
+
+        return;
+      } catch (error: unknown) {
+        rethrowUnlessTransport(error);
+      }
+
+      await pause(backoffMs(failures), signal);
+    }
+  })();
 }
 
 function followEvent(chat: Chat, event: GatewayEvent): void {
@@ -315,7 +341,7 @@ function followTurn(chat: Chat, event: TurnFrame): void {
 function started(chat: Chat, turn: RunningTurn, text: string): void {
   for (const chatId of chat.outbox.paired()) {
     if (turn.source !== chat.source) {
-      chat.outbox.say(chatId, sentences.mirrored(turn.source, text));
+      chat.outbox.sayToPaired(chatId, sentences.mirrored(turn.source, text));
     }
 
     chat.outbox.typing(chatId);

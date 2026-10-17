@@ -62,10 +62,12 @@ function gateOver(client: GatewayClient) {
   const reports: string[] = [];
   const outbox: Outbox = {
     paired: () => [],
+    admitted: unused,
     heardFrom: () => undefined,
     say: (_chatId, text) => {
       said.push(text);
     },
+    sayToPaired: unused,
     card: unused,
     revise: unused,
     answer: unused,

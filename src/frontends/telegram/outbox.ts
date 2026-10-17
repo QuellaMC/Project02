@@ -21,13 +21,17 @@ const draftEditMs = 1_500;
  * answers 403 never opened this bot, and is skipped until it writes.
  */
 export type Outbox = {
-  /** Each paired account's chat, a private chat's id being its account's, but one skipped for a 403. */
+  /** Each paired account's chat — by this bot's read of the settings, and the accounts the daemon let in since — a private chat's id being its account's, but one skipped for a 403. */
   paired(): readonly number[];
+  /** The daemon let the account in before this bot's next read of the settings, which supersedes it. */
+  admitted(chatId: number): void;
   /** A message from the chat arrived, so it is written to again. */
   heardFrom(chatId: number): void;
   /** Says the text in the chat, in as many messages as it takes, stopping at one that could not be sent. */
   say(chatId: number, text: string): void;
-  /** Sends a message with buttons, and gives its id once sent; none when it could not be. */
+  /** Says the text in a paired account's chat, unless the account is paired no longer when the saying's turn comes. */
+  sayToPaired(chatId: number, text: string): void;
+  /** Sends a message with buttons to a paired account's chat, and gives its id once sent; none when it could not be, or the account was paired no longer when its turn came. */
   card(
     chatId: number,
     text: string,
@@ -62,7 +66,7 @@ type Draft = {
 
 export function createOutbox(bot: BotContext): Outbox {
   const {api} = bot;
-  const silent = new Set<number>();
+  const audience = createAudience(bot);
   const drafts = new Map<string, Draft>();
   let output: Promise<unknown> = Promise.resolve();
   /** What the call gave, once every call decided before it has run; none once the bot has stopped. */
@@ -73,20 +77,9 @@ export function createOutbox(bot: BotContext): Outbox {
 
     return ran;
   };
-  /** One call to Telegram; one it asks to wait on is made once more after the pause, the queue waiting with it. */
-  const call = async <T>(
+  const call = <T>(
     request: () => Promise<BotApiOutcome<T>>,
-  ): Promise<BotApiOutcome<T>> => {
-    const outcome = await request();
-
-    if (outcome.ok || outcome.retryAfterMs === undefined) {
-      return outcome;
-    }
-
-    await pause(outcome.retryAfterMs, bot.signal);
-
-    return bot.signal.aborted ? outcome : request();
-  };
+  ): Promise<BotApiOutcome<T>> => patiently(bot.signal, request);
   const heard = <T>(
     chatId: number,
     outcome: BotApiOutcome<T>,
@@ -96,7 +89,7 @@ export function createOutbox(bot: BotContext): Outbox {
     }
 
     if (outcome.code === 403) {
-      silent.add(chatId);
+      audience.silence(chatId);
     } else if (!bot.signal.aborted) {
       bot.report(
         `${botNames(bot.settings()).bot} could not write to chat ${String(chatId)}: ${outcome.description}`,
@@ -133,16 +126,7 @@ export function createOutbox(bot: BotContext): Outbox {
 
     return notModified(outcome) || heard(chatId, outcome) !== undefined;
   };
-  /**
-   * A private chat's id is its account's: a positive integer, as Telegram
-   * gives one. A key shaped otherwise names no chat of ours — a negative
-   * one would name a group.
-   */
-  const paired = (): readonly number[] =>
-    Object.keys(bot.settings().pairedUsers)
-      .filter(key => /^[1-9]\d*$/u.test(key))
-      .map(Number)
-      .filter(chatId => Number.isSafeInteger(chatId) && !silent.has(chatId));
+  const paired = (): readonly number[] => audience.chats();
   /**
    * Brings the draft's message in every paired chat to the text: sent
    * where it has none, edited where it shows other words, an edit that
@@ -206,22 +190,40 @@ export function createOutbox(bot: BotContext): Outbox {
     }
   };
 
+  /** Says the text in the chat, piece by piece, stopping at one that could not be sent. */
+  const tell = async (chatId: number, text: string): Promise<void> => {
+    for (const piece of pieces(text)) {
+      if ((await send(chatId, piece)) === undefined) {
+        break;
+      }
+    }
+  };
+  const stillPaired = (chatId: number): boolean => paired().includes(chatId);
+
   return {
     paired,
+    admitted(chatId) {
+      audience.admitted(chatId);
+    },
     heardFrom(chatId) {
-      silent.delete(chatId);
+      audience.heardFrom(chatId);
     },
     say(chatId, text) {
-      void queue(async () => {
-        for (const piece of pieces(text)) {
-          if ((await send(chatId, piece)) === undefined) {
-            break;
-          }
-        }
-      });
+      void queue(() => tell(chatId, text));
+    },
+    sayToPaired(chatId, text) {
+      void queue(() =>
+        stillPaired(chatId) ? tell(chatId, text) : Promise.resolve(),
+      );
     },
     card: async (chatId, text, keyboard) =>
-      (await queue(() => send(chatId, text, keyboard)))?.messageId,
+      (
+        await queue(() =>
+          stillPaired(chatId)
+            ? send(chatId, text, keyboard)
+            : Promise.resolve(undefined),
+        )
+      )?.messageId,
     revise(chatId, messageId, text) {
       void queue(() => edit(chatId, messageId, text));
     },
@@ -279,6 +281,70 @@ export function createOutbox(bot: BotContext): Outbox {
           withdraw(draftId);
         }
       }
+    },
+  };
+}
+
+/** One call to Telegram; one it asks to wait on is made once more after the pause, the queue waiting with it. */
+async function patiently<T>(
+  signal: AbortSignal,
+  request: () => Promise<BotApiOutcome<T>>,
+): Promise<BotApiOutcome<T>> {
+  const outcome = await request();
+
+  if (outcome.ok || outcome.retryAfterMs === undefined) {
+    return outcome;
+  }
+
+  await pause(outcome.retryAfterMs, signal);
+
+  return signal.aborted ? outcome : request();
+}
+
+/**
+ * Whom a bot writes to: each paired account's chat by this bot's read of
+ * the settings, and the accounts the daemon let in since (a read
+ * supersedes them), but none that answered 403 until it writes again. A
+ * private chat's id is its account's, a positive integer as Telegram
+ * gives one; a key shaped otherwise names no chat of ours, since a
+ * negative one would name a group.
+ */
+function createAudience(bot: BotContext): {
+  chats(): readonly number[];
+  admitted(chatId: number): void;
+  heardFrom(chatId: number): void;
+  silence(chatId: number): void;
+} {
+  const silent = new Set<number>();
+  const letIn = new Set<number>();
+  let readSettings = bot.settings();
+
+  return {
+    chats() {
+      const settings = bot.settings();
+
+      if (settings !== readSettings) {
+        readSettings = settings;
+        letIn.clear();
+      }
+
+      return [
+        ...new Set([
+          ...Object.keys(settings.pairedUsers)
+            .filter(key => /^[1-9]\d*$/u.test(key))
+            .map(Number),
+          ...letIn,
+        ]),
+      ].filter(chatId => Number.isSafeInteger(chatId) && !silent.has(chatId));
+    },
+    admitted(chatId) {
+      letIn.add(chatId);
+    },
+    heardFrom(chatId) {
+      silent.delete(chatId);
+    },
+    silence(chatId) {
+      silent.add(chatId);
     },
   };
 }
