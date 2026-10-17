@@ -126,15 +126,21 @@ export function createPairingSeam(seams: {
       return refusedRequest('config_unloadable', reading.message);
     }
 
-    if (Object.hasOwn(reading.accounts, subject.id)) {
-      return Object.freeze({status: 'paired' as const});
-    }
-
     const asked = [...waiting.values()].find(
       entry =>
         entry.request.connectorId === connectorId &&
         entry.request.subject.id === subject.id,
     );
+
+    if (Object.hasOwn(reading.accounts, subject.id)) {
+      // Another hand paired the account while its request waited; a request
+      // whose approval is being written is settled by that write instead.
+      if (asked !== undefined && asked.writing !== true) {
+        settleAs(asked, 'approved');
+      }
+
+      return Object.freeze({status: 'paired' as const});
+    }
 
     return Object.freeze({
       status: 'pending' as const,
@@ -231,6 +237,11 @@ export function createPairingSeam(seams: {
 
     if (reading.status !== 'ok') {
       return reading.message;
+    }
+
+    // Another hand paired the account meanwhile; the name it gave stands.
+    if (Object.hasOwn(reading.accounts, entry.request.subject.id)) {
+      return undefined;
     }
 
     const outcome = await seams.applyChange(admission(reading, entry));
