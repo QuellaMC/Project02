@@ -774,9 +774,7 @@ data: {…}</code></pre>
         answer at or past the deadline is answered <code>expired</code>, the
         daemon being the judge of the deadline as for a confirmation, and an
         hour with no answer settles the request as <code>expired</code> on the
-        stream. While an approval's write runs the request is off the list, so
-        a second answer meanwhile is <code>unknown</code>; an approval that
-        could not be written puts the request back, announced again, and is
+        stream. While an approval's write runs the request keeps its place, so asking for the same account again gets the same request, and a second answer meanwhile is <code>unknown</code>; an approval that could not be written puts the request back on the clock, announced again, and is
         answered <code>failed</code> with the reason. A request lives as long
         as the daemon's run: the <code>ready</code> after a restart carries
         none, and asking again makes a new one.

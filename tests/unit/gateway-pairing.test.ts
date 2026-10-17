@@ -171,7 +171,7 @@ describe('gateway pairing seam', () => {
     ]);
   });
 
-  it('takes a request off the list and the clock while its approval is written, and puts it back on both when the write fails', async () => {
+  it('keeps a request in place while its approval is written, taking no second answer, and puts it back on the clock when the write fails', async () => {
     const writes: ((outcome: ConfigChangeOutcome) => void)[] = [];
     const {seam, events, ask} = createPairingHarness(
       () =>
@@ -182,7 +182,12 @@ describe('gateway pairing seam', () => {
     const request = ask();
     const approving = seam.settle(request.code, 'approved');
 
-    expect(seam.pending()).toEqual([]);
+    // Asking for the account again gets this request, not a second one.
+    expect(seam.pending()).toEqual([request]);
+    expect(seam.request('telegram', alice)).toEqual({
+      status: 'pending',
+      request,
+    });
     await expect(seam.settle(request.code, 'denied')).resolves.toEqual({
       status: 'unknown',
     });

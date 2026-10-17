@@ -17,10 +17,13 @@ import type {AllowlistReading} from './pairing.ts';
 
 /**
  * What a connector runs on, for the home and for each installed character
- * that is switched on, each entry resolved as its settings screen is. Its
- * secrets go out in the clear, as no other read's do, because a connector
- * is the owner's own program, running under the home's bearer token on
- * loopback, and a token is what it exists to use.
+ * that is switched on, each entry resolved as its settings screen is and
+ * carrying every declared field that resolves for its target, the home's
+ * own fields included, so a character's bot reads the home's allowlist
+ * whatever the home's switch says. Its secrets go out in the clear, as no
+ * other read's do, because a connector is the owner's own program, running
+ * under the home's bearer token on loopback, and a token is what it exists
+ * to use.
  */
 export function readConnectorConfig(
   home: Project02Home,
@@ -87,13 +90,15 @@ function entryOf(
     values: Object.freeze(
       Object.fromEntries(
         section.activation.status === 'active'
-          ? section.fields.flatMap(({name}): [string, RuntimeConfigValue][] => {
-              const field = ownJsonRecordValue(resolved, name);
+          ? declaration.config.fields.flatMap(
+              ({name}): [string, RuntimeConfigValue][] => {
+                const field = ownJsonRecordValue(resolved, name);
 
-              return field?.resolved === true && field.value !== undefined
-                ? [[name, field.value]]
-                : [];
-            })
+                return field?.resolved === true && field.value !== undefined
+                  ? [[name, field.value]]
+                  : [];
+              },
+            )
           : [],
       ),
     ),

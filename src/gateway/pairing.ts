@@ -62,6 +62,8 @@ type Waiting = {
   /** The field an approval writes the account into. */
   readonly field: string;
   readonly timer: NodeJS.Timeout;
+  /** An approval is on its way to disk; no second answer is taken meanwhile. */
+  readonly writing?: true;
 };
 
 /**
@@ -184,7 +186,7 @@ export function createPairingSeam(seams: {
   ): Promise<PairingSettleOutcome> {
     const entry = waiting.get(code);
 
-    if (entry === undefined) {
+    if (entry === undefined || entry.writing === true) {
       return Object.freeze({status: 'unknown' as const});
     }
 
@@ -200,10 +202,11 @@ export function createPairingSeam(seams: {
       return Object.freeze({status: 'settled' as const, decision});
     }
 
-    // Off the list and the clock while the write runs: a second answer
-    // meanwhile finds nothing waiting, and the deadline cannot find it either.
-    waiting.delete(code);
+    // Kept on the list while the write runs, so asking for the account
+    // again gets this request and not a second one; off the clock, and
+    // taking no second answer.
     clearTimeout(entry.timer);
+    waiting.set(code, {...entry, writing: true});
 
     const failure = await admit(entry, writeAttempts);
 
@@ -213,6 +216,7 @@ export function createPairingSeam(seams: {
       return Object.freeze({status: 'failed' as const, message: failure});
     }
 
+    waiting.delete(code);
     seams.emit(settlement(entry.request, decision));
 
     return Object.freeze({status: 'settled' as const, decision});
