@@ -25,6 +25,7 @@
   "scripts": {
     "inspect": "node src/cli/inspect/main.ts",
     "serve": "pnpm build:web && node src/cli/serve/main.ts",
+    "telegram": "node src/frontends/telegram/main.ts",
     "build:web": "vite build",
     "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"src/**/*.tsx\" \"tests/**/*.ts\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
