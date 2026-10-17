@@ -1,8 +1,9 @@
-import type {
-  BotApiOutcome,
-  InlineKeyboard,
-  TelegramCallbackQuery,
-  TelegramMessage,
+import {
+  pause,
+  type BotApiOutcome,
+  type InlineKeyboard,
+  type TelegramCallbackQuery,
+  type TelegramMessage,
 } from './bot-api.ts';
 import {botNames, type BotContext} from './bot.ts';
 
@@ -13,7 +14,8 @@ const draftEditMs = 1_500;
 /**
  * What a bot writes in its chats. Its calls to Telegram go one at a time in
  * the order they were decided, so no edit overtakes a commit nor a reply
- * the line shown before it, and none once the bot has stopped. A chat that
+ * the line shown before it, and none once the bot has stopped; one
+ * Telegram asks to wait on is made again after the pause. A chat that
  * answers 403 never opened this bot, and is skipped until it writes.
  */
 export type Outbox = {
@@ -68,6 +70,20 @@ export function createOutbox(bot: BotContext): Outbox {
 
     return ran;
   };
+  /** One call to Telegram; one it asks to wait on is made once more after the pause, the queue waiting with it. */
+  const call = async <T>(
+    request: () => Promise<BotApiOutcome<T>>,
+  ): Promise<BotApiOutcome<T>> => {
+    const outcome = await request();
+
+    if (outcome.ok || outcome.retryAfterMs === undefined) {
+      return outcome;
+    }
+
+    await pause(outcome.retryAfterMs, bot.signal);
+
+    return bot.signal.aborted ? outcome : request();
+  };
   const heard = <T>(
     chatId: number,
     outcome: BotApiOutcome<T>,
@@ -93,11 +109,13 @@ export function createOutbox(bot: BotContext): Outbox {
   ): Promise<TelegramMessage | undefined> =>
     heard(
       chatId,
-      await api.sendMessage({
-        chatId,
-        text,
-        ...(keyboard === undefined ? {} : {keyboard}),
-      }),
+      await call(() =>
+        api.sendMessage({
+          chatId,
+          text,
+          ...(keyboard === undefined ? {} : {keyboard}),
+        }),
+      ),
     );
   /** Edits a message to the text, without buttons; one showing it already is as good as edited. */
   const edit = async (
@@ -105,7 +123,9 @@ export function createOutbox(bot: BotContext): Outbox {
     messageId: number,
     text: string,
   ): Promise<void> => {
-    const outcome = await api.editMessageText({chatId, messageId, text});
+    const outcome = await call(() =>
+      api.editMessageText({chatId, messageId, text}),
+    );
 
     if (!notModified(outcome)) {
       heard(chatId, outcome);
@@ -116,9 +136,10 @@ export function createOutbox(bot: BotContext): Outbox {
       .map(Number)
       .filter(chatId => Number.isSafeInteger(chatId) && !silent.has(chatId));
   /**
-   * Brings the draft's message in every chat to the text: sent where it
-   * has none, edited where it shows other words. A draft shows what fits
-   * one message; its commit sends the rest after.
+   * Brings the draft's message in every paired chat to the text: sent
+   * where it has none, edited where it shows other words; a chat paired no
+   * longer gets no more of it. A draft shows what fits one message; its
+   * commit sends the rest after.
    */
   const render = async (
     draft: Draft,
@@ -127,7 +148,7 @@ export function createOutbox(bot: BotContext): Outbox {
   ): Promise<void> => {
     const [first = '', ...rest] = pieces(text);
 
-    for (const chatId of new Set([...draft.messages.keys(), ...paired()])) {
+    for (const chatId of paired()) {
       const messageId = draft.messages.get(chatId);
 
       if (messageId === undefined) {
@@ -161,7 +182,10 @@ export function createOutbox(bot: BotContext): Outbox {
     if (draft !== undefined) {
       void queue(async () => {
         for (const [chatId, messageId] of draft.messages) {
-          heard(chatId, await api.deleteMessage({chatId, messageId}));
+          heard(
+            chatId,
+            await call(() => api.deleteMessage({chatId, messageId})),
+          );
         }
       });
     }
@@ -184,16 +208,18 @@ export function createOutbox(bot: BotContext): Outbox {
       void queue(async () => {
         heard(
           press.from.id,
-          await api.answerCallbackQuery({
-            callbackQueryId: press.id,
-            ...(toast === undefined ? {} : {text: toast}),
-          }),
+          await call(() =>
+            api.answerCallbackQuery({
+              callbackQueryId: press.id,
+              ...(toast === undefined ? {} : {text: toast}),
+            }),
+          ),
         );
       });
     },
     typing(chatId) {
       void queue(async () => {
-        heard(chatId, await api.sendChatAction({chatId}));
+        heard(chatId, await call(() => api.sendChatAction({chatId})));
       });
     },
     draft(draftId, text, post) {
@@ -241,11 +267,11 @@ function notModified(outcome: BotApiOutcome<unknown>): boolean {
 }
 
 /** Messages Telegram takes, never cut between the halves of a surrogate pair. */
-function pieces(text: string): readonly string[] {
+function pieces(text: string, size = maxMessageLength): readonly string[] {
   const cut: string[] = [];
 
   for (let start = 0; start < text.length;) {
-    const end = Math.min(start + maxMessageLength, text.length);
+    const end = Math.min(start + size, text.length);
     const last = text.charCodeAt(end - 1);
     const next =
       end < text.length && last >= 0xd800 && last <= 0xdbff ? end - 1 : end;
@@ -255,4 +281,19 @@ function pieces(text: string): readonly string[] {
   }
 
   return cut;
+}
+
+/**
+ * The text as one message with `ending` whole, as a card with buttons must
+ * be: a text past Telegram's longest is cut to make room, an ellipsis
+ * marking the cut.
+ */
+export function oneMessage(text: string, ending = ''): string {
+  const [first = '', ...rest] = pieces(text, maxMessageLength - ending.length);
+
+  return (
+    (rest.length === 0
+      ? first
+      : `${Array.from(first).slice(0, -1).join('')}…`) + ending
+  );
 }

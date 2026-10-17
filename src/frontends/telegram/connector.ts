@@ -1,11 +1,12 @@
 import {join} from 'node:path';
 
 import {
-  gatewayProtocolVersion,
   type ConnectorConfigEntry,
   type ConnectorConfigView,
+  foldRunningTurns,
   type GatewayEvent,
   type GatewayHealth,
+  gatewayProtocolVersion,
   type GatewayReady,
 } from '../../gateway/api/index.ts';
 import {
@@ -296,7 +297,8 @@ type BotTable = {
   dispatch(event: GatewayEvent): void;
   /**
    * Hands each running bot the daemon's snapshot on a stream it did not
-   * resume, and keeps it for each bot started after.
+   * resume, and keeps it, moved on by every frame since, for each bot
+   * started after.
    */
   snapshot(ready: GatewayReady): void;
   /** Stops every bot, and settles once each has stopped. */
@@ -396,6 +398,10 @@ function createBotTable(context: {
       }
     },
     dispatch(event) {
+      if (latest !== undefined) {
+        latest = movedOn(latest, event);
+      }
+
       for (const bot of running.values()) {
         bot.dispatch(event);
       }
@@ -415,6 +421,60 @@ function createBotTable(context: {
       await Promise.all(stopping);
     },
   };
+}
+
+/**
+ * The snapshot moved on by a frame: what the daemon would say in a `ready`
+ * now, for a bot that starts now. The turns are folded by the contract's
+ * one rule; what waits is added as it is raised, announced again or not,
+ * and dropped as it is settled; health is as last said.
+ */
+function movedOn(ready: GatewayReady, event: GatewayEvent): GatewayReady {
+  switch (event.kind) {
+    case 'turn_progress':
+    case 'turn_completed':
+      return {
+        ...ready,
+        turns: [
+          ...foldRunningTurns(
+            new Map(ready.turns.map(turn => [turn.conversationId, turn])),
+            event,
+          ).values(),
+        ],
+      };
+    case 'confirmation_requested':
+      return {
+        ...ready,
+        confirmations: [
+          ...ready.confirmations.filter(pending => pending.id !== event.id),
+          event,
+        ],
+      };
+    case 'confirmation_settled':
+      return {
+        ...ready,
+        confirmations: ready.confirmations.filter(
+          pending => pending.id !== event.id,
+        ),
+      };
+    case 'pairing_requested':
+      return {
+        ...ready,
+        pairings: [
+          ...ready.pairings.filter(request => request.code !== event.code),
+          event,
+        ],
+      };
+    case 'pairing_settled':
+      return {
+        ...ready,
+        pairings: ready.pairings.filter(request => request.code !== event.code),
+      };
+    case 'health_changed':
+      return {...ready, health: event.health};
+    default:
+      return ready;
+  }
 }
 
 /** A bot is one owner's: a token that moves to another starts a bot of its own. */

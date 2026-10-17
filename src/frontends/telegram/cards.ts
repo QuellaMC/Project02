@@ -7,7 +7,7 @@ import type {
 import type {InlineKeyboard, TelegramCallbackQuery} from './bot-api.ts';
 import {daemonDown, rethrowUnlessTransport, type BotContext} from './bot.ts';
 import type {Gate} from './gate.ts';
-import type {Outbox} from './outbox.ts';
+import {oneMessage, type Outbox} from './outbox.ts';
 
 /**
  * What a card asks about, by the letter its buttons carry before the
@@ -44,7 +44,8 @@ type Card = {
 /**
  * Messages with Approve and Deny that end: once what a card asks is
  * settled, each of its messages is revised to its text and how it ended,
- * its buttons gone.
+ * its buttons gone. A card is one message, its buttons on it: a text past
+ * Telegram's longest is cut, and how it ended kept whole.
  */
 export type Cards = {
   /** Whether the card went to a chat and has not ended. */
@@ -71,17 +72,19 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
       cards.set(key, card);
 
       for (const chatId of chatIds) {
-        void outbox.card(chatId, card.text, keyboard).then(messageId => {
-          if (messageId === undefined) {
-            return;
-          }
+        void outbox
+          .card(chatId, oneMessage(card.text), keyboard)
+          .then(messageId => {
+            if (messageId === undefined) {
+              return;
+            }
 
-          if (card.ended === undefined) {
-            card.messages.push([chatId, messageId]);
-          } else {
-            outbox.revise(chatId, messageId, card.ended);
-          }
-        });
+            if (card.ended === undefined) {
+              card.messages.push([chatId, messageId]);
+            } else {
+              outbox.revise(chatId, messageId, card.ended);
+            }
+          });
       }
     },
     end(key, ending) {
@@ -92,7 +95,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
       }
 
       cards.delete(key);
-      card.ended = `${card.text} · ${ending}`;
+      card.ended = oneMessage(card.text, ` · ${ending}`);
 
       for (const [chatId, messageId] of card.messages) {
         outbox.revise(chatId, messageId, card.ended);

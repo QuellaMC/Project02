@@ -22,8 +22,8 @@ export type FakeTelegram = {
   push(token: string, update: TelegramWireUpdate): void;
   /** Every call on that token, in order, the refused ones too. */
   calls(token: string): readonly TelegramCall[];
-  /** The next call on that token answers 429 with `retry_after`. */
-  throttle(token: string, retryAfterSeconds: number): void;
+  /** The next call on that token — of `method`, when one is named — answers 429 with `retry_after`. */
+  throttle(token: string, retryAfterSeconds: number, method?: string): void;
 };
 
 /** A waiting poll is answered, or ended by a newer one on its token. */
@@ -37,7 +37,9 @@ type Bot = {
   /** Each sent message's text and keyboard, by chat and message id. */
   readonly contents: Map<string, string>;
   nextMessageId: number;
-  retryAfterSeconds: number | undefined;
+  throttled:
+    | {readonly retryAfterSeconds: number; readonly method: string | undefined}
+    | undefined;
   /** Ends the poll waiting on this token, if one is. */
   endWaitingPoll: ((ending: PollEnding) => void) | undefined;
 };
@@ -70,10 +72,13 @@ export async function createFakeTelegram(
 
     bot.calls.push({method, body});
 
-    if (bot.retryAfterSeconds !== undefined) {
-      const retryAfter = bot.retryAfterSeconds;
+    if (
+      bot.throttled !== undefined &&
+      (bot.throttled.method === undefined || bot.throttled.method === method)
+    ) {
+      const retryAfter = bot.throttled.retryAfterSeconds;
 
-      bot.retryAfterSeconds = undefined;
+      bot.throttled = undefined;
 
       return c.json(
         {
@@ -125,7 +130,7 @@ export async function createFakeTelegram(
         updates: [],
         contents: new Map(),
         nextMessageId: 1,
-        retryAfterSeconds: undefined,
+        throttled: undefined,
         endWaitingPoll: undefined,
       });
     },
@@ -136,8 +141,8 @@ export async function createFakeTelegram(
       bot.endWaitingPoll?.('answer');
     },
     calls: token => bots.get(token)?.calls ?? [],
-    throttle(token, retryAfterSeconds) {
-      registered(bots, token).retryAfterSeconds = retryAfterSeconds;
+    throttle(token, retryAfterSeconds, method) {
+      registered(bots, token).throttled = {retryAfterSeconds, method};
     },
   };
 }

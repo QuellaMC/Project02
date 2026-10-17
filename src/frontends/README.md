@@ -77,8 +77,8 @@ fetch on `node:http` that the reference client takes as its `fetch` and
 that waits as long as the daemon does: Node's own fetch gives a response
 five minutes, and a turn parked on a confirmation outlives that.
 Telegram it reaches by the platform's fetch, long polling. Ctrl-C,
-SIGTERM and SIGHUP are one stop: every bot stops, and the process
-exits 0.
+SIGTERM and SIGHUP are one stop: every bot stops, a line still waiting on
+its turn gives up the wait (the turn runs on), and the process exits 0.
 
 It runs one bot per token, by the daemon's judgment of each entry: the
 management bot while the home's entry is active and holds
@@ -90,8 +90,8 @@ its running bot, and the bots outlive a reconnect to the daemon. A bot
 asks Telegram who it is and says so. A token Telegram refuses ends its
 bot, naming the settings page to replace it on; another program polling
 the same token (409) and a Telegram that does not answer are said once
-per change while the bot keeps trying; a pause Telegram asks for before
-the next poll is waited out.
+per change while the bot keeps trying; a pause Telegram asks for is
+waited out, before the next poll or the next message.
 
 Every bot keeps the pairing gate on every message and every press of a
 card's button. An account not in `pairedUsers` gets a pairing code, good
@@ -108,10 +108,11 @@ again joins its turn. How a line ended has one teller, heard in the chat
 the line came from: the delivery's answer for a refusal before any turn
 or a daemon out of reach, and the stream's `turn_completed` for a turn
 that ran and did not complete, asking for the line again when the turn
-did not take it. Each reply of hers is one message in each paired chat, posted
-with its first words, edited at most every 1.5 s and then into its
-committed text, and deleted when withdrawn; past Telegram's 4096
-characters, the rest follows in more messages. With `mirror` on, its
+did not take it. Each reply of hers is one message in each paired chat —
+a chat unpaired while she writes gets no more of it — posted with its
+first words, edited at most every 1.5 s and then into its committed text,
+and deleted when withdrawn; past Telegram's 4096 characters, the rest
+follows in more messages. With `mirror` on, its
 default, another surface's turn is shown too, its line as
 `You (<source>): …`; a line this bot carried is not repeated. A chat
 that answers 403, one that never opened the bot, is skipped until it
@@ -124,7 +125,9 @@ A confirmation of hers that a turn of this bot's line raised is a card
 in that line's chat with Approve and Deny — in every paired chat when no
 turn raised it — and another surface's is left to that surface. A press
 is answered with the daemon's verdict as a toast, and every card is
-edited to how it ended, whichever surface answered. The management bot
+edited to how it ended, whichever surface answered; a card is one
+message, cut to fit when its preview runs past Telegram's longest. The
+management bot
 is roster-shaped, as the page is: every confirmation of the home, naming
 the surface that raised it, and every pairing request arrive as cards in
 each paired chat; `/status` says who is on, read fresh; `/pending` shows
