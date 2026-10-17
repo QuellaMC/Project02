@@ -51,6 +51,8 @@ export type BotContext = {
   readonly report: (line: string) => void;
   /** Aborts once the bot is stopped. */
   readonly signal: AbortSignal;
+  /** Settles once the settings are read after a loss or a ready, or the bot stops: what a write to a paired account waits for. */
+  readonly settled: () => Promise<void>;
 };
 
 /** What a bot does with a message, and with the daemon's frames and snapshots. */
@@ -173,6 +175,7 @@ export function startBot(options: {
       settings: () => settings,
       report,
       signal,
+      settled: () => Promise.race([options.settled(), halted]),
     });
 
     // A snapshot is installed by the settings it is shown by, read first.

@@ -147,15 +147,21 @@ async function followDaemon(
     notice(say, `Telegram connector: connected to ${baseUrl}.`);
   };
   let health: GatewayHealth | undefined;
+  /** The ticket of the last read started, and the one a hold must be outlived by: only a read begun after the hold releases it. */
+  let lastRead = 0;
+  let holdAfter = 0;
   const read = createConfigReads({
     client,
     signal,
     backoffMaxMs: options.pacing?.readBackoffMaxMs,
     report,
-    apply: view => {
-      bots.apply(view, health, client);
+    apply: (view, ticket) => {
+      bots.apply(view, health, client, ticket > holdAfter);
     },
   });
+  const startRead = (): void => {
+    lastRead = read();
+  };
 
   try {
     await client.events(
@@ -164,7 +170,7 @@ async function followDaemon(
 
         if (event.kind === 'health_changed') {
           health = event.health;
-          read();
+          startRead();
         }
       },
       {
@@ -174,16 +180,18 @@ async function followDaemon(
           connected();
           health = snapshot.health;
           bots.snapshot(snapshot);
-          read();
+          holdAfter = lastRead;
+          startRead();
         },
         // A stream that returns resumed brings no ready: the settings are
         // read for the updates held since the loss.
         onResumed: () => {
           connected();
-          read();
+          startRead();
         },
         onLost: () => {
           bots.hold();
+          holdAfter = lastRead;
 
           if (recordMoved(options.homeRoot, record)) {
             own.abort();
@@ -264,8 +272,9 @@ function createConfigReads(options: {
   readonly signal: AbortSignal;
   readonly backoffMaxMs: number | undefined;
   readonly report: WriteLine;
-  readonly apply: (view: ConnectorConfigView) => void;
-}): () => void {
+  /** Applies a read's answer, under the ticket the read started with. */
+  readonly apply: (view: ConnectorConfigView, ticket: number) => void;
+}): () => number {
   const {client, signal, report, apply} = options;
   let newest = 0;
   const current = (ticket: number): boolean =>
@@ -282,7 +291,7 @@ function createConfigReads(options: {
       }
 
       if ('view' in answer) {
-        apply(answer.view);
+        apply(answer.view, ticket);
 
         return;
       }
@@ -304,18 +313,23 @@ function createConfigReads(options: {
   return () => {
     newest += 1;
     void readUntilAnswered(newest);
+
+    return newest;
   };
 }
 
 type BotTable = {
   /**
    * Makes the running bots the ones the config's answer asks for, each
-   * reaching the daemon by the client the answer came by.
+   * reaching the daemon by the client the answer came by; and, when the
+   * read began after the hold, ends the hold: the snapshot and the frames
+   * held are handed on, and the bots' updates and writes go on.
    */
   apply(
     view: ConnectorConfigView,
     health: GatewayHealth | undefined,
     client: GatewayClient,
+    releases: boolean,
   ): void;
   /** Hands each running bot a frame of the daemon's stream, once the snapshot before it has been handed on. */
   dispatch(event: GatewayEvent): void;
@@ -407,7 +421,7 @@ function createBotTable(context: {
   };
 
   return {
-    apply(view, health, client) {
+    apply(view, health, client, releases) {
       const {wanted, shared} =
         view.status === 'ok'
           ? wantedBots(view, health)
@@ -446,6 +460,10 @@ function createBotTable(context: {
             ? 'Telegram is off, or no token is set; waiting for a change.'
             : undefined,
         );
+      }
+
+      if (!releases) {
+        return;
       }
 
       if (unread && latest !== undefined) {

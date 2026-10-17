@@ -1919,6 +1919,102 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('keeps holding when a read begun before the loss lands after it, until a read begun after the loss', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: {...aliceIsPaired, [String(bob.id)]: 'Bob'},
+    });
+    const telegram = await startTelegram();
+    const events = createEventStreams(gateway);
+    const first = await serve(homeRoot, gateway, {events});
+    const transport = createNodeFetch();
+    let reads = 0;
+    let releaseSecond = (): void => undefined;
+    const secondHeld = new Promise<void>(resolve => {
+      releaseSecond = resolve;
+    });
+    // The second read's answer is fetched, then held on its way back.
+    const holdingSecondAnswer: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const response = await transport(input, init);
+
+      if (url.pathname === '/api/connectors/telegram/config' && ++reads === 2) {
+        const body = await response.text();
+
+        await secondHeld;
+
+        return new Response(body, {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+
+      return response;
+    };
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram, holdingSecondAnswer);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+      },
+      {timeout: 5_000},
+    );
+    await change(gateway, mira, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'mirror',
+      value: false,
+    });
+    await vi.waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    const shownToBob = textsIn(telegram, miraToken, bob.id);
+
+    await first.close();
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain('waiting for the daemon');
+    });
+    await change(gateway, home, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'pairedUsers',
+      value: aliceIsPaired,
+    });
+    telegram.push(miraToken, messageFrom(bob, 2, 'again'));
+    releaseSecond();
+    await sleep(300);
+    expect(textsIn(telegram, miraToken, bob.id)).toEqual(shownToBob);
+
+    const returned = await serve(homeRoot, gateway, {port: first.port, events});
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+          /Your pairing code is/u,
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(
+      lines.filter(line => line.role === 'user').map(line => line.text),
+    ).toEqual(['hello']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
+    await events.closeAll();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("holds a line written while the daemon's socket is closed, and carries it once the daemon is back", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,

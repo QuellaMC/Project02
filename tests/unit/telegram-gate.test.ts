@@ -93,6 +93,7 @@ function gateOver(client: GatewayClient) {
       reports.push(line);
     },
     signal: new AbortController().signal,
+    settled: () => Promise.resolve(),
   };
 
   return {gate: createGate(bot, outbox, () => 'Mira'), said, reports};

@@ -71,9 +71,9 @@ the settings page with it — says it is running, and keeps its read of
 the connector config by the wire page's reading rule, and one read more:
 a read on every `ready` and every `health_changed`, the newest answer
 applied, a failed read tried again with a backoff, and a read on a
-stream's return after it was lost, since the bots' messages, and the
-frames the stream brings back, wait from the loss until the settings are
-read again; a `ready`'s snapshot reaches the
+stream's return after it was lost, since the bots' messages, their
+writes to paired accounts, and the frames the stream brings back wait
+from the loss until the settings are read again by a read begun after it; a `ready`'s snapshot reaches the
 bots, and their messages are read, only after its read, so what they show
 and admit goes by the settings as they are. A lost
 stream sends it back to the record, so a daemon that came back on
