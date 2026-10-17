@@ -8,7 +8,10 @@ import {
   type PollProblem,
   type TelegramUpdate,
 } from '../../src/frontends/telegram/bot-api.ts';
-import {createFakeTelegram} from '../support/telegram-api.ts';
+import {
+  createFakeTelegram,
+  webhookDescription,
+} from '../support/telegram-api.ts';
 
 const token = '123456:secret-part-of-the-token';
 const bot = {id: 123456, username: 'mira_bot'};
@@ -185,6 +188,37 @@ describe('Telegram long polling', () => {
     });
     expect(first.reports).toEqual([conflict, undefined]);
     await expect(first.stop()).resolves.toBe('stopped');
+    await telegram.close();
+  });
+
+  it('removes a webhook left on the token, says so once, and polls', async () => {
+    const telegram = await createFakeTelegram();
+
+    telegram.registerBot(token, bot);
+    telegram.setWebhook(token);
+    telegram.push(token, {
+      update_id: 1,
+      message: {message_id: 1, from: alice, chat, date: 1, text: 'hi'},
+    });
+
+    const {handed, reports, stop} = startPolling(
+      createBotApi({token, fetch, baseUrl: telegram.baseUrl}),
+    );
+
+    await vi.waitFor(() => {
+      expect(handed).toHaveLength(1);
+    });
+    expect(reports).toEqual([
+      {code: 'webhook', description: webhookDescription},
+      undefined,
+    ]);
+    expect(
+      telegram
+        .calls(token)
+        .map(call => call.method)
+        .slice(0, 3),
+    ).toEqual(['getUpdates', 'deleteWebhook', 'getUpdates']);
+    await expect(stop()).resolves.toBe('stopped');
     await telegram.close();
   });
 

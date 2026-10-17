@@ -55,6 +55,8 @@ type Chat = {
   thread: Extract<OpenOutcome, {readonly status: 'opened'}> | undefined;
   /** Every running turn, folded by the contract's one rule; her DM's is the one shown. */
   turns: RunningTurns;
+  /** Her turn frames from before her DM was known, folded and shown in order once it is. */
+  readonly held: TurnFrame[];
 };
 
 /**
@@ -78,6 +80,7 @@ export function characterChat(
       source: `telegram:${bot.username}`,
       thread: undefined,
       turns: new Map(),
+      held: [],
     };
 
     openAhead(chat);
@@ -171,8 +174,9 @@ async function carry(
 }
 
 /**
- * Opens her DM and keeps it, and shows what the fold holds of it, folded
- * before it was known to be hers; throws when the daemon cannot be reached.
+ * Opens her DM and keeps it, then shows what came before it was known: the
+ * drafts the snapshot gave it, and her frames held meanwhile, in order;
+ * throws when the daemon cannot be reached.
  */
 async function open(chat: Chat): Promise<OpenOutcome> {
   const outcome = await chat.bot
@@ -182,6 +186,10 @@ async function open(chat: Chat): Promise<OpenOutcome> {
   if (outcome.status === 'opened') {
     chat.thread = outcome;
     showDrafts(chat);
+
+    for (const frame of chat.held.splice(0)) {
+      followEvent(chat, frame);
+    }
   }
 
   return outcome;
@@ -200,10 +208,16 @@ function followEvent(chat: Chat, event: GatewayEvent): void {
   switch (event.kind) {
     case 'turn_progress':
     case 'turn_completed':
-      chat.turns = foldRunningTurns(chat.turns, event);
+      if (chat.thread === undefined) {
+        if (event.characterId === chat.characterId) {
+          chat.held.push(event);
+        }
+      } else {
+        chat.turns = foldRunningTurns(chat.turns, event);
 
-      if (event.conversationId === chat.thread?.conversationId) {
-        followTurn(chat, event);
+        if (event.conversationId === chat.thread.conversationId) {
+          followTurn(chat, event);
+        }
       }
       break;
     case 'state_changed':
@@ -333,8 +347,9 @@ function ended(
 
 /**
  * On a stream the daemon could not resume, the running turns are the
- * snapshot's — every one, as the fold has them; her DM is not open yet
- * when a bot starts. A draft shown here that the snapshot still carries
+ * snapshot's — every one, as the fold has them — and what was held for a
+ * DM not yet known is superseded; a DM not open yet is opened, the daemon
+ * being there to ask. A draft shown here that the snapshot still carries
  * keeps its message and is brought to the snapshot's words; one it does
  * not is withdrawn, as a page drops a bubble the snapshot does not carry.
  * A card whose confirmation the snapshot no longer holds is ended, and a
@@ -342,10 +357,16 @@ function ended(
  */
 function installSnapshot(chat: Chat, ready: GatewayReady): void {
   chat.turns = new Map(ready.turns.map(turn => [turn.conversationId, turn]));
+  chat.held.splice(0);
   chat.outbox.withdrawExcept(
     new Set(herTurn(chat)?.drafts.map(draft => draft.draftId)),
   );
-  showDrafts(chat);
+
+  if (chat.thread === undefined) {
+    openAhead(chat);
+  } else {
+    showDrafts(chat);
+  }
   chat.cards.keep(new Set(ready.confirmations.map(pending => pending.id)));
 
   for (const pending of ready.confirmations) {

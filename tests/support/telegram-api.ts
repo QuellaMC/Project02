@@ -24,6 +24,8 @@ export type FakeTelegram = {
   calls(token: string): readonly TelegramCall[];
   /** The next call on that token — of `method`, when one is named — answers 429 with `retry_after`. */
   throttle(token: string, retryAfterSeconds: number, method?: string): void;
+  /** Telegram sends the token's updates to a webhook, and refuses its polls, until `deleteWebhook`. */
+  setWebhook(token: string): void;
 };
 
 /** A waiting poll is answered, or ended by a newer one on its token. */
@@ -37,6 +39,7 @@ type Bot = {
   /** Each sent message's text and keyboard, by chat and message id. */
   readonly contents: Map<string, string>;
   nextMessageId: number;
+  webhook: boolean;
   throttled:
     | {readonly retryAfterSeconds: number; readonly method: string | undefined}
     | undefined;
@@ -46,6 +49,8 @@ type Bot = {
 
 const conflictDescription =
   'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';
+export const webhookDescription =
+  "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first";
 const notModifiedDescription =
   'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message';
 
@@ -103,7 +108,13 @@ export async function createFakeTelegram(
           },
         });
       case 'getUpdates':
-        return answerPoll(c, bot, fields);
+        return bot.webhook
+          ? refusal(c, 409, webhookDescription)
+          : answerPoll(c, bot, fields);
+      case 'deleteWebhook':
+        bot.webhook = false;
+
+        return c.json({ok: true, result: true});
       case 'sendMessage':
         return answerMessage(c, bot, fields, bot.nextMessageId++);
       case 'editMessageText':
@@ -130,6 +141,7 @@ export async function createFakeTelegram(
         updates: [],
         contents: new Map(),
         nextMessageId: 1,
+        webhook: false,
         throttled: undefined,
         endWaitingPoll: undefined,
       });
@@ -143,6 +155,9 @@ export async function createFakeTelegram(
     calls: token => bots.get(token)?.calls ?? [],
     throttle(token, retryAfterSeconds, method) {
       registered(bots, token).throttled = {retryAfterSeconds, method};
+    },
+    setWebhook(token) {
+      registered(bots, token).webhook = true;
     },
   };
 }

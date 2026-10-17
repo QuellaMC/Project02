@@ -89,10 +89,12 @@ said; a changed token restarts its bot, and one that moves to another
 character starts a bot of its own; any other change to an entry reaches
 its running bot, and the bots outlive a reconnect to the daemon. A bot
 asks Telegram who it is and says so. A token Telegram refuses ends its
-bot, naming the settings page to replace it on; another program polling
-the same token (409) and a Telegram that does not answer are said once
-per change while the bot keeps trying; a pause Telegram asks for is
-waited out, before the next poll or the next message.
+bot, naming the settings page to replace it on; another program polling the same token (409) and a Telegram that does
+not answer are said once per change while the bot keeps trying; a webhook
+left on the token is removed and said, since Telegram sends a bot's
+messages to it or to the polls, never both; a pause Telegram asks for is
+waited out, before the next poll, the next message, or the next asking
+who the bot is.
 
 Every bot keeps the pairing gate on every message and every press of a
 card's button. An account not in `pairedUsers` gets a pairing code, good

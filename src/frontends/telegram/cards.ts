@@ -53,7 +53,7 @@ const endedAway = 'settled while the bot was away';
  * Telegram's longest is cut, and how it ended kept whole.
  */
 export type Cards = {
-  /** Sends the card to each chat it has not gone to; a card already held keeps its text. */
+  /** Holds the card, and sends it to each chat it has not gone to; one already held keeps its text. */
   post(key: string, text: string, chatIds: readonly number[]): void;
   /** Sends every card held to the chat, where it has not gone; how many are held. */
   postAll(chatId: number): number;
@@ -85,10 +85,6 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
     text: string,
     chatIds: readonly number[],
   ): void => {
-    if (chatIds.length === 0) {
-      return;
-    }
-
     const card = cards.get(key) ?? {
       text,
       sent: new Set<number>(),

@@ -130,7 +130,10 @@ export function startBot(options: {
         );
       }
 
-      await pause(backoffMs(failures, pacing?.backoffMaxMs), signal);
+      await pause(
+        me.retryAfterMs ?? backoffMs(failures, pacing?.backoffMaxMs),
+        signal,
+      );
     }
 
     return undefined;
@@ -234,16 +237,23 @@ export function botNames(settings: BotSettings): {
       };
 }
 
-/** One sentence ends either problem: after a 409 as after an outage, the bot gets its messages again. */
+/** One sentence ends every problem: after a 409 as after an outage, the bot gets its messages again. */
 function problemSentence(
   problem: PollProblem | undefined,
   bot: string,
 ): string {
-  if (problem === undefined) {
-    return `Telegram: ${bot} gets its messages again.`;
+  switch (problem?.code) {
+    case undefined:
+      return `Telegram: ${bot} gets its messages again.`;
+    case 'conflict':
+      return `Another program is polling ${bot} (409); this one waits.`;
+    case 'webhook':
+      return (
+        `Telegram was sending the messages for ${bot} to a webhook, another ` +
+        "program's; this connector removed it to poll. If that program " +
+        'should have them, give this connector a token of its own.'
+      );
+    case 'unreachable':
+      return `Telegram cannot be reached for ${bot}: ${problem.description}`;
   }
-
-  return problem.code === 'conflict'
-    ? `Another program is polling ${bot} (409); this one waits.`
-    : `Telegram cannot be reached for ${bot}: ${problem.description}`;
 }
