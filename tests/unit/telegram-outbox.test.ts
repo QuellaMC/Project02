@@ -21,8 +21,8 @@ function recordingApi(failing: {
   editsToFail?: number;
   failSendAt?: ReadonlySet<number>;
   holdSendAt?: number;
-  /** The send of this ordinal answers 429, asking for 200 ms. */
-  retryAfterAt?: number;
+  /** The sends of these ordinals answer 429, asking for 200 ms. */
+  retryAfterAt?: ReadonlySet<number>;
 }) {
   const calls: {readonly method: string; readonly text: string}[] = [];
   let release = (): void => undefined;
@@ -54,7 +54,7 @@ function recordingApi(failing: {
         return {ok: false, code: 0, description: 'no answer'};
       }
 
-      if (failing.retryAfterAt === ordinal) {
+      if (failing.retryAfterAt?.has(ordinal) === true) {
         return {
           ok: false,
           code: 429,
@@ -230,7 +230,7 @@ describe('Telegram outbox', () => {
   it('writes no further piece, and makes no second try, to an account unpaired while its write was under way', async () => {
     const {api, calls, release} = recordingApi({
       holdSendAt: 1,
-      retryAfterAt: 2,
+      retryAfterAt: new Set([2]),
     });
     const pairedUsers: Record<string, string> = {'1': 'Alice'};
     const reports: string[] = [];
@@ -253,6 +253,22 @@ describe('Telegram outbox', () => {
     delete pairedUsers['1'];
     await sleep(300);
     expect(calls).toHaveLength(2);
+    expect(reports).toEqual([]);
+  });
+
+  it('keeps waiting while Telegram keeps asking it to, and sends when it stops', async () => {
+    const {api, calls} = recordingApi({retryAfterAt: new Set([1, 2])});
+    const reports: string[] = [];
+    const outbox = createOutbox(miraBot(api, reports).bot);
+
+    outbox.say(1, 'hello');
+    await vi.waitFor(
+      () => {
+        expect(calls).toHaveLength(3);
+      },
+      {timeout: 2_000},
+    );
+    expect(calls.every(call => call.text === 'hello')).toBe(true);
     expect(reports).toEqual([]);
   });
 
