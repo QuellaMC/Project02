@@ -8,13 +8,13 @@ import type {
 import type {TelegramUpdate} from './bot-api.ts';
 import {
   daemonDown,
+  minutesLeft,
   rethrowUnlessTransport,
   type BotContext,
   type BotRules,
 } from './bot.ts';
 import {
   answered,
-  clockTime,
   confirmationEnding,
   confirmationText,
   createCards,
@@ -35,7 +35,7 @@ const sentences = {
   notWaiting: 'That code is not waiting.',
   pairing: (request: PairingRequest): string =>
     `${request.subject.label} wants to pair · code ${request.code} · ` +
-    `expires at ${clockTime(request.expiresAt)}`,
+    `expires in ${minutesLeft(request.expiresAt)}`,
 };
 
 type Chat = {
