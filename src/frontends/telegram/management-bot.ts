@@ -144,7 +144,7 @@ async function command(
  */
 async function status(bot: BotContext): Promise<string> {
   try {
-    const {characters} = await bot.client().health();
+    const {characters} = await bot.client().health({signal: bot.signal});
 
     return characters.length === 0
       ? sentences.noCharacters
@@ -191,7 +191,9 @@ async function settle(
   }
 
   try {
-    const outcome = await bot.client().settlePairing(code, decision);
+    const outcome = await bot
+      .client()
+      .settlePairing(code, decision, {signal: bot.signal});
 
     switch (outcome.status) {
       case 'settled':

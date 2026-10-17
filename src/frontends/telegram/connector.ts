@@ -159,7 +159,14 @@ async function followDaemon(
       bots.apply(view, health, client, ticket > holdAfter);
     },
   });
+  /** Holds the bots until a read begun from now lands. */
+  const hold = (): void => {
+    bots.hold();
+    holdAfter = lastRead;
+  };
+  /** Every read holds the bots until it lands, so nothing goes by settings a change has left behind. */
   const startRead = (): void => {
+    hold();
     lastRead = read();
   };
 
@@ -180,7 +187,6 @@ async function followDaemon(
           connected();
           health = snapshot.health;
           bots.snapshot(snapshot);
-          holdAfter = lastRead;
           startRead();
         },
         // A stream that returns resumed brings no ready: the settings are
@@ -190,8 +196,7 @@ async function followDaemon(
           startRead();
         },
         onLost: () => {
-          bots.hold();
-          holdAfter = lastRead;
+          hold();
 
           if (recordMoved(options.homeRoot, record)) {
             own.abort();
@@ -343,10 +348,11 @@ type BotTable = {
    */
   snapshot(ready: GatewayReady): void;
   /**
-   * Holds the bots' updates, and the frames, until the next settings read
-   * is applied: the stream is lost, and the settings may change before it
-   * returns; a stream that returns resumed replays what was missed, and
-   * that is handed on in order once the settings are read.
+   * Holds the bots' updates, their writes to paired accounts, and the
+   * frames, until a settings read begun after the hold is applied: a read
+   * is under way, or the stream is lost and the settings may change
+   * before it returns. The frames are handed on in order once the read
+   * lands.
    */
   hold(): void;
   /** Stops every bot, and settles once each has stopped. */

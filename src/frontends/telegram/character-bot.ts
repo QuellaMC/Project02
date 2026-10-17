@@ -194,7 +194,7 @@ async function carry(
 async function open(chat: Chat): Promise<OpenOutcome> {
   const outcome = await chat.bot
     .client()
-    .openDirectConversation(chat.characterId);
+    .openDirectConversation(chat.characterId, {signal: chat.bot.signal});
 
   if (outcome.status === 'opened') {
     chat.thread = outcome;

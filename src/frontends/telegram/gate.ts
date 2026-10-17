@@ -72,7 +72,9 @@ export function createGate(
       let outcome: PairingRequestOutcome;
 
       try {
-        outcome = await bot.client().requestPairing(connectorId, subject);
+        outcome = await bot
+          .client()
+          .requestPairing(connectorId, subject, {signal: bot.signal});
       } catch (error: unknown) {
         rethrowUnlessTransport(error);
         outbox.say(chatId, daemonDown);
