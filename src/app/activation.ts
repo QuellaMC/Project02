@@ -98,6 +98,11 @@ export type Project02ConfiguredPluginHost = {
 export type Project02ConfiguredPluginActivation = {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+  /**
+   * The merged document the activation judged, so a section's switch is
+   * read from the same view.
+   */
+  readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
   readonly activation: RuntimePluginActivationResult;
   readonly packageProvenanceByPluginId: Readonly<
     Record<string, RuntimePluginPackageProvenance>
@@ -326,6 +331,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     catalogEntries,
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
+    effectiveConfig: layeredConfig.effective,
     activation,
     pluginConfigControl: Object.freeze({
       pluginManifests,
