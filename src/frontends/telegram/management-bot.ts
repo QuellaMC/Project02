@@ -115,7 +115,7 @@ async function command(
       chat.outbox.say(chatId, await status(chat.bot));
       break;
     case '/pending':
-      await showPending(chat, chatId);
+      showPending(chat, chatId);
       break;
     case '/approve':
     case '/deny':
@@ -163,36 +163,18 @@ async function status(bot: BotContext): Promise<string> {
   }
 }
 
-/** What waits for the owner, read afresh: a card for each in the chat that asked. */
-async function showPending(chat: Chat, chatId: number): Promise<void> {
-  const client = chat.bot.client();
-  let confirmations: readonly PendingConfirmation[];
-  let pairings: readonly PairingRequest[];
+/**
+ * What waits, as the stream has told this bot: a card for each in the
+ * chat that asked, where it has none yet. The bot's own cards are the
+ * source, not a read of the daemon's lists, so a settlement that lands
+ * meanwhile cannot bring a card back.
+ */
+function showPending(chat: Chat, chatId: number): void {
+  const held =
+    chat.confirmations.postAll(chatId) + chat.pairings.postAll(chatId);
 
-  try {
-    [confirmations, pairings] = await Promise.all([
-      client.pendingConfirmations(),
-      client.pendingPairings(),
-    ]);
-  } catch (error: unknown) {
-    rethrowUnlessTransport(error);
-    chat.outbox.say(chatId, daemonDown);
-
-    return;
-  }
-
-  if (confirmations.length === 0 && pairings.length === 0) {
+  if (held === 0) {
     chat.outbox.say(chatId, sentences.nothingWaits);
-
-    return;
-  }
-
-  for (const pending of confirmations) {
-    postConfirmation(chat, pending, [chatId]);
-  }
-
-  for (const request of pairings) {
-    postPairing(chat, request, [chatId]);
   }
 }
 

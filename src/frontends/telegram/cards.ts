@@ -55,6 +55,8 @@ const endedAway = 'settled while the bot was away';
 export type Cards = {
   /** Sends the card to each chat it has not gone to; a card already held keeps its text. */
   post(key: string, text: string, chatIds: readonly number[]): void;
+  /** Sends every card held to the chat, where it has not gone; how many are held. */
+  postAll(chatId: number): number;
   /** Revises the card to how it ended, and forgets it. */
   end(key: string, ending: string): void;
   /** Ends every card but those named, as settled while the bot was away. */
@@ -78,40 +80,53 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
     }
   };
 
+  const post = (
+    key: string,
+    text: string,
+    chatIds: readonly number[],
+  ): void => {
+    if (chatIds.length === 0) {
+      return;
+    }
+
+    const card = cards.get(key) ?? {
+      text,
+      sent: new Set<number>(),
+      messages: [],
+      ended: undefined,
+    };
+    const keyboard = keyboardOf(kind, key);
+
+    cards.set(key, card);
+
+    for (const chatId of chatIds) {
+      if (card.sent.has(chatId)) {
+        continue;
+      }
+
+      card.sent.add(chatId);
+      void outbox
+        .card(chatId, oneMessage(card.text), keyboard)
+        .then(messageId => {
+          if (messageId === undefined) {
+            card.sent.delete(chatId);
+          } else if (card.ended === undefined) {
+            card.messages.push([chatId, messageId]);
+          } else {
+            outbox.revise(chatId, messageId, card.ended);
+          }
+        });
+    }
+  };
+
   return {
-    post(key, text, chatIds) {
-      if (chatIds.length === 0) {
-        return;
+    post,
+    postAll(chatId) {
+      for (const [key, card] of cards) {
+        post(key, card.text, [chatId]);
       }
 
-      const card = cards.get(key) ?? {
-        text,
-        sent: new Set<number>(),
-        messages: [],
-        ended: undefined,
-      };
-      const keyboard = keyboardOf(kind, key);
-
-      cards.set(key, card);
-
-      for (const chatId of chatIds) {
-        if (card.sent.has(chatId)) {
-          continue;
-        }
-
-        card.sent.add(chatId);
-        void outbox
-          .card(chatId, oneMessage(card.text), keyboard)
-          .then(messageId => {
-            if (messageId === undefined) {
-              card.sent.delete(chatId);
-            } else if (card.ended === undefined) {
-              card.messages.push([chatId, messageId]);
-            } else {
-              outbox.revise(chatId, messageId, card.ended);
-            }
-          });
-      }
+      return cards.size;
     },
     end,
     keep(keys) {
