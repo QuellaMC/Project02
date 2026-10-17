@@ -1850,6 +1850,75 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('hands the frames a resumed stream brings back to the bots only once the settings are read, so a chat unpaired meanwhile gets none of them', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: {...aliceIsPaired, [String(bob.id)]: 'Bob'},
+    });
+    const telegram = await startTelegram();
+    const events = createEventStreams(gateway);
+    const first = await serve(homeRoot, gateway, {events});
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+      },
+      {timeout: 5_000},
+    );
+
+    const shownToBob = textsIn(telegram, miraToken, bob.id);
+    const shownToAlice = textsIn(telegram, miraToken, alice.id);
+
+    await first.close();
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain('waiting for the daemon');
+    });
+    // While the stream is away: Bob is unpaired, and a web turn runs whole.
+    await change(gateway, home, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'pairedUsers',
+      value: aliceIsPaired,
+    });
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'from the web',
+      source: 'web',
+      clientMessageId: 'web-1',
+    });
+
+    const returned = await serve(homeRoot, gateway, {port: first.port, events});
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+          ...shownToAlice,
+          'You (web): from the web',
+          'noted: ',
+          'noted: from the web',
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    expect(textsIn(telegram, miraToken, bob.id)).toEqual(shownToBob);
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
+    await events.closeAll();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("holds a line written while the daemon's socket is closed, and carries it once the daemon is back", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,

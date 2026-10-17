@@ -329,8 +329,10 @@ type BotTable = {
    */
   snapshot(ready: GatewayReady): void;
   /**
-   * Holds the bots' updates until the next settings read is applied: the
-   * stream is lost, and the settings may change before it returns.
+   * Holds the bots' updates, and the frames, until the next settings read
+   * is applied: the stream is lost, and the settings may change before it
+   * returns; a stream that returns resumed replays what was missed, and
+   * that is handed on in order once the settings are read.
    */
   hold(): void;
   /** Stops every bot, and settles once each has stopped. */
@@ -350,8 +352,10 @@ function createBotTable(context: {
   let latest: GatewayReady | undefined;
   /** A snapshot not handed on yet: the settings it is shown by are being read. */
   let unread = false;
-  /** The bots' updates wait for a settings read: the stream was lost, or a ready came. */
+  /** The bots' updates wait for a settings read, and the frames with them: the stream was lost, or a ready came. */
   let holding = false;
+  /** Frames since the loss, handed on in order once the settings are read; a ready supersedes them. */
+  const heldFrames: GatewayEvent[] = [];
   let settle = (): void => undefined;
   let settled: Promise<void> = Promise.resolve();
   const hold = (): void => {
@@ -444,16 +448,22 @@ function createBotTable(context: {
         );
       }
 
-      if (holding) {
-        holding = false;
-        settle();
-      }
-
       if (unread && latest !== undefined) {
         unread = false;
 
         for (const bot of running.values()) {
           bot.snapshot(latest);
+        }
+      }
+
+      if (holding) {
+        holding = false;
+        settle();
+
+        for (const frame of heldFrames.splice(0)) {
+          for (const bot of running.values()) {
+            bot.dispatch(frame);
+          }
         }
       }
     },
@@ -462,15 +472,24 @@ function createBotTable(context: {
         latest = movedOn(latest, event);
       }
 
-      if (!unread) {
-        for (const bot of running.values()) {
-          bot.dispatch(event);
-        }
+      if (unread) {
+        return;
+      }
+
+      if (holding) {
+        heldFrames.push(event);
+
+        return;
+      }
+
+      for (const bot of running.values()) {
+        bot.dispatch(event);
       }
     },
     snapshot(ready) {
       latest = ready;
       unread = true;
+      heldFrames.length = 0;
       hold();
     },
     hold,
