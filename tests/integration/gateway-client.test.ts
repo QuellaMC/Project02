@@ -55,7 +55,7 @@ describe('gateway reference client', () => {
   it('drives a conversation end to end from the printed URL', async () => {
     const {client, close} = await startServer();
 
-    await expect(client.health()).resolves.toMatchObject({protocolVersion: 6});
+    await expect(client.health()).resolves.toMatchObject({protocolVersion: 7});
     await expect(client.startCharacter('mira')).resolves.toMatchObject({
       status: 'settled',
       character: {id: 'mira', state: 'ready'},
@@ -109,12 +109,45 @@ describe('gateway reference client', () => {
     await close();
   });
 
-  it('reads what a connector runs on', async () => {
+  it('reads what a connector runs on, and asks, lists and answers its pairings, handing on each frame', async () => {
     const {client, gateway, close} = await startServer();
     const view = await client.connectorConfig('telegram');
 
     expect(view).toMatchObject({status: 'ok', connectorId: 'telegram'});
     expect(view).toEqual(gateway.connectorConfig('telegram'));
+
+    const kinds: string[] = [];
+    const abort = new AbortController();
+    let listening = false;
+    const following = client.events(event => kinds.push(event.kind), {
+      signal: abort.signal,
+      onReady: () => {
+        listening = true;
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(listening).toBe(true);
+    });
+
+    const asked = await client.requestPairing('telegram', {
+      id: '123456789',
+      label: 'Alice (@alice)',
+    });
+
+    if (asked.status !== 'pending') {
+      expect.fail(`The request was ${asked.status}.`);
+    }
+
+    await expect(client.pendingPairings()).resolves.toEqual([asked.request]);
+    await expect(
+      client.settlePairing(asked.request.code, 'denied'),
+    ).resolves.toEqual({status: 'settled', decision: 'denied'});
+    await vi.waitFor(() => {
+      expect(kinds).toEqual(['pairing_requested', 'pairing_settled']);
+    });
+    abort.abort();
+    await following;
     await close();
   });
 
@@ -279,9 +312,9 @@ describe('gateway reference client', () => {
             formatEventFrame(
               'ready',
               JSON.stringify({
-                protocolVersion: 6,
+                protocolVersion: 7,
                 health: {
-                  protocolVersion: 6,
+                  protocolVersion: 7,
                   homeRoot: '/nowhere',
                   config: {diagnostics: []},
                   packages: {diagnostics: []},

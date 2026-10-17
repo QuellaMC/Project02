@@ -11,10 +11,11 @@ import type {
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
 import {
-  answerConfirmationBody,
+  answerBody,
   configChangeBody,
   gatewayMessageBody,
   openConversationBody,
+  pairingRequestBody,
   type BodyValidator,
 } from './schemas.ts';
 
@@ -131,7 +132,7 @@ export function createApiRouter(
       ),
     )
     .get('/confirmations', c => c.json(gateway.pendingConfirmations(), 200))
-    .post('/confirmations/:id', jsonBody(answerConfirmationBody), c =>
+    .post('/confirmations/:id', jsonBody(answerBody), c =>
       c.json(
         gateway.answerConfirmation(
           c.req.param('id'),
@@ -148,6 +149,22 @@ export function createApiRouter(
     )
     .get('/connectors/:id/config', c =>
       c.json(gateway.connectorConfig(c.req.param('id')), 200),
+    )
+    .post('/connectors/:id/pairing', jsonBody(pairingRequestBody), c =>
+      c.json(
+        gateway.requestPairing(c.req.param('id'), c.req.valid('json').subject),
+        200,
+      ),
+    )
+    .get('/pairing', c => c.json(gateway.pendingPairings(), 200))
+    .post('/pairing/:code', jsonBody(answerBody), async c =>
+      c.json(
+        await gateway.settlePairing(
+          c.req.param('code'),
+          c.req.valid('json').decision,
+        ),
+        200,
+      ),
     )
     .get('/events', eventsQuery, c =>
       events.handler(c, c.req.valid('query').connector),

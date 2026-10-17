@@ -1,20 +1,30 @@
 import {Ajv, type JSONSchemaType, type SchemaObject} from 'ajv';
 
-import {clientStampPattern} from '../../core/index.ts';
+import {
+  clientStampPattern,
+  maxSpeakerDisplayNameLength,
+} from '../../core/index.ts';
 import {runtimeConfigSectionNamespaces} from '../../runtime/config/index.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import type {
   ConfigChange,
   GatewayConfirmationDecision,
   GatewayMessage,
+  PairingDecision,
+  PairingSubject,
 } from '../api/contract.ts';
 
 export type OpenConversationBody = {
   readonly characterId: string;
 };
 
-export type AnswerConfirmationBody = {
-  readonly decision: GatewayConfirmationDecision;
+/** One shape answers a confirmation and a pairing request alike. */
+export type AnswerBody = {
+  readonly decision: GatewayConfirmationDecision | PairingDecision;
+};
+
+export type PairingRequestBody = {
+  readonly subject: PairingSubject;
 };
 
 export type BodyValidation<T> =
@@ -69,10 +79,32 @@ const gatewayMessageSchema: JSONSchemaType<GatewayMessage> = {
   additionalProperties: false,
 };
 
-const answerConfirmationBodySchema: JSONSchemaType<AnswerConfirmationBody> = {
+const answerBodySchema: JSONSchemaType<AnswerBody> = {
   type: 'object',
   properties: {decision: {type: 'string', enum: ['approved', 'denied']}},
   required: ['decision'],
+  additionalProperties: false,
+};
+
+/** The façade judges the name's one line; the transport bounds its length. */
+const pairingRequestBodySchema: JSONSchemaType<PairingRequestBody> = {
+  type: 'object',
+  properties: {
+    subject: {
+      type: 'object',
+      properties: {
+        id: clientStamp,
+        label: {
+          type: 'string',
+          minLength: 1,
+          maxLength: maxSpeakerDisplayNameLength,
+        },
+      },
+      required: ['id', 'label'],
+      additionalProperties: false,
+    },
+  },
+  required: ['subject'],
   additionalProperties: false,
 };
 
@@ -201,9 +233,11 @@ export const gatewayMessageBody = createBodyValidator(
   gatewayMessageSchema,
 );
 
-export const answerConfirmationBody = createBodyValidator(
-  'The answer',
-  answerConfirmationBodySchema,
+export const answerBody = createBodyValidator('The answer', answerBodySchema);
+
+export const pairingRequestBody = createBodyValidator(
+  'The pairing request',
+  pairingRequestBodySchema,
 );
 
 export const configChangeBody = createBodyValidator<ConfigChange>(

@@ -4,12 +4,16 @@ import {
   type RuntimeConfigSectionDeclaration,
   type RuntimeConfigValue,
 } from '../runtime/config/index.ts';
-import {ownJsonRecordValue} from '../shared/json-boundary.ts';
+import {
+  isJsonBoundaryObject,
+  ownJsonRecordValue,
+} from '../shared/json-boundary.ts';
 import type {
   ConnectorConfigEntry,
   ConnectorConfigView,
 } from './api/contract.ts';
 import {resolveScope, sectionViewOf, type ScopeResolution} from './config.ts';
+import type {AllowlistReading} from './pairing.ts';
 
 /**
  * What a connector runs on, for the home and for each installed character
@@ -93,6 +97,33 @@ function entryOf(
           : [],
       ),
     ),
+  });
+}
+
+/** A connector's allowlist field as the home's document holds it; anything but an object holds no one. */
+export function readConnectorAllowlist(
+  home: Project02Home,
+  connectorId: string,
+  field: string,
+): AllowlistReading {
+  const scope = resolveScope(home, {scope: 'global'});
+
+  if ('status' in scope) {
+    return Object.freeze({status: 'refused' as const, message: scope.message});
+  }
+
+  const value = ownJsonRecordValue(
+    ownJsonRecordValue(
+      scope.sectionResolution.sectionConfigs.connectors,
+      connectorId,
+    ),
+    field,
+  )?.value;
+
+  return Object.freeze({
+    status: 'ok' as const,
+    fingerprint: scope.fingerprint,
+    accounts: value !== undefined && isJsonBoundaryObject(value) ? value : {},
   });
 }
 

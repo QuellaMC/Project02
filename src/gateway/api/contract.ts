@@ -18,7 +18,7 @@ import type {LocalRuntimeStorageContractError} from '../../runtime/storage/index
  * Bumped when a client could no longer read what the daemon says. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 6;
+export const gatewayProtocolVersion = 7;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be
@@ -346,7 +346,6 @@ export type ConfirmationAnswerStatus = 'answered' | 'expired' | 'unknown';
 
 export type AnswerOutcome = {readonly status: ConfirmationAnswerStatus};
 
-/** A parked tool confirmation, as the stream announced it and the list shows it. */
 /** The submission a turn ran for: enough for any surface to know whose it is. */
 export type TurnIdentity = {
   readonly conversationId: string;
@@ -354,6 +353,7 @@ export type TurnIdentity = {
   readonly clientMessageId: string;
 };
 
+/** A parked tool confirmation, as the stream announced it and the list shows it. */
 export type PendingConfirmation = {
   readonly characterId: string;
   /** Unique across the whole gateway; answerConfirmation routes by it alone. */
@@ -367,6 +367,55 @@ export type PendingConfirmation = {
    */
   readonly turn?: TurnIdentity;
 };
+
+/** The account a connector asks to let in: its own id for it, and the name the owner sees. */
+export type PairingSubject = {
+  readonly id: string;
+  readonly label: string;
+};
+
+/**
+ * An account waiting for the owner's answer, under a code any surface can
+ * show and answer by, until `expiresAt` — then the daemon settles it as
+ * expired.
+ */
+export type PairingRequest = {
+  readonly connectorId: string;
+  /** Six digits, unique among the requests waiting. */
+  readonly code: string;
+  readonly subject: PairingSubject;
+  readonly requestedAt: string;
+  readonly expiresAt: number;
+};
+
+/**
+ * `paired`: the home already lets the account in, so nothing is asked. A
+ * connector that does not pair, an account not named by one token and one
+ * line, or a home document that does not load is refused with the reason.
+ */
+export type PairingRequestOutcome =
+  | {readonly status: 'pending'; readonly request: PairingRequest}
+  | {readonly status: 'paired'}
+  | {
+      readonly status: 'refused';
+      readonly reason:
+        'unknown_connector' | 'config_unloadable' | 'invalid_subject';
+      readonly message: string;
+    };
+
+export type PairingDecision = 'approved' | 'denied';
+
+/**
+ * `expired`: the deadline had passed, so the daemon settled the request as
+ * expired instead — as with a confirmation, the client is never the judge
+ * of the deadline. `failed`: the approval could not be written, and the
+ * request still waits.
+ */
+export type PairingSettleOutcome =
+  | {readonly status: 'settled'; readonly decision: PairingDecision}
+  | {readonly status: 'expired'}
+  | {readonly status: 'unknown'}
+  | {readonly status: 'failed'; readonly message: string};
 
 /** One open draft of a running turn: the reply's text so far under that id. */
 export type RunningDraft = {
@@ -396,6 +445,7 @@ export type GatewayReady = {
   readonly protocolVersion: typeof gatewayProtocolVersion;
   readonly health: GatewayHealth;
   readonly confirmations: readonly PendingConfirmation[];
+  readonly pairings: readonly PairingRequest[];
   readonly turns: readonly RunningTurn[];
 };
 
@@ -441,6 +491,15 @@ export type GatewayEvent =
       readonly characterId: string;
       readonly id: string;
     } & ConfirmationSettlement)
+  | ({readonly kind: 'pairing_requested'} & PairingRequest)
+  | {
+      readonly kind: 'pairing_settled';
+      readonly connectorId: string;
+      readonly code: string;
+      readonly subject: PairingSubject;
+      /** The owner's answer, or `expired` when the deadline passed without one. */
+      readonly decision: PairingDecision | 'expired';
+    }
   | {
       readonly kind: 'state_changed';
       readonly characterId: string;
@@ -565,6 +624,21 @@ export type Gateway = {
   applyConfigChange(change: ConfigChange): Promise<ConfigChangeOutcome>;
   /** A connector reads it again on every `ready` and every `health_changed`. */
   connectorConfig(connectorId: string): ConnectorConfigView;
+  /**
+   * Asks the owner to let in an account a connector does not know: the
+   * request already waiting for it, or a new one under a fresh code.
+   */
+  requestPairing(
+    connectorId: string,
+    subject: PairingSubject,
+  ): PairingRequestOutcome;
+  /** What waits for the owner's answer right now, oldest first. */
+  pendingPairings(): readonly PairingRequest[];
+  /** An approval writes the account into the connector's allowlist in the home's document. */
+  settlePairing(
+    code: string,
+    decision: PairingDecision,
+  ): Promise<PairingSettleOutcome>;
   /**
    * Counts a connector's process as on the stream: its event stream
    * registers here while it is open, and the release is what the stream's

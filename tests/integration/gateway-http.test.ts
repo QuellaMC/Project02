@@ -223,7 +223,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 6,
+      protocolVersion: 7,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -341,6 +341,43 @@ describe('gateway over HTTP', () => {
     expect(await errorOf(foreignHost)).toMatchObject({
       code: 'misdirected_host',
     });
+  });
+
+  it('asks, lists and answers a pairing under a 200, and refuses a subject of the wrong shape', async () => {
+    const {request, post} = await createHttpHarness();
+    const subject = {id: '123456789', label: 'Alice (@alice)'};
+    const asked = await post('/api/connectors/telegram/pairing', {subject});
+
+    expect(asked.status).toBe(200);
+
+    const outcome = (await asked.json()) as {
+      status: string;
+      request: {code: string};
+    };
+
+    expect(outcome).toMatchObject({
+      status: 'pending',
+      request: {connectorId: 'telegram', subject},
+    });
+    await expect((await request('/api/pairing')).json()).resolves.toEqual([
+      outcome.request,
+    ]);
+
+    const answer = `/api/pairing/${outcome.request.code}`;
+
+    await expect(
+      (await post(answer, {decision: 'denied'})).json(),
+    ).resolves.toEqual({status: 'settled', decision: 'denied'});
+    await expect(
+      (await post(answer, {decision: 'denied'})).json(),
+    ).resolves.toEqual({status: 'unknown'});
+
+    const misshaped = await post('/api/connectors/telegram/pairing', {
+      subject: {id: 'not one token', label: 'Alice'},
+    });
+
+    expect(misshaped.status).toBe(400);
+    expect(await errorOf(misshaped)).toMatchObject({code: 'invalid_request'});
   });
 
   it('answers an unknown API route with the envelope, behind the same auth', async () => {
@@ -463,7 +500,7 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 6,
+      protocolVersion: 7,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
       turns: [],
@@ -603,7 +640,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 6,
+          protocolVersion: 7,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},
@@ -611,6 +648,7 @@ describe('gateway over HTTP', () => {
           connectors: [],
         }),
         pendingConfirmations: () => [],
+        pendingPairings: () => [],
         connectorPresent: () => () => undefined,
       },
       {heartbeatMs: 20, replayBytes: 3 * frameBytes + 1},
@@ -910,7 +948,7 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 6,
+          protocolVersion: 7,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},
@@ -918,6 +956,7 @@ describe('gateway over HTTP', () => {
           connectors: [],
         }),
         pendingConfirmations: () => [],
+        pendingPairings: () => [],
         connectorPresent: () => () => undefined,
       },
       {graceMs: 200},
