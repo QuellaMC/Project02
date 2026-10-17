@@ -27,14 +27,25 @@ import {
   type TurnOutcome,
 } from '../api/contract.ts';
 import type {GatewayApp} from '../http/app.ts';
+import {describeFetchFailure} from '../../shared/fetch-failure.ts';
 import {createSseFrameSplitter} from '../../shared/sse.ts';
 
 /** Where a client finds the daemon: the line `serve` prints, exported. */
 export const gatewayUrlEnvVarName = 'PROJECT02_GATEWAY';
 
-export type GatewayClientOptions =
-  /** The line `serve` prints: `http://127.0.0.1:<port>/#token=<token>`. */
-  {readonly url: string} | {readonly baseUrl: string; readonly token: string};
+export type GatewayClientOptions = (
+  | {
+      /** The line `serve` prints: `http://127.0.0.1:<port>/#token=<token>`. */
+      readonly url: string;
+    }
+  | {readonly baseUrl: string; readonly token: string}
+) & {
+  /**
+   * The platform's fetch unless one is handed in; a Node client that parks
+   * turns on confirmations hands one without Node's five-minute bound.
+   */
+  readonly fetch?: typeof fetch;
+};
 
 /** Cancels a verb's request: its socket is destroyed and the call rejects. */
 export type GatewayCallOptions = {
@@ -89,9 +100,8 @@ export type GatewayClient = {
     options?: GatewayCallOptions,
   ): Promise<OpenOutcome>;
   /**
-   * Waits for the turn and is never retried. The platform's fetch sets
-   * the only bound: a browser has none, Node's gives a response five
-   * minutes.
+   * Waits for the turn and is never retried. The fetch sets the only
+   * bound: a browser's has none, Node's gives a response five minutes.
    */
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
   history(
@@ -176,6 +186,7 @@ export function createGatewayClient(
   options: GatewayClientOptions,
 ): GatewayClient {
   const {baseUrl, token} = resolveOptions(options);
+  const guardedFetch = createGuardedFetch(options.fetch ?? fetch);
   const headers = {authorization: `Bearer ${token}`};
   const api = hc<GatewayApp>(baseUrl, {
     headers,
@@ -705,54 +716,42 @@ function abortedRequest(): GatewayClientError {
 }
 
 /**
- * The platform's fetch, guarded. Every request runs under a signal of its
- * own, derived from the caller's: the platform keeps a listener on a
- * signal it is handed until the request is collected, and a signal reused
- * across reconnects must not gather one per stream. A rejection is named
- * for what it is — the caller's abort, or a daemon that could not be
- * reached, with the platform's reason.
+ * A fetch, guarded. Every request runs under a signal of its own, derived
+ * from the caller's: the platform keeps a listener on a signal it is
+ * handed until the request is collected, and a signal reused across
+ * reconnects must not gather one per stream. A rejection is named for what
+ * it is — the caller's abort, or a daemon that could not be reached, with
+ * the fetch's reason.
  */
-function guardedFetch(
-  input: string | URL | Request,
-  init?: RequestInit,
-): Promise<Response> {
-  const {signal, ...rest} = init ?? {};
-  const target =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input.url;
+function createGuardedFetch(transport: typeof fetch): typeof fetch {
+  return (input, init) => {
+    const {signal, ...rest} = init ?? {};
+    const target =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
 
-  if (signal?.aborted === true) {
-    return Promise.reject(abortedRequest());
-  }
-
-  return fetch(input, {
-    ...rest,
-    ...(signal === undefined || signal === null
-      ? {}
-      : {signal: AbortSignal.any([signal])}),
-  }).catch((error: unknown) => {
     if (signal?.aborted === true) {
-      throw abortedRequest();
+      return Promise.reject(abortedRequest());
     }
 
-    throw new GatewayClientError(
-      0,
-      'unreachable',
-      `The daemon at ${target} could not be reached: ${describeFailure(error)}`,
-    );
-  });
-}
+    return transport(input, {
+      ...rest,
+      ...(signal === undefined || signal === null
+        ? {}
+        : {signal: AbortSignal.any([signal])}),
+    }).catch((error: unknown) => {
+      if (signal?.aborted === true) {
+        throw abortedRequest();
+      }
 
-/** The platform says `fetch failed` and keeps the reason in `cause`. */
-function describeFailure(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-
-  return error.cause instanceof Error
-    ? `${error.message}: ${error.cause.message}`
-    : error.message;
+      throw new GatewayClientError(
+        0,
+        'unreachable',
+        `The daemon at ${target} could not be reached: ${describeFetchFailure(error)}`,
+      );
+    });
+  };
 }
