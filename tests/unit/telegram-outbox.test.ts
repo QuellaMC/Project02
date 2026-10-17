@@ -10,12 +10,21 @@ import type {
 } from '../../src/frontends/telegram/bot.ts';
 import {createOutbox} from '../../src/frontends/telegram/outbox.ts';
 
-/** A Bot API that records what is written and answers as Telegram does, but for the sends (by ordinal) and edits told to fail. */
+/**
+ * A Bot API that records what is written and answers as Telegram does,
+ * but for the sends (by ordinal) and edits told to fail, and one send
+ * held until the test lets it through.
+ */
 function recordingApi(failing: {
   editsToFail?: number;
   failSendAt?: ReadonlySet<number>;
+  holdSendAt?: number;
 }) {
   const calls: {readonly method: string; readonly text: string}[] = [];
+  let release = (): void => undefined;
+  const held = new Promise<void>(resolve => {
+    release = resolve;
+  });
   const message = (
     id: number,
   ): BotApiOutcome<{messageId: number; chatId: number; chatType: string}> => ({
@@ -28,14 +37,20 @@ function recordingApi(failing: {
   const api: BotApi = {
     getMe: unused,
     getUpdates: unused,
-    sendMessage: ({text}) => {
+    sendMessage: async ({text}) => {
       calls.push({method: 'sendMessage', text});
 
-      if (failing.failSendAt?.has(calls.length) === true) {
-        return Promise.resolve({ok: false, code: 0, description: 'no answer'});
+      const ordinal = calls.length;
+
+      if (failing.holdSendAt === ordinal) {
+        await held;
       }
 
-      return Promise.resolve(message(calls.length));
+      if (failing.failSendAt?.has(ordinal) === true) {
+        return {ok: false, code: 0, description: 'no answer'};
+      }
+
+      return message(ordinal);
     },
     editMessageText: ({messageId, text}) => {
       calls.push({method: 'editMessageText', text});
@@ -58,7 +73,13 @@ function recordingApi(failing: {
     deleteWebhook: unused,
   };
 
-  return {api, calls};
+  return {
+    api,
+    calls,
+    release: () => {
+      release();
+    },
+  };
 }
 
 /**
@@ -88,6 +109,7 @@ function miraBot(
   return {
     bot: {
       api,
+      id: 987654,
       username: 'mira_bot',
       client: () => {
         throw new Error('not called here');
@@ -173,6 +195,23 @@ describe('Telegram outbox', () => {
     await vi.waitFor(() => {
       expect(calls).toHaveLength(1);
     });
+  });
+
+  it("skips a chat whose account was unpaired while an earlier chat's write was under way", async () => {
+    const {api, calls, release} = recordingApi({holdSendAt: 1});
+    const pairedUsers: Record<string, string> = {'1': 'Alice', '2': 'Bob'};
+    const outbox = createOutbox(miraBot(api, [], pairedUsers).bot);
+
+    outbox.commit('d', 'noted: hello', true);
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    delete pairedUsers['2'];
+    release();
+    await new Promise(resolve => {
+      setTimeout(resolve, 20);
+    });
+    expect(calls).toEqual([{method: 'sendMessage', text: 'noted: hello'}]);
   });
 
   it("answers a button press with a toast within Telegram's 200 characters", async () => {

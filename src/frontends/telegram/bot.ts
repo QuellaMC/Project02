@@ -42,6 +42,8 @@ export type BotSettings = (
 /** What a bot's rules run on: the daemon and the settings are read as they are at each use. */
 export type BotContext = {
   readonly api: BotApi;
+  /** As Telegram numbers the bot: stable where a username is not. */
+  readonly id: number;
   /** As Telegram named the bot. */
   readonly username: string;
   readonly client: () => GatewayClient;
@@ -153,6 +155,7 @@ export function startBot(options: {
     );
     rules = options.rules({
       api,
+      id: me.id,
       username,
       client: () => client,
       settings: () => settings,

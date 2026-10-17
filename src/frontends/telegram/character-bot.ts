@@ -28,7 +28,7 @@ import {
   readPress,
   type Cards,
 } from './cards.ts';
-import {createGate, paired, type Gate} from './gate.ts';
+import {createGate, type Gate} from './gate.ts';
 import {createOutbox, type Outbox} from './outbox.ts';
 
 /** What a character's bot says in a chat, but for the gate's words. */
@@ -131,7 +131,7 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
     outbox.say(chatId, sentences.hello(nameOf(chat)));
   } else {
     outbox.typing(chatId);
-    void carry(chat, chatId, lineId(message), text);
+    void carry(chat, chatId, lineId(chat, message), text);
   }
 }
 
@@ -290,8 +290,8 @@ function raiseCard(chat: Chat, pending: PendingConfirmation): void {
 
   chat.cards.post(
     pending.id,
-    confirmationText(pending, nameOf(chat)),
-    account !== undefined && paired(chat.bot, account)
+    () => confirmationText(pending, nameOf(chat)),
+    account !== undefined && inAudience(chat, account)
       ? [Number(account)]
       : chat.outbox.paired(),
   );
@@ -358,7 +358,7 @@ function ended(
   if (
     event.source === chat.source &&
     (event.status === 'rejected' || event.status === 'failed') &&
-    paired(chat.bot, account)
+    inAudience(chat, account)
   ) {
     chat.outbox.say(
       Number(account),
@@ -444,12 +444,22 @@ function nameOf(chat: Chat): string {
   return botNames(chat.bot.settings()).owner;
 }
 
-/** A line's id names its chat and message, so a resend after a lost answer joins its turn. */
-function lineId(message: TelegramMessage): string {
-  return `${String(message.chatId)}.${String(message.messageId)}`;
+/** Whether the account's chat is one this bot writes to, by the outbox's word: its read of the settings, and whom the daemon let in since. */
+function inAudience(chat: Chat, account: string): boolean {
+  return chat.outbox.paired().includes(Number(account));
+}
+
+/**
+ * A line's id names the bot, its chat and the message, so a resend after
+ * a lost answer joins its turn; the bot, because Telegram numbers
+ * messages within a chat, and a bot that replaces this one on her token
+ * opens a chat of its own with the same account, numbered from one again.
+ */
+function lineId(chat: Chat, message: TelegramMessage): string {
+  return `${String(chat.bot.id)}.${String(message.chatId)}.${String(message.messageId)}`;
 }
 
 /** The account whose chat a line of this bot's came from. */
 function chatOfLine(clientMessageId: string): string {
-  return clientMessageId.split('.', 1)[0] ?? '';
+  return clientMessageId.split('.')[1] ?? '';
 }

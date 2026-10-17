@@ -908,7 +908,7 @@ describe('Telegram connector', () => {
         role: 'user',
         text: line,
         source: 'telegram:mira_bot',
-        clientMessageId: '4242.7',
+        clientMessageId: '987654.4242.7',
       },
       {role: 'character', text: reply},
     ]);
@@ -1582,6 +1582,63 @@ describe('Telegram connector', () => {
       {timeout: 5_000},
     );
     expect(opens).toBe(2);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("takes a line from a bot that replaced hers though Telegram numbers its messages from one again, since a line's stamp names the bot", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'first'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: first',
+        );
+      },
+      {timeout: 5_000},
+    );
+    await change(gateway, mira, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'botToken',
+      value: replacedToken,
+    });
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(
+        'Telegram: @mira_new_bot answers for Mira.',
+      );
+    });
+    telegram.push(replacedToken, messageFrom(alice, 1, 'second'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, replacedToken, alice.id)).toContain(
+          'noted: second',
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(
+      lines
+        .filter(line => line.role === 'user')
+        .map(line => line.clientMessageId),
+    ).toEqual(['987654.4242.1', '987655.4242.1']);
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();

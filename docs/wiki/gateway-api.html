@@ -797,7 +797,7 @@ data: {…}</code></pre>
       <p>
         Telegram is the first connector, run as <code>pnpm telegram</code>. A
         line it carries is stamped <code>telegram:&lt;bot username&gt;</code>,
-        with <code>&lt;chat id&gt;.&lt;message id&gt;</code> as its
+        with <code>&lt;bot id&gt;.&lt;chat id&gt;.&lt;message id&gt;</code> as its
         <code>clientMessageId</code>, so the same message carried again joins
         its turn. It answers private chats only, keeps nothing between runs —
         each starts from the record, its <code>ready</code> and its config
