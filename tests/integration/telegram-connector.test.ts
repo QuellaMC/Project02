@@ -18,8 +18,9 @@ import {
   type ConfigTarget,
   type Gateway,
   type PairingRequest,
+  type PendingConfirmation,
 } from '../../src/gateway/index.ts';
-import {createRuntimePluginHost} from '../../src/plugins/index.ts';
+import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
 import {
   characterDataDirPath,
   ensureCharacterDataDir,
@@ -53,6 +54,7 @@ const replacedToken = '987654:replaced';
 const home: ConfigTarget = {scope: 'global'};
 const mira: ConfigTarget = {scope: 'character', characterId: 'mira'};
 const telegramSection = {namespace: 'connectors', id: 'telegram'} as const;
+const managementOn = 'Telegram: management bot @home_bot is on.';
 const miraAnswers = 'Telegram: @mira_bot answers for Mira.';
 const novaAnswers = 'Telegram: @nova_bot answers for Nova.';
 
@@ -73,10 +75,11 @@ const carol: Account = {id: 6161, first_name: 'Carol'};
 const aliceIsPaired = {[String(alice.id)]: 'Alice'};
 
 /**
- * Mira and Nova, answered by the scripted model, with Telegram authored in
- * the home's document — the management bot's token, and the accounts
- * paired when a test names them — and in Mira's, her bot's token, unless
- * a test writes another stanza for either character.
+ * Mira and Nova, answered by the scripted model, with the demo-config
+ * plugin on, so a `confirm` line asks for a confirmation; and Telegram
+ * authored in the home's document — the management bot's token, and the
+ * accounts paired when a test names them — and in Mira's, her bot's token,
+ * unless a test writes another stanza for either character.
  */
 async function createTelegramHome(
   stanzas: {
@@ -90,6 +93,7 @@ async function createTelegramHome(
 
   writeTestCharacterPackage(homeRoot, {id: 'nova', displayName: 'Nova'});
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    plugins: {[demoConfigPluginId]: {enabled: true}},
     connectors: {
       telegram: {
         config: {
@@ -116,7 +120,6 @@ async function createTelegramHome(
     gateway: createGateway({
       location: {storeRoot: homeRoot},
       roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
-      createPluginHost: () => createRuntimePluginHost({plugins: []}),
     }),
   };
 }
@@ -271,6 +274,100 @@ function messageFrom(
   };
 }
 
+/** A press of a card's button by an account, as Telegram's wire carries it, under the update's id. */
+function pressOn(
+  account: Account,
+  card: {readonly messageId: number},
+  data: string,
+): TelegramWireUpdate {
+  lastUpdateId += 1;
+
+  return {
+    update_id: lastUpdateId,
+    callback_query: {
+      id: String(lastUpdateId),
+      from: {...account, is_bot: false},
+      message: {
+        message_id: card.messageId,
+        date: 0,
+        chat: {id: account.id, type: 'private'},
+      },
+      chat_instance: String(account.id),
+      data,
+    },
+  };
+}
+
+/** The bodies of a bot's calls of one method, in order. */
+function bodiesOf(
+  telegram: FakeTelegram,
+  token: string,
+  method: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  return telegram
+    .calls(token)
+    .flatMap(call =>
+      call.method === method && isJsonRecord(call.body) ? [call.body] : [],
+    );
+}
+
+/**
+ * Each card a bot sent to one chat: the id the fake gave its message — a
+ * bot's messages are numbered from 1 as they are sent — its text, and its
+ * buttons.
+ */
+function cardsIn(telegram: FakeTelegram, token: string, chatId: number) {
+  return bodiesOf(telegram, token, 'sendMessage').flatMap((body, index) =>
+    body['chat_id'] === chatId && body['reply_markup'] !== undefined
+      ? [
+          {
+            messageId: index + 1,
+            text: body['text'],
+            keyboard: body['reply_markup'],
+          },
+        ]
+      : [],
+  );
+}
+
+/** The buttons of a card that asks about one confirmation or pairing request. */
+function decisionButtons(letter: 'c' | 'p', key: string) {
+  return {
+    inline_keyboard: [
+      [
+        {text: 'Approve', callback_data: `${letter}:${key}:a`},
+        {text: 'Deny', callback_data: `${letter}:${key}:d`},
+      ],
+    ],
+  };
+}
+
+/** A moment as a card says it: the hour and minute, as the web page shows them. */
+function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** The card a confirmation of Mira's gets, naming the surface it was raised on when one is given. */
+function confirmationCard(
+  pending: PendingConfirmation,
+  raisedOn?: string,
+): string {
+  return [
+    `Mira wants to: ${pending.request.summary}` +
+      (raisedOn === undefined ? '' : ` · raised on ${raisedOn}`),
+    JSON.stringify(pending.request.preview, null, 2),
+    `Expires at ${clockTime(pending.deadlineAt)}`,
+  ].join('\n');
+}
+
+/** The card a pairing request gets on the management bot. */
+function pairingCard(request: PairingRequest): string {
+  return `${request.subject.label} wants to pair · code ${request.code} · expires at ${clockTime(request.expiresAt)}`;
+}
+
 /** Each call a bot made to one chat, in order, with the text it carried. */
 function callsTo(
   telegram: FakeTelegram,
@@ -328,6 +425,22 @@ function pairingOf(
 
     return request;
   });
+}
+
+/** The confirmation waiting, once a turn has asked for one. */
+function confirmationOf(gateway: Gateway): Promise<PendingConfirmation> {
+  return vi.waitFor(
+    () => {
+      const [pending] = gateway.pendingConfirmations();
+
+      if (pending === undefined) {
+        throw new Error('Nothing waits for a confirmation yet.');
+      }
+
+      return pending;
+    },
+    {timeout: 5_000},
+  );
 }
 
 /** Nothing polls these tokens: an update pushed to each is never asked for. */
@@ -506,9 +619,7 @@ describe('Telegram connector', () => {
     const connector = runConnector(homeRoot, telegram);
 
     await vi.waitFor(() => {
-      expect(connector.stdout()).toContain(
-        'Telegram: management bot @home_bot is on.',
-      );
+      expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await change(gateway, home, {
@@ -570,9 +681,7 @@ describe('Telegram connector', () => {
     const connector = runConnector(homeRoot, telegram);
 
     await vi.waitFor(() => {
-      expect(connector.stdout()).toContain(
-        'Telegram: management bot @home_bot is on.',
-      );
+      expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
       expect(connector.stdout()).toContain(
         'Telegram: @nova_bot answers for Nova.',
@@ -1098,6 +1207,258 @@ describe('Telegram connector', () => {
     expect(
       lines.filter(line => line.role === 'user').map(line => line.text),
     ).toEqual(['hello']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("asks for a confirmation of her turn in the chat its line came from, takes the button's answer, and edits the card to how it ended", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
+
+    const pending = await confirmationOf(gateway);
+    const card = confirmationCard(pending);
+
+    await vi.waitFor(() => {
+      expect(cardsIn(telegram, miraToken, alice.id)).toEqual([
+        {messageId: 1, text: card, keyboard: decisionButtons('c', pending.id)},
+      ]);
+    });
+
+    const press = pressOn(alice, {messageId: 1}, `c:${pending.id}:a`);
+
+    telegram.push(miraToken, press);
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain('done');
+        expect(bodiesOf(telegram, miraToken, 'answerCallbackQuery')).toEqual([
+          {callback_query_id: String(press.update_id), text: 'Approved.'},
+        ]);
+        expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
+          {chat_id: alice.id, message_id: 1, text: `${card} · approved`},
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('leaves a confirmation the web raised out of her chat, and shows it on the management bot naming the web until the web answers it', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(managementOn);
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    // Her bot has her conversation open once it has carried a line there.
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const ref = await openDirect(gateway, 'mira');
+    const turn = gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'confirm',
+      source: 'web',
+      clientMessageId: 'web-confirm',
+    });
+    const pending = await confirmationOf(gateway);
+    const card = confirmationCard(pending, 'web');
+
+    await vi.waitFor(() => {
+      expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
+        {messageId: 1, text: card, keyboard: decisionButtons('c', pending.id)},
+      ]);
+    });
+    expect(gateway.answerConfirmation(pending.id, 'denied')).toEqual({
+      status: 'answered',
+    });
+    await expect(turn).resolves.toMatchObject({status: 'completed'});
+    await vi.waitFor(
+      () => {
+        expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
+          {chat_id: alice.id, message_id: 1, text: `${card} · denied`},
+        ]);
+        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe('done');
+      },
+      {timeout: 5_000},
+    );
+    // The turn's reply came after any card her chat would have had.
+    expect(cardsIn(telegram, miraToken, alice.id)).toEqual([]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('answers the commands of a paired account on the management bot, and pairs an account from the card it shows', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(managementOn);
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(homeToken, messageFrom(alice, 1, '/status'));
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, homeToken, alice.id)).toEqual([
+        'Mira: ready\nNova: not started',
+      ]);
+    });
+    telegram.push(miraToken, messageFrom(bob, 1, 'let me in'));
+
+    const request = await pairingOf(gateway, bob);
+    const card = pairingCard(request);
+
+    await vi.waitFor(() => {
+      expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
+        {
+          messageId: 2,
+          text: card,
+          keyboard: decisionButtons('p', request.code),
+        },
+      ]);
+    });
+
+    const press = pressOn(alice, {messageId: 2}, `p:${request.code}:a`);
+
+    telegram.push(homeToken, press);
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
+        'Paired. Mira is listening.',
+      );
+      expect(bodiesOf(telegram, homeToken, 'answerCallbackQuery')).toEqual([
+        {callback_query_id: String(press.update_id), text: 'Approved.'},
+      ]);
+      expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
+        {chat_id: alice.id, message_id: 2, text: `${card} · approved`},
+      ]);
+    });
+    telegram.push(homeToken, messageFrom(alice, 2, '/pending'));
+    telegram.push(homeToken, messageFrom(alice, 3, '/approve 000000'));
+    // A code that is not six digits never reaches the daemon's URL path.
+    telegram.push(homeToken, messageFrom(alice, 4, '/deny ../health'));
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, homeToken, alice.id).slice(2)).toEqual([
+        `${card} · approved`,
+        'Nothing waits for you.',
+        'That code is not waiting.',
+        'That code is not waiting.',
+      ]);
+    });
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('gives an account it does not know a pairing code on the management bot too', async () => {
+    const {homeRoot, gateway} = await createTelegramHome();
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(managementOn);
+    });
+    telegram.push(homeToken, messageFrom(carol, 1, '/status'));
+
+    const request = await pairingOf(gateway, carol);
+
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, homeToken, carol.id)).toEqual([
+        `This bot is private. Your pairing code is ${request.code}, good for an hour. Approve it on the web page.`,
+      ]);
+    });
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('posts a card for each confirmation and pairing request already waiting when the management bot starts', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const ref = await openDirect(gateway, 'mira');
+
+    // Answered by nobody here: the gateway's stop cancels it.
+    void gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'confirm',
+      source: 'web',
+      clientMessageId: 'web-confirm',
+    });
+    gateway.requestPairing('telegram', {
+      id: String(bob.id),
+      label: 'Bob (@bob)',
+    });
+
+    const pending = await confirmationOf(gateway);
+    const request = await pairingOf(gateway, bob);
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(
+      () => {
+        expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
+          {
+            messageId: 1,
+            text: confirmationCard(pending, 'web'),
+            keyboard: decisionButtons('c', pending.id),
+          },
+          {
+            messageId: 2,
+            text: pairingCard(request),
+            keyboard: decisionButtons('p', request.code),
+          },
+        ]);
+      },
+      {timeout: 5_000},
+    );
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
