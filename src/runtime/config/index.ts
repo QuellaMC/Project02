@@ -39,7 +39,9 @@ export {
   createProject02ConfigFieldInspectShapes,
   createRuntimeConfigInspectShape,
   createRuntimeSectionConfigInspectShape,
+  inspectConfiguredConnectors,
   inspectConfiguredPlugins,
+  type InspectConfiguredConnector,
   type InspectConfiguredPlugin,
 } from './inspect.ts';
 export {
