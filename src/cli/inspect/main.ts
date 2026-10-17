@@ -42,7 +42,9 @@ import {
 } from '../../runtime/evidence/index.ts';
 import type {SessionContinuationSnapshot} from '../../runtime/index.ts';
 import {
+  inspectConfiguredConnectors,
   inspectConfiguredPlugins,
+  type InspectConfiguredConnector,
   type InspectConfiguredPlugin,
 } from '../../runtime/config/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
@@ -70,33 +72,28 @@ type InspectCliArgs =
       readonly conversationId: string;
     });
 
-type InspectSessionListOutput = {
+type InspectConfiguration = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
+  readonly connectors: readonly InspectConfiguredConnector[];
+};
+
+type InspectSessionListOutput = InspectConfiguration & {
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
 };
 
-type InspectConversationListOutput = {
-  readonly runtimeConfig: RuntimeConfigInspectShape;
-  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
-  readonly plugins: readonly InspectConfiguredPlugin[];
+type InspectConversationListOutput = InspectConfiguration & {
   readonly conversations: readonly Conversation[];
 };
 
-type InspectConversationOutput = {
-  readonly runtimeConfig: RuntimeConfigInspectShape;
-  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
-  readonly plugins: readonly InspectConfiguredPlugin[];
+type InspectConversationOutput = InspectConfiguration & {
   readonly conversation: Conversation;
   /** The configured character's segments of this conversation, in order. */
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
 };
 
-type InspectSessionOutput = {
-  readonly runtimeConfig: RuntimeConfigInspectShape;
-  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
-  readonly plugins: readonly InspectConfiguredPlugin[];
+type InspectSessionOutput = InspectConfiguration & {
   readonly session: LocalRuntimeSessionMetadata;
   /** The opening record of a session that continues another. */
   readonly continuation?: SessionContinuationSnapshot;
@@ -347,6 +344,21 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
   }
 }
 
+function inspectConfiguration(
+  runtimeConfig: Project02ConfiguredPluginActivation,
+): InspectConfiguration {
+  return {
+    runtimeConfig: createRuntimeConfigInspectShape(
+      runtimeConfig.resolvedConfig,
+    ),
+    activationDiagnostics: Object.freeze([
+      ...runtimeConfig.activation.diagnostics,
+    ]),
+    plugins: inspectConfiguredPlugins(runtimeConfig),
+    connectors: inspectConfiguredConnectors(runtimeConfig.resolvedConfig),
+  };
+}
+
 async function writeConversationList(
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
@@ -357,13 +369,7 @@ async function writeConversationList(
   });
 
   writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(
-      runtimeConfig.resolvedConfig,
-    ),
-    activationDiagnostics: Object.freeze([
-      ...runtimeConfig.activation.diagnostics,
-    ]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
+    ...inspectConfiguration(runtimeConfig),
     conversations: await conversationStore.listConversations(),
   } satisfies InspectConversationListOutput);
 }
@@ -397,13 +403,7 @@ async function writeConversationSegments(
     );
 
   writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(
-      runtimeConfig.resolvedConfig,
-    ),
-    activationDiagnostics: Object.freeze([
-      ...runtimeConfig.activation.diagnostics,
-    ]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
+    ...inspectConfiguration(runtimeConfig),
     conversation,
     sessions,
   } satisfies InspectConversationOutput);
@@ -421,13 +421,7 @@ async function writeSessionList(
   const sessions = await sessionStore.listSessions();
 
   writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(
-      runtimeConfig.resolvedConfig,
-    ),
-    activationDiagnostics: Object.freeze([
-      ...runtimeConfig.activation.diagnostics,
-    ]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
+    ...inspectConfiguration(runtimeConfig),
     sessions,
   } satisfies InspectSessionListOutput);
 }
@@ -459,13 +453,7 @@ async function writeSessionEvidence(
   const traceEntries = logStore.traceEntries();
 
   writeJson(stdout, {
-    runtimeConfig: createRuntimeConfigInspectShape(
-      runtimeConfig.resolvedConfig,
-    ),
-    activationDiagnostics: Object.freeze([
-      ...runtimeConfig.activation.diagnostics,
-    ]),
-    plugins: inspectConfiguredPlugins(runtimeConfig),
+    ...inspectConfiguration(runtimeConfig),
     session,
     ...(rawEvents[0]?.sessionContinuation === undefined
       ? {}
