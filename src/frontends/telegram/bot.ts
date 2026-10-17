@@ -101,6 +101,16 @@ export function startBot(options: {
   const stopping = new AbortController();
   const {signal} = stopping;
   const stopped = (): boolean => signal.aborted;
+  /** Settles when the bot stops: what a wait for the settings is raced with, so a stop never hangs on them. */
+  const halted = new Promise<void>(resolve => {
+    signal.addEventListener(
+      'abort',
+      () => {
+        resolve();
+      },
+      {once: true},
+    );
+  });
   let settings = options.settings;
   let client = options.client;
   let username: string | undefined;
@@ -166,7 +176,7 @@ export function startBot(options: {
     });
 
     // A snapshot is installed by the settings it is shown by, read first.
-    await options.settled();
+    await Promise.race([options.settled(), halted]);
 
     if (stopped()) {
       return;
@@ -181,8 +191,11 @@ export function startBot(options: {
     const ended = await pollUpdates({
       api,
       onUpdate: async update => {
-        await options.settled();
-        await rules.onUpdate(update);
+        await Promise.race([options.settled(), halted]);
+
+        if (!stopped()) {
+          await rules.onUpdate(update);
+        }
       },
       report: problem => {
         report(problemSentence(problem, botNames(settings).bot));

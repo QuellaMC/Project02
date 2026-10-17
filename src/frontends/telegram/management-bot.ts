@@ -33,9 +33,9 @@ const sentences = {
   noCharacters: 'No characters are installed.',
   nothingWaits: 'Nothing waits for you.',
   notWaiting: 'That code is not waiting.',
-  pairing: (request: PairingRequest): string =>
-    `${request.subject.label} wants to pair · code ${request.code} · ` +
-    `expires in ${minutesLeft(request.expiresAt)}`,
+  pairing: (request: PairingRequest, ended: boolean): string =>
+    `${request.subject.label} wants to pair · code ${request.code}` +
+    (ended ? '' : ` · expires in ${minutesLeft(request.expiresAt)}`),
 };
 
 type Chat = {
@@ -264,12 +264,11 @@ function postConfirmation(
 
   chat.confirmations.post(
     pending.id,
-    () =>
-      confirmationText(
-        pending,
-        name ?? pending.characterId,
-        pending.turn?.source,
-      ),
+    ended =>
+      confirmationText(pending, name ?? pending.characterId, {
+        raisedOn: pending.turn?.source,
+        ended,
+      }),
     chatIds,
   );
 }
@@ -279,5 +278,9 @@ function postPairing(
   request: PairingRequest,
   chatIds: readonly number[],
 ): void {
-  chat.pairings.post(request.code, () => sentences.pairing(request), chatIds);
+  chat.pairings.post(
+    request.code,
+    ended => sentences.pairing(request, ended),
+    chatIds,
+  );
 }

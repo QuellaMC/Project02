@@ -296,7 +296,7 @@ function raiseCard(chat: Chat, pending: PendingConfirmation): void {
 
   chat.cards.post(
     pending.id,
-    () => confirmationText(pending, nameOf(chat)),
+    ended => confirmationText(pending, nameOf(chat), {ended}),
     account !== undefined && inAudience(chat, account)
       ? [Number(account)]
       : chat.outbox.paired(),
