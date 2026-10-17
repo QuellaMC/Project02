@@ -94,6 +94,8 @@ export function startBot(options: {
   readonly rules: (bot: BotContext) => BotRules;
   /** The stream's snapshot as its frames have moved it on, installed as the rules start, so a bot started late knows what runs and waits. */
   readonly snapshot: () => GatewayReady | undefined;
+  /** Settles once the settings a ready is shown by have been read; an update waits for it, so none is judged by settings that may have changed while the stream was away. */
+  readonly settled: () => Promise<void>;
 }): Bot {
   const {api, say, report, pacing} = options;
   const stopping = new AbortController();
@@ -171,7 +173,10 @@ export function startBot(options: {
 
     const ended = await pollUpdates({
       api,
-      onUpdate: update => rules.onUpdate(update),
+      onUpdate: async update => {
+        await options.settled();
+        await rules.onUpdate(update);
+      },
       report: problem => {
         report(problemSentence(problem, botNames(settings).bot));
       },

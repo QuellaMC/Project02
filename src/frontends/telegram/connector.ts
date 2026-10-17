@@ -316,9 +316,9 @@ type BotTable = {
    * Keeps the daemon's snapshot from a stream it did not resume, moved on
    * by every frame since, for each bot started after; and hands it to the
    * running bots once the settings read that follows a ready has been
-   * applied, the frames meanwhile folded into it and not handed on, so
-   * nothing is shown by settings that may have changed while the stream
-   * was away.
+   * applied, the frames meanwhile folded into it and not handed on, and
+   * the bots' updates waiting, so nothing is shown or judged by settings
+   * that may have changed while the stream was away.
    */
   snapshot(ready: GatewayReady): void;
   /** Stops every bot, and settles once each has stopped. */
@@ -336,8 +336,10 @@ function createBotTable(context: {
   const stopping = new Set<Promise<void>>();
   const notice = createNotice();
   let latest: GatewayReady | undefined;
-  /** A snapshot not handed on yet: the settings it is shown by are being read. */
+  /** A snapshot not handed on yet: the settings it is shown by are being read; the bots' updates wait for them too. */
   let unread = false;
+  let settle = (): void => undefined;
+  let settled: Promise<void> = Promise.resolve();
   const stop = (token: string, bot: Bot): void => {
     const stopped = bot.stop().finally(() => {
       stopping.delete(stopped);
@@ -373,6 +375,7 @@ function createBotTable(context: {
             ? characterChat(settings.characterId)
             : managementChat(),
         snapshot: () => latest,
+        settled: () => settled,
       }),
     );
   };
@@ -421,6 +424,7 @@ function createBotTable(context: {
 
       if (unread && latest !== undefined) {
         unread = false;
+        settle();
 
         for (const bot of running.values()) {
           bot.snapshot(latest);
@@ -440,7 +444,13 @@ function createBotTable(context: {
     },
     snapshot(ready) {
       latest = ready;
-      unread = true;
+
+      if (!unread) {
+        unread = true;
+        settled = new Promise(resolve => {
+          settle = resolve;
+        });
+      }
     },
     async stopAll() {
       for (const [token, bot] of running) {
