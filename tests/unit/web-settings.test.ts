@@ -577,7 +577,7 @@ describe('web settings', () => {
     expect(sectionDiagnostics(current, telegram)).toEqual([misplaced]);
   });
 
-  it("says whether a connector's process is on the stream, and how to start one that is not", () => {
+  it("says whether a connector's process is on the stream", () => {
     const running: GatewayHealth = {
       ...health,
       connectors: [{id: 'telegram', connected: true}],
@@ -587,7 +587,7 @@ describe('web settings', () => {
       'Connector: running',
     );
     expect(connectorPresenceSentence(health, 'telegram')).toBe(
-      'Connector: not running. Start it with pnpm telegram.',
+      'Connector: not running.',
     );
     expect(connectorPresenceSentence(health, 'discord')).toBeUndefined();
     expect(connectorPresenceSentence(undefined, 'telegram')).toBeUndefined();

@@ -2685,16 +2685,27 @@ describe('gateway façade', () => {
           pairedUsers: {},
         },
       },
+      // The home's own fields reach every character's entry, so a bot
+      // reads the allowlist from its own.
       characters: [
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false, pairedUsers: {}},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
         {
           characterId: 'nova',
           activation: active,
-          values: {mirror: true, pairedUsers: {}},
+          values: {
+            managementBotToken: '123456:home',
+            mirror: true,
+            pairedUsers: {},
+          },
         },
       ],
     });
@@ -2740,12 +2751,21 @@ describe('gateway façade', () => {
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false, pairedUsers: {}},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
         {
           characterId: 'nova',
           activation: active,
-          values: {mirror: false, pairedUsers: {}},
+          values: {
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
       ],
     });
@@ -2780,7 +2800,12 @@ describe('gateway façade', () => {
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false, pairedUsers: {}},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
         {characterId: 'nova', activation: disabled, values: {}},
       ],

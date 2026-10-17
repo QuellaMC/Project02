@@ -319,8 +319,9 @@ export type ConnectorConfigView =
     };
 
 /**
- * `values` holds every field the entry's target may set that has a
- * present, valid value, as authored or as its declared default, secrets in
+ * `values` holds every declared field that resolves for the entry's target
+ * with a present, valid value — the home's own fields reach every
+ * character's entry — as authored or as its declared default, secrets in
  * the clear; a field that is missing, blank or of the wrong type is absent,
  * and nothing is there unless the entry is active.
  */

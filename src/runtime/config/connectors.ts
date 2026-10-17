@@ -67,6 +67,7 @@ const telegramConnector: ConnectorDeclaration = Object.freeze({
         description:
           'Accounts allowed to talk to your characters, each id with a ' +
           'name. Pairing adds one; remove a line to unpair it.',
+        scope: 'global_only',
         required: false,
         secret: false,
         valueType: 'object',
