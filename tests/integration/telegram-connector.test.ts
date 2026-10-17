@@ -1292,6 +1292,92 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('shows a reply committed before her DM was known, once it is', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const transport = createNodeFetch();
+    let releaseOpen = (): void => undefined;
+    const opened = new Promise<void>(resolve => {
+      releaseOpen = resolve;
+    });
+    // Her DM opens only when the test lets it, as a slow daemon would.
+    const holdingOpen: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.pathname === '/api/conversations/open') {
+        await opened;
+      }
+
+      return transport(input, init);
+    };
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram, holdingOpen);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'hello',
+      source: 'web',
+      clientMessageId: 'web-1',
+    });
+    expect(textsIn(telegram, miraToken, alice.id)).toEqual([]);
+    releaseOpen();
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+          'You (web): hello',
+          'noted: ',
+          'noted: hello',
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('waits the pause Telegram asks for before asking again who a bot is', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+    telegram.throttle(miraToken, 1, 'getMe');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await sleep(500);
+    expect(connector.stdout()).not.toContain(miraAnswers);
+    await vi.waitFor(
+      () => {
+        expect(connector.stdout()).toContain(miraAnswers);
+      },
+      {timeout: 3_000},
+    );
+    expect(
+      methods(telegram, miraToken).filter(method => method === 'getMe'),
+    ).toEqual(['getMe', 'getMe']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("tells a line written while the daemon's socket is closed to be sent again", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,
@@ -1701,6 +1787,44 @@ describe('Telegram connector', () => {
         'Nothing waits for you.',
         'That code is not waiting.',
         'That code is not waiting.',
+      ]);
+    });
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('holds a card raised while nobody was paired, and shows it on /pending to the first account paired', async () => {
+    const {homeRoot, gateway} = await createTelegramHome();
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(managementOn);
+    });
+    telegram.push(homeToken, messageFrom(bob, 1, 'let me in'));
+
+    const request = await pairingOf(gateway, bob);
+
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, homeToken, bob.id)).toHaveLength(1);
+    });
+    await change(gateway, home, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'pairedUsers',
+      value: aliceIsPaired,
+    });
+    telegram.push(homeToken, messageFrom(alice, 1, '/pending'));
+    await vi.waitFor(() => {
+      expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
+        {
+          messageId: 2,
+          text: pairingCard(request),
+          keyboard: decisionButtons('p', request.code),
+        },
       ]);
     });
     await expect(connector.stop()).resolves.toBe(0);

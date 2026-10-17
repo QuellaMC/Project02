@@ -41,6 +41,7 @@ function recordingApi(failing: {editsToFail: number}) {
     deleteMessage: () => Promise.resolve({ok: true, result: true}),
     answerCallbackQuery: () => Promise.resolve({ok: true, result: true}),
     sendChatAction: () => Promise.resolve({ok: true, result: true}),
+    deleteWebhook: unused,
   };
 
   return {api, calls};

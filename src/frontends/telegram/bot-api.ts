@@ -97,6 +97,8 @@ export type BotApi = {
     readonly chatId: number;
     readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<true>>;
+  /** Removes the webhook set on the token; Telegram sends a bot's updates to a webhook or to its polls, never both. */
+  deleteWebhook(signal?: AbortSignal): Promise<BotApiOutcome<true>>;
 };
 
 export function createBotApi(options: {
@@ -196,12 +198,13 @@ export function createBotApi(options: {
         decodeTrue,
         signal,
       ),
+    deleteWebhook: signal => call('deleteWebhook', {}, decodeTrue, signal),
   };
 }
 
 /** Why polling is not getting through; reported as `undefined` once it is again. */
 export type PollProblem = {
-  readonly code: 'conflict' | 'unreachable';
+  readonly code: 'conflict' | 'webhook' | 'unreachable';
   readonly description: string;
 };
 
@@ -217,9 +220,11 @@ const pollTimeoutSeconds = 50;
 /**
  * Long-polls until the signal aborts, handing each update on in order and
  * asking past a batch only once all of it was handed on. Resolves
- * `unauthorized` when Telegram refuses the token and `stopped` on abort;
- * anything else Telegram or the network does is reported and waited out,
- * never thrown. What `onUpdate` throws is the caller's, and ends the loop.
+ * `unauthorized` when Telegram refuses the token and `stopped` on abort; a
+ * webhook left on the token is removed, since Telegram sends updates to it
+ * or to the polls, never both; anything else Telegram or the network does
+ * is reported and waited out, never thrown. What `onUpdate` throws is the
+ * caller's, and ends the loop.
  */
 export async function pollUpdates(options: {
   readonly api: BotApi;
@@ -271,6 +276,12 @@ export async function pollUpdates(options: {
       );
     } else if (tokenRefused(outcome.code)) {
       return 'unauthorized';
+    } else if (outcome.code === 409 && /webhook/iu.test(outcome.description)) {
+      reportChange({code: 'webhook', description: outcome.description});
+
+      if (!(await api.deleteWebhook(signal)).ok) {
+        await pause(conflictRetryMs, signal);
+      }
     } else if (outcome.code === 409) {
       reportChange({code: 'conflict', description: outcome.description});
       await pause(conflictRetryMs, signal);
