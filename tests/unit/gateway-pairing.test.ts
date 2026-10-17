@@ -11,6 +11,7 @@ import {createPairingSeam} from '../../src/gateway/pairing.ts';
 
 const hourMs = 60 * 60 * 1000;
 const alice = {id: '123456789', label: 'Alice (@alice)'};
+const bob = {id: '987654321', label: 'Bob (@bob)'};
 const carol = {'555': 'Carol'};
 const applied: ConfigChangeOutcome = {
   status: 'applied',
@@ -31,17 +32,19 @@ function answering(
 }
 
 /**
- * Telegram's allowlist holds Carol, and the document moves with every
- * write tried, so each read after one sees a new fingerprint.
+ * Telegram's allowlist holds Carol until `setAllowlist` writes it as
+ * another settings window would, and the document moves with every write
+ * tried, so each read after one sees a new fingerprint.
  */
 function createPairingHarness(write = answering()) {
   const events: GatewayEvent[] = [];
   const changes: ConfigChange[] = [];
+  let accounts: Readonly<Record<string, string>> = carol;
   const seam = createPairingSeam({
     readAllowlist: () => ({
       status: 'ok',
       fingerprint: `fp-${String(changes.length + 1)}`,
-      accounts: carol,
+      accounts,
     }),
     applyChange: change => {
       changes.push(change);
@@ -52,8 +55,8 @@ function createPairingHarness(write = answering()) {
       events.push(event);
     },
   });
-  const ask = (): PairingRequest => {
-    const asked = seam.request('telegram', alice);
+  const ask = (subject = alice): PairingRequest => {
+    const asked = seam.request('telegram', subject);
 
     if (asked.status !== 'pending') {
       expect.fail(`The request was ${asked.status}.`);
@@ -61,8 +64,11 @@ function createPairingHarness(write = answering()) {
 
     return asked.request;
   };
+  const setAllowlist = (written: Readonly<Record<string, string>>): void => {
+    accounts = written;
+  };
 
-  return {seam, events, changes, ask};
+  return {seam, events, changes, ask, setAllowlist};
 }
 
 function settledAs(
@@ -211,5 +217,23 @@ describe('gateway pairing seam', () => {
       {kind: 'pairing_requested', ...request},
       settledAs(request, 'expired'),
     ]);
+  });
+
+  it('settles a waiting request as approved once another window pairs its account, writing nothing over the name that window gave', async () => {
+    const {seam, events, changes, ask, setAllowlist} = createPairingHarness();
+    const forAlice = ask();
+    const forBob = ask(bob);
+
+    // Another settings window pairs both, under names of its own.
+    setAllowlist({...carol, [alice.id]: 'Alice', [bob.id]: 'Bob'});
+    expect(seam.request('telegram', alice)).toEqual({status: 'paired'});
+    expect(seam.pending()).toEqual([forBob]);
+    expect(events.at(-1)).toEqual(settledAs(forAlice, 'approved'));
+
+    await expect(seam.settle(forBob.code, 'approved')).resolves.toEqual({
+      status: 'settled',
+      decision: 'approved',
+    });
+    expect(changes).toEqual([]);
   });
 });
