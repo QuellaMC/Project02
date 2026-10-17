@@ -1645,6 +1645,142 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('answers a command with nothing when the account was unpaired while the daemon was asked', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const transport = createNodeFetch();
+    let reads = 0;
+    let releaseHealth = (): void => undefined;
+    const heldHealth = new Promise<void>(resolve => {
+      releaseHealth = resolve;
+    });
+    // The daemon answers /status's question only when the test lets it.
+    const holdingHealth: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.pathname === '/api/connectors/telegram/config') {
+        reads += 1;
+      }
+
+      if (url.pathname === '/api/health') {
+        await heldHealth;
+      }
+
+      return transport(input, init);
+    };
+    const connector = runConnector(homeRoot, telegram, holdingHealth);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(managementOn);
+    });
+    telegram.push(homeToken, messageFrom(alice, 1, '/status'));
+    await change(gateway, home, {
+      kind: 'section_field_unset',
+      ...telegramSection,
+      field: 'pairedUsers',
+    });
+    await vi.waitFor(() => {
+      expect(reads).toBeGreaterThanOrEqual(2);
+    });
+    await sleep(100);
+    releaseHealth();
+    await sleep(300);
+    expect(callsTo(telegram, homeToken, alice.id)).toEqual([]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("holds a message that arrives before a ready's settings are read, and judges it by them", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: {...aliceIsPaired, [String(bob.id)]: 'Bob'},
+    });
+    const telegram = await startTelegram();
+    const events = createEventStreams(gateway, {
+      replayBytes: 1,
+      graceMs: 100,
+    });
+    const first = await serve(homeRoot, gateway, {events});
+    const transport = createNodeFetch();
+    let reads = 0;
+    let releaseReads = (): void => undefined;
+    const heldReads = new Promise<void>(resolve => {
+      releaseReads = resolve;
+    });
+    // Every read after the first waits until the test lets it through.
+    const holdingReads: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.pathname === '/api/connectors/telegram/config' && ++reads >= 2) {
+        await heldReads;
+      }
+
+      return transport(input, init);
+    };
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram, holdingReads);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+      },
+      {timeout: 5_000},
+    );
+    await first.close();
+    await change(gateway, home, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'pairedUsers',
+      value: aliceIsPaired,
+    });
+
+    const returned = await serve(homeRoot, gateway, {
+      port: first.port,
+      events,
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(reads).toBeGreaterThanOrEqual(2);
+      },
+      {timeout: 5_000},
+    );
+    telegram.push(miraToken, messageFrom(bob, 2, 'again'));
+    await sleep(300);
+
+    const userLines = async () =>
+      (await logOf(gateway, 'mira'))
+        .filter(line => line.role === 'user')
+        .map(line => line.text);
+
+    await expect(userLines()).resolves.toEqual(['hello']);
+    releaseReads();
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+          /Your pairing code is/u,
+        );
+      },
+      {timeout: 5_000},
+    );
+    await expect(userLines()).resolves.toEqual(['hello']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
+    await events.closeAll();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("tells a line written while the daemon's socket is closed to be sent again", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,

@@ -102,7 +102,7 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
   }
 }
 
-/** A paired account's command, by the first word of its text; any other text is answered with help. */
+/** A paired account's command, by the first word of its text; any other text is answered with help. The answer goes by the audience as it is when its turn comes. */
 async function command(
   chat: Chat,
   chatId: number,
@@ -112,14 +112,14 @@ async function command(
 
   switch (word) {
     case '/status':
-      chat.outbox.say(chatId, await status(chat.bot));
+      chat.outbox.sayToPaired(chatId, await status(chat.bot));
       break;
     case '/pending':
       showPending(chat, chatId);
       break;
     case '/approve':
     case '/deny':
-      chat.outbox.say(
+      chat.outbox.sayToPaired(
         chatId,
         code === undefined
           ? sentences.help
@@ -132,7 +132,7 @@ async function command(
       );
       break;
     default:
-      chat.outbox.say(chatId, sentences.help);
+      chat.outbox.sayToPaired(chatId, sentences.help);
       break;
   }
 }
@@ -174,7 +174,7 @@ function showPending(chat: Chat, chatId: number): void {
     chat.confirmations.postAll(chatId) + chat.pairings.postAll(chatId);
 
   if (held === 0) {
-    chat.outbox.say(chatId, sentences.nothingWaits);
+    chat.outbox.sayToPaired(chatId, sentences.nothingWaits);
   }
 }
 

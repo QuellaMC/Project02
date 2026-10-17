@@ -126,9 +126,9 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
   }
 
   if (text === undefined) {
-    outbox.say(chatId, sentences.textOnly);
+    outbox.sayToPaired(chatId, sentences.textOnly);
   } else if (text.split(/\s/u, 1)[0] === '/start') {
-    outbox.say(chatId, sentences.hello(nameOf(chat)));
+    outbox.sayToPaired(chatId, sentences.hello(nameOf(chat)));
   } else {
     outbox.typing(chatId);
     void carry(chat, chatId, lineId(chat, message), text);
@@ -155,7 +155,10 @@ async function carry(
     const thread = chat.thread ?? (await open(chat));
 
     if (thread.status !== 'opened') {
-      outbox.say(chatId, sentences.unavailable(nameOf(chat), thread.message));
+      outbox.sayToPaired(
+        chatId,
+        sentences.unavailable(nameOf(chat), thread.message),
+      );
 
       return;
     }
@@ -172,11 +175,14 @@ async function carry(
     );
 
     if (outcome.status === 'refused' && !turnCommittedTheLine(outcome)) {
-      outbox.say(chatId, sentences.unavailable(nameOf(chat), outcome.message));
+      outbox.sayToPaired(
+        chatId,
+        sentences.unavailable(nameOf(chat), outcome.message),
+      );
     }
   } catch (error: unknown) {
     rethrowUnlessTransport(error);
-    outbox.say(chatId, daemonDown);
+    outbox.sayToPaired(chatId, daemonDown);
   }
 }
 
@@ -360,7 +366,7 @@ function ended(
     (event.status === 'rejected' || event.status === 'failed') &&
     inAudience(chat, account)
   ) {
-    chat.outbox.say(
+    chat.outbox.sayToPaired(
       Number(account),
       sentences.unanswered(
         nameOf(chat),

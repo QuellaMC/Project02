@@ -70,8 +70,9 @@ said. It opens the stream as the `telegram` connector, so health — and
 the settings page with it — says it is running, and keeps its read of
 the connector config by the wire page's reading rule: a read on every `ready` and every `health_changed`, the newest answer
 applied, a failed read tried again with a backoff, nothing read on
-`resumed`; a `ready`'s snapshot reaches the bots only after its read, so
-what they show goes by the settings as they are. A lost
+`resumed`; a `ready`'s snapshot reaches the bots, and their messages
+are read, only after its read, so what they show and admit goes by the
+settings as they are. A lost
 stream sends it back to the record, so a daemon that came back on
 another port is found. It reaches the daemon over `node-fetch.ts`, a
 fetch on `node:http` that the reference client takes as its `fetch` and
