@@ -165,6 +165,13 @@ export function startBot(options: {
       signal,
     });
 
+    // A snapshot is installed by the settings it is shown by, read first.
+    await options.settled();
+
+    if (stopped()) {
+      return;
+    }
+
     const latest = options.snapshot();
 
     if (latest !== undefined) {

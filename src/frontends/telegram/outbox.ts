@@ -337,28 +337,32 @@ function createWriter(bot: BotContext, audience: Audience): Writer {
 }
 
 /**
- * One call to Telegram; one it asks to wait on is made once more after
- * the pause, the queue waiting with it — unless `again` says no by then,
- * and then nothing is made.
+ * One call to Telegram, made again after each pause it asks for until it
+ * answers otherwise, the queue waiting with it — unless `again` says no
+ * by then, and then nothing is made.
  */
 async function patiently<T>(
   signal: AbortSignal,
   request: () => Promise<BotApiOutcome<T>>,
   again: () => boolean,
 ): Promise<BotApiOutcome<T> | undefined> {
-  const outcome = await request();
+  for (;;) {
+    const outcome = await request();
 
-  if (outcome.ok || outcome.retryAfterMs === undefined) {
-    return outcome;
+    if (outcome.ok || outcome.retryAfterMs === undefined) {
+      return outcome;
+    }
+
+    await pause(outcome.retryAfterMs, signal);
+
+    if (signal.aborted) {
+      return outcome;
+    }
+
+    if (!again()) {
+      return undefined;
+    }
   }
-
-  await pause(outcome.retryAfterMs, signal);
-
-  if (signal.aborted) {
-    return outcome;
-  }
-
-  return again() ? request() : undefined;
 }
 
 /**
