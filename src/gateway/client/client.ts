@@ -101,9 +101,13 @@ export type GatewayClient = {
   ): Promise<OpenOutcome>;
   /**
    * Waits for the turn and is never retried. The fetch sets the only
-   * bound: a browser's has none, Node's gives a response five minutes.
+   * bound — a browser's has none, Node's gives a response five minutes —
+   * unless the caller's signal ends the wait; the turn runs on without it.
    */
-  deliver(message: GatewayMessage): Promise<TurnOutcome>;
+  deliver(
+    message: GatewayMessage,
+    options?: GatewayCallOptions,
+  ): Promise<TurnOutcome>;
   history(
     conversationId: string,
     page?: HistoryPage,
@@ -222,8 +226,11 @@ export function createGatewayClient(
         ),
         callOptions,
       ),
-    deliver: async message =>
-      readOutcome<TurnOutcome>(await api.turns.$post({json: message})),
+    deliver: async (message, callOptions) =>
+      readOutcome<TurnOutcome>(
+        await api.turns.$post({json: message}, requestInit(callOptions)),
+        callOptions,
+      ),
     history: async (conversationId, page = {}, callOptions) =>
       readOutcome<HistoryOutcome>(
         await api.conversations[':id'].messages.$get(

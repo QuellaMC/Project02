@@ -53,7 +53,7 @@ type Chat = {
   /** The stamp on every line this bot carries. */
   readonly source: string;
   thread: Extract<OpenOutcome, {readonly status: 'opened'}> | undefined;
-  /** Her conversation's running turn, folded by the contract's one rule. */
+  /** Every running turn, folded by the contract's one rule; her DM's is the one shown. */
   turns: RunningTurns;
 };
 
@@ -127,10 +127,11 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
 }
 
 /**
- * Carries a line to her. How a turn that ran ended is the stream's to
- * tell, before this answer arrives or after it, and for a line from before
- * a restart too; a refusal comes before any turn, and only its answer says
- * so.
+ * Carries a line to her, waiting as long as the bot runs: one that stops
+ * gives up the wait, and the turn runs on. How a turn that ran ended is
+ * the stream's to tell, before this answer arrives or after it, and for a
+ * line from before a restart too; a refusal comes before any turn, and
+ * only its answer says so.
  */
 async function carry(
   chat: Chat,
@@ -149,13 +150,16 @@ async function carry(
       return;
     }
 
-    const outcome = await chat.bot.client().deliver({
-      conversationId: thread.conversationId,
-      senderId: thread.userParticipantId,
-      text,
-      source: chat.source,
-      clientMessageId,
-    });
+    const outcome = await chat.bot.client().deliver(
+      {
+        conversationId: thread.conversationId,
+        senderId: thread.userParticipantId,
+        text,
+        source: chat.source,
+        clientMessageId,
+      },
+      {signal: chat.bot.signal},
+    );
 
     if (outcome.status === 'refused') {
       outbox.say(chatId, sentences.unavailable(nameOf(chat), outcome.message));
@@ -192,6 +196,8 @@ function followEvent(chat: Chat, event: GatewayEvent): void {
   switch (event.kind) {
     case 'turn_progress':
     case 'turn_completed':
+      chat.turns = foldRunningTurns(chat.turns, event);
+
       if (event.conversationId === chat.thread?.conversationId) {
         followTurn(chat, event);
       }
@@ -253,8 +259,6 @@ function raiseCard(chat: Chat, pending: PendingConfirmation): void {
  * as it is written, then as committed.
  */
 function followTurn(chat: Chat, event: TurnFrame): void {
-  chat.turns = foldRunningTurns(chat.turns, event);
-
   if (event.kind === 'turn_completed') {
     ended(chat, event);
 
@@ -328,18 +332,15 @@ function ended(
 }
 
 /**
- * On a stream the daemon could not resume, her running turn is the
- * snapshot's, and the end of every draft shown here was missed: each is
- * withdrawn, as a page drops a bubble the snapshot does not carry, and one
- * still being written is posted again by its next words. A confirmation
- * still waiting that has no card here yet gets one.
+ * On a stream the daemon could not resume, the running turns are the
+ * snapshot's — every one, as the fold has them; her DM is not open yet
+ * when a bot starts — and the end of every draft shown here was missed:
+ * each is withdrawn, as a page drops a bubble the snapshot does not carry,
+ * and one still being written is posted again by its next words. A
+ * confirmation still waiting that has no card here yet gets one.
  */
 function installSnapshot(chat: Chat, ready: GatewayReady): void {
-  const turn = ready.turns.find(
-    running => running.conversationId === chat.thread?.conversationId,
-  );
-
-  chat.turns = new Map(turn === undefined ? [] : [[turn.conversationId, turn]]);
+  chat.turns = new Map(ready.turns.map(turn => [turn.conversationId, turn]));
   chat.outbox.withdrawAll();
 
   for (const pending of ready.confirmations) {

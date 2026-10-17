@@ -90,7 +90,7 @@ export function startBot(options: {
   readonly pacing?: PollPacing;
   /** What the bot does with what it gets, once Telegram has said who it is. */
   readonly rules: (bot: BotContext) => BotRules;
-  /** The stream's latest snapshot, installed as the rules start, so a bot started after it knows what already waits. */
+  /** The stream's snapshot as its frames have moved it on, installed as the rules start, so a bot started late knows what runs and waits. */
   readonly snapshot: () => GatewayReady | undefined;
 }): Bot {
   const {api, say, report, pacing} = options;
