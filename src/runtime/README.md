@@ -63,4 +63,8 @@ path of a section and of each of its fields. Another,
 `runtimeSectionValueLayers`, says which layer may supply a value, by a
 field's own scope or else its section's; the merge, the views and the
 refusal of a write are all built on it, and where no permitted layer
-authored a field, the resolver applies its declared default.
+authored a field, the resolver applies its declared default. A connector's
+declaration is a section's with one word more: `pairing` names the field
+an approved account is written into, and a connector without it does not
+pair. `config/inspect.ts` renders each built-in connector's section beside
+the plugins for `pnpm inspect`, its secrets redacted.

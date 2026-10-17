@@ -4,19 +4,26 @@ import {
   type RuntimeConfigSectionDeclaration,
   type RuntimeConfigValue,
 } from '../runtime/config/index.ts';
-import {ownJsonRecordValue} from '../shared/json-boundary.ts';
+import {
+  isJsonBoundaryObject,
+  ownJsonRecordValue,
+} from '../shared/json-boundary.ts';
 import type {
   ConnectorConfigEntry,
   ConnectorConfigView,
 } from './api/contract.ts';
 import {resolveScope, sectionViewOf, type ScopeResolution} from './config.ts';
+import type {AllowlistReading} from './pairing.ts';
 
 /**
  * What a connector runs on, for the home and for each installed character
- * that is switched on, each entry resolved as its settings screen is. Its
- * secrets go out in the clear, as no other read's do, because a connector
- * is the owner's own program, running under the home's bearer token on
- * loopback, and a token is what it exists to use.
+ * that is switched on, each entry resolved as its settings screen is and
+ * carrying every declared field that resolves for its target, the home's
+ * own fields included, so a character's bot reads the home's allowlist
+ * whatever the home's switch says. Its secrets go out in the clear, as no
+ * other read's do, because a connector is the owner's own program, running
+ * under the home's bearer token on loopback, and a token is what it exists
+ * to use.
  */
 export function readConnectorConfig(
   home: Project02Home,
@@ -83,16 +90,45 @@ function entryOf(
     values: Object.freeze(
       Object.fromEntries(
         section.activation.status === 'active'
-          ? section.fields.flatMap(({name}): [string, RuntimeConfigValue][] => {
-              const field = ownJsonRecordValue(resolved, name);
+          ? declaration.config.fields.flatMap(
+              ({name}): [string, RuntimeConfigValue][] => {
+                const field = ownJsonRecordValue(resolved, name);
 
-              return field?.resolved === true && field.value !== undefined
-                ? [[name, field.value]]
-                : [];
-            })
+                return field?.resolved === true && field.value !== undefined
+                  ? [[name, field.value]]
+                  : [];
+              },
+            )
           : [],
       ),
     ),
+  });
+}
+
+/** A connector's allowlist field as the home's document holds it; anything but an object holds no one. */
+export function readConnectorAllowlist(
+  home: Project02Home,
+  connectorId: string,
+  field: string,
+): AllowlistReading {
+  const scope = resolveScope(home, {scope: 'global'});
+
+  if ('status' in scope) {
+    return Object.freeze({status: 'refused' as const, message: scope.message});
+  }
+
+  const value = ownJsonRecordValue(
+    ownJsonRecordValue(
+      scope.sectionResolution.sectionConfigs.connectors,
+      connectorId,
+    ),
+    field,
+  )?.value;
+
+  return Object.freeze({
+    status: 'ok' as const,
+    fingerprint: scope.fingerprint,
+    accounts: value !== undefined && isJsonBoundaryObject(value) ? value : {},
   });
 }
 

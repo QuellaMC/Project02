@@ -223,7 +223,7 @@ describe('gateway over HTTP', () => {
 
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toMatchObject({
-      protocolVersion: 6,
+      protocolVersion: 7,
       characters: [expect.objectContaining({id: 'mira', state: 'not_started'})],
     });
 
@@ -341,6 +341,43 @@ describe('gateway over HTTP', () => {
     expect(await errorOf(foreignHost)).toMatchObject({
       code: 'misdirected_host',
     });
+  });
+
+  it('asks, lists and answers a pairing under a 200, and refuses a subject of the wrong shape', async () => {
+    const {request, post} = await createHttpHarness();
+    const subject = {id: '123456789', label: 'Alice (@alice)'};
+    const asked = await post('/api/connectors/telegram/pairing', {subject});
+
+    expect(asked.status).toBe(200);
+
+    const outcome = (await asked.json()) as {
+      status: string;
+      request: {code: string};
+    };
+
+    expect(outcome).toMatchObject({
+      status: 'pending',
+      request: {connectorId: 'telegram', subject},
+    });
+    await expect((await request('/api/pairing')).json()).resolves.toEqual([
+      outcome.request,
+    ]);
+
+    const answer = `/api/pairing/${outcome.request.code}`;
+
+    await expect(
+      (await post(answer, {decision: 'denied'})).json(),
+    ).resolves.toEqual({status: 'settled', decision: 'denied'});
+    await expect(
+      (await post(answer, {decision: 'denied'})).json(),
+    ).resolves.toEqual({status: 'unknown'});
+
+    const misshaped = await post('/api/connectors/telegram/pairing', {
+      subject: {id: 'not one token', label: 'Alice'},
+    });
+
+    expect(misshaped.status).toBe(400);
+    expect(await errorOf(misshaped)).toMatchObject({code: 'invalid_request'});
   });
 
   it('answers an unknown API route with the envelope, behind the same auth', async () => {
@@ -463,7 +500,7 @@ describe('gateway over HTTP', () => {
 
     // The daemon's state as the stream started listening, in one frame.
     expect(frameData(ready)).toMatchObject({
-      protocolVersion: 6,
+      protocolVersion: 7,
       health: {characters: [{id: 'mira', state: 'not_started'}]},
       confirmations: [],
       turns: [],
@@ -525,7 +562,9 @@ describe('gateway over HTTP', () => {
 
     // A stream that returns with the id of frame 3 is resumed with the
     // frames after it, byte for byte, then reads on with everyone else.
-    const back = await subscribeToEvents(server.baseUrl, token, ids[3]);
+    const back = await subscribeToEvents(server.baseUrl, token, {
+      lastEventId: ids[3],
+    });
     const resumed = await back.next(frame => frame.event === 'resumed');
 
     expect(back.frames[0]).toBe(resumed);
@@ -601,13 +640,16 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 6,
+          protocolVersion: 7,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},
           characters: [],
+          connectors: [],
         }),
         pendingConfirmations: () => [],
+        pendingPairings: () => [],
+        connectorPresent: () => () => undefined,
       },
       {heartbeatMs: 20, replayBytes: 3 * frameBytes + 1},
     );
@@ -618,11 +660,9 @@ describe('gateway over HTTP', () => {
     const run = ready.id?.split('-')[0] ?? '';
     // What a stream opened with this id gets before its first heartbeat.
     const opening = async (lastEventId: string) => {
-      const stream = await subscribeToEvents(
-        server.baseUrl,
-        token,
+      const stream = await subscribeToEvents(server.baseUrl, token, {
         lastEventId,
-      );
+      });
 
       await stream.next(frame => frame.comment === 'ping');
       await stream.cancel();
@@ -856,6 +896,45 @@ describe('gateway over HTTP', () => {
     await gateway.stop();
   });
 
+  it("counts a connector's process on the stream while its stream is open, and refuses a connector this version does not have", async () => {
+    const gateway = createGateway({
+      location: {storeRoot: await createGatewayTestHome()},
+    });
+    const server = await startTestGatewayServer({gateway});
+    const get = (path: string) =>
+      fetch(`${server.baseUrl}${path}`, {
+        headers: {authorization: `Bearer ${token}`},
+      });
+    const health = async (): Promise<unknown> =>
+      (await get('/api/health')).json();
+    const telegramIs = (connected: boolean) => ({
+      connectors: [{id: 'telegram', connected}],
+    });
+
+    const unknown = await get('/api/events?connector=discord');
+
+    expect(unknown.status).toBe(400);
+    expect(await errorOf(unknown)).toMatchObject({
+      code: 'invalid_request',
+      message: 'A connector is one of: telegram.',
+    });
+
+    const telegram = await subscribeToEvents(server.baseUrl, token, {
+      connector: 'telegram',
+    });
+    const ready = await telegram.next(frame => frame.event === 'ready');
+
+    expect(frameData(ready)).toMatchObject({health: telegramIs(true)});
+    await expect(health()).resolves.toMatchObject(telegramIs(true));
+
+    await telegram.cancel();
+    await vi.waitFor(async () => {
+      await expect(health()).resolves.toMatchObject(telegramIs(false));
+    });
+    await server.close();
+    await gateway.stop();
+  });
+
   it('drops a client that has stopped taking frames, within the grace', async () => {
     // Only the stream is under test: a fan-out the test drives directly.
     const listeners = new Set<GatewayEventListener>();
@@ -869,13 +948,16 @@ describe('gateway over HTTP', () => {
           };
         },
         health: () => ({
-          protocolVersion: 6,
+          protocolVersion: 7,
           homeRoot: '/nowhere',
           config: {diagnostics: []},
           packages: {diagnostics: []},
           characters: [],
+          connectors: [],
         }),
         pendingConfirmations: () => [],
+        pendingPairings: () => [],
+        connectorPresent: () => () => undefined,
       },
       {graceMs: 200},
     );

@@ -3,10 +3,9 @@ import {randomBytes} from 'node:crypto';
 import {
   acquireLocalRuntimeDaemonLease,
   LocalRuntimeStorageContractError,
-  readDaemonRecord,
   writeDaemonRecord,
-  type DaemonRecord,
 } from '../runtime/storage/index.ts';
+import {readDaemonRecord, type DaemonRecord} from '../shared/daemon-record.ts';
 import {gatewayProtocolVersion} from './api/contract.ts';
 
 /**

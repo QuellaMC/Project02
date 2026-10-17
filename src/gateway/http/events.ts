@@ -23,7 +23,8 @@ export type EventStreamsOptions = {
 };
 
 export type EventStreams = {
-  readonly handler: (c: Context<ApiEnv>) => Response;
+  /** A connector's process names itself, and is present while its stream is open. */
+  readonly handler: (c: Context<ApiEnv>, connectorId?: string) => Response;
   /** Streams open right now. */
   readonly openCount: () => number;
   /**
@@ -196,7 +197,14 @@ export function createEventLog(options: {readonly maxBytes: number}): EventLog {
  * stream stays a hint, and the verbs the truth.
  */
 export function createEventStreams(
-  source: Pick<Gateway, 'events' | 'health' | 'pendingConfirmations'>,
+  source: Pick<
+    Gateway,
+    | 'events'
+    | 'health'
+    | 'pendingConfirmations'
+    | 'pendingPairings'
+    | 'connectorPresent'
+  >,
   options: EventStreamsOptions = {},
 ): EventStreams {
   const heartbeatMs = options.heartbeatMs ?? defaultHeartbeatMs;
@@ -226,8 +234,10 @@ export function createEventStreams(
   });
 
   return Object.freeze({
-    handler(c) {
-      const response = streamSSE(c, stream => runStream(c, stream));
+    handler(c, connectorId) {
+      const response = streamSSE(c, stream =>
+        runStream(c, stream, connectorId),
+      );
 
       // The helper's own no-cache is fine; the API's rule is stricter.
       response.headers.set('Cache-Control', 'no-store');
@@ -248,6 +258,7 @@ export function createEventStreams(
   async function runStream(
     c: Context<ApiEnv>,
     stream: SSEStreamingApi,
+    connectorId: string | undefined,
   ): Promise<void> {
     if (closed) {
       return;
@@ -278,43 +289,52 @@ export function createEventStreams(
     });
     closers.add(close);
 
-    // First frame and attachment in one breath: no event lands between.
-    const lastEventId = c.req.header('last-event-id');
-    const missed =
-      lastEventId === undefined ? undefined : log.after(lastEventId);
-
-    if (missed === undefined) {
-      const snapshot: GatewayReady = {
-        protocolVersion: gatewayProtocolVersion,
-        health: source.health(),
-        confirmations: source.pendingConfirmations(),
-        turns: runningTurns(turns),
-      };
-
-      queue.push(
-        formatEventFrame(
-          readyEvent,
-          JSON.stringify(snapshot),
-          `${log.run}-${String(log.latest())}`,
-        ),
-      );
-    } else {
-      queue.push(formatEventFrame(resumedEvent, '{}'));
-
-      for (const frame of missed) {
-        queue.push(frame);
-      }
-    }
-
-    attached.add(queue);
+    // Present before the first frame, so what a connector's own stream
+    // opens with already counts it.
+    const leave =
+      connectorId === undefined
+        ? undefined
+        : source.connectorPresent(connectorId);
 
     try {
+      // First frame and attachment in one breath: no event lands between.
+      const lastEventId = c.req.header('last-event-id');
+      const missed =
+        lastEventId === undefined ? undefined : log.after(lastEventId);
+
+      if (missed === undefined) {
+        const snapshot: GatewayReady = {
+          protocolVersion: gatewayProtocolVersion,
+          health: source.health(),
+          confirmations: source.pendingConfirmations(),
+          pairings: source.pendingPairings(),
+          turns: runningTurns(turns),
+        };
+
+        queue.push(
+          formatEventFrame(
+            readyEvent,
+            JSON.stringify(snapshot),
+            `${log.run}-${String(log.latest())}`,
+          ),
+        );
+      } else {
+        queue.push(formatEventFrame(resumedEvent, '{}'));
+
+        for (const frame of missed) {
+          queue.push(frame);
+        }
+      }
+
+      attached.add(queue);
+
       while (await heartbeat.tick(heartbeatMs)) {
         queue.push(heartbeatFrame);
       }
     } finally {
       attached.delete(queue);
       closers.delete(close);
+      leave?.();
     }
   }
 }

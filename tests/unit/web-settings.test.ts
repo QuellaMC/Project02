@@ -4,6 +4,7 @@ import {
   changeEnded,
   changeSent,
   configViewRead,
+  connectorPresenceSentence,
   fieldEdited,
   hostFieldKey,
   operationFor,
@@ -27,6 +28,7 @@ import {
 import type {
   ConfigTarget,
   ConfigView,
+  GatewayHealth,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
@@ -130,20 +132,25 @@ function view(fingerprint = 'f1'): OkView {
   };
 }
 
+/** The daemon as the tab heard it: Mira ready, and no Telegram process on the stream. */
+const health: GatewayHealth = {
+  protocolVersion: 7,
+  homeRoot: '/home/person/.project02',
+  config: {diagnostics: []},
+  packages: {diagnostics: []},
+  characters: [
+    {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
+  ],
+  connectors: [{id: 'telegram', connected: false}],
+};
+
 /** A live tab with Mira's thread open and her settings screen in front of it. */
 function opened(target: ConfigTarget = mira): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 6,
-    health: {
-      protocolVersion: 6,
-      homeRoot: '/home/person/.project02',
-      config: {diagnostics: []},
-      packages: {diagnostics: []},
-      characters: [
-        {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
-      ],
-    },
+    protocolVersion: 7,
+    health,
     confirmations: [],
+    pairings: [],
     turns: [],
   });
 
@@ -568,6 +575,22 @@ describe('web settings', () => {
     // A plugin named like a listed connector is not that connector.
     expect(screenDiagnostics(current)).toEqual([unknownField, unknownPlugin]);
     expect(sectionDiagnostics(current, telegram)).toEqual([misplaced]);
+  });
+
+  it("says whether a connector's process is on the stream", () => {
+    const running: GatewayHealth = {
+      ...health,
+      connectors: [{id: 'telegram', connected: true}],
+    };
+
+    expect(connectorPresenceSentence(running, 'telegram')).toBe(
+      'Connector: running',
+    );
+    expect(connectorPresenceSentence(health, 'telegram')).toBe(
+      'Connector: not running.',
+    );
+    expect(connectorPresenceSentence(health, 'discord')).toBeUndefined();
+    expect(connectorPresenceSentence(undefined, 'telegram')).toBeUndefined();
   });
 
   it('judges the first run by the home provider alone: unauthored, with only its default in effect', () => {

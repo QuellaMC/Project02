@@ -1,11 +1,13 @@
 import type {
   ConfigTarget,
+  GatewayHealth,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
 } from '../../gateway/api/index.ts';
 import type {Session} from './session.ts';
 import {
+  connectorPresenceSentence,
   hostFieldKey,
   readableName,
   screenDiagnostics,
@@ -24,6 +26,7 @@ type RowContext = {
   readonly scope: ConfigTarget['scope'];
   /** A change is on its way, or the address will never take one. */
   readonly busy: boolean;
+  readonly health: GatewayHealth | undefined;
 };
 
 /**
@@ -56,6 +59,7 @@ export function SettingsScreen({
     session,
     scope: target.scope,
     busy: page.saving !== undefined || state.connection.status === 'refused',
+    health: state.health,
   };
   const groups = Object.groupBy(
     view?.status === 'ok' ? view.sections : [],
@@ -260,7 +264,7 @@ function SectionBlock({
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly context: RowContext;
 }) {
-  const {page, session, scope, busy} = context;
+  const {page, session, scope, busy, health} = context;
   const key = sectionKey(section.namespace, section.id);
   const authoredHere =
     section.enabledSource === (scope === 'global' ? 'global' : 'character');
@@ -275,6 +279,10 @@ function SectionBlock({
   // Activation is a per-character decision, so only a character's screen
   // shows how the plan judged it and why.
   const activation = scope === 'character' ? section.activation : undefined;
+  const presence =
+    section.namespace === 'connectors'
+      ? connectorPresenceSentence(health, section.id)
+      : undefined;
 
   return (
     <div className="section" data-section={key}>
@@ -289,6 +297,9 @@ function SectionBlock({
           <span className={`pill pill-${activation.status}`}>
             {activation.status}
           </span>
+        )}
+        {presence === undefined ? null : (
+          <span className="muted small">{presence}</span>
         )}
       </div>
       <div className="field" data-field={key}>

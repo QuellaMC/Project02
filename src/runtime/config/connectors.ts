@@ -8,7 +8,15 @@ import type {
   RuntimeConfigSections,
 } from './types.ts';
 
-const telegramConnector: RuntimeConfigSectionDeclaration = Object.freeze({
+/**
+ * A connector's settings, and the field pairing writes an approved account
+ * into; a connector without one does not pair.
+ */
+export type ConnectorDeclaration = RuntimeConfigSectionDeclaration & {
+  readonly pairing?: {readonly field: string};
+};
+
+const telegramConnector: ConnectorDeclaration = Object.freeze({
   id: 'telegram',
   displayName: 'Telegram',
   version: '1.0.0',
@@ -54,17 +62,33 @@ const telegramConnector: RuntimeConfigSectionDeclaration = Object.freeze({
         reloadRequired: false,
         redactionLabels: Object.freeze([]),
       } satisfies RuntimeConfigFieldDeclaration),
+      Object.freeze({
+        name: 'pairedUsers',
+        description:
+          'Accounts allowed to talk to your characters, each id with a ' +
+          'name. Pairing adds one; remove a line to unpair it.',
+        scope: 'global_only',
+        required: false,
+        secret: false,
+        valueType: 'object',
+        defaultValue: Object.freeze({}),
+        agentMutable: false,
+        reloadRequired: false,
+        redactionLabels: Object.freeze([]),
+      } satisfies RuntimeConfigFieldDeclaration),
     ]),
   }),
   activation: Object.freeze({
     defaultEnabled: true,
     reasons: Object.freeze(['built_in_connector']),
   }),
+  pairing: Object.freeze({field: 'pairedUsers'}),
 });
 
 /** Every connector this version has: a connector is built in, never discovered. */
-export const builtInConnectors: readonly RuntimeConfigSectionDeclaration[] =
-  Object.freeze([telegramConnector]);
+export const builtInConnectors: readonly ConnectorDeclaration[] = Object.freeze(
+  [telegramConnector],
+);
 
 /** The sections a daemon resolves: the plugins it discovered, and the connectors it has. */
 export function createRuntimeConfigSections(
