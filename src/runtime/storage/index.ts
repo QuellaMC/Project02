@@ -4,7 +4,6 @@ export {
   createLocalRuntimeStorageSchemaMarker,
   createProject02HomeLayout,
   decodeStorageSchemaMarker,
-  defaultProject02HomeRoot,
   encodeStorageSchemaMarker,
   homeRootForCharacterDataDir,
   LocalRuntimeStorageContractError,
@@ -39,10 +38,7 @@ export {
 } from './home.ts';
 export {
   acquireLocalRuntimeDaemonLease,
-  readDaemonRecord,
   writeDaemonRecord,
-  type DaemonRecord,
-  type DaemonRecordReading,
 } from './daemon-record.ts';
 export {
   createLocalRuntimeSessionHistoryFeed,
