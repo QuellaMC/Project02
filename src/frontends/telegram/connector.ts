@@ -176,8 +176,15 @@ async function followDaemon(
           bots.snapshot(snapshot);
           read();
         },
-        onResumed: connected,
+        // A stream that returns resumed brings no ready: the settings are
+        // read for the updates held since the loss.
+        onResumed: () => {
+          connected();
+          read();
+        },
         onLost: () => {
+          bots.hold();
+
           if (recordMoved(options.homeRoot, record)) {
             own.abort();
           } else {
@@ -321,6 +328,11 @@ type BotTable = {
    * that may have changed while the stream was away.
    */
   snapshot(ready: GatewayReady): void;
+  /**
+   * Holds the bots' updates until the next settings read is applied: the
+   * stream is lost, and the settings may change before it returns.
+   */
+  hold(): void;
   /** Stops every bot, and settles once each has stopped. */
   stopAll(): Promise<void>;
 };
@@ -336,10 +348,20 @@ function createBotTable(context: {
   const stopping = new Set<Promise<void>>();
   const notice = createNotice();
   let latest: GatewayReady | undefined;
-  /** A snapshot not handed on yet: the settings it is shown by are being read; the bots' updates wait for them too. */
+  /** A snapshot not handed on yet: the settings it is shown by are being read. */
   let unread = false;
+  /** The bots' updates wait for a settings read: the stream was lost, or a ready came. */
+  let holding = false;
   let settle = (): void => undefined;
   let settled: Promise<void> = Promise.resolve();
+  const hold = (): void => {
+    if (!holding) {
+      holding = true;
+      settled = new Promise(resolve => {
+        settle = resolve;
+      });
+    }
+  };
   const stop = (token: string, bot: Bot): void => {
     const stopped = bot.stop().finally(() => {
       stopping.delete(stopped);
@@ -422,9 +444,13 @@ function createBotTable(context: {
         );
       }
 
+      if (holding) {
+        holding = false;
+        settle();
+      }
+
       if (unread && latest !== undefined) {
         unread = false;
-        settle();
 
         for (const bot of running.values()) {
           bot.snapshot(latest);
@@ -444,14 +470,10 @@ function createBotTable(context: {
     },
     snapshot(ready) {
       latest = ready;
-
-      if (!unread) {
-        unread = true;
-        settled = new Promise(resolve => {
-          settle = resolve;
-        });
-      }
+      unread = true;
+      hold();
     },
+    hold,
     async stopAll() {
       for (const [token, bot] of running) {
         stop(token, bot);

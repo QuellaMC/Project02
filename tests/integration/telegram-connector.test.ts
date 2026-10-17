@@ -547,12 +547,12 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
-  it('reads nothing on a stream the daemon resumed', async () => {
+  it('reads once on a stream the daemon resumed, for the messages that waited since it was lost, and then on the next change', async () => {
     const {homeRoot, gateway} = await createTelegramHome();
     const telegram = await startTelegram();
     // Another of the connector's processes stays on the stream, so this
     // one leaving and coming back changes nothing in health: the daemon
-    // has nothing to replay.
+    // has nothing to replay, and the read on return is the connector's own.
     const otherProcess = gateway.connectorPresent('telegram');
     // The streams outlive the socket, as they do in the daemon.
     const events = createEventStreams(gateway);
@@ -588,7 +588,7 @@ describe('Telegram connector', () => {
         'Telegram: @mira_new_bot answers for Mira.',
       );
     });
-    expect(daemon.reads()).toBe(2);
+    expect(daemon.reads()).toBe(3);
     otherProcess();
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
@@ -1788,12 +1788,13 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
-  it("tells a line written while the daemon's socket is closed to be sent again", async () => {
+  it('holds a message that arrives while the stream is lost, and judges it by the settings read on its return', async () => {
     const {homeRoot, gateway} = await createTelegramHome({
-      pairedUsers: aliceIsPaired,
+      pairedUsers: {...aliceIsPaired, [String(bob.id)]: 'Bob'},
     });
     const telegram = await startTelegram();
-    const server = await serve(homeRoot, gateway);
+    const events = createEventStreams(gateway);
+    const first = await serve(homeRoot, gateway, {events});
 
     await gateway.startCharacter('mira');
 
@@ -1802,14 +1803,87 @@ describe('Telegram connector', () => {
     await vi.waitFor(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
-    await server.close();
-    telegram.push(miraToken, messageFrom(alice, 1, 'anyone there?'));
+    telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+      },
+      {timeout: 5_000},
+    );
+
+    const shownToBob = textsIn(telegram, miraToken, bob.id);
+
+    await first.close();
     await vi.waitFor(() => {
-      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-        'The daemon is not running right now; send that again in a moment.',
-      ]);
+      expect(connector.stdout()).toContain('waiting for the daemon');
     });
+    await change(gateway, home, {
+      kind: 'section_field_set',
+      ...telegramSection,
+      field: 'pairedUsers',
+      value: aliceIsPaired,
+    });
+    telegram.push(miraToken, messageFrom(bob, 2, 'again'));
+    await sleep(300);
+    expect(textsIn(telegram, miraToken, bob.id)).toEqual(shownToBob);
+
+    const returned = await serve(homeRoot, gateway, {port: first.port, events});
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+          /Your pairing code is/u,
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(
+      lines.filter(line => line.role === 'user').map(line => line.text),
+    ).toEqual(['hello']);
     await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
+    await events.closeAll();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("holds a line written while the daemon's socket is closed, and carries it once the daemon is back", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const first = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    await first.close();
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain('waiting for the daemon');
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'anyone there?'));
+    await sleep(300);
+    expect(textsIn(telegram, miraToken, alice.id)).toEqual([]);
+
+    const returned = await serve(homeRoot, gateway, {port: first.port});
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: anyone there?',
+        );
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
     await telegram.close();
     await gateway.stop();
   });
