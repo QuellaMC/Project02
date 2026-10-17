@@ -109,6 +109,41 @@ describe('gateway reference client', () => {
     await close();
   });
 
+  it('sends its verbs and its stream through the fetch it is handed', async () => {
+    const {server, close} = await startServer();
+    const paths: string[] = [];
+    const client = createGatewayClient({
+      baseUrl: server.baseUrl,
+      token,
+      fetch: (input, init) => {
+        paths.push(
+          new URL(input instanceof Request ? input.url : input).pathname,
+        );
+
+        return fetch(input, init);
+      },
+    });
+    const abort = new AbortController();
+    let listening = false;
+
+    await client.health();
+
+    const following = client.events(() => undefined, {
+      signal: abort.signal,
+      onReady: () => {
+        listening = true;
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(listening).toBe(true);
+    });
+    abort.abort();
+    await following;
+    expect(paths).toEqual(['/api/health', '/api/events']);
+    await close();
+  });
+
   it('reads what a connector runs on, and asks, lists and answers its pairings, handing on each frame', async () => {
     const {client, gateway, close} = await startServer();
     const view = await client.connectorConfig('telegram');

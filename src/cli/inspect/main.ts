@@ -47,7 +47,7 @@ import {
   type InspectConfiguredConnector,
   type InspectConfiguredPlugin,
 } from '../../runtime/config/index.ts';
-import {isMainModule} from '../shared/main-module.ts';
+import {isMainModule} from '../../shared/main-module.ts';
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
