@@ -92,7 +92,9 @@ export function createGate(
             bot.settings().kind,
           ),
         );
-      } else if (outcome.status === 'refused') {
+      } else if (outcome.status === 'paired') {
+        outbox.admitted(chatId);
+      } else {
         outbox.say(chatId, sentences.refused);
         bot.report(
           `${botNames(bot.settings()).bot} could not ask to pair ${subject.label}: ${outcome.message}`,

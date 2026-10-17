@@ -26,6 +26,8 @@ export type FakeTelegram = {
   throttle(token: string, retryAfterSeconds: number, method?: string): void;
   /** Telegram sends the token's updates to a webhook, and refuses its polls, until `deleteWebhook`. */
   setWebhook(token: string): void;
+  /** The token is no bot's any more: every call on it is refused. */
+  revokeBot(token: string): void;
 };
 
 /** A waiting poll is answered, or ended by a newer one on its token. */
@@ -158,6 +160,10 @@ export async function createFakeTelegram(
     },
     setWebhook(token) {
       registered(bots, token).webhook = true;
+    },
+    revokeBot(token) {
+      bots.get(token)?.endWaitingPoll?.('answer');
+      bots.delete(token);
     },
   };
 }

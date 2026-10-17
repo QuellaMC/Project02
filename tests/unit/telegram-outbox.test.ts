@@ -4,7 +4,10 @@ import type {
   BotApi,
   BotApiOutcome,
 } from '../../src/frontends/telegram/bot-api.ts';
-import type {BotContext} from '../../src/frontends/telegram/bot.ts';
+import type {
+  BotContext,
+  BotSettings,
+} from '../../src/frontends/telegram/bot.ts';
 import {createOutbox} from '../../src/frontends/telegram/outbox.ts';
 
 /** A Bot API that records what is written and answers as Telegram does, but for the sends (by ordinal) and edits told to fail. */
@@ -58,29 +61,46 @@ function recordingApi(failing: {
   return {api, calls};
 }
 
-/** Mira's bot, with Alice paired unless other accounts are given, over the API given. */
+/**
+ * Mira's bot, with Alice paired unless other accounts are given, over the
+ * API given; its settings are one object until `reread` gives it another,
+ * as a read of the daemon's does.
+ */
 function miraBot(
   api: BotApi,
   reports: string[],
   pairedUsers: Readonly<Record<string, string>> = {'1': 'Alice'},
-): BotContext {
+): {
+  readonly bot: BotContext;
+  reread(pairedUsers: Readonly<Record<string, string>>): void;
+} {
+  const settingsWith = (
+    paired: Readonly<Record<string, string>>,
+  ): BotSettings => ({
+    kind: 'character',
+    characterId: 'mira',
+    name: 'Mira',
+    mirror: true,
+    pairedUsers: paired,
+  });
+  let settings = settingsWith(pairedUsers);
+
   return {
-    api,
-    username: 'mira_bot',
-    client: () => {
-      throw new Error('not called here');
+    bot: {
+      api,
+      username: 'mira_bot',
+      client: () => {
+        throw new Error('not called here');
+      },
+      settings: () => settings,
+      report: line => {
+        reports.push(line);
+      },
+      signal: new AbortController().signal,
     },
-    settings: () => ({
-      kind: 'character',
-      characterId: 'mira',
-      name: 'Mira',
-      mirror: true,
-      pairedUsers,
-    }),
-    report: line => {
-      reports.push(line);
+    reread(paired) {
+      settings = settingsWith(paired);
     },
-    signal: new AbortController().signal,
   };
 }
 
@@ -93,7 +113,7 @@ describe('Telegram outbox', () => {
     // The first send of a commit, the first of a saying, and the second
     // piece of a longer commit fail.
     const {api, calls} = recordingApi({failSendAt: new Set([1, 2, 4])});
-    const outbox = createOutbox(miraBot(api, []));
+    const outbox = createOutbox(miraBot(api, []).bot);
     const long = 'x'.repeat(5_000);
     const longer = 'y'.repeat(10_000);
 
@@ -116,23 +136,48 @@ describe('Telegram outbox', () => {
 
   it('writes to the chats of accounts whose keys are Telegram user ids, and to no chat a key shaped otherwise would name', () => {
     const {api} = recordingApi({});
-    const outbox = createOutbox(
-      miraBot(api, [], {
-        '4242': 'Alice',
-        '-1001234': 'a group',
-        '007': 'padded',
-        '12.5': 'not an id',
-        bob: 'a name',
-        '9007199254740993': 'past a safe integer',
-      }),
-    );
+    const mira = miraBot(api, [], {
+      '4242': 'Alice',
+      '-1001234': 'a group',
+      '007': 'padded',
+      '12.5': 'not an id',
+      bob: 'a name',
+      '9007199254740993': 'past a safe integer',
+    });
+    const outbox = createOutbox(mira.bot);
 
     expect(outbox.paired()).toEqual([4242]);
+
+    // An account the daemon let in counts until the next read, which
+    // holds it or does not.
+    outbox.admitted(5151);
+    expect(outbox.paired()).toEqual([4242, 5151]);
+    mira.reread({'4242': 'Alice'});
+    expect(outbox.paired()).toEqual([4242]);
+  });
+
+  it("drops a saying or a card meant for a paired account whose pairing ended before its turn came, and still answers the chat's own message", async () => {
+    const {api, calls} = recordingApi({});
+    const pairedUsers: Record<string, string> = {'1': 'Alice'};
+    const outbox = createOutbox(miraBot(api, [], pairedUsers).bot);
+
+    outbox.sayToPaired(1, 'You (web): a secret');
+    const card = outbox.card(1, 'a card', [
+      [{text: 'Approve', callbackData: 'c:x:a'}],
+    ]);
+    delete pairedUsers['1'];
+    await expect(card).resolves.toBeUndefined();
+    expect(calls).toEqual([]);
+
+    outbox.say(1, 'I can only read text here for now.');
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
   });
 
   it("answers a button press with a toast within Telegram's 200 characters", async () => {
     const {api, calls} = recordingApi({});
-    const outbox = createOutbox(miraBot(api, []));
+    const outbox = createOutbox(miraBot(api, []).bot);
     const press = {id: 'q1', from: {id: 1, isBot: false, firstName: 'Alice'}};
 
     outbox.answer(press, 'z'.repeat(300));
@@ -148,7 +193,7 @@ describe('Telegram outbox', () => {
     const failing = {editsToFail: 1};
     const {api, calls} = recordingApi(failing);
     const reports: string[] = [];
-    const outbox = createOutbox(miraBot(api, reports));
+    const outbox = createOutbox(miraBot(api, reports).bot);
 
     outbox.draft('d', 'noted: ', true);
     await vi.advanceTimersByTimeAsync(0);

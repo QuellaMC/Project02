@@ -14,8 +14,10 @@ function recordingOutbox(
   const revised: {readonly chatId: number; readonly text: string}[] = [];
   const outbox: Outbox = {
     paired: () => [],
+    admitted: () => undefined,
     heardFrom: () => undefined,
     say: () => undefined,
+    sayToPaired: () => undefined,
     card: (chatId, text) => {
       sent.push({chatId, text});
 

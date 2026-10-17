@@ -78,8 +78,8 @@ const noRules: BotRules = {
 /**
  * One token's bot: asks Telegram who it is, says so, and polls until it is
  * stopped or Telegram refuses the token, handing what it gets to its
- * rules. Trouble is reported once per change, naming the bot, while the
- * bot keeps trying.
+ * rules; a token refused ends the bot's writes with its poll. Trouble is
+ * reported once per change, naming the bot, while the bot keeps trying.
  */
 export function startBot(options: {
   readonly api: BotApi;
@@ -178,6 +178,7 @@ export function startBot(options: {
 
     if (ended === 'unauthorized') {
       report(refused());
+      stopping.abort();
     }
   };
   const running = run();
