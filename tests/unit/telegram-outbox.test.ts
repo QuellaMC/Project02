@@ -1,3 +1,5 @@
+import {setTimeout as sleep} from 'node:timers/promises';
+
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import type {
@@ -19,6 +21,8 @@ function recordingApi(failing: {
   editsToFail?: number;
   failSendAt?: ReadonlySet<number>;
   holdSendAt?: number;
+  /** The send of this ordinal answers 429, asking for 200 ms. */
+  retryAfterAt?: number;
 }) {
   const calls: {readonly method: string; readonly text: string}[] = [];
   let release = (): void => undefined;
@@ -48,6 +52,15 @@ function recordingApi(failing: {
 
       if (failing.failSendAt?.has(ordinal) === true) {
         return {ok: false, code: 0, description: 'no answer'};
+      }
+
+      if (failing.retryAfterAt === ordinal) {
+        return {
+          ok: false,
+          code: 429,
+          description: 'Too Many Requests: retry after 1',
+          retryAfterMs: 200,
+        };
       }
 
       return message(ordinal);
@@ -212,6 +225,35 @@ describe('Telegram outbox', () => {
       setTimeout(resolve, 20);
     });
     expect(calls).toEqual([{method: 'sendMessage', text: 'noted: hello'}]);
+  });
+
+  it('writes no further piece, and makes no second try, to an account unpaired while its write was under way', async () => {
+    const {api, calls, release} = recordingApi({
+      holdSendAt: 1,
+      retryAfterAt: 2,
+    });
+    const pairedUsers: Record<string, string> = {'1': 'Alice'};
+    const reports: string[] = [];
+    const outbox = createOutbox(miraBot(api, reports, pairedUsers).bot);
+
+    outbox.sayToPaired(1, 'x'.repeat(5_000));
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    delete pairedUsers['1'];
+    release();
+    await sleep(20);
+    expect(calls).toHaveLength(1);
+
+    pairedUsers['1'] = 'Alice';
+    outbox.sayToPaired(1, 'again');
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    delete pairedUsers['1'];
+    await sleep(300);
+    expect(calls).toHaveLength(2);
+    expect(reports).toEqual([]);
   });
 
   it("answers a button press with a toast within Telegram's 200 characters", async () => {
