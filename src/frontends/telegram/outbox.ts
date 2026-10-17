@@ -41,7 +41,7 @@ export type Outbox = {
   ): Promise<number | undefined>;
   /** Edits a card to the text it ends with, its buttons gone. */
   revise(chatId: number, messageId: number, text: string): void;
-  /** Answers a button press, with a toast when there is one. */
+  /** Answers a button press at once, with a toast when there is one: it waits for none of what the bot writes. */
   answer(press: TelegramCallbackQuery, toast?: string): void;
   typing(chatId: number): void;
   /**
@@ -177,7 +177,7 @@ export function createOutbox(bot: BotContext): Outbox {
       void queue(() => writer.edit(chatId, messageId, text));
     },
     answer(press, toast) {
-      void queue(() => writer.answer(press, toast));
+      void writer.answer(press, toast);
     },
     typing(chatId) {
       void queue(() => writer.typing(chatId));

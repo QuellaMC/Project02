@@ -95,7 +95,9 @@ character starts a bot of its own; any other change to an entry reaches
 its running bot, and the bots outlive a reconnect to the daemon. A bot
 asks Telegram who it is and says so. A token Telegram refuses ends its
 bot, naming the settings page to replace it on; another program polling the same token (409) and a Telegram that does
-not answer are said once per change while the bot keeps trying; a webhook
+not answer are said once per change while the bot keeps trying, and
+while another program holds the polls this bot writes nothing, catching
+up from the snapshot when its polls are answered again; a webhook
 left on the token is removed and said, since Telegram sends a bot's
 messages to it or to the polls, never both; a pause Telegram asks for is
 waited out, before the next poll, the next message, or the next asking

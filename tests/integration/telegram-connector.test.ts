@@ -835,7 +835,7 @@ describe('Telegram connector', () => {
 
     await expect(connector.exit).resolves.toBe(1);
     expect(connector.stderr()).toBe(
-      `This connector speaks protocol ${String(gatewayProtocolVersion)}; the daemon speaks 6. Update one of them.\n`,
+      `The daemon speaks protocol 6; this client speaks ${String(gatewayProtocolVersion)}. Update one of them.\n`,
     );
     await older.close();
     await telegram.close();
