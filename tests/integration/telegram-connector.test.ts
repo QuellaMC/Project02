@@ -1180,6 +1180,118 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it("keeps a reply's message across a stream the daemon could not resume, and brings it to the words the snapshot carries", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const events = createEventStreams(gateway, {
+      replayBytes: 1,
+      graceMs: 100,
+    });
+    const first = await serve(homeRoot, gateway, {events});
+    const line = `slowly ${Array.from({length: 700}, (_, word) => `w${String(word)}`).join(' ')}`;
+    const reply = `noted: ${line}`;
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, line));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual(['noted: ']);
+      },
+      {timeout: 5_000},
+    );
+    await first.close();
+
+    // Back on the same address, mid-reply, with a log too short to replay:
+    // the ready carries the draft, and its message stays.
+    const returned = await serve(homeRoot, gateway, {
+      port: first.port,
+      events,
+    });
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+      },
+      {timeout: 10_000},
+    );
+    expect(bodiesOf(telegram, miraToken, 'deleteMessage')).toEqual([]);
+    expect(
+      new Set(
+        bodiesOf(telegram, miraToken, 'editMessageText').map(
+          body => body['message_id'],
+        ),
+      ),
+    ).toEqual(new Set([1]));
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
+    await events.closeAll();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('shows a long line from another surface in as many messages as it takes', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const text = Array.from(
+      {length: 1_000},
+      (_, word) => `m${String(word)}`,
+    ).join(' ');
+    const mirrored = `You (web): ${text}`;
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    const ref = await openDirect(gateway, 'mira');
+
+    await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text,
+      source: 'web',
+      clientMessageId: 'web-long',
+    });
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual(
+          expect.arrayContaining([
+            mirrored.slice(0, 4096),
+            mirrored.slice(4096),
+          ]),
+        );
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("tells a line written while the daemon's socket is closed to be sent again", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,
@@ -1415,6 +1527,53 @@ describe('Telegram connector', () => {
     expect(deliveries.map(signal => signal.aborted)).toEqual([true]);
     expect(gateway.pendingConfirmations()).toEqual([pending]);
     await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('ends a card whose confirmation was settled while the stream was down, on the ready that comes back without it', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const first = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
+
+    const pending = await confirmationOf(gateway);
+    const card = confirmationCard(pending);
+
+    await vi.waitFor(() => {
+      expect(cardsIn(telegram, miraToken, alice.id)).toHaveLength(1);
+    });
+    await first.close();
+    expect(gateway.answerConfirmation(pending.id, 'approved')).toMatchObject({
+      status: 'answered',
+    });
+
+    const returned = await serve(homeRoot, gateway, {port: first.port});
+
+    await vi.waitFor(
+      () => {
+        expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
+          {
+            chat_id: alice.id,
+            message_id: 1,
+            text: `${card} · settled while the bot was away`,
+          },
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await returned.close();
     await telegram.close();
     await gateway.stop();
   });

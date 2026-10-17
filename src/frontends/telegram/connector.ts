@@ -136,13 +136,13 @@ async function followDaemon(
 ): Promise<'stopped' | 'moved' | 'refused' | 'protocol_mismatch'> {
   const {options, bots, say, report, notice} = connector;
   const baseUrl = `http://127.0.0.1:${String(record.port)}`;
+  const own = new AbortController();
+  const signal = AbortSignal.any([options.signal, own.signal]);
   const client = createGatewayClient({
     baseUrl,
     token: record.token,
-    fetch: options.fetch,
+    fetch: underSignal(options.fetch, signal),
   });
-  const own = new AbortController();
-  const signal = AbortSignal.any([options.signal, own.signal]);
   const connected = (): void => {
     notice(say, `Telegram connector: connected to ${baseUrl}.`);
   };
@@ -212,6 +212,23 @@ async function followDaemon(
   }
 
   return options.signal.aborted ? 'stopped' : 'moved';
+}
+
+/** The transport with every request under the signal as well: none outlives the connection it was made on. */
+function underSignal(
+  transport: typeof fetch,
+  signal: AbortSignal,
+): typeof fetch {
+  return (input, init) =>
+    transport(input, {
+      ...init,
+      signal: AbortSignal.any([
+        signal,
+        ...(init?.signal === undefined || init.signal === null
+          ? []
+          : [init.signal]),
+      ]),
+    });
 }
 
 function waitingLine(homeRoot: string): string {

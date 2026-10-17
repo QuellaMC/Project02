@@ -23,6 +23,7 @@ export type Outbox = {
   paired(): readonly number[];
   /** A message from the chat arrived, so it is written to again. */
   heardFrom(chatId: number): void;
+  /** Says the text in the chat, in as many messages as it takes. */
   say(chatId: number, text: string): void;
   /** Sends a message with buttons, and gives its id once sent; none when it could not be. */
   card(
@@ -44,7 +45,8 @@ export type Outbox = {
   /** The committed text replaces its draft; with none posted, `post` sends it whole. */
   commit(draftId: string, text: string, post: boolean): void;
   withdraw(draftId: string): void;
-  withdrawAll(): void;
+  /** Withdraws every draft but those named: what a snapshot still carries keeps its message, and `draft` brings it to its text. */
+  withdrawExcept(kept: ReadonlySet<string>): void;
 };
 
 /** A reply as the chats show it while it is written. */
@@ -94,7 +96,7 @@ export function createOutbox(bot: BotContext): Outbox {
 
     if (outcome.code === 403) {
       silent.add(chatId);
-    } else {
+    } else if (!bot.signal.aborted) {
       bot.report(
         `${botNames(bot.settings()).bot} could not write to chat ${String(chatId)}: ${outcome.description}`,
       );
@@ -114,6 +116,7 @@ export function createOutbox(bot: BotContext): Outbox {
           chatId,
           text,
           ...(keyboard === undefined ? {} : {keyboard}),
+          signal: bot.signal,
         }),
       ),
     );
@@ -124,7 +127,7 @@ export function createOutbox(bot: BotContext): Outbox {
     text: string,
   ): Promise<void> => {
     const outcome = await call(() =>
-      api.editMessageText({chatId, messageId, text}),
+      api.editMessageText({chatId, messageId, text, signal: bot.signal}),
     );
 
     if (!notModified(outcome)) {
@@ -184,7 +187,9 @@ export function createOutbox(bot: BotContext): Outbox {
         for (const [chatId, messageId] of draft.messages) {
           heard(
             chatId,
-            await call(() => api.deleteMessage({chatId, messageId})),
+            await call(() =>
+              api.deleteMessage({chatId, messageId, signal: bot.signal}),
+            ),
           );
         }
       });
@@ -197,7 +202,11 @@ export function createOutbox(bot: BotContext): Outbox {
       silent.delete(chatId);
     },
     say(chatId, text) {
-      void queue(() => send(chatId, text));
+      void queue(async () => {
+        for (const piece of pieces(text)) {
+          await send(chatId, piece);
+        }
+      });
     },
     card: async (chatId, text, keyboard) =>
       (await queue(() => send(chatId, text, keyboard)))?.messageId,
@@ -212,6 +221,7 @@ export function createOutbox(bot: BotContext): Outbox {
             api.answerCallbackQuery({
               callbackQueryId: press.id,
               ...(toast === undefined ? {} : {text: toast}),
+              signal: bot.signal,
             }),
           ),
         );
@@ -219,7 +229,10 @@ export function createOutbox(bot: BotContext): Outbox {
     },
     typing(chatId) {
       void queue(async () => {
-        heard(chatId, await call(() => api.sendChatAction({chatId})));
+        heard(
+          chatId,
+          await call(() => api.sendChatAction({chatId, signal: bot.signal})),
+        );
       });
     },
     draft(draftId, text, post) {
@@ -246,9 +259,11 @@ export function createOutbox(bot: BotContext): Outbox {
       }
     },
     withdraw,
-    withdrawAll() {
+    withdrawExcept(kept) {
       for (const draftId of drafts.keys()) {
-        withdraw(draftId);
+        if (!kept.has(draftId)) {
+          withdraw(draftId);
+        }
       }
     },
   };

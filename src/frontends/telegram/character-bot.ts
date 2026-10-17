@@ -170,7 +170,10 @@ async function carry(
   }
 }
 
-/** Opens her DM and keeps it; throws when the daemon cannot be reached. */
+/**
+ * Opens her DM and keeps it, and shows what the fold holds of it, folded
+ * before it was known to be hers; throws when the daemon cannot be reached.
+ */
 async function open(chat: Chat): Promise<OpenOutcome> {
   const outcome = await chat.bot
     .client()
@@ -178,6 +181,7 @@ async function open(chat: Chat): Promise<OpenOutcome> {
 
   if (outcome.status === 'opened') {
     chat.thread = outcome;
+    showDrafts(chat);
   }
 
   return outcome;
@@ -268,11 +272,7 @@ function followTurn(chat: Chat, event: TurnFrame): void {
   const {outbox} = chat;
   const {progress} = event;
   const turn = chat.turns.get(event.conversationId);
-  const settings = chat.bot.settings();
-  const shown =
-    turn !== undefined &&
-    (turn.source === chat.source ||
-      (settings.kind === 'character' && settings.mirror));
+  const shown = turn !== undefined && isShown(chat, turn);
 
   switch (progress.kind) {
     case 'user_message':
@@ -334,19 +334,55 @@ function ended(
 /**
  * On a stream the daemon could not resume, the running turns are the
  * snapshot's — every one, as the fold has them; her DM is not open yet
- * when a bot starts — and the end of every draft shown here was missed:
- * each is withdrawn, as a page drops a bubble the snapshot does not carry,
- * and one still being written is posted again by its next words. A
- * confirmation still waiting that has no card here yet gets one.
+ * when a bot starts. A draft shown here that the snapshot still carries
+ * keeps its message and is brought to the snapshot's words; one it does
+ * not is withdrawn, as a page drops a bubble the snapshot does not carry.
+ * A card whose confirmation the snapshot no longer holds is ended, and a
+ * confirmation still waiting has its card in every chat it should.
  */
 function installSnapshot(chat: Chat, ready: GatewayReady): void {
   chat.turns = new Map(ready.turns.map(turn => [turn.conversationId, turn]));
-  chat.outbox.withdrawAll();
+  chat.outbox.withdrawExcept(
+    new Set(herTurn(chat)?.drafts.map(draft => draft.draftId)),
+  );
+  showDrafts(chat);
+  chat.cards.keep(new Set(ready.confirmations.map(pending => pending.id)));
 
   for (const pending of ready.confirmations) {
-    if (!chat.cards.has(pending.id)) {
-      raiseCard(chat, pending);
-    }
+    raiseCard(chat, pending);
+  }
+}
+
+/** A turn is shown here when this bot carried its line, or with Mirror on. */
+function isShown(chat: Chat, turn: RunningTurn): boolean {
+  const settings = chat.bot.settings();
+
+  return (
+    turn.source === chat.source ||
+    (settings.kind === 'character' && settings.mirror)
+  );
+}
+
+/** Her DM's running turn, as the fold has it. */
+function herTurn(chat: Chat): RunningTurn | undefined {
+  return chat.thread === undefined
+    ? undefined
+    : chat.turns.get(chat.thread.conversationId);
+}
+
+/**
+ * Her DM's drafts as the fold has them, brought to their words in the
+ * chats: posted where none is, edited where one shows other words.
+ */
+function showDrafts(chat: Chat): void {
+  const turn = herTurn(chat);
+
+  if (turn === undefined) {
+    return;
+  }
+
+  for (const draft of turn.drafts) {
+    chat.outbox.draft(draft.draftId, draft.text, isShown(chat, turn));
   }
 }
 
