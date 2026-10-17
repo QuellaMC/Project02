@@ -24,6 +24,7 @@ function telegramWith(
   polls: readonly BotApiOutcome<readonly TelegramUpdate[]>[] = [
     {ok: true, result: []},
   ],
+  log: string[] = [],
 ): BotApi {
   const answers = [...polls];
 
@@ -39,6 +40,8 @@ function telegramWith(
         },
       }),
     getUpdates: ({signal}) => {
+      log.push('poll');
+
       const answer = answers.shift();
 
       return answer === undefined
@@ -120,8 +123,9 @@ describe('a Telegram bot', () => {
   it('writes nothing while another poller holds the token, and catches up from the snapshot when it polls again', async () => {
     const installed: GatewayReady[] = [];
     const dispatched: string[] = [];
+    const log: string[] = [];
     const bot = startBot({
-      ...miraOver(telegramWith([conflict, {ok: true, result: []}])),
+      ...miraOver(telegramWith([conflict, {ok: true, result: []}], log)),
       pacing: {conflictRetryMs: 200},
       rules: () => ({
         onUpdate: () => Promise.resolve(),
@@ -130,6 +134,7 @@ describe('a Telegram bot', () => {
         },
         snapshot: ready => {
           installed.push(ready);
+          log.push('install');
         },
       }),
       snapshot: () => snapshot,
@@ -153,6 +158,8 @@ describe('a Telegram bot', () => {
     });
     bot.dispatch(frame);
     expect(dispatched).toEqual(['health_changed']);
+    // Each poll is on its way before the catch-up that follows it.
+    expect(log.slice(0, 4)).toEqual(['poll', 'install', 'poll', 'install']);
     await bot.stop();
   });
 

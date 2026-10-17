@@ -2086,6 +2086,64 @@ describe('Telegram connector', () => {
     await gateway.stop();
   });
 
+  it('hands two lines that came together to her in their order, though her DM had to be opened first', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const transport = createNodeFetch();
+    let opens = 0;
+    let releaseOpens = (): void => undefined;
+    const opensHeld = new Promise<void>(resolve => {
+      releaseOpens = resolve;
+    });
+    // Her DM opens only when the test lets it, as a slow daemon would.
+    const holdingOpens: typeof fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+
+      if (url.pathname === '/api/conversations/open') {
+        opens += 1;
+        await opensHeld;
+      }
+
+      return transport(input, init);
+    };
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram, holdingOpens);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'first'));
+    telegram.push(miraToken, messageFrom(alice, 2, 'second'));
+    await vi.waitFor(() => {
+      expect(opens).toBeGreaterThanOrEqual(2);
+    });
+    await sleep(100);
+    releaseOpens();
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: second',
+        );
+      },
+      {timeout: 10_000},
+    );
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(
+      lines.filter(line => line.role === 'user').map(line => line.text),
+    ).toEqual(['first', 'second']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
   it("holds a line written while the daemon's socket is closed, and carries it once the daemon is back", async () => {
     const {homeRoot, gateway} = await createTelegramHome({
       pairedUsers: aliceIsPaired,

@@ -228,7 +228,7 @@ const pollTimeoutSeconds = 50;
  */
 export async function pollUpdates(options: {
   readonly api: BotApi;
-  /** Runs before each poll is sent: the token's updates are this poller's from here, until a 409 says another poller took them. */
+  /** Runs once each poll is on its way: the token's updates are this poller's from here, until a 409 says another poller took them. */
   readonly onPoll?: () => void | Promise<void>;
   readonly onUpdate: (update: TelegramUpdate) => void | Promise<void>;
   readonly report: (problem: PollProblem | undefined) => void;
@@ -249,17 +249,15 @@ export async function pollUpdates(options: {
   };
 
   while (!aborted()) {
-    await options.onPoll?.();
-
-    if (aborted()) {
-      break;
-    }
-
-    const outcome = await api.getUpdates({
+    const polling = api.getUpdates({
       offset,
       timeoutSeconds: pollTimeoutSeconds,
       signal,
     });
+
+    await options.onPoll?.();
+
+    const outcome = await polling;
 
     if (aborted()) {
       break;
