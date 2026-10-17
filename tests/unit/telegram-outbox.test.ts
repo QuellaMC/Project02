@@ -7,8 +7,11 @@ import type {
 import type {BotContext} from '../../src/frontends/telegram/bot.ts';
 import {createOutbox} from '../../src/frontends/telegram/outbox.ts';
 
-/** A Bot API that records what is written and answers as Telegram does, but for the sends and edits told to fail. */
-function recordingApi(failing: {editsToFail?: number; sendsToFail?: number}) {
+/** A Bot API that records what is written and answers as Telegram does, but for the sends (by ordinal) and edits told to fail. */
+function recordingApi(failing: {
+  editsToFail?: number;
+  failSendAt?: ReadonlySet<number>;
+}) {
   const calls: {readonly method: string; readonly text: string}[] = [];
   const message = (
     id: number,
@@ -25,9 +28,7 @@ function recordingApi(failing: {editsToFail?: number; sendsToFail?: number}) {
     sendMessage: ({text}) => {
       calls.push({method: 'sendMessage', text});
 
-      if ((failing.sendsToFail ?? 0) > 0) {
-        failing.sendsToFail = (failing.sendsToFail ?? 0) - 1;
-
+      if (failing.failSendAt?.has(calls.length) === true) {
         return Promise.resolve({ok: false, code: 0, description: 'no answer'});
       }
 
@@ -45,7 +46,11 @@ function recordingApi(failing: {editsToFail?: number; sendsToFail?: number}) {
       return Promise.resolve(message(messageId));
     },
     deleteMessage: () => Promise.resolve({ok: true, result: true}),
-    answerCallbackQuery: () => Promise.resolve({ok: true, result: true}),
+    answerCallbackQuery: ({text}) => {
+      calls.push({method: 'answerCallbackQuery', text: text ?? ''});
+
+      return Promise.resolve({ok: true, result: true});
+    },
     sendChatAction: () => Promise.resolve({ok: true, result: true}),
     deleteWebhook: unused,
   };
@@ -80,30 +85,41 @@ describe('Telegram outbox', () => {
     vi.useRealTimers();
   });
 
-  it('sends the pieces after the first only once the first is in place', async () => {
-    const failing = {sendsToFail: 1};
-    const {api, calls} = recordingApi(failing);
+  it('sends the pieces of a text in order, and stops at one that could not be sent', async () => {
+    // The first send of a commit, the first of a saying, and the second
+    // piece of a longer commit fail.
+    const {api, calls} = recordingApi({failSendAt: new Set([1, 2, 4])});
     const outbox = createOutbox(miraBot(api, []));
     const long = 'x'.repeat(5_000);
+    const longer = 'y'.repeat(10_000);
 
     outbox.commit('d', long, true);
+    outbox.say(1, long);
+    outbox.commit('e', longer, true);
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(4);
+    });
+    await new Promise(resolve => {
+      setTimeout(resolve, 20);
+    });
+    expect(calls.map(call => call.text)).toEqual([
+      long.slice(0, 4096),
+      long.slice(0, 4096),
+      longer.slice(0, 4096),
+      longer.slice(4096, 8192),
+    ]);
+  });
+
+  it("answers a button press with a toast within Telegram's 200 characters", async () => {
+    const {api, calls} = recordingApi({});
+    const outbox = createOutbox(miraBot(api, []));
+    const press = {id: 'q1', from: {id: 1, isBot: false, firstName: 'Alice'}};
+
+    outbox.answer(press, 'z'.repeat(300));
     await vi.waitFor(() => {
       expect(calls).toHaveLength(1);
     });
-    await new Promise(resolve => {
-      setTimeout(resolve, 20);
-    });
-    expect(calls).toEqual([{method: 'sendMessage', text: long.slice(0, 4096)}]);
-
-    failing.sendsToFail = 1;
-    outbox.say(1, long);
-    await vi.waitFor(() => {
-      expect(calls).toHaveLength(2);
-    });
-    await new Promise(resolve => {
-      setTimeout(resolve, 20);
-    });
-    expect(calls).toHaveLength(2);
+    expect(calls[0]?.text).toBe(`${'z'.repeat(199)}…`);
   });
 
   it('tries an edit again at the commit when the one before it failed, though the words are the same', async () => {

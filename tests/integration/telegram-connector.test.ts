@@ -1552,7 +1552,7 @@ describe('Telegram connector', () => {
     expect(approved.subject.label).toBe('Bob (@bob)');
     await vi.waitFor(() => {
       expect(textsIn(telegram, miraToken, bob.id)).toEqual([
-        `This bot is private. Your pairing code is ${approved.code}, good for an hour. Approve it on the web page, or send it to the management bot.`,
+        `This bot is private. Your pairing code is ${approved.code}, good for 60 minutes. Approve it on the web page, or send it to the management bot.`,
       ]);
     });
     await expect(
@@ -1916,7 +1916,7 @@ describe('Telegram connector', () => {
 
     await vi.waitFor(() => {
       expect(textsIn(telegram, homeToken, carol.id)).toEqual([
-        `This bot is private. Your pairing code is ${request.code}, good for an hour. Approve it on the web page.`,
+        `This bot is private. Your pairing code is ${request.code}, good for 60 minutes. Approve it on the web page.`,
       ]);
     });
     await expect(connector.stop()).resolves.toBe(0);
