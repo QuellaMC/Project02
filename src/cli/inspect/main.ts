@@ -355,7 +355,10 @@ function inspectConfiguration(
       ...runtimeConfig.activation.diagnostics,
     ]),
     plugins: inspectConfiguredPlugins(runtimeConfig),
-    connectors: inspectConfiguredConnectors(runtimeConfig.resolvedConfig),
+    connectors: inspectConfiguredConnectors(
+      runtimeConfig.resolvedConfig,
+      runtimeConfig.effectiveConfig,
+    ),
   };
 }
 

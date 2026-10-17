@@ -633,40 +633,46 @@ describe('inspect CLI plugin evidence', () => {
     expect(stdout).toContain('"disabled_by_config"');
   });
 
-  it('shows each connector with its secrets redacted and its diagnostics', async () => {
+  it('shows each connector with its switch and activation, its secrets redacted, and its diagnostics', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-connectors-');
-    let stdout = '';
-
+    const configPath = join(storeRoot, 'config.json');
     // The character's bot token, misplaced in the home's document.
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      connectors: {
-        telegram: {
-          config: {
-            botToken: '654321:misplaced',
-            managementBotToken: '123456:home',
-            pairedUsers: {'123456789': 'Alice (@alice)'},
-          },
+    const telegram = {
+      config: {
+        botToken: '654321:misplaced',
+        managementBotToken: '123456:home',
+        pairedUsers: {'123456789': 'Alice (@alice)'},
+      },
+    };
+    const inspect = async (): Promise<string> => {
+      let stdout = '';
+      const exitCode = await runInspectCliFromArgs(
+        ['--store', storeRoot, '--sessions'],
+        {
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
         },
-      },
-    });
+      );
 
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--sessions'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-      },
-    );
+      expect(exitCode).toBe(0);
 
-    expect(exitCode).toBe(0);
+      return stdout;
+    };
+
+    writeRuntimeConfig(configPath, {connectors: {telegram}});
+
+    const stdout = await inspect();
+
     expect(JSON.parse(stdout)).toMatchObject({
       connectors: [
         {
           id: 'telegram',
           displayName: 'Telegram',
           version: '1.0.0',
+          enabled: true,
+          activation: {status: 'active'},
           diagnostics: [
             {
               code: 'runtime_config_authored_outside_scope',
@@ -684,6 +690,13 @@ describe('inspect CLI plugin evidence', () => {
     });
     expect(stdout).not.toContain('123456:home');
     expect(stdout).not.toContain('654321:misplaced');
+
+    writeRuntimeConfig(configPath, {
+      connectors: {telegram: {...telegram, enabled: false}},
+    });
+    expect(JSON.parse(await inspect())).toMatchObject({
+      connectors: [{enabled: false, activation: {status: 'disabled'}}],
+    });
   });
 
   it('uses declared plugin manifests for inspect without constructing plugins', async () => {
