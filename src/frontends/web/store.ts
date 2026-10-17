@@ -20,6 +20,7 @@ import {
   type HistoryPage,
   type OpenOutcome,
   type PairingRequest,
+  type PairingSettleOutcome,
   type PendingConfirmation,
   type RunningTurns,
   type TurnOutcome,
@@ -585,6 +586,52 @@ function withoutConfirmation(state: WebState, id: string): WebState {
   };
 }
 
+/**
+ * The daemon's answer to a click on a pairing card. A settlement is left
+ * to the settled frame, which removes the card. An expiry is the news
+ * that frame carries, said the same way, so whichever reaches the tab
+ * first the person hears it once. A request the daemon does not know may
+ * have been answered on another surface either way, so the page says only
+ * that it is not waiting. An approval that could not be written leaves the
+ * request waiting: the card stays, and the person hears why.
+ */
+export function pairingGone(
+  state: WebState,
+  code: string,
+  outcome: PairingSettleOutcome,
+): WebState {
+  const card = state.pairings.find(pairing => pairing.code === code);
+
+  if (card === undefined) {
+    return state;
+  }
+
+  switch (outcome.status) {
+    case 'settled':
+      return state;
+    case 'expired':
+      return pairingExpired(state, card);
+    case 'unknown':
+      return noticed(
+        withoutPairing(state, code),
+        'A pairing request is no longer waiting.',
+      );
+    case 'failed':
+      return noticed(state, outcome.message);
+  }
+}
+
+/** A pairing request whose hour ran out unanswered, said the same way whichever news of it comes first. */
+function pairingExpired(
+  state: WebState,
+  {code, subject}: Pick<PairingRequest, 'code' | 'subject'>,
+): WebState {
+  return noticed(
+    withoutPairing(state, code),
+    `A pairing request expired before it was answered: ${subject.label}, code ${code}.`,
+  );
+}
+
 function withoutPairing(state: WebState, code: string): WebState {
   return {
     ...state,
@@ -622,10 +669,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         : {...state, pairings: [...state.pairings, pairingOf(event)]};
     case 'pairing_settled':
       return event.decision === 'expired'
-        ? noticed(
-            withoutPairing(state, event.code),
-            `A pairing request expired before it was answered: ${event.subject.label}, code ${event.code}.`,
-          )
+        ? pairingExpired(state, event)
         : withoutPairing(state, event.code);
     case 'turn_progress': {
       const {progress} = event;
