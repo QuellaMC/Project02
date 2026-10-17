@@ -68,9 +68,10 @@ cannot read, and a token the daemon refuses are each said once. A daemon
 that speaks another protocol ends the process with exit 1, both versions
 said. It opens the stream as the `telegram` connector, so health — and
 the settings page with it — says it is running, and keeps its read of
-the connector config by the wire page's reading rule: a read on every
-`ready` and every `health_changed`, the newest answer applied, a failed
-read tried again with a backoff, nothing read on `resumed`. A lost
+the connector config by the wire page's reading rule: a read on every `ready` and every `health_changed`, the newest answer
+applied, a failed read tried again with a backoff, nothing read on
+`resumed`; a `ready`'s snapshot reaches the bots only after its read, so
+what they show goes by the settings as they are. A lost
 stream sends it back to the record, so a daemon that came back on
 another port is found. It reaches the daemon over `node-fetch.ts`, a
 fetch on `node:http` that the reference client takes as its `fetch` and
@@ -97,8 +98,9 @@ waited out, before the next poll, the next message, or the next asking
 who the bot is.
 
 Every bot keeps the pairing gate on every message and every press of a
-card's button. An account not in `pairedUsers` gets a pairing code, good
-for an hour, and nothing else; the daemon's `paired` answer lets in an
+card's button. An account not in `pairedUsers` gets a pairing code, good for an hour,
+and nothing else — or, when the daemon cannot take the request, is told
+the bot cannot pair it right now; the daemon's `paired` answer lets in an
 account the home already holds, before this bot's next read of the
 settings. An account this bot gave a code is told how its request ended.
 A bot answers private chats only.
