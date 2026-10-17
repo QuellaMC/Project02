@@ -3,9 +3,12 @@ import {useState, useSyncExternalStore} from 'react';
 import type {
   CharacterSummary,
   GatewayConfirmationDecision,
+  PairingDecision,
+  PairingRequest,
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import {webSource, type Session} from './session.ts';
+import {readableName} from './settings.ts';
 import {SettingsScreen} from './settings.tsx';
 import {characterName} from './store.ts';
 import {Avatar, StatePill, ThreadPane} from './thread.tsx';
@@ -91,12 +94,13 @@ export function App({session}: {readonly session: Session}) {
             {notice}
           </p>
         ))}
-        {state.confirmations.length === 0 ? null : (
+        {state.confirmations.length === 0 &&
+        state.pairings.length === 0 ? null : (
           // Every confirmation waiting is on the page, whichever character
           // it belongs to and whichever surface raised it: a person who
           // sees the whole roster answers for the whole roster, and one
           // raised for a character nobody is reading must not expire
-          // unseen.
+          // unseen. A pairing request is the home's, and waits beside them.
           <div className="cards">
             {state.confirmations.map(card => (
               <ConfirmationCard
@@ -104,6 +108,15 @@ export function App({session}: {readonly session: Session}) {
                 pending={card}
                 characterName={characterName(state, card.characterId)}
                 onAnswer={decision => session.answer(card.id, decision)}
+              />
+            ))}
+            {state.pairings.map(request => (
+              <PairingCard
+                key={request.code}
+                request={request}
+                onSettle={decision =>
+                  session.settlePairing(request.code, decision)
+                }
               />
             ))}
           </div>
@@ -216,18 +229,10 @@ function ConfirmationCard({
   readonly characterName: string;
   readonly onAnswer: (decision: GatewayConfirmationDecision) => Promise<void>;
 }) {
-  // The buttons rest while an answer is on its way; an answer that could
-  // not be delivered gives them back, since the card is still there.
-  const [answering, setAnswering] = useState(false);
-  const expires = new Date(pending.deadlineAt).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const answer = async (decision: GatewayConfirmationDecision) => {
-    setAnswering(true);
-    await onAnswer(decision);
-    setAnswering(false);
-  };
+  const raisedOn =
+    pending.turn === undefined || pending.turn.source === webSource
+      ? ''
+      : ` · raised on ${pending.turn.source}`;
 
   return (
     <div className="card" role="group" aria-label="Confirmation">
@@ -239,33 +244,80 @@ function ConfirmationCard({
       <pre className="card-preview">
         {JSON.stringify(pending.request.preview, null, 2)}
       </pre>
-      <div className="card-actions">
-        <span className="muted small">
-          {characterName} · expires at {expires}
-          {pending.turn === undefined || pending.turn.source === webSource
-            ? ''
-            : ` · raised on ${pending.turn.source}`}
-        </span>
-        <button
-          type="button"
-          disabled={answering}
-          onClick={() => {
-            void answer('approved');
-          }}
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          disabled={answering}
-          onClick={() => {
-            void answer('denied');
-          }}
-        >
-          Deny
-        </button>
-      </div>
+      <CardActions
+        note={`${characterName} · expires at ${clockTime(pending.deadlineAt)}${raisedOn}`}
+        onAnswer={onAnswer}
+      />
     </div>
   );
+}
+
+function PairingCard({
+  request,
+  onSettle,
+}: {
+  readonly request: PairingRequest;
+  readonly onSettle: (decision: PairingDecision) => Promise<void>;
+}) {
+  return (
+    <div className="card" role="group" aria-label="Pairing">
+      <p className="card-title">{readableName(request.connectorId)} pairing</p>
+      <p className="card-summary">{request.subject.label}</p>
+      <CardActions
+        note={`code ${request.code} · expires at ${clockTime(request.expiresAt)}`}
+        onAnswer={onSettle}
+      />
+    </div>
+  );
+}
+
+/**
+ * The buttons rest while an answer is on its way; one that did not settle
+ * the card gives them back, since the card is still there.
+ */
+function CardActions({
+  note,
+  onAnswer,
+}: {
+  readonly note: string;
+  readonly onAnswer: (decision: 'approved' | 'denied') => Promise<void>;
+}) {
+  const [answering, setAnswering] = useState(false);
+  const answer = async (decision: 'approved' | 'denied') => {
+    setAnswering(true);
+    await onAnswer(decision);
+    setAnswering(false);
+  };
+
+  return (
+    <div className="card-actions">
+      <span className="muted small">{note}</span>
+      <button
+        type="button"
+        disabled={answering}
+        onClick={() => {
+          void answer('approved');
+        }}
+      >
+        Approve
+      </button>
+      <button
+        type="button"
+        className="secondary"
+        disabled={answering}
+        onClick={() => {
+          void answer('denied');
+        }}
+      >
+        Deny
+      </button>
+    </div>
+  );
+}
+
+function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

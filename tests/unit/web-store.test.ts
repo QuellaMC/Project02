@@ -15,6 +15,7 @@ import {
   linesTaken,
   noticeSpent,
   pageUnread,
+  pairingGone,
   streamLost,
   streamResumed,
   threadOpened,
@@ -1000,7 +1001,7 @@ describe('web store', () => {
     ).toEqual(gone.notices);
   });
 
-  it('shows every pairing request waiting, whatever connector asked, and says when one expired unanswered', () => {
+  it('shows every pairing request waiting, whatever connector asked, and says when one expired unanswered or an answer to one did not settle it', () => {
     const alice = pairing('123456', 'Alice (@alice)');
     const bob = pairing('654321', 'Bob');
     let state = installSnapshot(opened(), {...ready(), pairings: [alice]});
@@ -1035,6 +1036,32 @@ describe('web store', () => {
     expect(expired.notices).toEqual([
       'A pairing request expired before it was answered: Bob, code 654321.',
     ]);
+
+    // The daemon's answer to a click: a settlement leaves the card to its
+    // frame, and an expiry is that frame's news, said once whichever of
+    // the two comes first.
+    expect(
+      pairingGone(state, bob.code, {status: 'settled', decision: 'approved'}),
+    ).toBe(state);
+    expect(pairingGone(state, bob.code, {status: 'expired'})).toEqual(expired);
+    expect(pairingGone(expired, bob.code, {status: 'expired'})).toBe(expired);
+
+    // A request the daemon does not know may have been answered on another
+    // surface either way; one whose approval could not be written waits.
+    const unknown = pairingGone(state, bob.code, {status: 'unknown'});
+
+    expect(unknown.pairings).toEqual([alice]);
+    expect(unknown.notices).toEqual([
+      'A pairing request is no longer waiting.',
+    ]);
+
+    const failed = pairingGone(state, bob.code, {
+      status: 'failed',
+      message: 'The disk is full.',
+    });
+
+    expect(failed.pairings).toEqual([alice, bob]);
+    expect(failed.notices).toEqual(['The disk is full.']);
 
     // One that ended while the tab was away simply goes.
     const away = installSnapshot(state, ready());
