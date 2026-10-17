@@ -104,6 +104,7 @@ function miraBot(
   api: BotApi,
   reports: string[],
   pairedUsers: Readonly<Record<string, string>> = {'1': 'Alice'},
+  settled: () => Promise<void> = () => Promise.resolve(),
 ): {
   readonly bot: BotContext;
   reread(pairedUsers: Readonly<Record<string, string>>): void;
@@ -132,6 +133,7 @@ function miraBot(
         reports.push(line);
       },
       signal: new AbortController().signal,
+      settled,
     },
     reread(paired) {
       settings = settingsWith(paired);
@@ -270,6 +272,27 @@ describe('Telegram outbox', () => {
     );
     expect(calls.every(call => call.text === 'hello')).toBe(true);
     expect(reports).toEqual([]);
+  });
+
+  it('waits with a write to a paired account while the settings are in doubt', async () => {
+    const {api, calls} = recordingApi({});
+    let settle = (): void => undefined;
+    const settled = new Promise<void>(resolve => {
+      settle = resolve;
+    });
+    const outbox = createOutbox(
+      miraBot(api, [], {'1': 'Alice'}, () => settled).bot,
+    );
+
+    outbox.sayToPaired(1, 'You (web): hello');
+    await sleep(50);
+    expect(calls).toEqual([]);
+    settle();
+    await vi.waitFor(() => {
+      expect(calls).toEqual([
+        {method: 'sendMessage', text: 'You (web): hello'},
+      ]);
+    });
   });
 
   it("answers a button press with a toast within Telegram's 200 characters", async () => {

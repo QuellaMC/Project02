@@ -236,23 +236,29 @@ type Writer = {
 /**
  * How a bot's calls to Telegram are made and heard. One Telegram asks to
  * wait on is made again after the pause; a write to a paired account's
- * chat names the account as its audience, and is not made, nor made
- * again, once the account is paired no longer. A refusal is reported, a
- * 403 silences the chat, and nothing is said of a call not made.
+ * chat names the account as its audience, waits while the settings are
+ * in doubt, and is not made, nor made again, once the account is paired
+ * no longer. A refusal is reported, a 403 silences the chat, and nothing
+ * is said of a call not made.
  */
 function createWriter(bot: BotContext, audience: Audience): Writer {
   const {api} = bot;
   const stillPaired = (chatId: number): boolean =>
     audience.chats().includes(chatId);
-  const call = <T>(
+  const call = async <T>(
     request: () => Promise<BotApiOutcome<T>>,
     to?: number,
   ): Promise<BotApiOutcome<T> | undefined> => {
-    const allowed = (): boolean => to === undefined || stillPaired(to);
+    if (to === undefined) {
+      return patiently(bot.signal, request, () => true);
+    }
 
-    return allowed()
-      ? patiently(bot.signal, request, allowed)
-      : Promise.resolve(undefined);
+    // Settings in doubt, the stream lost: the write waits for them.
+    await bot.settled();
+
+    const allowed = (): boolean => stillPaired(to);
+
+    return allowed() ? patiently(bot.signal, request, allowed) : undefined;
   };
   const heard = <T>(
     chatId: number,
