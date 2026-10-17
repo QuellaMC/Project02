@@ -1,6 +1,7 @@
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {validator} from 'hono/validator';
 
+import {builtInConnectors} from '../../runtime/config/index.ts';
 import type {
   ConfigTarget,
   Gateway,
@@ -68,6 +69,30 @@ const configTargetQuery = validator(
   },
 );
 
+/** The connector a stream's process names itself as, if any: one this version has, or a 400. */
+const eventsQuery = validator(
+  'query',
+  (value: Record<string, string | string[]>, c: Context<ApiEnv>) => {
+    const connector = value['connector'];
+
+    if (
+      connector === undefined ||
+      (typeof connector === 'string' &&
+        builtInConnectors.some(known => known.id === connector))
+    ) {
+      return {connector};
+    }
+
+    return c.json(
+      errorBody(
+        'invalid_request',
+        `A connector is one of: ${builtInConnectors.map(known => known.id).join(', ')}.`,
+      ),
+      400,
+    );
+  },
+);
+
 /**
  * Every route returns its verb's outcome verbatim with a 200: the status
  * codes describe the transport, and `status` in the body describes what
@@ -124,7 +149,9 @@ export function createApiRouter(
     .get('/connectors/:id/config', c =>
       c.json(gateway.connectorConfig(c.req.param('id')), 200),
     )
-    .get('/events', c => events.handler(c))
+    .get('/events', eventsQuery, c =>
+      events.handler(c, c.req.valid('query').connector),
+    )
     .all('/*', c =>
       c.json(errorBody('not_found', `No API route at ${c.req.path}.`), 404),
     );

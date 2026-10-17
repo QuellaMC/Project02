@@ -20,6 +20,7 @@ export {
   type ConfirmationSettlement,
   type ConnectorConfigEntry,
   type ConnectorConfigView,
+  type ConnectorPresence,
   type Gateway,
   type GatewayConfirmationDecision,
   type GatewayErrorBody,

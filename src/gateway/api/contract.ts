@@ -451,10 +451,11 @@ export type GatewayEvent =
   | {
       /**
        * The daemon's whole state read again the moment a config change
-       * landed, before the pass that acts on it: the roster as config now
-       * says it — who is on, who is installed — and the config and package
-       * problems as they stand. What the pass does to each character's
-       * state follows as `state_changed`.
+       * landed, before the pass that acts on it, or a connector's process
+       * came onto the stream or left it: the roster as config now says it —
+       * who is on, who is installed — the connectors on the stream, and the
+       * config and package problems as they stand. What the pass does to
+       * each character's state follows as `state_changed`.
        */
       readonly kind: 'health_changed';
       readonly health: GatewayHealth;
@@ -489,7 +490,16 @@ export type CharacterSummary = {
   readonly maintenance?: MaintenanceFailure;
 };
 
-/** The daemon's whole state in one read: the roster and what it could not load. */
+/** Whether a process of this connector is on the event stream right now; one entry per built-in connector. */
+export type ConnectorPresence = {
+  readonly id: string;
+  readonly connected: boolean;
+};
+
+/**
+ * The daemon's whole state in one read: the roster, the connectors on its
+ * stream, and what it could not load.
+ */
 export type GatewayHealth = {
   readonly protocolVersion: typeof gatewayProtocolVersion;
   readonly homeRoot: string;
@@ -500,6 +510,7 @@ export type GatewayHealth = {
     readonly diagnostics: readonly CharacterPackageDiagnostic[];
   };
   readonly characters: readonly CharacterSummary[];
+  readonly connectors: readonly ConnectorPresence[];
 };
 
 /**
@@ -531,8 +542,9 @@ export type CharacterRuntime = {
 /**
  * The façade the daemon holds, and the whole of what its socket exposes.
  * Every verb answers a client-reachable condition with an outcome; a throw
- * is a bug. Every verb but reconcile and stop serializes over HTTP
- * unchanged; those two are the daemon's own lifecycle.
+ * is a bug. Every verb but reconcile, stop and connectorPresent serializes
+ * over HTTP unchanged; those three are the daemon's own: its lifecycle, and
+ * the presence a connector's event stream holds while it is open.
  */
 export type Gateway = {
   health(): GatewayHealth;
@@ -553,6 +565,12 @@ export type Gateway = {
   applyConfigChange(change: ConfigChange): Promise<ConfigChangeOutcome>;
   /** A connector reads it again on every `ready` and every `health_changed`. */
   connectorConfig(connectorId: string): ConnectorConfigView;
+  /**
+   * Counts a connector's process as on the stream: its event stream
+   * registers here while it is open, and the release is what the stream's
+   * end calls.
+   */
+  connectorPresent(connectorId: string): Unsubscribe;
   /** Makes the running set match the config: at boot, and after any change. */
   reconcile(): Promise<ReconcilePlan>;
   stop(): Promise<void>;

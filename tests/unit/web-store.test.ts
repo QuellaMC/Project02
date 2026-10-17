@@ -46,6 +46,7 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
     config: {diagnostics: []},
     packages: {diagnostics: []},
     characters,
+    connectors: [],
   };
 }
 

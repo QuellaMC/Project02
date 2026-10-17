@@ -186,8 +186,9 @@ export function createSession(address: string): Session {
           void accountForPending(accounting());
         }
 
-        // Config moved, here or on another surface: a settings screen
-        // open shows what is there now.
+        // Config moved, here or on another surface, or a connector's
+        // process came or went: a settings screen open shows what is
+        // there now.
         if (event.kind === 'health_changed') {
           void settings.changed();
         }
