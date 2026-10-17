@@ -237,10 +237,8 @@ function followEvent(chat: Chat, event: GatewayEvent): void {
       chat.confirmations.end(event.id, confirmationEnding(event));
       break;
     case 'pairing_requested':
-      // A request put back after a failed approval is announced again.
-      if (!chat.pairings.has(event.code)) {
-        postPairing(chat, event, chat.outbox.paired());
-      }
+      // Announced again after a failed approval: a chat that holds its card keeps it.
+      postPairing(chat, event, chat.outbox.paired());
       break;
     case 'pairing_settled':
       chat.gate.settled(event);
@@ -251,18 +249,23 @@ function followEvent(chat: Chat, event: GatewayEvent): void {
   }
 }
 
-/** On a stream the daemon could not resume, what still waits and has no card here yet gets one. */
+/**
+ * On a stream the daemon could not resume, a card for what the snapshot
+ * no longer carries is ended, and what still waits has its card in every
+ * paired chat.
+ */
 function installSnapshot(chat: Chat, ready: GatewayReady): void {
+  chat.confirmations.keep(
+    new Set(ready.confirmations.map(pending => pending.id)),
+  );
+  chat.pairings.keep(new Set(ready.pairings.map(request => request.code)));
+
   for (const pending of ready.confirmations) {
-    if (!chat.confirmations.has(pending.id)) {
-      postConfirmation(chat, pending, chat.outbox.paired());
-    }
+    postConfirmation(chat, pending, chat.outbox.paired());
   }
 
   for (const request of ready.pairings) {
-    if (!chat.pairings.has(request.code)) {
-      postPairing(chat, request, chat.outbox.paired());
-    }
+    postPairing(chat, request, chat.outbox.paired());
   }
 }
 

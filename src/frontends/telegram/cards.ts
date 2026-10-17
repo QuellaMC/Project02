@@ -33,13 +33,18 @@ export const answered = {
   unknown: 'Already answered.',
 } as const;
 
-/** A card's text, and its message in each chat it went to. */
+/** A card's text, the chats it went to, and its message in each it reached. */
 type Card = {
   readonly text: string;
+  /** Chats the card was sent to; one whose send failed is taken off, so the next post tries it again. */
+  readonly sent: Set<number>;
   readonly messages: (readonly [chatId: number, messageId: number])[];
   /** Its text once it ended, for a message whose id arrives after that. */
   ended: string | undefined;
 };
+
+/** How a card ends when the bot missed the word: the snapshot it came back to no longer carries what it asked about. */
+const endedAway = 'settled while the bot was away';
 
 /**
  * Messages with Approve and Deny that end: once what a card asks is
@@ -48,38 +53,59 @@ type Card = {
  * Telegram's longest is cut, and how it ended kept whole.
  */
 export type Cards = {
-  /** Whether the card went to a chat and has not ended. */
-  has(key: string): boolean;
-  /** Sends the card to each chat; a card already held keeps its text. */
+  /** Sends the card to each chat it has not gone to; a card already held keeps its text. */
   post(key: string, text: string, chatIds: readonly number[]): void;
   /** Revises the card to how it ended, and forgets it. */
   end(key: string, ending: string): void;
+  /** Ends every card but those named, as settled while the bot was away. */
+  keep(keys: ReadonlySet<string>): void;
 };
 
 export function createCards(outbox: Outbox, kind: CardKind): Cards {
   const cards = new Map<string, Card>();
+  const end = (key: string, ending: string): void => {
+    const card = cards.get(key);
+
+    if (card === undefined) {
+      return;
+    }
+
+    cards.delete(key);
+    card.ended = oneMessage(card.text, ` · ${ending}`);
+
+    for (const [chatId, messageId] of card.messages) {
+      outbox.revise(chatId, messageId, card.ended);
+    }
+  };
 
   return {
-    has: key => cards.has(key),
     post(key, text, chatIds) {
       if (chatIds.length === 0) {
         return;
       }
 
-      const card = cards.get(key) ?? {text, messages: [], ended: undefined};
+      const card = cards.get(key) ?? {
+        text,
+        sent: new Set<number>(),
+        messages: [],
+        ended: undefined,
+      };
       const keyboard = keyboardOf(kind, key);
 
       cards.set(key, card);
 
       for (const chatId of chatIds) {
+        if (card.sent.has(chatId)) {
+          continue;
+        }
+
+        card.sent.add(chatId);
         void outbox
           .card(chatId, oneMessage(card.text), keyboard)
           .then(messageId => {
             if (messageId === undefined) {
-              return;
-            }
-
-            if (card.ended === undefined) {
+              card.sent.delete(chatId);
+            } else if (card.ended === undefined) {
               card.messages.push([chatId, messageId]);
             } else {
               outbox.revise(chatId, messageId, card.ended);
@@ -87,18 +113,12 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
           });
       }
     },
-    end(key, ending) {
-      const card = cards.get(key);
-
-      if (card === undefined) {
-        return;
-      }
-
-      cards.delete(key);
-      card.ended = oneMessage(card.text, ` · ${ending}`);
-
-      for (const [chatId, messageId] of card.messages) {
-        outbox.revise(chatId, messageId, card.ended);
+    end,
+    keep(keys) {
+      for (const key of cards.keys()) {
+        if (!keys.has(key)) {
+          end(key, endedAway);
+        }
       }
     },
   };

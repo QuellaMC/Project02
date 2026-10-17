@@ -58,7 +58,8 @@ export type BotApiOutcome<T> =
 
 /**
  * The Bot API as the connector calls it: whatever Telegram or the network
- * does comes back as an outcome, never a throw.
+ * does comes back as an outcome, never a throw. A request's `signal` ends
+ * the call: a bot's go under its own, so none outlives it.
  */
 export type BotApi = {
   getMe(signal?: AbortSignal): Promise<BotApiOutcome<TelegramUser>>;
@@ -72,24 +73,29 @@ export type BotApi = {
     readonly chatId: number;
     readonly text: string;
     readonly keyboard?: InlineKeyboard;
+    readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<TelegramMessage>>;
   editMessageText(request: {
     readonly chatId: number;
     readonly messageId: number;
     readonly text: string;
     readonly keyboard?: InlineKeyboard;
+    readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<TelegramMessage>>;
   deleteMessage(request: {
     readonly chatId: number;
     readonly messageId: number;
+    readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<true>>;
   answerCallbackQuery(request: {
     readonly callbackQueryId: string;
     readonly text?: string;
+    readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<true>>;
   /** Shows the bot as typing in the chat. */
   sendChatAction(request: {
     readonly chatId: number;
+    readonly signal?: AbortSignal;
   }): Promise<BotApiOutcome<true>>;
 };
 
@@ -147,13 +153,14 @@ export function createBotApi(options: {
           AbortSignal.timeout((timeoutSeconds + 10) * 1_000),
         ]),
       ),
-    sendMessage: ({chatId, text, keyboard}) =>
+    sendMessage: ({chatId, text, keyboard, signal}) =>
       call(
         'sendMessage',
         {chat_id: chatId, text, ...replyMarkup(keyboard)},
         decodeMessage,
+        signal,
       ),
-    editMessageText: ({chatId, messageId, text, keyboard}) =>
+    editMessageText: ({chatId, messageId, text, keyboard, signal}) =>
       call(
         'editMessageText',
         {
@@ -163,14 +170,16 @@ export function createBotApi(options: {
           ...replyMarkup(keyboard),
         },
         decodeMessage,
+        signal,
       ),
-    deleteMessage: ({chatId, messageId}) =>
+    deleteMessage: ({chatId, messageId, signal}) =>
       call(
         'deleteMessage',
         {chat_id: chatId, message_id: messageId},
         decodeTrue,
+        signal,
       ),
-    answerCallbackQuery: ({callbackQueryId, text}) =>
+    answerCallbackQuery: ({callbackQueryId, text, signal}) =>
       call(
         'answerCallbackQuery',
         {
@@ -178,9 +187,15 @@ export function createBotApi(options: {
           ...(text === undefined ? {} : {text}),
         },
         decodeTrue,
+        signal,
       ),
-    sendChatAction: ({chatId}) =>
-      call('sendChatAction', {chat_id: chatId, action: 'typing'}, decodeTrue),
+    sendChatAction: ({chatId, signal}) =>
+      call(
+        'sendChatAction',
+        {chat_id: chatId, action: 'typing'},
+        decodeTrue,
+        signal,
+      ),
   };
 }
 

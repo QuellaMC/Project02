@@ -77,8 +77,9 @@ fetch on `node:http` that the reference client takes as its `fetch` and
 that waits as long as the daemon does: Node's own fetch gives a response
 five minutes, and a turn parked on a confirmation outlives that.
 Telegram it reaches by the platform's fetch, long polling. Ctrl-C,
-SIGTERM and SIGHUP are one stop: every bot stops, a line still waiting on
-its turn gives up the wait (the turn runs on), and the process exits 0.
+SIGTERM and SIGHUP are one stop: every bot stops, its calls to Telegram
+and to the daemon with it — a line still waiting on its turn gives up the
+wait, and the turn runs on — and the process exits 0.
 
 It runs one bot per token, by the daemon's judgment of each entry: the
 management bot while the home's entry is active and holds
@@ -111,22 +112,25 @@ that ran and did not complete, asking for the line again when the turn
 did not take it. Each reply of hers is one message in each paired chat —
 a chat unpaired while she writes gets no more of it — posted with its
 first words, edited at most every 1.5 s and then into its committed text,
-and deleted when withdrawn; past Telegram's 4096 characters, the rest
-follows in more messages. With `mirror` on, its
+and deleted when withdrawn; whatever a bot says past Telegram's 4096
+characters follows in more messages. With `mirror` on, its
 default, another surface's turn is shown too, its line as
 `You (<source>): …`; a line this bot carried is not repeated. A chat
 that answers 403, one that never opened the bot, is skipped until it
 writes. What a bot writes leaves one call at a time, in the order
-decided, so no edit overtakes a commit. Nothing is read from history: on
-a `ready` the daemon could not resume, the drafts shown are withdrawn
-and the running turn is the snapshot's.
+decided, so no edit overtakes a commit. Nothing is read from history: on a `ready` the daemon could not resume,
+the running turns are the snapshot's, a draft it still carries keeps its
+message and is brought to the snapshot's words, and one it does not is
+withdrawn.
 
 A confirmation of hers that a turn of this bot's line raised is a card
 in that line's chat with Approve and Deny — in every paired chat when no
 turn raised it — and another surface's is left to that surface. A press
 is answered with the daemon's verdict as a toast, and every card is
 edited to how it ended, whichever surface answered; a card is one
-message, cut to fit when its preview runs past Telegram's longest. The
+message, cut to fit when its preview runs past Telegram's longest, sent
+again to a chat it could not reach, and ended as settled while the bot
+was away when a `ready` comes back without what it asked about. The
 management bot
 is roster-shaped, as the page is: every confirmation of the home, naming
 the surface that raised it, and every pairing request arrive as cards in
