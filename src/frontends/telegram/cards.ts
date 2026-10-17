@@ -5,7 +5,12 @@ import type {
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import type {InlineKeyboard, TelegramCallbackQuery} from './bot-api.ts';
-import {daemonDown, rethrowUnlessTransport, type BotContext} from './bot.ts';
+import {
+  daemonDown,
+  minutesLeft,
+  rethrowUnlessTransport,
+  type BotContext,
+} from './bot.ts';
 import type {Gate} from './gate.ts';
 import {oneMessage, type Outbox} from './outbox.ts';
 
@@ -153,7 +158,7 @@ export function confirmationText(
     ...(Object.keys(preview).length === 0
       ? []
       : [JSON.stringify(preview, null, 2)]),
-    `Expires at ${clockTime(pending.deadlineAt)}`,
+    `Expires in ${minutesLeft(pending.deadlineAt)}`,
   ].join('\n');
 }
 
@@ -166,14 +171,6 @@ export function confirmationEnding(settlement: ConfirmationSettlement): string {
   return settlement.reason === 'expired'
     ? 'expired'
     : 'cancelled when the character stopped';
-}
-
-/** A moment as the web page shows one: its hour and minute, in local time. */
-export function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 /**

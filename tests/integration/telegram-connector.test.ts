@@ -343,11 +343,11 @@ function decisionButtons(letter: 'c' | 'p', key: string) {
 }
 
 /** A moment as a card says it: the hour and minute, as the web page shows them. */
-function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+/** What a deadline has left as the bots say it, computed as they do. */
+function minutesLeft(deadlineAt: number): string {
+  const minutes = Math.max(1, Math.ceil((deadlineAt - Date.now()) / 60_000));
+
+  return `${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
 
 /** The card a confirmation of Mira's gets, naming the surface it was raised on when one is given. */
@@ -359,13 +359,13 @@ function confirmationCard(
     `Mira wants to: ${pending.request.summary}` +
       (raisedOn === undefined ? '' : ` · raised on ${raisedOn}`),
     JSON.stringify(pending.request.preview, null, 2),
-    `Expires at ${clockTime(pending.deadlineAt)}`,
+    `Expires in ${minutesLeft(pending.deadlineAt)}`,
   ].join('\n');
 }
 
 /** The card a pairing request gets on the management bot. */
 function pairingCard(request: PairingRequest): string {
-  return `${request.subject.label} wants to pair · code ${request.code} · expires at ${clockTime(request.expiresAt)}`;
+  return `${request.subject.label} wants to pair · code ${request.code} · expires in ${minutesLeft(request.expiresAt)}`;
 }
 
 /** Each call a bot made to one chat, in order, with the text it carried. */

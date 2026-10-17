@@ -9,6 +9,7 @@ import {
   botNames,
   connectorId,
   daemonDown,
+  minutesLeft,
   rethrowUnlessTransport,
   type BotContext,
   type BotSettings,
@@ -22,11 +23,10 @@ const sentences = {
     'try again later.',
   pairingCode: (
     code: string,
-    minutesLeft: number,
+    left: string,
     kind: BotSettings['kind'],
   ): string =>
-    `This bot is private. Your pairing code is ${code}, good for ` +
-    `${String(minutesLeft)} ${minutesLeft === 1 ? 'minute' : 'minutes'}. ` +
+    `This bot is private. Your pairing code is ${code}, good for ${left}. ` +
     (kind === 'management'
       ? 'Approve it on the web page.'
       : 'Approve it on the web page, or send it to the management bot.'),
@@ -114,11 +114,6 @@ export function createGate(
       }
     },
   };
-}
-
-/** What a code has left, in whole minutes and at least one: a request asked for again keeps its first deadline. */
-function minutesLeft(expiresAt: number): number {
-  return Math.max(1, Math.ceil((expiresAt - Date.now()) / 60_000));
 }
 
 /** Whether the home lets the account in, by this bot's read of the settings. */

@@ -207,6 +207,17 @@ export function startBot(options: {
   };
 }
 
+/**
+ * What a deadline has left, in whole minutes and at least one, as a chat
+ * says it: a clock time would be this machine's, and the reader may be
+ * elsewhere.
+ */
+export function minutesLeft(deadlineAt: number): string {
+  const minutes = Math.max(1, Math.ceil((deadlineAt - Date.now()) / 60_000));
+
+  return `${String(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
 /** Said in a chat when what it asked could not reach the daemon. */
 export const daemonDown =
   'The daemon is not running right now; send that again in a moment.';
