@@ -199,7 +199,11 @@ export function createEventLog(options: {readonly maxBytes: number}): EventLog {
 export function createEventStreams(
   source: Pick<
     Gateway,
-    'events' | 'health' | 'pendingConfirmations' | 'connectorPresent'
+    | 'events'
+    | 'health'
+    | 'pendingConfirmations'
+    | 'pendingPairings'
+    | 'connectorPresent'
   >,
   options: EventStreamsOptions = {},
 ): EventStreams {
@@ -303,6 +307,7 @@ export function createEventStreams(
           protocolVersion: gatewayProtocolVersion,
           health: source.health(),
           confirmations: source.pendingConfirmations(),
+          pairings: source.pendingPairings(),
           turns: runningTurns(turns),
         };
 

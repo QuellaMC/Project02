@@ -22,10 +22,10 @@ describe("the daemon's record", () => {
     rmdirSync(path);
 
     for (const body of [
-      '{"protocolVersion": 6, "token": "abc", "port": 43',
-      JSON.stringify({protocolVersion: 6, port: 4310}),
+      '{"protocolVersion": 7, "token": "abc", "port": 43',
+      JSON.stringify({protocolVersion: 7, port: 4310}),
       JSON.stringify({
-        protocolVersion: 6,
+        protocolVersion: 7,
         token: 'abc',
         port: 4310,
         running: {pid: 0, startedAt: '2026-10-17T09:00:00.000Z'},
@@ -35,7 +35,7 @@ describe("the daemon's record", () => {
       expect(readDaemonRecord({homeRoot})).toEqual(unreadable);
     }
 
-    const stopped = {protocolVersion: 6, token: 'abc', port: 4310};
+    const stopped = {protocolVersion: 7, token: 'abc', port: 4310};
     const running = {
       ...stopped,
       running: {pid: 4242, startedAt: '2026-10-17T09:00:00.000Z'},

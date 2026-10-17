@@ -19,6 +19,7 @@ import {
   type HistoryOutcome,
   type HistoryPage,
   type OpenOutcome,
+  type PairingRequest,
   type PendingConfirmation,
   type RunningTurns,
   type TurnOutcome,
@@ -103,6 +104,8 @@ export type WebState = {
   readonly health?: GatewayHealth;
   /** Every confirmation still waiting, whatever surface raised it. */
   readonly confirmations: readonly PendingConfirmation[];
+  /** Every pairing request waiting for the owner's answer, whatever connector asked. */
+  readonly pairings: readonly PairingRequest[];
   /** The one open DM. */
   readonly thread?: Thread;
   /** The settings screen, when one is open in front of the thread. */
@@ -148,6 +151,7 @@ export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 export const initialState: WebState = {
   connection: {status: 'connecting'},
   confirmations: [],
+  pairings: [],
   pending: new Map(),
   composers: new Map(),
   turns: new Map(),
@@ -171,10 +175,10 @@ export function composerText(state: WebState): string {
 
 /**
  * Every `ready` is the truth: the roster, the waiting confirmations and
- * the turns in progress replace what the tab held — how a turn ended is
- * still news — and what the thread shows is set aside for the newest page
- * the session reads next, kept on screen and stitched to nothing that
- * comes.
+ * pairing requests, and the turns in progress replace what the tab held —
+ * how a turn ended is still news — and what the thread shows is set aside
+ * for the newest page the session reads next, kept on screen and stitched
+ * to nothing that comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -186,6 +190,7 @@ export function installSnapshot(
     connection: {status: 'live'},
     health: snapshot.health,
     confirmations: snapshot.confirmations,
+    pairings: snapshot.pairings,
     turns: new Map(snapshot.turns.map(turn => [turn.conversationId, turn])),
     ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
   };
@@ -243,18 +248,20 @@ export function streamResumed(state: WebState): WebState {
 
 /**
  * The address will never work again: the page stops taking new lines,
- * and every confirmation waiting and every turn in progress goes, since
- * an answer would never reach the daemon and a draft would never be
- * finished. A line already sent stays as it is, with the id it was sent
- * under — a token dies when a daemon restarts, and a line it committed
- * just before is one the log can still be asked about. Turning it back
- * into ordinary text would lose the only name it can be recognised by.
+ * and every confirmation and pairing request waiting and every turn in
+ * progress goes, since an answer would never reach the daemon and a draft
+ * would never be finished. A line already sent stays as it is, with the
+ * id it was sent under — a token dies when a daemon restarts, and a line
+ * it committed just before is one the log can still be asked about.
+ * Turning it back into ordinary text would lose the only name it can be
+ * recognised by.
  */
 export function connectionRefused(state: WebState, message: string): WebState {
   return {
     ...state,
     connection: {status: 'refused', message},
     confirmations: [],
+    pairings: [],
     turns: new Map(),
   };
 }
@@ -578,6 +585,13 @@ function withoutConfirmation(state: WebState, id: string): WebState {
   };
 }
 
+function withoutPairing(state: WebState, code: string): WebState {
+  return {
+    ...state,
+    pairings: state.pairings.filter(pairing => pairing.code !== code),
+  };
+}
+
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
   switch (event.kind) {
     case 'state_changed':
@@ -602,6 +616,17 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       return event.decision === 'cancelled'
         ? cancelled(state, event.id, event.characterId, event.reason)
         : withoutConfirmation(state, event.id);
+    case 'pairing_requested':
+      return state.pairings.some(pairing => pairing.code === event.code)
+        ? state
+        : {...state, pairings: [...state.pairings, pairingOf(event)]};
+    case 'pairing_settled':
+      return event.decision === 'expired'
+        ? noticed(
+            withoutPairing(state, event.code),
+            `A pairing request expired before it was answered: ${event.subject.label}, code ${event.code}.`,
+          )
+        : withoutPairing(state, event.code);
     case 'turn_progress': {
       const {progress} = event;
       // The daemon took the line, whichever thread it went to.
@@ -766,6 +791,18 @@ function pendingOf(
     request: event.request,
     deadlineAt: event.deadlineAt,
     ...(event.turn === undefined ? {} : {turn: event.turn}),
+  };
+}
+
+function pairingOf(
+  event: Extract<GatewayEvent, {kind: 'pairing_requested'}>,
+): PairingRequest {
+  return {
+    connectorId: event.connectorId,
+    code: event.code,
+    subject: event.subject,
+    requestedAt: event.requestedAt,
+    expiresAt: event.expiresAt,
   };
 }
 

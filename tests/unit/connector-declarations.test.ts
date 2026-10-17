@@ -5,7 +5,7 @@ import {builtInConnectors} from '../../src/runtime/config/index.ts';
 import {memorySearchPluginManifest} from '../support/plugin-host-fixtures.ts';
 
 describe('built-in connector declarations', () => {
-  it('pass the validation a plugin manifest passes, under unique ids, with no field the model may change or a change reloads', () => {
+  it('pass the validation a plugin manifest passes, under unique ids, with no field the model may change or a change reloads, and pair into an object field of their own', () => {
     for (const connector of builtInConnectors) {
       // Worn as a manifest, so the one validator judges its declaration.
       expect(
@@ -27,5 +27,13 @@ describe('built-in connector declarations', () => {
             field.agentMutable === true || field.reloadRequired !== false,
         ),
     ).toEqual([]);
+
+    for (const {pairing, config} of builtInConnectors) {
+      if (pairing !== undefined) {
+        expect(
+          config.fields.find(field => field.name === pairing.field),
+        ).toMatchObject({valueType: 'object'});
+      }
+    }
   });
 });
