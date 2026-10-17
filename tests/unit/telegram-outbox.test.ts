@@ -58,8 +58,12 @@ function recordingApi(failing: {
   return {api, calls};
 }
 
-/** Mira's bot, with Alice paired, over the API given. */
-function miraBot(api: BotApi, reports: string[]): BotContext {
+/** Mira's bot, with Alice paired unless other accounts are given, over the API given. */
+function miraBot(
+  api: BotApi,
+  reports: string[],
+  pairedUsers: Readonly<Record<string, string>> = {'1': 'Alice'},
+): BotContext {
   return {
     api,
     username: 'mira_bot',
@@ -71,7 +75,7 @@ function miraBot(api: BotApi, reports: string[]): BotContext {
       characterId: 'mira',
       name: 'Mira',
       mirror: true,
-      pairedUsers: {'1': 'Alice'},
+      pairedUsers,
     }),
     report: line => {
       reports.push(line);
@@ -108,6 +112,22 @@ describe('Telegram outbox', () => {
       longer.slice(0, 4096),
       longer.slice(4096, 8192),
     ]);
+  });
+
+  it('writes to the chats of accounts whose keys are Telegram user ids, and to no chat a key shaped otherwise would name', () => {
+    const {api} = recordingApi({});
+    const outbox = createOutbox(
+      miraBot(api, [], {
+        '4242': 'Alice',
+        '-1001234': 'a group',
+        '007': 'padded',
+        '12.5': 'not an id',
+        bob: 'a name',
+        '9007199254740993': 'past a safe integer',
+      }),
+    );
+
+    expect(outbox.paired()).toEqual([4242]);
   });
 
   it("answers a button press with a toast within Telegram's 200 characters", async () => {

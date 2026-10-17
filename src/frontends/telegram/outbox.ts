@@ -133,8 +133,14 @@ export function createOutbox(bot: BotContext): Outbox {
 
     return notModified(outcome) || heard(chatId, outcome) !== undefined;
   };
+  /**
+   * A private chat's id is its account's: a positive integer, as Telegram
+   * gives one. A key shaped otherwise names no chat of ours — a negative
+   * one would name a group.
+   */
   const paired = (): readonly number[] =>
     Object.keys(bot.settings().pairedUsers)
+      .filter(key => /^[1-9]\d*$/u.test(key))
       .map(Number)
       .filter(chatId => Number.isSafeInteger(chatId) && !silent.has(chatId));
   /**
