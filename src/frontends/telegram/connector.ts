@@ -28,6 +28,7 @@ import {
   type BotSettings,
 } from './bot.ts';
 import {characterChat} from './character-bot.ts';
+import {managementChat} from './management-bot.ts';
 
 /** The waits a test shortens. */
 export type ConnectorPacing = {
@@ -293,7 +294,10 @@ type BotTable = {
   ): void;
   /** Hands each running bot a frame of the daemon's stream. */
   dispatch(event: GatewayEvent): void;
-  /** Hands each running bot the daemon's snapshot on a stream it did not resume. */
+  /**
+   * Hands each running bot the daemon's snapshot on a stream it did not
+   * resume, and keeps it for each bot started after.
+   */
   snapshot(ready: GatewayReady): void;
   /** Stops every bot, and settles once each has stopped. */
   stopAll(): Promise<void>;
@@ -309,6 +313,7 @@ function createBotTable(context: {
   const running = new Map<string, Bot>();
   const stopping = new Set<Promise<void>>();
   const notice = createNotice();
+  let latest: GatewayReady | undefined;
   const stop = (token: string, bot: Bot): void => {
     const stopped = bot.stop().finally(() => {
       stopping.delete(stopped);
@@ -339,9 +344,11 @@ function createBotTable(context: {
         ...(options.pacing?.poll === undefined
           ? {}
           : {pacing: options.pacing.poll}),
-        ...(settings.kind === 'character'
-          ? {rules: characterChat(settings.characterId)}
-          : {}),
+        rules:
+          settings.kind === 'character'
+            ? characterChat(settings.characterId)
+            : managementChat(),
+        snapshot: () => latest,
       }),
     );
   };
@@ -394,6 +401,8 @@ function createBotTable(context: {
       }
     },
     snapshot(ready) {
+      latest = ready;
+
       for (const bot of running.values()) {
         bot.snapshot(ready);
       }
@@ -428,23 +437,30 @@ function wantedBots(
   readonly wanted: ReadonlyMap<string, BotSettings>;
   readonly shared: readonly string[];
 } {
+  const names = new Map(
+    health?.characters.map((character): [string, string] => [
+      character.id,
+      character.displayName,
+    ]),
+  );
   const entries: readonly {
     readonly token: string | undefined;
     readonly settings: BotSettings;
   }[] = [
     {
       token: tokenOf(view.home, 'managementBotToken'),
-      settings: {kind: 'management', pairedUsers: pairedUsersOf(view.home)},
+      settings: {
+        kind: 'management',
+        names,
+        pairedUsers: pairedUsersOf(view.home),
+      },
     },
     ...view.characters.map(entry => ({
       token: tokenOf(entry, 'botToken'),
       settings: {
         kind: 'character' as const,
         characterId: entry.characterId,
-        name:
-          health?.characters.find(
-            character => character.id === entry.characterId,
-          )?.displayName ?? entry.characterId,
+        name: names.get(entry.characterId) ?? entry.characterId,
         mirror: entry.values['mirror'] === true,
         pairedUsers: pairedUsersOf(entry),
       },

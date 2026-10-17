@@ -1,4 +1,9 @@
-import type {BotApiOutcome, TelegramMessage} from './bot-api.ts';
+import type {
+  BotApiOutcome,
+  InlineKeyboard,
+  TelegramCallbackQuery,
+  TelegramMessage,
+} from './bot-api.ts';
 import {botNames, type BotContext} from './bot.ts';
 
 /** Telegram's longest message, in the UTF-16 units a string's length counts. */
@@ -17,6 +22,16 @@ export type Outbox = {
   /** A message from the chat arrived, so it is written to again. */
   heardFrom(chatId: number): void;
   say(chatId: number, text: string): void;
+  /** Sends a message with buttons, and gives its id once sent; none when it could not be. */
+  card(
+    chatId: number,
+    text: string,
+    keyboard: InlineKeyboard,
+  ): Promise<number | undefined>;
+  /** Edits a card to the text it ends with, its buttons gone. */
+  revise(chatId: number, messageId: number, text: string): void;
+  /** Answers a button press, with a toast when there is one. */
+  answer(press: TelegramCallbackQuery, toast?: string): void;
   typing(chatId: number): void;
   /**
    * A draft's text so far: a new one is posted in every paired chat when
@@ -44,9 +59,14 @@ export function createOutbox(bot: BotContext): Outbox {
   const {api} = bot;
   const silent = new Set<number>();
   const drafts = new Map<string, Draft>();
-  let output = Promise.resolve();
-  const queue = (call: () => Promise<void>): void => {
-    output = output.then(() => (bot.signal.aborted ? undefined : call()));
+  let output: Promise<unknown> = Promise.resolve();
+  /** What the call gave, once every call decided before it has run; none once the bot has stopped. */
+  const queue = <T>(call: () => Promise<T>): Promise<T | undefined> => {
+    const ran = output.then(() => (bot.signal.aborted ? undefined : call()));
+
+    output = ran;
+
+    return ran;
   };
   const heard = <T>(
     chatId: number,
@@ -69,8 +89,28 @@ export function createOutbox(bot: BotContext): Outbox {
   const send = async (
     chatId: number,
     text: string,
+    keyboard?: InlineKeyboard,
   ): Promise<TelegramMessage | undefined> =>
-    heard(chatId, await api.sendMessage({chatId, text}));
+    heard(
+      chatId,
+      await api.sendMessage({
+        chatId,
+        text,
+        ...(keyboard === undefined ? {} : {keyboard}),
+      }),
+    );
+  /** Edits a message to the text, without buttons; one showing it already is as good as edited. */
+  const edit = async (
+    chatId: number,
+    messageId: number,
+    text: string,
+  ): Promise<void> => {
+    const outcome = await api.editMessageText({chatId, messageId, text});
+
+    if (!notModified(outcome)) {
+      heard(chatId, outcome);
+    }
+  };
   const paired = (): readonly number[] =>
     Object.keys(bot.settings().pairedUsers)
       .map(Number)
@@ -97,15 +137,7 @@ export function createOutbox(bot: BotContext): Outbox {
           draft.messages.set(chatId, sent.messageId);
         }
       } else if (first !== draft.shown) {
-        const outcome = await api.editMessageText({
-          chatId,
-          messageId,
-          text: first,
-        });
-
-        if (!notModified(outcome)) {
-          heard(chatId, outcome);
-        }
+        await edit(chatId, messageId, first);
       }
 
       for (const piece of commit ? rest : []) {
@@ -127,7 +159,7 @@ export function createOutbox(bot: BotContext): Outbox {
     const draft = forget(draftId);
 
     if (draft !== undefined) {
-      queue(async () => {
+      void queue(async () => {
         for (const [chatId, messageId] of draft.messages) {
           heard(chatId, await api.deleteMessage({chatId, messageId}));
         }
@@ -141,12 +173,26 @@ export function createOutbox(bot: BotContext): Outbox {
       silent.delete(chatId);
     },
     say(chatId, text) {
-      queue(async () => {
-        await send(chatId, text);
+      void queue(() => send(chatId, text));
+    },
+    card: async (chatId, text, keyboard) =>
+      (await queue(() => send(chatId, text, keyboard)))?.messageId,
+    revise(chatId, messageId, text) {
+      void queue(() => edit(chatId, messageId, text));
+    },
+    answer(press, toast) {
+      void queue(async () => {
+        heard(
+          press.from.id,
+          await api.answerCallbackQuery({
+            callbackQueryId: press.id,
+            ...(toast === undefined ? {} : {text: toast}),
+          }),
+        );
       });
     },
     typing(chatId) {
-      queue(async () => {
+      void queue(async () => {
         heard(chatId, await api.sendChatAction({chatId}));
       });
     },
@@ -157,20 +203,20 @@ export function createOutbox(bot: BotContext): Outbox {
         posted.text = text;
         posted.edit ??= setTimeout(() => {
           posted.edit = undefined;
-          queue(() => render(posted, posted.text, false));
+          void queue(() => render(posted, posted.text, false));
         }, draftEditMs).unref();
       } else if (post && text.trim() !== '') {
         const draft = newDraft(text);
 
         drafts.set(draftId, draft);
-        queue(() => render(draft, text, false));
+        void queue(() => render(draft, text, false));
       }
     },
     commit(draftId, text, post) {
       const draft = forget(draftId) ?? (post ? newDraft(text) : undefined);
 
       if (draft !== undefined) {
-        queue(() => render(draft, text, true));
+        void queue(() => render(draft, text, true));
       }
     },
     withdraw,

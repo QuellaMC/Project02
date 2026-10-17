@@ -1,30 +1,32 @@
-import {maxSpeakerDisplayNameLength} from '../../core/index.ts';
 import {
   foldRunningTurns,
   type GatewayEvent,
   type GatewayReady,
   type OpenOutcome,
-  type PairingDecision,
-  type PairingRequestOutcome,
+  type PendingConfirmation,
   type RunningTurn,
   type RunningTurns,
 } from '../../gateway/api/index.ts';
-import {GatewayClientError} from '../../gateway/client/index.ts';
-import type {TelegramMessage, TelegramUpdate, TelegramUser} from './bot-api.ts';
-import {botNames, connectorId, type BotContext, type BotRules} from './bot.ts';
+import type {TelegramMessage, TelegramUpdate} from './bot-api.ts';
+import {
+  botNames,
+  daemonDown,
+  rethrowUnlessTransport,
+  type BotContext,
+  type BotRules,
+} from './bot.ts';
+import {
+  confirmationEnding,
+  confirmationText,
+  createCards,
+  readPress,
+  type Cards,
+} from './cards.ts';
+import {createGate, paired, type Gate} from './gate.ts';
 import {createOutbox, type Outbox} from './outbox.ts';
 
-/** Everything a character's bot says in a chat. */
+/** What a character's bot says in a chat, but for the gate's words. */
 const sentences = {
-  pairingCode: (code: string): string =>
-    `This bot is private. Your pairing code is ${code}, good for an hour. ` +
-    'Approve it on the web page, or send it to the management bot.',
-  settled: (decision: PairingDecision | 'expired', name: string): string =>
-    ({
-      approved: `Paired. ${name} is listening.`,
-      denied: 'The owner declined.',
-      expired: 'Your pairing code expired; write again for a new one.',
-    })[decision],
   hello: (name: string): string => `Hi, I'm ${name}. Write to me here.`,
   textOnly: 'I can only read text here for now.',
   unavailable: (name: string, message: string): string =>
@@ -32,8 +34,6 @@ const sentences = {
   unanswered: (name: string, message: string, committed: boolean): string =>
     `${name} could not answer: ${message}` +
     (committed ? '' : '\nYour message was not taken; send it again.'),
-  daemonDown:
-    'The daemon is not running right now; send that again in a moment.',
   mirrored: (source: string, text: string): string =>
     `You (${source}): ${text}`,
 };
@@ -46,34 +46,38 @@ type TurnFrame = Extract<
 type Chat = {
   readonly bot: BotContext;
   readonly outbox: Outbox;
+  readonly gate: Gate;
+  /** A card for each confirmation of hers this bot shows, by its id. */
+  readonly cards: Cards;
   readonly characterId: string;
   /** The stamp on every line this bot carries. */
   readonly source: string;
   thread: Extract<OpenOutcome, {readonly status: 'opened'}> | undefined;
   /** Her conversation's running turn, folded by the contract's one rule. */
   turns: RunningTurns;
-  /** Accounts this bot gave a pairing code, told how their request ends. */
-  readonly strangers: Set<string>;
 };
 
 /**
  * A character's bot: her DM, opened once the bot knows its name; the
- * pairing gate on every message; a paired account's line carried to her;
- * and her conversation shown in every paired chat as the stream tells it.
- * Nothing is read from history.
+ * pairing gate on every message and press; a paired account's line
+ * carried to her; her conversation shown in every paired chat as the
+ * stream tells it; and a card with Approve and Deny for each confirmation
+ * a turn of this bot's line raises. Nothing is read from history.
  */
 export function characterChat(
   characterId: string,
 ): (bot: BotContext) => BotRules {
   return bot => {
+    const outbox = createOutbox(bot);
     const chat: Chat = {
       bot,
-      outbox: createOutbox(bot),
+      outbox,
+      gate: createGate(bot, outbox, () => botNames(bot.settings()).owner),
+      cards: createCards(outbox, 'confirmation'),
       characterId,
       source: `telegram:${bot.username}`,
       thread: undefined,
       turns: new Map(),
-      strangers: new Set(),
     };
 
     openAhead(chat);
@@ -91,7 +95,13 @@ export function characterChat(
 }
 
 async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
-  const {message} = update;
+  const {message, callbackQuery} = update;
+
+  if (callbackQuery !== undefined) {
+    await readPress(chat, callbackQuery);
+
+    return;
+  }
 
   if (message?.chatType !== 'private' || message.from === undefined) {
     return;
@@ -102,7 +112,7 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
 
   outbox.heardFrom(chatId);
 
-  if (!paired(chat, String(from.id)) && !(await admitted(chat, chatId, from))) {
+  if (!(await chat.gate.admit(chatId, from))) {
     return;
   }
 
@@ -114,41 +124,6 @@ async function readUpdate(chat: Chat, update: TelegramUpdate): Promise<void> {
     outbox.typing(chatId);
     void carry(chat, chatId, lineId(message), text);
   }
-}
-
-/**
- * Asks the owner to let in an account the settings do not hold, and tells
- * it its code. The daemon's allowlist is the gate and the settings this
- * bot's read of it, so an account the daemon holds already is let in
- * before the next read lands.
- */
-async function admitted(
-  chat: Chat,
-  chatId: number,
-  from: TelegramUser,
-): Promise<boolean> {
-  const subject = {id: String(from.id), label: labelOf(from)};
-  let outcome: PairingRequestOutcome;
-
-  try {
-    outcome = await chat.bot.client().requestPairing(connectorId, subject);
-  } catch (error: unknown) {
-    rethrowUnlessTransport(error);
-    chat.outbox.say(chatId, sentences.daemonDown);
-
-    return false;
-  }
-
-  if (outcome.status === 'pending') {
-    chat.strangers.add(subject.id);
-    chat.outbox.say(chatId, sentences.pairingCode(outcome.request.code));
-  } else if (outcome.status === 'refused') {
-    chat.bot.report(
-      `${botNames(chat.bot.settings()).bot} could not ask to pair ${subject.label}: ${outcome.message}`,
-    );
-  }
-
-  return outcome.status === 'paired';
 }
 
 /**
@@ -187,7 +162,7 @@ async function carry(
     }
   } catch (error: unknown) {
     rethrowUnlessTransport(error);
-    outbox.say(chatId, sentences.daemonDown);
+    outbox.say(chatId, daemonDown);
   }
 }
 
@@ -230,20 +205,46 @@ function followEvent(chat: Chat, event: GatewayEvent): void {
         openAhead(chat);
       }
       break;
+    case 'confirmation_requested':
+      raiseCard(chat, event);
+      break;
+    case 'confirmation_settled':
+      chat.cards.end(event.id, confirmationEnding(event));
+      break;
     case 'pairing_settled':
-      if (
-        event.connectorId === connectorId &&
-        chat.strangers.delete(event.subject.id)
-      ) {
-        chat.outbox.say(
-          Number(event.subject.id),
-          sentences.settled(event.decision, nameOf(chat)),
-        );
-      }
+      chat.gate.settled(event);
       break;
     default:
       break;
   }
+}
+
+/**
+ * A confirmation of hers that a turn of this bot's line raised is shown in
+ * the chat the line came from; one raised with no turn, or whose line's
+ * chat is paired no longer, in every paired chat. Another surface's turn
+ * leaves it to that surface.
+ */
+function raiseCard(chat: Chat, pending: PendingConfirmation): void {
+  const {turn} = pending;
+
+  if (
+    pending.characterId !== chat.characterId ||
+    (turn !== undefined && turn.source !== chat.source)
+  ) {
+    return;
+  }
+
+  const account =
+    turn === undefined ? undefined : chatOfLine(turn.clientMessageId);
+
+  chat.cards.post(
+    pending.id,
+    confirmationText(pending, nameOf(chat)),
+    account !== undefined && paired(chat.bot, account)
+      ? [Number(account)]
+      : chat.outbox.paired(),
+  );
 }
 
 /**
@@ -313,7 +314,7 @@ function ended(
   if (
     event.source === chat.source &&
     (event.status === 'rejected' || event.status === 'failed') &&
-    paired(chat, account)
+    paired(chat.bot, account)
   ) {
     chat.outbox.say(
       Number(account),
@@ -330,7 +331,8 @@ function ended(
  * On a stream the daemon could not resume, her running turn is the
  * snapshot's, and the end of every draft shown here was missed: each is
  * withdrawn, as a page drops a bubble the snapshot does not carry, and one
- * still being written is posted again by its next words.
+ * still being written is posted again by its next words. A confirmation
+ * still waiting that has no card here yet gets one.
  */
 function installSnapshot(chat: Chat, ready: GatewayReady): void {
   const turn = ready.turns.find(
@@ -339,6 +341,12 @@ function installSnapshot(chat: Chat, ready: GatewayReady): void {
 
   chat.turns = new Map(turn === undefined ? [] : [[turn.conversationId, turn]]);
   chat.outbox.withdrawAll();
+
+  for (const pending of ready.confirmations) {
+    if (!chat.cards.has(pending.id)) {
+      raiseCard(chat, pending);
+    }
+  }
 }
 
 function draftText(
@@ -348,19 +356,8 @@ function draftText(
   return turn?.drafts.find(draft => draft.draftId === draftId)?.text;
 }
 
-function paired(chat: Chat, account: string): boolean {
-  return Object.hasOwn(chat.bot.settings().pairedUsers, account);
-}
-
 function nameOf(chat: Chat): string {
   return botNames(chat.bot.settings()).owner;
-}
-
-/** The client's own error is a daemon out of reach or answering with an error; anything else is a bug. */
-function rethrowUnlessTransport(error: unknown): void {
-  if (!(error instanceof GatewayClientError)) {
-    throw error;
-  }
 }
 
 /** A line's id names its chat and message, so a resend after a lost answer joins its turn. */
@@ -371,20 +368,4 @@ function lineId(message: TelegramMessage): string {
 /** The account whose chat a line of this bot's came from. */
 function chatOfLine(clientMessageId: string): string {
   return clientMessageId.split('.', 1)[0] ?? '';
-}
-
-/** The name the owner sees: one line, no longer than the daemon takes. */
-function labelOf(user: TelegramUser): string {
-  const name = [
-    user.firstName,
-    user.lastName,
-    user.username === undefined ? undefined : `(@${user.username})`,
-  ]
-    .filter(part => part !== undefined)
-    .join(' ');
-
-  return Array.from(name.replace(/\s+/gu, ' ').trim())
-    .slice(0, maxSpeakerDisplayNameLength)
-    .join('')
-    .trim();
 }

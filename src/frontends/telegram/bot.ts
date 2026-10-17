@@ -1,5 +1,8 @@
 import type {GatewayEvent, GatewayReady} from '../../gateway/api/index.ts';
-import type {GatewayClient} from '../../gateway/client/index.ts';
+import {
+  GatewayClientError,
+  type GatewayClient,
+} from '../../gateway/client/index.ts';
 import {
   backoffMs,
   pause,
@@ -20,7 +23,11 @@ export const connectorId = 'telegram';
  * bot it is, and the accounts the home lets in.
  */
 export type BotSettings = (
-  | {readonly kind: 'management'}
+  | {
+      readonly kind: 'management';
+      /** Each character's name as health has it, by her id. */
+      readonly names: ReadonlyMap<string, string>;
+    }
   | {
       readonly kind: 'character';
       readonly characterId: string;
@@ -61,7 +68,7 @@ export type Bot = {
   stop(): Promise<void>;
 };
 
-/** The management bot's for now: whatever it gets, it does nothing with. */
+/** Until Telegram has said who the bot is, whatever it gets, it does nothing with. */
 const noRules: BotRules = {
   onUpdate: () => Promise.resolve(),
   dispatch: () => undefined,
@@ -81,8 +88,10 @@ export function startBot(options: {
   readonly say: (line: string) => void;
   readonly report: (line: string) => void;
   readonly pacing?: PollPacing;
-  /** The rules once Telegram has said who the bot is; none, unless given. */
-  readonly rules?: (bot: BotContext) => BotRules;
+  /** What the bot does with what it gets, once Telegram has said who it is. */
+  readonly rules: (bot: BotContext) => BotRules;
+  /** The stream's latest snapshot, installed as the rules start, so a bot started after it knows what already waits. */
+  readonly snapshot: () => GatewayReady | undefined;
 }): Bot {
   const {api, say, report, pacing} = options;
   const stopping = new AbortController();
@@ -139,15 +148,20 @@ export function startBot(options: {
         ? `Telegram: management bot @${username} is on.`
         : `Telegram: @${username} answers for ${settings.name}.`,
     );
-    rules =
-      options.rules?.({
-        api,
-        username,
-        client: () => client,
-        settings: () => settings,
-        report,
-        signal,
-      }) ?? noRules;
+    rules = options.rules({
+      api,
+      username,
+      client: () => client,
+      settings: () => settings,
+      report,
+      signal,
+    });
+
+    const latest = options.snapshot();
+
+    if (latest !== undefined) {
+      rules.snapshot(latest);
+    }
 
     const ended = await pollUpdates({
       api,
@@ -188,6 +202,17 @@ export function startBot(options: {
       }
     },
   };
+}
+
+/** Said in a chat when what it asked could not reach the daemon. */
+export const daemonDown =
+  'The daemon is not running right now; send that again in a moment.';
+
+/** The client's own error is a daemon out of reach or answering with an error; anything else is a bug. */
+export function rethrowUnlessTransport(error: unknown): void {
+  if (!(error instanceof GatewayClientError)) {
+    throw error;
+  }
 }
 
 /** How the terminal names a bot: whose it is, the bot, and where its token is replaced. */
