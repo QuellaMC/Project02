@@ -216,7 +216,9 @@ async function confirm(
   decision: GatewayConfirmationDecision,
 ): Promise<string> {
   try {
-    const {status} = await bot.client().answerConfirmation(id, decision);
+    const {status} = await bot
+      .client()
+      .answerConfirmation(id, decision, {signal: bot.signal});
 
     return status === 'answered' ? answered[decision] : answered[status];
   } catch (error: unknown) {

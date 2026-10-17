@@ -4,7 +4,10 @@ import type {BotApi} from '../../src/frontends/telegram/bot-api.ts';
 import type {BotContext} from '../../src/frontends/telegram/bot.ts';
 import {createGate} from '../../src/frontends/telegram/gate.ts';
 import type {Outbox} from '../../src/frontends/telegram/outbox.ts';
-import type {GatewayClient} from '../../src/gateway/client/index.ts';
+import {
+  GatewayClientError,
+  type GatewayClient,
+} from '../../src/gateway/client/index.ts';
 import type {PairingRequest} from '../../src/gateway/api/index.ts';
 
 const unused = (): never => {
@@ -56,8 +59,9 @@ const refusing = daemon(() =>
 
 const bob = {id: 7, isBot: false, firstName: 'Bob'};
 
-/** A gate for Mira's bot over the daemon given, with what it said in the chats. */
+/** A gate for Mira's bot over the daemon given, with what it said in the chats, and the bot's stop. */
 function gateOver(client: GatewayClient) {
+  const stopping = new AbortController();
   const said: string[] = [];
   const reports: string[] = [];
   const outbox: Outbox = {
@@ -92,11 +96,18 @@ function gateOver(client: GatewayClient) {
     report: line => {
       reports.push(line);
     },
-    signal: new AbortController().signal,
+    signal: stopping.signal,
     settled: () => Promise.resolve(),
   };
 
-  return {gate: createGate(bot, outbox, () => 'Mira'), said, reports};
+  return {
+    gate: createGate(bot, outbox, () => 'Mira'),
+    said,
+    reports,
+    stop: () => {
+      stopping.abort();
+    },
+  };
 }
 
 describe('Telegram pairing gate', () => {
@@ -139,6 +150,29 @@ describe('Telegram pairing gate', () => {
     expect(said).toHaveLength(2);
     settled('222222');
     expect(said.at(-1)).toBe('Paired. Mira is listening.');
+  });
+
+  it('gives up a pairing request still waiting on the daemon when the bot stops', async () => {
+    const {gate, stop} = gateOver(
+      daemon(
+        (_connectorId, _subject, options) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => {
+              reject(
+                new GatewayClientError(
+                  0,
+                  'aborted',
+                  'The request was aborted.',
+                ),
+              );
+            });
+          }),
+      ),
+    );
+    const admitted = gate.admit(7, bob);
+
+    stop();
+    await expect(admitted).resolves.toBe(false);
   });
 
   it('tells an account the bot cannot pair it right now when the daemon refuses the request, and the operator why', async () => {

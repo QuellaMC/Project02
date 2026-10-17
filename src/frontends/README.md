@@ -71,11 +71,11 @@ the settings page with it — says it is running, and keeps its read of
 the connector config by the wire page's reading rule, and one read more:
 a read on every `ready` and every `health_changed`, the newest answer
 applied, a failed read tried again with a backoff, and a read on a
-stream's return after it was lost, since the bots' messages, their
-writes to paired accounts, and the frames the stream brings back wait
-from the loss until the settings are read again by a read begun after it; a `ready`'s snapshot reaches the
-bots, and their messages are read, only after its read, so what they show
-and admit goes by the settings as they are. A lost
+stream's return after it was lost. Every read holds the bots until it
+lands — their messages, their writes to paired accounts, and the stream's
+frames, handed on in order after — and so does the stream's loss, until a
+read begun after it lands, so what the bots show and admit goes by the
+settings as they are. A lost
 stream sends it back to the record, so a daemon that came back on
 another port is found. It reaches the daemon over `node-fetch.ts`, a
 fetch on `node:http` that the reference client takes as its `fetch` and
