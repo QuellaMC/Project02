@@ -1,11 +1,13 @@
 {
   "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
   "daemon-record.ts": ["gateway", "runtime"],
+  "fetch-failure.ts": ["frontends", "gateway"],
   "file-system.ts": ["cli", "plugins", "runtime"],
   "identifier.ts": ["characters", "cli", "plugins", "role-model", "runtime"],
   "json-boundary.ts": [
     "app",
     "characters",
+    "frontends",
     "gateway",
     "plugins",
     "role-model",
