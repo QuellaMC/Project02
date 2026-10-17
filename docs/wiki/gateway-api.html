@@ -81,7 +81,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 6,
+  "protocolVersion": 7,
   "token": "…",
   "port": 4310,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -119,6 +119,11 @@
         on the same address and a start-twice hands the address back; when
         the wait is up, or the holder is on another machine, it says so and
         exits 1. Ctrl-C ends the wait at once.
+      </p>
+
+      <p>
+        A connector's process finds the daemon by the same record, in the
+        home it serves.
       </p>
 
       <h2>Stopping</h2>
@@ -165,12 +170,13 @@
               then reads on. Any other stream — no id, an id from another run
               of the daemon, one before the tail — opens with a
               <code>ready</code> frame that carries the daemon's snapshot:
-              health, the confirmations still waiting, and the turns running
-              with their drafts so far, taken in one breath with the stream's
-              registration, so every later frame moves on from exactly that
-              state. A client installs the snapshot and reads on; what it
-              wants of a conversation's history it reads as one page,
-              deduplicated by message id. The log on disk stays the truth.
+              health, the confirmations and pairing requests still waiting,
+              and the turns running with their drafts so far, taken in one
+              breath with the stream's registration, so every later frame
+              moves on from exactly that state. A client installs the
+              snapshot and reads on; what it wants of a conversation's
+              history it reads as one page, deduplicated by message id. The
+              log on disk stays the truth.
             </td>
           </tr>
           <tr>
@@ -219,7 +225,7 @@
             <td>400</td>
             <td><code>invalid_request</code></td>
             <td>
-              Unreadable or mis-shaped body, or malformed
+              Unreadable or mis-shaped body or query, or malformed
               <code>Authorization</code> syntax.
             </td>
           </tr>
@@ -286,7 +292,9 @@
             <td>
               → <code>GatewayHealth</code>: protocol version, home root, config
               and package diagnostics, the roster with each character's state
-              and last maintenance failure.
+              and last maintenance failure, and <code>connectors</code>: for
+              each built-in connector, whether a process of it is on the
+              stream.
             </td>
           </tr>
           <tr>
@@ -404,9 +412,45 @@
             </td>
           </tr>
           <tr>
+            <td>pairing request</td>
+            <td><code>POST /api/connectors/:id/pairing</code></td>
+            <td>
+              <code>{subject: {id, label}}</code> →
+              <code>PairingRequestOutcome</code>: <code>pending</code> with the
+              request — the one already waiting for that account, or a new
+              one — <code>paired</code> when the home's allowlist already
+              holds the account, or <code>refused</code>
+              (<code>unknown_connector</code>, <code>config_unloadable</code>,
+              <code>invalid_subject</code>). Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>pending pairings</td>
+            <td><code>GET /api/pairing</code></td>
+            <td>
+              → <code>PairingRequest[]</code>: every pairing request still
+              waiting, with its code and deadline.
+            </td>
+          </tr>
+          <tr>
+            <td>pairing answer</td>
+            <td><code>POST /api/pairing/:code</code></td>
+            <td>
+              <code>{decision: "approved" | "denied"}</code> →
+              <code>PairingSettleOutcome</code>: <code>settled</code> with the
+              decision, <code>expired</code>, <code>unknown</code>, or
+              <code>failed</code> with the reason an approval could not be
+              written, the request waiting again.
+            </td>
+          </tr>
+          <tr>
             <td>events</td>
             <td><code>GET /api/events</code></td>
-            <td>SSE, described below.</td>
+            <td>
+              SSE, described below. A connector's process names itself with
+              <code>?connector=&lt;id&gt;</code>; an id this version does not
+              have is a 400.
+            </td>
           </tr>
           <tr>
             <td>page</td>
@@ -471,7 +515,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":6,"health":{…},"confirmations":[…],"turns":[…]}
+data: {"protocolVersion":7,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -522,11 +566,13 @@ data: {…}</code></pre>
             <td>
               The protocol version and the daemon's snapshot at that instant:
               <code>health</code> (the roster, each character's state and last
-              maintenance failure), <code>confirmations</code> still waiting,
-              and <code>turns</code> — each turn in progress, named by its
-              submission's <code>conversationId</code>, <code>source</code>
-              and <code>clientMessageId</code>, with its character and its open
-              drafts' text so far. A client installs it on every one it sees.
+              maintenance failure, the connectors on the stream),
+              <code>confirmations</code> and <code>pairings</code> still
+              waiting, and <code>turns</code> — each turn in progress, named
+              by its submission's <code>conversationId</code>,
+              <code>source</code> and <code>clientMessageId</code>, with its
+              character and its open drafts' text so far. A client installs
+              it on every one it sees.
             </td>
           </tr>
           <tr>
@@ -591,6 +637,30 @@ data: {…}</code></pre>
             </td>
           </tr>
           <tr>
+            <td><code>pairing_requested</code></td>
+            <td>
+              An account a connector does not know, waiting for the owner's
+              answer: <code>connectorId</code>, the six-digit
+              <code>code</code>, the <code>subject</code> (<code>id</code>,
+              <code>label</code>), <code>requestedAt</code>, and
+              <code>expiresAt</code>, an hour on. The same shape the pairing
+              list returns. A request put back after an approval that could
+              not be written is announced again, so a surface adds a request
+              by its code, once.
+            </td>
+          </tr>
+          <tr>
+            <td><code>pairing_settled</code></td>
+            <td>
+              How a request ended: its <code>connectorId</code>,
+              <code>code</code> and <code>subject</code>, and the
+              <code>decision</code> — approved, denied, or
+              <code>expired</code> (the hour passed, whether the daemon's
+              timer fired or an answer came too late). An approval follows
+              the <code>health_changed</code> its write caused.
+            </td>
+          </tr>
+          <tr>
             <td><code>state_changed</code></td>
             <td>
               A character's runtime state, with a message when something went
@@ -604,12 +674,14 @@ data: {…}</code></pre>
             <td><code>health_changed</code></td>
             <td>
               The daemon's whole state, read again the moment a config change
-              landed and before the pass that acts on it: the roster as config
-              now says it and the config and package problems as they stand,
-              the shape <code>GET /api/health</code> returns. Every surface
-              hears it, not only the one that wrote, and one showing config
-              reads its view again on it, so two windows on one screen stay
-              in step; what the pass then does to each character follows as
+              landed and before the pass that acts on it, or the moment a
+              connector's process came onto the stream or left it: the roster
+              as config now says it, the connectors on the stream, and the
+              config and package problems as they stand, the shape
+              <code>GET /api/health</code> returns. Every surface hears it,
+              not only the one that wrote, and one showing config reads its
+              view again on it, so two windows on one screen stay in step;
+              what the pass then does to each character follows as
               <code>state_changed</code>.
             </td>
           </tr>
@@ -649,6 +721,78 @@ data: {…}</code></pre>
           no read.
         </li>
       </ul>
+
+      <h2>A connector</h2>
+
+      <p class="rule">
+        A connector lets nobody in by itself: an account it does not know is
+        the owner's to admit, and the owner's yes reaches the connector as its
+        own config.
+      </p>
+
+      <p>
+        A connector's process opens its stream as
+        <code>GET /api/events?connector=&lt;id&gt;</code>, and the daemon
+        counts it on the stream from before the first frame — so the
+        connector's own <code>ready</code> already shows it — until the stream
+        ends. Health's <code>connectors</code> says, for each built-in
+        connector, whether a process of it is on the stream;
+        <code>health_changed</code> goes out when its first stream opens and
+        when its last one ends, and the settings page says on the connector's
+        block whether it is running. The connector keeps its config by the
+        rule above.
+      </p>
+
+      <p>
+        For an account it does not know, the connector asks:
+        <code>POST /api/connectors/:id/pairing</code> with the
+        <code>subject</code> — its own <code>id</code> for the account, one
+        token by the pattern the stamps match, and the <code>label</code> the
+        owner sees, one line of at most 128 characters with no space at either
+        end. A subject the body schema cannot take is a 400, and one it takes
+        that breaks the rule is refused <code>invalid_subject</code>. The
+        answer is <code>paired</code> when the home's allowlist already holds
+        the account, or <code>pending</code> with the request: the one already
+        waiting for that account, so asking again is safe, or a new one under a
+        six-digit code unique among those waiting, good for one hour, until
+        <code>expiresAt</code>. The connector tells the person asking the code
+        and the hour, and lets in exactly the accounts the allowlist in its own
+        config entry holds — the field its declaration names as
+        <code>pairing</code>, <code>pairedUsers</code> for
+        <code>telegram</code>.
+      </p>
+
+      <p>
+        The owner answers by the code, on any surface. A denial removes the
+        request. An approval is the daemon's own config write, through the
+        same path as any change: the account, named by its label, goes into
+        that field in the home's document — which every character that sets
+        none of its own inherits — under the current fingerprint, with up to
+        three attempts in all when other writes moved the document. A connector
+        therefore hears it as <code>health_changed</code>, on which its next
+        read finds the account, and then as <code>pairing_settled</code>. An
+        answer at or past the deadline is answered <code>expired</code>, the
+        daemon being the judge of the deadline as for a confirmation, and an
+        hour with no answer settles the request as <code>expired</code> on the
+        stream. While an approval's write runs the request is off the list, so
+        a second answer meanwhile is <code>unknown</code>; an approval that
+        could not be written puts the request back, announced again, and is
+        answered <code>failed</code> with the reason. A request lives as long
+        as the daemon's run: the <code>ready</code> after a restart carries
+        none, and asking again makes a new one.
+      </p>
+
+      <p>
+        The web page shows each request waiting as a card beside the
+        confirmations — the connector, the account's label, the code and the
+        time it expires, with Approve and Deny — installed from every
+        <code>ready</code>, added from <code>pairing_requested</code> once per
+        code, and removed by <code>pairing_settled</code>. Answering a card,
+        the page leaves a settlement to the frame; an expiry is said once,
+        whichever news of it reaches the page first; a request the daemon no
+        longer knows is said to be no longer waiting; and an approval that
+        could not be written leaves the card, with the reason.
+      </p>
 
       <h2>The sync rule</h2>
 

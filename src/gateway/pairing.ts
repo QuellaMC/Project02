@@ -49,7 +49,6 @@ export type PairingSeam = {
     connectorId: string,
     subject: PairingSubject,
   ) => PairingRequestOutcome;
-  /** Oldest first. */
   readonly pending: () => readonly PairingRequest[];
   readonly settle: (
     code: string,

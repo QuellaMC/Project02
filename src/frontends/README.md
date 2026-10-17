@@ -25,8 +25,14 @@ a pure function of the previous value and one input — the daemon's
 snapshot, an event, a history page, a send, a line's end. It is DOM-free
 and unit-tested in Node. `session.ts` holds the tab's one client and one
 stream and the verbs a page calls, and runs only in a browser; `app.tsx`
-and `thread.tsx` render the store — the roster, every confirmation
-waiting, the thread with its draft bubbles, the one-line composer. The
+and `thread.tsx` render the store — the roster, every confirmation and
+pairing request waiting, the thread with its draft bubbles, the one-line
+composer. A pairing request is a card beside the confirmations, with its
+connector, the account, the code and when it expires; the daemon's answer
+to a click settles it as a confirmation's answer does — a settlement is
+left to the frame, an expiry is said once whichever news of it comes
+first, a request the daemon no longer knows is no longer waiting — and an
+approval that could not be written keeps the card and says why. The
 turns in progress are the contract's own shape, folded from frames by the
 contract's one fold and installed from every `ready`; a stream the daemon
 resumed is live again with nothing installed. A restart of the daemon is a
@@ -45,7 +51,9 @@ is the verbs over the tab's client, and `settings.tsx` renders one screen
 for the home and for a character, every row the field shape the view
 carries. The roster links to it: Settings for the home, a gear per
 character, and a character that is off shows so, with its switch on its
-own screen. A change saved on any surface reaches every screen open on
+own screen. A connector's block says from health whether its process is
+on the daemon's stream, and how to start it when it is not. A change
+saved on any surface reaches every screen open on
 it: the stream's `health_changed` frame is a tab's cue to read its view
 again, with what is typed kept. A fresh home opens on the home's screen
 framed as setup until a provider is chosen; the person leaves it.
