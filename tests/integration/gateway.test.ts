@@ -2413,10 +2413,10 @@ describe('gateway façade', () => {
       id: 'telegram',
       enabled: true,
       activation: {status: 'active'},
+      // The allowlist is the home's alone; her screen cannot author it.
       fields: [
         {name: 'botToken', authored: {configured: true, value: '[redacted]'}},
         {name: 'mirror'},
-        {name: 'pairedUsers'},
       ],
     });
     expect(JSON.stringify([home, mira])).not.toMatch(/123456:home|987654:mira/);
@@ -2585,7 +2585,7 @@ describe('gateway façade', () => {
         namespace: 'connectors',
         enabled: true,
         activation: {status: 'active'},
-        fields: [{name: 'botToken'}, {name: 'mirror'}, {name: 'pairedUsers'}],
+        fields: [{name: 'botToken'}, {name: 'mirror'}],
       },
     ]);
 
