@@ -17,8 +17,10 @@ const draftEditMs = 1_500;
  * What a bot writes in its chats. Its calls to Telegram go one at a time in
  * the order they were decided, so no edit overtakes a commit nor a reply
  * the line shown before it, and none once the bot has stopped; one
- * Telegram asks to wait on is made again after the pause. A chat that
- * answers 403 never opened this bot, and is skipped until it writes.
+ * Telegram asks to wait on is made again after the pause. A write to a
+ * paired account's chat is made only while the account is paired, checked
+ * as each call comes. A chat that answers 403 never opened this bot, and
+ * is skipped until it writes.
  */
 export type Outbox = {
   /** Each paired account's chat — by this bot's read of the settings, and the accounts the daemon let in since — a private chat's id being its account's, but one skipped for a 403. */
@@ -65,8 +67,8 @@ type Draft = {
 };
 
 export function createOutbox(bot: BotContext): Outbox {
-  const {api} = bot;
   const audience = createAudience(bot);
+  const writer = createWriter(bot, audience);
   const drafts = new Map<string, Draft>();
   let output: Promise<unknown> = Promise.resolve();
   /** What the call gave, once every call decided before it has run; none once the bot has stopped. */
@@ -77,57 +79,7 @@ export function createOutbox(bot: BotContext): Outbox {
 
     return ran;
   };
-  const call = <T>(
-    request: () => Promise<BotApiOutcome<T>>,
-  ): Promise<BotApiOutcome<T>> => patiently(bot.signal, request);
-  const heard = <T>(
-    chatId: number,
-    outcome: BotApiOutcome<T>,
-  ): T | undefined => {
-    if (outcome.ok) {
-      return outcome.result;
-    }
-
-    if (outcome.code === 403) {
-      audience.silence(chatId);
-    } else if (!bot.signal.aborted) {
-      bot.report(
-        `${botNames(bot.settings()).bot} could not write to chat ${String(chatId)}: ${outcome.description}`,
-      );
-    }
-
-    return undefined;
-  };
-  const send = async (
-    chatId: number,
-    text: string,
-    keyboard?: InlineKeyboard,
-  ): Promise<TelegramMessage | undefined> =>
-    heard(
-      chatId,
-      await call(() =>
-        api.sendMessage({
-          chatId,
-          text,
-          ...(keyboard === undefined ? {} : {keyboard}),
-          signal: bot.signal,
-        }),
-      ),
-    );
-  /** Edits a message to the text, without buttons: whether it shows the text now, one showing it already as good as edited. */
-  const edit = async (
-    chatId: number,
-    messageId: number,
-    text: string,
-  ): Promise<boolean> => {
-    const outcome = await call(() =>
-      api.editMessageText({chatId, messageId, text, signal: bot.signal}),
-    );
-
-    return notModified(outcome) || heard(chatId, outcome) !== undefined;
-  };
   const paired = (): readonly number[] => audience.chats();
-  const stillPaired = (chatId: number): boolean => paired().includes(chatId);
   /**
    * Brings the draft's message in every paired chat to the text: sent
    * where it has none, edited where it shows other words, an edit that
@@ -143,28 +95,27 @@ export function createOutbox(bot: BotContext): Outbox {
     const [first = '', ...rest] = pieces(text);
 
     for (const chatId of paired()) {
-      // Paired still, now that this chat's write comes.
-      if (!stillPaired(chatId)) {
-        continue;
-      }
-
       const message = draft.messages.get(chatId);
       const sent =
-        message === undefined ? await send(chatId, first) : undefined;
+        message === undefined
+          ? await writer.send(chatId, first, undefined, chatId)
+          : undefined;
 
       if (sent !== undefined) {
         draft.messages.set(chatId, {messageId: sent.messageId, shown: first});
       } else if (
         message !== undefined &&
         first !== message.shown &&
-        (await edit(chatId, message.messageId, first))
+        (await writer.edit(chatId, message.messageId, first))
       ) {
         message.shown = first;
       }
 
       if (commit && draft.messages.get(chatId)?.shown === first) {
         for (const piece of rest) {
-          if ((await send(chatId, piece)) === undefined) {
+          if (
+            (await writer.send(chatId, piece, undefined, chatId)) === undefined
+          ) {
             break;
           }
         }
@@ -185,21 +136,22 @@ export function createOutbox(bot: BotContext): Outbox {
     if (draft !== undefined) {
       void queue(async () => {
         for (const [chatId, {messageId}] of draft.messages) {
-          heard(
-            chatId,
-            await call(() =>
-              api.deleteMessage({chatId, messageId, signal: bot.signal}),
-            ),
-          );
+          await writer.remove(chatId, messageId);
         }
       });
     }
   };
 
   /** Says the text in the chat, piece by piece, stopping at one that could not be sent. */
-  const tell = async (chatId: number, text: string): Promise<void> => {
+  const tell = async (
+    chatId: number,
+    text: string,
+    audience?: number,
+  ): Promise<void> => {
     for (const piece of pieces(text)) {
-      if ((await send(chatId, piece)) === undefined) {
+      if (
+        (await writer.send(chatId, piece, undefined, audience)) === undefined
+      ) {
         break;
       }
     }
@@ -216,44 +168,19 @@ export function createOutbox(bot: BotContext): Outbox {
       void queue(() => tell(chatId, text));
     },
     sayToPaired(chatId, text) {
-      void queue(() =>
-        stillPaired(chatId) ? tell(chatId, text) : Promise.resolve(),
-      );
+      void queue(() => tell(chatId, text, chatId));
     },
     card: async (chatId, text, keyboard) =>
-      (
-        await queue(() =>
-          stillPaired(chatId)
-            ? send(chatId, text, keyboard)
-            : Promise.resolve(undefined),
-        )
-      )?.messageId,
+      (await queue(() => writer.send(chatId, text, keyboard, chatId)))
+        ?.messageId,
     revise(chatId, messageId, text) {
-      void queue(() => edit(chatId, messageId, text));
+      void queue(() => writer.edit(chatId, messageId, text));
     },
     answer(press, toast) {
-      void queue(async () => {
-        heard(
-          press.from.id,
-          await call(() =>
-            api.answerCallbackQuery({
-              callbackQueryId: press.id,
-              ...(toast === undefined
-                ? {}
-                : {text: cut(toast, maxToastLength)}),
-              signal: bot.signal,
-            }),
-          ),
-        );
-      });
+      void queue(() => writer.answer(press, toast));
     },
     typing(chatId) {
-      void queue(async () => {
-        heard(
-          chatId,
-          await call(() => api.sendChatAction({chatId, signal: bot.signal})),
-        );
-      });
+      void queue(() => writer.typing(chatId));
     },
     draft(draftId, text, post) {
       const posted = drafts.get(draftId);
@@ -289,11 +216,136 @@ export function createOutbox(bot: BotContext): Outbox {
   };
 }
 
-/** One call to Telegram; one it asks to wait on is made once more after the pause, the queue waiting with it. */
+/** The calls a bot makes to Telegram, each heard: what it gave, or nothing for one not made or refused. */
+type Writer = {
+  /** Sends a message; one to a paired account's chat names the account as `audience`. */
+  send(
+    chatId: number,
+    text: string,
+    keyboard?: InlineKeyboard,
+    audience?: number,
+  ): Promise<TelegramMessage | undefined>;
+  /** Edits a message of a paired account's chat to the text, without buttons: whether it shows the text now, one showing it already as good as edited. */
+  edit(chatId: number, messageId: number, text: string): Promise<boolean>;
+  remove(chatId: number, messageId: number): Promise<void>;
+  /** Answers a button press, with a toast cut to what Telegram takes. */
+  answer(press: TelegramCallbackQuery, toast?: string): Promise<void>;
+  typing(chatId: number): Promise<void>;
+};
+
+/**
+ * How a bot's calls to Telegram are made and heard. One Telegram asks to
+ * wait on is made again after the pause; a write to a paired account's
+ * chat names the account as its audience, and is not made, nor made
+ * again, once the account is paired no longer. A refusal is reported, a
+ * 403 silences the chat, and nothing is said of a call not made.
+ */
+function createWriter(bot: BotContext, audience: Audience): Writer {
+  const {api} = bot;
+  const stillPaired = (chatId: number): boolean =>
+    audience.chats().includes(chatId);
+  const call = <T>(
+    request: () => Promise<BotApiOutcome<T>>,
+    to?: number,
+  ): Promise<BotApiOutcome<T> | undefined> => {
+    const allowed = (): boolean => to === undefined || stillPaired(to);
+
+    return allowed()
+      ? patiently(bot.signal, request, allowed)
+      : Promise.resolve(undefined);
+  };
+  const heard = <T>(
+    chatId: number,
+    outcome: BotApiOutcome<T> | undefined,
+  ): T | undefined => {
+    if (outcome === undefined) {
+      return undefined;
+    }
+
+    if (outcome.ok) {
+      return outcome.result;
+    }
+
+    if (outcome.code === 403) {
+      audience.silence(chatId);
+    } else if (!bot.signal.aborted) {
+      bot.report(
+        `${botNames(bot.settings()).bot} could not write to chat ${String(chatId)}: ${outcome.description}`,
+      );
+    }
+
+    return undefined;
+  };
+
+  return {
+    send: async (chatId, text, keyboard, to) =>
+      heard(
+        chatId,
+        await call(
+          () =>
+            api.sendMessage({
+              chatId,
+              text,
+              ...(keyboard === undefined ? {} : {keyboard}),
+              signal: bot.signal,
+            }),
+          to,
+        ),
+      ),
+    async edit(chatId, messageId, text) {
+      const outcome = await call(
+        () =>
+          api.editMessageText({chatId, messageId, text, signal: bot.signal}),
+        chatId,
+      );
+
+      return (
+        outcome !== undefined &&
+        (notModified(outcome) || heard(chatId, outcome) !== undefined)
+      );
+    },
+    async remove(chatId, messageId) {
+      heard(
+        chatId,
+        await call(() =>
+          api.deleteMessage({chatId, messageId, signal: bot.signal}),
+        ),
+      );
+    },
+    async answer(press, toast) {
+      heard(
+        press.from.id,
+        await call(() =>
+          api.answerCallbackQuery({
+            callbackQueryId: press.id,
+            ...(toast === undefined ? {} : {text: cut(toast, maxToastLength)}),
+            signal: bot.signal,
+          }),
+        ),
+      );
+    },
+    async typing(chatId) {
+      heard(
+        chatId,
+        await call(
+          () => api.sendChatAction({chatId, signal: bot.signal}),
+          chatId,
+        ),
+      );
+    },
+  };
+}
+
+/**
+ * One call to Telegram; one it asks to wait on is made once more after
+ * the pause, the queue waiting with it — unless `again` says no by then,
+ * and then nothing is made.
+ */
 async function patiently<T>(
   signal: AbortSignal,
   request: () => Promise<BotApiOutcome<T>>,
-): Promise<BotApiOutcome<T>> {
+  again: () => boolean,
+): Promise<BotApiOutcome<T> | undefined> {
   const outcome = await request();
 
   if (outcome.ok || outcome.retryAfterMs === undefined) {
@@ -302,7 +354,11 @@ async function patiently<T>(
 
   await pause(outcome.retryAfterMs, signal);
 
-  return signal.aborted ? outcome : request();
+  if (signal.aborted) {
+    return outcome;
+  }
+
+  return again() ? request() : undefined;
 }
 
 /**
@@ -313,12 +369,14 @@ async function patiently<T>(
  * gives one; a key shaped otherwise names no chat of ours, since a
  * negative one would name a group.
  */
-function createAudience(bot: BotContext): {
+type Audience = {
   chats(): readonly number[];
   admitted(chatId: number): void;
   heardFrom(chatId: number): void;
   silence(chatId: number): void;
-} {
+};
+
+function createAudience(bot: BotContext): Audience {
   const silent = new Set<number>();
   const letIn = new Set<number>();
   let readSettings = bot.settings();
