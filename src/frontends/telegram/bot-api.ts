@@ -198,7 +198,6 @@ export type PollPacing = {
 };
 
 const pollTimeoutSeconds = 50;
-const firstBackoffMs = 1_000;
 
 /**
  * Long-polls until the signal aborts, handing each update on in order and
@@ -216,7 +215,6 @@ export async function pollUpdates(options: {
 }): Promise<'unauthorized' | 'stopped'> {
   const {api, onUpdate, report, signal} = options;
   const conflictRetryMs = options.pacing?.conflictRetryMs ?? 30_000;
-  const backoffMaxMs = options.pacing?.backoffMaxMs ?? 30_000;
   const aborted = (): boolean => signal.aborted;
   let offset = 0;
   let failures = 0;
@@ -256,7 +254,7 @@ export async function pollUpdates(options: {
         offset,
         ...outcome.result.map(update => update.updateId + 1),
       );
-    } else if (outcome.code === 401) {
+    } else if (tokenRefused(outcome.code)) {
       return 'unauthorized';
     } else if (outcome.code === 409) {
       reportChange({code: 'conflict', description: outcome.description});
@@ -265,10 +263,7 @@ export async function pollUpdates(options: {
       await pause(outcome.retryAfterMs, signal);
     } else {
       reportChange({code: 'unreachable', description: outcome.description});
-      await pause(
-        Math.min(firstBackoffMs * 2 ** failures, backoffMaxMs),
-        signal,
-      );
+      await pause(backoffMs(failures, options.pacing?.backoffMaxMs), signal);
       failures += 1;
     }
   }
@@ -276,9 +271,22 @@ export async function pollUpdates(options: {
   return 'stopped';
 }
 
+/** Telegram answers a wrong token with 401, and one it cannot even parse with 404. */
+export function tokenRefused(code: number): boolean {
+  return code === 401 || code === 404;
+}
+
 /** Ends at once, and without a throw, when the signal aborts. */
-function pause(ms: number, signal: AbortSignal): Promise<void> {
+export function pause(ms: number, signal: AbortSignal): Promise<void> {
   return sleep(ms, undefined, {signal}).catch(() => undefined);
+}
+
+/**
+ * The wait before trying again after `failures` failures in a row: a
+ * second, doubled with each, and never longer than `maxMs`.
+ */
+export function backoffMs(failures: number, maxMs = 30_000): number {
+  return Math.min(1_000 * 2 ** failures, maxMs);
 }
 
 function unanswered(description: string): BotApiOutcome<never> {
