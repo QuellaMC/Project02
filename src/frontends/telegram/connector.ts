@@ -4,7 +4,9 @@ import {
   gatewayProtocolVersion,
   type ConnectorConfigEntry,
   type ConnectorConfigView,
+  type GatewayEvent,
   type GatewayHealth,
+  type GatewayReady,
 } from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
@@ -18,7 +20,14 @@ import {
 } from '../../shared/daemon-record.ts';
 import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {backoffMs, createBotApi, pause, type PollPacing} from './bot-api.ts';
-import {botNames, startBot, type Bot, type BotSettings} from './bot.ts';
+import {
+  botNames,
+  connectorId,
+  startBot,
+  type Bot,
+  type BotSettings,
+} from './bot.ts';
+import {characterChat} from './character-bot.ts';
 
 /** The waits a test shortens. */
 export type ConnectorPacing = {
@@ -142,13 +151,15 @@ async function followDaemon(
     backoffMaxMs: options.pacing?.readBackoffMaxMs,
     report,
     apply: view => {
-      bots.apply(view, health);
+      bots.apply(view, health, client);
     },
   });
 
   try {
     await client.events(
       event => {
+        bots.dispatch(event);
+
         if (event.kind === 'health_changed') {
           health = event.health;
           read();
@@ -156,10 +167,11 @@ async function followDaemon(
       },
       {
         signal,
-        connector: 'telegram',
+        connector: connectorId,
         onReady: ({snapshot}) => {
           connected();
           health = snapshot.health;
+          bots.snapshot(snapshot);
           read();
         },
         onResumed: connected,
@@ -234,7 +246,7 @@ function createConfigReads(options: {
     ticket === newest && !signal.aborted;
   const readUntilAnswered = async (ticket: number): Promise<void> => {
     for (let failures = 0; current(ticket); failures += 1) {
-      const answer = await client.connectorConfig('telegram', {signal}).then(
+      const answer = await client.connectorConfig(connectorId, {signal}).then(
         view => ({view}),
         (error: unknown) => ({error}),
       );
@@ -270,8 +282,19 @@ function createConfigReads(options: {
 }
 
 type BotTable = {
-  /** Makes the running bots the ones the config's answer asks for. */
-  apply(view: ConnectorConfigView, health: GatewayHealth | undefined): void;
+  /**
+   * Makes the running bots the ones the config's answer asks for, each
+   * reaching the daemon by the client the answer came by.
+   */
+  apply(
+    view: ConnectorConfigView,
+    health: GatewayHealth | undefined,
+    client: GatewayClient,
+  ): void;
+  /** Hands each running bot a frame of the daemon's stream. */
+  dispatch(event: GatewayEvent): void;
+  /** Hands each running bot the daemon's snapshot on a stream it did not resume. */
+  snapshot(ready: GatewayReady): void;
   /** Stops every bot, and settles once each has stopped. */
   stopAll(): Promise<void>;
 };
@@ -294,7 +317,11 @@ function createBotTable(context: {
     running.delete(token);
     stopping.add(stopped);
   };
-  const start = (token: string, settings: BotSettings): void => {
+  const start = (
+    token: string,
+    settings: BotSettings,
+    client: GatewayClient,
+  ): void => {
     running.set(
       token,
       startBot({
@@ -305,18 +332,22 @@ function createBotTable(context: {
             ? {}
             : {baseUrl: options.telegramBaseUrl}),
         }),
+        client,
         settings,
         say,
         report,
         ...(options.pacing?.poll === undefined
           ? {}
           : {pacing: options.pacing.poll}),
+        ...(settings.kind === 'character'
+          ? {rules: characterChat(settings.characterId)}
+          : {}),
       }),
     );
   };
 
   return {
-    apply(view, health) {
+    apply(view, health, client) {
       const {wanted, shared} =
         view.status === 'ok'
           ? wantedBots(view, health)
@@ -335,10 +366,14 @@ function createBotTable(context: {
       for (const [token, settings] of wanted) {
         const bot = running.get(token);
 
-        if (bot === undefined) {
-          start(token, settings);
+        if (bot !== undefined && sameOwner(bot.settings, settings)) {
+          bot.update(settings, client);
         } else {
-          bot.update(settings);
+          if (bot !== undefined) {
+            stop(token, bot);
+          }
+
+          start(token, settings, client);
         }
       }
 
@@ -353,6 +388,16 @@ function createBotTable(context: {
         );
       }
     },
+    dispatch(event) {
+      for (const bot of running.values()) {
+        bot.dispatch(event);
+      }
+    },
+    snapshot(ready) {
+      for (const bot of running.values()) {
+        bot.snapshot(ready);
+      }
+    },
     async stopAll() {
       for (const [token, bot] of running) {
         stop(token, bot);
@@ -361,6 +406,13 @@ function createBotTable(context: {
       await Promise.all(stopping);
     },
   };
+}
+
+/** A bot is one owner's: a token that moves to another starts a bot of its own. */
+function sameOwner(running: BotSettings, wanted: BotSettings): boolean {
+  return running.kind === 'management'
+    ? wanted.kind === 'management'
+    : wanted.kind === 'character' && wanted.characterId === running.characterId;
 }
 
 /**
