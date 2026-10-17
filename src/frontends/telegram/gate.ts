@@ -17,6 +17,9 @@ import type {Outbox} from './outbox.ts';
 
 /** What the gate says to an account the home does not let in. */
 const sentences = {
+  refused:
+    'This bot is private, and cannot take a pairing request right now; ' +
+    'try again later.',
   pairingCode: (code: string, kind: BotSettings['kind']): string =>
     `This bot is private. Your pairing code is ${code}, good for an hour. ` +
     (kind === 'management'
@@ -78,6 +81,7 @@ export function createGate(
           sentences.pairingCode(outcome.request.code, bot.settings().kind),
         );
       } else if (outcome.status === 'refused') {
+        outbox.say(chatId, sentences.refused);
         bot.report(
           `${botNames(bot.settings()).bot} could not ask to pair ${subject.label}: ${outcome.message}`,
         );

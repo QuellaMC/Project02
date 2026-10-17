@@ -7,8 +7,8 @@ import type {
 import type {BotContext} from '../../src/frontends/telegram/bot.ts';
 import {createOutbox} from '../../src/frontends/telegram/outbox.ts';
 
-/** A Bot API that records what is written and answers as Telegram does, but for the edits told to fail. */
-function recordingApi(failing: {editsToFail: number}) {
+/** A Bot API that records what is written and answers as Telegram does, but for the sends and edits told to fail. */
+function recordingApi(failing: {editsToFail?: number; sendsToFail?: number}) {
   const calls: {readonly method: string; readonly text: string}[] = [];
   const message = (
     id: number,
@@ -25,13 +25,19 @@ function recordingApi(failing: {editsToFail: number}) {
     sendMessage: ({text}) => {
       calls.push({method: 'sendMessage', text});
 
+      if ((failing.sendsToFail ?? 0) > 0) {
+        failing.sendsToFail = (failing.sendsToFail ?? 0) - 1;
+
+        return Promise.resolve({ok: false, code: 0, description: 'no answer'});
+      }
+
       return Promise.resolve(message(calls.length));
     },
     editMessageText: ({messageId, text}) => {
       calls.push({method: 'editMessageText', text});
 
-      if (failing.editsToFail > 0) {
-        failing.editsToFail -= 1;
+      if ((failing.editsToFail ?? 0) > 0) {
+        failing.editsToFail = (failing.editsToFail ?? 0) - 1;
 
         return Promise.resolve({ok: false, code: 0, description: 'no answer'});
       }
@@ -47,9 +53,57 @@ function recordingApi(failing: {editsToFail: number}) {
   return {api, calls};
 }
 
+/** Mira's bot, with Alice paired, over the API given. */
+function miraBot(api: BotApi, reports: string[]): BotContext {
+  return {
+    api,
+    username: 'mira_bot',
+    client: () => {
+      throw new Error('not called here');
+    },
+    settings: () => ({
+      kind: 'character',
+      characterId: 'mira',
+      name: 'Mira',
+      mirror: true,
+      pairedUsers: {'1': 'Alice'},
+    }),
+    report: line => {
+      reports.push(line);
+    },
+    signal: new AbortController().signal,
+  };
+}
+
 describe('Telegram outbox', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('sends the pieces after the first only once the first is in place', async () => {
+    const failing = {sendsToFail: 1};
+    const {api, calls} = recordingApi(failing);
+    const outbox = createOutbox(miraBot(api, []));
+    const long = 'x'.repeat(5_000);
+
+    outbox.commit('d', long, true);
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    await new Promise(resolve => {
+      setTimeout(resolve, 20);
+    });
+    expect(calls).toEqual([{method: 'sendMessage', text: long.slice(0, 4096)}]);
+
+    failing.sendsToFail = 1;
+    outbox.say(1, long);
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    await new Promise(resolve => {
+      setTimeout(resolve, 20);
+    });
+    expect(calls).toHaveLength(2);
   });
 
   it('tries an edit again at the commit when the one before it failed, though the words are the same', async () => {
@@ -58,25 +112,7 @@ describe('Telegram outbox', () => {
     const failing = {editsToFail: 1};
     const {api, calls} = recordingApi(failing);
     const reports: string[] = [];
-    const bot: BotContext = {
-      api,
-      username: 'mira_bot',
-      client: () => {
-        throw new Error('not called here');
-      },
-      settings: () => ({
-        kind: 'character',
-        characterId: 'mira',
-        name: 'Mira',
-        mirror: true,
-        pairedUsers: {'1': 'Alice'},
-      }),
-      report: line => {
-        reports.push(line);
-      },
-      signal: new AbortController().signal,
-    };
-    const outbox = createOutbox(bot);
+    const outbox = createOutbox(miraBot(api, reports));
 
     outbox.draft('d', 'noted: ', true);
     await vi.advanceTimersByTimeAsync(0);

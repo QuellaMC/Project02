@@ -23,7 +23,7 @@ export type Outbox = {
   paired(): readonly number[];
   /** A message from the chat arrived, so it is written to again. */
   heardFrom(chatId: number): void;
-  /** Says the text in the chat, in as many messages as it takes. */
+  /** Says the text in the chat, in as many messages as it takes, stopping at one that could not be sent. */
   say(chatId: number, text: string): void;
   /** Sends a message with buttons, and gives its id once sent; none when it could not be. */
   card(
@@ -140,7 +140,7 @@ export function createOutbox(bot: BotContext): Outbox {
    * where it has none, edited where it shows other words, an edit that
    * failed leaving the words for the next to try again; a chat paired no
    * longer gets no more of it. A draft shows what fits one message; its
-   * commit sends the rest after.
+   * commit sends the rest after, and only after.
    */
   const render = async (
     draft: Draft,
@@ -151,22 +151,23 @@ export function createOutbox(bot: BotContext): Outbox {
 
     for (const chatId of paired()) {
       const message = draft.messages.get(chatId);
+      const sent =
+        message === undefined ? await send(chatId, first) : undefined;
 
-      if (message === undefined) {
-        const sent = await send(chatId, first);
-
-        if (sent !== undefined) {
-          draft.messages.set(chatId, {messageId: sent.messageId, shown: first});
-        }
+      if (sent !== undefined) {
+        draft.messages.set(chatId, {messageId: sent.messageId, shown: first});
       } else if (
+        message !== undefined &&
         first !== message.shown &&
         (await edit(chatId, message.messageId, first))
       ) {
         message.shown = first;
       }
 
-      for (const piece of commit ? rest : []) {
-        await send(chatId, piece);
+      if (commit && draft.messages.get(chatId)?.shown === first) {
+        for (const piece of rest) {
+          await send(chatId, piece);
+        }
       }
     }
   };
@@ -203,7 +204,9 @@ export function createOutbox(bot: BotContext): Outbox {
     say(chatId, text) {
       void queue(async () => {
         for (const piece of pieces(text)) {
-          await send(chatId, piece);
+          if ((await send(chatId, piece)) === undefined) {
+            break;
+          }
         }
       });
     },

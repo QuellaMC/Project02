@@ -310,12 +310,15 @@ type BotTable = {
     health: GatewayHealth | undefined,
     client: GatewayClient,
   ): void;
-  /** Hands each running bot a frame of the daemon's stream. */
+  /** Hands each running bot a frame of the daemon's stream, once the snapshot before it has been handed on. */
   dispatch(event: GatewayEvent): void;
   /**
-   * Hands each running bot the daemon's snapshot on a stream it did not
-   * resume, and keeps it, moved on by every frame since, for each bot
-   * started after.
+   * Keeps the daemon's snapshot from a stream it did not resume, moved on
+   * by every frame since, for each bot started after; and hands it to the
+   * running bots once the settings read that follows a ready has been
+   * applied, the frames meanwhile folded into it and not handed on, so
+   * nothing is shown by settings that may have changed while the stream
+   * was away.
    */
   snapshot(ready: GatewayReady): void;
   /** Stops every bot, and settles once each has stopped. */
@@ -333,6 +336,8 @@ function createBotTable(context: {
   const stopping = new Set<Promise<void>>();
   const notice = createNotice();
   let latest: GatewayReady | undefined;
+  /** A snapshot not handed on yet: the settings it is shown by are being read. */
+  let unread = false;
   const stop = (token: string, bot: Bot): void => {
     const stopped = bot.stop().finally(() => {
       stopping.delete(stopped);
@@ -413,22 +418,29 @@ function createBotTable(context: {
             : undefined,
         );
       }
+
+      if (unread && latest !== undefined) {
+        unread = false;
+
+        for (const bot of running.values()) {
+          bot.snapshot(latest);
+        }
+      }
     },
     dispatch(event) {
       if (latest !== undefined) {
         latest = movedOn(latest, event);
       }
 
-      for (const bot of running.values()) {
-        bot.dispatch(event);
+      if (!unread) {
+        for (const bot of running.values()) {
+          bot.dispatch(event);
+        }
       }
     },
     snapshot(ready) {
       latest = ready;
-
-      for (const bot of running.values()) {
-        bot.snapshot(ready);
-      }
+      unread = true;
     },
     async stopAll() {
       for (const [token, bot] of running) {
