@@ -1,3 +1,5 @@
+import type {GatewayEvent, GatewayReady} from '../../gateway/api/index.ts';
+import type {GatewayClient} from '../../gateway/client/index.ts';
 import {
   backoffMs,
   pause,
@@ -6,8 +8,12 @@ import {
   type BotApi,
   type PollPacing,
   type PollProblem,
+  type TelegramUpdate,
   type TelegramUser,
 } from './bot-api.ts';
+
+/** This connector's id on the daemon's wire. */
+export const connectorId = 'telegram';
 
 /**
  * What a bot runs on, as its entry in the connector config has it: whose
@@ -18,7 +24,7 @@ export type BotSettings = (
   | {
       readonly kind: 'character';
       readonly characterId: string;
-      /** Her name as health has it, for what the terminal says. */
+      /** Her name as health has it. */
       readonly name: string;
       readonly mirror: boolean;
     }
@@ -26,31 +32,66 @@ export type BotSettings = (
   readonly pairedUsers: Readonly<Record<string, unknown>>;
 };
 
+/** What a bot's rules run on: the daemon and the settings are read as they are at each use. */
+export type BotContext = {
+  readonly api: BotApi;
+  /** As Telegram named the bot. */
+  readonly username: string;
+  readonly client: () => GatewayClient;
+  readonly settings: () => BotSettings;
+  readonly report: (line: string) => void;
+  /** Aborts once the bot is stopped. */
+  readonly signal: AbortSignal;
+};
+
+/** What a bot does with a message, and with the daemon's frames and snapshots. */
+export type BotRules = {
+  readonly onUpdate: (update: TelegramUpdate) => Promise<void>;
+  readonly dispatch: (event: GatewayEvent) => void;
+  readonly snapshot: (ready: GatewayReady) => void;
+};
+
 export type Bot = {
   readonly settings: BotSettings;
-  update(settings: BotSettings): void;
+  /** Takes the settings a later read gave, and the client that read came by. */
+  update(settings: BotSettings, client: GatewayClient): void;
+  dispatch(event: GatewayEvent): void;
+  snapshot(ready: GatewayReady): void;
   /** Ends the bot's poll, and settles once it has ended. */
   stop(): Promise<void>;
 };
 
+/** The management bot's for now: whatever it gets, it does nothing with. */
+const noRules: BotRules = {
+  onUpdate: () => Promise.resolve(),
+  dispatch: () => undefined,
+  snapshot: () => undefined,
+};
+
 /**
  * One token's bot: asks Telegram who it is, says so, and polls until it is
- * stopped or Telegram refuses the token. Trouble is reported once per
- * change, naming the bot, while the bot keeps trying.
+ * stopped or Telegram refuses the token, handing what it gets to its
+ * rules. Trouble is reported once per change, naming the bot, while the
+ * bot keeps trying.
  */
 export function startBot(options: {
   readonly api: BotApi;
+  readonly client: GatewayClient;
   readonly settings: BotSettings;
   readonly say: (line: string) => void;
   readonly report: (line: string) => void;
   readonly pacing?: PollPacing;
+  /** The rules once Telegram has said who the bot is; none, unless given. */
+  readonly rules?: (bot: BotContext) => BotRules;
 }): Bot {
   const {api, say, report, pacing} = options;
   const stopping = new AbortController();
   const {signal} = stopping;
   const stopped = (): boolean => signal.aborted;
   let settings = options.settings;
+  let client = options.client;
   let username: string | undefined;
+  let rules = noRules;
   const refused = (): string => {
     const {bot, page} = botNames(settings);
 
@@ -98,10 +139,19 @@ export function startBot(options: {
         ? `Telegram: management bot @${username} is on.`
         : `Telegram: @${username} answers for ${settings.name}.`,
     );
+    rules =
+      options.rules?.({
+        api,
+        username,
+        client: () => client,
+        settings: () => settings,
+        report,
+        signal,
+      }) ?? noRules;
 
     const ended = await pollUpdates({
       api,
-      onUpdate: () => undefined,
+      onUpdate: update => rules.onUpdate(update),
       report: problem => {
         report(problemSentence(problem, botNames(settings).bot));
       },
@@ -119,8 +169,15 @@ export function startBot(options: {
     get settings() {
       return settings;
     },
-    update(next) {
-      settings = next;
+    update(nextSettings, nextClient) {
+      settings = nextSettings;
+      client = nextClient;
+    },
+    dispatch(event) {
+      rules.dispatch(event);
+    },
+    snapshot(ready) {
+      rules.snapshot(ready);
     },
     async stop() {
       stopping.abort();

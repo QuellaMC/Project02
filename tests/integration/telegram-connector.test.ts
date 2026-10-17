@@ -17,6 +17,7 @@ import {
   type ConfigChange,
   type ConfigTarget,
   type Gateway,
+  type PairingRequest,
 } from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {
@@ -24,8 +25,12 @@ import {
   ensureCharacterDataDir,
   writeDaemonRecord,
 } from '../../src/runtime/storage/index.ts';
+import {isJsonRecord} from '../../src/shared/json-boundary.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
-import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
+import {
+  createGatewayTestHome,
+  openDirect,
+} from '../support/gateway-fixtures.ts';
 import {
   listen,
   startTestGatewayServer,
@@ -33,10 +38,12 @@ import {
   type TestGatewayServer,
 } from '../support/gateway-http.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {createScriptedAdapter} from '../support/scripted-adapter.ts';
 import {collect} from '../support/streams.ts';
 import {
   createFakeTelegram,
   type FakeTelegram,
+  type TelegramWireUpdate,
 } from '../support/telegram-api.ts';
 
 const homeToken = '123456:home';
@@ -47,33 +54,55 @@ const home: ConfigTarget = {scope: 'global'};
 const mira: ConfigTarget = {scope: 'character', characterId: 'mira'};
 const telegramSection = {namespace: 'connectors', id: 'telegram'} as const;
 const miraAnswers = 'Telegram: @mira_bot answers for Mira.';
+const novaAnswers = 'Telegram: @nova_bot answers for Nova.';
 
 type TelegramStanza = {
   readonly enabled?: boolean;
   readonly config: Readonly<Record<string, unknown>>;
 };
 
+type Account = {
+  readonly id: number;
+  readonly first_name: string;
+  readonly username?: string;
+};
+
+const alice: Account = {id: 4242, first_name: 'Alice'};
+const bob: Account = {id: 5151, first_name: 'Bob', username: 'bob'};
+const carol: Account = {id: 6161, first_name: 'Carol'};
+const aliceIsPaired = {[String(alice.id)]: 'Alice'};
+
 /**
- * Mira and Nova, with Telegram authored in the home's document — the
- * management bot's token — and in Mira's, her bot's token, unless a test
- * writes another stanza for either character.
+ * Mira and Nova, answered by the scripted model, with Telegram authored in
+ * the home's document — the management bot's token, and the accounts
+ * paired when a test names them — and in Mira's, her bot's token, unless
+ * a test writes another stanza for either character.
  */
 async function createTelegramHome(
   stanzas: {
+    readonly pairedUsers?: Readonly<Record<string, string>>;
     readonly mira?: TelegramStanza;
     readonly nova?: TelegramStanza;
   } = {},
 ): Promise<{readonly homeRoot: string; readonly gateway: Gateway}> {
   const homeRoot = await createGatewayTestHome('project02-telegram-');
+  const {pairedUsers, ...characters} = stanzas;
 
   writeTestCharacterPackage(homeRoot, {id: 'nova', displayName: 'Nova'});
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    connectors: {telegram: {config: {managementBotToken: homeToken}}},
+    connectors: {
+      telegram: {
+        config: {
+          managementBotToken: homeToken,
+          ...(pairedUsers === undefined ? {} : {pairedUsers}),
+        },
+      },
+    },
   });
 
   for (const [characterId, telegram] of Object.entries({
     mira: {config: {botToken: miraToken}},
-    ...stanzas,
+    ...characters,
   })) {
     await ensureCharacterDataDir({homeRoot, characterId});
     writeRuntimeConfig(
@@ -86,7 +115,7 @@ async function createTelegramHome(
     homeRoot,
     gateway: createGateway({
       location: {storeRoot: homeRoot},
-      roleModelAdapter: {invoke: () => ({rawOutputText: '{}'})},
+      roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     }),
   };
@@ -210,6 +239,95 @@ async function change(
 
 function methods(telegram: FakeTelegram, token: string): readonly string[] {
   return telegram.calls(token).map(call => call.method);
+}
+
+let lastUpdateId = 0;
+
+/**
+ * A message from an account, as Telegram's wire carries it: in its private
+ * chat with a bot unless another chat is named, and a sticker when it has
+ * no text.
+ */
+function messageFrom(
+  account: Account,
+  messageId: number,
+  text: string | undefined,
+  chat: {readonly id: number; readonly type: string} = {
+    id: account.id,
+    type: 'private',
+  },
+): TelegramWireUpdate {
+  lastUpdateId += 1;
+
+  return {
+    update_id: lastUpdateId,
+    message: {
+      message_id: messageId,
+      date: 0,
+      chat,
+      from: {...account, is_bot: false},
+      ...(text === undefined ? {sticker: {file_id: 'sticker'}} : {text}),
+    },
+  };
+}
+
+/** Each call a bot made to one chat, in order, with the text it carried. */
+function callsTo(
+  telegram: FakeTelegram,
+  token: string,
+  chatId: number,
+): readonly {readonly method: string; readonly text: unknown}[] {
+  return telegram
+    .calls(token)
+    .flatMap(({method, body}) =>
+      isJsonRecord(body) && body['chat_id'] === chatId
+        ? [{method, text: body['text']}]
+        : [],
+    );
+}
+
+/** What a bot wrote in one chat, sent or edited, in order. */
+function textsIn(
+  telegram: FakeTelegram,
+  token: string,
+  chatId: number,
+): readonly unknown[] {
+  return callsTo(telegram, token, chatId)
+    .filter(
+      call =>
+        call.method === 'sendMessage' || call.method === 'editMessageText',
+    )
+    .map(call => call.text);
+}
+
+/** Her conversation's log, as history reads it. */
+async function logOf(gateway: Gateway, characterId: string) {
+  const {conversationId} = await openDirect(gateway, characterId);
+  const history = await gateway.history(conversationId);
+
+  if (history.status !== 'ok') {
+    expect.fail(history.message);
+  }
+
+  return history.messages;
+}
+
+/** The request waiting for an account's pairing, once a bot has asked for it. */
+function pairingOf(
+  gateway: Gateway,
+  account: Account,
+): Promise<PairingRequest> {
+  return vi.waitFor(() => {
+    const request = gateway
+      .pendingPairings()
+      .find(pending => pending.subject.id === String(account.id));
+
+    if (request === undefined) {
+      throw new Error(`Nothing asks to pair ${account.first_name} yet.`);
+    }
+
+    return request;
+  });
 }
 
 /** Nothing polls these tokens: an update pushed to each is never asked for. */
@@ -605,5 +723,384 @@ describe('Telegram connector', () => {
     );
     await older.close();
     await telegram.close();
+  });
+
+  it('starts a bot afresh when its token moves to another character', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      nova: {config: {botToken: miraToken}},
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    await change(gateway, mira, {
+      kind: 'section_field_unset',
+      ...telegramSection,
+      field: 'botToken',
+    });
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(
+        'Telegram: stopped @mira_bot (Mira).',
+      );
+      expect(connector.stdout()).toContain(
+        'Telegram: @mira_bot answers for Nova.',
+      );
+    });
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("carries a paired account's line to her under the bot's stamps, and edits the reply's message as it is written, then into its committed text", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    // Paced pieces, at least 4 ms apart: the reply is written for longer
+    // than one interval between edits.
+    const line = `slowly ${Array.from({length: 450}, (_, word) => `w${String(word)}`).join(' ')}`;
+    const reply = `noted: ${line}`;
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 7, line));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+      },
+      {timeout: 10_000},
+    );
+
+    const [posted, ...edits] = callsTo(telegram, miraToken, alice.id).filter(
+      call => call.method !== 'sendChatAction',
+    );
+
+    expect(posted).toEqual({method: 'sendMessage', text: 'noted: '});
+    expect(edits.map(call => call.method)).toEqual(
+      edits.map(() => 'editMessageText'),
+    );
+    // Hundreds of pieces, and an edit at most once an interval, each
+    // showing the reply so far.
+    expect(edits.length).toBeGreaterThan(1);
+    expect(edits.length).toBeLessThan(10);
+    expect(edits.every(call => reply.startsWith(String(call.text)))).toBe(true);
+    await expect(logOf(gateway, 'mira')).resolves.toMatchObject([
+      {
+        role: 'user',
+        text: line,
+        source: 'telegram:mira_bot',
+        clientMessageId: '4242.7',
+      },
+      {role: 'character', text: reply},
+    ]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("sends a reply longer than a Telegram message whole: its draft's message holds the first part, and the rest follows", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const line = Array.from(
+      {length: 1_000},
+      (_, word) => `w${String(word)}`,
+    ).join(' ');
+    const reply = `noted: ${line}`;
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, line));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+          'noted: ',
+          reply.slice(0, 4096),
+          reply.slice(4096),
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('carries nothing from a group or without text, and tells a sticker it reads only text', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const group = {id: -1_002_003, type: 'group'};
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello, all', group));
+    telegram.push(miraToken, messageFrom(alice, 2, undefined));
+    await vi.waitFor(() => {
+      expect(callsTo(telegram, miraToken, alice.id)).toEqual([
+        {method: 'sendMessage', text: 'I can only read text here for now.'},
+      ]);
+    });
+    expect(callsTo(telegram, miraToken, group.id)).toEqual([]);
+    await expect(logOf(gateway, 'mira')).resolves.toEqual([]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("shows another surface's turn in the chat of a character who mirrors, and no chat its own line", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+      nova: {config: {botToken: novaToken, mirror: false}},
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+    await gateway.startCharacter('nova');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+      expect(connector.stdout()).toContain(novaAnswers);
+    });
+    // Each bot has her conversation open once it has carried a line there.
+    telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
+    telegram.push(novaToken, messageFrom(alice, 1, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toContain(
+          'noted: hello',
+        );
+        expect(textsIn(telegram, novaToken, alice.id)).toContain(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+
+    for (const characterId of ['mira', 'nova']) {
+      const ref = await openDirect(gateway, characterId);
+
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'from the web',
+        source: 'web',
+        clientMessageId: `web-${characterId}`,
+      });
+    }
+
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+          'noted: ',
+          'noted: hello',
+          'You (web): from the web',
+          'noted: ',
+          'noted: from the web',
+        ]);
+      },
+      {timeout: 5_000},
+    );
+    // A line after the web's turn: once its reply is in, Nova's chat has
+    // been shown all it will be of that turn.
+    telegram.push(novaToken, messageFrom(alice, 2, 'again'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, novaToken, alice.id).at(-1)).toBe(
+          'noted: again',
+        );
+      },
+      {timeout: 5_000},
+    );
+    expect(textsIn(telegram, novaToken, alice.id)).toEqual([
+      'noted: ',
+      'noted: hello',
+      'noted: ',
+      'noted: again',
+    ]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it("tells a line written while the daemon's socket is closed to be sent again", async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    await server.close();
+    telegram.push(miraToken, messageFrom(alice, 1, 'anyone there?'));
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        'The daemon is not running right now; send that again in a moment.',
+      ]);
+    });
+    await expect(connector.stop()).resolves.toBe(0);
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('tells the chat, once, why a line got no answer: refused before any turn, or not answered in its turn', async () => {
+    const {homeRoot, gateway} = await createTelegramHome({
+      pairedUsers: aliceIsPaired,
+      nova: {config: {botToken: novaToken}},
+    });
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+    const notAnswered =
+      'Mira could not answer: Adapter output must be valid JSON.';
+    const notTaken =
+      'Mira could not answer: Provide exactly one non-empty single-line message.\nYour message was not taken; send it again.';
+
+    // Nova is never started.
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+      expect(connector.stdout()).toContain(novaAnswers);
+    });
+    telegram.push(novaToken, messageFrom(alice, 1, 'hello'));
+    telegram.push(miraToken, messageFrom(alice, 1, 'reject'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, novaToken, alice.id)).toEqual([
+          'Nova is not available right now: Character "nova" has not been started.',
+        ]);
+        expect(textsIn(telegram, miraToken, alice.id)).toEqual([notAnswered]);
+      },
+      {timeout: 5_000},
+    );
+    telegram.push(miraToken, messageFrom(alice, 2, 'two\nlines'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(notTaken);
+      },
+      {timeout: 5_000},
+    );
+    // Once a later line's reply is in, any second telling would be too.
+    telegram.push(miraToken, messageFrom(alice, 3, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+    expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+      notAnswered,
+      notTaken,
+      'noted: ',
+      'noted: hello',
+    ]);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
+  });
+
+  it('gives an account it does not know a pairing code and carries nothing, then carries its lines once the owner approves, and tells one declined so', async () => {
+    const {homeRoot, gateway} = await createTelegramHome();
+    const telegram = await startTelegram();
+    const server = await serve(homeRoot, gateway);
+
+    await gateway.startCharacter('mira');
+
+    const connector = runConnector(homeRoot, telegram);
+
+    await vi.waitFor(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
+    telegram.push(miraToken, messageFrom(bob, 1, 'let me in'));
+
+    const approved = await pairingOf(gateway, bob);
+
+    expect(approved.subject.label).toBe('Bob (@bob)');
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toEqual([
+        `This bot is private. Your pairing code is ${approved.code}, good for an hour. Approve it on the web page, or send it to the management bot.`,
+      ]);
+    });
+    await expect(
+      gateway.settlePairing(approved.code, 'approved'),
+    ).resolves.toEqual({status: 'settled', decision: 'approved'});
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
+        'Paired. Mira is listening.',
+      );
+    });
+    telegram.push(miraToken, messageFrom(bob, 2, 'hello'));
+    await vi.waitFor(
+      () => {
+        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
+          'noted: hello',
+        );
+      },
+      {timeout: 5_000},
+    );
+    telegram.push(miraToken, messageFrom(carol, 1, 'me too'));
+
+    const declined = await pairingOf(gateway, carol);
+
+    await expect(
+      gateway.settlePairing(declined.code, 'denied'),
+    ).resolves.toEqual({status: 'settled', decision: 'denied'});
+    await vi.waitFor(() => {
+      expect(textsIn(telegram, miraToken, carol.id).at(-1)).toBe(
+        'The owner declined.',
+      );
+    });
+
+    const lines = await logOf(gateway, 'mira');
+
+    expect(
+      lines.filter(line => line.role === 'user').map(line => line.text),
+    ).toEqual(['hello']);
+    await expect(connector.stop()).resolves.toBe(0);
+    await server.close();
+    await telegram.close();
+    await gateway.stop();
   });
 });
