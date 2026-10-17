@@ -119,7 +119,7 @@ export function createGate(
 }
 
 /** Whether the home lets the account in, by this bot's read of the settings. */
-export function paired(bot: BotContext, account: string): boolean {
+function paired(bot: BotContext, account: string): boolean {
   return Object.hasOwn(bot.settings().pairedUsers, account);
 }
 

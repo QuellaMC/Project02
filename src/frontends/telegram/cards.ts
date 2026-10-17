@@ -38,9 +38,10 @@ export const answered = {
   unknown: 'Already answered.',
 } as const;
 
-/** A card's text, the chats it went to, and its message in each it reached. */
+/** A card's text as of its sending, the chats it went to, and its message in each it reached. */
 type Card = {
-  readonly text: string;
+  /** Rendered when the card is sent, so a card held back says what a deadline has left as of then. */
+  readonly text: () => string;
   /** Chats the card was sent to; one whose send failed is taken off, so the next post tries it again. */
   readonly sent: Set<number>;
   readonly messages: (readonly [chatId: number, messageId: number])[];
@@ -59,7 +60,7 @@ const endedAway = 'settled while the bot was away';
  */
 export type Cards = {
   /** Holds the card, and sends it to each chat it has not gone to; one already held keeps its text. */
-  post(key: string, text: string, chatIds: readonly number[]): void;
+  post(key: string, text: () => string, chatIds: readonly number[]): void;
   /** Sends every card held to the chat, where it has not gone; how many are held. */
   postAll(chatId: number): number;
   /** Revises the card to how it ended, and forgets it. */
@@ -78,7 +79,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
     }
 
     cards.delete(key);
-    card.ended = oneMessage(card.text, ` · ${ending}`);
+    card.ended = oneMessage(card.text(), ` · ${ending}`);
 
     for (const [chatId, messageId] of card.messages) {
       outbox.revise(chatId, messageId, card.ended);
@@ -87,7 +88,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
 
   const post = (
     key: string,
-    text: string,
+    text: () => string,
     chatIds: readonly number[],
   ): void => {
     const card = cards.get(key) ?? {
@@ -107,7 +108,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
 
       card.sent.add(chatId);
       void outbox
-        .card(chatId, oneMessage(card.text), keyboard)
+        .card(chatId, oneMessage(card.text()), keyboard)
         .then(messageId => {
           if (messageId === undefined) {
             card.sent.delete(chatId);

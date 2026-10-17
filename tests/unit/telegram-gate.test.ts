@@ -79,6 +79,7 @@ function gateOver(client: GatewayClient) {
   };
   const bot: BotContext = {
     api: silentApi,
+    id: 987654,
     username: 'mira_bot',
     client: () => client,
     settings: () => ({

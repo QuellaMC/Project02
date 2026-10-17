@@ -127,6 +127,7 @@ export function createOutbox(bot: BotContext): Outbox {
     return notModified(outcome) || heard(chatId, outcome) !== undefined;
   };
   const paired = (): readonly number[] => audience.chats();
+  const stillPaired = (chatId: number): boolean => paired().includes(chatId);
   /**
    * Brings the draft's message in every paired chat to the text: sent
    * where it has none, edited where it shows other words, an edit that
@@ -142,6 +143,11 @@ export function createOutbox(bot: BotContext): Outbox {
     const [first = '', ...rest] = pieces(text);
 
     for (const chatId of paired()) {
+      // Paired still, now that this chat's write comes.
+      if (!stillPaired(chatId)) {
+        continue;
+      }
+
       const message = draft.messages.get(chatId);
       const sent =
         message === undefined ? await send(chatId, first) : undefined;
@@ -198,8 +204,6 @@ export function createOutbox(bot: BotContext): Outbox {
       }
     }
   };
-  const stillPaired = (chatId: number): boolean => paired().includes(chatId);
-
   return {
     paired,
     admitted(chatId) {

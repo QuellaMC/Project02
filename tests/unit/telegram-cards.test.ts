@@ -44,7 +44,7 @@ describe('Telegram cards', () => {
     // 4094 units, a pair at the cut, and more past Telegram's 4096.
     const text = `${'x'.repeat(4094)}😀 and more`;
 
-    cards.post('id', text, [1]);
+    cards.post('id', () => text, [1]);
     cards.end('id', 'approved');
     await vi.waitFor(() => {
       expect(revised).toHaveLength(1);
@@ -58,7 +58,7 @@ describe('Telegram cards', () => {
     expect(revised[0]?.text).toHaveLength(4096);
   });
 
-  it('sends a card to a chat once, tries again where the send failed, and revises each message it reached', async () => {
+  it('sends a card to a chat once, tries again where the send failed with the words of that moment, and revises each message it reached', async () => {
     let failed = false;
     const {outbox, sent, revised} = recordingOutbox((chatId, ordinal) => {
       if (chatId === 2 && !failed) {
@@ -70,16 +70,24 @@ describe('Telegram cards', () => {
       return ordinal;
     });
     const cards = createCards(outbox, 'pairing');
+    let left = 60;
+    const text = () => `Bob wants to pair · expires in ${String(left)} minutes`;
 
-    cards.post('123456', 'Bob wants to pair', [1, 2]);
+    cards.post('123456', text, [1, 2]);
     await vi.waitFor(() => {
       expect(sent).toHaveLength(2);
     });
-    cards.post('123456', 'Bob wants to pair', [1, 2]);
+    left = 59;
+    cards.post('123456', text, [1, 2]);
     await vi.waitFor(() => {
       expect(sent).toHaveLength(3);
     });
     expect(sent.map(call => call.chatId)).toEqual([1, 2, 2]);
+    expect(sent.map(call => call.text)).toEqual([
+      'Bob wants to pair · expires in 60 minutes',
+      'Bob wants to pair · expires in 60 minutes',
+      'Bob wants to pair · expires in 59 minutes',
+    ]);
 
     cards.end('123456', 'approved');
     await vi.waitFor(() => {

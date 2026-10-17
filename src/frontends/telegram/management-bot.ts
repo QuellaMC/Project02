@@ -264,11 +264,12 @@ function postConfirmation(
 
   chat.confirmations.post(
     pending.id,
-    confirmationText(
-      pending,
-      name ?? pending.characterId,
-      pending.turn?.source,
-    ),
+    () =>
+      confirmationText(
+        pending,
+        name ?? pending.characterId,
+        pending.turn?.source,
+      ),
     chatIds,
   );
 }
@@ -278,5 +279,5 @@ function postPairing(
   request: PairingRequest,
   chatIds: readonly number[],
 ): void {
-  chat.pairings.post(request.code, sentences.pairing(request), chatIds);
+  chat.pairings.post(request.code, () => sentences.pairing(request), chatIds);
 }

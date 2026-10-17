@@ -108,7 +108,7 @@ A bot answers private chats only.
 A character's bot is her chat. `/start` greets; a message without text
 is told the bot reads only text; a paired account's text is carried to
 her as the local user's, its `source` `telegram:<bot username>` and its
-`clientMessageId` `<chat id>.<message id>`, so the same message carried
+`clientMessageId` `<bot id>.<chat id>.<message id>`, so the same message carried
 again joins its turn. How a line ended has one teller, heard in the chat
 the line came from: the delivery's answer for a refusal before any turn
 or a daemon out of reach, and the stream's `turn_completed` for a turn
