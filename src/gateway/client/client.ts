@@ -17,6 +17,11 @@ import {
   type HistoryOutcome,
   type HistoryPage,
   type OpenOutcome,
+  type PairingDecision,
+  type PairingRequest,
+  type PairingRequestOutcome,
+  type PairingSettleOutcome,
+  type PairingSubject,
   type PendingConfirmation,
   type StartOutcome,
   type TurnOutcome,
@@ -63,6 +68,8 @@ export type GatewayEventsOptions = {
   readonly onResumed?: () => void;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
+  /** Names this client as a connector's process, so the daemon's health says it is on the stream. */
+  readonly connector?: string;
 };
 
 /**
@@ -112,6 +119,19 @@ export type GatewayClient = {
     connectorId: string,
     options?: GatewayCallOptions,
   ): Promise<ConnectorConfigView>;
+  requestPairing(
+    connectorId: string,
+    subject: PairingSubject,
+    options?: GatewayCallOptions,
+  ): Promise<PairingRequestOutcome>;
+  pendingPairings(
+    options?: GatewayCallOptions,
+  ): Promise<readonly PairingRequest[]>;
+  settlePairing(
+    code: string,
+    decision: PairingDecision,
+    options?: GatewayCallOptions,
+  ): Promise<PairingSettleOutcome>;
   /**
    * Follows the event stream until the signal aborts, reconnecting after
    * the daemon closes it with the id of the last frame it handed on, so a
@@ -145,6 +165,8 @@ const eventKinds: ReadonlySet<GatewayEvent['kind']> = new Set([
   'turn_completed',
   'confirmation_requested',
   'confirmation_settled',
+  'pairing_requested',
+  'pairing_settled',
   'state_changed',
   'health_changed',
   'maintenance_failed',
@@ -244,8 +266,33 @@ export function createGatewayClient(
         ),
         callOptions,
       ),
+    requestPairing: async (connectorId, subject, callOptions) =>
+      readOutcome<PairingRequestOutcome>(
+        await api.connectors[':id'].pairing.$post(
+          {param: {id: connectorId}, json: {subject}},
+          requestInit(callOptions),
+        ),
+        callOptions,
+      ),
+    pendingPairings: async callOptions =>
+      readOutcome<readonly PairingRequest[]>(
+        await api.pairing.$get(undefined, requestInit(callOptions)),
+        callOptions,
+      ),
+    settlePairing: async (code, decision, callOptions) =>
+      readOutcome<PairingSettleOutcome>(
+        await api.pairing[':code'].$post(
+          {param: {code}, json: {decision}},
+          requestInit(callOptions),
+        ),
+        callOptions,
+      ),
     async events(listener, eventsOptions) {
-      const {signal} = eventsOptions;
+      const {signal, connector} = eventsOptions;
+      const query =
+        connector === undefined
+          ? ''
+          : `?connector=${encodeURIComponent(connector)}`;
       const aborted = (): boolean => signal.aborted;
       const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
       let reconnected = false;
@@ -256,7 +303,7 @@ export function createGatewayClient(
 
       while (!aborted()) {
         try {
-          const response = await guardedFetch(`${baseUrl}/api/events`, {
+          const response = await guardedFetch(`${baseUrl}/api/events${query}`, {
             headers:
               cursor.lastEventId === undefined
                 ? headers

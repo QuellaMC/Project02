@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {claimDaemonHome} from '../../src/gateway/index.ts';
-import {readDaemonRecord} from '../../src/runtime/storage/index.ts';
+import {readDaemonRecord} from '../../src/shared/daemon-record.ts';
 import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
 
 describe("the daemon's claim on a home", () => {
@@ -43,7 +43,7 @@ describe("the daemon's claim on a home", () => {
     await expect(first.claim.release()).resolves.toBeUndefined();
     expect(readDaemonRecord({homeRoot})).toEqual({
       status: 'ok',
-      record: {protocolVersion: 6, token: first.claim.token, port: 4310},
+      record: {protocolVersion: 7, token: first.claim.token, port: 4310},
     });
 
     const second = await claimDaemonHome({homeRoot});

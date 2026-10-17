@@ -1,6 +1,7 @@
 import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {validator} from 'hono/validator';
 
+import {builtInConnectors} from '../../runtime/config/index.ts';
 import type {
   ConfigTarget,
   Gateway,
@@ -10,10 +11,11 @@ import type {
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
 import {
-  answerConfirmationBody,
+  answerBody,
   configChangeBody,
   gatewayMessageBody,
   openConversationBody,
+  pairingRequestBody,
   type BodyValidator,
 } from './schemas.ts';
 
@@ -68,6 +70,30 @@ const configTargetQuery = validator(
   },
 );
 
+/** The connector a stream's process names itself as, if any: one this version has, or a 400. */
+const eventsQuery = validator(
+  'query',
+  (value: Record<string, string | string[]>, c: Context<ApiEnv>) => {
+    const connector = value['connector'];
+
+    if (
+      connector === undefined ||
+      (typeof connector === 'string' &&
+        builtInConnectors.some(known => known.id === connector))
+    ) {
+      return {connector};
+    }
+
+    return c.json(
+      errorBody(
+        'invalid_request',
+        `A connector is one of: ${builtInConnectors.map(known => known.id).join(', ')}.`,
+      ),
+      400,
+    );
+  },
+);
+
 /**
  * Every route returns its verb's outcome verbatim with a 200: the status
  * codes describe the transport, and `status` in the body describes what
@@ -106,7 +132,7 @@ export function createApiRouter(
       ),
     )
     .get('/confirmations', c => c.json(gateway.pendingConfirmations(), 200))
-    .post('/confirmations/:id', jsonBody(answerConfirmationBody), c =>
+    .post('/confirmations/:id', jsonBody(answerBody), c =>
       c.json(
         gateway.answerConfirmation(
           c.req.param('id'),
@@ -124,7 +150,25 @@ export function createApiRouter(
     .get('/connectors/:id/config', c =>
       c.json(gateway.connectorConfig(c.req.param('id')), 200),
     )
-    .get('/events', c => events.handler(c))
+    .post('/connectors/:id/pairing', jsonBody(pairingRequestBody), c =>
+      c.json(
+        gateway.requestPairing(c.req.param('id'), c.req.valid('json').subject),
+        200,
+      ),
+    )
+    .get('/pairing', c => c.json(gateway.pendingPairings(), 200))
+    .post('/pairing/:code', jsonBody(answerBody), async c =>
+      c.json(
+        await gateway.settlePairing(
+          c.req.param('code'),
+          c.req.valid('json').decision,
+        ),
+        200,
+      ),
+    )
+    .get('/events', eventsQuery, c =>
+      events.handler(c, c.req.valid('query').connector),
+    )
     .all('/*', c =>
       c.json(errorBody('not_found', `No API route at ${c.req.path}.`), 404),
     );

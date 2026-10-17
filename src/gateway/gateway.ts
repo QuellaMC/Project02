@@ -13,12 +13,14 @@ import type {
   RuntimePluginToolConfirmationHandler,
 } from '../plugins/index.ts';
 import type {RoleModelAdapter} from '../role-model/index.ts';
+import {builtInConnectors} from '../runtime/config/index.ts';
 import {
   gatewayProtocolVersion,
   type AnswerOutcome,
   type CharacterRuntimeHealth,
   type CharacterSummary,
   type Gateway,
+  type GatewayConfirmationDecision,
   type GatewayEvent,
   type GatewayEventListener,
   type GatewayHealth,
@@ -36,12 +38,16 @@ import {
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
 import {applyConfigChange, readConfigView} from './config.ts';
-import {readConnectorConfig} from './connector-config.ts';
+import {
+  readConnectorAllowlist,
+  readConnectorConfig,
+} from './connector-config.ts';
 import {
   characterOfConversation,
   type ConversationCharacter,
 } from './conversations.ts';
 import {readConversationHistory} from './history.ts';
+import {createPairingSeam} from './pairing.ts';
 import {createReconciler, type Reconciler} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
@@ -75,6 +81,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const boundHome = loadProject02Home(options);
   const loadHome = (): Project02Home => reloadProject02Home(boundHome);
   const runtimes = new Map<string, LocalCharacterRuntime>();
+  const connectorStreams = new Map<string, number>();
   // The routing table the gateway builds by attaching clients to
   // conversations: conversation → the character runtime holding it. Room
   // policy replaces this single-participant lookup when groups arrive.
@@ -87,6 +94,11 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const emit = (event: GatewayEvent): void => {
     emitTo(listeners, event);
   };
+  const currentHealth = (): GatewayHealth =>
+    readHealth(loadHome(), runtimes, connectorStreams);
+  const healthChanged = (): void => {
+    emit({kind: 'health_changed', health: currentHealth()});
+  };
   const runtimeFor = createRuntimeFactory({
     options,
     loadHome,
@@ -94,28 +106,33 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     startsInFlight,
     emit,
   });
-  const reconciler = createReconciler({
-    roster: () => listProject02Characters(loadHome()).characters,
-    running: () => [...runtimes.keys()],
-    stateOf: characterId =>
-      runtimes.get(characterId)?.health().state ?? 'not_started',
+  const reconciler = createRuntimeReconciler({
+    loadHome,
+    runtimes,
     start: startCharacter,
-    stop: async characterId => {
-      await runtimes.get(characterId)?.stop();
-    },
-    drifted: characterId =>
-      runtimes.get(characterId)?.assemblyDrifted() ?? false,
-    reload: characterId => {
-      const runtime = runtimes.get(characterId);
+    reload: reloadOrJoin,
+  });
+  const applyChange: Gateway['applyConfigChange'] = async change => {
+    const outcome = await applyConfigChange(loadHome(), change);
 
-      return runtime === undefined ? Promise.resolve() : reloadOrJoin(runtime);
-    },
+    if (outcome.status === 'applied') {
+      // What the change did to the roster is on the stream at once, to
+      // every surface and not only the one that wrote; the pass follows.
+      healthChanged();
+      reconcileBehind(startsInFlight, reconciler);
+    }
+
+    return outcome;
+  };
+  const pairings = createPairingSeam({
+    readAllowlist: (connectorId, field) =>
+      readConnectorAllowlist(loadHome(), connectorId, field),
+    applyChange,
+    emit,
   });
 
   return Object.freeze({
-    health(): GatewayHealth {
-      return readHealth(loadHome(), runtimes);
-    },
+    health: currentHealth,
     history: (conversationId, page) =>
       readConversationHistory({
         homeRoot: boundHome.runtimeLocation.homeRoot,
@@ -125,23 +142,14 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     startCharacter,
     reconcile: (): Promise<ReconcilePlan> => reconciler.reconcile(),
     configView: target => readConfigView(loadHome(), target),
-    async applyConfigChange(change) {
-      const outcome = await applyConfigChange(loadHome(), change);
-
-      if (outcome.status === 'applied') {
-        // What the change did to the roster is on the stream at once, to
-        // every surface and not only the one that wrote; the pass follows.
-        emit({
-          kind: 'health_changed',
-          health: readHealth(loadHome(), runtimes),
-        });
-        reconcileBehind(startsInFlight, reconciler);
-      }
-
-      return outcome;
-    },
+    applyConfigChange: applyChange,
     connectorConfig: connectorId =>
       readConnectorConfig(loadHome(), connectorId),
+    requestPairing: pairings.request,
+    pendingPairings: pairings.pending,
+    settlePairing: pairings.settle,
+    connectorPresent: connectorId =>
+      holdPresence(connectorStreams, connectorId, healthChanged),
     async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const reach = reachable(runtimes, loadHome(), characterId);
 
@@ -215,26 +223,9 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         return outcome;
       });
     },
-    pendingConfirmations(): readonly PendingConfirmation[] {
-      return Object.freeze(
-        [...runtimes.values()].flatMap(runtime =>
-          runtime.pendingConfirmations(),
-        ),
-      );
-    },
-    answerConfirmation(id, decision): AnswerOutcome {
-      // Ids are gateway-unique, so routing is asking everyone; the one
-      // runtime that parked the id has the answer.
-      for (const runtime of runtimes.values()) {
-        const status = runtime.answerConfirmation(id, decision);
-
-        if (status !== 'unknown') {
-          return Object.freeze({status});
-        }
-      }
-
-      return Object.freeze({status: 'unknown' as const});
-    },
+    pendingConfirmations: () => pendingConfirmationsAcross(runtimes),
+    answerConfirmation: (id, decision) =>
+      answerConfirmationAcross(runtimes, id, decision),
     events(listener: GatewayEventListener): Unsubscribe {
       listeners.add(listener);
 
@@ -251,6 +242,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       // A reconcile pass in flight then sees its starts refused and its
       // stops joined; the joins confirm every promise settled.
       stopped = true;
+      pairings.stop();
 
       const stops = [...runtimes.values()].map(runtime => runtime.stop());
 
@@ -367,6 +359,34 @@ function emitTo(
   }
 }
 
+function pendingConfirmationsAcross(
+  runtimes: Runtimes,
+): readonly PendingConfirmation[] {
+  return Object.freeze(
+    [...runtimes.values()].flatMap(runtime => runtime.pendingConfirmations()),
+  );
+}
+
+/**
+ * Ids are gateway-unique, so routing is asking everyone; the one runtime
+ * that parked the id has the answer.
+ */
+function answerConfirmationAcross(
+  runtimes: Runtimes,
+  id: string,
+  decision: GatewayConfirmationDecision,
+): AnswerOutcome {
+  for (const runtime of runtimes.values()) {
+    const status = runtime.answerConfirmation(id, decision);
+
+    if (status !== 'unknown') {
+      return Object.freeze({status});
+    }
+  }
+
+  return Object.freeze({status: 'unknown' as const});
+}
+
 /**
  * The runtime a character is reached through, or the refusal. The roster
  * is the truth about what is installed: a runtime kept after its package
@@ -464,6 +484,34 @@ function reconcileBehind(
     .catch(() => undefined);
 }
 
+/** The reconciler over the gateway's runtimes, starting and reloading the way the façade does. */
+function createRuntimeReconciler(seams: {
+  readonly loadHome: () => Project02Home;
+  readonly runtimes: Runtimes;
+  readonly start: (characterId: string) => Promise<StartOutcome>;
+  readonly reload: (runtime: LocalCharacterRuntime) => Promise<void>;
+}): Reconciler {
+  const {runtimes} = seams;
+
+  return createReconciler({
+    roster: () => listProject02Characters(seams.loadHome()).characters,
+    running: () => [...runtimes.keys()],
+    stateOf: characterId =>
+      runtimes.get(characterId)?.health().state ?? 'not_started',
+    start: seams.start,
+    stop: async characterId => {
+      await runtimes.get(characterId)?.stop();
+    },
+    drifted: characterId =>
+      runtimes.get(characterId)?.assemblyDrifted() ?? false,
+    reload: characterId => {
+      const runtime = runtimes.get(characterId);
+
+      return runtime === undefined ? Promise.resolve() : seams.reload(runtime);
+    },
+  });
+}
+
 /**
  * Construct-once runtimes, each wired for one automatic restart after a
  * fatal turn: a boot failure arrives from 'starting' and stays failed
@@ -534,7 +582,47 @@ function createRuntimeFactory(seams: {
   };
 }
 
-function readHealth(home: Project02Home, runtimes: Runtimes): GatewayHealth {
+/**
+ * One more open stream for the connector, and the release its end calls.
+ * Health only changes when a count crosses zero, so that is when `crossed`
+ * runs; a release counts once, however often it is called.
+ */
+function holdPresence(
+  connectorStreams: Map<string, number>,
+  connectorId: string,
+  crossed: () => void,
+): Unsubscribe {
+  const adjust = (by: number): number => {
+    const open = (connectorStreams.get(connectorId) ?? 0) + by;
+
+    connectorStreams.set(connectorId, open);
+
+    return open;
+  };
+  let released = false;
+
+  if (adjust(1) === 1) {
+    crossed();
+  }
+
+  return () => {
+    if (released) {
+      return;
+    }
+
+    released = true;
+
+    if (adjust(-1) === 0) {
+      crossed();
+    }
+  };
+}
+
+function readHealth(
+  home: Project02Home,
+  runtimes: Runtimes,
+  connectorStreams: ReadonlyMap<string, number>,
+): GatewayHealth {
   const roster = listProject02Characters(home);
 
   return Object.freeze({
@@ -545,6 +633,14 @@ function readHealth(home: Project02Home, runtimes: Runtimes): GatewayHealth {
     characters: Object.freeze(
       roster.characters.map(character =>
         summarize(character, runtimes.get(character.id)?.health()),
+      ),
+    ),
+    connectors: Object.freeze(
+      builtInConnectors.map(connector =>
+        Object.freeze({
+          id: connector.id,
+          connected: (connectorStreams.get(connector.id) ?? 0) > 0,
+        }),
       ),
     ),
   });

@@ -17,3 +17,8 @@ on a held home prints the running daemon's address and exits, keeps trying
 for a while one that does not answer — stopping, or not yet bound — and
 takes the home over when its lease goes, or says so when the wait is up. Ctrl-C, SIGTERM and SIGHUP
 are one stop: it finishes what was accepted, then lets the home go.
+
+`inspect/` reports on a home and writes nothing. Every report opens with
+the character's resolved config, its plugins, and each built-in
+connector's settings, secrets redacted, before the sessions or
+conversations it was asked for.

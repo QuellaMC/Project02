@@ -20,6 +20,7 @@ export {
   type ConfirmationSettlement,
   type ConnectorConfigEntry,
   type ConnectorConfigView,
+  type ConnectorPresence,
   type Gateway,
   type GatewayConfirmationDecision,
   type GatewayErrorBody,
@@ -35,6 +36,11 @@ export {
   type HistoryPage,
   type MaintenanceFailure,
   type OpenOutcome,
+  type PairingDecision,
+  type PairingRequest,
+  type PairingRequestOutcome,
+  type PairingSettleOutcome,
+  type PairingSubject,
   type PendingConfirmation,
   type ReconcilePlan,
   type RunningDraft,
@@ -56,4 +62,4 @@ export type {
   RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
 /** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
-export type {DaemonRecord} from '../../runtime/storage/index.ts';
+export type {DaemonRecord} from '../../shared/daemon-record.ts';

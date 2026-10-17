@@ -15,6 +15,7 @@ import {
   linesTaken,
   noticeSpent,
   pageUnread,
+  pairingGone,
   streamLost,
   streamResumed,
   threadOpened,
@@ -27,6 +28,7 @@ import type {
   GatewayReady,
   HistoryMessage,
   HistoryOutcome,
+  PairingRequest,
   PendingConfirmation,
   RunningTurn,
 } from '../../src/gateway/api/index.ts';
@@ -41,11 +43,12 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 6,
+    protocolVersion: 7,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
     characters,
+    connectors: [],
   };
 }
 
@@ -53,7 +56,13 @@ function ready(
   confirmations: readonly PendingConfirmation[] = [],
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
-  return {protocolVersion: 6, health: health(mira), confirmations, turns};
+  return {
+    protocolVersion: 7,
+    health: health(mira),
+    confirmations,
+    pairings: [],
+    turns,
+  };
 }
 
 /** A live tab with Mira's DM open and nothing shown yet. */
@@ -129,6 +138,16 @@ function confirmation(id: string): PendingConfirmation {
     },
     deadlineAt: 1_000,
     turn: {conversationId, source: 'web', clientMessageId: 'line-1'},
+  };
+}
+
+function pairing(code: string, label: string): PairingRequest {
+  return {
+    connectorId: 'telegram',
+    code,
+    subject: {id: `account-${code}`, label},
+    requestedAt: '2026-10-17T09:00:00.000Z',
+    expiresAt: 3_600_000,
   };
 }
 
@@ -814,6 +833,10 @@ describe('web store', () => {
       kind: 'confirmation_requested',
       ...confirmation('c-1'),
     });
+    live = applyEvent(live, {
+      kind: 'pairing_requested',
+      ...pairing('123456', 'Alice'),
+    });
     live = applyEvent(
       live,
       progress({kind: 'reply_delta', draftId: '1.0', text: 'half a thought'}),
@@ -833,6 +856,7 @@ describe('web store', () => {
     expect(composerText(state)).toBe('and this is unsent');
     // An answer would never reach the daemon, and a draft never finish.
     expect(state.confirmations).toEqual([]);
+    expect(state.pairings).toEqual([]);
     expect(state.turns.size).toBe(0);
   });
 
@@ -975,6 +999,75 @@ describe('web store', () => {
         reason: 'expired',
       }).notices,
     ).toEqual(gone.notices);
+  });
+
+  it('shows every pairing request waiting, whatever connector asked, and says when one expired unanswered or an answer to one did not settle it', () => {
+    const alice = pairing('123456', 'Alice (@alice)');
+    const bob = pairing('654321', 'Bob');
+    let state = installSnapshot(opened(), {...ready(), pairings: [alice]});
+
+    expect(state.pairings).toEqual([alice]);
+
+    state = applyEvent(state, {kind: 'pairing_requested', ...bob});
+    state = applyEvent(state, {kind: 'pairing_requested', ...bob});
+
+    expect(state.pairings).toEqual([alice, bob]);
+
+    const approved = applyEvent(state, {
+      kind: 'pairing_settled',
+      connectorId: 'telegram',
+      code: alice.code,
+      subject: alice.subject,
+      decision: 'approved',
+    });
+
+    expect(approved.pairings).toEqual([bob]);
+    expect(approved.notices).toEqual([]);
+
+    const expired = applyEvent(state, {
+      kind: 'pairing_settled',
+      connectorId: 'telegram',
+      code: bob.code,
+      subject: bob.subject,
+      decision: 'expired',
+    });
+
+    expect(expired.pairings).toEqual([alice]);
+    expect(expired.notices).toEqual([
+      'A pairing request expired before it was answered: Bob, code 654321.',
+    ]);
+
+    // The daemon's answer to a click: a settlement leaves the card to its
+    // frame, and an expiry is that frame's news, said once whichever of
+    // the two comes first.
+    expect(
+      pairingGone(state, bob.code, {status: 'settled', decision: 'approved'}),
+    ).toBe(state);
+    expect(pairingGone(state, bob.code, {status: 'expired'})).toEqual(expired);
+    expect(pairingGone(expired, bob.code, {status: 'expired'})).toBe(expired);
+
+    // A request the daemon does not know may have been answered on another
+    // surface either way; one whose approval could not be written waits.
+    const unknown = pairingGone(state, bob.code, {status: 'unknown'});
+
+    expect(unknown.pairings).toEqual([alice]);
+    expect(unknown.notices).toEqual([
+      'A pairing request is no longer waiting.',
+    ]);
+
+    const failed = pairingGone(state, bob.code, {
+      status: 'failed',
+      message: 'The disk is full.',
+    });
+
+    expect(failed.pairings).toEqual([alice, bob]);
+    expect(failed.notices).toEqual(['The disk is full.']);
+
+    // One that ended while the tab was away simply goes.
+    const away = installSnapshot(state, ready());
+
+    expect(away.pairings).toEqual([]);
+    expect(away.notices).toEqual([]);
   });
 
   it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {

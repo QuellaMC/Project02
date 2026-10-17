@@ -1,7 +1,9 @@
 import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
 import type {
+  RedactedRuntimeSectionConfig,
   ResolvedProject02RuntimeConfig,
   RuntimeConfigInspectShape,
+  RuntimeConfigDiagnostic,
   RuntimeConfigEffectiveSource,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigFieldScope,
@@ -12,8 +14,12 @@ import type {
   RuntimeConfigSectionNamespace,
   RuntimeConfigValue,
 } from './types.ts';
-import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
+import type {
+  EffectiveProject02RuntimeConfigSnapshot,
+  LayeredProject02RuntimeConfigSnapshot,
+} from './resolve-layered.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {builtInConnectors} from './connectors.ts';
 import {getRedactedRuntimeConfigValueAtPath} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
@@ -349,6 +355,59 @@ export function inspectConfiguredPlugins(
         diagnostics: Object.freeze([...plugin.diagnostics]),
         ...(config === undefined ? {} : {config}),
       } satisfies InspectConfiguredPlugin);
+    }),
+  );
+}
+
+export type InspectConfiguredConnector = {
+  readonly id: string;
+  readonly displayName: string;
+  readonly version: string;
+  readonly enabled: boolean;
+  readonly activation: RuntimeConfigSectionActivationShape;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly config?: RedactedRuntimeSectionConfig;
+};
+
+export function inspectConfiguredConnectors(
+  resolvedConfig: Pick<
+    ResolvedProject02RuntimeConfig,
+    'redactedSectionConfigs' | 'diagnostics'
+  >,
+  effectiveConfig: EffectiveProject02RuntimeConfigSnapshot,
+): readonly InspectConfiguredConnector[] {
+  return Object.freeze(
+    builtInConnectors.map(connector => {
+      const enabled =
+        ownJsonRecordValue(effectiveConfig.config?.connectors, connector.id)
+          ?.enabled ?? connector.activation.defaultEnabled;
+      const diagnostics = Object.freeze(
+        resolvedConfig.diagnostics.filter(diagnostic =>
+          runtimeConfigDiagnosticMatchesSection({
+            diagnostic,
+            namespace: 'connectors',
+            id: connector.id,
+          }),
+        ),
+      );
+      const config = ownJsonRecordValue(
+        resolvedConfig.redactedSectionConfigs.connectors,
+        connector.id,
+      );
+
+      return Object.freeze({
+        id: connector.id,
+        displayName: connector.displayName,
+        version: connector.version,
+        enabled,
+        activation: sectionActivationInspection({
+          configuredEnabled: enabled,
+          diagnostics,
+          declaration: connector,
+        }),
+        diagnostics,
+        ...(config === undefined ? {} : {config}),
+      } satisfies InspectConfiguredConnector);
     }),
   );
 }

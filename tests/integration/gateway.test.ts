@@ -2389,7 +2389,8 @@ describe('gateway façade', () => {
     }
 
     // On until someone turns it off; a bot is one character's, the
-    // management bot the home's, and a token shows only as set.
+    // management bot the home's, the paired accounts the home's for every
+    // character that sets none, and a token shows only as set.
     expect(
       home.sections.find(section => section.namespace === 'connectors'),
     ).toMatchObject({
@@ -2403,6 +2404,7 @@ describe('gateway façade', () => {
           authored: {configured: true, value: '[redacted]'},
         },
         {name: 'mirror', effective: {source: 'default', value: true}},
+        {name: 'pairedUsers', effective: {source: 'default', value: {}}},
       ],
     });
     expect(
@@ -2411,6 +2413,7 @@ describe('gateway façade', () => {
       id: 'telegram',
       enabled: true,
       activation: {status: 'active'},
+      // The allowlist is the home's alone; her screen cannot author it.
       fields: [
         {name: 'botToken', authored: {configured: true, value: '[redacted]'}},
         {name: 'mirror'},
@@ -2676,15 +2679,34 @@ describe('gateway façade', () => {
       connectorId: 'telegram',
       home: {
         activation: active,
-        values: {managementBotToken: '123456:home', mirror: true},
+        values: {
+          managementBotToken: '123456:home',
+          mirror: true,
+          pairedUsers: {},
+        },
       },
+      // The home's own fields reach every character's entry, so a bot
+      // reads the allowlist from its own.
       characters: [
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
-        {characterId: 'nova', activation: active, values: {mirror: true}},
+        {
+          characterId: 'nova',
+          activation: active,
+          values: {
+            managementBotToken: '123456:home',
+            mirror: true,
+            pairedUsers: {},
+          },
+        },
       ],
     });
 
@@ -2719,15 +2741,32 @@ describe('gateway façade', () => {
       connectorId: 'telegram',
       home: {
         activation: active,
-        values: {managementBotToken: '123456:home', mirror: false},
+        values: {
+          managementBotToken: '123456:home',
+          mirror: false,
+          pairedUsers: {},
+        },
       },
       characters: [
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
-        {characterId: 'nova', activation: active, values: {mirror: false}},
+        {
+          characterId: 'nova',
+          activation: active,
+          values: {
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
+        },
       ],
     });
 
@@ -2761,7 +2800,12 @@ describe('gateway façade', () => {
         {
           characterId: 'mira',
           activation: active,
-          values: {botToken: '987654:mira', mirror: false},
+          values: {
+            botToken: '987654:mira',
+            managementBotToken: '123456:home',
+            mirror: false,
+            pairedUsers: {},
+          },
         },
         {characterId: 'nova', activation: disabled, values: {}},
       ],
@@ -2796,6 +2840,161 @@ describe('gateway façade', () => {
       reason: 'config_unloadable',
     });
     expect(gateway.connectorConfig('telegram')).toEqual(home);
+  });
+
+  it('pairs an account the owner approves into the allowlist every character reads, on the stream like any change, and pairs no one denied', async () => {
+    const homeRoot = await createTelegramHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.reconcile();
+
+    const events: GatewayEvent[] = [];
+
+    gateway.events(event => {
+      events.push(event);
+    });
+
+    const alice = {id: '123456789', label: 'Alice (@alice)'};
+    const asked = gateway.requestPairing('telegram', alice);
+
+    if (asked.status !== 'pending') {
+      expect.fail(`The request was ${asked.status}.`);
+    }
+
+    const {code} = asked.request;
+
+    expect(code).toMatch(/^[0-9]{6}$/u);
+    expect(events).toEqual([{kind: 'pairing_requested', ...asked.request}]);
+    // Asking again is the request already waiting, under the same code.
+    expect(gateway.requestPairing('telegram', alice)).toEqual(asked);
+    expect(gateway.pendingPairings()).toEqual([asked.request]);
+
+    await expect(gateway.settlePairing(code, 'approved')).resolves.toEqual({
+      status: 'settled',
+      decision: 'approved',
+    });
+
+    // The home's document lets her in, and so every character that sets no
+    // allowlist of its own.
+    const paired = {values: {pairedUsers: {[alice.id]: alice.label}}};
+
+    expect(gateway.connectorConfig('telegram')).toMatchObject({
+      home: paired,
+      characters: [
+        {characterId: 'mira', ...paired},
+        {characterId: 'nova', ...paired},
+      ],
+    });
+    // The roster is on the stream before the settlement, and no character
+    // is built from the allowlist.
+    await expect(gateway.reconcile()).resolves.toEqual({
+      starting: [],
+      stopping: [],
+      reloading: [],
+    });
+    expect(events.map(event => event.kind)).toEqual([
+      'pairing_requested',
+      'health_changed',
+      'pairing_settled',
+    ]);
+    expect(events.at(-1)).toEqual({
+      kind: 'pairing_settled',
+      connectorId: 'telegram',
+      code,
+      subject: alice,
+      decision: 'approved',
+    });
+    expect(gateway.requestPairing('telegram', alice)).toEqual({
+      status: 'paired',
+    });
+    expect(gateway.pendingPairings()).toEqual([]);
+
+    const homeConfig = join(homeRoot, 'config.json');
+    const written = readFileSync(homeConfig, 'utf8');
+    const bob = gateway.requestPairing('telegram', {
+      id: '987654321',
+      label: 'Bob',
+    });
+
+    if (bob.status !== 'pending') {
+      expect.fail(`The request was ${bob.status}.`);
+    }
+
+    await expect(
+      gateway.settlePairing(bob.request.code, 'denied'),
+    ).resolves.toEqual({status: 'settled', decision: 'denied'});
+    expect(events.at(-1)).toMatchObject({
+      kind: 'pairing_settled',
+      code: bob.request.code,
+      decision: 'denied',
+    });
+    expect(readFileSync(homeConfig, 'utf8')).toBe(written);
+    await gateway.stop();
+  });
+
+  it('refuses a pairing for a connector that does not pair or an account it cannot name, and an answer to a code it never gave', async () => {
+    const gateway = createGateway({
+      location: {storeRoot: await createTelegramHome()},
+    });
+
+    expect(
+      gateway.requestPairing('discord', {id: '123456789', label: 'Dee'}),
+    ).toMatchObject({status: 'refused', reason: 'unknown_connector'});
+    // A name is one line: what follows a break could pose as a line of its own.
+    expect(
+      gateway.requestPairing('telegram', {
+        id: '123456789',
+        label: 'Dee\nApproved',
+      }),
+    ).toMatchObject({status: 'refused', reason: 'invalid_subject'});
+    await expect(gateway.settlePairing('123456', 'approved')).resolves.toEqual({
+      status: 'unknown',
+    });
+    expect(gateway.pendingPairings()).toEqual([]);
+  });
+
+  it("says a connector's process is on the stream from its first open stream to its last, and says each crossing once", async () => {
+    const gateway = createGateway({
+      location: {storeRoot: await createGatewayHome()},
+    });
+    const crossings: GatewayHealth['connectors'][] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'health_changed') {
+        crossings.push(event.health.connectors);
+      }
+    });
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: false},
+    ]);
+
+    const first = gateway.connectorPresent('telegram');
+
+    expect(crossings).toEqual([[{id: 'telegram', connected: true}]]);
+
+    const second = gateway.connectorPresent('telegram');
+
+    first();
+    // A release counts once: the second stream still holds the connector.
+    first();
+    expect(crossings).toHaveLength(1);
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: true},
+    ]);
+
+    second();
+    second();
+    expect(crossings).toEqual([
+      [{id: 'telegram', connected: true}],
+      [{id: 'telegram', connected: false}],
+    ]);
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: false},
+    ]);
   });
 
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {

@@ -4,6 +4,7 @@ import {join} from 'node:path';
 
 import {expect, test as base} from '@playwright/test';
 
+import {createGatewayClient} from '../../src/gateway/client/index.ts';
 import {spawnDaemon, type SpawnedDaemon} from '../support/spawn-daemon.ts';
 
 /** A daemon of its own per test, stopped the way an operator stops it. */
@@ -125,6 +126,31 @@ test('shows a confirmation card for a tool round and lets the turn finish once a
   await card.getByRole('button', {name: 'Approve'}).click();
   await expect(card).toHaveCount(0);
   await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText('done');
+});
+
+test('shows a pairing card for an account a connector asks to let in, and pairs the account once approved', async ({
+  daemon,
+  page,
+}) => {
+  const client = createGatewayClient({url: daemon.url});
+  const alice = {id: '123456789', label: 'Alice (@alice)'};
+  const asked = await client.requestPairing('telegram', alice);
+
+  if (asked.status !== 'pending') {
+    throw new Error(`The daemon did not hold the request: ${asked.status}.`);
+  }
+
+  await page.goto(daemon.url);
+
+  const card = page.getByRole('group', {name: 'Pairing'});
+
+  await expect(card).toContainText(alice.label);
+  await expect(card).toContainText(asked.request.code);
+  await card.getByRole('button', {name: 'Approve'}).click();
+  await expect(card).toHaveCount(0);
+  await expect(client.connectorConfig('telegram')).resolves.toMatchObject({
+    home: {values: {pairedUsers: {[alice.id]: alice.label}}},
+  });
 });
 
 test('keeps a line whose turn the daemon rejected on the thread and says why', async ({

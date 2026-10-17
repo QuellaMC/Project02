@@ -8,6 +8,7 @@ import {
   turnCommittedTheLine,
   type GatewayConfirmationDecision,
   type HistoryPage,
+  type PairingDecision,
 } from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
@@ -34,6 +35,7 @@ import {
   noticeSpent,
   noticed,
   pageUnread,
+  pairingGone,
   streamLost,
   streamResumed,
   threadOpened,
@@ -52,6 +54,10 @@ export type Session = SettingsVerbs & {
   readonly answer: (
     id: string,
     decision: GatewayConfirmationDecision,
+  ) => Promise<void>;
+  readonly settlePairing: (
+    code: string,
+    decision: PairingDecision,
   ) => Promise<void>;
   readonly start: (characterId: string) => Promise<void>;
 };
@@ -186,8 +192,9 @@ export function createSession(address: string): Session {
           void accountForPending(accounting());
         }
 
-        // Config moved, here or on another surface: a settings screen
-        // open shows what is there now.
+        // Config moved, here or on another surface, or a connector's
+        // process came or went: a settings screen open shows what is
+        // there now.
         if (event.kind === 'health_changed') {
           void settings.changed();
         }
@@ -320,6 +327,17 @@ export function createSession(address: string): Session {
         if (outcome.status !== 'answered') {
           apply(current => confirmationGone(current, id, outcome.status));
         }
+      } catch (error: unknown) {
+        apply(current => noticed(current, problem(error)));
+      }
+    },
+    async settlePairing(code, decision) {
+      apply(noticeSpent);
+
+      try {
+        const outcome = await client.settlePairing(code, decision);
+
+        apply(current => pairingGone(current, code, outcome));
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
       }
@@ -607,6 +625,7 @@ function refusedSession(message: string): Session {
     send: nothing,
     loadEarlier: nothing,
     answer: nothing,
+    settlePairing: nothing,
     start: nothing,
   };
 }

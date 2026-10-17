@@ -58,7 +58,10 @@
     "telegram": {
       "enabled": true,
       "config": {
-        "managementBotToken": "123456:AA…"
+        "managementBotToken": "123456:AA…",
+        "pairedUsers": {
+          "381940562": "Alice (@alice)"
+        }
       }
     }
   }
@@ -209,8 +212,8 @@
 
     <p>
       A character's first valid write, like its first start, creates its data directory and
-      overlay. <code>pnpm inspect</code> reports a home's config, activation, and sessions
-      without writing anything.
+      overlay. <code>pnpm inspect</code> reports a home's config, activation, connectors, and
+      sessions without writing anything.
     </p>
 
     <h2>Connectors</h2>
@@ -224,7 +227,19 @@
       whose tools reach plugins only. Telegram is the first: <code>botToken</code>, the bot a
       character answers as, is that character's alone; <code>managementBotToken</code>, a bot
       for the home itself, is the home's alone; and the switch and <code>mirror</code>, both on
-      by default, are the home's for every character that does not set its own.
+      by default, are the home's for every character that does not set its own; and
+      <code>pairedUsers</code>, empty by default, is the home's alone, and reaches every
+      character's bot.
+    </p>
+
+    <p>
+      <code>pairedUsers</code> holds the accounts allowed to talk to the characters, each
+      account's id with a name. Pairing adds to it: for an account it does not know, the
+      connector asks the daemon; the request waits one hour under a six-digit code any surface
+      can show and answer by; and the owner's approval is the daemon's own write into the field
+      the connector's declaration names as its <code>pairing</code>, in the home's document,
+      through the same path as any change (<a href="gateway-api.html">Gateway API</a>).
+      Removing an account's entry, on the settings page or in the document, unpairs it.
     </p>
 
     <p>
@@ -242,7 +257,9 @@
       have is reported as the warning <code>runtime_config_unknown_connector</code> at its
       path, and blocks nothing. A connector's section is resolved beside a character, never
       into one, so an error in its stanza blocks that section, with the reason, and stops no
-      character.
+      character. <code>pnpm inspect</code> lists each connector beside the plugins: its switch
+      and activation, its fields as the character's layered resolution holds them, secrets
+      redacted, and the diagnostics that name its section.
     </p>
 
     <h2>Runtime plugin management</h2>
