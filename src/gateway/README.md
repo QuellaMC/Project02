@@ -22,7 +22,14 @@ fields and the `sections`, one list over every namespace), and the change
 that goes through the one control transaction (a section's operations name
 it by namespace and id), applied by reconcile behind the answer;
 `connector-config.ts` is the one read a connector makes, resolved through
-the same functions as the view and handing out values, not field shapes;
+the same functions as the view and handing out values, not field shapes,
+and reads a connector's allowlist in the clear from the home's resolution
+for the pairing seam; `pairing.ts` holds the pairing requests as the daemon
+holds tool confirmations — each under a code, announced on the stream,
+settled once for every surface, expired after an hour — and writes an
+approval through the façade's own config change, into the field the
+connector's declaration names in the home's document, so `health_changed`
+is on the stream before the settlement;
 `submissions.ts` is the turn ledger that makes a resubmitted message join
 its turn instead of starting another; a line an earlier run of the daemon
 already put on any segment of the conversation is refused by the runtime
@@ -44,7 +51,11 @@ running, and opens each stream with `ready` or — for a client that returns
 with the id of the last frame it applied — `resumed` and what it missed),
 the built web page's files at the root (public, uncached, behind the API
 router so no file answers for an API path), and the server whose close
-order loses nothing. `api/running-turns.ts` is the one fold that says what
+order loses nothing. A stream opened with `?connector=<id>` holds that
+connector present in the façade from before its first frame until it ends;
+the façade counts each connector's open streams and emits `health_changed`
+when a count crosses zero, so health says which connectors are on the
+stream. `api/running-turns.ts` is the one fold that says what
 a running turn is; the daemon builds the snapshot's turns with it and the
 page folds its frames with it. `client/` is the reference client, one
 module for Node and for a browser tab — the web page and future

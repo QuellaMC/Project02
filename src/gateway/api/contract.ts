@@ -632,7 +632,7 @@ export type Gateway = {
     connectorId: string,
     subject: PairingSubject,
   ): PairingRequestOutcome;
-  /** What waits for the owner's answer right now, oldest first. */
+  /** What waits for the owner's answer right now. */
   pendingPairings(): readonly PairingRequest[];
   /** An approval writes the account into the connector's allowlist in the home's document. */
   settlePairing(
