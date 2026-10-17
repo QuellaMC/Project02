@@ -163,7 +163,12 @@ describe('gateway pairing seam', () => {
     });
     expect(changes).toHaveLength(4);
     expect(seam.pending()).toEqual([request]);
-    expect(events.map(event => event.kind)).toEqual(['pairing_requested']);
+    // Put back twice, announced twice; never settled.
+    expect(events.map(event => event.kind)).toEqual([
+      'pairing_requested',
+      'pairing_requested',
+      'pairing_requested',
+    ]);
   });
 
   it('takes a request off the list and the clock while its approval is written, and puts it back on both when the write fails', async () => {
@@ -197,6 +202,7 @@ describe('gateway pairing seam', () => {
     vi.advanceTimersByTime(1);
     expect(seam.pending()).toEqual([]);
     expect(events).toEqual([
+      {kind: 'pairing_requested', ...request},
       {kind: 'pairing_requested', ...request},
       settledAs(request, 'expired'),
     ]);
