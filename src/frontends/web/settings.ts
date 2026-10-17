@@ -11,6 +11,7 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
+  GatewayHealth,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
@@ -369,6 +370,26 @@ function namesSection(
     diagnostic.namespace === section.namespace &&
     diagnostic.id === section.id
   );
+}
+
+/**
+ * Whether a connector's process is on the daemon's stream, as health says
+ * it, and how to start one that is not; nothing for a connector health
+ * does not list.
+ */
+export function connectorPresenceSentence(
+  health: GatewayHealth | undefined,
+  id: string,
+): string | undefined {
+  const presence = health?.connectors.find(connector => connector.id === id);
+
+  if (presence === undefined) {
+    return undefined;
+  }
+
+  return presence.connected
+    ? 'Connector: running'
+    : `Connector: not running. Start it with pnpm ${id}.`;
 }
 
 /**

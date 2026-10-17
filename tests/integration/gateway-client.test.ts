@@ -253,9 +253,10 @@ describe('gateway reference client', () => {
     await gateway.stop();
   });
 
-  it('asks for the frames after the last one it handed on, whether the stream was cut before or during a replay', async () => {
+  it('asks for the frames after the last one it handed on, whether the stream was cut before or during a replay, naming its connector every time', async () => {
     const run = 'a'.repeat(16);
     const asked: (string | undefined)[] = [];
+    const named: (string | undefined)[] = [];
     const frame = (seq: number): string =>
       formatEventFrame(
         'state_changed',
@@ -270,6 +271,7 @@ describe('gateway reference client', () => {
       const last = c.req.header('last-event-id');
 
       asked.push(last);
+      named.push(c.req.query('connector'));
 
       return streamSSE(c, async stream => {
         if (last === undefined) {
@@ -329,6 +331,7 @@ describe('gateway reference client', () => {
     const following = client.events(event => applied.push(event.kind), {
       signal: abort.signal,
       retryMs: 10,
+      connector: 'telegram',
       onResumed: () => {
         resumed += 1;
       },
@@ -338,6 +341,7 @@ describe('gateway reference client', () => {
       expect(applied).toHaveLength(6);
     });
     expect(asked).toEqual([undefined, `${run}-3`, `${run}-5`]);
+    expect(named).toEqual(['telegram', 'telegram', 'telegram']);
     expect(resumed).toBe(2);
     abort.abort();
     await following;

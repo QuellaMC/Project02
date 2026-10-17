@@ -2798,6 +2798,46 @@ describe('gateway façade', () => {
     expect(gateway.connectorConfig('telegram')).toEqual(home);
   });
 
+  it("says a connector's process is on the stream from its first open stream to its last, and says each crossing once", async () => {
+    const gateway = createGateway({
+      location: {storeRoot: await createGatewayHome()},
+    });
+    const crossings: GatewayHealth['connectors'][] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'health_changed') {
+        crossings.push(event.health.connectors);
+      }
+    });
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: false},
+    ]);
+
+    const first = gateway.connectorPresent('telegram');
+
+    expect(crossings).toEqual([[{id: 'telegram', connected: true}]]);
+
+    const second = gateway.connectorPresent('telegram');
+
+    first();
+    // A release counts once: the second stream still holds the connector.
+    first();
+    expect(crossings).toHaveLength(1);
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: true},
+    ]);
+
+    second();
+    second();
+    expect(crossings).toEqual([
+      [{id: 'telegram', connected: true}],
+      [{id: 'telegram', connected: false}],
+    ]);
+    expect(gateway.health().connectors).toEqual([
+      {id: 'telegram', connected: false},
+    ]);
+  });
+
   it('reconcile stops a disabled character that failed, freeing what it still held', async () => {
     const homeRoot = await createGatewayHome();
     const options = {

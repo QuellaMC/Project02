@@ -63,6 +63,8 @@ export type GatewayEventsOptions = {
   readonly onResumed?: () => void;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
+  /** Names this client as a connector's process, so the daemon's health says it is on the stream. */
+  readonly connector?: string;
 };
 
 /**
@@ -245,7 +247,11 @@ export function createGatewayClient(
         callOptions,
       ),
     async events(listener, eventsOptions) {
-      const {signal} = eventsOptions;
+      const {signal, connector} = eventsOptions;
+      const query =
+        connector === undefined
+          ? ''
+          : `?connector=${encodeURIComponent(connector)}`;
       const aborted = (): boolean => signal.aborted;
       const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
       let reconnected = false;
@@ -256,7 +262,7 @@ export function createGatewayClient(
 
       while (!aborted()) {
         try {
-          const response = await guardedFetch(`${baseUrl}/api/events`, {
+          const response = await guardedFetch(`${baseUrl}/api/events${query}`, {
             headers:
               cursor.lastEventId === undefined
                 ? headers

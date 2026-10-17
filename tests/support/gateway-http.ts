@@ -116,9 +116,17 @@ export type EventSubscription = {
 export async function subscribeToEvents(
   baseUrl: string,
   token = testGatewayToken,
-  lastEventId?: string,
+  stream: {
+    readonly lastEventId?: string | undefined;
+    readonly connector?: string;
+  } = {},
 ): Promise<EventSubscription> {
-  const response = await fetch(`${baseUrl}/api/events`, {
+  const {lastEventId, connector} = stream;
+  const query =
+    connector === undefined
+      ? ''
+      : `?connector=${encodeURIComponent(connector)}`;
+  const response = await fetch(`${baseUrl}/api/events${query}`, {
     headers: {
       authorization: `Bearer ${token}`,
       ...(lastEventId === undefined ? {} : {'last-event-id': lastEventId}),
