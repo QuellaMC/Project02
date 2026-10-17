@@ -40,8 +40,8 @@ export const answered = {
 
 /** A card's text as of its sending, the chats it went to, and its message in each it reached. */
 type Card = {
-  /** Rendered when the card is sent, so a card held back says what a deadline has left as of then. */
-  readonly text: () => string;
+  /** Rendered when the card is sent, so a card held back says what a deadline has left as of then; and once more when it ends, without the deadline. */
+  readonly text: (ended: boolean) => string;
   /** Chats the card was sent to; one whose send failed is taken off, so the next post tries it again. */
   readonly sent: Set<number>;
   readonly messages: (readonly [chatId: number, messageId: number])[];
@@ -60,7 +60,11 @@ const endedAway = 'settled while the bot was away';
  */
 export type Cards = {
   /** Holds the card, and sends it to each chat it has not gone to; one already held keeps its text. */
-  post(key: string, text: () => string, chatIds: readonly number[]): void;
+  post(
+    key: string,
+    text: (ended: boolean) => string,
+    chatIds: readonly number[],
+  ): void;
   /** Sends every card held to the chat, where it has not gone; how many are held. */
   postAll(chatId: number): number;
   /** Revises the card to how it ended, and forgets it. */
@@ -79,7 +83,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
     }
 
     cards.delete(key);
-    card.ended = oneMessage(card.text(), ` · ${ending}`);
+    card.ended = oneMessage(card.text(true), ` · ${ending}`);
 
     for (const [chatId, messageId] of card.messages) {
       outbox.revise(chatId, messageId, card.ended);
@@ -88,7 +92,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
 
   const post = (
     key: string,
-    text: () => string,
+    text: (ended: boolean) => string,
     chatIds: readonly number[],
   ): void => {
     const card = cards.get(key) ?? {
@@ -108,7 +112,7 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
 
       card.sent.add(chatId);
       void outbox
-        .card(chatId, oneMessage(card.text()), keyboard)
+        .card(chatId, oneMessage(card.text(false)), keyboard)
         .then(messageId => {
           if (messageId === undefined) {
             card.sent.delete(chatId);
@@ -143,15 +147,16 @@ export function createCards(outbox: Outbox, kind: CardKind): Cards {
 
 /**
  * A confirmation as a card says it: who wants to do what, and where it was
- * raised when the card names that; the preview when it has one; and when
- * it expires.
+ * raised when the card names that; the preview when it has one; and what
+ * its deadline has left, until it has ended.
  */
 export function confirmationText(
   pending: PendingConfirmation,
   name: string,
-  raisedOn?: string,
+  options: {readonly raisedOn?: string | undefined; readonly ended: boolean},
 ): string {
   const {summary, preview} = pending.request;
+  const {raisedOn, ended} = options;
 
   return [
     `${name} wants to: ${summary}` +
@@ -159,7 +164,7 @@ export function confirmationText(
     ...(Object.keys(preview).length === 0
       ? []
       : [JSON.stringify(preview, null, 2)]),
-    `Expires in ${minutesLeft(pending.deadlineAt)}`,
+    ...(ended ? [] : [`Expires in ${minutesLeft(pending.deadlineAt)}`]),
   ].join('\n');
 }
 

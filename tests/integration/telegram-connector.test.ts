@@ -353,19 +353,26 @@ function minutesLeft(deadlineAt: number): string {
 /** The card a confirmation of Mira's gets, naming the surface it was raised on when one is given. */
 function confirmationCard(
   pending: PendingConfirmation,
-  raisedOn?: string,
+  options: {readonly raisedOn?: string; readonly ended?: boolean} = {},
 ): string {
   return [
     `Mira wants to: ${pending.request.summary}` +
-      (raisedOn === undefined ? '' : ` · raised on ${raisedOn}`),
+      (options.raisedOn === undefined
+        ? ''
+        : ` · raised on ${options.raisedOn}`),
     JSON.stringify(pending.request.preview, null, 2),
-    `Expires in ${minutesLeft(pending.deadlineAt)}`,
+    ...(options.ended === true
+      ? []
+      : [`Expires in ${minutesLeft(pending.deadlineAt)}`]),
   ].join('\n');
 }
 
-/** The card a pairing request gets on the management bot. */
-function pairingCard(request: PairingRequest): string {
-  return `${request.subject.label} wants to pair · code ${request.code} · expires in ${minutesLeft(request.expiresAt)}`;
+/** The card a pairing request gets on the management bot, its deadline dropped once it ended. */
+function pairingCard(request: PairingRequest, ended = false): string {
+  return (
+    `${request.subject.label} wants to pair · code ${request.code}` +
+    (ended ? '' : ` · expires in ${minutesLeft(request.expiresAt)}`)
+  );
 }
 
 /** Each call a bot made to one chat, in order, with the text it carried. */
@@ -1966,7 +1973,11 @@ describe('Telegram connector', () => {
           {callback_query_id: String(press.update_id), text: 'Approved.'},
         ]);
         expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
-          {chat_id: alice.id, message_id: 1, text: `${card} · approved`},
+          {
+            chat_id: alice.id,
+            message_id: 1,
+            text: `${confirmationCard(pending, {ended: true})} · approved`,
+          },
         ]);
       },
       {timeout: 5_000},
@@ -2037,7 +2048,6 @@ describe('Telegram connector', () => {
     telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
 
     const pending = await confirmationOf(gateway);
-    const card = confirmationCard(pending);
 
     await vi.waitFor(() => {
       expect(cardsIn(telegram, miraToken, alice.id)).toHaveLength(1);
@@ -2055,7 +2065,7 @@ describe('Telegram connector', () => {
           {
             chat_id: alice.id,
             message_id: 1,
-            text: `${card} · settled while the bot was away`,
+            text: `${confirmationCard(pending, {ended: true})} · settled while the bot was away`,
           },
         ]);
       },
@@ -2102,7 +2112,7 @@ describe('Telegram connector', () => {
       clientMessageId: 'web-confirm',
     });
     const pending = await confirmationOf(gateway);
-    const card = confirmationCard(pending, 'web');
+    const card = confirmationCard(pending, {raisedOn: 'web'});
 
     await vi.waitFor(() => {
       expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
@@ -2116,7 +2126,11 @@ describe('Telegram connector', () => {
     await vi.waitFor(
       () => {
         expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
-          {chat_id: alice.id, message_id: 1, text: `${card} · denied`},
+          {
+            chat_id: alice.id,
+            message_id: 1,
+            text: `${confirmationCard(pending, {raisedOn: 'web', ended: true})} · denied`,
+          },
         ]);
         expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe('done');
       },
@@ -2177,7 +2191,11 @@ describe('Telegram connector', () => {
         {callback_query_id: String(press.update_id), text: 'Approved.'},
       ]);
       expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
-        {chat_id: alice.id, message_id: 2, text: `${card} · approved`},
+        {
+          chat_id: alice.id,
+          message_id: 2,
+          text: `${pairingCard(request, true)} · approved`,
+        },
       ]);
     });
     telegram.push(homeToken, messageFrom(alice, 2, '/pending'));
@@ -2186,7 +2204,7 @@ describe('Telegram connector', () => {
     telegram.push(homeToken, messageFrom(alice, 4, '/deny ../health'));
     await vi.waitFor(() => {
       expect(textsIn(telegram, homeToken, alice.id).slice(2)).toEqual([
-        `${card} · approved`,
+        `${pairingCard(request, true)} · approved`,
         'Nothing waits for you.',
         'That code is not waiting.',
         'That code is not waiting.',
@@ -2293,7 +2311,7 @@ describe('Telegram connector', () => {
         expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
           {
             messageId: 1,
-            text: confirmationCard(pending, 'web'),
+            text: confirmationCard(pending, {raisedOn: 'web'}),
             keyboard: decisionButtons('c', pending.id),
           },
           {
