@@ -13,6 +13,7 @@
     "role-model",
     "runtime"
   ],
+  "main-module.ts": ["cli", "frontends"],
   "node-error.ts": ["characters", "plugins", "runtime"],
   "one-of.ts": ["plugins", "role-model", "runtime"],
   "package-capture.ts": ["characters", "plugins"],

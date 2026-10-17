@@ -5,11 +5,15 @@ argv and captured stdio streams (`runServeCliFromArgs`,
 `runInspectCliFromArgs`) — the whole composition root executes, but no
 packaged binary is spawned.
 
-Three exceptions spawn `node` against the real entry files:
+Four exceptions spawn `node` against the real entry files:
 `plugin-barrel-startup.test.ts` pins module-init-order safety, a property
 no import-graph rule can express; `two-character-concurrency.test.ts`
 runs a real `serve` process to prove one home's leases across characters;
-and `serve-instances.test.ts` proves one daemon per home across
-processes — a second `serve` handing back the first's address, a crash
-succeeded on the same address, and SIGHUP as a stop. The last two run one
-file at a time, under the `processes` project.
+`serve-instances.test.ts` proves one daemon per home across processes — a
+second `serve` handing back the first's address, a crash succeeded on the
+same address, and SIGHUP as a stop; and `telegram-process.test.ts` runs a
+real `serve` and, beside it, the Telegram connector — through
+`telegram-entry.ts`, which points the real entry's function at a fake Bot
+API — to prove it finds the daemon by the home's record and stops on
+SIGINT. The last three run one file at a time, under the `processes`
+project.

@@ -374,7 +374,8 @@ function namesSection(
 
 /**
  * Whether a connector's process is on the daemon's stream, as health says
- * it; nothing for a connector health does not list.
+ * it, and the command that starts one that is not: `pnpm <id>`. Nothing
+ * for a connector health does not list.
  */
 export function connectorPresenceSentence(
   health: GatewayHealth | undefined,
@@ -386,7 +387,9 @@ export function connectorPresenceSentence(
     return undefined;
   }
 
-  return presence.connected ? 'Connector: running' : 'Connector: not running.';
+  return presence.connected
+    ? 'Connector: running.'
+    : `Connector: not running. Start it with pnpm ${id}.`;
 }
 
 /**
