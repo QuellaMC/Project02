@@ -20,8 +20,13 @@ const sentences = {
   refused:
     'This bot is private, and cannot take a pairing request right now; ' +
     'try again later.',
-  pairingCode: (code: string, kind: BotSettings['kind']): string =>
-    `This bot is private. Your pairing code is ${code}, good for an hour. ` +
+  pairingCode: (
+    code: string,
+    minutesLeft: number,
+    kind: BotSettings['kind'],
+  ): string =>
+    `This bot is private. Your pairing code is ${code}, good for ` +
+    `${String(minutesLeft)} ${minutesLeft === 1 ? 'minute' : 'minutes'}. ` +
     (kind === 'management'
       ? 'Approve it on the web page.'
       : 'Approve it on the web page, or send it to the management bot.'),
@@ -42,7 +47,7 @@ export type Gate = {
    * already is let in before the next read lands.
    */
   admit(chatId: number, from: TelegramUser): Promise<boolean>;
-  /** Tells an account this bot gave a code how its request ended. */
+  /** Tells an account this bot gave a code how that request ended; an earlier code's ending is not this one's. */
   settled(
     event: Extract<GatewayEvent, {readonly kind: 'pairing_settled'}>,
   ): void;
@@ -54,7 +59,8 @@ export function createGate(
   outbox: Outbox,
   name: () => string,
 ): Gate {
-  const strangers = new Set<string>();
+  /** Account id → the code this bot gave it, until that request is settled. */
+  const strangers = new Map<string, string>();
 
   return {
     async admit(chatId, from) {
@@ -75,10 +81,16 @@ export function createGate(
       }
 
       if (outcome.status === 'pending') {
-        strangers.add(subject.id);
+        const {code, expiresAt} = outcome.request;
+
+        strangers.set(subject.id, code);
         outbox.say(
           chatId,
-          sentences.pairingCode(outcome.request.code, bot.settings().kind),
+          sentences.pairingCode(
+            code,
+            minutesLeft(expiresAt),
+            bot.settings().kind,
+          ),
         );
       } else if (outcome.status === 'refused') {
         outbox.say(chatId, sentences.refused);
@@ -92,8 +104,9 @@ export function createGate(
     settled(event) {
       if (
         event.connectorId === connectorId &&
-        strangers.delete(event.subject.id)
+        strangers.get(event.subject.id) === event.code
       ) {
+        strangers.delete(event.subject.id);
         outbox.say(
           Number(event.subject.id),
           sentences.settled(event.decision, name()),
@@ -101,6 +114,11 @@ export function createGate(
       }
     },
   };
+}
+
+/** What a code has left, in whole minutes and at least one: a request asked for again keeps its first deadline. */
+function minutesLeft(expiresAt: number): number {
+  return Math.max(1, Math.ceil((expiresAt - Date.now()) / 60_000));
 }
 
 /** Whether the home lets the account in, by this bot's read of the settings. */

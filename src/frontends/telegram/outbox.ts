@@ -9,6 +9,8 @@ import {botNames, type BotContext} from './bot.ts';
 
 /** Telegram's longest message, in the UTF-16 units a string's length counts. */
 const maxMessageLength = 4096;
+/** Telegram's longest answer to a button press. */
+const maxToastLength = 200;
 const draftEditMs = 1_500;
 
 /**
@@ -166,7 +168,9 @@ export function createOutbox(bot: BotContext): Outbox {
 
       if (commit && draft.messages.get(chatId)?.shown === first) {
         for (const piece of rest) {
-          await send(chatId, piece);
+          if ((await send(chatId, piece)) === undefined) {
+            break;
+          }
         }
       }
     }
@@ -222,7 +226,9 @@ export function createOutbox(bot: BotContext): Outbox {
           await call(() =>
             api.answerCallbackQuery({
               callbackQueryId: press.id,
-              ...(toast === undefined ? {} : {text: toast}),
+              ...(toast === undefined
+                ? {}
+                : {text: cut(toast, maxToastLength)}),
               signal: bot.signal,
             }),
           ),
@@ -302,15 +308,17 @@ function pieces(text: string, size = maxMessageLength): readonly string[] {
 
 /**
  * The text as one message with `ending` whole, as a card with buttons must
- * be: a text past Telegram's longest is cut to make room, an ellipsis
- * marking the cut.
+ * be: a text past Telegram's longest is cut to make room.
  */
 export function oneMessage(text: string, ending = ''): string {
-  const [first = '', ...rest] = pieces(text, maxMessageLength - ending.length);
+  return cut(text, maxMessageLength - ending.length) + ending;
+}
 
-  return (
-    (rest.length === 0
-      ? first
-      : `${Array.from(first).slice(0, -1).join('')}…`) + ending
-  );
+/** The text within the limit, an ellipsis marking a cut, never between the halves of a surrogate pair. */
+function cut(text: string, limit: number): string {
+  const [first = '', ...rest] = pieces(text, limit);
+
+  return rest.length === 0
+    ? first
+    : `${Array.from(first).slice(0, -1).join('')}…`;
 }
