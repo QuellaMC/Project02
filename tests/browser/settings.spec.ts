@@ -139,20 +139,34 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
   );
 
   const note = row(page, 'plugins/demo-config/operatorNote');
+  const noteBox = note.getByRole('textbox', {name: 'Operator note'});
   const secondNote = row(second, 'plugins/demo-config/operatorNote').getByRole(
     'textbox',
     {name: 'Operator note'},
   );
 
-  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
+  // The read after a save fails at first: the row says Saved only once a
+  // read has landed, and then shows what was saved, never the value from
+  // before.
+  let reads = 'failing';
+
+  await page.route('**/api/config?*', async route => {
+    await (reads === 'failing' ? route.abort() : route.continue());
+  });
+  await noteBox.fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
+  await expect(page.locator('.notice')).toBeVisible();
+  await expect(note.getByRole('button', {name: 'Saved'})).toHaveCount(0);
+  reads = 'landing';
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
+  expect(await noteBox.inputValue()).toBe('kept');
+  await page.unroute('**/api/config?*');
   await expect(secondNote).toHaveValue('kept');
 
   // A page whose read did not land is behind, and says so; its next save
   // is told that someone saved first.
   await second.route('**/api/config?*', route => route.abort(), {times: 1});
-  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept again');
+  await noteBox.fill('kept again');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
   await expect(second.locator('.notice')).toBeVisible();
@@ -174,6 +188,26 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
   // A character clicked in the roster is a thread wanted: settings give way.
   await page.getByRole('button', {name: /^Mira\b/u}).click();
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
+});
+
+test('stops reading a screen that was left while its reads failed, and says nothing of it', async ({
+  daemon,
+  page,
+}) => {
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+
+  const note = row(page, 'plugins/demo-config/operatorNote');
+
+  await page.route('**/api/config?*', route => route.abort());
+  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
+  await note.getByRole('button', {name: 'Save'}).click();
+  await expect(page.locator('.notice')).toBeVisible();
+  await page.getByRole('button', {name: /^Mira\b/u}).click();
+  await expect(page.locator('.notice')).toHaveCount(0);
+  // Past two of the retries a screen still open would make: none is made.
+  await page.waitForTimeout(2_500);
+  await expect(page.locator('.notice')).toHaveCount(0);
 });
 
 test.describe('a roster with a character that is off', () => {

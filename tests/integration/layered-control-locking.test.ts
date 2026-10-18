@@ -17,6 +17,7 @@ import {
   ensureCharacterDataDir,
 } from '../../src/runtime/storage/index.ts';
 import {acquireLocalRuntimeMutationLock} from '../../src/runtime/storage/mutation-lock.ts';
+import {awaitStartFile} from '../support/start-file.ts';
 
 const tempRoots: string[] = [];
 
@@ -148,7 +149,7 @@ describe('layered control lock ordering', () => {
 });
 
 const controlChildPrelude = [
-  "import { existsSync, writeFileSync } from 'node:fs';",
+  "import { writeFileSync } from 'node:fs';",
   'const {',
   '  applyRuntimeConfigControlOperation,',
   '  bindProject02CharacterRuntimeLocation,',
@@ -162,7 +163,6 @@ const controlChildPrelude = [
   'const runtimeLocation = bindProject02CharacterRuntimeLocation({',
   "  configLocation, characterId: 'mira',",
   '});',
-  'const sleep = new Int32Array(new SharedArrayBuffer(4));',
 ].join('\n');
 
 const globalExpectationMutationScript = [
@@ -200,7 +200,7 @@ const characterMutationScript = [
 
 const barrieredGlobalExpectationMutationScript = [
   controlChildPrelude,
-  'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+  awaitStartFile(2),
   'const target = resolveRuntimeConfigScopeTarget({',
   "  runtimeLocation, scope: 'global',",
   '});',
@@ -223,7 +223,7 @@ const barrieredGlobalExpectationMutationScript = [
 
 const barrieredCharacterMutationScript = [
   controlChildPrelude,
-  'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+  awaitStartFile(2),
   'const target = resolveRuntimeConfigScopeTarget({',
   "  runtimeLocation, scope: 'character',",
   '});',
@@ -238,11 +238,10 @@ const barrieredCharacterMutationScript = [
 ].join('\n');
 
 const barrieredMutationLockBatchScript = [
-  "import { existsSync } from 'node:fs';",
   "const { acquireLocalRuntimeMutationLocksSync } = await import('./src/runtime/storage/mutation-lock.ts');",
   'const sleep = new Int32Array(new SharedArrayBuffer(4));',
   'const targets = JSON.parse(process.argv[1]);',
-  'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+  awaitStartFile(2),
   'const lease = acquireLocalRuntimeMutationLocksSync({',
   '  targets,',
   '  waitTimeoutMs: 5_000,',

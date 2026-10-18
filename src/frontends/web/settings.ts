@@ -175,9 +175,9 @@ export function changeSent(
  * How the change ended, known by its ticket: a screen opened since, or a
  * later change on it, is waiting on nothing this one can answer.
  * `applied`: the text that was sent is done with, and a newer word typed
- * meanwhile stays to be saved; the fingerprint the answer carries is the
- * view's from now on, so a save made before the session's re-read lands
- * cannot conflict with this one, and the re-read fills in the rest.
+ * meanwhile stays to be saved; the view is left as it was read, its
+ * fingerprint with it: the session lands the answer with a view read
+ * after it, and only a read says what the daemon holds.
  * `refused` as `invalid`: the daemon's reason stays at the field, with
  * the text. `conflict`: someone else saved first; said once, and the
  * session re-reads, with the text still in the row. A character that is
@@ -219,9 +219,6 @@ export function changeEnded(
       ...state,
       settings: {
         ...page,
-        ...(page.view?.status === 'ok'
-          ? {view: {...page.view, fingerprint: outcome.fingerprint}}
-          : {}),
         edits,
         problems,
         ...(newer === undefined ? {saved: key} : {}),

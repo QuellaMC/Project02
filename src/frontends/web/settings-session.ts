@@ -6,6 +6,7 @@
 import type {
   ConfigChangeOutcome,
   ConfigTarget,
+  ConfigView,
 } from '../../gateway/api/index.ts';
 import type {GatewayClient} from '../../gateway/client/index.ts';
 import {
@@ -40,6 +41,9 @@ export const noSettingsVerbs: SettingsVerbs = {
   resetSetting: () => Promise.resolve(),
 };
 
+/** Between reads of a screen whose save has its answer but not yet its view. */
+const rereadRetryMs = 1_000;
+
 function problem(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -56,30 +60,64 @@ export function createSettingsVerbs(tab: {
   readonly ready: () => Promise<void>;
 } {
   const {client, getState, apply} = tab;
-  /** Only the latest read of the screen applies; an earlier one that settles later is let go. */
+  /** Reads of the screen, numbered as they begin, and the newest whose view has landed. */
   let reads = 0;
+  let landed = 0;
   /** Each change has a ticket of its own; its end is known by it. */
   let changes = 0;
   let setupJudged = false;
-  const readView = async (target: ConfigTarget): Promise<void> => {
+  /** Whether the settings screen open is the one on the target. */
+  const isOpen = (target: ConfigTarget): boolean => {
+    const open = getState().settings;
+
+    return open !== undefined && sameTarget(open.target, target);
+  };
+  /**
+   * Reads the screen's view and lands it in one step with `alongside`.
+   * Views land in the order their reads began: one that settles after a
+   * later read's view has landed brings only `alongside`. Whether
+   * `alongside` landed: a read that fails brings nothing, and is said
+   * unless a later one is on its way or its screen was left.
+   */
+  const readView = async (
+    target: ConfigTarget,
+    alongside: (state: WebState) => WebState = state => state,
+  ): Promise<boolean> => {
     const mine = (reads += 1);
+    let view: ConfigView;
 
     try {
-      const view = await client.configView(target);
-
-      if (mine === reads) {
-        apply(current => configViewRead(current, target, view));
-      }
+      view = await client.configView(target);
     } catch (error: unknown) {
-      if (mine === reads) {
+      if (mine === reads && isOpen(target)) {
         apply(current => noticed(current, problem(error)));
       }
+
+      return false;
     }
+
+    const lands = mine > landed;
+
+    if (lands) {
+      landed = mine;
+    }
+
+    apply(current =>
+      lands
+        ? configViewRead(alongside(current), target, view)
+        : alongside(current),
+    );
+
+    return true;
   };
   /**
    * One change, bound to the fingerprint the view handed out. Applied or
-   * met with a conflict, the view is read again: a write can move more
-   * than its field, and a conflict means the screen was stale.
+   * met with a conflict, the view is read again — a write can move more
+   * than its field, and a conflict means the screen was stale — and the
+   * answer lands with that view, so a row goes from what was typed to
+   * what is saved, never back through the value from before. A read that
+   * fails is tried again, the screen busy meanwhile, until one lands or
+   * the screen is left: no change ends on a view from before it.
    */
   const change = async (
     key: string,
@@ -113,19 +151,31 @@ export function createSettingsVerbs(tab: {
       outcome = {status: 'failed', message: problem(error)};
     }
 
-    apply(current => changeEnded(current, ticket, outcome));
+    const ended = (current: WebState): WebState =>
+      changeEnded(current, ticket, outcome);
 
     // The screen the change came from is read again, if it is still the
     // one open — at once, on the answer in hand, whether or not the frame
     // that follows reaches this tab's stream. The roster needs no read:
     // what the change did to it comes on the stream, to every tab.
-    const open = getState().settings;
     const moved =
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
 
-    if (moved && open !== undefined && sameTarget(open.target, page.target)) {
-      await readView(page.target);
+    if (!moved || !isOpen(page.target)) {
+      apply(ended);
+
+      return;
+    }
+
+    while (!(await readView(page.target, ended))) {
+      await new Promise(resolve => {
+        setTimeout(resolve, rereadRetryMs);
+      });
+
+      if (!isOpen(page.target)) {
+        return;
+      }
     }
   };
 

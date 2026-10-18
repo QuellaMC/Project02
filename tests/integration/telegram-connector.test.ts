@@ -421,7 +421,7 @@ function pairingOf(
   gateway: Gateway,
   account: Account,
 ): Promise<PairingRequest> {
-  return vi.waitFor(() => {
+  return eventually(() => {
     const request = gateway
       .pendingPairings()
       .find(pending => pending.subject.id === String(account.id));
@@ -436,18 +436,27 @@ function pairingOf(
 
 /** The confirmation waiting, once a turn has asked for one. */
 function confirmationOf(gateway: Gateway): Promise<PendingConfirmation> {
-  return vi.waitFor(
-    () => {
-      const [pending] = gateway.pendingConfirmations();
+  return eventually(() => {
+    const [pending] = gateway.pendingConfirmations();
 
-      if (pending === undefined) {
-        throw new Error('Nothing waits for a confirmation yet.');
-      }
+    if (pending === undefined) {
+      throw new Error('Nothing waits for a confirmation yet.');
+    }
 
-      return pending;
-    },
-    {timeout: 5_000},
-  );
+    return pending;
+  });
+}
+
+/**
+ * Waits for what the connector does on its own: loopback hops to the
+ * daemon and calls to Telegram, which a loaded machine stretches well
+ * past vitest's one-second default.
+ */
+function eventually<T>(
+  check: () => T | Promise<T>,
+  timeout = 5_000,
+): Promise<T> {
+  return vi.waitFor(check, {timeout});
 }
 
 /** Nothing polls these tokens: an update pushed to each is never asked for. */
@@ -497,7 +506,7 @@ describe('Telegram connector', () => {
       field: 'botToken',
       value: replacedToken,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(methods(telegram, replacedToken)).toEqual(['getMe', 'getUpdates']);
     });
     release();
@@ -516,7 +525,7 @@ describe('Telegram connector', () => {
     const first = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await first.close();
@@ -531,14 +540,11 @@ describe('Telegram connector', () => {
     // is left to replay.
     const returned = await serve(homeRoot, gateway, {port: first.port});
 
-    await vi.waitFor(
-      () => {
-        expect(connector.stdout()).toContain(
-          'Telegram: @mira_new_bot answers for Mira.',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(connector.stdout()).toContain(
+        'Telegram: @mira_new_bot answers for Mira.',
+      );
+    });
     expect(connector.stdout()).toContain('Telegram: stopped @mira_bot (Mira).');
     await expectUnpolled(telegram, miraToken);
     await expect(connector.stop()).resolves.toBe(0);
@@ -560,22 +566,19 @@ describe('Telegram connector', () => {
     const daemon = watchReads();
     const connector = runConnector(homeRoot, telegram, daemon.fetch);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await first.close();
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(events.openCount()).toBe(0);
     });
 
     const returned = await serve(homeRoot, gateway, {events, port: first.port});
 
-    await vi.waitFor(
-      () => {
-        expect(events.openCount()).toBe(1);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(events.openCount()).toBe(1);
+    });
     // The next read is the next change's.
     await change(gateway, mira, {
       kind: 'section_field_set',
@@ -583,7 +586,7 @@ describe('Telegram connector', () => {
       field: 'botToken',
       value: replacedToken,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(
         'Telegram: @mira_new_bot answers for Mira.',
       );
@@ -606,7 +609,7 @@ describe('Telegram connector', () => {
     );
     const connector = runConnector(homeRoot, telegram, daemon.fetch);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     expect(daemon.reads()).toBe(2);
@@ -625,7 +628,7 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
     });
@@ -639,7 +642,7 @@ describe('Telegram connector', () => {
       ...telegramSection,
       field: 'botToken',
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(
         'Telegram: stopped @home_bot (the management bot).',
       );
@@ -665,7 +668,7 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(methods(telegram, miraToken)).toEqual(['getMe', 'getUpdates']);
     });
     expect(connector.stderr()).toContain(
@@ -687,7 +690,7 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
       expect(connector.stdout()).toContain(
@@ -699,7 +702,7 @@ describe('Telegram connector', () => {
       ...telegramSection,
       enabled: false,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(
         'Telegram: stopped @home_bot (the management bot).',
       );
@@ -723,7 +726,7 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stderr()).toContain(
         "Telegram refused Mira's bot token. Replace it on Mira's settings page.",
       );
@@ -741,11 +744,11 @@ describe('Telegram connector', () => {
     const connector = runConnector(homeRoot, telegram);
     const waiting = `Telegram connector: waiting for the daemon on ${homeRoot}; run pnpm serve.`;
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(waiting);
     });
     writeRecord(homeRoot, server.port);
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     expect(connector.stdout().split('\n').slice(0, 2)).toEqual([
@@ -764,7 +767,7 @@ describe('Telegram connector', () => {
     const first = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
 
@@ -772,14 +775,11 @@ describe('Telegram connector', () => {
 
     await first.close();
     writeRecord(homeRoot, moved.port);
-    await vi.waitFor(
-      () => {
-        expect(connector.stdout()).toContain(
-          `Telegram connector: connected to ${moved.baseUrl}.`,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(connector.stdout()).toContain(
+        `Telegram connector: connected to ${moved.baseUrl}.`,
+      );
+    });
     expect(methods(telegram, miraToken)).toEqual(['getMe', 'getUpdates']);
     await expect(connector.stop()).resolves.toBe(0);
     await moved.close();
@@ -798,11 +798,11 @@ describe('Telegram connector', () => {
     const connector = runConnector(homeRoot, telegram);
     const refused = `Telegram connector: the daemon at ${server.baseUrl} refused the token in ${join(homeRoot, 'daemon.json')}; trying again.`;
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stderr()).toContain(refused);
     });
     writeRecord(homeRoot, server.port, minted);
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     expect(connector.stderr()).toBe(`${refused}\n`);
@@ -849,7 +849,7 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await change(gateway, mira, {
@@ -857,7 +857,7 @@ describe('Telegram connector', () => {
       ...telegramSection,
       field: 'botToken',
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(
         'Telegram: stopped @mira_bot (Mira).',
       );
@@ -886,16 +886,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 7, line));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
-      },
-      {timeout: 10_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+    }, 10_000);
 
     const [posted, ...edits] = callsTo(telegram, miraToken, alice.id).filter(
       call => call.method !== 'sendChatAction',
@@ -941,20 +938,17 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, line));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-          'noted: ',
-          reply.slice(0, 4096),
-          reply.slice(4096),
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        'noted: ',
+        reply.slice(0, 4096),
+        reply.slice(4096),
+      ]);
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
@@ -973,12 +967,12 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello, all', group));
     telegram.push(miraToken, messageFrom(alice, 2, undefined));
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(callsTo(telegram, miraToken, alice.id)).toEqual([
         {method: 'sendMessage', text: 'I can only read text here for now.'},
       ]);
@@ -1004,24 +998,17 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
       expect(connector.stdout()).toContain(novaAnswers);
     });
     // Each bot has her conversation open once it has carried a line there.
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
     telegram.push(novaToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: hello',
-        );
-        expect(textsIn(telegram, novaToken, alice.id)).toContain(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: hello');
+      expect(textsIn(telegram, novaToken, alice.id)).toContain('noted: hello');
+    });
 
     for (const characterId of ['mira', 'nova']) {
       const ref = await openDirect(gateway, characterId);
@@ -1035,29 +1022,23 @@ describe('Telegram connector', () => {
       });
     }
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-          'noted: ',
-          'noted: hello',
-          'You (web): from the web',
-          'noted: ',
-          'noted: from the web',
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        'noted: ',
+        'noted: hello',
+        'You (web): from the web',
+        'noted: ',
+        'noted: from the web',
+      ]);
+    });
     // A line after the web's turn: once its reply is in, Nova's chat has
     // been shown all it will be of that turn.
     telegram.push(novaToken, messageFrom(alice, 2, 'again'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, novaToken, alice.id).at(-1)).toBe(
-          'noted: again',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, novaToken, alice.id).at(-1)).toBe(
+        'noted: again',
+      );
+    });
     expect(textsIn(telegram, novaToken, alice.id)).toEqual([
       'noted: ',
       'noted: hello',
@@ -1091,16 +1072,13 @@ describe('Telegram connector', () => {
     });
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await turn;
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+    });
 
     const shown = textsIn(telegram, miraToken, alice.id);
 
@@ -1126,28 +1104,22 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, line));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toEqual(['noted: ']);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toEqual(['noted: ']);
+    });
     await change(gateway, home, {
       kind: 'section_field_set',
       ...telegramSection,
       field: 'pairedUsers',
       value: aliceIsPaired,
     });
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
-      },
-      {timeout: 10_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+    }, 10_000);
 
     const shownToBob = textsIn(telegram, miraToken, bob.id);
 
@@ -1171,13 +1143,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.throttle(miraToken, 0.05, 'sendMessage');
     telegram.push(miraToken, messageFrom(alice, 1, '/start'));
     // The refused call and the one after the pause, both on the record.
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, miraToken, alice.id)).toEqual([hello, hello]);
     });
     expect(connector.stderr()).not.toContain('could not write');
@@ -1204,16 +1176,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, line));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual(['noted: ']);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual(['noted: ']);
+    });
     await first.close();
 
     // Back on the same address, mid-reply, with a log too short to replay:
@@ -1223,12 +1192,9 @@ describe('Telegram connector', () => {
       events,
     });
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
-      },
-      {timeout: 10_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(reply);
+    }, 10_000);
     expect(bodiesOf(telegram, miraToken, 'deleteMessage')).toEqual([]);
     expect(
       new Set(
@@ -1260,18 +1226,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: hello');
+    });
 
     const ref = await openDirect(gateway, 'mira');
 
@@ -1282,17 +1243,11 @@ describe('Telegram connector', () => {
       source: 'web',
       clientMessageId: 'web-long',
     });
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual(
-          expect.arrayContaining([
-            mirrored.slice(0, 4096),
-            mirrored.slice(4096),
-          ]),
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual(
+        expect.arrayContaining([mirrored.slice(0, 4096), mirrored.slice(4096)]),
+      );
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
@@ -1325,7 +1280,7 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, holdingOpen);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
 
@@ -1340,16 +1295,13 @@ describe('Telegram connector', () => {
     });
     expect(textsIn(telegram, miraToken, alice.id)).toEqual([]);
     releaseOpen();
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-          'You (web): hello',
-          'noted: ',
-          'noted: hello',
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        'You (web): hello',
+        'noted: ',
+        'noted: hello',
+      ]);
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
@@ -1370,12 +1322,9 @@ describe('Telegram connector', () => {
 
     await sleep(500);
     expect(connector.stdout()).not.toContain(miraAnswers);
-    await vi.waitFor(
-      () => {
-        expect(connector.stdout()).toContain(miraAnswers);
-      },
-      {timeout: 3_000},
-    );
+    await eventually(() => {
+      expect(connector.stdout()).toContain(miraAnswers);
+    });
     expect(
       methods(telegram, miraToken).filter(method => method === 'getMe'),
     ).toEqual(['getMe', 'getMe']);
@@ -1401,16 +1350,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
 
     const shownToBob = textsIn(telegram, miraToken, bob.id);
 
@@ -1437,14 +1383,11 @@ describe('Telegram connector', () => {
     });
 
     await turn;
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(
-          `noted: ${line}`,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(
+        `noted: ${line}`,
+      );
+    });
     expect(textsIn(telegram, miraToken, bob.id)).toEqual(shownToBob);
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
@@ -1464,18 +1407,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: hello');
+    });
 
     const shown = textsIn(telegram, miraToken, alice.id);
 
@@ -1503,27 +1441,19 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: hello');
+    });
     telegram.revokeBot(miraToken);
-    await vi.waitFor(
-      () => {
-        expect(connector.stderr()).toContain(
-          "Telegram refused Mira's bot token. Replace it on Mira's settings page.",
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(connector.stderr()).toContain(
+        "Telegram refused Mira's bot token. Replace it on Mira's settings page.",
+      );
+    });
 
     const ref = await openDirect(gateway, 'mira');
 
@@ -1565,7 +1495,7 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, stumbling);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
 
@@ -1578,17 +1508,15 @@ describe('Telegram connector', () => {
       source: 'web',
       clientMessageId: 'web-1',
     });
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-          'You (web): hello',
-          'noted: ',
-          'noted: hello',
-        ]);
-      },
-      {timeout: 5_000},
-    );
-    expect(opens).toBe(2);
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        'You (web): hello',
+        'noted: ',
+        'noted: hello',
+      ]);
+    });
+    // Asked again: a ready may start an open of its own beside the retry.
+    expect(opens).toBeGreaterThanOrEqual(2);
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
@@ -1606,38 +1534,30 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'first'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: first',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: first');
+    });
     await change(gateway, mira, {
       kind: 'section_field_set',
       ...telegramSection,
       field: 'botToken',
       value: replacedToken,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(
         'Telegram: @mira_new_bot answers for Mira.',
       );
     });
     telegram.push(replacedToken, messageFrom(alice, 1, 'second'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, replacedToken, alice.id)).toContain(
-          'noted: second',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, replacedToken, alice.id)).toContain(
+        'noted: second',
+      );
+    });
 
     const lines = await logOf(gateway, 'mira');
 
@@ -1660,11 +1580,16 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const transport = createNodeFetch();
     let reads = 0;
+    let asked = (): void => undefined;
+    const healthAsked = new Promise<void>(resolve => {
+      asked = resolve;
+    });
     let releaseHealth = (): void => undefined;
     const heldHealth = new Promise<void>(resolve => {
       releaseHealth = resolve;
     });
-    // The daemon answers /status's question only when the test lets it.
+    // /status is the only caller of health: its question reaching the
+    // daemon says the gate let the account in. The answer waits for the test.
     const holdingHealth: typeof fetch = async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : input);
 
@@ -1673,6 +1598,7 @@ describe('Telegram connector', () => {
       }
 
       if (url.pathname === '/api/health') {
+        asked();
         await heldHealth;
       }
 
@@ -1680,19 +1606,19 @@ describe('Telegram connector', () => {
     };
     const connector = runConnector(homeRoot, telegram, holdingHealth);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
     });
     telegram.push(homeToken, messageFrom(alice, 1, '/status'));
+    await healthAsked;
     await change(gateway, home, {
       kind: 'section_field_unset',
       ...telegramSection,
       field: 'pairedUsers',
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(reads).toBeGreaterThanOrEqual(2);
     });
-    await sleep(100);
     releaseHealth();
     await sleep(300);
     expect(callsTo(telegram, homeToken, alice.id)).toEqual([]);
@@ -1733,16 +1659,13 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, holdingReads);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
     await first.close();
     await change(gateway, home, {
       kind: 'section_field_set',
@@ -1756,12 +1679,9 @@ describe('Telegram connector', () => {
       events,
     });
 
-    await vi.waitFor(
-      () => {
-        expect(reads).toBeGreaterThanOrEqual(2);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(reads).toBeGreaterThanOrEqual(2);
+    });
     telegram.push(miraToken, messageFrom(bob, 2, 'again'));
     await sleep(300);
 
@@ -1772,14 +1692,11 @@ describe('Telegram connector', () => {
 
     await expect(userLines()).resolves.toEqual(['hello']);
     releaseReads();
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
-          /Your pairing code is/u,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+        /Your pairing code is/u,
+      );
+    });
     await expect(userLines()).resolves.toEqual(['hello']);
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
@@ -1800,21 +1717,18 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
 
     const shownToBob = textsIn(telegram, miraToken, bob.id);
 
     await first.close();
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain('waiting for the daemon');
     });
     await change(gateway, home, {
@@ -1829,14 +1743,11 @@ describe('Telegram connector', () => {
 
     const returned = await serve(homeRoot, gateway, {port: first.port, events});
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
-          /Your pairing code is/u,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+        /Your pairing code is/u,
+      );
+    });
 
     const lines = await logOf(gateway, 'mira');
 
@@ -1862,22 +1773,19 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
 
     const shownToBob = textsIn(telegram, miraToken, bob.id);
     const shownToAlice = textsIn(telegram, miraToken, alice.id);
 
     await first.close();
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain('waiting for the daemon');
     });
     // While the stream is away: Bob is unpaired, and a web turn runs whole.
@@ -1900,17 +1808,14 @@ describe('Telegram connector', () => {
 
     const returned = await serve(homeRoot, gateway, {port: first.port, events});
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([
-          ...shownToAlice,
-          'You (web): from the web',
-          'noted: ',
-          'noted: from the web',
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([
+        ...shownToAlice,
+        'You (web): from the web',
+        'noted: ',
+        'noted: from the web',
+      ]);
+    });
     expect(textsIn(telegram, miraToken, bob.id)).toEqual(shownToBob);
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
@@ -1955,30 +1860,27 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, holdingSecondAnswer);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
     await change(gateway, mira, {
       kind: 'section_field_set',
       ...telegramSection,
       field: 'mirror',
       value: false,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(reads).toBe(2);
     });
 
     const shownToBob = textsIn(telegram, miraToken, bob.id);
 
     await first.close();
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain('waiting for the daemon');
     });
     await change(gateway, home, {
@@ -1994,14 +1896,11 @@ describe('Telegram connector', () => {
 
     const returned = await serve(homeRoot, gateway, {port: first.port, events});
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
-          /Your pairing code is/u,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+        /Your pairing code is/u,
+      );
+    });
 
     const lines = await logOf(gateway, 'mira');
 
@@ -2042,23 +1941,20 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, holdingSecondRead);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(bob, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id)).toContain('noted: hello');
+    });
     await change(gateway, home, {
       kind: 'section_field_set',
       ...telegramSection,
       field: 'pairedUsers',
       value: aliceIsPaired,
     });
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(reads).toBe(2);
     });
     telegram.push(miraToken, messageFrom(bob, 2, 'again'));
@@ -2071,14 +1967,11 @@ describe('Telegram connector', () => {
 
     await expect(userLines()).resolves.toEqual(['hello']);
     releaseSecond();
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
-          /Your pairing code is/u,
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toMatch(
+        /Your pairing code is/u,
+      );
+    });
     await expect(userLines()).resolves.toEqual(['hello']);
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
@@ -2114,24 +2007,19 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, holdingOpens);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'first'));
     telegram.push(miraToken, messageFrom(alice, 2, 'second'));
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(opens).toBeGreaterThanOrEqual(2);
     });
     await sleep(100);
     releaseOpens();
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: second',
-        );
-      },
-      {timeout: 10_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: second');
+    }, 10_000);
 
     const lines = await logOf(gateway, 'mira');
 
@@ -2155,11 +2043,11 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     await first.close();
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain('waiting for the daemon');
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'anyone there?'));
@@ -2168,14 +2056,11 @@ describe('Telegram connector', () => {
 
     const returned = await serve(homeRoot, gateway, {port: first.port});
 
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: anyone there?',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain(
+        'noted: anyone there?',
+      );
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
     await telegram.close();
@@ -2199,38 +2084,29 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
       expect(connector.stdout()).toContain(novaAnswers);
     });
     telegram.push(novaToken, messageFrom(alice, 1, 'hello'));
     telegram.push(miraToken, messageFrom(alice, 1, 'reject'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, novaToken, alice.id)).toEqual([
-          'Nova is not available right now: Character "nova" has not been started.',
-        ]);
-        expect(textsIn(telegram, miraToken, alice.id)).toEqual([notAnswered]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, novaToken, alice.id)).toEqual([
+        'Nova is not available right now: Character "nova" has not been started.',
+      ]);
+      expect(textsIn(telegram, miraToken, alice.id)).toEqual([notAnswered]);
+    });
     telegram.push(miraToken, messageFrom(alice, 2, 'two\nlines'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(notTaken);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(notTaken);
+    });
     // Once a later line's reply is in, any second telling would be too.
     telegram.push(miraToken, messageFrom(alice, 3, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe(
+        'noted: hello',
+      );
+    });
     expect(textsIn(telegram, miraToken, alice.id)).toEqual([
       notAnswered,
       notTaken,
@@ -2252,7 +2128,7 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(bob, 1, 'let me in'));
@@ -2260,7 +2136,7 @@ describe('Telegram connector', () => {
     const approved = await pairingOf(gateway, bob);
 
     expect(approved.subject.label).toBe('Bob (@bob)');
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, miraToken, bob.id)).toEqual([
         `This bot is private. Your pairing code is ${approved.code}, good for 60 minutes. Approve it on the web page, or send it to the management bot.`,
       ]);
@@ -2268,20 +2144,15 @@ describe('Telegram connector', () => {
     await expect(
       gateway.settlePairing(approved.code, 'approved'),
     ).resolves.toEqual({status: 'settled', decision: 'approved'});
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
         'Paired. Mira is listening.',
       );
     });
     telegram.push(miraToken, messageFrom(bob, 2, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe('noted: hello');
+    });
     telegram.push(miraToken, messageFrom(carol, 1, 'me too'));
 
     const declined = await pairingOf(gateway, carol);
@@ -2289,7 +2160,7 @@ describe('Telegram connector', () => {
     await expect(
       gateway.settlePairing(declined.code, 'denied'),
     ).resolves.toEqual({status: 'settled', decision: 'denied'});
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, miraToken, carol.id).at(-1)).toBe(
         'The owner declined.',
       );
@@ -2317,7 +2188,7 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
@@ -2325,7 +2196,7 @@ describe('Telegram connector', () => {
     const pending = await confirmationOf(gateway);
     const card = confirmationCard(pending);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, miraToken, alice.id)).toEqual([
         {messageId: 1, text: card, keyboard: decisionButtons('c', pending.id)},
       ]);
@@ -2334,22 +2205,19 @@ describe('Telegram connector', () => {
     const press = pressOn(alice, {messageId: 1}, `c:${pending.id}:a`);
 
     telegram.push(miraToken, press);
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain('done');
-        expect(bodiesOf(telegram, miraToken, 'answerCallbackQuery')).toEqual([
-          {callback_query_id: String(press.update_id), text: 'Approved.'},
-        ]);
-        expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
-          {
-            chat_id: alice.id,
-            message_id: 1,
-            text: `${confirmationCard(pending, {ended: true})} · approved`,
-          },
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('done');
+      expect(bodiesOf(telegram, miraToken, 'answerCallbackQuery')).toEqual([
+        {callback_query_id: String(press.update_id), text: 'Approved.'},
+      ]);
+      expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
+        {
+          chat_id: alice.id,
+          message_id: 1,
+          text: `${confirmationCard(pending, {ended: true})} · approved`,
+        },
+      ]);
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
@@ -2381,14 +2249,14 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram, watched);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
 
     const pending = await confirmationOf(gateway);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, miraToken, alice.id)).toHaveLength(1);
     });
     await expect(connector.stop()).resolves.toBe(0);
@@ -2410,14 +2278,14 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(miraToken, messageFrom(alice, 1, 'confirm'));
 
     const pending = await confirmationOf(gateway);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, miraToken, alice.id)).toHaveLength(1);
     });
     await first.close();
@@ -2427,18 +2295,15 @@ describe('Telegram connector', () => {
 
     const returned = await serve(homeRoot, gateway, {port: first.port});
 
-    await vi.waitFor(
-      () => {
-        expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
-          {
-            chat_id: alice.id,
-            message_id: 1,
-            text: `${confirmationCard(pending, {ended: true})} · settled while the bot was away`,
-          },
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(bodiesOf(telegram, miraToken, 'editMessageText')).toEqual([
+        {
+          chat_id: alice.id,
+          message_id: 1,
+          text: `${confirmationCard(pending, {ended: true})} · settled while the bot was away`,
+        },
+      ]);
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await returned.close();
     await telegram.close();
@@ -2456,20 +2321,15 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
     });
     // Her bot has her conversation open once it has carried a line there.
     telegram.push(miraToken, messageFrom(alice, 1, 'hello'));
-    await vi.waitFor(
-      () => {
-        expect(textsIn(telegram, miraToken, alice.id)).toContain(
-          'noted: hello',
-        );
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(textsIn(telegram, miraToken, alice.id)).toContain('noted: hello');
+    });
 
     const ref = await openDirect(gateway, 'mira');
     const turn = gateway.deliver({
@@ -2482,7 +2342,7 @@ describe('Telegram connector', () => {
     const pending = await confirmationOf(gateway);
     const card = confirmationCard(pending, {raisedOn: 'web'});
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
         {messageId: 1, text: card, keyboard: decisionButtons('c', pending.id)},
       ]);
@@ -2491,19 +2351,16 @@ describe('Telegram connector', () => {
       status: 'answered',
     });
     await expect(turn).resolves.toMatchObject({status: 'completed'});
-    await vi.waitFor(
-      () => {
-        expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
-          {
-            chat_id: alice.id,
-            message_id: 1,
-            text: `${confirmationCard(pending, {raisedOn: 'web', ended: true})} · denied`,
-          },
-        ]);
-        expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe('done');
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(bodiesOf(telegram, homeToken, 'editMessageText')).toEqual([
+        {
+          chat_id: alice.id,
+          message_id: 1,
+          text: `${confirmationCard(pending, {raisedOn: 'web', ended: true})} · denied`,
+        },
+      ]);
+      expect(textsIn(telegram, miraToken, alice.id).at(-1)).toBe('done');
+    });
     // The turn's reply came after any card her chat would have had.
     expect(cardsIn(telegram, miraToken, alice.id)).toEqual([]);
     await expect(connector.stop()).resolves.toBe(0);
@@ -2523,12 +2380,12 @@ describe('Telegram connector', () => {
 
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
       expect(connector.stdout()).toContain(miraAnswers);
     });
     telegram.push(homeToken, messageFrom(alice, 1, '/status'));
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, homeToken, alice.id)).toEqual([
         'Mira: ready\nNova: not started',
       ]);
@@ -2538,7 +2395,7 @@ describe('Telegram connector', () => {
     const request = await pairingOf(gateway, bob);
     const card = pairingCard(request);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
         {
           messageId: 2,
@@ -2551,7 +2408,7 @@ describe('Telegram connector', () => {
     const press = pressOn(alice, {messageId: 2}, `p:${request.code}:a`);
 
     telegram.push(homeToken, press);
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, miraToken, bob.id).at(-1)).toBe(
         'Paired. Mira is listening.',
       );
@@ -2570,7 +2427,7 @@ describe('Telegram connector', () => {
     telegram.push(homeToken, messageFrom(alice, 3, '/approve 000000'));
     // A code that is not six digits never reaches the daemon's URL path.
     telegram.push(homeToken, messageFrom(alice, 4, '/deny ../health'));
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, homeToken, alice.id).slice(2)).toEqual([
         `${pairingCard(request, true)} · approved`,
         'Nothing waits for you.',
@@ -2590,14 +2447,14 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
     });
     telegram.push(homeToken, messageFrom(bob, 1, 'let me in'));
 
     const request = await pairingOf(gateway, bob);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, homeToken, bob.id)).toHaveLength(1);
     });
     await change(gateway, home, {
@@ -2607,7 +2464,7 @@ describe('Telegram connector', () => {
       value: aliceIsPaired,
     });
     telegram.push(homeToken, messageFrom(alice, 1, '/pending'));
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
         {
           messageId: 2,
@@ -2628,14 +2485,14 @@ describe('Telegram connector', () => {
     const server = await serve(homeRoot, gateway);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(connector.stdout()).toContain(managementOn);
     });
     telegram.push(homeToken, messageFrom(carol, 1, '/status'));
 
     const request = await pairingOf(gateway, carol);
 
-    await vi.waitFor(() => {
+    await eventually(() => {
       expect(textsIn(telegram, homeToken, carol.id)).toEqual([
         `This bot is private. Your pairing code is ${request.code}, good for 60 minutes. Approve it on the web page.`,
       ]);
@@ -2674,23 +2531,20 @@ describe('Telegram connector', () => {
     const request = await pairingOf(gateway, bob);
     const connector = runConnector(homeRoot, telegram);
 
-    await vi.waitFor(
-      () => {
-        expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
-          {
-            messageId: 1,
-            text: confirmationCard(pending, {raisedOn: 'web'}),
-            keyboard: decisionButtons('c', pending.id),
-          },
-          {
-            messageId: 2,
-            text: pairingCard(request),
-            keyboard: decisionButtons('p', request.code),
-          },
-        ]);
-      },
-      {timeout: 5_000},
-    );
+    await eventually(() => {
+      expect(cardsIn(telegram, homeToken, alice.id)).toEqual([
+        {
+          messageId: 1,
+          text: confirmationCard(pending, {raisedOn: 'web'}),
+          keyboard: decisionButtons('c', pending.id),
+        },
+        {
+          messageId: 2,
+          text: pairingCard(request),
+          keyboard: decisionButtons('p', request.code),
+        },
+      ]);
+    });
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();
