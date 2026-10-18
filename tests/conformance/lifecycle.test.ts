@@ -1,18 +1,124 @@
-import {readdirSync, readFileSync, statSync} from 'node:fs';
+import {createHash, randomUUID} from 'node:crypto';
+import {
+  chmodSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import {createServer, type AddressInfo} from 'node:net';
 import {join} from 'node:path';
 
-import {expect, it} from 'vitest';
+import {expect, it, onTestFinished} from 'vitest';
 
 import {serve, startDaemon} from './harness/daemon.ts';
-import {frameOf, openEvents} from './harness/events.ts';
-import {configJson, createHome} from './harness/home.ts';
-import {reply, startModelServer} from './harness/model-server.ts';
+import {
+  frameOf,
+  openEvents,
+  type Events,
+  type Frame,
+} from './harness/events.ts';
+import {characterJson, configJson, createHome} from './harness/home.ts';
+import {
+  finish,
+  reply,
+  startModelServer,
+  toolCall,
+  type Answer,
+} from './harness/model-server.ts';
+import {connectSocket} from './harness/socket.ts';
 import {converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
 function record(home: string): unknown {
   return JSON.parse(readFileSync(join(home, 'daemon.json'), 'utf8'));
+}
+
+/** A character package as a home's `characters/<id>` directory holds it. */
+function characterPackage(id: string, displayName: string) {
+  return {'project02.character.json': characterJson(id, displayName)};
+}
+
+/** The character's state in a ready frame's snapshot. */
+function snapshotState(ready: Frame, characterId: string): string | undefined {
+  const {health} = JSON.parse(ready.data ?? '') as {
+    health: {characters: {id: string; state: string}[]};
+  };
+
+  return health.characters.find(character => character.id === characterId)
+    ?.state;
+}
+
+/** The character's states as the stream told them: its ready snapshot, then each change. */
+function statesOf(events: Events, characterId: string): string[] {
+  return events.frames.flatMap(frame => {
+    if (frame.event === 'ready') {
+      const state = snapshotState(frame, characterId);
+
+      return state === undefined ? [] : [state];
+    }
+
+    if (frame.event !== 'state_changed') {
+      return [];
+    }
+
+    const change = JSON.parse(frame.data ?? '') as {
+      characterId: string;
+      state: string;
+    };
+
+    return change.characterId === characterId ? [change.state] : [];
+  });
+}
+
+/** Settles once the stream says the character is in this state: in its ready snapshot, or later. */
+async function reached(
+  events: Events,
+  characterId: string,
+  state: string,
+): Promise<void> {
+  const ready = await events.next(frame => frame.event === 'ready');
+
+  if (snapshotState(ready, characterId) !== state) {
+    await events.next(frameOf('state_changed', {characterId, state}));
+  }
+}
+
+/** A port another program listens on until the test ends. */
+async function occupiedPort(): Promise<number> {
+  const server = createServer();
+
+  onTestFinished(
+    () =>
+      new Promise<void>(resolve => {
+        server.close(() => {
+          resolve();
+        });
+      }),
+  );
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  return (server.address() as AddressInfo).port;
+}
+
+/** The model calling one tool, and nothing else in that round. */
+function calling(name: string, input: object): Answer {
+  return {
+    chunks: [
+      ...toolCall({
+        index: 0,
+        id: `call_${name}`,
+        name,
+        arguments: JSON.stringify(input),
+      }),
+      finish('tool_calls'),
+    ],
+  };
 }
 
 it('lifecycle.address-line: serve prints its address as its first stdout line once it answers there', async () => {
@@ -44,6 +150,55 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
   daemon.signal('SIGINT');
   await daemon.exit();
   expect(record(home)).toEqual(address);
+});
+
+it('lifecycle.same-address-across-runs: a later run on the same home answers on the same address, its port and token', async () => {
+  const home = createHome();
+  const first = await startDaemon(home);
+
+  first.signal('SIGINT');
+  await first.exit();
+
+  const later = await startDaemon(home);
+
+  expect(later.url).toBe(first.url);
+  await expect(wireOf(later).health()).resolves.toMatchObject({
+    homeRoot: home,
+  });
+});
+
+it('lifecycle.record-temp-residue: the next record write removes the daemon.json temp file a killed writer left', async () => {
+  const home = createHome();
+  const killed = await startDaemon(home);
+
+  killed.signal('SIGKILL');
+  await killed.exit();
+
+  const residue = `.daemon.json.${String(killed.pid)}.${randomUUID()}.tmp`;
+
+  writeFileSync(join(home, residue), '{"protocolVersion":7,');
+  await startDaemon(home);
+  expect(readdirSync(home)).not.toContain(residue);
+});
+
+it("lifecycle.port-default-and-fallback: when another program holds the home's port, serve says so before its address line, binds a free port and records it for the next run", async () => {
+  const port = await occupiedPort();
+  const home = createHome({
+    'daemon.json': JSON.stringify({protocolVersion: 7, token: 'kept', port}),
+  });
+  const moved = await startDaemon(home);
+
+  expect(moved.stdout().split('\n').slice(0, 2)).toEqual([
+    `Port ${String(port)} was taken by another program; the address has changed. Open tabs and bookmarks need the new one.`,
+    `PROJECT02_GATEWAY=${moved.url}`,
+  ]);
+  expect(new URL(moved.origin).port).not.toBe(String(port));
+  expect(record(home)).toMatchObject({
+    port: Number(new URL(moved.origin).port),
+  });
+  moved.signal('SIGINT');
+  await moved.exit();
+  expect((await startDaemon(home)).url).toBe(moved.url);
 });
 
 it('lifecycle.stop-signals: SIGINT, SIGTERM and SIGHUP each stop it cleanly, with exit 0, nothing on stderr and no running process in the record', async () => {
@@ -127,6 +282,60 @@ it('lifecycle.second-serve-hands-back: a second serve on a running home hands ba
   });
 });
 
+it('lifecycle.second-serve-waits-takeover: a serve started while the holder stops says it waits for it, then takes the home over on the same address once the holder lets go', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const holder = await startDaemon(home);
+  const say = await converse(wireOf(holder), 'mira');
+  const held = model.hold();
+  const turn = say('Still there?', 'in-flight');
+
+  await held.arrived();
+  holder.signal('SIGINT');
+  await holder.printed('Stopping; finishing what is in flight.');
+
+  const next = serve(['--store', home]);
+
+  await next.printedOnStderr(
+    'Another daemon holds this home but is stopping; waiting for it.',
+  );
+  held.release(reply('Still here.'));
+  await turn;
+  expect((await next.address()).url).toBe(holder.url);
+});
+
+it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that does not answer says so and waits, takes the home on the record's address once the lease is freed, exits 1 asking to run it again when its wait runs out, and exits 1 quietly when stopped while waiting", async () => {
+  const home = createHome();
+  const holder = await startDaemon(home);
+
+  holder.signal('SIGSTOP');
+
+  const silent = `Another daemon holds this home but did not answer at ${holder.origin}/ within 5 seconds`;
+  const patient = serve(['--store', home]);
+  const impatient = serve(['--store', home], {
+    PROJECT02_TEST_DURATIONS: 'hold=1',
+  });
+  const stopped = serve(['--store', home]);
+
+  expect(await impatient.exit()).toBe(1);
+  expect(impatient.stdout()).toBe('');
+  expect(impatient.stderr()).toBe(
+    `${silent}, still; run this again once it has started or stopped.\n`,
+  );
+  await Promise.all([
+    patient.printedOnStderr(`${silent}; waiting for it.`),
+    stopped.printedOnStderr(`${silent}; waiting for it.`),
+  ]);
+  stopped.signal('SIGINT');
+  expect(await stopped.exit()).toBe(1);
+  expect(stopped.stdout()).toBe('');
+  expect(stopped.stderr()).toBe(`${silent}; waiting for it.\n`);
+  holder.signal('SIGKILL');
+  expect((await patient.address()).url).toBe(holder.url);
+});
+
 it('lifecycle.crash-lease-reclaimed: after SIGKILL the record still names the dead run, and the next serve takes the home on the same address', async () => {
   const home = createHome();
   const first = await startDaemon(home);
@@ -143,6 +352,48 @@ it('lifecycle.crash-lease-reclaimed: after SIGKILL the record still names the de
   });
 });
 
+it('lifecycle.unreadable-record-replaced: a daemon.json that cannot be read, truncated or without its token, is replaced with a fresh token, and stderr names it', async () => {
+  for (const unreadable of [
+    '{"protocolVersion":7,"token":"old-token","port":4',
+    JSON.stringify({protocolVersion: 7, port: 4242}),
+  ]) {
+    const home = createHome({'daemon.json': unreadable});
+    const daemon = await startDaemon(home);
+
+    daemon.signal('SIGINT');
+    await daemon.exit();
+    expect(daemon.stderr(), unreadable).toContain(join(home, 'daemon.json'));
+    expect(daemon.token, unreadable).not.toBe('old-token');
+    expect(record(home), unreadable).toEqual({
+      protocolVersion: 7,
+      token: daemon.token,
+      port: Number(new URL(daemon.origin).port),
+    });
+  }
+});
+
+it('lifecycle.unwritable-record: when the home refuses daemon.json, serve exits 1 saying the store could not be written, prints nothing, leaves no record and lets the home go for the next run', async () => {
+  // Its lock directory is there to take the lease: the record is the first write refused.
+  const home = createHome({'.locks': {}});
+
+  chmodSync(home, 0o500);
+  onTestFinished(() => {
+    chmodSync(home, 0o755);
+  });
+
+  const refused = serve(['--store', home]);
+
+  expect(await refused.exit()).toBe(1);
+  expect(refused.stderr()).toContain(
+    'Error: Local runtime store could not be written.',
+  );
+  expect(refused.stdout()).toBe('');
+  expect(readdirSync(home)).toEqual(['.locks']);
+  expect(readdirSync(join(home, '.locks'))).toEqual([]);
+  chmodSync(home, 0o755);
+  await startDaemon(home);
+});
+
 it('lifecycle.usage-errors: serve refuses the options a client owns with exit 1, naming the option on stderr', async () => {
   const home = createHome();
 
@@ -152,6 +403,30 @@ it('lifecycle.usage-errors: serve refuses the options a client owns with exit 1,
     expect(await run.exit(), option).toBe(1);
     expect(run.stderr(), option).toContain(`Unknown serve option: ${option}.`);
   }
+});
+
+it('lifecycle.test-switch-refusals: serve refuses to start, with exit 1, the reason on stderr and nothing written, on a durations key it does not read or gives twice, a value that is not whole milliseconds above 0, or a test provider other than deterministic', async () => {
+  const home = createHome();
+  const refusals = [
+    ['PROJECT02_TEST_DURATIONS', 'edit=100', '"edit"'],
+    ['PROJECT02_TEST_DURATIONS', 'grace=100,grace=200', '"grace"'],
+    ['PROJECT02_TEST_DURATIONS', 'grace=0', '"0"'],
+    ['PROJECT02_TEST_DURATIONS', 'grace=1.5', '"1.5"'],
+    ['PROJECT02_TEST_PROVIDER', 'nvidia', '"deterministic"'],
+  ] as const;
+  const runs = refusals.map(([variable, value, reason]) => ({
+    variable,
+    reason,
+    run: serve(['--store', home, '--init'], {[variable]: value}),
+  }));
+
+  for (const {variable, reason, run} of runs) {
+    expect(await run.exit(), reason).toBe(1);
+    expect(run.stderr(), reason).toContain(variable);
+    expect(run.stderr(), reason).toContain(reason);
+  }
+
+  expect(readdirSync(home)).toEqual([]);
 });
 
 it('lifecycle.store-consent-no-terminal: without --init and with no terminal to ask, serve on an empty directory exits 1 naming it and --init, and writes nothing', async () => {
@@ -192,18 +467,161 @@ it("lifecycle.store-init: serve --init makes a home of an empty directory, or of
   expect(readdirSync(seeded)).toContain('schema.json');
 });
 
+it('lifecycle.store-init-foreign-dir: serve --init refuses a directory holding foreign entries and creates nothing there', async () => {
+  const home = createHome({'notes.txt': 'mine'});
+  const run = serve(['--store', home, '--init']);
+
+  expect(await run.exit()).toBe(1);
+  expect(run.stdout()).toBe('');
+  expect(readdirSync(home)).toEqual(['notes.txt']);
+});
+
+it("lifecycle.store-init-residue: a live process's in-flight marker temp file does not stop a home's initialization, and one a dead process abandoned is refused", async () => {
+  const inFlight = createHome({
+    [`.schema.json.${String(process.pid)}.${randomUUID()}.tmp`]: '{',
+  });
+  const daemon = await startDaemon(inFlight);
+
+  await wireOf(daemon).start('mira');
+  expect(readdirSync(inFlight)).toContain('schema.json');
+  daemon.signal('SIGINT');
+  await daemon.exit();
+
+  const abandoned = `.schema.json.${String(daemon.pid)}.${randomUUID()}.tmp`;
+  const crashed = createHome({[abandoned]: '{'});
+  const refused = serve(['--store', crashed, '--init']);
+
+  expect(await refused.exit()).toBe(1);
+  expect(readdirSync(crashed)).toEqual([abandoned]);
+});
+
+it("lifecycle.leftover-record: a leftover daemon.json beside no marker is the home's own, and one that is a symlink or a directory is refused", async () => {
+  const leftover = createHome({
+    'daemon.json': JSON.stringify({
+      protocolVersion: 7,
+      token: 'leftover-token',
+      port: 41925,
+    }),
+  });
+
+  expect((await startDaemon(leftover)).token).toBe('leftover-token');
+
+  const elsewhere = join(createHome({'record.json': '{}'}), 'record.json');
+  const linked = createHome();
+  const directory = createHome({'daemon.json': {}});
+
+  symlinkSync(elsewhere, join(linked, 'daemon.json'));
+
+  for (const home of [linked, directory]) {
+    const run = serve(['--store', home, '--init']);
+
+    expect(await run.exit(), home).toBe(1);
+    expect(run.stdout(), home).toBe('');
+    expect(readdirSync(home), home).toEqual(['daemon.json']);
+  }
+
+  expect(readFileSync(elsewhere, 'utf8')).toBe('{}');
+});
+
+it('lifecycle.store-wrong-dir: serve refuses a character data directory, or a directory inside one, as its home and creates nothing, while a home whose path merely runs through a character-data directory serves', async () => {
+  const home = join(
+    createHome({'character-data': {home: {}}}),
+    'character-data',
+    'home',
+  );
+  const daemon = await startDaemon(home);
+
+  await wireOf(daemon).start('mira');
+  daemon.signal('SIGINT');
+  await daemon.exit();
+
+  const miraData = join(home, 'character-data', 'mira');
+  const before = readdirSync(miraData);
+
+  for (const store of [miraData, join(miraData, 'inner')]) {
+    const run = serve(['--store', store, '--init']);
+
+    expect(await run.exit(), store).toBe(1);
+    expect(run.stdout(), store).toBe('');
+  }
+
+  expect(readdirSync(miraData)).toEqual(before);
+});
+
+it('lifecycle.foreign-host-lease: a home whose lease names a process on another host is never taken over', async () => {
+  const lease = {
+    version: 1,
+    resourceKey: 'daemon',
+    nonce: randomUUID(),
+    // No process on this host can have this pid: only its host keeps the lease.
+    pid: 4_194_305,
+    hostname: 'elsewhere.invalid',
+    acquiredAt: '2026-10-18T00:00:00.000Z',
+  };
+  const lock = `${createHash('sha256').update('daemon').digest('hex')}.lock`;
+  const home = createHome({
+    '.locks': {[lock]: {'owner.json': JSON.stringify(lease)}},
+  });
+  const run = serve(['--store', home, '--init'], {
+    PROJECT02_TEST_DURATIONS: 'hold=500',
+  });
+
+  expect(await run.exit()).toBe(1);
+  expect(run.stdout()).toBe('');
+  expect(readdirSync(home)).toEqual(['.locks']);
+  expect(readdirSync(join(home, '.locks'))).toEqual([lock]);
+  expect(
+    JSON.parse(readFileSync(join(home, '.locks', lock, 'owner.json'), 'utf8')),
+  ).toEqual(lease);
+});
+
+it('lifecycle.roster-boot: at boot every enabled character starts, and a disabled one is not started: health shows it switched off and not_started', async () => {
+  const daemon = await startDaemon(
+    createHome({
+      characters: {zeta: characterPackage('zeta', 'Zeta')},
+      'character-data': {
+        mira: {'config.json': configJson({project02: {enabled: false}})},
+      },
+    }),
+    fixedReplies,
+  );
+
+  await reached(await openEvents(daemon), 'zeta', 'ready');
+  expect(await wireOf(daemon).health()).toMatchObject({
+    characters: [
+      {id: 'mira', enabled: false, state: 'not_started'},
+      {id: 'zeta', enabled: true, state: 'ready'},
+    ],
+  });
+});
+
+it('lifecycle.no-provider-chosen: until a model provider is chosen no character starts: health shows each failed saying so, and an open is refused character_unavailable with that sentence', async () => {
+  const noProvider =
+    'No model provider is chosen. Choose one on the settings page.';
+  const wire = wireOf(
+    await startDaemon(
+      createHome({characters: {zeta: characterPackage('zeta', 'Zeta')}}),
+    ),
+  );
+
+  await wire.start('mira');
+  await wire.start('zeta');
+  expect(await wire.health()).toMatchObject({
+    characters: [
+      {id: 'mira', state: 'failed', diagnostic: noProvider},
+      {id: 'zeta', state: 'failed', diagnostic: noProvider},
+    ],
+  });
+  expect(await wire.open('mira')).toMatchObject({
+    status: 'refused',
+    reason: 'character_unavailable',
+    message: expect.stringContaining(noProvider) as string,
+  });
+});
+
 it('lifecycle.roster-health: health lists each installed character with its display name, switch and state, and a damaged data directory hides none', async () => {
   const home = createHome({
-    characters: {
-      zeta: {
-        'project02.character.json': JSON.stringify({
-          format: 'project02.character.v1',
-          identity: {id: 'zeta', displayName: 'Zeta'},
-          persona: {system: ['You are Zeta.']},
-          meta: {version: '1.0.0'},
-        }),
-      },
-    },
+    characters: {zeta: characterPackage('zeta', 'Zeta')},
     'character-data': {zeta: {'schema.json': 'not json'}},
   });
   const wire = wireOf(await startDaemon(home, fixedReplies));
@@ -227,4 +645,290 @@ it('lifecycle.roster-health: health lists each installed character with its disp
       }),
     ]),
   );
+});
+
+it("lifecycle.health-diagnostics: health carries the protocol version, the home, each config diagnostic at its path and each package diagnostic with its package's path", async () => {
+  const home = createHome({
+    'config.json': configJson({project02: {character: 'mira'}}),
+    characters: {broken: {'project02.character.json': '{not json'}},
+  });
+
+  expect(await wireOf(await startDaemon(home)).health()).toMatchObject({
+    protocolVersion: 7,
+    homeRoot: home,
+    config: {
+      diagnostics: [{severity: 'error', path: 'project02.character'}],
+    },
+    packages: {
+      diagnostics: [
+        {
+          code: 'invalid_descriptor',
+          path: join(home, 'characters', 'broken', 'project02.character.json'),
+        },
+      ],
+    },
+  });
+});
+
+it('lifecycle.start-verb: starting a character that is not installed is refused unknown_character, saying it was not found', async () => {
+  const wire = wireOf(await startDaemon(createHome()));
+
+  expect(await wire.start('ghost')).toMatchObject({
+    status: 'refused',
+    reason: 'unknown_character',
+    message: expect.stringContaining('"ghost" was not found') as string,
+  });
+});
+
+it('lifecycle.start-retry-after-fix: a character whose config is invalid fails naming the field, and once the file is fixed a start reads it again and the character is ready', async () => {
+  const home = createHome({
+    'config.json': configJson({project02: {contextWindowTokens: -5}}),
+  });
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  expect(await wire.start('mira')).toMatchObject({
+    character: {
+      state: 'failed',
+      diagnostic: expect.stringContaining('contextWindowTokens') as string,
+    },
+  });
+  writeFileSync(join(home, 'config.json'), configJson({}));
+  expect(await wire.start('mira')).toMatchObject({
+    character: {state: 'ready'},
+  });
+});
+
+it('lifecycle.boot-failure-no-crash-loop: a boot failure stays failed with its diagnostic, never started again until the stop', async () => {
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({project02: {contextWindowTokens: -5}}),
+    }),
+  );
+  const events = await openEvents(daemon);
+
+  await reached(events, 'mira', 'failed');
+  expect(await wireOf(daemon).health()).toMatchObject({
+    characters: [
+      {
+        id: 'mira',
+        state: 'failed',
+        diagnostic: expect.stringContaining('contextWindowTokens') as string,
+      },
+    ],
+  });
+  daemon.signal('SIGINT');
+  await events.ended();
+
+  const states = statesOf(events, 'mira');
+
+  expect(states.slice(states.indexOf('failed'))).toEqual([
+    'failed',
+    'stopping',
+    'stopped',
+  ]);
+});
+
+it('lifecycle.boot-failure-retried-by-change: a character whose boot failed on invalid config is retried by the next config change once the file is fixed, and becomes ready', async () => {
+  const home = createHome({
+    'config.json': configJson({project02: {contextWindowTokens: -5}}),
+  });
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+
+  await reached(events, 'mira', 'failed');
+  writeFileSync(join(home, 'config.json'), configJson({}));
+
+  const view = (await wire.configView({scope: 'global'})) as {
+    fingerprint: string;
+  };
+
+  await wire.configChange({
+    target: {scope: 'global'},
+    expectedFingerprint: view.fingerprint,
+    operation: {kind: 'set', path: 'project02.userDisplayName', value: 'Robin'},
+  });
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
+  );
+});
+
+it('lifecycle.startup-problems-stderr: a character package that fails discovery is named on stderr with its code while the other characters are served', async () => {
+  const home = createHome({
+    characters: {broken: {'project02.character.json': '{not json'}},
+  });
+  const daemon = await startDaemon(home, fixedReplies);
+
+  expect(await wireOf(daemon).start('mira')).toMatchObject({
+    character: {state: 'ready'},
+  });
+  daemon.signal('SIGINT');
+  await daemon.exit();
+  expect(daemon.stderr()).toContain(
+    `Character package ${join(home, 'characters', 'broken', 'project02.character.json')} (invalid_descriptor)`,
+  );
+});
+
+it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parked and a reload queued behind it ends at once instead of at the deadline, and the character ends stopped', async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({
+        project02: model.settings,
+        plugins: {'demo-config': {enabled: true}},
+      }),
+    }),
+  );
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const events = await openEvents(daemon);
+
+  model.answer(calling('runtime_plugin_config', {pluginId: 'demo-config'}));
+
+  const inspected = model.hold();
+
+  model.answer(reply('Never mind.'));
+
+  const turn = say('Be warmer.', 'warmer');
+  const {messages} = (await inspected.arrived()).body as {
+    messages: {content: string}[];
+  };
+  const {output} = JSON.parse(messages.at(-1)?.content ?? '') as {
+    output: {fingerprint: string};
+  };
+
+  inspected.release(
+    calling('runtime_plugin_config_update', {
+      pluginId: 'demo-config',
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: output.fingerprint,
+    }),
+  );
+  await events.next(frameOf('confirmation_requested'));
+
+  const mira = {scope: 'character', characterId: 'mira'} as const;
+  const view = (await wire.configView(mira)) as {fingerprint: string};
+
+  await wire.configChange({
+    target: mira,
+    expectedFingerprint: view.fingerprint,
+    operation: {
+      kind: 'set',
+      path: 'project02.contextWindowTokens',
+      value: 4096,
+    },
+  });
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'reloading'}),
+  );
+  daemon.signal('SIGINT');
+  await turn;
+  expect(await daemon.exit()).toBe(0);
+  await events.ended();
+  expect(statesOf(events, 'mira').at(-1)).toBe('stopped');
+});
+
+it('lifecycle.stop-not-held-by-stalled-client: a stop does not wait on a client that stalled halfway through its request body', async () => {
+  // A minute's grace: a stop that waited on the stalled client would outlast every wait here.
+  const daemon = await startDaemon(createHome(), {
+    PROJECT02_TEST_DURATIONS: 'grace=60000',
+  });
+  const stalled = await connectSocket(daemon);
+
+  stalled.write(
+    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n`,
+  );
+  await stalled.holds('HTTP/1.1 100 Continue\r\n\r\n');
+  stalled.write('{"conversationId":');
+  daemon.signal('SIGINT');
+  expect(await daemon.exit()).toBe(0);
+  await stalled.closed();
+});
+
+it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped reading a large answer the grace, about two seconds, then cuts it and exits', async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: model.settings})}),
+  );
+  const wire = wireOf(daemon);
+
+  await wire.start('mira');
+
+  const opened = await wire.open('mira');
+
+  if (opened.status !== 'opened') {
+    throw new Error(`Mira has no conversation: ${JSON.stringify(opened)}.`);
+  }
+
+  // JSON writes a control character as six bytes: the answer is many
+  // times what the sockets between the daemon and the client hold.
+  model.answer(reply('\u0001'.repeat(2 * 1024 * 1024)));
+
+  const body = JSON.stringify({
+    conversationId: opened.conversationId,
+    senderId: opened.userParticipantId,
+    text: 'Tell me everything.',
+    source: 'web',
+    clientMessageId: 'everything',
+  });
+  const reader = await connectSocket(daemon);
+
+  reader.write(
+    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: ${String(Buffer.byteLength(body))}\r\n\r\n${body}`,
+  );
+  await reader.holds('\r\n\r\n');
+  reader.pause();
+
+  // The monotonic clock: the wall clock is adjusted under WSL2.
+  const stopped = performance.now();
+
+  daemon.signal('SIGINT');
+  expect(await daemon.exit()).toBe(0);
+  // Timers fire up to a few milliseconds early.
+  expect(performance.now() - stopped).toBeGreaterThanOrEqual(1_900);
+  reader.resume();
+  await reader.closed();
+
+  const answer = reader.received();
+  const headEnd = answer.indexOf('\r\n\r\n');
+  const announced = Number(
+    /^content-length: (\d+)$/imu.exec(
+      answer.subarray(0, headEnd).toString('latin1'),
+    )?.[1],
+  );
+
+  expect(answer.length - headEnd - 4).toBeLessThan(announced);
+});
+
+it('lifecycle.first-run-port: a first run on a home binds a free port the system hands it, names it in its address line and records it', async () => {
+  const home = createHome();
+  const daemon = await startDaemon(home);
+
+  expect(daemon.stdout()).toBe(`PROJECT02_GATEWAY=${daemon.url}\n`);
+  expect(record(home)).toMatchObject({
+    port: Number(new URL(daemon.origin).port),
+  });
+});
+
+it('lifecycle.second-signal-exits: a second stop signal during a stop ends the process at once, and the next start reclaims the lease it left', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const daemon = await startDaemon(home);
+  const say = await converse(wireOf(daemon), 'mira');
+  const held = model.hold();
+  // Never released: a stop that waited for this turn would never end.
+  const turn = say('Still there?', 'held');
+
+  await held.arrived();
+  daemon.signal('SIGINT');
+  await daemon.printed('Stopping; finishing what is in flight.');
+  daemon.signal('SIGTERM');
+  await daemon.exit();
+  await expect(turn).rejects.toThrow();
+  expect(record(home)).toMatchObject({running: {pid: daemon.pid}});
+  expect((await startDaemon(home)).url).toBe(daemon.url);
 });

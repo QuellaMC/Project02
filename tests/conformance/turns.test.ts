@@ -15,7 +15,7 @@ import {
   visibleReply,
   type ModelRequest,
 } from './harness/model-server.ts';
-import {exchange} from './harness/socket.ts';
+import {exchange, jsonFrom} from './harness/http.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
@@ -168,21 +168,21 @@ it('turns.stamp-pattern: a turn whose source stamp breaks the pattern is a 400 b
   const events = await openEvents(daemon);
 
   for (const source of ['we b', '-web', 'w'.repeat(65)]) {
-    const refused = exchange(daemon, {
+    const refused = await exchange(daemon, {
       method: 'POST',
       path: '/api/turns',
-      body: {
+      headers: jsonFrom(daemon),
+      body: JSON.stringify({
         conversationId,
         senderId: userParticipantId,
         text: 'Hello?',
         source,
         clientMessageId: 'stamped',
-      },
+      }),
     });
 
-    expect((await refused.head()).status, source).toBe(400);
-    await refused.ended();
-    expect(JSON.parse(refused.body()), source).toMatchObject({
+    expect(refused.status, source).toBe(400);
+    expect(JSON.parse(await refused.whole()), source).toMatchObject({
       error: {code: 'invalid_request'},
     });
   }

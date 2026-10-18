@@ -12,7 +12,7 @@ import {
   visibleReply,
   type Answer,
 } from './harness/model-server.ts';
-import {exchange} from './harness/socket.ts';
+import {bearer, exchange} from './harness/http.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
@@ -50,9 +50,12 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   await wire.start('mira');
   await wire.pairingRequest('telegram', {id: 'friend', label: 'A friend'});
 
-  const stream = exchange(daemon, {method: 'GET', path: '/api/events'});
+  const stream = await exchange(daemon, {
+    path: '/api/events',
+    headers: bearer(daemon),
+  });
 
-  expect((await stream.head()).headers).toMatchObject({
+  expect(stream.headers).toMatchObject({
     'content-type': expect.stringMatching(/^text\/event-stream/u) as string,
     'cache-control': 'no-store',
   });
@@ -207,7 +210,10 @@ it('stream.shutdown-ends-streams: a stop ends each stream only once every frame 
   );
   const say = await converse(wireOf(daemon), 'mira');
   const keepingUp = await openEvents(daemon);
-  const lagging = exchange(daemon, {method: 'GET', path: '/api/events'});
+  const lagging = await exchange(daemon, {
+    path: '/api/events',
+    headers: bearer(daemon),
+  });
 
   await lagging.received('event: ready');
   lagging.pause();
@@ -217,10 +223,12 @@ it('stream.shutdown-ends-streams: a stop ends each stream only once every frame 
   await daemon.printed('Stopping; finishing what is in flight.');
   await keepingUp.ended();
 
-  const late = exchange(daemon, {method: 'GET', path: '/api/events'});
+  const late = await exchange(daemon, {
+    path: '/api/events',
+    headers: bearer(daemon),
+  });
 
-  expect((await late.head()).status).toBe(503);
-  await late.ended();
+  expect(late.status).toBe(503);
   lagging.resume();
   await lagging.ended();
   expect(lagging.body()).toContain(`id: ${String(keepingUp.lastEventId())}\n`);
@@ -241,9 +249,9 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
     });
   // A connector's stream: the presence it holds shows when the daemon
   // lets the stream go.
-  const stalled = exchange(daemon, {
-    method: 'GET',
+  const stalled = await exchange(daemon, {
     path: '/api/events?connector=telegram',
+    headers: bearer(daemon),
   });
 
   await stalled.received('event: ready');
@@ -533,23 +541,22 @@ it('stream.connector-presence: a stream opened with ?connector= holds its connec
     health: {connectors: [{id: 'telegram', connected}]},
   });
   const connector = async () => {
-    const stream = exchange(daemon, {
-      method: 'GET',
+    const stream = await exchange(daemon, {
       path: '/api/events?connector=telegram',
+      headers: bearer(daemon),
     });
 
     await stream.received('event: ready');
 
     return stream;
   };
-  const unknown = exchange(daemon, {
-    method: 'GET',
+  const unknown = await exchange(daemon, {
     path: '/api/events?connector=discord',
+    headers: bearer(daemon),
   });
 
-  expect((await unknown.head()).status).toBe(400);
-  await unknown.ended();
-  expect(JSON.parse(unknown.body())).toEqual({
+  expect(unknown.status).toBe(400);
+  expect(JSON.parse(await unknown.whole())).toEqual({
     error: {
       code: 'invalid_request',
       message: expect.stringContaining('telegram') as string,
