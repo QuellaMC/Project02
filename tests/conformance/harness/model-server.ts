@@ -36,6 +36,14 @@ export type Held = {
   readonly release: (answer: Answer) => void;
 };
 
+/** A streamed answer the test writes piece by piece, so a draft grows at the test's pace. */
+export type Driven = {
+  readonly arrived: () => Promise<ModelRequest>;
+  readonly write: (chunks: readonly unknown[]) => void;
+  /** Ends the answer with `[DONE]`. */
+  readonly end: () => void;
+};
+
 export type ModelServer = {
   /** The `project02` settings of a home's `config.json` that point the daemon here. */
   readonly settings: {
@@ -48,6 +56,8 @@ export type ModelServer = {
   readonly answer: (...answers: Answer[]) => void;
   /** The next request waits for the test to release it; never released, it is silence. */
   readonly hold: () => Held;
+  /** The next request is answered as the test writes, piece by piece. */
+  readonly stream: () => Driven;
 };
 
 type Scripted =
@@ -55,6 +65,10 @@ type Scripted =
   | {
       readonly reached: (request: ModelRequest) => void;
       readonly released: Promise<Answer>;
+    }
+  | {
+      readonly reached: (request: ModelRequest) => void;
+      readonly drive: (response: ServerResponse) => void;
     };
 
 export async function startModelServer(): Promise<ModelServer> {
@@ -88,7 +102,10 @@ export async function startModelServer(): Promise<ModelServer> {
       },
     };
 
-    if ('released' in next) {
+    if ('drive' in next) {
+      next.reached(recorded);
+      next.drive(response);
+    } else if ('released' in next) {
       next.reached(recorded);
       give(await next.released, request, response);
     } else {
@@ -131,6 +148,53 @@ export async function startModelServer(): Promise<ModelServer> {
         release: release.resolve,
       };
     },
+    stream: () => {
+      const arrival = Promise.withResolvers<ModelRequest>();
+      let response: ServerResponse | undefined;
+      let pending: unknown[] = [];
+      let ended = false;
+      const flush = (): void => {
+        if (response === undefined) {
+          return;
+        }
+
+        for (const chunk of pending) {
+          response.write(dataLine(chunk));
+        }
+
+        pending = [];
+
+        if (ended) {
+          response.end('data: [DONE]\n\n');
+        }
+      };
+
+      script.push({
+        reached: arrival.resolve,
+        drive: driven => {
+          response = driven.writeHead(200, {
+            'content-type': 'text/event-stream',
+          });
+          flush();
+        },
+      });
+
+      return {
+        arrived: () =>
+          within(
+            'the driven request to reach the model server',
+            arrival.promise,
+          ),
+        write: chunks => {
+          pending.push(...chunks);
+          flush();
+        },
+        end: () => {
+          ended = true;
+          flush();
+        },
+      };
+    },
   };
 }
 
@@ -159,9 +223,7 @@ function give(
     response.flushHeaders();
 
     for (const chunk of answer.chunks) {
-      response.write(
-        `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}\n\n`,
-      );
+      response.write(dataLine(chunk));
     }
 
     // Ended, not destroyed: the chunks written so far still go out first.
@@ -171,6 +233,10 @@ function give(
       response.end('data: [DONE]\n\n');
     }
   }
+}
+
+function dataLine(chunk: unknown): string {
+  return `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}\n\n`;
 }
 
 /** Plain content, one chunk per piece, cut at the given offsets. */
@@ -249,4 +315,14 @@ export function reply(words: string): Answer {
 
 function pieces(whole: string, cuts: readonly number[]): string[] {
   return [0, ...cuts].map((start, at) => whole.slice(start, cuts[at]));
+}
+
+/**
+ * A model that never decides, for as many rounds as one turn gives it:
+ * each answer neither replies nor calls a tool, so the parser refuses it,
+ * and the turn ends rejected once its rounds — the first and 99 more — are
+ * spent.
+ */
+export function undecided(rounds = 100): Answer[] {
+  return Array.from({length: rounds}, () => ({chunks: [finish('stop')]}));
 }
