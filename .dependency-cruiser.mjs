@@ -244,6 +244,22 @@ export default {
         ],
       },
     },
+    {
+      name: 'conformance-is-black-box',
+      comment:
+        'tests/conformance is the suite the TypeScript daemon and the Rust ' +
+        'one must both pass, so it reaches a daemon only from outside: its ' +
+        'process, its address, its files. It may import Node built-ins, ' +
+        'vitest and its own files — never src or tests/support, type-only ' +
+        'imports included. Green (zero baseline entries).',
+      severity: 'error',
+      from: {path: '^tests/conformance/'},
+      to: {
+        // Unanchored: pnpm nests the package under node_modules/.pnpm/.
+        pathNot: ['^tests/conformance/', '^vitest$', 'node_modules/vitest/'],
+        dependencyTypesNot: ['core'],
+      },
+    },
   ],
   options: {
     doNotFollow: {path: 'node_modules'},
