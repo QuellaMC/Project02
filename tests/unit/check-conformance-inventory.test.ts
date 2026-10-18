@@ -86,6 +86,7 @@ describe('the conformance inventory check', () => {
         "it('turns.f: names a retired row', () => {});",
         "it.skip('turns.g: parked, so no proof', () => {});",
         "it.fails('turns.h: passes by failing, so no proof', () => {});",
+        "describe.skip('a block that parks every test under it', () => {});",
       ],
     });
 
@@ -100,6 +101,7 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/turns.test.ts:4: the title "no row id here" is not "<row id>: <sentence>".',
       'conformance-inventory: tests/conformance/turns.test.ts:5: lifecycle.z is not a conformance row of tests/conformance/inventory.csv.',
       'conformance-inventory: tests/conformance/turns.test.ts:6: turns.f is not a conformance row of tests/conformance/inventory.csv.',
+      'conformance-inventory: tests/conformance/turns.test.ts:9: a describe block; the suite is flat, so no block above a test can park it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped or expects to fail.',
