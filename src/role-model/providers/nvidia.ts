@@ -34,6 +34,7 @@ import {
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
 } from '../../plugins/api/index.ts';
+import {endpointUnder} from '../../shared/base-url.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {scrubReasoningBlocks} from '../api/reasoning.ts';
 
@@ -98,8 +99,9 @@ type NvidiaProviderErrorCode =
 export function createNvidiaRoleModelProviderAdapter(
   options: CreateNvidiaRoleModelProviderAdapterOptions = {},
 ): RoleModelAdapter {
-  const endpoint = chatCompletionsEndpoint(
+  const endpoint = endpointUnder(
     options.baseUrl ?? nvidiaCloudBaseUrl,
+    'chat/completions',
   );
   const model = options.model ?? 'nvidia/nemotron-3-nano-30b-a3b';
   const apiKey =
@@ -281,15 +283,6 @@ export function createNvidiaRoleModelProviderAdapter(
       }
     },
   } satisfies RoleModelAdapter);
-}
-
-/** A base given with or without its trailing slash names one endpoint. */
-function chatCompletionsEndpoint(baseUrl: string): string {
-  const url = new URL(baseUrl);
-
-  url.pathname = `${url.pathname.replace(/\/+$/u, '')}/chat/completions`;
-
-  return url.href;
 }
 
 function createNvidiaRequestBody(options: {

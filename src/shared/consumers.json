@@ -1,5 +1,5 @@
 {
-  "base-url.ts": ["frontends", "plugins", "runtime"],
+  "base-url.ts": ["frontends", "plugins", "role-model", "runtime"],
   "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
   "daemon-record.ts": ["frontends", "gateway", "runtime"],
   "fetch-failure.ts": ["frontends", "gateway"],
