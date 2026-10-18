@@ -66,12 +66,18 @@ export function createSettingsVerbs(tab: {
   /** Each change has a ticket of its own; its end is known by it. */
   let changes = 0;
   let setupJudged = false;
+  /** Whether the settings screen open is the one on the target. */
+  const isOpen = (target: ConfigTarget): boolean => {
+    const open = getState().settings;
+
+    return open !== undefined && sameTarget(open.target, target);
+  };
   /**
    * Reads the screen's view and lands it in one step with `alongside`.
    * Views land in the order their reads began: one that settles after a
    * later read's view has landed brings only `alongside`. Whether
    * `alongside` landed: a read that fails brings nothing, and is said
-   * unless a later one is on its way.
+   * unless a later one is on its way or its screen was left.
    */
   const readView = async (
     target: ConfigTarget,
@@ -83,7 +89,7 @@ export function createSettingsVerbs(tab: {
     try {
       view = await client.configView(target);
     } catch (error: unknown) {
-      if (mine === reads) {
+      if (mine === reads && isOpen(target)) {
         apply(current => noticed(current, problem(error)));
       }
 
@@ -155,22 +161,21 @@ export function createSettingsVerbs(tab: {
     const moved =
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
-    const stillOpen = (): boolean => {
-      const open = getState().settings;
 
-      return open !== undefined && sameTarget(open.target, page.target);
-    };
-
-    if (!moved || !stillOpen()) {
+    if (!moved || !isOpen(page.target)) {
       apply(ended);
 
       return;
     }
 
-    while (!(await readView(page.target, ended)) && stillOpen()) {
+    while (!(await readView(page.target, ended))) {
       await new Promise(resolve => {
         setTimeout(resolve, rereadRetryMs);
       });
+
+      if (!isOpen(page.target)) {
+        return;
+      }
     }
   };
 

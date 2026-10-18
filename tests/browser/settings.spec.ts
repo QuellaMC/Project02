@@ -190,6 +190,26 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
+test('stops reading a screen that was left while its reads failed, and says nothing of it', async ({
+  daemon,
+  page,
+}) => {
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+
+  const note = row(page, 'plugins/demo-config/operatorNote');
+
+  await page.route('**/api/config?*', route => route.abort());
+  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
+  await note.getByRole('button', {name: 'Save'}).click();
+  await expect(page.locator('.notice')).toBeVisible();
+  await page.getByRole('button', {name: /^Mira\b/u}).click();
+  await expect(page.locator('.notice')).toHaveCount(0);
+  // Past two of the retries a screen still open would make: none is made.
+  await page.waitForTimeout(2_500);
+  await expect(page.locator('.notice')).toHaveCount(0);
+});
+
 test.describe('a roster with a character that is off', () => {
   test.use({disabledCharacters: ['nova']});
 
