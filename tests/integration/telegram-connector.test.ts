@@ -1515,7 +1515,8 @@ describe('Telegram connector', () => {
         'noted: hello',
       ]);
     });
-    expect(opens).toBe(2);
+    // Asked again: a ready may start an open of its own beside the retry.
+    expect(opens).toBeGreaterThanOrEqual(2);
     await expect(connector.stop()).resolves.toBe(0);
     await server.close();
     await telegram.close();

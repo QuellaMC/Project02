@@ -166,7 +166,14 @@ export function changeSent(
       ...withoutSaved(settings),
       edits,
       problems,
-      saving: {ticket, key, ...(secret || text === undefined ? {} : {text})},
+      saving: {
+        ticket,
+        key,
+        ...(secret || text === undefined ? {} : {text}),
+        ...(settings.view?.status === 'ok'
+          ? {against: settings.view.fingerprint}
+          : {}),
+      },
     };
   });
 }
@@ -175,10 +182,10 @@ export function changeSent(
  * How the change ended, known by its ticket: a screen opened since, or a
  * later change on it, is waiting on nothing this one can answer.
  * `applied`: the text that was sent is done with, and a newer word typed
- * meanwhile stays to be saved; the fingerprint the answer carries is the
- * view's from now on, so the next save does not conflict with this one
- * even when the re-read it lands with failed; one that was read replaces
- * the view whole.
+ * meanwhile stays to be saved; the fingerprint the answer carries
+ * replaces the one the change was made against, so the next save does
+ * not conflict with this one even when the re-read it lands with failed,
+ * while a view read since keeps its own, being newer.
  * `refused` as `invalid`: the daemon's reason stays at the field, with
  * the text. `conflict`: someone else saved first; said once, and the
  * session re-reads, with the text still in the row. A character that is
@@ -220,7 +227,8 @@ export function changeEnded(
       ...state,
       settings: {
         ...page,
-        ...(page.view?.status === 'ok'
+        ...(page.view?.status === 'ok' &&
+        page.view.fingerprint === saving.against
           ? {view: {...page.view, fingerprint: outcome.fingerprint}}
           : {}),
         edits,
