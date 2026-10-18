@@ -239,12 +239,12 @@ describe('web settings', () => {
     expect(landed.settings?.edits.get(tone)).toBe('neutral');
     expect(landed.settings?.saved).toBeUndefined();
     expect(landed.settings?.saving).toBeUndefined();
-    // The answer's fingerprint is the view's at once: a save made before
-    // the re-read lands does not conflict with this one.
+    // The answer leaves the view as read: its fingerprint comes from the
+    // read that lands with the answer, never from the answer.
     expect(
       landed.settings?.view?.status === 'ok' &&
         landed.settings.view.fingerprint,
-    ).toBe('f2');
+    ).toBe('f1');
 
     // Left for the home and came back: a fresh screen, waiting on nothing.
     const back = settingsOpened(settingsOpened(sent, home), mira);
