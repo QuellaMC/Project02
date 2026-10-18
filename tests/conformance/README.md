@@ -39,6 +39,7 @@ against any other build of it.
 | `harness/wire.ts`         | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                 |
 | `harness/events.ts`       | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                            |
 | `harness/model-server.ts` | An OpenAI-compatible model on loopback that answers as the test scripts it, holds a request open on demand and keeps every request. |
+| `harness/socket.ts`       | One request on a socket of its own: the status, headers and bytes fetch hides, and a client that stops reading or hangs up.         |
 | `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                          |
 
 ## Environment
