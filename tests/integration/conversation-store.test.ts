@@ -148,7 +148,7 @@ describe('local runtime conversation store', () => {
         homeRoot,
         conversationId: conversation.id,
       }),
-    ).rejects.toMatchObject({code: 'conversation_busy'});
+    ).rejects.toMatchObject({code: 'storage_busy'});
 
     const reentrant = await acquireLocalRuntimeConversationWriterLease({
       homeRoot,

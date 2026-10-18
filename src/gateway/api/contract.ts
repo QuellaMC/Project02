@@ -79,7 +79,6 @@ export type GatewayRefusalReason =
   | 'unknown_conversation'
   /** The conversation's record could not be read; the message says why. */
   | 'conversation_unreadable'
-  | 'conversation_busy'
   | 'sender_not_supported'
   | 'character_unavailable'
   | 'invalid_message'
@@ -155,8 +154,7 @@ export type OpenOutcome =
     }
   | {
       readonly status: 'refused';
-      readonly reason:
-        'unknown_character' | 'character_unavailable' | 'conversation_busy';
+      readonly reason: 'unknown_character' | 'character_unavailable';
       readonly message: string;
     }
   | StorageFailure;

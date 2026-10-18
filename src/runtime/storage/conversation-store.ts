@@ -99,7 +99,6 @@ export async function acquireLocalRuntimeConversationWriterLease(options: {
       options.conversationId,
     )}`,
     waitTimeoutMs: 0,
-    busyCode: 'conversation_busy',
     ...(options.ownerToken === undefined
       ? {}
       : {ownerToken: options.ownerToken}),

@@ -588,16 +588,12 @@ async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
       userDisplayName: assembled.userDisplayName,
     });
   } catch (error: unknown) {
-    // Another process holds the thread, or the store itself is broken:
-    // both are the caller's to hear about, and neither is a bug.
     if (error instanceof LocalRuntimeStorageContractError) {
-      return error.code === 'conversation_busy'
-        ? refusedOpen('conversation_busy', error.message)
-        : Object.freeze({
-            status: 'failed' as const,
-            code: error.code,
-            message: error.message,
-          });
+      return Object.freeze({
+        status: 'failed' as const,
+        code: error.code,
+        message: error.message,
+      });
     }
 
     throw error;
@@ -621,18 +617,13 @@ async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
 }
 
 function unavailableOutcome(context: RuntimeContext): OpenOutcome {
-  return refusedOpen(
-    'character_unavailable',
-    `Character "${context.characterId}" is not ready (state ` +
+  return Object.freeze({
+    status: 'refused' as const,
+    reason: 'character_unavailable' as const,
+    message:
+      `Character "${context.characterId}" is not ready (state ` +
       `"${context.state}").`,
-  );
-}
-
-function refusedOpen(
-  reason: Extract<OpenOutcome, {status: 'refused'}>['reason'],
-  message: string,
-): OpenOutcome {
-  return Object.freeze({status: 'refused' as const, reason, message});
+  });
 }
 
 function deliverMessage(
