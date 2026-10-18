@@ -11,6 +11,7 @@ export type RoleModelProviderSettings = Pick<
 /** Undefined until a provider is chosen. */
 export function createRoleModelProviderAdapter(
   settings: RoleModelProviderSettings,
+  requestTimeoutMs?: number,
 ): RoleModelAdapter | undefined {
   if (settings.roleModelProvider !== 'nvidia') {
     return undefined;
@@ -26,5 +27,6 @@ export function createRoleModelProviderAdapter(
     ...(settings.nvidiaBaseUrl === undefined
       ? {}
       : {baseUrl: settings.nvidiaBaseUrl}),
+    ...(requestTimeoutMs === undefined ? {} : {requestTimeoutMs}),
   });
 }

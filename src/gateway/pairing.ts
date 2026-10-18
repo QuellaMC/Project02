@@ -80,7 +80,7 @@ export function createPairingSeam(seams: {
   ) => AllowlistReading;
   readonly applyChange: (change: ConfigChange) => Promise<ConfigChangeOutcome>;
   readonly emit: (event: GatewayEvent) => void;
-  readonly ttlMs?: number;
+  readonly ttlMs?: number | undefined;
 }): PairingSeam {
   const ttlMs = seams.ttlMs ?? pairingTtlMs;
   const waiting = new Map<string, Waiting>();

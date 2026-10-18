@@ -15,9 +15,9 @@ import type {ApiEnv} from './env.ts';
 
 export type EventStreamsOptions = {
   /** Keeps an idle connection alive through client body timeouts; tests shorten it. */
-  readonly heartbeatMs?: number;
+  readonly heartbeatMs?: number | undefined;
   /** How long a client may leave one frame untaken before it is treated as gone; tests shorten it. */
-  readonly graceMs?: number;
+  readonly graceMs?: number | undefined;
   /** How much of the log is kept for a client that returns; tests shorten it. */
   readonly replayBytes?: number;
 };

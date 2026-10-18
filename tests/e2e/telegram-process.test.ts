@@ -39,9 +39,10 @@ describe('the Telegram connector, as a process', () => {
       '--init',
     ]);
     const connector = await spawnProcess(
-      'tests/e2e/telegram-entry.ts',
-      ['--store', homeRoot, '--telegram-api', telegram.baseUrl],
+      'src/frontends/telegram/main.ts',
+      ['--store', homeRoot],
       line => line === 'Telegram: @mira_bot answers for Mira.',
+      {PROJECT02_TEST_TELEGRAM_API: telegram.baseUrl},
     );
 
     expect(connector.stdout).toContain(

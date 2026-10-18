@@ -58,7 +58,7 @@ const runtimePluginToolApprovalTimeoutMs = 5 * 60_000;
 async function requestRuntimePluginToolConfirmation(
   handler: RuntimePluginToolConfirmationHandler,
   request: RuntimePluginToolConfirmationRequest,
-  timeoutMs = runtimePluginToolApprovalTimeoutMs,
+  timeoutMs: number,
 ): Promise<
   RuntimePluginToolConfirmationDecision | {readonly status: 'timed_out'}
 > {
@@ -103,16 +103,25 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     RuntimePluginToolCallExecutionResult,
     {readonly status: 'accepted'}
   >;
-  readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
-  readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+  readonly confirmationHandler:
+    RuntimePluginToolConfirmationHandler | undefined;
+  readonly confirmationTimeoutMs: number | undefined;
+  readonly pluginConfigControl: RuntimePluginConfigControlHostState | undefined;
   readonly liveApply: RuntimePluginConfigLiveApply;
 }): Promise<RuntimePluginToolCallResult> {
   const effect = options.result.preparedConfigEffect;
+  const timeoutMs =
+    options.confirmationTimeoutMs ?? runtimePluginToolApprovalTimeoutMs;
 
-  if (effect === undefined) {
-    // Unreachable: normalization already rejects this; this only narrows.
+  if (
+    effect === undefined ||
+    options.confirmationHandler === undefined ||
+    options.pluginConfigControl === undefined
+  ) {
+    // Unreachable: normalization rejects a result without its effect, and
+    // the host's routing a gated tool it cannot confirm; this only narrows.
     throw new TypeError(
-      'Approval-gated runtime config tool result is missing its prepared effect.',
+      'Approval-gated runtime config tool result is missing its prepared effect or its host approval state.',
     );
   }
 
@@ -154,6 +163,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
         summary: options.providedTool.description,
         preview,
       }),
+      timeoutMs,
     );
   } catch {
     return createRejectedToolCallResult({
@@ -182,7 +192,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     decision.status === 'timed_out'
       ? {
           reason: 'plugin_config_approval_timeout',
-          message: `Plugin config update approval timed out after ${String(runtimePluginToolApprovalTimeoutMs)}ms.`,
+          message: `Plugin config update approval timed out after ${String(timeoutMs)}ms.`,
         }
       : decision.status === 'denied'
         ? {
