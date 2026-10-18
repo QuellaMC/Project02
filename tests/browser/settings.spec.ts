@@ -139,20 +139,31 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
   );
 
   const note = row(page, 'plugins/demo-config/operatorNote');
+  const noteBox = note.getByRole('textbox', {name: 'Operator note'});
   const secondNote = row(second, 'plugins/demo-config/operatorNote').getByRole(
     'textbox',
     {name: 'Operator note'},
   );
 
-  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
+  // With the read after a save slow, the row says Saved only once it
+  // shows what was saved: never the value from before in between.
+  await page.route('**/api/config?*', async route => {
+    await new Promise(resolve => {
+      setTimeout(resolve, 500);
+    });
+    await route.continue();
+  });
+  await noteBox.fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
+  expect(await noteBox.inputValue()).toBe('kept');
+  await page.unroute('**/api/config?*');
   await expect(secondNote).toHaveValue('kept');
 
   // A page whose read did not land is behind, and says so; its next save
   // is told that someone saved first.
   await second.route('**/api/config?*', route => route.abort(), {times: 1});
-  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept again');
+  await noteBox.fill('kept again');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
   await expect(second.locator('.notice')).toBeVisible();

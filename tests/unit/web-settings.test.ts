@@ -239,8 +239,8 @@ describe('web settings', () => {
     expect(landed.settings?.edits.get(tone)).toBe('neutral');
     expect(landed.settings?.saved).toBeUndefined();
     expect(landed.settings?.saving).toBeUndefined();
-    // The answer's fingerprint is the view's at once: a save made before
-    // the re-read lands does not conflict with this one.
+    // The answer's fingerprint is the view's at once: the next save does
+    // not conflict with this one, though the re-read failed.
     expect(
       landed.settings?.view?.status === 'ok' &&
         landed.settings.view.fingerprint,

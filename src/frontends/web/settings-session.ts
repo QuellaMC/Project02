@@ -6,6 +6,7 @@
 import type {
   ConfigChangeOutcome,
   ConfigTarget,
+  ConfigView,
 } from '../../gateway/api/index.ts';
 import type {GatewayClient} from '../../gateway/client/index.ts';
 import {
@@ -56,30 +57,55 @@ export function createSettingsVerbs(tab: {
   readonly ready: () => Promise<void>;
 } {
   const {client, getState, apply} = tab;
-  /** Only the latest read of the screen applies; an earlier one that settles later is let go. */
+  /** Reads of the screen, numbered as they begin, and the newest whose view has landed. */
   let reads = 0;
+  let landed = 0;
   /** Each change has a ticket of its own; its end is known by it. */
   let changes = 0;
   let setupJudged = false;
-  const readView = async (target: ConfigTarget): Promise<void> => {
+  /**
+   * Reads the screen's view and lands it in one step with `alongside`.
+   * Views land in the order their reads began: one that settles after a
+   * later read's view has landed brings only `alongside`. A read that
+   * fails is said unless a later one is on its way.
+   */
+  const readView = async (
+    target: ConfigTarget,
+    alongside: (state: WebState) => WebState = state => state,
+  ): Promise<void> => {
     const mine = (reads += 1);
+    let view: ConfigView;
 
     try {
-      const view = await client.configView(target);
-
-      if (mine === reads) {
-        apply(current => configViewRead(current, target, view));
-      }
+      view = await client.configView(target);
     } catch (error: unknown) {
-      if (mine === reads) {
-        apply(current => noticed(current, problem(error)));
-      }
+      const said = mine === reads;
+
+      apply(current =>
+        said ? noticed(alongside(current), problem(error)) : alongside(current),
+      );
+
+      return;
     }
+
+    const lands = mine > landed;
+
+    if (lands) {
+      landed = mine;
+    }
+
+    apply(current =>
+      lands
+        ? configViewRead(alongside(current), target, view)
+        : alongside(current),
+    );
   };
   /**
    * One change, bound to the fingerprint the view handed out. Applied or
-   * met with a conflict, the view is read again: a write can move more
-   * than its field, and a conflict means the screen was stale.
+   * met with a conflict, the view is read again — a write can move more
+   * than its field, and a conflict means the screen was stale — and the
+   * answer lands with that view, so a row goes from what was typed to
+   * what is saved, never back through the value from before.
    */
   const change = async (
     key: string,
@@ -113,7 +139,8 @@ export function createSettingsVerbs(tab: {
       outcome = {status: 'failed', message: problem(error)};
     }
 
-    apply(current => changeEnded(current, ticket, outcome));
+    const ended = (current: WebState): WebState =>
+      changeEnded(current, ticket, outcome);
 
     // The screen the change came from is read again, if it is still the
     // one open — at once, on the answer in hand, whether or not the frame
@@ -125,7 +152,9 @@ export function createSettingsVerbs(tab: {
       (outcome.status === 'refused' && outcome.reason === 'conflict');
 
     if (moved && open !== undefined && sameTarget(open.target, page.target)) {
-      await readView(page.target);
+      await readView(page.target, ended);
+    } else {
+      apply(ended);
     }
   };
 
