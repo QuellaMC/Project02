@@ -31,7 +31,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/frontends/web/tsconfig.json --noEmit",
-    "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs && node scripts/check-source-text.mjs",
+    "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs && node scripts/check-source-text.mjs && node scripts/check-conformance-inventory.mjs",
     "plugin:new": "node scripts/create-plugin.mjs",
     "character:new": "node scripts/create-character.mjs",
     "arch:baseline": "node scripts/arch-check.mjs --baseline",
