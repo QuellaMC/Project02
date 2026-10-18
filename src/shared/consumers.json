@@ -1,5 +1,5 @@
 {
-  "base-url.ts": ["plugins", "runtime"],
+  "base-url.ts": ["frontends", "plugins", "runtime"],
   "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
   "daemon-record.ts": ["frontends", "gateway", "runtime"],
   "fetch-failure.ts": ["frontends", "gateway"],
@@ -22,5 +22,6 @@
   "real-path.ts": ["plugins", "runtime"],
   "redaction.ts": ["plugins", "runtime"],
   "sse.ts": ["gateway", "role-model"],
+  "test-durations.ts": ["cli", "frontends"],
   "text-cut.ts": ["frontends", "plugins", "runtime"]
 }

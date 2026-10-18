@@ -32,6 +32,7 @@ import {
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {pathExistsSync} from '../../shared/file-system.ts';
 import {isMainModule, stopSignal} from '../../shared/main-module.ts';
+import {readTestDurations} from '../../shared/test-durations.ts';
 import {
   matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
@@ -63,7 +64,13 @@ export type ServeCliOptions = {
   readonly pluginHost?: RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
   /** How long a second run waits for a holder that does not answer; tests shorten it. */
-  readonly holdWaitMs?: number;
+  readonly holdWaitMs?: number | undefined;
+  /** The gateway's waits and its socket's, handed through: each owner keeps its default when absent. */
+  readonly toolConfirmationTimeoutMs?: number | undefined;
+  readonly pairingTtlMs?: number | undefined;
+  readonly roleModelRequestTimeoutMs?: number | undefined;
+  readonly heartbeatMs?: number | undefined;
+  readonly graceMs?: number | undefined;
 };
 
 type ServeCliFlags = {
@@ -94,6 +101,9 @@ export async function runServeCliFromArgs(
       ...(options.pluginHost === undefined
         ? {}
         : {createPluginHost: () => options.pluginHost as RuntimePluginHost}),
+      toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
+      pairingTtlMs: options.pairingTtlMs,
+      roleModelRequestTimeoutMs: options.roleModelRequestTimeoutMs,
     });
     const homeRoot = gateway.health().homeRoot;
     const claimed = await claimDaemonHome({homeRoot});
@@ -178,6 +188,8 @@ async function serve(
       // Served only once built: the file handler warns about a root that is
       // not there, and a daemon run straight from `node` must not.
       ...(pathExistsSync(join(uiRoot, 'index.html')) ? {uiRoot} : {}),
+      heartbeatMs: options.heartbeatMs,
+      graceMs: options.graceMs,
     });
 
     const moved = claim.publish(server.port);
@@ -438,14 +450,27 @@ function aborted(signal: AbortSignal): Promise<void> {
 const testProviderEnvVarName = 'PROJECT02_TEST_PROVIDER';
 
 if (isMainModule(import.meta.url)) {
+  const testDurations = readTestDurations(process.env, [
+    'confirmation',
+    'pairing',
+    'silence',
+    'heartbeat',
+    'grace',
+    'hold',
+  ]);
   const testProvider = process.env[testProviderEnvVarName];
 
-  if (testProvider !== undefined && testProvider !== 'deterministic') {
+  if ('refusal' in testDurations) {
+    process.stderr.write(`Error: ${testDurations.refusal}\n`);
+    process.exitCode = 1;
+  } else if (testProvider !== undefined && testProvider !== 'deterministic') {
     process.stderr.write(
       `Error: ${testProviderEnvVarName} must be "deterministic" when it is set.\n`,
     );
     process.exitCode = 1;
   } else {
+    const {durations} = testDurations;
+
     // A second signal ends the process before the release; the lease left
     // behind is the next start's to reclaim.
     process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
@@ -456,6 +481,12 @@ if (isMainModule(import.meta.url)) {
       ...(testProvider === undefined
         ? {}
         : {roleModelAdapter: createDeterministicTestRoleModelAdapter()}),
+      toolConfirmationTimeoutMs: durations.get('confirmation'),
+      pairingTtlMs: durations.get('pairing'),
+      roleModelRequestTimeoutMs: durations.get('silence'),
+      heartbeatMs: durations.get('heartbeat'),
+      graceMs: durations.get('grace'),
+      holdWaitMs: durations.get('hold'),
     });
   }
 }

@@ -65,6 +65,10 @@ export type LocalCharacterRuntimeOptions = {
   ) => RuntimePluginHost;
   /** Answers for the character whatever provider its config chooses, or none. */
   readonly roleModelAdapter?: RoleModelAdapter;
+  /** Handed to the plugin host a production start constructs. */
+  readonly toolConfirmationTimeoutMs?: number | undefined;
+  /** Handed to the configured provider's adapter. */
+  readonly roleModelRequestTimeoutMs?: number | undefined;
 };
 
 export type LocalCharacterRuntime = CharacterRuntime & {
@@ -522,7 +526,11 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   }
 
   const adapter =
-    options.roleModelAdapter ?? createRoleModelProviderAdapter(project02);
+    options.roleModelAdapter ??
+    createRoleModelProviderAdapter(
+      project02,
+      options.roleModelRequestTimeoutMs,
+    );
 
   if (adapter === undefined) {
     throw new Error(noProviderMessage);
@@ -561,6 +569,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: startup.activationPlan,
       toolConfirmationHandler: context.broker.handler,
+      toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
     });
   } catch {
     throw new Error(constructionFailureMessage);

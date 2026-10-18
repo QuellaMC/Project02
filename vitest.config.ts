@@ -7,6 +7,7 @@ const processSpawningTests = [
   'tests/integration/session-store-concurrency.test.ts',
   'tests/e2e/two-character-concurrency.test.ts',
   'tests/e2e/serve-instances.test.ts',
+  'tests/e2e/serve-test-durations.test.ts',
   'tests/e2e/telegram-process.test.ts',
 ];
 

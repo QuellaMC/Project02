@@ -124,6 +124,7 @@ export type CreateRuntimePluginHostOptions = {
   readonly pluginDatabase?: RuntimePluginDatabaseProvider;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
+  readonly toolConfirmationTimeoutMs?: number | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
   readonly pluginReloader?: RuntimePluginReloader;
 };
@@ -284,6 +285,7 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         toolConfirmationHandler: options.toolConfirmationHandler,
+        toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
         pluginConfigControl,
         liveApply,
         createFileStore: options.fileStore?.createFileStore,
@@ -604,6 +606,7 @@ type HandleToolCallOptions = {
 } & PluginHookCapabilityOptions & {
     readonly toolConfirmationHandler?:
       RuntimePluginToolConfirmationHandler | undefined;
+    readonly toolConfirmationTimeoutMs?: number | undefined;
     readonly pluginConfigControl?:
       RuntimePluginConfigControlHostState | undefined;
     readonly liveApply: RuntimePluginConfigLiveApply;
@@ -686,15 +689,6 @@ async function runHandleToolCall(
       return result;
     }
 
-    if (
-      options.toolConfirmationHandler === undefined ||
-      options.pluginConfigControl === undefined
-    ) {
-      throw new TypeError(
-        'Approval-gated plugin tool lost its host approval state.',
-      );
-    }
-
     return await confirmPreparedRuntimePluginToolResult({
       plugin,
       providedTool,
@@ -702,6 +696,7 @@ async function runHandleToolCall(
       context: options.context,
       result,
       confirmationHandler: options.toolConfirmationHandler,
+      confirmationTimeoutMs: options.toolConfirmationTimeoutMs,
       pluginConfigControl: options.pluginConfigControl,
       liveApply: options.liveApply,
     });

@@ -12,7 +12,7 @@ import {botNames, type BotContext} from './bot.ts';
 const maxMessageLength = 4096;
 /** Telegram's longest answer to a button press. */
 const maxToastLength = 200;
-const draftEditMs = 1_500;
+const defaultDraftEditMs = 1_500;
 
 /**
  * What a bot writes in its chats. Its calls to Telegram go one at a time in
@@ -67,7 +67,10 @@ type Draft = {
   edit: NodeJS.Timeout | undefined;
 };
 
-export function createOutbox(bot: BotContext): Outbox {
+export function createOutbox(
+  bot: BotContext,
+  draftEditMs = defaultDraftEditMs,
+): Outbox {
   const audience = createAudience(bot);
   const writer = createWriter(bot, audience);
   const drafts = new Map<string, Draft>();

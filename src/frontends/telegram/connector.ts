@@ -37,6 +37,8 @@ export type ConnectorPacing = {
   /** The longest wait before a failed read of the connector config is tried again. */
   readonly readBackoffMaxMs?: number;
   readonly poll?: PollPacing;
+  /** The shortest wait between two edits of a reply's draft in a chat. */
+  readonly draftEditMs?: number;
 };
 
 export type TelegramConnectorOptions = {
@@ -416,7 +418,7 @@ function createBotTable(context: {
           : {pacing: options.pacing.poll}),
         rules:
           settings.kind === 'character'
-            ? characterChat(settings.characterId)
+            ? characterChat(settings.characterId, options.pacing?.draftEditMs)
             : managementChat(),
         snapshot: () => latest,
         settled: () => settled,
