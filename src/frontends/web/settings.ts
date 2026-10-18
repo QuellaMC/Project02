@@ -176,8 +176,8 @@ export function changeSent(
  * later change on it, is waiting on nothing this one can answer.
  * `applied`: the text that was sent is done with, and a newer word typed
  * meanwhile stays to be saved; the view is left as it was read, its
- * fingerprint with it: the re-read that lands with the answer brings the
- * new one, and only a read says what the daemon holds.
+ * fingerprint with it: the session lands the answer with a view read
+ * after it, and only a read says what the daemon holds.
  * `refused` as `invalid`: the daemon's reason stays at the field, with
  * the text. `conflict`: someone else saved first; said once, and the
  * session re-reads, with the text still in the row. A character that is

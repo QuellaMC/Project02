@@ -41,6 +41,9 @@ export const noSettingsVerbs: SettingsVerbs = {
   resetSetting: () => Promise.resolve(),
 };
 
+/** Between reads of a screen whose save has its answer but not yet its view. */
+const rereadRetryMs = 1_000;
+
 function problem(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -66,26 +69,25 @@ export function createSettingsVerbs(tab: {
   /**
    * Reads the screen's view and lands it in one step with `alongside`.
    * Views land in the order their reads began: one that settles after a
-   * later read's view has landed brings only `alongside`. A read that
-   * fails is said unless a later one is on its way.
+   * later read's view has landed brings only `alongside`. Whether
+   * `alongside` landed: a read that fails brings nothing, and is said
+   * unless a later one is on its way.
    */
   const readView = async (
     target: ConfigTarget,
     alongside: (state: WebState) => WebState = state => state,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const mine = (reads += 1);
     let view: ConfigView;
 
     try {
       view = await client.configView(target);
     } catch (error: unknown) {
-      const said = mine === reads;
+      if (mine === reads) {
+        apply(current => noticed(current, problem(error)));
+      }
 
-      apply(current =>
-        said ? noticed(alongside(current), problem(error)) : alongside(current),
-      );
-
-      return;
+      return false;
     }
 
     const lands = mine > landed;
@@ -99,13 +101,17 @@ export function createSettingsVerbs(tab: {
         ? configViewRead(alongside(current), target, view)
         : alongside(current),
     );
+
+    return true;
   };
   /**
    * One change, bound to the fingerprint the view handed out. Applied or
    * met with a conflict, the view is read again — a write can move more
    * than its field, and a conflict means the screen was stale — and the
    * answer lands with that view, so a row goes from what was typed to
-   * what is saved, never back through the value from before.
+   * what is saved, never back through the value from before. A read that
+   * fails is tried again, the screen busy meanwhile, until one lands or
+   * the screen is left: no change ends on a view from before it.
    */
   const change = async (
     key: string,
@@ -146,15 +152,25 @@ export function createSettingsVerbs(tab: {
     // one open — at once, on the answer in hand, whether or not the frame
     // that follows reaches this tab's stream. The roster needs no read:
     // what the change did to it comes on the stream, to every tab.
-    const open = getState().settings;
     const moved =
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
+    const stillOpen = (): boolean => {
+      const open = getState().settings;
 
-    if (moved && open !== undefined && sameTarget(open.target, page.target)) {
-      await readView(page.target, ended);
-    } else {
+      return open !== undefined && sameTarget(open.target, page.target);
+    };
+
+    if (!moved || !stillOpen()) {
       apply(ended);
+
+      return;
+    }
+
+    while (!(await readView(page.target, ended)) && stillOpen()) {
+      await new Promise(resolve => {
+        setTimeout(resolve, rereadRetryMs);
+      });
     }
   };
 

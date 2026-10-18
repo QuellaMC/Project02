@@ -145,16 +145,19 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
     {name: 'Operator note'},
   );
 
-  // With the read after a save slow, the row says Saved only once it
-  // shows what was saved: never the value from before in between.
+  // The read after a save fails at first: the row says Saved only once a
+  // read has landed, and then shows what was saved, never the value from
+  // before.
+  let reads = 'failing';
+
   await page.route('**/api/config?*', async route => {
-    await new Promise(resolve => {
-      setTimeout(resolve, 500);
-    });
-    await route.continue();
+    await (reads === 'failing' ? route.abort() : route.continue());
   });
   await noteBox.fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
+  await expect(page.locator('.notice')).toBeVisible();
+  await expect(note.getByRole('button', {name: 'Saved'})).toHaveCount(0);
+  reads = 'landing';
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
   expect(await noteBox.inputValue()).toBe('kept');
   await page.unroute('**/api/config?*');
