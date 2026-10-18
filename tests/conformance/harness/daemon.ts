@@ -27,6 +27,8 @@ export type Serve = {
   readonly address: () => Promise<Address>;
   /** Settles once stdout holds this whole line. */
   readonly printed: (line: string) => Promise<void>;
+  /** Settles once stderr holds this whole line. */
+  readonly printedOnStderr: (line: string) => Promise<void>;
   /** To its whole process group, as a terminal or a service manager sends one. */
   readonly signal: (name: NodeJS.Signals) => void;
   /** Its exit code; null when a signal ended it. */
@@ -107,13 +109,17 @@ export function serve(
   });
 
   /** An idle deadline: a daemon starting under load is slow, not silent. */
-  const line = (what: string, match: (line: string) => boolean) => {
+  const line = (
+    what: string,
+    output: () => string,
+    match: (line: string) => boolean,
+  ) => {
     const failed = waitFailure(what);
 
     return new Promise<string>((resolve, reject) => {
       let timer: NodeJS.Timeout | undefined;
       const check = (): void => {
-        const found = stdout.split('\n').slice(0, -1).find(match);
+        const found = output().split('\n').slice(0, -1).find(match);
 
         clearTimeout(timer);
 
@@ -142,12 +148,25 @@ export function serve(
     stderr: () => stderr,
     address: async () =>
       addressOf(
-        await line('serve to print its address', printed =>
-          printed.startsWith(addressPrefix),
+        await line(
+          'serve to print its address',
+          () => stdout,
+          printed => printed.startsWith(addressPrefix),
         ),
       ),
     printed: async text => {
-      await line(`serve to print "${text}"`, printed => printed === text);
+      await line(
+        `serve to print "${text}"`,
+        () => stdout,
+        printed => printed === text,
+      );
+    },
+    printedOnStderr: async text => {
+      await line(
+        `serve to print "${text}" on stderr`,
+        () => stderr,
+        printed => printed === text,
+      );
     },
     signal: name => {
       process.kill(-pid, name);
