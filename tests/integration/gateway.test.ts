@@ -917,38 +917,6 @@ describe('gateway façade', () => {
     });
   });
 
-  it('refuses a thread another gateway holds, then opens it once that one lets go', async () => {
-    const homeRoot = await createGatewayHome();
-    const options = {
-      location: {storeRoot: homeRoot},
-      roleModelAdapter: replyAdapter(),
-      createPluginHost: () => createRuntimePluginHost({plugins: []}),
-    };
-    const first = createGateway(options);
-    const second = createGateway(options);
-
-    await first.startCharacter('mira');
-    await second.startCharacter('mira');
-
-    const held = await open(first, 'mira');
-
-    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'refused',
-      reason: 'conversation_busy',
-    });
-    // The holder keeps its thread, and the refusal left nothing cached.
-    await expect(first.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'opened',
-      conversationId: held.conversationId,
-    });
-    await first.stop();
-    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'opened',
-      conversationId: held.conversationId,
-    });
-    await second.stop();
-  });
-
   it('reports an unreadable conversation store as a failure, not a bug', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({

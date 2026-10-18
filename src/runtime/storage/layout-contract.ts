@@ -22,7 +22,6 @@ type LocalRuntimeStorageScope = (typeof localRuntimeStorageScopeValues)[number];
 export type LocalRuntimeStorageContractErrorCode =
   | 'character_identity_mismatch'
   | 'concurrent_write'
-  | 'conversation_busy'
   | 'invalid_character_id'
   | 'invalid_conversation_id'
   | 'invalid_session_id'
