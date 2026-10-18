@@ -4,6 +4,7 @@ import {
   selectConversationHistoryWindow,
   type ConversationTurn,
 } from '../../role-model/index.ts';
+import {codePointBoundary, truncateText} from '../../shared/text-cut.ts';
 import {maxContextSummaryChars} from '../evidence/records.ts';
 
 /**
@@ -173,7 +174,7 @@ export function capSummaryText(
     return trimmed;
   }
 
-  const head = trimmed.slice(0, maxChars);
+  const head = trimmed.slice(0, codePointBoundary(trimmed, maxChars));
   const boundary = Math.max(
     head.lastIndexOf('. '),
     head.lastIndexOf('\n'),
@@ -200,7 +201,7 @@ export function mechanicalSummary(options: {
   const userName = options.userDisplayName ?? 'the person';
   const recentUserLines = options.summarized
     .slice(-3)
-    .map(turn => `“${shortenTo(turn.userMessage.text, 160)}”`)
+    .map(turn => `“${truncateText(turn.userMessage.text, 160, '…')}”`)
     .join(' · ');
   const tools = [
     ...new Set(
@@ -211,7 +212,7 @@ export function mechanicalSummary(options: {
       ),
     ),
   ];
-  const section = shortenTo(
+  const section = truncateText(
     [
       `Earlier conversation (${String(options.summarized.length)} turns, ${
         first?.createdAt.slice(0, 10) ?? '?'
@@ -221,6 +222,7 @@ export function mechanicalSummary(options: {
       'Details from that part are not available in context.',
     ].join(' '),
     Math.min(maxFallbackSummaryChars, options.maxChars),
+    '…',
   );
 
   if (options.previousSummary === undefined) {
@@ -231,7 +233,7 @@ export function mechanicalSummary(options: {
 
   return room <= 0
     ? section
-    : `${shortenTo(options.previousSummary, room)}\n\n${section}`;
+    : `${truncateText(options.previousSummary, room, '…')}\n\n${section}`;
 }
 
 function speakerLine(name: string, message: VisibleMessage): string {
@@ -243,14 +245,13 @@ function shortenLine(line: string): string {
     return line;
   }
 
-  const omitted =
-    line.length - summarizerLineHeadChars - summarizerLineTailChars;
+  const headEnd = codePointBoundary(line, summarizerLineHeadChars);
+  const tailStart = codePointBoundary(
+    line,
+    line.length - summarizerLineTailChars,
+  );
 
-  return `${line.slice(0, summarizerLineHeadChars)} [… ${String(
-    omitted,
-  )} chars omitted …] ${line.slice(-summarizerLineTailChars)}`;
-}
-
-function shortenTo(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`;
+  return `${line.slice(0, headEnd)} [… ${String(
+    tailStart - headEnd,
+  )} chars omitted …] ${line.slice(tailStart)}`;
 }

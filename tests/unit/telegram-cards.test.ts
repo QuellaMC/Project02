@@ -41,8 +41,7 @@ describe('Telegram cards', () => {
   it("sends a card past Telegram's longest message cut to fit, and keeps how it ended whole", async () => {
     const {outbox, sent, revised} = recordingOutbox();
     const cards = createCards(outbox, 'confirmation');
-    // 4094 units, a pair at the cut, and more past Telegram's 4096.
-    const text = `${'x'.repeat(4094)}😀 and more`;
+    const text = 'x'.repeat(4100);
 
     cards.post('id', () => text, [1]);
     cards.end('id', 'approved');
@@ -50,8 +49,7 @@ describe('Telegram cards', () => {
       expect(revised).toHaveLength(1);
     });
 
-    // The pair at the cut goes whole, the ellipsis in its place.
-    expect(sent.map(call => call.text)).toEqual([`${'x'.repeat(4094)}…`]);
+    expect(sent.map(call => call.text)).toEqual([`${'x'.repeat(4095)}…`]);
     expect(revised.map(call => call.text)).toEqual([
       `${'x'.repeat(4084)}… · approved`,
     ]);

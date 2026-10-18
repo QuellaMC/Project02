@@ -20,5 +20,6 @@
   "package-metadata.ts": ["characters", "plugins", "runtime"],
   "real-path.ts": ["plugins", "runtime"],
   "redaction.ts": ["plugins", "runtime"],
-  "sse.ts": ["gateway", "role-model"]
+  "sse.ts": ["gateway", "role-model"],
+  "text-cut.ts": ["frontends", "plugins", "runtime"]
 }
