@@ -35,7 +35,6 @@ import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   defaultProject02ContextWindowTokens,
   defaultProject02Enabled,
-  defaultProject02RoleModelProvider,
 } from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
@@ -185,14 +184,18 @@ function resolvedProject02HostSection(options: {
       authored?.userDisplayName ?? localUserSpeaker.displayName
     ).trim(),
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
-    roleModelProvider:
-      authored?.roleModelProvider ?? defaultProject02RoleModelProvider,
+    ...(authored?.roleModelProvider === undefined
+      ? {}
+      : {roleModelProvider: authored.roleModelProvider}),
     ...(authored?.nvidiaApiKey === undefined
       ? {}
       : {nvidiaApiKey: authored.nvidiaApiKey}),
     ...(authored?.nvidiaModel === undefined
       ? {}
       : {nvidiaModel: authored.nvidiaModel}),
+    ...(authored?.nvidiaBaseUrl === undefined
+      ? {}
+      : {nvidiaBaseUrl: authored.nvidiaBaseUrl}),
     contextWindowTokens:
       authored?.contextWindowTokens ?? defaultProject02ContextWindowTokens,
   });
@@ -567,10 +570,11 @@ function effectiveFingerprintInput(options: {
       enabled: project02.enabled,
       userDisplayName: project02.userDisplayName,
       defaultMemoryProvider: project02.defaultMemoryProvider ?? null,
-      roleModelProvider: project02.roleModelProvider,
+      roleModelProvider: project02.roleModelProvider ?? null,
       // Presence only: this fingerprint is shown, so the key never is.
       nvidiaApiKeySet: project02.nvidiaApiKey !== undefined,
       nvidiaModel: project02.nvidiaModel ?? null,
+      nvidiaBaseUrl: project02.nvidiaBaseUrl ?? null,
       contextWindowTokens: project02.contextWindowTokens,
     }),
     sections: options.redactedSectionConfigs,

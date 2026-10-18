@@ -38,6 +38,7 @@ import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {scrubReasoningBlocks} from '../api/reasoning.ts';
 
 const nvidiaRoleModelProviderName = 'nvidia';
+const nvidiaCloudBaseUrl = 'https://integrate.api.nvidia.com/v1';
 export const defaultNvidiaRoleModelReasoningBudget = 16384;
 
 export const nvidiaRoleModelProviderCapabilities = Object.freeze({
@@ -49,7 +50,7 @@ export const nvidiaRoleModelProviderCapabilities = Object.freeze({
 
 export type NvidiaRoleModelProviderConfig = {
   readonly apiKey?: string;
-  readonly endpoint?: string;
+  readonly baseUrl?: string;
   readonly model?: string;
   readonly requestTimeoutMs?: number;
 };
@@ -97,9 +98,16 @@ type NvidiaProviderErrorCode =
 export function createNvidiaRoleModelProviderAdapter(
   options: CreateNvidiaRoleModelProviderAdapterOptions = {},
 ): RoleModelAdapter {
-  const endpoint =
-    options.endpoint ?? 'https://integrate.api.nvidia.com/v1/chat/completions';
+  const endpoint = chatCompletionsEndpoint(
+    options.baseUrl ?? nvidiaCloudBaseUrl,
+  );
   const model = options.model ?? 'nvidia/nemotron-3-nano-30b-a3b';
+  const apiKey =
+    options.apiKey === undefined || options.apiKey.length === 0
+      ? undefined
+      : options.apiKey;
+  // NVIDIA's cloud answers nothing without a key; a server of one's own may ask for none.
+  const keyMissing = apiKey === undefined && options.baseUrl === undefined;
   const fetchClient: NvidiaFetchClient = options.fetchClient ?? fetch;
   const requestTimeoutMs = normalizeNvidiaRequestTimeoutMs(
     options.requestTimeoutMs,
@@ -109,16 +117,22 @@ export function createNvidiaRoleModelProviderAdapter(
   );
 
   return Object.freeze({
-    completeText: createNvidiaTextCompletion({
-      ...(options.apiKey === undefined ? {} : {apiKey: options.apiKey}),
-      endpoint,
-      model,
-      fetchClient,
-      requestTimeoutMs,
-      transportRetryDelaysMs,
-    }),
+    completeText: keyMissing
+      ? () =>
+          Promise.resolve({
+            status: 'failed' as const,
+            reason: 'NVIDIA provider has no API key.',
+          })
+      : createNvidiaTextCompletion({
+          ...(apiKey === undefined ? {} : {apiKey}),
+          endpoint,
+          model,
+          fetchClient,
+          requestTimeoutMs,
+          transportRetryDelaysMs,
+        }),
     async invoke(_inputEnvelope, invocation) {
-      if (options.apiKey === undefined || options.apiKey.length === 0) {
+      if (keyMissing) {
         return createProviderRejectedOutput({
           code: 'missing_api_key',
           endpoint,
@@ -163,7 +177,7 @@ export function createNvidiaRoleModelProviderAdapter(
         const transport = await performNvidiaTransportRequest({
           fetchClient,
           endpoint,
-          apiKey: options.apiKey,
+          ...(apiKey === undefined ? {} : {apiKey}),
           body,
           requestDeadline,
           retryDelaysMs: transportRetryDelaysMs,
@@ -267,6 +281,15 @@ export function createNvidiaRoleModelProviderAdapter(
       }
     },
   } satisfies RoleModelAdapter);
+}
+
+/** A base given with or without its trailing slash names one endpoint. */
+function chatCompletionsEndpoint(baseUrl: string): string {
+  const url = new URL(baseUrl);
+
+  url.pathname = `${url.pathname.replace(/\/+$/u, '')}/chat/completions`;
+
+  return url.href;
 }
 
 function createNvidiaRequestBody(options: {

@@ -7,6 +7,7 @@ import {
   runtimeConfigValueMatchesField,
   type RuntimeConfigFieldDeclaration,
 } from '../../plugins/api/index.ts';
+import {httpBaseUrlRule, isHttpBaseUrl} from '../../shared/base-url.ts';
 import {
   project02RoleModelProviderValues,
   type RuntimeConfigValue,
@@ -25,7 +26,6 @@ export type Project02ConfigFieldDefinition = RuntimeConfigFieldDeclaration & {
 // Stated once: each declaration below carries its default, and code that
 // needs the value typed reads the same name.
 export const defaultProject02Enabled = true;
-export const defaultProject02RoleModelProvider = 'local';
 /** A safe floor for small local models; a stopgap until providers report their own limit. */
 export const defaultProject02ContextWindowTokens = 32768;
 
@@ -56,15 +56,14 @@ const project02ConfigFieldDefinitions = Object.freeze([
     path: 'project02.roleModelProvider',
     name: 'roleModelProvider',
     description:
-      'Who answers as the character: the built-in local voice, or a model ' +
-      'hosted by NVIDIA.',
+      "Who answers as the character: nvidia is a model on NVIDIA's cloud, " +
+      'or on the server nvidiaBaseUrl names. No character starts until one ' +
+      'is chosen.',
     invalidValueCode: 'runtime_config_role_model_provider_invalid',
-    invalidValueMessage:
-      'Project02 roleModelProvider must be "local" or "nvidia".',
+    invalidValueMessage: 'Project02 roleModelProvider must be "nvidia".',
     required: false,
     secret: false,
     valueType: 'enum',
-    defaultValue: defaultProject02RoleModelProvider,
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
     agentMutable: false,
@@ -95,6 +94,25 @@ const project02ConfigFieldDefinitions = Object.freeze([
     required: false,
     secret: false,
     valueType: 'string',
+    redactionLabels: Object.freeze([]),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.nvidiaBaseUrl',
+    name: 'nvidiaBaseUrl',
+    description:
+      'Where the model runs: the base address of an NVIDIA NIM or any ' +
+      'OpenAI-compatible server, such as http://localhost:1234/v1. ' +
+      "NVIDIA's cloud when left unset. Use https:// for a server on " +
+      'another machine: http:// sends the key and the conversation in the ' +
+      'clear.',
+    invalidValueCode: 'runtime_config_nvidia_base_url_invalid',
+    invalidValueMessage: `Project02 nvidiaBaseUrl must be ${httpBaseUrlRule}.`,
+    required: false,
+    secret: false,
+    valueType: 'string',
+    acceptsValue: value => typeof value === 'string' && isHttpBaseUrl(value),
     redactionLabels: Object.freeze([]),
     agentMutable: false,
     reloadRequired: true,

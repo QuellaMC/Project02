@@ -63,6 +63,7 @@ export type LocalCharacterRuntimeOptions = {
   readonly createPluginHost?: (
     confirmations: RuntimePluginToolConfirmationHandler,
   ) => RuntimePluginHost;
+  /** Answers for the character whatever provider its config chooses, or none. */
   readonly roleModelAdapter?: RoleModelAdapter;
 };
 
@@ -75,7 +76,7 @@ type AssembledCharacter = {
   readonly profile: CharacterProfile;
   readonly host: RuntimePluginHost;
   readonly ownsHost: boolean;
-  readonly adapter?: RoleModelAdapter;
+  readonly adapter: RoleModelAdapter;
   readonly personaSections: readonly string[];
   readonly characterRef: RoleModelCharacterRef;
   readonly contextWindowTokens: number;
@@ -113,6 +114,8 @@ function disabledMessage(characterId: string): string {
 }
 const constructionFailureMessage =
   'Configured plugin construction failed before creating a durable session.';
+const noProviderMessage =
+  'No model provider is chosen. Choose one on the settings page.';
 
 export function createLocalCharacterRuntime(
   options: LocalCharacterRuntimeOptions,
@@ -518,8 +521,16 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     throw new Error(disabledMessage(characterId));
   }
 
+  const adapter =
+    options.roleModelAdapter ?? createRoleModelProviderAdapter(project02);
+
+  if (adapter === undefined) {
+    throw new Error(noProviderMessage);
+  }
+
   const shared = {
     profile: activation.profile,
+    adapter,
     personaSections: activation.personaSections,
     characterRef: activation.characterRef,
     contextWindowTokens: project02.contextWindowTokens,
@@ -527,15 +538,10 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     storeRoot: project02.storeRoot,
     identity: assemblyIdentity(startup.activationPlan, activation.characterRef),
   };
-  // The configured provider wins; an injected adapter covers the rest.
-  const adapter =
-    createRoleModelProviderAdapter(project02) ?? options.roleModelAdapter;
-  const adapterOption = adapter === undefined ? {} : {adapter};
 
   if (options.createPluginHost !== undefined) {
     return {
       ...shared,
-      ...adapterOption,
       host: options.createPluginHost(context.broker.handler),
       ownsHost: false,
     };
@@ -569,7 +575,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     throw new Error(`Runtime config activation failed: ${constructed.message}`);
   }
 
-  return {...shared, ...adapterOption, host: configured.host, ownsHost: true};
+  return {...shared, host: configured.host, ownsHost: true};
 }
 
 async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
@@ -622,7 +628,8 @@ function unavailableOutcome(context: RuntimeContext): OpenOutcome {
     reason: 'character_unavailable' as const,
     message:
       `Character "${context.characterId}" is not ready (state ` +
-      `"${context.state}").`,
+      `"${context.state}").` +
+      (context.failure === undefined ? '' : ` ${context.failure}`),
   });
 }
 
@@ -700,9 +707,7 @@ async function runTurn(
       source: message.source,
       clientMessageId: message.clientMessageId,
       pluginHost: assembled.host,
-      ...(assembled.adapter === undefined
-        ? {}
-        : {roleModelAdapter: assembled.adapter}),
+      roleModelAdapter: assembled.adapter,
       characterPersonaSections: assembled.personaSections,
       characterRef: assembled.characterRef,
       contextWindowTokens: assembled.contextWindowTokens,

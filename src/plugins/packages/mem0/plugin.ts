@@ -1,6 +1,7 @@
 import {join} from 'node:path';
 
 import {localUserSpeaker} from '../../../core/index.ts';
+import {httpBaseUrlRule, isHttpBaseUrl} from '../../../shared/base-url.ts';
 import {createMemoryProviderRuntimePlugin} from '../../builtin/memory-provider/index.ts';
 import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
@@ -96,7 +97,7 @@ function configuredMem0Backend(
     // Without this, "localhost:8765" reaches fetch as a bad URL and every
     // verb reports the backend unreachable, naming nothing the operator
     // can fix.
-    if (!isAbsoluteHttpOrigin(baseUrl)) {
+    if (!isHttpBaseUrl(baseUrl)) {
       return createMisconfiguredMem0Backend(invalidEndpointMessage('baseUrl'));
     }
 
@@ -113,7 +114,7 @@ function configuredMem0Backend(
     );
   }
 
-  if (baseUrl !== undefined && !isAbsoluteHttpOrigin(baseUrl)) {
+  if (baseUrl !== undefined && !isHttpBaseUrl(baseUrl)) {
     return createMisconfiguredMem0Backend(invalidEndpointMessage('baseUrl'));
   }
 
@@ -124,13 +125,8 @@ function configuredMem0Backend(
   });
 }
 
-/**
- * Never echoes the value: a rejected endpoint can carry userinfo or a
- * token in its query, and this message travels through health into logs
- * and durable evidence. The field name is what the operator needs.
- */
 function invalidEndpointMessage(fieldName: string): string {
-  return `Mem0 ${fieldName} must be an absolute http:// or https:// origin with no embedded credentials, query, or fragment.`;
+  return `Mem0 ${fieldName} must be ${httpBaseUrlRule}.`;
 }
 
 /**
@@ -149,26 +145,6 @@ function sameEndpoint(first: string, second: string): boolean {
     );
   } catch {
     return first === second;
-  }
-}
-
-function isAbsoluteHttpOrigin(value: string): boolean {
-  try {
-    const url = new URL(value);
-
-    // Endpoint paths are appended as text, so a query or fragment would
-    // silently move where every request lands. URL userinfo is rejected
-    // too: Node's fetch refuses such requests, which would surface as a
-    // fake outage instead of the field to fix.
-    return (
-      (url.protocol === 'http:' || url.protocol === 'https:') &&
-      url.search === '' &&
-      url.hash === '' &&
-      url.username === '' &&
-      url.password === ''
-    );
-  } catch {
-    return false;
   }
 }
 
@@ -199,7 +175,7 @@ export function mem0OssSettingsFromInput(
     ['ossLlmBaseUrl', configuredLlmBaseUrl],
     ['ossEmbedderBaseUrl', configuredEmbedderBaseUrl],
   ] as const) {
-    if (value !== undefined && !isAbsoluteHttpOrigin(value)) {
+    if (value !== undefined && !isHttpBaseUrl(value)) {
       return {
         status: 'rejected',
         message: invalidEndpointMessage(field),

@@ -69,7 +69,7 @@ describe('runtime config canonical path locking', () => {
     const configB = join(rootB, 'config.json');
     const initialConfig = `${JSON.stringify({
       version: runtimeConfigVersion,
-      project02: {roleModelProvider: 'local'},
+      project02: {userDisplayName: 'Sam'},
     })}\n`;
 
     writeFileSync(configA, initialConfig, 'utf8');

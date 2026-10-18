@@ -36,13 +36,19 @@ export type SpawnedDaemon = SpawnedProcess & {
 
 const addressPrefix = `${gatewayUrlEnvVarName}=`;
 
-/** Ready once the daemon printed its address. */
+/**
+ * Ready once the daemon printed its address. Started with the test switch
+ * on, so a real `serve` runs its characters on the test provider.
+ */
 export async function spawnDaemon(
   entry: string,
   args: readonly string[],
 ): Promise<SpawnedDaemon> {
-  const daemon = await spawnProcess(entry, args, line =>
-    line.startsWith(addressPrefix),
+  const daemon = await spawnProcess(
+    entry,
+    args,
+    line => line.startsWith(addressPrefix),
+    {PROJECT02_TEST_PROVIDER: 'deterministic'},
   );
 
   return {...daemon, url: daemon.line.slice(addressPrefix.length)};
@@ -53,10 +59,12 @@ export async function spawnProcess(
   entry: string,
   args: readonly string[],
   ready: (line: string) => boolean,
+  env: Readonly<Record<string, string>> = {},
 ): Promise<SpawnedProcess> {
   const child = spawn(process.execPath, [entry, ...args], {
     cwd: process.cwd(),
     stdio: 'pipe',
+    env: {...process.env, ...env},
   });
   // Taken now, not at stop: a process that died on its own has already
   // fired its exit, and a listener added afterwards would wait forever.

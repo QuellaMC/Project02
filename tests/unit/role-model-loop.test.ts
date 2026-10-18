@@ -979,7 +979,7 @@ describe('role-model loop reply drafts', () => {
     expect(failing).toEqual(['delta 1.0 hello', 'withdrawn 1.0']);
   });
 
-  it("drafts a local agent's reply after the scrub the parser applies, so a draft never shows what the commit hides", async () => {
+  it("drafts an agent's reply after the scrub the parser applies, so a draft never shows what the commit hides", async () => {
     const log: string[] = [];
 
     await runWith(
@@ -987,7 +987,7 @@ describe('role-model loop reply drafts', () => {
       createRoleModelAdapterFromCharacterAgent({
         reply: () => ({text: '<think>hidden</think>Hello there'}),
       }),
-      'evt_local_draft_scrubbed',
+      'evt_agent_draft_scrubbed',
     );
 
     expect(log).toEqual([
@@ -1003,7 +1003,7 @@ describe('role-model loop reply drafts', () => {
       createRoleModelAdapterFromCharacterAgent({
         reply: () => ({text: '<think>never closed'}),
       }),
-      'evt_local_draft_unterminated',
+      'evt_agent_draft_unterminated',
     );
 
     expect(result.status).toBe('rejected');

@@ -7,7 +7,7 @@ import * as project02 from '../../src/index.ts';
 
 import {
   createSession,
-  createDeterministicLocalRoleModelAdapter,
+  createDeterministicTestRoleModelAdapter,
   createRuntimePluginHost,
   createRuntimeEventIdentity,
   createRuntimeLogStore,
@@ -63,8 +63,8 @@ describe('root public surface', () => {
 });
 
 describe('role-model module smoke', () => {
-  it('exposes the local adapter and parser through the root barrel', () => {
-    expect(createDeterministicLocalRoleModelAdapter()).toHaveProperty('invoke');
+  it('exposes the test provider and parser through the root barrel', () => {
+    expect(createDeterministicTestRoleModelAdapter()).toHaveProperty('invoke');
     expect(
       parseRoleModelDecision(
         JSON.stringify({
@@ -113,7 +113,7 @@ describe('role-model module smoke', () => {
       session,
       logStore,
       pluginHost: createRuntimePluginHost(),
-      roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
+      roleModelAdapter: createDeterministicTestRoleModelAdapter(),
     });
 
     expect(result.status).toBe('completed');

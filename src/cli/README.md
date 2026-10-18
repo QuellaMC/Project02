@@ -19,6 +19,12 @@ for a while one that does not answer — stopping, or not yet bound — and
 takes the home over when its lease goes, or says so when the wait is up. Ctrl-C, SIGTERM and SIGHUP
 are one stop: it finishes what was accepted, then lets the home go.
 
+`PROJECT02_TEST_PROVIDER=deterministic` in `serve`'s environment runs
+every character on the deterministic test provider — fixed replies, no
+model, no network — whatever its config chooses, so a test can drive a
+real daemon on a home with no provider; any other value refuses to start.
+It is a test's switch, not a setting, and nothing but the entry reads it.
+
 `inspect/` reports on a home and writes nothing. Every report opens with
 the character's resolved config, its plugins, and each built-in
 connector's settings, secrets redacted, before the sessions or

@@ -1,4 +1,3 @@
-import {createDeterministicLocalRoleModelAdapter} from '../providers/local.ts';
 import {
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
@@ -56,7 +55,7 @@ import {
 export type RunRoleModelLoopOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
-  readonly adapter?: RoleModelAdapter;
+  readonly adapter: RoleModelAdapter;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost: RoleModelPluginToolHost;
   readonly maxToolRounds?: number;
@@ -163,7 +162,6 @@ export async function runRoleModelLoop(
     options.decisionContext.historyWindow,
   );
 
-  const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const maxToolRounds = normalizeMaxToolRounds(options.maxToolRounds);
   const identity = createSnapshotIdentity(options.event);
   const sessionId = options.decisionContext.sessionId;
@@ -190,7 +188,6 @@ export async function runRoleModelLoop(
     try {
       const invokedRound = await invokeRoleModelLoopRound({
         options,
-        adapter,
         identity,
         sessionId,
         round,
@@ -299,7 +296,6 @@ type InvokedRoleModelLoopRound =
 
 async function invokeRoleModelLoopRound(options: {
   readonly options: RunRoleModelLoopOptions;
-  readonly adapter: RoleModelAdapter;
   readonly identity: RuntimeEventIdentity;
   readonly sessionId: string;
   readonly round: number;
@@ -328,13 +324,16 @@ async function invokeRoleModelLoopRound(options: {
       ? {}
       : {userDisplayName: options.options.userDisplayName}),
   });
-  const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
-    turnContext,
-    conversationHistory,
-    onReplyDelta: delta => {
-      options.drafts.speak(delta);
+  const rawOutput: unknown = await options.options.adapter.invoke(
+    inputEnvelope,
+    {
+      turnContext,
+      conversationHistory,
+      onReplyDelta: delta => {
+        options.drafts.speak(delta);
+      },
     },
-  });
+  );
   const rawOutputValidation = validateRoleModelAdapterRawOutput(rawOutput);
   const ioSnapshot = createRoleModelIOSnapshot({
     ...options.identity,
