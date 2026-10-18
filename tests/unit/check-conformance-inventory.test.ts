@@ -75,6 +75,7 @@ describe('the conformance inventory check', () => {
         'lifecycle.e,lifecycle,A statement.',
         row('turns.f', 'retired', 'todo'),
         row('turns.g', 'conformance', 'done'),
+        row('turns.h', 'conformance', 'done'),
       ],
       'tests/conformance/turns.test.ts': [
         'it(`lifecycle.c: a template literal`, () => {});',
@@ -84,6 +85,7 @@ describe('the conformance inventory check', () => {
         "it('lifecycle.z: names no row', () => {});",
         "it('turns.f: names a retired row', () => {});",
         "it.skip('turns.g: parked, so no proof', () => {});",
+        "it.fails('turns.h: passes by failing, so no proof', () => {});",
       ],
     });
 
@@ -100,7 +102,8 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/turns.test.ts:6: turns.f is not a conformance row of tests/conformance/inventory.csv.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance.',
-      'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped or expects to fail.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped or expects to fail.',
       '',
     ]);
     expect(result.status).toBe(1);

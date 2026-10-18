@@ -31,8 +31,8 @@ const COLUMN_VALUES = {
 const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?\(/gm;
 // The modifiers that take an argument list before the one with the title.
 const ARGUMENTS_BEFORE_TITLE = /\.(?:each|for|skipIf|runIf)\b/;
-// The modifiers under which a test never runs, so it proves nothing.
-const NEVER_RUNS = /\.(?:skip|todo)\b/;
+// The modifiers under which a test proves nothing: it never runs, or it passes by failing.
+const PROVES_NOTHING = /\.(?:skip|todo|fails)\b/;
 const TITLE_SHAPE = /^([^\s:]+): \S/;
 
 // RFC 4180: a quoted field may hold commas, line breaks and doubled quotes.
@@ -132,7 +132,7 @@ function testCalls(source) {
     closed.lastIndex = end;
     return {
       line: source.slice(0, match.index).split('\n').length,
-      disabled: NEVER_RUNS.test(match[1]),
+      disabled: PROVES_NOTHING.test(match[1]),
       title:
         end > start && closed.test(source)
           ? source.slice(start + 1, end - 1)
@@ -241,7 +241,7 @@ function main() {
       failures.push(
         parked.has(row.id)
           ? `${INVENTORY_FILE}: ${row.id} is done, but every test naming it ` +
-              `in ${SUITE_DIRECTORY} is skipped.`
+              `in ${SUITE_DIRECTORY} is skipped or expects to fail.`
           : `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +
               `${SUITE_DIRECTORY} names it.`,
       );
