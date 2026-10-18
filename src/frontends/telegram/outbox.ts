@@ -1,3 +1,4 @@
+import {codePointBoundary, truncateText} from '../../shared/text-cut.ts';
 import {
   pause,
   type BotApiOutcome,
@@ -324,7 +325,9 @@ function createWriter(bot: BotContext, audience: Audience): Writer {
         await call(() =>
           api.answerCallbackQuery({
             callbackQueryId: press.id,
-            ...(toast === undefined ? {} : {text: cut(toast, maxToastLength)}),
+            ...(toast === undefined
+              ? {}
+              : {text: truncateText(toast, maxToastLength, '…')}),
             signal: bot.signal,
           }),
         ),
@@ -433,18 +436,15 @@ function notModified(outcome: BotApiOutcome<unknown>): boolean {
   );
 }
 
-/** Messages Telegram takes, never cut between the halves of a surrogate pair. */
-function pieces(text: string, size = maxMessageLength): readonly string[] {
+/** Messages Telegram takes. */
+function pieces(text: string): readonly string[] {
   const cut: string[] = [];
 
   for (let start = 0; start < text.length;) {
-    const end = Math.min(start + size, text.length);
-    const last = text.charCodeAt(end - 1);
-    const next =
-      end < text.length && last >= 0xd800 && last <= 0xdbff ? end - 1 : end;
+    const end = codePointBoundary(text, start + maxMessageLength);
 
-    cut.push(text.slice(start, next));
-    start = next;
+    cut.push(text.slice(start, end));
+    start = end;
   }
 
   return cut;
@@ -455,14 +455,5 @@ function pieces(text: string, size = maxMessageLength): readonly string[] {
  * be: a text past Telegram's longest is cut to make room.
  */
 export function oneMessage(text: string, ending = ''): string {
-  return cut(text, maxMessageLength - ending.length) + ending;
-}
-
-/** The text within the limit, an ellipsis marking a cut, never between the halves of a surrogate pair. */
-function cut(text: string, limit: number): string {
-  const [first = '', ...rest] = pieces(text, limit);
-
-  return rest.length === 0
-    ? first
-    : `${Array.from(first).slice(0, -1).join('')}…`;
+  return truncateText(text, maxMessageLength - ending.length, '…') + ending;
 }
