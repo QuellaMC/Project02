@@ -74,7 +74,6 @@ try {
       stderr: process.stderr,
       signal: abort.signal,
       roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
-      port: 0,
     },
   );
 } finally {

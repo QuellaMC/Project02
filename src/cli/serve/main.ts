@@ -40,8 +40,6 @@ import {
 } from '../shared/terminal-errors.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
 
-export const defaultGatewayPort = 4310;
-
 /** How long one question to the daemon that holds the home may take. */
 const probeMs = 5_000;
 /** How long a second serve keeps asking a holder that does not answer, and trying its lease. */
@@ -61,11 +59,6 @@ export type ServeCliOptions = {
   /** Test and dev injection, handed through to the gateway. */
   readonly pluginHost?: RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
-  /**
-   * The port a first run on this home asks for; a later run binds the
-   * home's own. Tests inject 0, a free port.
-   */
-  readonly port?: number;
   /** How long a second run waits for a holder that does not answer; tests shorten it. */
   readonly holdWaitMs?: number;
 };
@@ -178,7 +171,7 @@ async function serve(
     server = await createGatewayServer({
       gateway,
       token: claim.token,
-      port: claim.port ?? options.port ?? defaultGatewayPort,
+      port: claim.port ?? 0,
       // Served only once built: the file handler warns about a root that is
       // not there, and a daemon run straight from `node` must not.
       ...(pathExistsSync(join(uiRoot, 'index.html')) ? {uiRoot} : {}),
@@ -212,8 +205,9 @@ async function serve(
 
     return await released(claim, options.stderr, stopProblems === 0 ? 0 : 1);
   } catch (error: unknown) {
-    // The socket never opened, or a bug escaped: leave nothing running,
-    // and let the home go — a lease that would not go is said too.
+    // The socket never opened, the record could not be written, or a bug
+    // escaped: leave nothing running, and let the home go — a lease that
+    // would not go is said too.
     await (server === undefined ? gateway.stop() : server.close());
     await released(claim, options.stderr, 1);
 
