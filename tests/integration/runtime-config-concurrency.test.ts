@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 
 import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
+import {awaitStartFile} from '../support/start-file.ts';
 
 const tempRoots: string[] = [];
 
@@ -54,11 +55,9 @@ async function runConfigMutationChild(options: {
   readonly pluginId: string;
 }): Promise<void> {
   const script = [
-    "import { existsSync } from 'node:fs';",
     "const { applyRuntimeConfigControlOperation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-activation-fixtures.ts');",
-    'const sleep = new Int32Array(new SharedArrayBuffer(4));',
-    'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+    awaitStartFile(2),
     'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] } });',
     'applyRuntimeConfigControlOperation({',
     'sections: { plugins: [], connectors: [] },',
