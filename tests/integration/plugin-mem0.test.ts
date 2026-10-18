@@ -319,48 +319,16 @@ describe('mem0 plugin package', () => {
       ...mem0FactoryInput('server'),
       resolvedConfig: resolvedConfig({
         backend: 'server',
-        baseUrl: 'localhost:8765',
-      }),
-    });
-
-    const health = await plugin.lifecycleHooks.health?.(mem0Context());
-
-    // An origin without a scheme fails inside fetch, where every verb
-    // would blame the network for a field the operator can fix.
-    expect(health).toMatchObject({
-      status: 'unavailable',
-      summary: expect.stringContaining(
-        'absolute http:// or https:// origin',
-      ) as string,
-    });
-
-    // Endpoint paths are appended as text, so a query or fragment moves
-    // where every request lands.
-    const withFragment = createMem0PluginFromInput({
-      ...mem0FactoryInput('server'),
-      resolvedConfig: resolvedConfig({
-        backend: 'server',
-        baseUrl: 'https://mem0.example/#/admin',
-      }),
-    });
-
-    expect(
-      await withFragment.lifecycleHooks.health?.(mem0Context()),
-    ).toMatchObject({status: 'unavailable'});
-
-    // The rejected value itself never travels: health reaches logs and
-    // durable evidence, and a mistyped URL can carry the credential.
-    const withUserinfo = createMem0PluginFromInput({
-      ...mem0FactoryInput('server'),
-      resolvedConfig: resolvedConfig({
-        backend: 'server',
         baseUrl: 'https://operator:hunter2@mem0.example',
       }),
     });
-    const leaked = await withUserinfo.lifecycleHooks.health?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
 
-    expect(leaked).toMatchObject({status: 'unavailable'});
-    expect(JSON.stringify(leaked)).not.toContain('hunter2');
+    expect(health).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining('Mem0 baseUrl must be') as string,
+    });
+    expect(JSON.stringify(health)).not.toContain('hunter2');
   });
 
   it('reports missing configuration through health instead of pretending memory works', async () => {

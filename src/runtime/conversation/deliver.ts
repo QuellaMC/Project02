@@ -84,9 +84,7 @@ async function deliverThroughSegment(
         session,
         logStore,
         rawInput: options.line,
-        ...(options.roleModelAdapter === undefined
-          ? {}
-          : {roleModelAdapter: options.roleModelAdapter}),
+        roleModelAdapter: options.roleModelAdapter,
         ...(options.characterPersonaSections === undefined
           ? {}
           : {characterPersonaSections: options.characterPersonaSections}),
@@ -162,9 +160,7 @@ async function rotateIfNeeded(
   const plan = await planSessionContinuation({
     sessionId: session.id,
     logStore,
-    ...(options.roleModelAdapter === undefined
-      ? {}
-      : {roleModelAdapter: options.roleModelAdapter}),
+    roleModelAdapter: options.roleModelAdapter,
     ...(options.contextWindowTokens === undefined
       ? {}
       : {contextWindowTokens: options.contextWindowTokens}),

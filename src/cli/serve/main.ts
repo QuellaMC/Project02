@@ -25,7 +25,10 @@ import {
   type GatewayServer,
 } from '../../gateway/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
-import type {RoleModelAdapter} from '../../role-model/index.ts';
+import {
+  createDeterministicTestRoleModelAdapter,
+  type RoleModelAdapter,
+} from '../../role-model/index.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {pathExistsSync} from '../../shared/file-system.ts';
 import {isMainModule, stopSignal} from '../../shared/main-module.ts';
@@ -428,13 +431,31 @@ function aborted(signal: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * A test's switch, never a setting: every character answers through the
+ * deterministic test provider, whatever its config chooses.
+ */
+const testProviderEnvVarName = 'PROJECT02_TEST_PROVIDER';
+
 if (isMainModule(import.meta.url)) {
-  // A second signal ends the process before the release; the lease left
-  // behind is the next start's to reclaim.
-  process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    signal: stopSignal(),
-  });
+  const testProvider = process.env[testProviderEnvVarName];
+
+  if (testProvider !== undefined && testProvider !== 'deterministic') {
+    process.stderr.write(
+      `Error: ${testProviderEnvVarName} must be "deterministic" when it is set.\n`,
+    );
+    process.exitCode = 1;
+  } else {
+    // A second signal ends the process before the release; the lease left
+    // behind is the next start's to reclaim.
+    process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      signal: stopSignal(),
+      ...(testProvider === undefined
+        ? {}
+        : {roleModelAdapter: createDeterministicTestRoleModelAdapter()}),
+    });
+  }
 }

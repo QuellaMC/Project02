@@ -40,7 +40,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
-  readonly roleModelAdapter?: RoleModelAdapter;
+  readonly roleModelAdapter: RoleModelAdapter;
   readonly maxToolRounds?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly characterPersonaSections?: readonly string[];

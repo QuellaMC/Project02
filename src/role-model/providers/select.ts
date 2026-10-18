@@ -5,10 +5,10 @@ import {createNvidiaRoleModelProviderAdapter} from './nvidia.ts';
 /** The host settings the provider adapter is built from. */
 export type RoleModelProviderSettings = Pick<
   ResolvedProject02RuntimeConfig['project02'],
-  'roleModelProvider' | 'nvidiaApiKey' | 'nvidiaModel'
+  'roleModelProvider' | 'nvidiaApiKey' | 'nvidiaModel' | 'nvidiaBaseUrl'
 >;
 
-/** Undefined for the local provider: the caller supplies that adapter. */
+/** Undefined until a provider is chosen. */
 export function createRoleModelProviderAdapter(
   settings: RoleModelProviderSettings,
 ): RoleModelAdapter | undefined {
@@ -23,5 +23,8 @@ export function createRoleModelProviderAdapter(
     ...(settings.nvidiaModel === undefined
       ? {}
       : {model: settings.nvidiaModel}),
+    ...(settings.nvidiaBaseUrl === undefined
+      ? {}
+      : {baseUrl: settings.nvidiaBaseUrl}),
   });
 }

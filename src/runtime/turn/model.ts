@@ -28,7 +28,6 @@ import {conversationHistoryFromRawEvents} from '../evidence/conversation-history
 import {defaultProject02ContextWindowTokens} from '../config/schema.ts';
 import {
   runRoleModelLoop,
-  type RoleModelAdapter,
   type RoleModelLoopResult,
   type RoleModelPluginToolCallCompletedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
@@ -242,6 +241,7 @@ async function runRuntimeModel(
   const result = await runRoleModelLoop({
     event: state.event,
     decisionContext: roleModelDecisionContext,
+    adapter: state.options.roleModelAdapter,
     ...(state.options.maxToolRounds === undefined
       ? {}
       : {maxToolRounds: state.options.maxToolRounds}),
@@ -281,7 +281,6 @@ async function runRuntimeModel(
     onReplyWithdrawn(event) {
       void emitProgress(state, {kind: 'reply_withdrawn', ...event});
     },
-    ...roleModelLoopAdapterOption(state.options),
   });
 
   return {status: 'completed', result};
@@ -451,14 +450,6 @@ async function rejectPreCommitHealth(options: {
     toolCallIds: Object.freeze([...options.state.finishedToolCallIds]),
     ...visibleMessageIdsForTurnOption(options.state.committedVisibleMessages),
   });
-}
-
-function roleModelLoopAdapterOption(options: RunLocalUserMessageEventOptions): {
-  readonly adapter?: RoleModelAdapter;
-} {
-  return options.roleModelAdapter === undefined
-    ? {}
-    : {adapter: options.roleModelAdapter};
 }
 
 function pluginToolEvidenceFromRouting(

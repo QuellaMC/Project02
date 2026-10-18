@@ -197,7 +197,7 @@ type NvidiaTransportResult =
 export async function performNvidiaTransportRequest(options: {
   readonly fetchClient: NvidiaFetchClient;
   readonly endpoint: string;
-  readonly apiKey: string;
+  readonly apiKey?: string;
   readonly body: string;
   readonly requestDeadline: NvidiaRequestDeadline;
   readonly retryDelaysMs: readonly number[];
@@ -211,7 +211,9 @@ export async function performNvidiaTransportRequest(options: {
         options.fetchClient(options.endpoint, {
           method: 'POST',
           headers: {
-            authorization: `Bearer ${options.apiKey}`,
+            ...(options.apiKey === undefined
+              ? {}
+              : {authorization: `Bearer ${options.apiKey}`}),
             'content-type': 'application/json',
           },
           body: options.body,

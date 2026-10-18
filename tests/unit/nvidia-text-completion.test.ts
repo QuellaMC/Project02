@@ -9,7 +9,7 @@ function jsonResponse(body: unknown, status = 200): Promise<Response> {
 }
 
 describe('NVIDIA plain text completion', () => {
-  it('asks the same model without tools or thinking and returns the scrubbed text', async () => {
+  it('asks the same model on the same server without tools or thinking and returns the scrubbed text', async () => {
     let captured: {url: string; body: unknown} | undefined;
     const fetchClient: NvidiaFetchClient = (url, request) => {
       captured = {url, body: JSON.parse(request.body)};
@@ -30,7 +30,7 @@ describe('NVIDIA plain text completion', () => {
     const adapter = createNvidiaRoleModelProviderAdapter({
       apiKey: 'secret',
       model: 'nvidia/test-model',
-      endpoint: 'https://example.test/v1/chat/completions',
+      baseUrl: 'https://example.test/v1/',
       fetchClient,
     });
 
