@@ -1,7 +1,8 @@
 // The inventory is the conformance suite's index: each test is titled
 // `<row id>: <sentence>` after the row it proves, and a row is done only
 // when a test names it. A title must be a plain string literal, so a
-// search for a row id finds its test.
+// search for a row id finds its test, and the suite is flat, so no block
+// above a test can park it.
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -29,6 +30,8 @@ const COLUMN_VALUES = {
 // `it` or `test` at the start of a line, with any modifiers and type
 // arguments.
 const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?\(/gm;
+// A describe or suite block, which could park every test under it.
+const BLOCK = /^[ \t]*(?:describe|suite)(?:\.\w+)*\(/gm;
 // The modifiers that take an argument list before the one with the title.
 const ARGUMENTS_BEFORE_TITLE = /\.(?:each|for|skipIf|runIf)\b/;
 // The modifiers under which a test proves nothing: it never runs, or it passes by failing.
@@ -72,6 +75,10 @@ function parseCsv(text) {
     records.push([...record, field]);
   }
   return records;
+}
+
+function lineOf(source, index) {
+  return source.slice(0, index).split('\n').length;
 }
 
 function skipSpace(source, index) {
@@ -131,7 +138,7 @@ function testCalls(source) {
 
     closed.lastIndex = end;
     return {
-      line: source.slice(0, match.index).split('\n').length,
+      line: lineOf(source, match.index),
       disabled: PROVES_NOTHING.test(match[1]),
       title:
         end > start && closed.test(source)
@@ -200,9 +207,9 @@ function main() {
   let tests = 0;
 
   for (const file of testFiles) {
-    for (const {line, disabled, title} of testCalls(
-      readFileSync(file, 'utf8'),
-    )) {
+    const source = readFileSync(file, 'utf8');
+
+    for (const {line, disabled, title} of testCalls(source)) {
       const id = title?.match(TITLE_SHAPE)?.[1];
 
       tests += 1;
@@ -225,6 +232,12 @@ function main() {
       } else {
         tested.add(id);
       }
+    }
+    for (const block of source.matchAll(BLOCK)) {
+      failures.push(
+        `${file}:${lineOf(source, block.index)}: a describe block; the ` +
+          'suite is flat, so no block above a test can park it.',
+      );
     }
   }
 

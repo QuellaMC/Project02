@@ -34,6 +34,13 @@ export type Serve = {
 
 export type Daemon = Serve & Address;
 
+/** This process's environment without the daemon's test switches: none leaks in from the shell running the suite. */
+const inherited = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) => !name.startsWith('PROJECT02_TEST_'),
+  ),
+);
+
 /**
  * `serve` with these arguments, in a process group of its own so a signal
  * reaches whatever it started. The group is killed when the test ends,
@@ -46,7 +53,7 @@ export function serve(
   const commandLine = [...serveCommand, ...args];
   const [command = '', ...commandArgs] = commandLine;
   const child = spawn(command, commandArgs, {
-    env: {...process.env, ...env},
+    env: {...inherited, ...env},
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
