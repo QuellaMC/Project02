@@ -64,17 +64,17 @@ describe('gateway event stream frames', () => {
     // Only the head is in flight; the rest wait their turn.
     expect(releases).toHaveLength(1);
 
-    let drained: boolean | undefined;
+    let drained = false;
 
-    void queue.drain().then(written => {
-      drained = written;
+    void queue.drain().then(() => {
+      drained = true;
     });
     releases[0]?.();
     await new Promise(resolve => setImmediate(resolve));
     releases[1]?.();
     await new Promise(resolve => setImmediate(resolve));
     // A close that waits on the drain still has the last frame ahead of it.
-    expect(drained).toBeUndefined();
+    expect(drained).toBe(false);
     releases[2]?.();
     await new Promise(resolve => setImmediate(resolve));
 
@@ -114,7 +114,7 @@ describe('gateway event stream frames', () => {
 
       // Dropped once; what waited is discarded, and so is what comes later.
       queue.push('late');
-      await expect(queue.drain()).resolves.toBe(false);
+      await queue.drain();
       expect(writes).toBe(1);
       expect(drops).toBe(1);
     } finally {

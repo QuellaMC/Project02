@@ -3,7 +3,11 @@ import {connect, createServer} from 'node:net';
 import {describe, expect, it, vi} from 'vitest';
 
 import {createGatewayServer} from '../../src/gateway/http/server.ts';
-import {createGateway, type HistoryOutcome} from '../../src/gateway/index.ts';
+import {
+  createGateway,
+  type GatewayEventListener,
+  type HistoryOutcome,
+} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {
@@ -212,6 +216,87 @@ describe('gateway server lifecycle', () => {
     expect(waited).toBeLessThan(5_000);
     stalled.destroy();
   }, 10_000);
+
+  it('ends a stream that lags behind only once every frame queued for it is written', async () => {
+    const gateway = gatewayOver(
+      await createGatewayTestHome(),
+      heldAdapter().adapter,
+    );
+    let emit: GatewayEventListener = () => undefined;
+    const server = await createGatewayServer({
+      gateway: {
+        ...gateway,
+        events: listener => {
+          emit = listener;
+
+          return gateway.events(listener);
+        },
+      },
+      token,
+      port: 0,
+    });
+    const lagging = connect(server.port, '127.0.0.1');
+    let received = '';
+    const opened = new Promise<void>(resolve => {
+      lagging.setEncoding('utf8');
+      lagging.on('data', (chunk: string) => {
+        received += chunk;
+
+        if (received.includes('event: ready')) {
+          resolve();
+        }
+      });
+    });
+
+    lagging.write(
+      `GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:${String(server.port)}\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`,
+    );
+    await opened;
+    lagging.pause();
+
+    // Frames large enough that the sockets' buffers hold only some of
+    // them: the rest are still queued for the stream when the stop comes.
+    const frames = 64;
+
+    for (let index = 0; index < frames; index += 1) {
+      emit({
+        kind: 'turn_progress',
+        characterId: 'mira',
+        conversationId: 'c',
+        progress: {
+          kind: 'visible_reply',
+          messageId: 'm',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'x'.repeat(256 * 1024),
+          draftId: '1.0',
+        },
+      });
+    }
+
+    // A client that keeps up hears its stream end once the stop has
+    // reached the streams.
+    const keepingUp = await subscribeToEvents(
+      `http://127.0.0.1:${String(server.port)}`,
+    );
+
+    await keepingUp.next(frame => frame.event === 'ready');
+
+    const closing = server.close();
+
+    await keepingUp.ended;
+
+    const ended = new Promise<void>(resolve => {
+      lagging.once('end', resolve);
+    });
+
+    lagging.resume();
+    await ended;
+    await closing;
+    expect([...received.matchAll(/^event: turn_progress$/gmu)]).toHaveLength(
+      frames,
+    );
+  });
 
   it('drains an accepted turn behind a 503 for newcomers, with the stream still carrying its reply', async () => {
     const homeRoot = await createGatewayTestHome();

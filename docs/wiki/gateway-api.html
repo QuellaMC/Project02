@@ -132,12 +132,15 @@
         Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the
         daemon prints <em>Stopping; finishing what is in flight</em>, requests
         the stop at once (a boot still under way is joined, and its late
-        <code>ready</code> suppressed), finishes the turns it accepted, lets
-        the streams and answers drain, closes the socket, then rewrites the
-        record without <code>running</code> and releases the lease. A second
-        signal of any kind ends the process at once; the lease left behind is
-        the next start's to reclaim. On Windows, the console window's close
-        is a SIGHUP followed by a kill about ten seconds later.
+        <code>ready</code> suppressed), finishes the turns it accepted, ends
+        each stream once every frame queued for it is written, gives an
+        answer still being written two seconds to finish, closes the socket,
+        then rewrites the record without <code>running</code> and releases
+        the lease. A client that does not take a frame within two seconds is
+        dropped, at a stop as at any other time. A second signal of any kind
+        ends the process at once; the lease left behind is the next start's
+        to reclaim. On Windows, the console window's close is a SIGHUP
+        followed by a kill about ten seconds later.
       </p>
 
       <h2>The four wire rules</h2>
