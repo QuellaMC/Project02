@@ -60,6 +60,8 @@ type Chat = {
   /** The stamp on every line this bot carries. */
   readonly source: string;
   thread: Extract<OpenOutcome, {readonly status: 'opened'}> | undefined;
+  /** A loop opening her DM is under way: one at a time, however many ask. */
+  opening: boolean;
   /** The hand-offs to her, begun in the order the lines came: the next once the one before is on its way. */
   handing: Promise<void>;
   /** Every running turn, folded by the contract's one rule; her DM's is the one shown. */
@@ -88,6 +90,7 @@ export function characterChat(
       characterId,
       source: `telegram:${bot.username}`,
       thread: undefined,
+      opening: false,
       handing: Promise.resolve(),
       turns: new Map(),
       held: [],
@@ -234,28 +237,37 @@ async function open(chat: Chat): Promise<OpenOutcome> {
 
 /**
  * Opens her DM before any line, so other surfaces' turns can be shown,
- * asking again with a backoff while the daemon cannot be reached; one she
- * cannot take yet is opened once she is ready, or by the next line, which
- * tells its chat why when it cannot.
+ * asking again with a backoff while the daemon cannot be reached, in one
+ * loop however many ask; one she cannot take yet is opened once she is
+ * ready, or by the next line, which tells its chat why when it cannot.
  */
 function openAhead(chat: Chat): void {
   const {signal} = chat.bot;
 
+  if (chat.opening) {
+    return;
+  }
+
+  chat.opening = true;
   void (async () => {
-    for (
-      let failures = 0;
-      !signal.aborted && chat.thread === undefined;
-      failures += 1
-    ) {
-      try {
-        await open(chat);
+    try {
+      for (
+        let failures = 0;
+        !signal.aborted && chat.thread === undefined;
+        failures += 1
+      ) {
+        try {
+          await open(chat);
 
-        return;
-      } catch (error: unknown) {
-        rethrowUnlessTransport(error);
+          return;
+        } catch (error: unknown) {
+          rethrowUnlessTransport(error);
+        }
+
+        await pause(backoffMs(failures), signal);
       }
-
-      await pause(backoffMs(failures), signal);
+    } finally {
+      chat.opening = false;
     }
   })();
 }
