@@ -214,18 +214,13 @@ describe('web settings', () => {
     );
     const sent = changeSent(state, 1, secret);
 
-    expect(sent.settings?.saving).toEqual({
-      ticket: 1,
-      key: secret,
-      against: 'f1',
-    });
+    expect(sent.settings?.saving).toEqual({ticket: 1, key: secret});
     expect(sent.settings?.edits.has(secret)).toBe(false);
     expect(sent.settings?.edits.get(tone)).toBe('warm');
     expect(changeSent(state, 1, tone).settings?.saving).toEqual({
       ticket: 1,
       key: tone,
       text: 'warm',
-      against: 'f1',
     });
   });
 
@@ -244,25 +239,12 @@ describe('web settings', () => {
     expect(landed.settings?.edits.get(tone)).toBe('neutral');
     expect(landed.settings?.saved).toBeUndefined();
     expect(landed.settings?.saving).toBeUndefined();
-    // The answer's fingerprint is the view's at once: the next save does
-    // not conflict with this one, though the re-read failed.
+    // The answer leaves the view as read: its fingerprint comes from the
+    // read that lands with the answer, never from the answer.
     expect(
       landed.settings?.view?.status === 'ok' &&
         landed.settings.view.fingerprint,
-    ).toBe('f2');
-
-    // A view read after another surface saved landed first: it is newer
-    // than the answer, and keeps its own fingerprint.
-    const overtaken = changeEnded(
-      configViewRead(retyped, mira, view('f3')),
-      1,
-      {status: 'applied', fingerprint: 'f2'},
-    );
-
-    expect(
-      overtaken.settings?.view?.status === 'ok' &&
-        overtaken.settings.view.fingerprint,
-    ).toBe('f3');
+    ).toBe('f1');
 
     // Left for the home and came back: a fresh screen, waiting on nothing.
     const back = settingsOpened(settingsOpened(sent, home), mira);

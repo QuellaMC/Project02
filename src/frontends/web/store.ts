@@ -95,8 +95,6 @@ export type SettingsPage = {
     readonly ticket: number;
     readonly key: string;
     readonly text?: string;
-    /** The fingerprint of the view the change was made against. */
-    readonly against?: string;
   };
   /** The field whose last change landed, until the person's next edit. */
   readonly saved?: string;
