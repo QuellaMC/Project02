@@ -28,3 +28,12 @@ export function isHttpBaseUrl(value: string): boolean {
  */
 export const httpBaseUrlRule =
   'an absolute http:// or https:// address with no embedded credentials, query, or fragment';
+
+/** The endpoint at `path` under a base, given with or without its trailing slash. */
+export function endpointUnder(baseUrl: string, path: string): string {
+  const url = new URL(baseUrl);
+
+  url.pathname = `${url.pathname.replace(/\/+$/u, '')}/${path}`;
+
+  return url.href;
+}
