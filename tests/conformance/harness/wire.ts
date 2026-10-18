@@ -131,3 +131,29 @@ export async function converse(
       clientMessageId,
     });
 }
+
+/**
+ * One change saved as a settings page saves it: against the fingerprint
+ * the target's view hands out now. A change not applied is a failure that
+ * names the outcome.
+ */
+export async function saveConfig(
+  wire: Wire,
+  target: Parameters<Wire['configView']>[0],
+  operation: object,
+): Promise<void> {
+  const view = (await wire.configView(target)) as {
+    readonly fingerprint?: string;
+  };
+  const outcome = await wire.configChange({
+    target,
+    expectedFingerprint: view.fingerprint,
+    operation,
+  });
+
+  if ((outcome as {readonly status?: string}).status !== 'applied') {
+    throw failure(
+      `The change ${JSON.stringify(operation)} answered ${JSON.stringify(outcome)}.`,
+    );
+  }
+}

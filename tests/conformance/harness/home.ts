@@ -45,3 +45,21 @@ function plant(directory: string, tree: Tree): void {
 export function configJson(document: object): string {
   return JSON.stringify({version: 'project02.config.v2', ...document});
 }
+
+/**
+ * A character package's descriptor for this identity, with a one-line
+ * persona at version 1.0.0; the parts given replace those whole.
+ */
+export function characterJson(
+  id: string,
+  displayName: string,
+  descriptor: object = {},
+): string {
+  return JSON.stringify({
+    format: 'project02.character.v1',
+    identity: {id, displayName},
+    persona: {system: [`You are ${displayName}.`]},
+    meta: {version: '1.0.0'},
+    ...descriptor,
+  });
+}
