@@ -46,13 +46,16 @@ export async function openEvents(
 
   if (response.status !== 200 || response.body === null) {
     throw failure(
-      `The event stream answered ${String(response.status)}: ${await response.text()}`,
+      `The event stream answered ${String(response.status)}: ${await within(
+        "the event stream's refusal to be read",
+        response.text(),
+      )}`,
     );
   }
 
   const frames: Frame[] = [];
   let arrival = Promise.withResolvers<undefined>();
-  const parse = createFrameParser(frame => {
+  const parser = createFrameParser(frame => {
     frames.push(frame);
     arrival.resolve(undefined);
     arrival = Promise.withResolvers();
@@ -63,10 +66,12 @@ export async function openEvents(
       const {done, value} = await reader.read();
 
       if (done) {
+        parser.end();
+
         return;
       }
 
-      parse(value);
+      parser.feed(value);
     }
   })();
   let taken = 0;
@@ -137,15 +142,19 @@ function holds(value: unknown, pattern: unknown): boolean {
   );
 }
 
-/** Lines end in LF, CRLF or CR, and a blank one ends a frame. */
-function createFrameParser(
-  emit: (frame: Frame) => void,
-): (text: string) => void {
+/**
+ * Lines end in LF, CRLF or CR, and a blank one ends a frame. A CR held back
+ * as the possible first half of a CRLF is a line's end once the stream
+ * ends; a line the stream ends in the middle of is not a line.
+ */
+function createFrameParser(emit: (frame: Frame) => void): {
+  readonly feed: (text: string) => void;
+  readonly end: () => void;
+} {
   let rest = '';
   let fields: {id?: string; event?: string; data?: string; comment?: string} =
     {};
-
-  return text => {
+  const feed = (text: string): void => {
     rest += text;
 
     for (;;) {
@@ -183,6 +192,15 @@ function createFrameParser(
         fields[name] = value;
       }
     }
+  };
+
+  return {
+    feed,
+    end: () => {
+      if (rest.endsWith('\r')) {
+        feed('\n');
+      }
+    },
   };
 }
 
