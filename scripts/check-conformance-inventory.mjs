@@ -31,6 +31,8 @@ const COLUMN_VALUES = {
 const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?\(/gm;
 // The modifiers that take an argument list before the one with the title.
 const ARGUMENTS_BEFORE_TITLE = /\.(?:each|for|skipIf|runIf)\b/;
+// The modifiers under which a test never runs, so it proves nothing.
+const NEVER_RUNS = /\.(?:skip|todo)\b/;
 const TITLE_SHAPE = /^([^\s:]+): \S/;
 
 // RFC 4180: a quoted field may hold commas, line breaks and doubled quotes.
@@ -130,6 +132,7 @@ function testCalls(source) {
     closed.lastIndex = end;
     return {
       line: source.slice(0, match.index).split('\n').length,
+      disabled: NEVER_RUNS.test(match[1]),
       title:
         end > start && closed.test(source)
           ? source.slice(start + 1, end - 1)
@@ -193,10 +196,13 @@ function main() {
     .sort()
     .map(path => join(SUITE_DIRECTORY, path));
   const tested = new Set();
+  const parked = new Set();
   let tests = 0;
 
   for (const file of testFiles) {
-    for (const {line, title} of testCalls(readFileSync(file, 'utf8'))) {
+    for (const {line, disabled, title} of testCalls(
+      readFileSync(file, 'utf8'),
+    )) {
       const id = title?.match(TITLE_SHAPE)?.[1];
 
       tests += 1;
@@ -214,6 +220,8 @@ function main() {
           `${file}:${line}: ${id} is not a conformance row of ` +
             `${INVENTORY_FILE}.`,
         );
+      } else if (disabled) {
+        parked.add(id);
       } else {
         tested.add(id);
       }
@@ -231,8 +239,11 @@ function main() {
       );
     } else if (!tested.has(row.id)) {
       failures.push(
-        `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +
-          `${SUITE_DIRECTORY} names it.`,
+        parked.has(row.id)
+          ? `${INVENTORY_FILE}: ${row.id} is done, but every test naming it ` +
+              `in ${SUITE_DIRECTORY} is skipped.`
+          : `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +
+              `${SUITE_DIRECTORY} names it.`,
       );
     }
   }
