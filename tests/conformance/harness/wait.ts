@@ -28,34 +28,50 @@ export function failure(message: string): Error {
  */
 export function waitFailure(what: string): {
   readonly ceiling: () => Error;
-  readonly because: (why: string) => Error;
+  readonly because: (why: string, cause?: unknown) => Error;
 } {
   const error = new Error();
-  const fail = (message: string): Error => {
+  const fail = (message: string, cause?: unknown): Error => {
     error.message = withEvidence(message);
+
+    if (cause !== undefined) {
+      error.cause = cause;
+    }
 
     return error;
   };
 
   return {
     ceiling: () => fail(`Waited ${String(ceilingMs / 1000)} s for ${what}.`),
-    because: why => fail(`Waited for ${what}, but ${why}.`),
+    because: (why, cause) => fail(`Waited for ${what}, but ${why}.`, cause),
   };
 }
 
+/** The promise's outcome under the ceiling; a failure of either kind shows the evidence, the promise's own as its cause. */
 export async function within<T>(what: string, promise: Promise<T>): Promise<T> {
   const failed = waitFailure(what);
   let timer: NodeJS.Timeout | undefined;
+  let ceiling: Error | undefined;
 
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
-          reject(failed.ceiling());
+          ceiling = failed.ceiling();
+          reject(ceiling);
         }, ceilingMs);
       }),
     ]);
+  } catch (error: unknown) {
+    if (error === ceiling) {
+      throw error;
+    }
+
+    throw failed.because(
+      `it failed: ${error instanceof Error ? error.message : String(error)}`,
+      error,
+    );
   } finally {
     clearTimeout(timer);
   }

@@ -142,18 +142,22 @@ function parkedByOptions(options) {
   if (options === undefined) {
     return false;
   }
-  return (
-    !ts.isObjectLiteralExpression(options) ||
-    options.properties.some(
-      property =>
-        (ts.isPropertyAssignment(property) &&
-          ts.isIdentifier(property.name) &&
-          PARKING_MODIFIERS.has(property.name.text) &&
-          property.initializer.kind !== ts.SyntaxKind.FalseKeyword) ||
-        (ts.isShorthandPropertyAssignment(property) &&
-          PARKING_MODIFIERS.has(property.name.text)),
-    )
-  );
+  if (!ts.isObjectLiteralExpression(options)) {
+    return true;
+  }
+  return options.properties.some(property => {
+    if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)) {
+      return (
+        PARKING_MODIFIERS.has(property.name.text) &&
+        property.initializer.kind !== ts.SyntaxKind.FalseKeyword
+      );
+    }
+    if (ts.isShorthandPropertyAssignment(property)) {
+      return PARKING_MODIFIERS.has(property.name.text);
+    }
+    // A spread, a computed name or a method: what it sets cannot be read.
+    return true;
+  });
 }
 
 /** Whether the call's table of cases, if it has one, holds none: then nothing runs. */
