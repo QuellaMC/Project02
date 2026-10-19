@@ -115,3 +115,17 @@ export function snapshot(directory: string): Record<string, string> {
       }),
   );
 }
+
+/** The records of this kind that a character's sessions logged, segment by segment. */
+export function sessionRecords(
+  home: string,
+  characterId: string,
+  kind: string,
+): Record<string, unknown>[] {
+  const sessions = join(home, 'character-data', characterId, 'sessions');
+
+  return readdirSync(sessions)
+    .sort((left, right) => left.localeCompare(right, 'en', {numeric: true}))
+    .flatMap(session => sessionLog(home, characterId, session))
+    .filter(record => record['kind'] === kind);
+}

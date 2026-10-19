@@ -92,7 +92,7 @@ it("storage.torn-final-record: a log whose last line a crash cut short reads bac
     const say = await converse(wire, 'mira');
     const {conversationId} = await conversationOf(wire, 'mira');
 
-    model.answer(calling('character_state_patch', {mood}), reply(`${mood}.`));
+    model.answer(calling(['character_state_patch', {mood}]), reply(`${mood}.`));
 
     const outcome = await say(`Feeling ${mood}?`, mood);
     const history = await wire.history(conversationId);
@@ -202,13 +202,16 @@ it('storage.crash-open-turn-readable: a log a crash left in the middle of a turn
 
   model.answer(
     reply('Here.'),
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: fingerprint,
-    }),
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: fingerprint,
+      },
+    ]),
   );
   expect(await second.say('Hello again.', 'again')).toMatchObject({
     status: 'completed',

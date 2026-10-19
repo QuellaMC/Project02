@@ -16,7 +16,7 @@ import {
   characterJson,
   configJson,
   createHome,
-  sessionLog,
+  sessionRecords,
 } from './harness/home.ts';
 import {messagesOf, reply, startModelServer} from './harness/model-server.ts';
 import {converse, saveConfig, wireOf} from './harness/wire.ts';
@@ -224,17 +224,14 @@ it('characters.package-removed-while-running: a character whose package goes whi
 
 /** What each model round recorded of the character it ran for. */
 function characterRefs(home: string, characterId: string) {
-  return readdirSync(join(characterData(home, characterId), 'sessions'))
-    .flatMap(session => sessionLog(home, characterId, session))
-    .filter(event => event['kind'] === 'role_model_round')
-    .map(
-      round =>
-        (
-          round['roleModelIOSnapshot'] as {
-            readonly characterRef?: {readonly personaFingerprint?: string};
-          }
-        ).characterRef,
-    );
+  return sessionRecords(home, characterId, 'role_model_round').map(
+    round =>
+      (
+        round['roleModelIOSnapshot'] as {
+          readonly characterRef?: {readonly personaFingerprint?: string};
+        }
+      ).characterRef,
+  );
 }
 
 it("characters.persona-prompt: the persona's sections, a blank line apart, then the runtime's words naming the person, are the system message the model receives, and each round records the character's id, version and persona fingerprint", async () => {

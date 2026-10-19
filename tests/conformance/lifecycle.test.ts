@@ -856,7 +856,7 @@ it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parke
   const say = await converse(wire, 'mira');
   const events = await openEvents(daemon);
 
-  model.answer(calling('runtime_plugin_config', {pluginId: 'demo-config'}));
+  model.answer(calling(['runtime_plugin_config', {pluginId: 'demo-config'}]));
 
   const inspected = model.hold();
 
@@ -868,13 +868,16 @@ it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parke
   };
 
   inspected.release(
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: output.fingerprint,
-    }),
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: output.fingerprint,
+      },
+    ]),
   );
   await events.next(frameOf('confirmation_requested'));
 

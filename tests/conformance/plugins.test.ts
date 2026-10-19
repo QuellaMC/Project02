@@ -100,7 +100,7 @@ it('plugins.default-catalog: a fresh home offers character-memory, character-sta
     const say = await converse(wire, characterId);
 
     model.answer(
-      calling('runtime_plugin_list', {scope: 'all'}),
+      calling(['runtime_plugin_list', {scope: 'all'}]),
       reply('Listed.'),
     );
     await say('What plugins do you have?', characterId);
@@ -186,9 +186,9 @@ it("plugins.config-tools-read: runtime_plugin_config answers a plugin's metadata
   const say = await converse(wire, 'mira');
 
   model.answer(
-    calling('runtime_plugin_config', {pluginId: 'demo-config'}),
-    calling('runtime_plugin_config', {pluginId: 'character-state'}),
-    calling('runtime_plugin_config', {pluginId: ''}),
+    calling(['runtime_plugin_config', {pluginId: 'demo-config'}]),
+    calling(['runtime_plugin_config', {pluginId: 'character-state'}]),
+    calling(['runtime_plugin_config', {pluginId: ''}]),
     reply('Inspected.'),
   );
   await say('How are your plugins set?', 'inspect');
@@ -264,12 +264,15 @@ it("plugins.config-tools-update: an approved update writes her overlay before th
   const say = await converse(wire, 'mira');
   const events = await openEvents(daemon);
   const update = (fingerprint: string, change: object) =>
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      expectedFingerprint: fingerprint,
-      ...change,
-    });
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        expectedFingerprint: fingerprint,
+        ...change,
+      },
+    ]);
 
   model.answer(
     update(await fingerprintOf(wire), {operation: 'set', value: 'formal'}),
@@ -342,14 +345,17 @@ it('plugins.config-tools-update-refusals: an update is refused without asking fo
   const events = await openEvents(daemon);
   const fingerprint = await fingerprintOf(wire);
   const update = (change: object) =>
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: fingerprint,
-      ...change,
-    });
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: fingerprint,
+        ...change,
+      },
+    ]);
   const invalid = (message: string) => ({
     status: 'rejected',
     reason: 'plugin_config_update_invalid',
@@ -405,13 +411,16 @@ it('plugins.config-tools-update-refusals: an update is refused without asking fo
     }),
   );
   model.answer(
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'formal',
-      expectedFingerprint: await fingerprintOf(wire),
-    }),
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'formal',
+        expectedFingerprint: await fingerprintOf(wire),
+      },
+    ]),
     reply('Still warm.'),
   );
   await say('Be formal.', 'formal');
@@ -440,13 +449,16 @@ it('plugins.config-tools-conflict: an update approved after her settings changed
   const events = await openEvents(daemon);
 
   model.answer(
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'pirate',
-      expectedFingerprint: await fingerprintOf(wire),
-    }),
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'pirate',
+        expectedFingerprint: await fingerprintOf(wire),
+      },
+    ]),
     reply('Never mind.'),
   );
 
