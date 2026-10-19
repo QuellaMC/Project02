@@ -1,8 +1,9 @@
 //! One hook call under its plugin's budget.
 //!
 //! Each hook runs as a task of its own, so a hook that blocks its thread
-//! cannot hold the host past its deadline, and a hook that panics fails
-//! through its plugin's policy instead of taking the turn down. Whichever
+//! holds that worker alone and the host keeps its deadline, and a hook
+//! that panics fails through its plugin's policy instead of taking the
+//! turn down. Whichever
 //! way the host stops waiting (an answer, the deadline, the turn being
 //! abandoned, or the caller dropping the wait) the hook's writes end, and
 //! unless it answered in time its task is aborted and its token cancelled,

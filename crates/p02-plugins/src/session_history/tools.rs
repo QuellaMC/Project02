@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use p02_contracts::{PluginError, ProvidedTool, ToolConcurrency, ToolInputContract};
+use p02_contracts::{PluginError, ProvidedTool, ToolInputContract};
 use p02_shared::Identifier;
 use serde_json::{Value, json};
 
@@ -22,7 +22,9 @@ const READ_DESCRIPTION: &str = "Read a window of messages from one of your past 
      returned messageId as anchorMessageId to get the messages around it; hasBefore and hasAfter \
      say whether more exist beyond the window.";
 
-/// The two tools, both read-only and so shared: calls of them overlap.
+/// The two tools. Each call has the index to itself, so they are
+/// exclusive: a call's budget starts when it runs, not while an earlier
+/// call holds the index.
 pub(super) fn provided() -> Result<Vec<ProvidedTool>, PluginError> {
     Ok(vec![
         tool(
@@ -85,13 +87,12 @@ pub(super) fn provided() -> Result<Vec<ProvidedTool>, PluginError> {
 }
 
 fn tool(name: &str, description: &str, contract: Value) -> Result<ProvidedTool, PluginError> {
-    Ok(ProvidedTool::new(
+    ProvidedTool::new(
         Identifier::new(name).map_err(refused(name))?,
         description,
         ToolInputContract::new(contract).map_err(refused(name))?,
     )
-    .map_err(refused(name))?
-    .with_concurrency(ToolConcurrency::Shared))
+    .map_err(refused(name))
 }
 
 fn refused<E: Error + Send + Sync + 'static>(name: &str) -> impl Fn(E) -> PluginError + '_ {

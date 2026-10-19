@@ -13,7 +13,6 @@ use p02_contracts::{
 };
 use p02_core::{SessionId, VisibleMessageRole};
 use p02_shared::Identifier;
-use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde_json::Value;
 
@@ -36,13 +35,7 @@ const BOOKEND: i64 = 2;
 /// The trigram tokenizer cannot match fewer characters than this.
 const TRIGRAM_CHARS: usize = 3;
 
-/// Scripts written without spaces between words, which the word index
-/// cannot split, so only the trigram index finds a part of a run of them.
-static UNSPACED_SCRIPT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}]").expect("the pattern compiles")
-});
-
-/// Messages are immutable once committed, so the full-text indexes follow
+/// Messages are immutable once committed, so the full-text index follows
 /// inserts and deletes only.
 const SCHEMA: &str = "
 CREATE TABLE index_owner (
@@ -68,18 +61,13 @@ CREATE TABLE messages (
   UNIQUE (session_id, position),
   UNIQUE (session_id, message_id)
 );
-CREATE VIRTUAL TABLE words USING fts5(
-  text, content = 'messages', content_rowid = 'id', tokenize = 'unicode61'
-);
 CREATE VIRTUAL TABLE trigrams USING fts5(
   text, content = 'messages', content_rowid = 'id', tokenize = 'trigram'
 );
 CREATE TRIGGER messages_indexed AFTER INSERT ON messages BEGIN
-  INSERT INTO words (rowid, text) VALUES (new.id, new.text);
   INSERT INTO trigrams (rowid, text) VALUES (new.id, new.text);
 END;
 CREATE TRIGGER messages_forgotten AFTER DELETE ON messages BEGIN
-  INSERT INTO words (words, rowid, text) VALUES ('delete', old.id, old.text);
   INSERT INTO trigrams (trigrams, rowid, text) VALUES ('delete', old.id, old.text);
 END;
 ";
@@ -157,12 +145,6 @@ struct Hit {
     session_id: String,
     position: i64,
     sessions_with_hits: i64,
-}
-
-#[derive(Clone, Copy)]
-enum FullText {
-    Words,
-    Trigrams,
 }
 
 impl SessionIndex {
@@ -327,11 +309,10 @@ impl SessionIndex {
         Ok(damaged.try_into().unwrap_or_default())
     }
 
-    /// The sessions whose messages hold `query`, read as literal text. A
-    /// query too short for a trigram is a case-folded substring; one in a
-    /// script without spaces is found by trigrams; any other by words, or
-    /// by trigrams when no word matches. Each session's best hit is its
-    /// best rank, the newest of equals, and sessions rank the same way.
+    /// The sessions whose messages hold `query` as written, case aside: a
+    /// trigram phrase, or a folded substring when the query is too short
+    /// for a trigram. Each session's best hit is its best rank, the newest
+    /// of equals, and sessions rank the same way.
     pub(super) fn search(&self, query: &str, scope: &Scope<'_>) -> Result<Hits, IndexError> {
         let query = query.trim();
 
@@ -341,16 +322,8 @@ impl SessionIndex {
 
         let hits = if query.chars().count() < TRIGRAM_CHARS {
             self.substring_hits(query, scope)?
-        } else if UNSPACED_SCRIPT.is_match(query) {
-            self.ranked_hits(FullText::Trigrams, query, scope)?
         } else {
-            let words = self.ranked_hits(FullText::Words, query, scope)?;
-
-            if words.is_empty() {
-                self.ranked_hits(FullText::Trigrams, query, scope)?
-            } else {
-                words
-            }
+            self.ranked_hits(query, scope)?
         };
         let sessions_with_hits = hits.first().map_or(0, |hit| {
             hit.sessions_with_hits.try_into().unwrap_or_default()
@@ -422,32 +395,23 @@ impl SessionIndex {
             .unwrap_or(0))
     }
 
-    fn ranked_hits(
-        &self,
-        index: FullText,
-        query: &str,
-        scope: &Scope<'_>,
-    ) -> Result<Vec<Hit>, IndexError> {
-        let table = match index {
-            FullText::Words => "words",
-            FullText::Trigrams => "trigrams",
-        };
+    /// A phrase on the trigram index holds the query as written: no
+    /// operator of the query language is read.
+    fn ranked_hits(&self, query: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
         let phrase = format!("\"{}\"", query.replace('"', "\"\""));
 
         self.hits(
-            &format!(
-                "WITH best AS (
-                   SELECT m.session_id, m.position, m.committed_at, f.rank AS rank,
-                          ROW_NUMBER() OVER (
-                            PARTITION BY m.session_id ORDER BY f.rank, m.id DESC
-                          ) AS place
-                   FROM {table}(?1) AS f JOIN messages AS m ON m.id = f.rowid
-                   WHERE (?2 IS NULL OR m.session_id = ?2)
-                     AND m.message_id NOT IN (SELECT value FROM json_each(?3))
-                 )
-                 SELECT session_id, position, COUNT(*) OVER () FROM best WHERE place = 1
-                 ORDER BY rank, committed_at DESC, session_id LIMIT ?4"
-            ),
+            "WITH best AS (
+               SELECT m.session_id, m.position, m.committed_at, f.rank AS rank,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY m.session_id ORDER BY f.rank, m.id DESC
+                      ) AS place
+               FROM trigrams(?1) AS f JOIN messages AS m ON m.id = f.rowid
+               WHERE (?2 IS NULL OR m.session_id = ?2)
+                 AND m.message_id NOT IN (SELECT value FROM json_each(?3))
+             )
+             SELECT session_id, position, COUNT(*) OVER () FROM best WHERE place = 1
+             ORDER BY rank, committed_at DESC, session_id LIMIT ?4",
             &phrase,
             scope,
         )
