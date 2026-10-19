@@ -225,9 +225,8 @@ it("plugins.config-tools-read: runtime_plugin_config answers a plugin's metadata
           name: 'operatorNote',
           agentMutable: false,
           authored: {configured: false},
-          effective: expect.objectContaining({
-            source: expect.any(String) as string,
-          }) as unknown,
+          effectiveSource: 'default',
+          effective: {source: 'missing'},
         },
         {
           name: 'apiKey',
