@@ -867,9 +867,12 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
     throw new Error(`Mira has no conversation: ${JSON.stringify(opened)}.`);
   }
 
-  // JSON writes a control character as six bytes: the answer is many
-  // times what the sockets between the daemon and the client hold.
-  model.answer(reply('\u0001'.repeat(2 * 1024 * 1024)));
+  const events = await openEvents(daemon);
+
+  // A reader that takes nothing leaves the sockets' buffers to hold what
+  // they can, under three mebibytes here, and JSON writes a control
+  // character as six bytes: the answer is twice that.
+  model.answer(reply('\u0001'.repeat(1024 * 1024)));
 
   const body = JSON.stringify({
     conversationId: opened.conversationId,
@@ -880,11 +883,11 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
   });
   const reader = await connectSocket(daemon);
 
+  reader.pause();
   reader.write(
     `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: ${String(Buffer.byteLength(body))}\r\n\r\n${body}`,
   );
-  await reader.holds('\r\n\r\n');
-  reader.pause();
+  await events.next(frameOf('turn_completed', {clientMessageId: 'everything'}));
 
   // The monotonic clock: the wall clock is adjusted under WSL2.
   const stopped = performance.now();

@@ -111,7 +111,16 @@ it('stream.ping: an idle stream carries a ": ping" comment each heartbeat', asyn
   const ping = (frame: Frame): boolean => frame.comment === 'ping';
 
   expect(await events.next(ping)).toEqual({comment: 'ping'});
+
+  const first = performance.now();
+
   expect(await events.next(ping)).toEqual({comment: 'ping'});
+
+  const interval = performance.now() - first;
+
+  // One heartbeat apart: neither a steady stream of them nor one in a while.
+  expect(interval).toBeGreaterThanOrEqual(90);
+  expect(interval).toBeLessThan(2_000);
 });
 
 it("stream.turn-frames-order: a turn reaches the stream as its line's user_message, its reply's deltas in order, the visible_reply they join to, then turn_completed", async () => {
@@ -266,9 +275,18 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
   await stalled.received('event: ready');
   stalled.pause();
   await watching.next(telegram(true));
+
+  const submitted = performance.now();
+
   model.answer(overflowingDraft());
   await say('Talk a lot.', 'long');
   await watching.next(telegram(false));
+
+  const dropped = performance.now() - submitted;
+
+  // The grace of one second runs from the stall, then the drop: within the grace means about it.
+  expect(dropped).toBeGreaterThanOrEqual(900);
+  expect(dropped).toBeLessThan(5_000);
   stalled.resume();
   await stalled.ended();
   expect(stalled.body()).not.toContain('event: turn_completed');
