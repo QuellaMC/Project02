@@ -268,17 +268,9 @@ impl TryFrom<UncheckedContextItem> for PluginContextItem {
 /// The record's serialized form held to the default JSON limits, which
 /// bound every public string a plugin hands the host and their sum.
 pub(crate) fn within_limits<T: Serialize>(record: &T, name: &str) -> Result<(), BoundJsonError> {
-    within(record, name, JsonLimits::default())
-}
-
-pub(crate) fn within<T: Serialize>(
-    record: &T,
-    name: &str,
-    limits: JsonLimits,
-) -> Result<(), BoundJsonError> {
     let value = serde_json::to_value(record).expect("a record of plain data always serializes");
 
-    bound_json(value, name, limits, Credentials::Keep).map(drop)
+    bound_json(value, name, JsonLimits::default(), Credentials::Keep).map(drop)
 }
 
 /// A section of the trusted curated frame, between the persona and the

@@ -2,7 +2,6 @@ use p02_shared::{BoundJsonError, Credentials, JsonLimits, bound_json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::output::within;
 use crate::role_model::chat::{
     ChatCompletionTool, ChatMessage, ProviderCapabilities, ToolNameMapping,
 };
@@ -57,32 +56,35 @@ pub struct ExchangeProvider {
     pub endpoint: Option<String>,
 }
 
-/// An [`ExchangeRecord`] fit to keep: within the exchange's limits, its
-/// free-form parts with credential-named values redacted.
+/// An [`ExchangeRecord`] as it is kept: its JSON within the exchange's
+/// limits, every credential-named value redacted wherever it sits, in the
+/// request body, a tool's schema or the provider's usage alike.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "ExchangeRecord", into = "ExchangeRecord")]
-pub struct ProviderExchange(ExchangeRecord);
+#[serde(try_from = "ExchangeRecord", into = "Value")]
+pub struct ProviderExchange(Value);
 
 impl ProviderExchange {
     /// # Errors
     ///
     /// [`BoundJsonError`] for the first limit the record breaks.
-    pub fn new(mut record: ExchangeRecord) -> Result<Self, BoundJsonError> {
-        let name = "Role-model provider exchange";
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "a record of plain data always serializes"
+    )]
+    pub fn new(record: ExchangeRecord) -> Result<Self, BoundJsonError> {
+        let value = serde_json::to_value(record).expect("a record of plain data always serializes");
 
-        within(&record, name, EXCHANGE_LIMITS)?;
-
-        let redacted = |value: Value| bound_json(value, name, EXCHANGE_LIMITS, Credentials::Redact);
-
-        record.reasoning_params = redacted(record.reasoning_params)?;
-        record.request_body = redacted(record.request_body)?;
-        record.usage = record.usage.map(redacted).transpose()?;
-
-        Ok(Self(record))
+        bound_json(
+            value,
+            "Role-model provider exchange",
+            EXCHANGE_LIMITS,
+            Credentials::Redact,
+        )
+        .map(Self)
     }
 
     #[must_use]
-    pub fn record(&self) -> &ExchangeRecord {
+    pub fn as_value(&self) -> &Value {
         &self.0
     }
 }
@@ -95,7 +97,7 @@ impl TryFrom<ExchangeRecord> for ProviderExchange {
     }
 }
 
-impl From<ProviderExchange> for ExchangeRecord {
+impl From<ProviderExchange> for Value {
     fn from(exchange: ProviderExchange) -> Self {
         exchange.0
     }
@@ -142,7 +144,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::role_model::chat::{ContextRole, ReasoningParameterStyle};
+    use crate::role_model::chat::{ChatToolFunction, ContextRole, ReasoningParameterStyle};
 
     fn record(messages: Vec<ChatMessage>, request_body: Value) -> ExchangeRecord {
         ExchangeRecord {
@@ -182,25 +184,40 @@ mod tests {
             .collect();
         let body = json!({"messages": serde_json::to_value(&history).unwrap()});
         let exchange = ProviderExchange::new(record(history, body)).unwrap();
+        let kept = exchange.as_value();
 
         assert!(serde_json::to_string(&exchange).unwrap().len() > 64 * 1_024);
-        assert_eq!(exchange.record().rendered_messages.len(), 48);
+        assert_eq!(kept["renderedMessages"].as_array().map(Vec::len), Some(48));
         assert_eq!(
-            exchange.record().usage,
-            Some(json!({"prompt_tokens": 9000, "completion_tokens": 12}))
+            kept["usage"],
+            json!({"prompt_tokens": 9000, "completion_tokens": 12})
         );
     }
 
     #[test]
-    fn a_credential_sent_to_the_provider_is_never_kept() {
-        let exchange = ProviderExchange::new(record(
+    fn a_credential_sent_to_the_provider_is_never_kept_wherever_it_sat() {
+        let mut sent = record(
             Vec::new(),
             json!({"model": "nvidia/test-model", "api_key": "nvapi-secret", "messages": []}),
-        ))
-        .unwrap();
+        );
+        sent.rendered_tools = vec![ChatCompletionTool::new(ChatToolFunction {
+            name: "mem0.add".to_owned(),
+            description: "Stores a note.".to_owned(),
+            parameters: json!({
+                "type": "object",
+                "examples": [{"text": "a note", "api_key": "m0sk_live"}],
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+            strict: false,
+        })];
+        let exchange = ProviderExchange::new(sent).unwrap();
+        let kept = exchange.as_value();
 
+        assert_eq!(kept["requestBody"]["api_key"], json!("[redacted]"));
         assert_eq!(
-            exchange.record().request_body["api_key"],
+            kept["renderedTools"][0]["function"]["parameters"]["examples"][0]["api_key"],
             json!("[redacted]")
         );
         assert_eq!(

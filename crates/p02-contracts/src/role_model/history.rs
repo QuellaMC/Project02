@@ -7,6 +7,7 @@ use p02_shared::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::output::within_limits;
 use crate::tool::ToolCallId;
 
 /// A finished turn as the model replays it: the person's message, every
@@ -80,7 +81,8 @@ pub enum ToolCallResult {
 
 impl ConversationToolCall {
     /// A finished call as the model is shown it again: its input and output
-    /// held to the JSON limits, credential-named values redacted.
+    /// held to the JSON limits with credential-named values redacted, and a
+    /// rejection's reason and message held to the same limits.
     ///
     /// # Errors
     ///
@@ -107,7 +109,10 @@ impl ConversationToolCall {
                     Credentials::Redact,
                 )?,
             },
-            rejected @ ToolCallResult::Rejected { .. } => rejected,
+            rejected @ ToolCallResult::Rejected { .. } => {
+                within_limits(&rejected, "Conversation tool call rejection")?;
+                rejected
+            }
         };
 
         Ok(Self {
@@ -295,6 +300,34 @@ mod tests {
             &ToolCallResult::Accepted {
                 output: json!({"stored": 1, "session": {"access_token": "[redacted]"}})
             }
+        );
+    }
+
+    #[test]
+    fn a_replayed_tool_call_is_held_to_the_json_limits_however_it_ended() {
+        let call = |result| {
+            ConversationToolCall::new(
+                ToolCallId::new("call-1").unwrap(),
+                Identifier::new("mem0").unwrap(),
+                Identifier::new("memory.add").unwrap(),
+                Map::new(),
+                result,
+            )
+        };
+        let oversized = "x".repeat(16 * 1_024 + 1);
+
+        assert!(
+            call(ToolCallResult::Accepted {
+                output: json!(oversized),
+            })
+            .is_err()
+        );
+        assert!(
+            call(ToolCallResult::Rejected {
+                reason: "handler_failed".to_owned(),
+                message: oversized,
+            })
+            .is_err()
         );
     }
 }

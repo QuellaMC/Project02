@@ -72,15 +72,15 @@ pub struct FileStore {
     writes_open: Arc<AtomicBool>,
 }
 
-/// The host's hold on a hook's writes, which it ends when the hook settles.
-/// A plugin never has one.
+/// The host's hold on a hook's writes. Dropping it ends every later write
+/// through any copy of the store, when the hook settles and on every other
+/// way out. A plugin never has one.
 #[derive(Debug)]
-#[must_use = "a hook's writes end only when the host revokes them"]
-pub struct WriteRevocation(Arc<AtomicBool>);
+#[must_use = "dropping the hold ends the hook's writes at once"]
+pub struct WriteHold(Arc<AtomicBool>);
 
-impl WriteRevocation {
-    /// Ends every later write through any copy of the store.
-    pub fn revoke(self) {
+impl Drop for WriteHold {
+    fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
 }
@@ -104,7 +104,7 @@ impl FileStore {
         access: StoreAccess,
         deadline: Instant,
         cancellation: CancellationToken,
-    ) -> (Self, WriteRevocation) {
+    ) -> (Self, WriteHold) {
         let writes_open = Arc::new(AtomicBool::new(true));
 
         (
@@ -115,7 +115,7 @@ impl FileStore {
                 cancellation,
                 writes_open: Arc::clone(&writes_open),
             },
-            WriteRevocation(writes_open),
+            WriteHold(writes_open),
         )
     }
 
