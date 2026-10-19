@@ -1,6 +1,5 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {setTimeout as sleep} from 'node:timers/promises';
 
 import {expect, it} from 'vitest';
 
@@ -180,7 +179,7 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
 it('pairing.approve-write-failed: an approval the home cannot take answers failed with the reason, and the request waits on to its own deadline, announced again', async () => {
   const home = createHome();
   const daemon = await startDaemon(home, {
-    PROJECT02_TEST_DURATIONS: 'pairing=5000',
+    PROJECT02_TEST_DURATIONS: 'pairing=5000,heartbeat=1000',
   });
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
@@ -188,9 +187,12 @@ it('pairing.approve-write-failed: an approval the home cannot take answers faile
   const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
 
   await events.next(frameOf('pairing_requested', {code: request.code}));
-  // Halfway to the deadline: a request the failure re-armed would outlive
-  // its own deadline by as long again.
-  await sleep(2_500);
+  // Three heartbeats on, well short of the deadline: a request the failure
+  // re-armed would outlive its own deadline by that much.
+  for (let beat = 0; beat < 3; beat += 1) {
+    await events.next(frame => frame.comment === 'ping');
+  }
+
   chmod(home, 0o500);
 
   try {
@@ -217,7 +219,7 @@ it('pairing.approve-write-failed: an approval the home cannot take answers faile
 
   // At its own deadline of five seconds, not five after the failure.
   expect(waited).toBeGreaterThanOrEqual(4_900);
-  expect(waited).toBeLessThan(7_400);
+  expect(waited).toBeLessThan(7_500);
 });
 
 it('pairing.paired-elsewhere-settles: a request whose account another settings window paired meanwhile settles approved, asked again or answered, keeping the name that window gave', async () => {
@@ -288,7 +290,7 @@ it("pairing.not-across-restart: pairing requests live as long as the daemon's ru
   await events.next(
     frameOf('pairing_requested', {code: again.request.code, subject: alice}),
   );
-  expect(Date.parse(again.request.requestedAt)).toBeGreaterThan(
-    Date.parse(before.request.requestedAt),
-  );
+  // A new request, not the old one back; which was asked later the clock
+  // cannot say across two processes.
+  expect(again.request).not.toEqual(before.request);
 });

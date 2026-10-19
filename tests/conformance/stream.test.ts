@@ -1,7 +1,7 @@
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
-import {frameOf, openEvents, type Frame} from './harness/events.ts';
+import {type Frame, frameOf, framesOf, openEvents} from './harness/events.ts';
 import {configJson, createHome} from './harness/home.ts';
 import {
   finish,
@@ -235,11 +235,6 @@ it('stream.tail-bound: a Last-Event-ID more than the 1 MiB tail behind, past the
   }
 });
 
-/** The ids of a raw stream's frames, in order. */
-function idsOf(stream: string): string[] {
-  return [...stream.matchAll(/^id: (.*)$/gmu)].map(match => match[1] ?? '');
-}
-
 it('stream.shutdown-ends-streams: a stop ends each stream only once every frame queued for it is written, a client lagging within the grace included, and a stream asked for meanwhile is refused at once', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
@@ -271,11 +266,14 @@ it('stream.shutdown-ends-streams: a stop ends each stream only once every frame 
   expect(late.status).toBe(503);
   expect(performance.now() - asked).toBeLessThan(2_000);
   lagging.resume();
-  await lagging.ended();
-  expect(idsOf(lagging.body())).toEqual(
-    keepingUp.frames.flatMap(frame =>
-      frame.id === undefined ? [] : [frame.id],
-    ),
+
+  // Whole, so ended by the daemon rather than broken off, and holding
+  // every queued frame as the stream that kept up saw it.
+  const queued = (frames: readonly Frame[]) =>
+    frames.filter(frame => frame.id !== undefined && frame.event !== 'ready');
+
+  expect(queued(framesOf(await lagging.whole()))).toEqual(
+    queued(keepingUp.frames),
   );
   expect(await daemon.exit()).toBe(0);
 });
