@@ -1,10 +1,13 @@
 // The inventory is the conformance suite's index: each test is titled
 // `<row id>: <sentence>` after the row it proves, and a row is done only
 // when a test names it. A title must be a plain string literal, so a
-// search for a row id finds its test, and the suite is flat, so no block
-// above a test can park it.
+// search for a row id finds its test; a file is read as TypeScript, so a
+// test in a comment or a string is no test; and the suite is flat, so no
+// block above a test can park it.
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
+
+import ts from 'typescript';
 
 const SUITE_DIRECTORY = 'tests/conformance';
 const INVENTORY_FILE = `${SUITE_DIRECTORY}/inventory.csv`;
@@ -27,15 +30,17 @@ const COLUMN_VALUES = {
   status: ['todo', 'done'],
 };
 
-// `it` or `test` at the start of a line, with any modifiers and type
-// arguments, called or given a tagged template.
-const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?[(`]/gm;
-// A describe or suite block, which could park every test under it.
-const BLOCK = /^[ \t]*(?:describe|suite)(?:\.\w+)*\(/gm;
-// The modifiers that take an argument list before the one with the title.
-const ARGUMENTS_BEFORE_TITLE = /\.(?:each|for|skipIf|runIf)\b/;
+// What a call's root name opens: a test, or a block that could park every test under it.
+const ROOTS = new Map([
+  ['it', 'test'],
+  ['test', 'test'],
+  ['describe', 'block'],
+  ['suite', 'block'],
+]);
+// The modifiers applied with their own arguments before the titled call.
+const MODIFIERS_WITH_ARGUMENTS = new Set(['each', 'for', 'skipIf', 'runIf']);
 // The modifiers under which a test proves nothing: it never runs, or it passes by failing.
-const PROVES_NOTHING = /\.(?:skip|todo|fails)\b/;
+const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails']);
 const TITLE_SHAPE = /^([^\s:]+): \S/;
 
 // RFC 4180: a quoted field may hold commas, line breaks and doubled quotes.
@@ -77,75 +82,72 @@ function parseCsv(text) {
   return records;
 }
 
-function lineOf(source, index) {
-  return source.slice(0, index).split('\n').length;
-}
-
-function skipSpace(source, index) {
-  const space = /\s*/y;
-
-  space.lastIndex = index;
-  space.exec(source);
-  return space.lastIndex;
-}
-
-function pastString(source, index) {
-  let end = index + 1;
-
-  while (end < source.length && source[end] !== source[index]) {
-    end += source[end] === '\\' ? 2 : 1;
+/** The names along a callee such as `it.skip`, `it.each([...])` or `it.each\`...\``, root first. */
+function calleeNames(expression) {
+  if (ts.isIdentifier(expression)) {
+    return [expression.text];
   }
-  return end + 1;
-}
+  if (ts.isPropertyAccessExpression(expression)) {
+    const names = calleeNames(expression.expression);
 
-function pastArguments(source, index) {
-  let depth = 1;
-  let end = index;
-
-  while (depth > 0 && end < source.length) {
-    const character = source[end];
-
-    if (["'", '"', '`'].includes(character)) {
-      end = pastString(source, end);
-      continue;
-    }
-    if ('([{'.includes(character)) {
-      depth += 1;
-    } else if (')]}'.includes(character)) {
-      depth -= 1;
-    }
-    end += 1;
+    return names === undefined ? undefined : [...names, expression.name.text];
   }
-  return end;
+  if (ts.isCallExpression(expression)) {
+    return calleeNames(expression.expression);
+  }
+  if (ts.isTaggedTemplateExpression(expression)) {
+    return calleeNames(expression.tag);
+  }
+  return undefined;
 }
 
-/** Each test's line, and its title when that is a plain string literal. */
-function testCalls(source) {
-  return [...source.matchAll(TEST_CALL)].map(match => {
-    let start = skipSpace(source, match.index + match[0].length);
+/** Whether the call carries the title, rather than being the `.each([...])` or `.skipIf(cond)` applied before it. */
+function titled(call) {
+  if (
+    ts.isCallExpression(call.expression) ||
+    ts.isTaggedTemplateExpression(call.expression)
+  ) {
+    return true;
+  }
+  return !MODIFIERS_WITH_ARGUMENTS.has(calleeNames(call.expression)?.at(-1));
+}
 
-    if (ARGUMENTS_BEFORE_TITLE.test(match[1])) {
-      const next = skipSpace(source, pastArguments(source, start));
+/** Each titled test call, with its title when that is a plain string literal, and each block, by line. */
+function scan(file, source) {
+  const tree = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const tests = [];
+  const blocks = [];
+  const visit = node => {
+    if (ts.isCallExpression(node) && titled(node)) {
+      const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
+      const line =
+        tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
+      const [title] = node.arguments;
 
-      start =
-        source[next] === '(' ? skipSpace(source, next + 1) : source.length;
+      if (ROOTS.get(root) === 'block') {
+        blocks.push(line);
+      } else if (ROOTS.get(root) === 'test') {
+        tests.push({
+          line,
+          parked: modifiers.some(name => PARKING_MODIFIERS.has(name)),
+          title:
+            title !== undefined && ts.isStringLiteral(title)
+              ? title.text
+              : undefined,
+        });
+      }
     }
+    ts.forEachChild(node, visit);
+  };
 
-    const quote = source[start];
-    const end =
-      quote === "'" || quote === '"' ? pastString(source, start) : start;
-    const closed = /\s*[,)]/y;
-
-    closed.lastIndex = end;
-    return {
-      line: lineOf(source, match.index),
-      disabled: PROVES_NOTHING.test(match[1]),
-      title:
-        !match[0].endsWith('`') && end > start && closed.test(source)
-          ? source.slice(start + 1, end - 1)
-          : undefined,
-    };
-  });
+  visit(tree);
+  return {tests, blocks};
 }
 
 function reportFailures(failures) {
@@ -203,13 +205,13 @@ function main() {
     .sort()
     .map(path => join(SUITE_DIRECTORY, path));
   const tested = new Set();
-  const parked = new Set();
+  const parkedRows = new Set();
   let tests = 0;
 
   for (const file of testFiles) {
-    const source = readFileSync(file, 'utf8');
+    const {tests: calls, blocks} = scan(file, readFileSync(file, 'utf8'));
 
-    for (const {line, disabled, title} of testCalls(source)) {
+    for (const {line, parked, title} of calls) {
       const id = title?.match(TITLE_SHAPE)?.[1];
 
       tests += 1;
@@ -227,15 +229,15 @@ function main() {
           `${file}:${line}: ${id} is not a conformance row of ` +
             `${INVENTORY_FILE}.`,
         );
-      } else if (disabled) {
-        parked.add(id);
+      } else if (parked) {
+        parkedRows.add(id);
       } else {
         tested.add(id);
       }
     }
-    for (const block of source.matchAll(BLOCK)) {
+    for (const line of blocks) {
       failures.push(
-        `${file}:${lineOf(source, block.index)}: a describe block; the ` +
+        `${file}:${line}: a describe block; the ` +
           'suite is flat, so no block above a test can park it.',
       );
     }
@@ -252,7 +254,7 @@ function main() {
       );
     } else if (!tested.has(row.id)) {
       failures.push(
-        parked.has(row.id)
+        parkedRows.has(row.id)
           ? `${INVENTORY_FILE}: ${row.id} is done, but every test naming it ` +
               `in ${SUITE_DIRECTORY} is skipped or expects to fail.`
           : `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +

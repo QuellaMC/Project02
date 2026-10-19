@@ -27,7 +27,8 @@ against any other build of it.
   something that must happen after it.
 - Each test owns its home, daemon, model server and ports. Teardown kills
   each process group the test started, and a process still there after
-  the ceiling fails the test.
+  the ceiling fails the test. The suite runs on POSIX: process groups are
+  how signals reach a daemon and what it started.
 
 ## The harness
 

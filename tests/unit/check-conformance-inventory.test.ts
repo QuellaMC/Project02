@@ -50,13 +50,17 @@ describe('the conformance inventory check', () => {
         '  () => {},',
         ');',
         "it.each<[string, string]>([['a', ')']])('turns.d: %s', () => {});",
+        'it.each`',
+        '  a',
+        '  ${1}',
+        "`('turns.d: a tagged table, $a', () => {});",
         "test.skip('turns.d: skipped for now', () => {});",
       ],
     });
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 4 test(s) name rows of ' +
+      'conformance-inventory: 5 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
         'area: lifecycle 1/1, turns 0/1.\n',
     );
@@ -86,11 +90,13 @@ describe('the conformance inventory check', () => {
         "it('turns.f: names a retired row', () => {});",
         "it.skip('turns.g: parked, so no proof', () => {});",
         "it.fails('turns.h: passes by failing, so no proof', () => {});",
-        'it.each`',
+        "// it('lifecycle.z: a test in a comment is no test', () => {});",
+        "const text = `it('lifecycle.z: a test in a string is no test', () => {});`;",
+        "describe.skip('a block that parks every test under it', () => {});",
+        'describe.skip.each`',
         '  a',
         '  ${1}',
-        "`('turns.h: a tagged table, $a', () => {});",
-        "describe.skip('a block that parks every test under it', () => {});",
+        "`('a tagged block parks them too', () => {});",
       ],
     });
 
@@ -105,8 +111,8 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/turns.test.ts:4: the title "no row id here" is not "<row id>: <sentence>".',
       'conformance-inventory: tests/conformance/turns.test.ts:5: lifecycle.z is not a conformance row of tests/conformance/inventory.csv.',
       'conformance-inventory: tests/conformance/turns.test.ts:6: turns.f is not a conformance row of tests/conformance/inventory.csv.',
-      'conformance-inventory: tests/conformance/turns.test.ts:9: the title is not a plain string literal.',
-      'conformance-inventory: tests/conformance/turns.test.ts:13: a describe block; the suite is flat, so no block above a test can park it.',
+      'conformance-inventory: tests/conformance/turns.test.ts:11: a describe block; the suite is flat, so no block above a test can park it.',
+      'conformance-inventory: tests/conformance/turns.test.ts:12: a describe block; the suite is flat, so no block above a test can park it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped or expects to fail.',
