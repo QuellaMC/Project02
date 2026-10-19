@@ -154,6 +154,7 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
   });
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
+  const asked = performance.now();
   const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
 
   await events.next(
@@ -163,6 +164,12 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
       decision: 'expired',
     }),
   );
+
+  const waited = performance.now() - asked;
+
+  // At its deadline of half a second: neither at once nor long after.
+  expect(waited).toBeGreaterThanOrEqual(450);
+  expect(waited).toBeLessThan(3_000);
   expect(await wire.pairingAnswer(request.code, 'approved')).toEqual({
     status: 'unknown',
   });
