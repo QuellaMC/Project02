@@ -45,16 +45,25 @@ const TABLE_MODIFIERS = new Set(['each', 'for']);
 const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails', 'skipIf', 'runIf']);
 const TITLE_SHAPE = /^([^\s:]+): \S/;
 
-// RFC 4180: a quoted field may hold commas, line breaks and doubled quotes.
+// RFC 4180: a quoted field may hold commas, line breaks and doubled quotes;
+// a quote anywhere else, or text after a closing quote, is no CSV.
 function parseCsv(text) {
   const records = [];
   let record = [];
   let field = '';
   let quoted = false;
+  let closed = false;
+  let line = 1;
+  const refuse = why => {
+    throw new Error(`${INVENTORY_FILE}:${String(line)}: ${why}.`);
+  };
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
 
+    if (character === '\n') {
+      line += 1;
+    }
     if (quoted) {
       if (character !== '"') {
         field += character;
@@ -63,8 +72,23 @@ function parseCsv(text) {
         index += 1;
       } else {
         quoted = false;
+        closed = true;
       }
-    } else if (character === '"') {
+      continue;
+    }
+    if (
+      closed &&
+      character !== ',' &&
+      character !== '\n' &&
+      character !== '\r'
+    ) {
+      refuse('text after a closing quote');
+    }
+    closed = false;
+    if (character === '"') {
+      if (field !== '') {
+        refuse('a quote inside an unquoted field');
+      }
       quoted = true;
     } else if (character === ',') {
       record.push(field);
@@ -78,6 +102,9 @@ function parseCsv(text) {
     }
   }
 
+  if (quoted) {
+    refuse('a quoted field that never closes');
+  }
   if (field !== '' || record.length > 0) {
     records.push([...record, field]);
   }
@@ -127,15 +154,30 @@ function bodiless(call) {
   return !call.arguments.some(isFunction);
 }
 
-/** The options a test was given: its second argument when a third follows, or an object literal or a name there, which may be options as well as a body. */
+/**
+ * The options a test was given, read as Vitest reads them: after a body,
+ * an object literal third (a number there is a timeout); before one, the
+ * second argument, which a name also may be when nothing follows it or a
+ * body does.
+ */
 function optionsOf(call) {
   const [, second, third] = call.arguments;
 
-  return third !== undefined ||
-    (second !== undefined &&
-      (ts.isObjectLiteralExpression(second) || ts.isIdentifier(second)))
-    ? second
-    : undefined;
+  if (second === undefined) {
+    return undefined;
+  }
+  if (ts.isArrowFunction(second) || ts.isFunctionExpression(second)) {
+    return third !== undefined && ts.isObjectLiteralExpression(third)
+      ? third
+      : undefined;
+  }
+  if (ts.isIdentifier(second)) {
+    if (third === undefined || isFunction(third)) {
+      return second;
+    }
+    return ts.isObjectLiteralExpression(third) ? third : undefined;
+  }
+  return second;
 }
 
 /** Whether the test's options park it: skip, todo or fails set to anything but false, or options the checker cannot read. */
@@ -289,9 +331,16 @@ function reportFailures(failures) {
 }
 
 function main() {
-  const [header = [], ...records] = parseCsv(
-    readFileSync(INVENTORY_FILE, 'utf8'),
-  );
+  let parsed;
+
+  try {
+    parsed = parseCsv(readFileSync(INVENTORY_FILE, 'utf8'));
+  } catch (error) {
+    reportFailures([error instanceof Error ? error.message : String(error)]);
+    return;
+  }
+
+  const [header = [], ...records] = parsed;
 
   if (header.join(',') !== COLUMNS.join(',')) {
     reportFailures([

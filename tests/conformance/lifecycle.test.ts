@@ -68,7 +68,18 @@ it('lifecycle.stop-drains-in-flight: a stop says so, finishes the turn in flight
   const events = await openEvents(daemon);
   const held = model.hold();
   const turn = say('Still there?', 'in-flight');
+  // The order the answer and the stream's end settle in, as they settle.
+  const settled: string[] = [];
+  const ended = events.ended();
 
+  void turn.then(
+    () => settled.push('answered'),
+    () => settled.push('answered'),
+  );
+  void ended.then(
+    () => settled.push('ended'),
+    () => settled.push('ended'),
+  );
   await held.arrived();
   daemon.signal('SIGINT');
   await daemon.printed('Stopping; finishing what is in flight.');
@@ -88,7 +99,8 @@ it('lifecycle.stop-drains-in-flight: a stop says so, finishes the turn in flight
       status: 'completed',
     }),
   );
-  await events.ended();
+  await ended;
+  expect(settled).toEqual(['answered', 'ended']);
   expect(await daemon.exit()).toBe(0);
 });
 

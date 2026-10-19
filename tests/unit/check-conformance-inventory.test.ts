@@ -40,6 +40,7 @@ describe('the conformance inventory check', () => {
         'lifecycle.a,lifecycle,"Says ""ready"", then serves.",PROCESS,-,none,yes,,conformance,0,done',
         row('lifecycle.b', 'conformance', 'todo'),
         row('lifecycle.c', 'rust-unit', 'todo'),
+        row('lifecycle.g', 'conformance', 'done'),
         row('turns.d', 'conformance', 'todo'),
         row('page.e', 'client-ts', 'todo'),
       ],
@@ -51,6 +52,7 @@ describe('the conformance inventory check', () => {
         '  () => {},',
         ');',
         "it.each<[string, string]>([['a', ')']])('turns.d: %s', () => {});",
+        "it('lifecycle.g: a body and a timeout', () => {}, 120_000);",
         'it.each`',
         '  a',
         '  ${1}',
@@ -65,9 +67,9 @@ describe('the conformance inventory check', () => {
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 5 test(s) name rows of ' +
+      'conformance-inventory: 6 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
-        'area: lifecycle 1/1, turns 0/1.\n',
+        'area: lifecycle 2/1, turns 0/1.\n',
     );
     expect(result.status).toBe(0);
   });
@@ -154,6 +156,20 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
       '',
     ]);
+    expect(result.status).toBe(1);
+  });
+
+  it('reads no row of an inventory with a quote inside an unquoted field', () => {
+    const result = check({
+      'tests/conformance/inventory.csv': [
+        header,
+        row('lifecycle.a', 'conformance', 'todo').replace('todo', 'to"do"'),
+      ],
+    });
+
+    expect(result.stderr).toBe(
+      'conformance-inventory: tests/conformance/inventory.csv:2: a quote inside an unquoted field.\n',
+    );
     expect(result.status).toBe(1);
   });
 
