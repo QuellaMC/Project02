@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    Confirmation, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore, HookContext,
-    PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
-    ToolCallResult, ToolInputContract,
+    Confirmation, ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
+    FileStore, HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError,
+    ToolCall, ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
     ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ToolCallReport, Turn,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::time::Instant;
 
 use crate::storage::Storage;
@@ -303,6 +303,54 @@ async fn a_plugin_answer_is_recorded_as_what_it_says_or_fails_the_call() {
     assert_eq!(
         message(&oversized),
         "Plugin tool output exceeds the JSON string byte limit"
+    );
+}
+
+/// Fails every call with more words than any record keeps.
+#[derive(Debug)]
+struct Verbose {
+    tools: Vec<ProvidedTool>,
+}
+
+#[async_trait]
+impl RuntimePlugin for Verbose {
+    fn provided_tools(&self) -> &[ProvidedTool] {
+        &self.tools
+    }
+
+    async fn handle_tool_call(
+        &self,
+        _call: &ToolCall,
+        _context: &HookContext,
+    ) -> Result<ToolCallOutcome, PluginError> {
+        Err(PluginError::new("x".repeat(20_000)))
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_verbose_failure_is_cut_to_what_a_record_keeps_and_still_replays() {
+    let host = host_of(vec![(
+        Spec::tools("chatty"),
+        Arc::new(Verbose {
+            tools: vec![tool("chatty.run")],
+        }) as _,
+    )]);
+    let report = one(&host, call("c1", "chatty.run", json!({})), &turn()).await;
+    let text = message(&report).to_owned();
+
+    assert_eq!(reason(&report), Some("handler_failed"));
+    assert_eq!(text.chars().count(), 4_096);
+    assert!(text.ends_with("..."));
+    assert_eq!(report.evidence[0].summary(), text);
+    assert!(
+        ConversationToolCall::new(
+            ToolCallId::new("c1").unwrap(),
+            id("chatty"),
+            id("chatty.run"),
+            Map::new(),
+            report.result,
+        )
+        .is_ok()
     );
 }
 

@@ -21,7 +21,7 @@ pub(crate) const RECORD_LIMIT: usize = 64;
 
 /// How much of a plugin's own text a host record repeats: enough to say
 /// what failed, and within the JSON limits whatever the plugin said.
-const QUOTED_CHARS: usize = 4_096;
+pub(crate) const QUOTED_CHARS: usize = 4_096;
 
 impl Slot {
     pub(crate) fn labels(&self, turn: &Turn) -> Vec<RedactionLabel> {

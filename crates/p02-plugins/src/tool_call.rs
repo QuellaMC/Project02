@@ -14,10 +14,11 @@ use p02_shared::{Credentials, JsonLimits, bound_json, bound_json_object};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::boundary::{described, within_answer_limits};
+use crate::boundary::{QUOTED_CHARS, described, within_answer_limits};
 use crate::confirmation::{ConfirmationDecision, ConfirmationRequest};
 use crate::host::{Core, PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure};
+use crate::text::excerpt;
 use crate::turn::Turn;
 
 /// What one tool call came to: what the model reads, and the records the
@@ -88,7 +89,13 @@ impl Core {
         if let Err(rejection) = tool.input_contract().validate(tool.name(), call.input()) {
             let (status, outcome) = slot.failure_record(FailureKind::Exception);
 
-            return slot.refusal(turn, "invalid_input", rejection.sentence(), status, outcome);
+            return slot.refusal(
+                turn,
+                "invalid_input",
+                &rejection.sentence(),
+                status,
+                outcome,
+            );
         }
 
         let approval = if tool.is_approval_gated() {
@@ -133,7 +140,7 @@ impl Core {
             return Err(slot.refusal(
                 turn,
                 "tool_not_routable",
-                format!(
+                &format!(
                     "Plugin \"{plugin_id}\" tool \"{}\" requires an unavailable confirmation \
                      handler.",
                     tool.name()
@@ -160,11 +167,11 @@ impl Core {
             decision = confirmer.confirm(request) => decision,
             () = turn.cancellation().cancelled() => ConfirmationDecision::Cancelled,
         };
-        let refused = |reason, message| {
+        let refused = |reason, message: String| {
             slot.refusal(
                 turn,
                 reason,
-                message,
+                &message,
                 EvidenceStatus::Rejected,
                 PolicyOutcome::HandlerRejected,
             )
@@ -283,7 +290,7 @@ impl Slot {
         };
         let (status, outcome) = self.failure_record(failure.kind);
 
-        self.refusal(turn, reason, failure.message.clone(), status, outcome)
+        self.refusal(turn, reason, &failure.message, status, outcome)
     }
 
     /// How the plugin's `handleToolCall` policy records a call that failed.
@@ -307,15 +314,19 @@ impl Slot {
         }
     }
 
-    /// A call the host refuses, recorded as the refusal it is.
+    /// A call the host refuses, recorded as the refusal it is; what the
+    /// model reads of it is cut like any host record, so a plugin's own
+    /// words never put the report past the limits.
     fn refusal(
         &self,
         turn: &Turn,
         reason: &str,
-        message: String,
+        message: &str,
         status: EvidenceStatus,
         outcome: PolicyOutcome,
     ) -> ToolCallReport {
+        let message = excerpt(message, QUOTED_CHARS).into_owned();
+
         ToolCallReport {
             evidence: vec![self.record(
                 turn,
