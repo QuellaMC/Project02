@@ -912,13 +912,25 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
 });
 
 it('lifecycle.first-run-port: a first run on a home binds a free port the system hands it, names it in its address line and records it', async () => {
-  const home = createHome();
-  const daemon = await startDaemon(home);
+  // Two first runs at once: a port of the daemon's own choosing would be
+  // taken for one of them, whose first line would then say so.
+  const runs = await Promise.all(
+    [createHome(), createHome()].map(async home => ({
+      home,
+      daemon: await startDaemon(home),
+    })),
+  );
 
-  expect(daemon.stdout()).toBe(`PROJECT02_GATEWAY=${daemon.url}\n`);
-  expect(record(home)).toMatchObject({
-    port: Number(new URL(daemon.origin).port),
-  });
+  for (const {home, daemon} of runs) {
+    expect(daemon.stdout()).toBe(`PROJECT02_GATEWAY=${daemon.url}\n`);
+    expect(record(home)).toMatchObject({
+      port: Number(new URL(daemon.origin).port),
+    });
+  }
+
+  expect(
+    new Set(runs.map(({daemon}) => new URL(daemon.origin).port)).size,
+  ).toBe(2);
 });
 
 it('lifecycle.second-signal-exits: a second stop signal during a stop ends the process at once, and the next start reclaims the lease it left', async () => {
