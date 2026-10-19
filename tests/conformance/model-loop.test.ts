@@ -104,14 +104,26 @@ it('model.round-budget: a turn ends rejected tool_rounds_exhausted once its roun
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
   });
-  const say = await converse(wireOf(await startDaemon(home)), 'mira');
+  const daemon = await startDaemon(home);
+  const say = await converse(wireOf(daemon), 'mira');
+  const events = await openEvents(daemon);
 
   model.answer(
     ...Array.from({length: 100}, () =>
       calling(['runtime_plugin_config', {pluginId: 'nothing'}]),
     ),
   );
-  expect(await say('Keep looking.', 'looking')).toMatchObject({
+
+  const turn = say('Keep looking.', 'looking');
+
+  // A hundred rounds outlast one wait: each dispatched call is seen through.
+  for (let round = 0; round < 99; round += 1) {
+    await events.next(
+      frameOf('turn_progress', {progress: {kind: 'tool_call_completed'}}),
+    );
+  }
+
+  expect(await turn).toMatchObject({
     status: 'rejected',
     reason: 'tool_rounds_exhausted',
   });
