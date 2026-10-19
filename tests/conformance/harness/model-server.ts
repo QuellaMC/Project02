@@ -9,11 +9,9 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import type {AddressInfo} from 'node:net';
 import {text} from 'node:stream/consumers';
 
-import {onTestFinished} from 'vitest';
-
+import {servedOnLoopback} from './server.ts';
 import {attachEvidence, within} from './wait.ts';
 
 export type ModelRequest = {
@@ -104,24 +102,12 @@ export async function startModelServer(): Promise<ModelServer> {
     });
   });
 
-  await new Promise<void>(resolve => {
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  onTestFinished(
-    () =>
-      new Promise<void>(resolve => {
-        server.closeAllConnections();
-        server.close(() => {
-          resolve();
-        });
-      }),
-  );
+  const port = await servedOnLoopback(server);
+
   attachEvidence(
     () =>
       `model server: ${String(requests.length)} request(s), ${String(script.length)} scripted answer(s) left`,
   );
-
-  const {port} = server.address() as AddressInfo;
 
   return {
     settings: {
