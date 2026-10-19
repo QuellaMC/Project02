@@ -13,8 +13,11 @@ character's storage grants through the contracts.
   the host. A reload rebuilds one plugin for every later hook, unless the
   rebuild fails or would offer other tools, and waits for nothing.
 - **Hooks.** Each hook runs as a task of its own under its plugin's one
-  budget, so a hook that blocks or panics cannot hold or end the turn.
-  When the host stops waiting (an answer, the deadline, the turn
+  budget: a hook that panics fails through its policy, and a hook that
+  blocks its worker holds that worker alone, so the host keeps its
+  deadline; blocking work belongs on the blocking pool, where session
+  history does its database work. When the host stops waiting (an
+  answer, the deadline, the turn
   abandoned) the hook's writes end, and a hook that did not answer in time
   has its task aborted and its token cancelled. A failure goes through
   the hook's failure policy: `beforeRoleModelCall` degrades or rejects the

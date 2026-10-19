@@ -101,6 +101,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     history.exchange("chat.3", "我们讨论了插件权限设计吗？", "讨论过。");
     history.exchange("chat.4", "Привет, как дела?", "Хорошо!");
     history.exchange("chat.5", &long, "Noted.");
+    history.exchange("chat.7", "Call it foo bar, not C++.", "Fine.");
     history.say(
         "chat.6",
         VisibleMessageRole::User,
@@ -129,6 +130,8 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
         "zephyr77",
         "glimmerwing",
         "anchovy",
+        "foo-bar",
+        "c++",
     ];
     let reports = host
         .handle_tool_calls(
@@ -155,6 +158,8 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
             vec!["chat.6"],
             vec![],
             vec!["chat.5"],
+            vec![],
+            vec!["chat.7"],
         ]
     );
     assert_eq!(results[0]["totalSessionsWithHits"], json!(2));

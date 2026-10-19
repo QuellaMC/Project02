@@ -15,7 +15,8 @@ use crate::host::Slot;
 use crate::text::excerpt;
 use crate::turn::Turn;
 
-/// The most records of one kind one answer may carry.
+/// The most records of one kind a plugin's answer may carry; the host's
+/// own record of the answer, cut to fit, comes on top.
 pub(crate) const RECORD_LIMIT: usize = 64;
 
 /// How much of a plugin's own text a host record repeats: enough to say

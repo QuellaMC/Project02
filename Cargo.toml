@@ -15,7 +15,6 @@ jsonschema = { version = "0.59.0", default-features = false }
 p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
 p02-shared = { path = "crates/p02-shared" }
-regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
