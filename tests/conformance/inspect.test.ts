@@ -8,6 +8,7 @@ import {
   characterJson,
   configJson,
   createHome,
+  sessionLog,
   snapshot,
 } from './harness/home.ts';
 import {
@@ -36,6 +37,7 @@ type Round = {
 };
 
 type SessionReport = {
+  readonly counts: {readonly traceEntries: number; readonly rawEvents: number};
   readonly continuation?: {readonly summary: string};
   readonly turns: readonly {readonly modelRounds: readonly Round[]}[];
 };
@@ -95,6 +97,7 @@ it("inspect.session-report: inspect --session prints the session as JSON: its ev
   ])) as SessionReport;
   const rounds = report.turns[0]?.modelRounds ?? [];
 
+  expect(report.counts.traceEntries).toBeGreaterThan(0);
   expect(report).toMatchObject({
     evidenceScopes: {
       runtimeConfig: 'current_at_inspection',
@@ -104,7 +107,7 @@ it("inspect.session-report: inspect --session prints the session as JSON: its ev
     },
     counts: {
       traceEntries: expect.any(Number) as number,
-      rawEvents: expect.any(Number) as number,
+      rawEvents: sessionLog(home, 'mira', `${conversationId}.1`).length,
       conversationMessages: 2,
     },
     turns: [
@@ -303,7 +306,20 @@ it("inspect.config-report: inspect shows where the config came from, each plugin
   const run = inspect(['--store', home, '--sessions']);
 
   expect(await run.exit()).toBe(0);
-  expect(JSON.parse(run.stdout())).toMatchObject({
+
+  const shown = JSON.parse(run.stdout()) as {
+    readonly plugins: readonly {readonly pluginId: string}[];
+  };
+
+  expect(shown.plugins.map(plugin => plugin.pluginId).sort()).toEqual([
+    'character-memory',
+    'character-state',
+    'demo-config',
+    'mem0',
+    'runtime.plugin',
+    'session-history',
+  ]);
+  expect(shown).toMatchObject({
     runtimeConfig: {source: 'path', path: join(home, 'config.json')},
     activationDiagnostics: [
       {code: 'runtime_config_unknown_plugin', path: 'plugins.ghost-plugin'},

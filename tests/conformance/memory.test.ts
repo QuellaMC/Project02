@@ -29,7 +29,7 @@ import {
   visibleReply,
   type ModelRequest,
 } from './harness/model-server.ts';
-import {conversationOf, converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 type ToolResult = {
   readonly status: string;
@@ -406,7 +406,7 @@ it('memory.session-history-guidance: with session-history on, the runtime notes 
   );
 });
 
-it("memory.session-history-index: the index file is written after committed turns only while the plugin is on, and an index of a newer version or a corrupt one is rebuilt from the sessions' logs", async () => {
+it("memory.session-history-index: the index holds the lines that committed, a rejected turn's among them, only while the plugin is on, and an index of a newer version or a corrupt one is rebuilt from the sessions' logs", async () => {
   const model = await startModelServer();
   const settings = {project02: {...model.settings, contextWindowTokens: 1}};
   // Each turn outgrows the window, so its session ends with it once its
@@ -440,6 +440,12 @@ it("memory.session-history-index: the index file is written after committed turn
   model.answer(reply('Noted.'), {status: 400});
   await turnIn(off, 'The kraken surfaced.', 'off');
   expect(existsSync(pluginData(off, 'session-history'))).toBe(false);
+  // A rejected turn's line is committed before the model answers, so it
+  // is indexed like any other.
+  model.answer({status: 400});
+  await turnIn(on, 'The kraken was rejected.', 'rejected');
+  await searchAgain('after-rejection');
+  expect(krakenFound()).toBe(1);
   model.answer(reply('Noted.'), {status: 400});
   await turnIn(on, 'The kraken surfaced.', 'on');
   expect(existsSync(index)).toBe(true);
@@ -459,7 +465,7 @@ it("memory.session-history-index: the index file is written after committed turn
   database.exec('PRAGMA user_version = 99');
   database.close();
   await searchAgain('newer');
-  expect(krakenFound()).toBe(1);
+  expect(krakenFound()).toBe(2);
   expect(version()).toEqual(built);
 
   for (const file of ['session-index.sqlite-wal', 'session-index.sqlite-shm']) {
@@ -468,7 +474,7 @@ it("memory.session-history-index: the index file is written after committed turn
 
   writeFileSync(index, 'not a database');
   await searchAgain('corrupt');
-  expect(krakenFound()).toBe(1);
+  expect(krakenFound()).toBe(2);
 });
 
 it('memory.session-history-search: sessions.search finds lines of earlier sessions and lines out of the window but never what the model sees or its own interim reply; it routes CJK, short, non-ASCII case-folded and literal queries, keeps one best hit per session, the newest of equals, and centers a 160-character snippet on the match beside text bounded to 200', async () => {
@@ -587,6 +593,31 @@ it('memory.session-history-search: sessions.search finds lines of earlier sessio
         (pizza?.snippet?.length ?? 0) / 2,
     ),
   ).toBeLessThan(10);
+
+  // With the window wide again, a line the model still sees is indexed
+  // once committed but never found, while the earlier sessions still are.
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {kind: 'set', path: 'project02.contextWindowTokens', value: 32768},
+  );
+  model.answer(
+    reply('Noted.'),
+    calling(
+      ['sessions_search', {query: 'moonwort'}],
+      ['sessions_search', {query: 'kraken'}],
+    ),
+    reply('Found.'),
+  );
+  await say('The moonwort bloomed.', 'visible');
+  await say('Did we speak of moonwort?', 'visible-search');
+  expect(
+    toolResultsIn(model.requests.at(-1)).map(result =>
+      (result.output as {readonly sessions: readonly View[]}).sessions
+        .map(view => view.sessionId)
+        .sort(),
+    ),
+  ).toEqual([[], [session(1), session(2)]]);
 });
 
 it('memory.session-history-read: sessions.search anchors a view with the bookends of its session, sessions.read scrolls by anchor with paging flags and texts bounded to 400, an unknown session is session_not_found and an unknown anchor message_not_found, damage is counted, and a storage failure names no local path', async () => {

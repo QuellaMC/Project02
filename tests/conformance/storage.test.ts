@@ -138,6 +138,13 @@ it("storage.per-character-isolation: each character's segments and their writer 
 
   daemon.signal('SIGINT');
   await daemon.exit();
+
+  for (const locks of ['mira', 'zeta'].map(characterId =>
+    join(home, 'character-data', characterId, '.locks'),
+  )) {
+    expect(leases(locks), locks).toEqual([]);
+  }
+
   expect(
     leases(join(home, '.locks')).filter(resource =>
       resource.startsWith('session-writer:'),

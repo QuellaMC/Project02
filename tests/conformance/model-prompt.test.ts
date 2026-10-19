@@ -534,15 +534,18 @@ it('model.summarizer-fallback: a summarizer that fails, by HTTP error, blank tex
   expect(
     sessionRecords(home, 'mira', 'session_continued')
       .slice(0, failures.length)
-      .map(
-        record =>
-          (record['sessionContinuation'] as {readonly summarizer: unknown})
-            .summarizer,
-      ),
+      .map(record => {
+        const {summarizer, summary} = record['sessionContinuation'] as {
+          readonly summarizer: unknown;
+          readonly summary: string;
+        };
+
+        return {summarizer, summary};
+      }),
   ).toEqual(
-    failures.map(() => ({
-      status: 'fallback',
-      reason: expect.any(String) as string,
+    failures.map((_, at) => ({
+      summarizer: {status: 'fallback', reason: expect.any(String) as string},
+      summary: expect.stringContaining(`Line ${String(at)}.`) as string,
     })),
   );
   expect(carried).toContain(`1 turns, ${day} to ${day}`);
