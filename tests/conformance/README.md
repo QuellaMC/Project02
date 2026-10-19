@@ -32,14 +32,16 @@ against any other build of it.
 
 ## The harness
 
-| File                      | Job                                                                                                                                 |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `harness/home.ts`         | A canonical temp home, empty for `serve --init` or seeded with the files a test names.                                              |
-| `harness/daemon.ts`       | Spawns `serve` in its own process group: its address, signals, output and exit code.                                                |
-| `harness/wire.ts`         | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                 |
-| `harness/events.ts`       | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                            |
-| `harness/model-server.ts` | An OpenAI-compatible model on loopback that answers as the test scripts it, holds a request open on demand and keeps every request. |
-| `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                          |
+| File                      | Job                                                                                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `harness/home.ts`         | A canonical temp home, empty for `serve --init` or seeded with the files a test names.                                                                    |
+| `harness/daemon.ts`       | Spawns `serve` in its own process group: its address, signals, output and exit code.                                                                      |
+| `harness/wire.ts`         | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                                       |
+| `harness/events.ts`       | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                                                  |
+| `harness/http.ts`         | One request exactly as the test writes it, nothing added: the answer's status, headers and body as it comes, and a client that stops reading or hangs up. |
+| `harness/socket.ts`       | A bare TCP connection, for a request stopped halfway or an answer left unread.                                                                            |
+| `harness/model-server.ts` | An OpenAI-compatible model on loopback that answers as the test scripts it, holds a request open on demand and keeps every request.                       |
+| `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                                                |
 
 ## Environment
 

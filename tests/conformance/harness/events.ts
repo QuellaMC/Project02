@@ -159,6 +159,17 @@ function holds(value: unknown, pattern: unknown): boolean {
  * as the possible first half of a CRLF is a line's end once the stream
  * ends; a line the stream ends in the middle of is not a line.
  */
+/** The frames of a stream's whole text, as the live stream would have parsed them. */
+export function framesOf(text: string): Frame[] {
+  const frames: Frame[] = [];
+  const parser = createFrameParser(frame => frames.push(frame));
+
+  parser.feed(text);
+  parser.end();
+
+  return frames;
+}
+
 function createFrameParser(emit: (frame: Frame) => void): {
   readonly feed: (text: string) => void;
   readonly end: () => void;
