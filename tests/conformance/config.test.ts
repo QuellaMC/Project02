@@ -7,7 +7,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import {join, relative} from 'node:path';
-import {setTimeout as sleep} from 'node:timers/promises';
 
 import {expect, it} from 'vitest';
 
@@ -95,16 +94,12 @@ it("config.view-global: the home's view lists the host fields in page order, eac
     ),
   );
   const view = await viewOf(wire, {scope: 'global'});
-  /** A host field with its metadata, whatever its values. */
-  const shaped = (name: string) => ({
+  /** A host field the home leaves unset and no default supplies. */
+  const unset = (name: string) => ({
     name,
-    authored: expect.objectContaining({
-      configured: expect.any(Boolean) as boolean,
-    }) as unknown,
-    effectiveSource: expect.any(String) as string,
-    effective: expect.objectContaining({
-      source: expect.any(String) as string,
-    }) as unknown,
+    authored: {configured: false},
+    effectiveSource: 'default',
+    effective: {source: 'missing', secret: name === 'nvidiaApiKey'},
   });
 
   expect(view).toMatchObject({
@@ -124,18 +119,23 @@ it("config.view-global: the home's view lists the host fields in page order, eac
         effectiveSource: 'global',
         effective: {source: 'config', value: 'Robin'},
       },
-      shaped('roleModelProvider'),
-      shaped('nvidiaApiKey'),
-      shaped('nvidiaModel'),
-      shaped('nvidiaBaseUrl'),
+      unset('roleModelProvider'),
+      unset('nvidiaApiKey'),
+      unset('nvidiaModel'),
+      unset('nvidiaBaseUrl'),
       {
         name: 'contextWindowTokens',
         authored: {configured: false},
         effectiveSource: 'default',
         effective: {source: 'default', value: 32768},
       },
-      shaped('defaultMemoryProvider'),
-      shaped('enabled'),
+      unset('defaultMemoryProvider'),
+      {
+        name: 'enabled',
+        authored: {configured: false},
+        effectiveSource: 'default',
+        effective: {source: 'default', value: true},
+      },
     ],
   });
   expect(
@@ -748,7 +748,10 @@ it('config.applied-reload: a change reloads a running character only when what s
 
 it('config.reload-failure: a reload that cannot assemble leaves the character failed with the diagnostic, tried again by nothing until the next change, which starts her once the overlay is fixed', async () => {
   const home = createHome();
-  const daemon = await startDaemon(home, fixedReplies);
+  const daemon = await startDaemon(home, {
+    ...fixedReplies,
+    PROJECT02_TEST_DURATIONS: 'heartbeat=1000',
+  });
   const wire = wireOf(daemon);
 
   await wire.start('mira');
@@ -794,10 +797,13 @@ it('config.reload-failure: a reload that cannot assemble leaves the character fa
     ],
   });
 
-  // Tried again by nothing: two seconds on, she is failed as before.
+  // Tried again by nothing: two heartbeats on, she is failed as before.
   const failedSoFar = timeline(events, 'mira');
 
-  await sleep(2_000);
+  for (let beat = 0; beat < 2; beat += 1) {
+    await events.next(frame => frame.comment === 'ping');
+  }
+
   expect(timeline(events, 'mira')).toEqual(failedSoFar);
   expect(await wire.health()).toMatchObject({
     characters: [{id: 'mira', state: 'failed'}],

@@ -16,7 +16,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {expect, it, onTestFinished} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
-import {configJson, createHome} from './harness/home.ts';
+import {configJson, createHome, snapshot} from './harness/home.ts';
 import {
   calling,
   completion,
@@ -237,6 +237,16 @@ it('memory.character-memory-caps: a batch that would carry a target past its ren
     },
   ]);
   await stop(first);
+
+  // Neither refused entry was kept: the store holds the two notes alone.
+  const stored =
+    Object.entries(snapshot(join(home, 'character-data', 'mira'))).find(
+      ([path]) => path.endsWith('memory.json'),
+    )?.[1] ?? '';
+
+  expect(stored).toContain(longer);
+  expect(stored).not.toMatch(/"text":\s*"c"/u);
+  expect(stored).not.toContain('d'.repeat(1376));
 
   const again = await converse(wireOf(await startDaemon(home)), 'mira');
 
