@@ -1,11 +1,11 @@
-import {chmodSync, readFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
-import {characterJson, createHome} from './harness/home.ts';
+import {chmod, characterJson, createHome} from './harness/home.ts';
 import {saveConfig, wireOf} from './harness/wire.ts';
 
 type Asked = {
@@ -169,36 +169,33 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
   expect(await wire.pendingPairings()).toEqual([]);
 });
 
-it.skipIf(process.getuid?.() === 0)(
-  'pairing.approve-write-failed: an approval the home cannot take answers failed with the reason, and the request waits on to its own deadline, announced again',
-  async () => {
-    const home = createHome();
-    const daemon = await startDaemon(home);
-    const wire = wireOf(daemon);
-    const events = await openEvents(daemon);
-    const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
+it('pairing.approve-write-failed: an approval the home cannot take answers failed with the reason, and the request waits on to its own deadline, announced again', async () => {
+  const home = createHome();
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
 
-    await events.next(frameOf('pairing_requested', {code: request.code}));
-    chmodSync(home, 0o500);
+  await events.next(frameOf('pairing_requested', {code: request.code}));
+  chmod(home, 0o500);
 
-    try {
-      expect(await wire.pairingAnswer(request.code, 'approved')).toEqual({
-        status: 'failed',
-        message: expect.stringContaining(join(home, 'config.json')) as string,
-      });
-    } finally {
-      chmodSync(home, 0o700);
-    }
+  try {
+    expect(await wire.pairingAnswer(request.code, 'approved')).toEqual({
+      status: 'failed',
+      message: expect.stringContaining(join(home, 'config.json')) as string,
+    });
+  } finally {
+    chmod(home, 0o700);
+  }
 
-    expect(
-      JSON.parse(
-        (await events.next(frameOf('pairing_requested', {code: request.code})))
-          .data ?? '',
-      ),
-    ).toEqual({kind: 'pairing_requested', ...request});
-    expect(await wire.pendingPairings()).toEqual([request]);
-  },
-);
+  expect(
+    JSON.parse(
+      (await events.next(frameOf('pairing_requested', {code: request.code})))
+        .data ?? '',
+    ),
+  ).toEqual({kind: 'pairing_requested', ...request});
+  expect(await wire.pendingPairings()).toEqual([request]);
+});
 
 it('pairing.paired-elsewhere-settles: a request whose account another settings window paired meanwhile settles approved, asked again or answered, keeping the name that window gave', async () => {
   const home = createHome();

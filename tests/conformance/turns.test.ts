@@ -1,11 +1,11 @@
-import {chmodSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
-import {characterJson, configJson, createHome} from './harness/home.ts';
+import {chmod, characterJson, configJson, createHome} from './harness/home.ts';
 import {
   finish,
   reply,
@@ -19,8 +19,6 @@ import {exchange, jsonFrom} from './harness/http.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
-// Permissions do not bind root, so the storage failures they provoke never happen.
-const asRoot = process.getuid?.() === 0;
 // A window this small rotates the segment after every turn.
 const rotatingEveryTurn = configJson({project02: {contextWindowTokens: 1}});
 
@@ -361,54 +359,51 @@ it('turns.duplicate-submission-across-restart: after a restart a line already co
   });
 });
 
-it.skipIf(asRoot)(
-  'turns.damaged-segment-open: without the record of taken lines, an open fails read_failed while the segment before the current one is unreadable, and open and history fail missing_file once its transcript is gone',
-  async () => {
-    const home = createHome({'config.json': rotatingEveryTurn});
-    const first = await startDaemon(home, fixedReplies);
-    const firstWire = wireOf(first);
-    const say = await converse(firstWire, 'mira');
-    const {conversationId} = await conversationOf(firstWire, 'mira');
+it('turns.damaged-segment-open: without the record of taken lines, an open fails read_failed while the segment before the current one is unreadable, and open and history fail missing_file once its transcript is gone', async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const first = await startDaemon(home, fixedReplies);
+  const firstWire = wireOf(first);
+  const say = await converse(firstWire, 'mira');
+  const {conversationId} = await conversationOf(firstWire, 'mira');
 
-    await say('One.', 'one');
-    const previous = segmentDirectory(home, conversationId);
+  await say('One.', 'one');
+  const previous = segmentDirectory(home, conversationId);
 
-    await stop(first);
-    rmSync(
-      join(
-        home,
-        'character-data',
-        'mira',
-        'taken-lines',
-        `${conversationId}.json`,
-      ),
-    );
+  await stop(first);
+  rmSync(
+    join(
+      home,
+      'character-data',
+      'mira',
+      'taken-lines',
+      `${conversationId}.json`,
+    ),
+  );
 
-    const wire = wireOf(await startDaemon(home, fixedReplies));
+  const wire = wireOf(await startDaemon(home, fixedReplies));
 
-    await wire.start('mira');
-    chmodSync(previous, 0o000);
+  await wire.start('mira');
+  chmod(previous, 0o000);
 
-    try {
-      await expect(wire.open('mira')).resolves.toMatchObject({
-        status: 'failed',
-        code: 'read_failed',
-      });
-    } finally {
-      chmodSync(previous, 0o755);
-    }
-
-    rmSync(join(previous, 'raw-events.jsonl'));
+  try {
     await expect(wire.open('mira')).resolves.toMatchObject({
       status: 'failed',
-      code: 'missing_file',
+      code: 'read_failed',
     });
-    await expect(wire.history(conversationId)).resolves.toMatchObject({
-      status: 'failed',
-      code: 'missing_file',
-    });
-  },
-);
+  } finally {
+    chmod(previous, 0o755);
+  }
+
+  rmSync(join(previous, 'raw-events.jsonl'));
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'failed',
+    code: 'missing_file',
+  });
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    status: 'failed',
+    code: 'missing_file',
+  });
+});
 
 it('turns.one-turn-at-a-time: a character runs its turns one at a time, in the order they arrived, so the model never sees two at once', async () => {
   const model = await startModelServer();
@@ -605,123 +600,114 @@ it("turns.rejected-turn-outcome: after a turn the model's output fails, the char
   });
 });
 
-it.skipIf(asRoot)(
-  'turns.fatal-turn-refuses-queued: a turn the store fails restarts the character once: it fails, the delivery queued behind it is refused, and the character comes back ready for the next',
-  async () => {
-    const model = await startModelServer();
-    const home = createHome({
-      'config.json': configJson({project02: model.settings}),
+it('turns.fatal-turn-refuses-queued: a turn the store fails restarts the character once: it fails, the delivery queued behind it is refused, and the character comes back ready for the next', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const events = await openEvents(daemon);
+  const sessions = join(home, 'character-data', 'mira', 'sessions');
+  const held = model.hold();
+  const fatal = say('First.', 'fatal');
+
+  await held.arrived();
+
+  const queued = say('Second.', 'queued');
+
+  // Sent before a request the daemon has since answered: it is in, queued
+  // behind the turn the model holds.
+  await wire.health();
+  chmod(sessions, 0o000);
+
+  try {
+    held.release(reply('Never written.'));
+    expect(await fatal).toMatchObject({status: 'failed', committed: true});
+    expect(await queued).toMatchObject({
+      status: 'refused',
+      reason: 'character_unavailable',
     });
-    const daemon = await startDaemon(home);
-    const wire = wireOf(daemon);
-    const say = await converse(wire, 'mira');
-    const events = await openEvents(daemon);
-    const sessions = join(home, 'character-data', 'mira', 'sessions');
-    const held = model.hold();
-    const fatal = say('First.', 'fatal');
+  } finally {
+    chmod(sessions, 0o755);
+  }
 
-    await held.arrived();
+  for (const state of ['failed', 'starting', 'ready']) {
+    await events.next(frameOf('state_changed', {characterId: 'mira', state}));
+  }
 
-    const queued = say('Second.', 'queued');
+  model.answer(reply('Back again.'));
+  expect(await say('Third.', 'next')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Back again.'}],
+  });
+});
 
-    // Sent before a request the daemon has since answered: it is in, queued
-    // behind the turn the model holds.
-    await wire.health();
-    chmodSync(sessions, 0o000);
+it('turns.recovery-after-fatal-turn: after a turn whose line could not be appended, failed and uncommitted on its answer and the stream, the character recovers by itself; the next turn needs no reopen, and an open right after joins the recovery', async () => {
+  const home = createHome();
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const events = await openEvents(daemon);
+  const sessions = join(home, 'character-data', 'mira', 'sessions');
+  const failOnce = async (id: string): Promise<void> => {
+    chmod(sessions, 0o000);
 
     try {
-      held.release(reply('Never written.'));
-      expect(await fatal).toMatchObject({status: 'failed', committed: true});
-      expect(await queued).toMatchObject({
-        status: 'refused',
-        reason: 'character_unavailable',
-      });
-    } finally {
-      chmodSync(sessions, 0o755);
-    }
-
-    for (const state of ['failed', 'starting', 'ready']) {
-      await events.next(frameOf('state_changed', {characterId: 'mira', state}));
-    }
-
-    model.answer(reply('Back again.'));
-    expect(await say('Third.', 'next')).toMatchObject({
-      status: 'completed',
-      messages: [{}, {text: 'Back again.'}],
-    });
-  },
-);
-
-it.skipIf(asRoot)(
-  'turns.recovery-after-fatal-turn: after a turn whose line could not be appended, failed and uncommitted on its answer and the stream, the character recovers by itself; the next turn needs no reopen, and an open right after joins the recovery',
-  async () => {
-    const home = createHome();
-    const daemon = await startDaemon(home, fixedReplies);
-    const wire = wireOf(daemon);
-    const say = await converse(wire, 'mira');
-    const {conversationId} = await conversationOf(wire, 'mira');
-    const events = await openEvents(daemon);
-    const sessions = join(home, 'character-data', 'mira', 'sessions');
-    const failOnce = async (id: string): Promise<void> => {
-      chmodSync(sessions, 0o000);
-
-      try {
-        expect(await say('Lost?', id)).toMatchObject({
-          status: 'failed',
-          committed: false,
-        });
-      } finally {
-        chmodSync(sessions, 0o755);
-      }
-    };
-
-    await failOnce('lost');
-    await events.next(
-      frameOf('turn_completed', {
-        clientMessageId: 'lost',
+      expect(await say('Lost?', id)).toMatchObject({
         status: 'failed',
         committed: false,
-      }),
-    );
-    expect(await say('Still there?', 'after')).toMatchObject({
-      status: 'completed',
-      conversationId,
-    });
-    await failOnce('lost-again');
-    await expect(wire.open('mira')).resolves.toMatchObject({
-      status: 'opened',
-      conversationId,
-    });
-  },
-);
-
-it.skipIf(asRoot)(
-  'turns.storage-failure-outcome: an open answers failed read_failed while the conversations directory is unreadable and write_failed while it cannot be written, and opens once it can',
-  async () => {
-    const home = createHome({conversations: {}});
-    const wire = wireOf(await startDaemon(home, fixedReplies));
-    const conversations = join(home, 'conversations');
-
-    await wire.start('mira');
-
-    try {
-      chmodSync(conversations, 0o000);
-      await expect(wire.open('mira')).resolves.toMatchObject({
-        status: 'failed',
-        code: 'read_failed',
-      });
-      chmodSync(conversations, 0o555);
-      await expect(wire.open('mira')).resolves.toMatchObject({
-        status: 'failed',
-        code: 'write_failed',
       });
     } finally {
-      chmodSync(conversations, 0o755);
+      chmod(sessions, 0o755);
     }
+  };
 
-    await expect(wire.open('mira')).resolves.toMatchObject({status: 'opened'});
-  },
-);
+  await failOnce('lost');
+  await events.next(
+    frameOf('turn_completed', {
+      clientMessageId: 'lost',
+      status: 'failed',
+      committed: false,
+    }),
+  );
+  expect(await say('Still there?', 'after')).toMatchObject({
+    status: 'completed',
+    conversationId,
+  });
+  await failOnce('lost-again');
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'opened',
+    conversationId,
+  });
+});
+
+it('turns.storage-failure-outcome: an open answers failed read_failed while the conversations directory is unreadable and write_failed while it cannot be written, and opens once it can', async () => {
+  const home = createHome({conversations: {}});
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+  const conversations = join(home, 'conversations');
+
+  await wire.start('mira');
+
+  try {
+    chmod(conversations, 0o000);
+    await expect(wire.open('mira')).resolves.toMatchObject({
+      status: 'failed',
+      code: 'read_failed',
+    });
+    chmod(conversations, 0o555);
+    await expect(wire.open('mira')).resolves.toMatchObject({
+      status: 'failed',
+      code: 'write_failed',
+    });
+  } finally {
+    chmod(conversations, 0o755);
+  }
+
+  await expect(wire.open('mira')).resolves.toMatchObject({status: 'opened'});
+});
 
 it('turns.route-unopened-conversation: after a restart a turn on a conversation the earlier run opened is routed by its record, refused character_unavailable until the character runs, then completed there, and history spans both runs', async () => {
   const home = createHome();

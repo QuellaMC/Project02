@@ -217,6 +217,29 @@ it('characters.package-removed-while-running: a character whose package goes whi
   });
 });
 
+/** What each model round recorded of the character it ran for. */
+function characterRefs(home: string, characterId: string) {
+  const sessions = join(characterData(home, characterId), 'sessions');
+
+  return readdirSync(sessions)
+    .flatMap(session =>
+      readFileSync(join(sessions, session, 'raw-events.jsonl'), 'utf8')
+        .trim()
+        .split('\n'),
+    )
+    .map(
+      line =>
+        JSON.parse(line) as {
+          readonly kind: string;
+          readonly roleModelIOSnapshot?: {
+            readonly characterRef?: {readonly personaFingerprint?: string};
+          };
+        },
+    )
+    .filter(event => event.kind === 'role_model_round')
+    .map(round => round.roleModelIOSnapshot?.characterRef);
+}
+
 it("characters.persona-prompt: the persona's sections, a blank line apart, then the runtime's words naming the person, are the system message the model receives, and each round records the character's id, version and persona fingerprint", async () => {
   const persona = ['First paragraph.', 'Second paragraph.'];
   const model = await startModelServer();
@@ -231,9 +254,15 @@ it("characters.persona-prompt: the persona's sections, a blank line apart, then 
           meta: {version: '2.3.4'},
         }),
       },
+      vega: {
+        'project02.character.json': characterJson('vega', 'Vega', {
+          persona: {system: persona},
+        }),
+      },
     },
   });
-  const say = await converse(wireOf(await startDaemon(home)), 'nova');
+  const wire = wireOf(await startDaemon(home));
+  const say = await converse(wire, 'nova');
 
   model.answer(reply('Hi, Sam.'));
   await say('Hello.', 'hello');
@@ -251,24 +280,7 @@ it("characters.persona-prompt: the persona's sections, a blank line apart, then 
   expect(system?.role).toBe('system');
   expect(system?.content.slice(0, sections.length)).toBe(sections);
   expect(system?.content.slice(sections.length)).toContain('Sam');
-
-  const sessions = join(characterData(home, 'nova'), 'sessions');
-  const rounds = readdirSync(sessions)
-    .flatMap(session =>
-      readFileSync(join(sessions, session, 'raw-events.jsonl'), 'utf8')
-        .trim()
-        .split('\n'),
-    )
-    .map(
-      line =>
-        JSON.parse(line) as {
-          readonly kind: string;
-          readonly roleModelIOSnapshot?: {readonly characterRef?: unknown};
-        },
-    )
-    .filter(event => event.kind === 'role_model_round');
-
-  expect(rounds.map(round => round.roleModelIOSnapshot?.characterRef)).toEqual([
+  expect(characterRefs(home, 'nova')).toEqual([
     {
       id: 'nova',
       version: '2.3.4',
@@ -277,6 +289,21 @@ it("characters.persona-prompt: the persona's sections, a blank line apart, then 
       ) as string,
     },
   ]);
+
+  // The fingerprint is the persona's: the same sections give the same one, other sections another.
+  model.answer(reply('Hi.'), reply('Hi.'));
+  await (
+    await converse(wire, 'vega')
+  )('Hello.', 'hello');
+  await (
+    await converse(wire, 'mira')
+  )('Hello.', 'hello');
+
+  const fingerprintOf = (id: string) =>
+    characterRefs(home, id)[0]?.personaFingerprint;
+
+  expect(fingerprintOf('vega')).toBe(fingerprintOf('nova'));
+  expect(fingerprintOf('mira')).not.toBe(fingerprintOf('nova'));
 });
 
 it('characters.display-name: a display name of two lines, or with a space at its end, makes the package unusable before anything is written for it', async () => {
