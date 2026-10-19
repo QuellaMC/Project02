@@ -171,6 +171,7 @@ the pairing gate; `outbox.ts` is what a bot writes in its chats;
 (`tests/integration/telegram-connector.test.ts`) runs it against a real
 gateway on a loopback socket and the fake Bot API in
 `tests/support/telegram-api.ts`, which answers as Telegram does — a
-second poll on one token ends the first with a 409 — and the process
-test (`tests/e2e/telegram-process.test.ts`) runs a real `serve` and the
-connector beside it, pointed at the fake by `PROJECT02_TEST_TELEGRAM_API`.
+second poll on one token ends the first with a 409 — and the conformance
+suite (`tests/conformance/connectors*.test.ts`) runs it as a process beside
+a real `serve`, pointed at a Bot API of its own by
+`PROJECT02_TEST_TELEGRAM_API`.
