@@ -6,9 +6,9 @@
 // read as TypeScript, so a test in a comment or a string is no test; and
 // each suite is flat, so no block above a test can park it. In the Rust
 // suite a test's title is the first `///` line above its attributes, only
-// a test whose title has that shape names a row, and `#[ignore]` parks it;
-// a file is read as Rust tokens, so there too a test in a comment or a
-// string is no test.
+// a test whose title has that shape names a row, `#[ignore]` or a `cfg`
+// parks it, and only a module may enclose it; a file is read as Rust
+// tokens, so there too a test in a comment or a string is no test.
 import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -536,16 +536,24 @@ function closingBracket(tokens, open) {
   return tokens.length;
 }
 
+/** The attributes under which a Rust test proves nothing: it is parked, or compiled only under a cfg the index cannot evaluate. */
+const RUST_PARKING = new Set(['ignore', 'cfg', 'cfg_attr']);
+
 /**
  * Each test of a Rust file that names a row: a function carrying a
  * `#[test]`-family attribute, with or without arguments, whose first `///`
- * line above its attributes is a title.
+ * line above its attributes is a title. Only a module may enclose it: the
+ * harness never runs a test inside another item.
  */
 function scanRust(source) {
   const tokens = rustTokens(source);
   const tests = [];
+  // For each open brace, whether it opened a module.
+  const blocks = [];
   let docs = [];
   let attributes = [];
+  let opensModule = false;
+  let fileParked = false;
 
   for (let at = 0; at < tokens.length; at += 1) {
     const token = tokens[at];
@@ -566,8 +574,10 @@ function scanRust(source) {
         }
         path.push(text);
       }
-      // An inner attribute belongs to what encloses it, not to the next item.
+      // An inner attribute belongs to what encloses it, not to the next
+      // item, and a cfg among them may compile the whole file out.
       if (next === '!') {
+        fileParked ||= path[0] === 'cfg' || path[0] === 'cfg_attr';
         docs = [];
         attributes = [];
       } else {
@@ -575,6 +585,18 @@ function scanRust(source) {
       }
       at = close;
       continue;
+    }
+    if (token.text === '{') {
+      blocks.push(opensModule);
+      opensModule = false;
+      continue;
+    }
+    if (token.text === '}') {
+      blocks.pop();
+      continue;
+    }
+    if (token.text === ';') {
+      opensModule = false;
     }
 
     let item = at;
@@ -588,27 +610,34 @@ function scanRust(source) {
       item += 1;
     }
 
+    const head = tokens[item]?.text;
     const [title] = docs;
 
-    if (
-      tokens[item]?.text === 'fn' &&
+    if (head === 'mod') {
+      opensModule = true;
+    } else if (
+      head === 'fn' &&
       attributes.some(path => RUST_TEST_ATTRIBUTE.test(path)) &&
       title !== undefined &&
       TITLE_SHAPE.test(title)
     ) {
       tests.push({
         line: tokens[item].line,
-        nested: false,
-        parked: attributes.includes('ignore'),
-        parksFile: false,
+        nested: blocks.includes(false),
+        parked: attributes.some(path => RUST_PARKING.has(path)),
         title,
       });
     }
     docs = [];
     attributes = [];
-    at = item;
+    // A brace the qualifiers led to is read as the brace it is.
+    at = head === '{' || head === '}' ? item - 1 : item;
   }
-  return {tests, blocks: [], aliases: []};
+  return {
+    tests: tests.map(test => ({...test, parked: test.parked || fileParked})),
+    blocks: [],
+    aliases: [],
+  };
 }
 
 function reportFailures(failures) {
