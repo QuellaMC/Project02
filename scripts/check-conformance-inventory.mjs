@@ -43,7 +43,10 @@ const MODIFIERS_WITH_ARGUMENTS = new Set(['each', 'for', 'skipIf', 'runIf']);
 const TABLE_MODIFIERS = new Set(['each', 'for']);
 // The modifiers under which a test proves nothing: it never runs, it passes by failing, or it runs on a condition.
 const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails', 'skipIf', 'runIf']);
-const TITLE_SHAPE = /^([^\s:]+): \S/;
+/** An id as a title names it: no whitespace, no colon. */
+const ID_CHARACTERS = '[^\\s:]+';
+const ID_SHAPE = new RegExp(`^${ID_CHARACTERS}$`);
+const TITLE_SHAPE = new RegExp(`^(${ID_CHARACTERS}): \\S`);
 
 // RFC 4180: a quoted field may hold commas, line breaks and doubled quotes;
 // a quote anywhere else, or text after a closing quote, is no CSV.
@@ -157,11 +160,17 @@ function skipsItself(call) {
   );
   const context = body?.parameters[0]?.name;
 
-  if (
-    body === undefined ||
-    context === undefined ||
-    !ts.isIdentifier(context)
-  ) {
+  if (body === undefined || context === undefined) {
+    return false;
+  }
+  if (ts.isObjectBindingPattern(context)) {
+    return context.elements.some(element => {
+      const property = element.propertyName ?? element.name;
+
+      return ts.isIdentifier(property) && property.text === 'skip';
+    });
+  }
+  if (!ts.isIdentifier(context)) {
     return false;
   }
 
@@ -408,6 +417,10 @@ function main() {
     if (row.id === '') {
       failures.push(
         `${INVENTORY_FILE}: a row has no id: "${record.join(',')}".`,
+      );
+    } else if (!ID_SHAPE.test(row.id)) {
+      failures.push(
+        `${INVENTORY_FILE}: "${row.id}" is an id no title could name.`,
       );
     } else if (row.statement === '') {
       failures.push(`${INVENTORY_FILE}: ${row.id} has no statement.`);

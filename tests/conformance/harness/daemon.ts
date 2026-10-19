@@ -102,6 +102,10 @@ export function serve(
   onTestFinished(async () => {
     signalGroup(pid, 'SIGKILL');
     await within(`pid ${String(pid)} to go after SIGKILL`, closed);
+    await within(
+      `the group of pid ${String(pid)} to go after SIGKILL`,
+      groupGone(pid),
+    );
   });
 
   /** An idle deadline: a daemon starting under load is slow, not silent. */
@@ -173,6 +177,21 @@ function addressOf(line: string): Address {
     origin: parsed.origin,
     token: parsed.hash.slice('#token='.length),
   };
+}
+
+/** Settles once no process of the group is left to signal. */
+async function groupGone(pid: number): Promise<void> {
+  for (;;) {
+    try {
+      process.kill(-pid, 0);
+    } catch {
+      return;
+    }
+
+    await new Promise(resolve => {
+      setTimeout(resolve, 20);
+    });
+  }
 }
 
 function signalGroup(pid: number, name: NodeJS.Signals): void {

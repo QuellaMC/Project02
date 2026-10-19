@@ -169,6 +169,8 @@ function give(
       .end(JSON.stringify(answer.completion));
   } else {
     response.writeHead(200, {'content-type': 'text/event-stream'});
+    // Out now, so a stream that then hangs or is cut had opened.
+    response.flushHeaders();
 
     for (const chunk of answer.chunks) {
       response.write(

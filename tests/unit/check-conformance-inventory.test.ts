@@ -86,6 +86,7 @@ describe('the conformance inventory check', () => {
         'lifecycle.e,lifecycle,A statement.',
         row('lifecycle.f', 'conformance', 'todo').replace('A statement.', ''),
         row('', 'conformance', 'todo'),
+        row('turns.bad id', 'conformance', 'todo'),
         row('turns.f', 'retired', 'todo'),
         row('turns.g', 'conformance', 'done'),
         row('turns.h', 'conformance', 'done'),
@@ -129,6 +130,7 @@ describe('the conformance inventory check', () => {
         "`('turns.h: a header alone runs no case', () => {});",
         "it('turns.g: two arguments, the second a name', options);",
         "it('turns.g: skips itself', context => { context.skip(); });",
+        "it('turns.g: skips itself, the skip taken out', ({skip}) => skip());",
       ],
     });
 
@@ -139,6 +141,7 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/inventory.csv: the row starting "lifecycle.e" has 3 field(s), not 11.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.f has no statement.',
       'conformance-inventory: tests/conformance/inventory.csv: a row has no id: ",,A statement.,WIRE,-,none,yes,,conformance,0,todo".',
+      'conformance-inventory: tests/conformance/inventory.csv: "turns.bad id" is an id no title could name.',
       "conformance-inventory: tests/conformance/turns.test.ts:2: vitest's it is imported under another name, which the index cannot follow.",
       'conformance-inventory: tests/conformance/turns.test.ts:3: vitest is imported as a namespace, which the index cannot follow.',
       'conformance-inventory: tests/conformance/turns.test.ts:4: the title is not a plain string literal.',
