@@ -1,16 +1,16 @@
-// The inventory is the conformance suite's index: each test is titled
-// `<row id>: <sentence>` after the row it proves, and a row is done only
-// when a test names it. A title must be a plain string literal, so a
+// The inventory is the index of the suites that prove behavior from
+// outside: each test is titled `<row id>: <sentence>` after the row it
+// proves, and a row is done only when a test of the suite for its
+// test_location names it. A title must be a plain string literal, so a
 // search for a row id finds its test; a file is read as TypeScript, so a
-// test in a comment or a string is no test; and the suite is flat, so no
+// test in a comment or a string is no test; and each suite is flat, so no
 // block above a test can park it.
-import {readFileSync, readdirSync} from 'node:fs';
+import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 
 import ts from 'typescript';
 
-const SUITE_DIRECTORY = 'tests/conformance';
-const INVENTORY_FILE = `${SUITE_DIRECTORY}/inventory.csv`;
+const INVENTORY_FILE = 'tests/conformance/inventory.csv';
 const COLUMNS = [
   'id',
   'area',
@@ -30,19 +30,61 @@ const COLUMN_VALUES = {
   status: ['todo', 'done'],
 };
 
-// What a call's root name opens: a test, or a block that could park every test under it.
-const ROOTS = new Map([
-  ['it', 'test'],
-  ['test', 'test'],
-  ['describe', 'block'],
-  ['suite', 'block'],
-]);
+// How a runner's test files read: the modules its roots come from; what a
+// call is by the names along its callee, root first — a test, a block that
+// could park every test under it, or neither; the modifiers and options
+// under which a test proves nothing, since it never runs, passes by
+// failing or runs on a condition; those that park every test of the file
+// when they declare none; and how many parameters a body takes before its
+// context.
+const VITEST = {
+  sources: ['vitest'],
+  roots: new Set(['it', 'test', 'describe', 'suite']),
+  kindOf: ([root]) =>
+    root === 'describe' || root === 'suite' ? 'block' : 'test',
+  parking: new Set(['skip', 'todo', 'fails', 'skipIf', 'runIf']),
+  parkingFile: new Set(),
+  contextAt: 0,
+};
+// The names after Playwright's test that declare one; `step`, `use` and the hooks do not.
+const PLAYWRIGHT_DECLARATIONS = new Set(['only', 'skip', 'fixme', 'fail']);
+const PLAYWRIGHT = {
+  // Its own test, or the one the browser suite's fixture extends it to.
+  sources: ['@playwright/test', './fixture.ts'],
+  roots: new Set(['test']),
+  kindOf: ([, member]) => {
+    if (member === 'describe') {
+      return 'block';
+    }
+    return member === undefined || PLAYWRIGHT_DECLARATIONS.has(member)
+      ? 'test'
+      : undefined;
+  },
+  // An annotation in a test's details may be any of the others.
+  parking: new Set(['skip', 'fixme', 'fail', 'annotation']),
+  parkingFile: new Set(['skip', 'fixme', 'fail']),
+  // The fixtures come first.
+  contextAt: 1,
+};
+// Each suite proves the rows of one test_location.
+const SUITES = [
+  {
+    directory: 'tests/conformance',
+    extension: '.test.ts',
+    location: 'conformance',
+    runner: VITEST,
+  },
+  {
+    directory: 'tests/browser',
+    extension: '.spec.ts',
+    location: 'client-ts',
+    runner: PLAYWRIGHT,
+  },
+];
 // The modifiers applied with their own arguments before the titled call.
 const MODIFIERS_WITH_ARGUMENTS = new Set(['each', 'for', 'skipIf', 'runIf']);
 // Of those, the ones whose argument is a table of cases.
 const TABLE_MODIFIERS = new Set(['each', 'for']);
-// The modifiers under which a test proves nothing: it never runs, it passes by failing, or it runs on a condition.
-const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails', 'skipIf', 'runIf']);
 /** An id as a title names it: no whitespace, no colon. */
 const ID_CHARACTERS = '[^\\s:]+';
 const ID_SHAPE = new RegExp(`^${ID_CHARACTERS}$`);
@@ -152,8 +194,8 @@ function isFunction(node) {
   );
 }
 
-/** Whether the body takes its context, through which it could skip itself under any name: a table hands its case first, and `.each` hands nothing else. */
-function takesContext(call, modifiers) {
+/** Whether the body takes its context, through which it could skip itself under any name: the runner's own parameters and a table's case come first, and `.each` hands nothing else. */
+function takesContext(call, modifiers, contextAt) {
   const body = call.arguments.find(
     argument =>
       ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
@@ -165,21 +207,21 @@ function takesContext(call, modifiers) {
 
   // A rest parameter takes whatever follows the case, the context included.
   return (
-    body.parameters.length > (modifiers.includes('for') ? 1 : 0) ||
+    body.parameters.length > contextAt + (modifiers.includes('for') ? 1 : 0) ||
     body.parameters.some(parameter => parameter.dotDotDotToken !== undefined)
   );
 }
 
-/** Whether the test has no body to run: Vitest takes such a test as todo. */
+/** Whether the test has no body to run: Vitest takes such a test as todo, and Playwright refuses it. */
 function bodiless(call) {
   return !call.arguments.some(isFunction);
 }
 
 /**
- * The options a test was given, read as Vitest reads them: after a body,
- * an object literal third (a number there is a timeout); before one, the
- * second argument, which a name also may be when nothing follows it or a
- * body does.
+ * The options a test was given, Playwright's details among them, read as
+ * Vitest reads them: after a body, an object literal third (a number there
+ * is a timeout); before one, the second argument, which a name also may be
+ * when nothing follows it or a body does.
  */
 function optionsOf(call) {
   const [, second, third] = call.arguments;
@@ -201,8 +243,8 @@ function optionsOf(call) {
   return second;
 }
 
-/** Whether the test's options park it: skip, todo or fails set to anything but false, or options the checker cannot read. */
-function parkedByOptions(options) {
+/** Whether the test's options park it: a parking name set to anything but false, or options the checker cannot read. */
+function parkedByOptions(options, parking) {
   if (options === undefined) {
     return false;
   }
@@ -212,12 +254,12 @@ function parkedByOptions(options) {
   return options.properties.some(property => {
     if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)) {
       return (
-        PARKING_MODIFIERS.has(property.name.text) &&
+        parking.has(property.name.text) &&
         property.initializer.kind !== ts.SyntaxKind.FalseKeyword
       );
     }
     if (ts.isShorthandPropertyAssignment(property)) {
-      return PARKING_MODIFIERS.has(property.name.text);
+      return parking.has(property.name.text);
     }
     // A spread, a computed name or a method: what it sets cannot be read.
     return true;
@@ -252,8 +294,8 @@ function runsNoCase(call) {
   return false;
 }
 
-/** Each titled test call, with its title when that is a plain string literal, each block, and each of Vitest's names imported under another, by line. */
-function scan(file, source) {
+/** Each titled test call, with its title when that is a plain string literal, each block, and each of the runner's names imported under another, by line. */
+function scan(file, source, runner) {
   const tree = ts.createSourceFile(
     file,
     source,
@@ -269,9 +311,10 @@ function scan(file, source) {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === 'vitest' &&
+      runner.sources.includes(node.moduleSpecifier.text) &&
       node.importClause?.namedBindings !== undefined
     ) {
+      const source = node.moduleSpecifier.text;
       const bindings = node.importClause.namedBindings;
 
       if (ts.isNamespaceImport(bindings)) {
@@ -279,6 +322,7 @@ function scan(file, source) {
           line:
             tree.getLineAndCharacterOfPosition(bindings.getStart(tree)).line +
             1,
+          source,
           name: '*',
         });
       }
@@ -288,25 +332,27 @@ function scan(file, source) {
         : []) {
         if (
           binding.propertyName === undefined &&
-          ROOTS.has(binding.name.text)
+          runner.roots.has(binding.name.text)
         ) {
           imported.add(binding.name.text);
         }
         if (
           binding.propertyName !== undefined &&
-          ROOTS.has(binding.propertyName.text)
+          runner.roots.has(binding.propertyName.text)
         ) {
           aliases.push({
             line:
               tree.getLineAndCharacterOfPosition(binding.getStart(tree)).line +
               1,
+            source,
             name: binding.propertyName.text,
           });
         }
       }
     }
     if (ts.isCallExpression(node) && titled(node)) {
-      const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
+      const names = calleeNames(node.expression) ?? [];
+      const [root = '', ...modifiers] = names;
 
       if (!imported.has(root)) {
         ts.forEachChild(node, visit);
@@ -315,22 +361,28 @@ function scan(file, source) {
       const line =
         tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
       const [title] = node.arguments;
+      const kind = runner.kindOf(names);
+      const nested = !(
+        ts.isExpressionStatement(node.parent) &&
+        ts.isSourceFile(node.parent.parent)
+      );
 
-      if (ROOTS.get(root) === 'block') {
+      if (kind === 'block') {
         blocks.push(line);
-      } else if (ROOTS.get(root) === 'test') {
+      } else if (kind === 'test') {
         tests.push({
           line,
-          nested: !(
-            ts.isExpressionStatement(node.parent) &&
-            ts.isSourceFile(node.parent.parent)
-          ),
+          nested,
           parked:
-            modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
-            parkedByOptions(optionsOf(node)) ||
+            modifiers.some(name => runner.parking.has(name)) ||
+            parkedByOptions(optionsOf(node), runner.parking) ||
             bodiless(node) ||
-            takesContext(node, modifiers) ||
+            takesContext(node, modifiers, runner.contextAt) ||
             runsNoCase(node),
+          parksFile:
+            !nested &&
+            bodiless(node) &&
+            modifiers.some(name => runner.parkingFile.has(name)),
           title:
             title !== undefined && ts.isStringLiteral(title)
               ? title.text
@@ -342,7 +394,14 @@ function scan(file, source) {
   };
 
   visit(tree);
-  return {tests, blocks, aliases};
+
+  const fileParked = tests.some(test => test.parksFile);
+
+  return {
+    tests: tests.map(test => ({...test, parked: test.parked || fileParked})),
+    blocks,
+    aliases,
+  };
 }
 
 function reportFailures(failures) {
@@ -414,27 +473,32 @@ function main() {
     }
   }
 
-  const testFiles = readdirSync(SUITE_DIRECTORY, {recursive: true})
-    .filter(path => path.endsWith('.test.ts'))
-    .sort()
-    .map(path => join(SUITE_DIRECTORY, path));
+  // A suite whose directory is not there holds no test, so none of its rows is done.
+  const testFiles = SUITES.flatMap(suite =>
+    existsSync(suite.directory)
+      ? readdirSync(suite.directory, {recursive: true})
+          .filter(path => path.endsWith(suite.extension))
+          .sort()
+          .map(path => ({suite, file: join(suite.directory, path)}))
+      : [],
+  );
   const tested = new Set();
   const parkedRows = new Set();
   let tests = 0;
 
-  for (const file of testFiles) {
+  for (const {suite, file} of testFiles) {
     const {
       tests: calls,
       blocks,
       aliases,
-    } = scan(file, readFileSync(file, 'utf8'));
+    } = scan(file, readFileSync(file, 'utf8'), suite.runner);
 
-    for (const {line, name} of aliases) {
+    for (const {line, source, name} of aliases) {
       failures.push(
         name === '*'
-          ? `${file}:${line}: vitest is imported as a namespace, which the ` +
-              'index cannot follow.'
-          : `${file}:${line}: vitest's ${name} is imported under another ` +
+          ? `${file}:${line}: ${source} is imported as a namespace, which ` +
+              'the index cannot follow.'
+          : `${file}:${line}: ${source}'s ${name} is imported under another ` +
               'name, which the index cannot follow.',
       );
     }
@@ -456,9 +520,9 @@ function main() {
           `${file}:${line}: the title "${title}" is not ` +
             '"<row id>: <sentence>".',
         );
-      } else if (rows.get(id)?.test_location !== 'conformance') {
+      } else if (rows.get(id)?.test_location !== suite.location) {
         failures.push(
-          `${file}:${line}: ${id} is not a conformance row of ` +
+          `${file}:${line}: ${id} is not a ${suite.location} row of ` +
             `${INVENTORY_FILE}.`,
         );
       } else if (parked) {
@@ -483,18 +547,21 @@ function main() {
     if (row.status !== 'done') {
       continue;
     }
-    if (row.test_location !== 'conformance') {
+    const suite = SUITES.find(({location}) => location === row.test_location);
+
+    if (suite === undefined) {
       failures.push(
         `${INVENTORY_FILE}: ${row.id} is done, but its test_location is ` +
-          `${row.test_location}, not conformance.`,
+          `${row.test_location}, not ` +
+          `${SUITES.map(({location}) => location).join(' or ')}.`,
       );
     } else if (!tested.has(row.id)) {
       failures.push(
         parkedRows.has(row.id)
           ? `${INVENTORY_FILE}: ${row.id} is done, but every test naming it ` +
-              `in ${SUITE_DIRECTORY} is skipped, runs no case or expects to fail.`
+              `in ${suite.directory} is skipped, runs no case or expects to fail.`
           : `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +
-              `${SUITE_DIRECTORY} names it.`,
+              `${suite.directory} names it.`,
       );
     }
   }
@@ -504,23 +571,28 @@ function main() {
     return;
   }
 
-  const areas = new Map();
+  const byArea = SUITES.map(({location}) => {
+    const areas = new Map();
 
-  for (const row of rows.values()) {
-    if (row.test_location === 'conformance') {
-      const counts = areas.get(row.area) ?? {done: 0, todo: 0};
+    for (const row of rows.values()) {
+      if (row.test_location === location) {
+        const counts = areas.get(row.area) ?? {done: 0, todo: 0};
 
-      counts[row.status] += 1;
-      areas.set(row.area, counts);
+        counts[row.status] += 1;
+        areas.set(row.area, counts);
+      }
     }
-  }
-  process.stdout.write(
-    `conformance-inventory: ${tests} test(s) name rows of ` +
-      `${INVENTORY_FILE}; conformance rows done/todo by area: ` +
+    return (
+      `${location} rows done/todo by area: ` +
       [...areas]
         .map(([area, {done, todo}]) => `${area} ${done}/${todo}`)
-        .join(', ') +
-      '.\n',
+        .join(', ')
+    );
+  });
+
+  process.stdout.write(
+    `conformance-inventory: ${tests} test(s) name rows of ` +
+      `${INVENTORY_FILE}; ${byArea.join('; ')}.\n`,
   );
 }
 

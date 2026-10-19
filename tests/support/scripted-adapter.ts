@@ -5,12 +5,12 @@ import {demoConfigToneChangeOutput} from './demo-config-tool.ts';
 const pacedPieceMs = 4;
 
 /**
- * A model scripted by the line it reads, for a daemon a real browser talks
+ * A model scripted by the line it reads, for a daemon a real client talks
  * to. `confirm` asks for the demo-config tone change — a confirmation-gated
  * tool round — and says `done` once the round is in; `reject` writes what
  * the parser refuses; any other line is answered `noted: <line>`, spoken in
  * word pieces the way a model's reply arrives, and paced when the line
- * starts with `slowly` so a page can be seen filling the draft.
+ * starts with `slowly` so a client can be seen following the draft.
  */
 export function createScriptedAdapter(options: {
   readonly homeRoot: string;

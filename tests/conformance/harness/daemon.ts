@@ -2,8 +2,7 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 
-import {onTestFinished} from 'vitest';
-
+import {onTestFinished} from './runner.ts';
 import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 
 const serveCommand = commandOf(
