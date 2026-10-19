@@ -41,8 +41,8 @@ const ROOTS = new Map([
 const MODIFIERS_WITH_ARGUMENTS = new Set(['each', 'for', 'skipIf', 'runIf']);
 // Of those, the ones whose argument is a table of cases.
 const TABLE_MODIFIERS = new Set(['each', 'for']);
-// The modifiers under which a test proves nothing: it never runs, or it passes by failing.
-const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails']);
+// The modifiers under which a test proves nothing: it never runs, it passes by failing, or it runs on a condition.
+const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails', 'skipIf', 'runIf']);
 const TITLE_SHAPE = /^([^\s:]+): \S/;
 
 // RFC 4180: a quoted field may hold commas, line breaks and doubled quotes.
@@ -205,10 +205,22 @@ function scan(file, source) {
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       node.moduleSpecifier.text === 'vitest' &&
-      node.importClause?.namedBindings !== undefined &&
-      ts.isNamedImports(node.importClause.namedBindings)
+      node.importClause?.namedBindings !== undefined
     ) {
-      for (const binding of node.importClause.namedBindings.elements) {
+      const bindings = node.importClause.namedBindings;
+
+      if (ts.isNamespaceImport(bindings)) {
+        aliases.push({
+          line:
+            tree.getLineAndCharacterOfPosition(bindings.getStart(tree)).line +
+            1,
+          name: '*',
+        });
+      }
+
+      for (const binding of ts.isNamedImports(bindings)
+        ? bindings.elements
+        : []) {
         if (
           binding.propertyName !== undefined &&
           ROOTS.has(binding.propertyName.text)
@@ -331,8 +343,11 @@ function main() {
 
     for (const {line, name} of aliases) {
       failures.push(
-        `${file}:${line}: vitest's ${name} is imported under another name, ` +
-          'which the index cannot follow.',
+        name === '*'
+          ? `${file}:${line}: vitest is imported as a namespace, which the ` +
+              'index cannot follow.'
+          : `${file}:${line}: vitest's ${name} is imported under another ` +
+              'name, which the index cannot follow.',
       );
     }
 

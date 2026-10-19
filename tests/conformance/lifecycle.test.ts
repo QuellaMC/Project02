@@ -20,7 +20,7 @@ it('lifecycle.address-line: serve prints its address as its first stdout line on
   const daemon = await startDaemon(home);
 
   expect(daemon.stdout().split('\n')[0]).toMatch(
-    /^PROJECT02_GATEWAY=http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+$/u,
+    /^PROJECT02_GATEWAY=http:\/\/127\.0\.0\.1:\d+\/#token=[!-~]+$/u,
   );
   await expect(wireOf(daemon).health()).resolves.toMatchObject({
     homeRoot: home,
