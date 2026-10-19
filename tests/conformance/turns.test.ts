@@ -262,11 +262,16 @@ it('turns.message-ids: committed messages are numbered <sessionId>:message-N in 
   });
 });
 
-it('turns.client-message-id-join: a repeat of a submission while it runs joins it, a repeat after it gets its outcome again, and only a new id runs a new turn', async () => {
+it('turns.client-message-id-join: a repeat of a submission while it runs joins it, a repeat after it gets its outcome again, only a new id runs a new turn, and the same id on another conversation is another turn', async () => {
   const model = await startModelServer();
   const wire = wireOf(
     await startDaemon(
-      createHome({'config.json': configJson({project02: model.settings})}),
+      createHome({
+        'config.json': configJson({project02: model.settings}),
+        characters: {
+          zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+        },
+      }),
     ),
   );
   const say = await converse(wire, 'mira');
@@ -294,6 +299,15 @@ it('turns.client-message-id-join: a repeat of a submission while it runs joins i
     messages: [{}, {text: 'Hello again.'}],
   });
   expect(model.requests).toHaveLength(2);
+
+  const sayZeta = await converse(wire, 'zeta');
+
+  model.answer(reply('Zeta here.'));
+  expect(await sayZeta('Hello?', 'hello')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Zeta here.'}],
+  });
+  expect(model.requests).toHaveLength(3);
 });
 
 it('turns.client-message-id-conflict: the same client message id with another line is refused', async () => {

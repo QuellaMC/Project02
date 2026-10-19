@@ -5,7 +5,7 @@ import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
-import {configJson, createHome} from './harness/home.ts';
+import {characterJson, configJson, createHome} from './harness/home.ts';
 import {
   finish,
   reply,
@@ -26,13 +26,17 @@ const mira = {scope: 'character', characterId: 'mira'} as const;
 const fiveMinutes = 5 * 60_000;
 
 /** Mira on the model server, beside the bundled plugin whose fields the model may ask to change. */
-async function demoConfigHome(env: Readonly<Record<string, string>> = {}) {
+async function demoConfigHome(
+  env: Readonly<Record<string, string>> = {},
+  seed: object = {},
+) {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({
       project02: model.settings,
       plugins: {'demo-config': {enabled: true}},
     }),
+    ...seed,
   });
   const daemon = await startDaemon(home, env);
   const wire = wireOf(daemon);
@@ -41,9 +45,15 @@ async function demoConfigHome(env: Readonly<Record<string, string>> = {}) {
   return {model, home, daemon, wire, say};
 }
 
-/** The model asks to set Mira's tone, against the fingerprint her settings hand out now. */
-async function asksForTone(wire: Wire, tone: string): Promise<Answer> {
-  const view = (await wire.configView(mira)) as {readonly fingerprint: string};
+/** The model asks to set a character's tone, against the fingerprint her settings hand out now. */
+async function asksForTone(
+  wire: Wire,
+  tone: string,
+  target: Parameters<Wire['configView']>[0] = mira,
+): Promise<Answer> {
+  const view = (await wire.configView(target)) as {
+    readonly fingerprint: string;
+  };
 
   return {
     chunks: [
@@ -223,6 +233,7 @@ it('confirmations.expire: a confirmation nobody answers by its deadline settles 
 
   const turn = say('Talk like a pirate.', 'pirate');
   const {id} = parkedIn(await events.next(frameOf('confirmation_requested')));
+  const asked = performance.now();
 
   await events.next(
     frameOf('confirmation_settled', {
@@ -231,6 +242,12 @@ it('confirmations.expire: a confirmation nobody answers by its deadline settles 
       reason: 'expired',
     }),
   );
+
+  const waited = performance.now() - asked;
+
+  // At its deadline of half a second: neither at once nor long after.
+  expect(waited).toBeGreaterThanOrEqual(400);
+  expect(waited).toBeLessThan(3_000);
   expect(await turn).toMatchObject({status: 'completed'});
   expect(miraOverlay(home)).toBe(before);
   expect(await wire.answer(id, 'approved')).toEqual({status: 'unknown'});
@@ -258,8 +275,15 @@ it("confirmations.approval-window: an approval that comes after the tool's five-
   });
 });
 
-it('confirmations.cancelled-stopped: switching a character off or stopping the daemon cancels a parked confirmation as stopped, one raised while she shuts down is cancelled unannounced, and once she is back on they park again', async () => {
-  const {model, daemon, wire, say} = await demoConfigHome();
+it('confirmations.cancelled-stopped: switching a character off or stopping the daemon cancels every parked confirmation as stopped, one raised while she shuts down is cancelled unannounced, and once she is back on they park again', async () => {
+  const {model, daemon, wire, say} = await demoConfigHome(
+    {},
+    {
+      characters: {
+        zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+      },
+    },
+  );
   const events = await openEvents(daemon);
 
   model.answer(await asksForTone(wire, 'pirate'));
@@ -305,20 +329,38 @@ it('confirmations.cancelled-stopped: switching a character off or stopping the d
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
   );
-  model.answer(await asksForTone(wire, 'warm'), reply('Warmly.'));
+  // One queue of answers for both: each character's call first, then the
+  // replies their cancelled rounds take in whichever order they come.
+  model.answer(await asksForTone(wire, 'warm'));
 
   const warm = say('Be warm.', 'warm');
   const again = parkedIn(await events.next(frameOf('confirmation_requested')));
+  const sayZeta = await converse(wire, 'zeta');
+  const zeta = {scope: 'character', characterId: 'zeta'} as const;
+
+  model.answer(await asksForTone(wire, 'formal', zeta));
+
+  const formal = sayZeta('Be formal.', 'formal');
+  const zetaParked = parkedIn(
+    await events.next(frameOf('confirmation_requested')),
+  );
+
+  model.answer(reply('Warmly.'), reply('Formally.'));
+  const cancelled = frameOf('confirmation_settled', {
+    decision: 'cancelled',
+    reason: 'stopped',
+  });
 
   daemon.signal('SIGINT');
-  await events.next(
-    frameOf('confirmation_settled', {
-      id: again.id,
-      decision: 'cancelled',
-      reason: 'stopped',
-    }),
-  );
+  expect(
+    new Set(
+      [await events.next(cancelled), await events.next(cancelled)].map(
+        frame => parkedIn(frame).id,
+      ),
+    ),
+  ).toEqual(new Set([again.id, zetaParked.id]));
   expect(await warm).toMatchObject({status: 'completed'});
+  expect(await formal).toMatchObject({status: 'completed'});
   await events.ended();
   expect(await daemon.exit()).toBe(0);
 });

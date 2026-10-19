@@ -583,18 +583,28 @@ it('lifecycle.foreign-host-lease: a home whose lease names a process on another 
 it('lifecycle.roster-boot: at boot every enabled character starts, and a disabled one is not started: health shows it switched off and not_started', async () => {
   const daemon = await startDaemon(
     createHome({
-      characters: {zeta: characterPackage('zeta', 'Zeta')},
+      characters: {
+        nova: characterPackage('nova', 'Nova'),
+        zeta: characterPackage('zeta', 'Zeta'),
+      },
       'character-data': {
         mira: {'config.json': configJson({project02: {enabled: false}})},
       },
     }),
     fixedReplies,
   );
+  const events = await openEvents(daemon);
 
-  await reached(await openEvents(daemon), 'zeta', 'ready');
+  while (
+    !['nova', 'zeta'].every(id => statesOf(events, id).includes('ready'))
+  ) {
+    await events.next(() => true);
+  }
+
   expect(await wireOf(daemon).health()).toMatchObject({
     characters: [
       {id: 'mira', enabled: false, state: 'not_started'},
+      {id: 'nova', enabled: true, state: 'ready'},
       {id: 'zeta', enabled: true, state: 'ready'},
     ],
   });
@@ -828,9 +838,13 @@ it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parke
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'reloading'}),
   );
+  const stopped = performance.now();
+
   daemon.signal('SIGINT');
   await turn;
   expect(await daemon.exit()).toBe(0);
+  // Promptly: not the five minutes the parked confirmation had.
+  expect(performance.now() - stopped).toBeLessThan(5_000);
   await events.ended();
   expect(statesOf(events, 'mira').at(-1)).toBe('stopped');
 });
@@ -954,8 +968,13 @@ it('lifecycle.second-signal-exits: a second stop signal during a stop ends the p
   await held.arrived();
   daemon.signal('SIGINT');
   await daemon.printed('Stopping; finishing what is in flight.');
+
+  const second = performance.now();
+
   daemon.signal('SIGTERM');
   await daemon.exit();
+  // At once: the turn the stop waited on is never finished.
+  expect(performance.now() - second).toBeLessThan(3_000);
   expect(await turn).toBe('cut off');
   expect(record(home)).toMatchObject({running: {pid: daemon.pid}});
   const again = await startDaemon(home);
