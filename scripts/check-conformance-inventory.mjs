@@ -171,7 +171,8 @@ function runsNoCase(call) {
       TABLE_MODIFIERS.has(calleeNames(applied)?.at(-1)) &&
       (table === undefined ||
         !ts.isArrayLiteralExpression(table) ||
-        table.elements.length === 0)
+        table.elements.length === 0 ||
+        table.elements.some(ts.isSpreadElement))
     );
   }
   if (ts.isTaggedTemplateExpression(applied)) {
@@ -187,7 +188,7 @@ function runsNoCase(call) {
   return false;
 }
 
-/** Each titled test call, with its title when that is a plain string literal, and each block, by line. */
+/** Each titled test call, with its title when that is a plain string literal, each block, and each of Vitest's names imported under another, by line. */
 function scan(file, source) {
   const tree = ts.createSourceFile(
     file,
@@ -198,7 +199,29 @@ function scan(file, source) {
   );
   const tests = [];
   const blocks = [];
+  const aliases = [];
   const visit = node => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === 'vitest' &&
+      node.importClause?.namedBindings !== undefined &&
+      ts.isNamedImports(node.importClause.namedBindings)
+    ) {
+      for (const binding of node.importClause.namedBindings.elements) {
+        if (
+          binding.propertyName !== undefined &&
+          ROOTS.has(binding.propertyName.text)
+        ) {
+          aliases.push({
+            line:
+              tree.getLineAndCharacterOfPosition(binding.getStart(tree)).line +
+              1,
+            name: binding.propertyName.text,
+          });
+        }
+      }
+    }
     if (ts.isCallExpression(node) && titled(node)) {
       const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
       const line =
@@ -230,7 +253,7 @@ function scan(file, source) {
   };
 
   visit(tree);
-  return {tests, blocks};
+  return {tests, blocks, aliases};
 }
 
 function reportFailures(failures) {
@@ -296,7 +319,18 @@ function main() {
   let tests = 0;
 
   for (const file of testFiles) {
-    const {tests: calls, blocks} = scan(file, readFileSync(file, 'utf8'));
+    const {
+      tests: calls,
+      blocks,
+      aliases,
+    } = scan(file, readFileSync(file, 'utf8'));
+
+    for (const {line, name} of aliases) {
+      failures.push(
+        `${file}:${line}: vitest's ${name} is imported under another name, ` +
+          'which the index cannot follow.',
+      );
+    }
 
     for (const {line, nested, parked, title} of calls) {
       const id = title?.match(TITLE_SHAPE)?.[1];
