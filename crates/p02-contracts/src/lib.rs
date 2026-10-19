@@ -21,7 +21,7 @@ pub use capability::{
     DatabaseError, DatabaseOpener, FileStore, FileStoreBackend, HistoryCursor, HistoryMessage,
     LeasedFiles, LeasedStore, MessageBatch, PluginDatabase, ReadMessages, SessionHistory,
     SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary, StoreAccess,
-    StoreError, WriteRevocation,
+    StoreError, WriteHold,
 };
 pub use config::{ConfigField, ConfigSection, ResolvedConfig};
 pub use context::{HookContext, TurnIdentity, TurnText};

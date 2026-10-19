@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::capability::{
     DatabaseOpener, FileStore, FileStoreBackend, PluginDatabase, SessionHistory,
-    SessionHistoryFeed, StoreAccess, WriteRevocation,
+    SessionHistoryFeed, StoreAccess, WriteHold,
 };
 use crate::label::RedactionLabel;
 
@@ -90,17 +90,17 @@ impl HookContext {
 
     /// Grants the plugin's character-scoped store (`character_file_store`),
     /// held to this hook's deadline and cancellation. The host keeps the
-    /// revocation and uses it when the hook settles.
+    /// hold until the hook settles.
     pub fn with_character_file_store(
         mut self,
         backend: Arc<dyn FileStoreBackend>,
         access: StoreAccess,
-    ) -> (Self, WriteRevocation) {
-        let (store, revocation) =
+    ) -> (Self, WriteHold) {
+        let (store, hold) =
             FileStore::new(backend, access, self.deadline, self.cancellation.clone());
 
         self.character_file_store = Some(store);
-        (self, revocation)
+        (self, hold)
     }
 
     /// Grants the character's session history (`session_history: read`).
@@ -307,7 +307,7 @@ mod tests {
             character: Identifier::new("mira").unwrap(),
             reads: AtomicUsize::new(0),
         });
-        let (granted, revocation) = context(cancellation.clone())
+        let (granted, _hold) = context(cancellation.clone())
             .with_character_file_store(Arc::clone(&memory) as _, StoreAccess::ReadWrite);
         let granted = granted
             .with_session_history(Arc::clone(&feed) as _)
@@ -340,20 +340,19 @@ mod tests {
         assert_eq!(memory.leases.load(Ordering::SeqCst), 1);
         assert_eq!(feed.reads.load(Ordering::SeqCst), 0);
         assert_eq!(opener.opened.load(Ordering::SeqCst), 0);
-        revocation.revoke();
     }
 
     #[test]
     fn writes_end_with_the_hook_and_a_reader_never_writes() {
         let memory = Arc::new(Memory::default());
-        let (granted, revocation) = context(CancellationToken::new())
+        let (granted, hold) = context(CancellationToken::new())
             .with_character_file_store(Arc::clone(&memory) as _, StoreAccess::ReadWrite);
         let retained = granted.character_file_store().unwrap().clone();
 
         retained
             .with_lease(|leased| leased.write_json("notes.json", &json!("kept")))
             .unwrap();
-        revocation.revoke();
+        drop(hold);
 
         assert!(matches!(
             retained.with_lease(|leased| leased.write_json("notes.json", &json!("late"))),
@@ -366,7 +365,7 @@ mod tests {
             Some(json!("kept"))
         );
 
-        let (reader, _revocation) = context(CancellationToken::new())
+        let (reader, _hold) = context(CancellationToken::new())
             .with_character_file_store(memory, StoreAccess::ReadOnly);
 
         assert!(matches!(

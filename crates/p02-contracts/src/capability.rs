@@ -4,7 +4,7 @@ mod session_history;
 
 pub use database::{DatabaseError, DatabaseOpener, PluginDatabase};
 pub use file_store::{
-    FileStore, FileStoreBackend, LeasedFiles, LeasedStore, StoreAccess, StoreError, WriteRevocation,
+    FileStore, FileStoreBackend, LeasedFiles, LeasedStore, StoreAccess, StoreError, WriteHold,
 };
 pub use session_history::{
     HistoryCursor, HistoryMessage, MessageBatch, ReadMessages, SessionHistory, SessionHistoryError,
