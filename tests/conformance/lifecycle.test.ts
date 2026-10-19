@@ -23,11 +23,10 @@ import {
 } from './harness/events.ts';
 import {chmod, characterJson, configJson, createHome} from './harness/home.ts';
 import {
-  finish,
+  calling,
   reply,
   startModelServer,
-  toolCall,
-  type Answer,
+  toolResults,
 } from './harness/model-server.ts';
 import {connectSocket} from './harness/socket.ts';
 import {within} from './harness/wait.ts';
@@ -107,21 +106,6 @@ async function occupiedPort(): Promise<number> {
   });
 
   return (server.address() as AddressInfo).port;
-}
-
-/** The model calling one tool, and nothing else in that round. */
-function calling(name: string, input: object): Answer {
-  return {
-    chunks: [
-      ...toolCall({
-        index: 0,
-        id: `call_${name}`,
-        name,
-        arguments: JSON.stringify(input),
-      }),
-      finish('tool_calls'),
-    ],
-  };
 }
 
 it('lifecycle.address-line: serve prints its address as its first stdout line once it answers there', async () => {
@@ -879,11 +863,8 @@ it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parke
   model.answer(reply('Never mind.'));
 
   const turn = say('Be warmer.', 'warmer');
-  const {messages} = (await inspected.arrived()).body as {
-    messages: {content: string}[];
-  };
-  const {output} = JSON.parse(messages.at(-1)?.content ?? '') as {
-    output: {fingerprint: string};
+  const {output} = toolResults(await inspected.arrived()).at(-1) as {
+    readonly output: {readonly fingerprint: string};
   };
 
   inspected.release(

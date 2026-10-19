@@ -1,0 +1,738 @@
+import {createHash, randomUUID} from 'node:crypto';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+
+import {expect, it, onTestFinished} from 'vitest';
+
+import {serve, startDaemon} from './harness/daemon.ts';
+import {frameOf, openEvents} from './harness/events.ts';
+import {
+  characterJson,
+  configJson,
+  createHome,
+  sessionLog,
+  snapshot,
+} from './harness/home.ts';
+import {
+  calling,
+  content,
+  finish,
+  reply,
+  startModelServer,
+  toolResults,
+  undecided,
+} from './harness/model-server.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
+
+const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
+// A window this small rotates the segment after every turn.
+const rotatingEveryTurn = configJson({project02: {contextWindowTokens: 1}});
+// No process has this pid: a temp file named for it was left by a writer that is gone.
+const deadPid = 2_147_483_647;
+
+/** The resource each lease in a lock directory is held on. */
+function leases(locks: string): string[] {
+  return readdirSync(locks)
+    .map(
+      lock =>
+        (
+          JSON.parse(readFileSync(join(locks, lock, 'owner.json'), 'utf8')) as {
+            readonly resourceKey: string;
+          }
+        ).resourceKey,
+    )
+    .sort();
+}
+
+/** A file's text, or the names a directory holds. */
+function contentsOf(path: string): string | string[] {
+  return statSync(path).isDirectory()
+    ? readdirSync(path)
+    : readFileSync(path, 'utf8');
+}
+
+/** The session ids a character's catalog names, in its order. */
+function catalogOf(home: string, characterId: string): string[] {
+  return readFileSync(
+    join(home, 'character-data', characterId, 'sessions.jsonl'),
+    'utf8',
+  )
+    .trimEnd()
+    .split('\n')
+    .map(row => (JSON.parse(row) as {readonly sessionId: string}).sessionId);
+}
+
+it("storage.layout: a character's history lives under character-data/<id>: the sessions catalog, a directory per segment <conversationId>.N holding its raw events, the taken-lines record and the locks; the conversation lives at conversations/<id>/conversation.json", async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const data = join(home, 'character-data', 'mira');
+  const segments = [`${conversationId}.1`, `${conversationId}.2`];
+
+  await say('Hello.', 'hello');
+  expect(readdirSync(data)).toEqual(
+    expect.arrayContaining([
+      'sessions.jsonl',
+      'sessions',
+      'taken-lines',
+      '.locks',
+    ]),
+  );
+  expect(catalogOf(home, 'mira')).toEqual(segments);
+  expect(readdirSync(join(data, 'sessions')).sort()).toEqual(segments);
+
+  for (const segment of segments) {
+    expect(readdirSync(join(data, 'sessions', segment)), segment).toEqual([
+      'raw-events.jsonl',
+    ]);
+  }
+
+  expect(readdirSync(join(data, 'taken-lines'))).toEqual([
+    `${conversationId}.json`,
+  ]);
+  expect(readdirSync(join(home, 'conversations'))).toEqual([conversationId]);
+  expect(
+    JSON.parse(
+      readFileSync(
+        join(home, 'conversations', conversationId, 'conversation.json'),
+        'utf8',
+      ),
+    ),
+  ).toMatchObject({id: conversationId});
+});
+
+it("storage.per-character-isolation: each character's segments and their writer leases live in its own data directory, and after a clean stop the home's lock directory holds no session-writer lease", async () => {
+  const home = createHome({
+    characters: {
+      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+    },
+  });
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+
+  for (const characterId of ['mira', 'zeta']) {
+    const say = await converse(wire, characterId);
+    const {conversationId} = await conversationOf(wire, characterId);
+    const data = join(home, 'character-data', characterId);
+
+    await say('Hello.', characterId);
+    expect(readdirSync(join(data, 'sessions')), characterId).toEqual([
+      `${conversationId}.1`,
+    ]);
+    expect(leases(join(data, '.locks')), characterId).toEqual([
+      `session-writer:${conversationId}.1`,
+    ]);
+  }
+
+  daemon.signal('SIGINT');
+  await daemon.exit();
+  expect(
+    leases(join(home, '.locks')).filter(resource =>
+      resource.startsWith('session-writer:'),
+    ),
+  ).toEqual([]);
+});
+
+it('storage.session-segments: a conversation is segments .1, .2, ... made in order and only the newest goes on, and its first segment is never made again over the records it holds', async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const first = await startDaemon(home, fixedReplies);
+  const firstWire = wireOf(first);
+  const say = await converse(firstWire, 'mira');
+  const {conversationId} = await conversationOf(firstWire, 'mira');
+  const segmentLog = (segment: number) =>
+    join(
+      home,
+      'character-data',
+      'mira',
+      'sessions',
+      `${conversationId}.${String(segment)}`,
+      'raw-events.jsonl',
+    );
+
+  await say('One.', 'one');
+
+  const closed = readFileSync(segmentLog(1), 'utf8');
+
+  expect(await say('Two.', 'two')).toMatchObject({
+    messages: [{messageId: `${conversationId}.2:message-1`}, {}],
+  });
+  expect(readFileSync(segmentLog(1), 'utf8')).toBe(closed);
+  expect(catalogOf(home, 'mira')).toEqual(
+    [1, 2, 3].map(segment => `${conversationId}.${String(segment)}`),
+  );
+  first.signal('SIGINT');
+  await first.exit();
+
+  const catalog = join(home, 'character-data', 'mira', 'sessions.jsonl');
+
+  rmSync(catalog);
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  await wire.start('mira');
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'failed',
+    code: 'missing_file',
+  });
+  expect(readFileSync(segmentLog(1), 'utf8')).toBe(closed);
+  expect(existsSync(catalog)).toBe(false);
+});
+
+it("storage.continuation: once its history outgrows the window the conversation goes on silently in the next segment: the catalog names both, the new one opens with a continuation record, and the old one's writer lease is released", async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const events = await openEvents(daemon);
+
+  await say('Hello.', 'hello');
+  expect(catalogOf(home, 'mira')).toEqual([
+    `${conversationId}.1`,
+    `${conversationId}.2`,
+  ]);
+  expect(sessionLog(home, 'mira', `${conversationId}.2`)).toMatchObject([
+    {
+      kind: 'session_continued',
+      sessionContinuation: {continuedFrom: {sessionId: `${conversationId}.1`}},
+    },
+  ]);
+  expect(leases(join(home, 'character-data', 'mira', '.locks'))).toEqual([
+    `session-writer:${conversationId}.2`,
+  ]);
+  await say('Still there?', 'still');
+  await events.next(frameOf('turn_completed', {clientMessageId: 'still'}));
+  expect(new Set(events.frames.map(frame => frame.event))).toEqual(
+    new Set(['ready', 'turn_progress', 'turn_completed']),
+  );
+});
+
+it('storage.round-records: each model round is its own record of what the model was shown and wrote, named by number by its tool calls and by the terminal record, which carries the commit validation; the same tool in two turns gets two call ids, and a later refusal keeps the accepted call and its evidence', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const wire = wireOf(await startDaemon(home));
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  model.answer(
+    calling('character_state_patch', {mood: 'curious'}),
+    reply('Curious now.'),
+    calling('character_state_patch', {mood: 'playful'}),
+    ...undecided(99),
+  );
+  await say('How do you feel?', 'feel');
+  await say('And now?', 'now');
+
+  const records = sessionLog(home, 'mira', `${conversationId}.1`);
+  const [completed, refused] = [
+    ...new Set(records.map(record => record['eventId'])),
+  ].map(eventId => records.filter(record => record['eventId'] === eventId));
+  const ofKind = (turn: typeof records | undefined, kind: string) =>
+    (turn ?? []).filter(record => record['kind'] === kind);
+  const [firstCall] = ofKind(completed, 'tool_call_started');
+  const [secondCall] = ofKind(refused, 'tool_call_started');
+
+  expect(ofKind(completed, 'role_model_round')).toMatchObject([
+    {
+      round: 1,
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          event: {payload: {currentUserMessage: 'How do you feel?'}},
+        },
+        rawOutputText: expect.stringContaining(
+          'character_state.patch',
+        ) as string,
+      },
+    },
+    {
+      round: 2,
+      roleModelIOSnapshot: {
+        rawOutputText: expect.stringContaining('Curious now.') as string,
+      },
+    },
+  ]);
+  expect(ofKind(completed, 'tool_call_finished')).toMatchObject([
+    {round: 1, toolCallId: firstCall?.['toolCallId']},
+  ]);
+  expect(ofKind(completed, 'runtime_turn_completed')).toMatchObject([
+    {
+      round: 2,
+      toolCallIds: [firstCall?.['toolCallId']],
+      commitValidation: {
+        result: {status: 'accepted', acceptedVisibleReplyText: 'Curious now.'},
+      },
+    },
+  ]);
+  expect(firstCall).not.toHaveProperty('roleModelIOSnapshot');
+  expect(secondCall?.['toolCallId']).not.toBe(firstCall?.['toolCallId']);
+  expect(ofKind(refused, 'runtime_turn_rejected')).toMatchObject([
+    {
+      reason: 'malformed_output',
+      toolCallIds: [secondCall?.['toolCallId']],
+      runtimePluginEvidence: expect.arrayContaining([
+        expect.objectContaining({
+          pluginId: 'character-state',
+          evidenceKind: 'tool_invocation',
+          status: 'accepted',
+        }),
+      ]) as unknown[],
+    },
+  ]);
+});
+
+it('storage.taken-lines: after a restart a line from any earlier segment is refused duplicate_submission; without the taken-lines record the open rebuilds what it knew without writing it, and the next rotation writes it again', async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const earlier = await startDaemon(home, fixedReplies);
+  const earlierWire = wireOf(earlier);
+  const sayEarlier = await converse(earlierWire, 'mira');
+  const {conversationId} = await conversationOf(earlierWire, 'mira');
+  const record = join(
+    home,
+    'character-data',
+    'mira',
+    'taken-lines',
+    `${conversationId}.json`,
+  );
+
+  await sayEarlier('One.', 'one');
+  await sayEarlier('Two.', 'two');
+  earlier.signal('SIGINT');
+  await earlier.exit();
+  rmSync(record);
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+  const say = await converse(wire, 'mira');
+
+  expect(existsSync(record)).toBe(false);
+
+  for (const [text, id] of [
+    ['One.', 'one'],
+    ['Two.', 'two'],
+  ] as const) {
+    expect(await say(text, id), id).toMatchObject({
+      status: 'refused',
+      reason: 'duplicate_submission',
+    });
+  }
+
+  expect(existsSync(record)).toBe(false);
+  await say('Three.', 'three');
+  expect(JSON.parse(readFileSync(record, 'utf8'))).toEqual({
+    segments: {
+      1: {one: `${conversationId}.1:message-1`},
+      2: {two: `${conversationId}.2:message-1`},
+      3: {three: `${conversationId}.3:message-1`},
+    },
+  });
+});
+
+it("storage.schema-marker: the home and each character's data directory carry a version 14 schema.json naming its scope, the character's its id and package version too; one of an older or unknown version, malformed or unreadable as a file, is refused and left as it was", async () => {
+  const home = createHome();
+  const first = await startDaemon(home, fixedReplies);
+
+  await wireOf(first).start('mira');
+  first.signal('SIGINT');
+  await first.exit();
+
+  const homeMarker = join(home, 'schema.json');
+  const miraMarker = join(home, 'character-data', 'mira', 'schema.json');
+  const readMarker = (path: string): unknown =>
+    JSON.parse(readFileSync(path, 'utf8'));
+  const markers = {home: readMarker(homeMarker), mira: readMarker(miraMarker)};
+
+  expect(markers).toEqual({
+    home: {
+      schemaVersion: 14,
+      scope: 'home',
+      createdAt: expect.any(String) as string,
+    },
+    mira: {
+      schemaVersion: 14,
+      scope: 'character-data',
+      characterId: 'mira',
+      materializedCharacterPackageVersion: '1.1.0',
+      createdAt: expect.any(String) as string,
+    },
+  });
+
+  // What the refusal says of each damage, and the bytes put in the marker's
+  // place: none for a directory.
+  const damages = (marker: unknown): [string, string | undefined][] => [
+    [
+      'schema version 13',
+      JSON.stringify({...(marker as object), schemaVersion: 13}),
+    ],
+    [
+      'schema version 99',
+      JSON.stringify({...(marker as object), schemaVersion: 99}),
+    ],
+    ['not valid JSON', '{"schemaVersion":'],
+    ['must be a regular file', undefined],
+  ];
+  const plant = (path: string, bytes: string | undefined): void => {
+    rmSync(path, {recursive: true});
+
+    if (bytes === undefined) {
+      mkdirSync(path);
+    } else {
+      writeFileSync(path, bytes);
+    }
+  };
+
+  for (const [says, bytes] of damages(markers.mira)) {
+    plant(miraMarker, bytes);
+
+    const daemon = await startDaemon(home, fixedReplies);
+
+    expect(await wireOf(daemon).start('mira'), says).toMatchObject({
+      character: {
+        state: 'failed',
+        diagnostic: expect.stringContaining(says) as string,
+      },
+    });
+    daemon.signal('SIGINT');
+    await daemon.exit();
+    expect(contentsOf(miraMarker), says).toEqual(bytes ?? []);
+  }
+
+  plant(miraMarker, JSON.stringify(markers.mira));
+
+  for (const [says, bytes] of damages(markers.home)) {
+    plant(homeMarker, bytes);
+
+    const refused = serve(['--store', home], fixedReplies);
+
+    expect(await refused.exit(), says).toBe(1);
+    expect(refused.stderr(), says).toContain(says);
+    expect(contentsOf(homeMarker), says).toEqual(bytes ?? []);
+  }
+});
+
+it('storage.data-marker-mismatch: a data directory copied from another character is refused for every read and write, naming the character it holds history for, and its files stay as they were', async () => {
+  const home = createHome({
+    characters: {
+      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+    },
+  });
+  const first = await startDaemon(home, fixedReplies);
+  const firstWire = wireOf(first);
+
+  for (const characterId of ['mira', 'zeta']) {
+    const say = await converse(firstWire, characterId);
+
+    await say('Hello.', characterId);
+  }
+
+  const {conversationId} = await conversationOf(firstWire, 'zeta');
+
+  first.signal('SIGINT');
+  await first.exit();
+
+  const zetaData = join(home, 'character-data', 'zeta');
+
+  rmSync(zetaData, {recursive: true});
+  cpSync(join(home, 'character-data', 'mira'), zetaData, {recursive: true});
+
+  const copied = snapshot(zetaData);
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+  const holdsMira = expect.stringContaining(
+    'holds history for character "mira"',
+  ) as string;
+
+  expect(await wire.start('zeta')).toMatchObject({
+    character: {state: 'failed', diagnostic: holdsMira},
+  });
+  await expect(wire.open('zeta')).resolves.toMatchObject({
+    status: 'refused',
+    message: holdsMira,
+  });
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    status: 'failed',
+    message: holdsMira,
+  });
+  expect(snapshot(zetaData)).toEqual(copied);
+});
+
+it("storage.marker-less-history: a character data directory holding history or a foreign file but no marker is never adopted: the character fails, and nothing is written, not even the home's schema.json", async () => {
+  for (const [name, bytes] of [
+    ['sessions.jsonl', ''],
+    ['notes.txt', 'Mine.'],
+  ] as const) {
+    const home = createHome({
+      'character-data': {mira: {[name]: bytes}},
+    });
+    const daemon = await startDaemon(home, fixedReplies);
+
+    expect(await wireOf(daemon).start('mira'), name).toMatchObject({
+      character: {
+        state: 'failed',
+        diagnostic: expect.stringContaining(
+          `holds "${name}" without a data marker`,
+        ) as string,
+      },
+    });
+    daemon.signal('SIGINT');
+    await daemon.exit();
+    expect(readdirSync(join(home, 'character-data', 'mira')), name).toEqual([
+      name,
+    ]);
+    expect(readdirSync(home), name).not.toContain('schema.json');
+  }
+});
+
+it('storage.no-secrets-in-logs: a credential under a credential-shaped key the model provider sends back is redacted in the session log, which never holds its value', async () => {
+  const credential = 'provider-echoed-credential';
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const wire = wireOf(await startDaemon(home));
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  model.answer({
+    chunks: [
+      ...content('Hello.'),
+      finish('stop'),
+      {
+        choices: [],
+        usage: {
+          prompt_tokens: 1,
+          completion_tokens: 1,
+          total_tokens: 2,
+          api_key: credential,
+          nested: {access_token: credential, kept: 'as is'},
+        },
+      },
+    ],
+  });
+  await say('Hello?', 'hello');
+
+  const records = sessionLog(home, 'mira', `${conversationId}.1`);
+
+  expect(JSON.stringify(records)).not.toContain(credential);
+  expect(
+    records.find(record => record['kind'] === 'role_model_round'),
+  ).toMatchObject({
+    roleModelIOSnapshot: {
+      providerExchange: {
+        usage: {
+          api_key: '[redacted]',
+          nested: {access_token: '[redacted]', kept: 'as is'},
+        },
+      },
+    },
+  });
+});
+
+it("storage.temp-residue-cleanup: the temp files writers that are gone left behind, beside a segment's raw events, config.json or a plugin's state, are removed by the next write there, while a live writer's temps and unrelated files are kept", async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const first = await startDaemon(home);
+  const firstWire = wireOf(first);
+  const sayFirst = await converse(firstWire, 'mira');
+  const {conversationId} = await conversationOf(firstWire, 'mira');
+
+  model.answer(
+    calling('character_state_patch', {mood: 'curious'}),
+    reply('Curious.'),
+  );
+  await sayFirst('How are you?', 'one');
+  first.signal('SIGINT');
+  await first.exit();
+
+  const segment = join(
+    home,
+    'character-data',
+    'mira',
+    'sessions',
+    `${conversationId}.1`,
+  );
+  const state = join(
+    home,
+    'character-data',
+    'mira',
+    'plugin-data',
+    'character-state',
+  );
+  const temp = (directory: string, name: string, pid: number) =>
+    join(directory, `${name}.${String(pid)}.${randomUUID()}.tmp`);
+  const abandoned = [
+    temp(segment, '.raw-events.jsonl', deadPid),
+    temp(home, '.config.json', deadPid),
+    temp(state, '.checkpoint.json', deadPid),
+  ];
+  // The suite's own process is alive: a temp named for it is in flight.
+  const kept = [
+    temp(segment, '.raw-events.jsonl', process.pid),
+    temp(home, '.config.json', process.pid),
+    temp(state, '.checkpoint.json', process.pid),
+    temp(home, '.unrelated', deadPid),
+    temp(state, 'notes', deadPid),
+  ];
+
+  for (const path of [...abandoned, ...kept]) {
+    writeFileSync(path, 'residue');
+  }
+
+  const wire = wireOf(await startDaemon(home));
+  const say = await converse(wire, 'mira');
+
+  model.answer(
+    calling('character_state_patch', {mood: 'playful'}),
+    reply('Playful.'),
+  );
+  await say('And now?', 'two');
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'},
+  );
+  expect(abandoned.filter(path => existsSync(path))).toEqual([]);
+  expect(kept.filter(path => !existsSync(path))).toEqual([]);
+});
+
+it('storage.stale-lock-reclaim: a lease a killed daemon left is taken over by the next run, and one whose owner record a crash left malformed is taken over only once it is older than the grace period', async () => {
+  const home = createHome();
+  const killed = await startDaemon(home, fixedReplies);
+  const killedWire = wireOf(killed);
+  const sayKilled = await converse(killedWire, 'mira');
+  const {conversationId} = await conversationOf(killedWire, 'mira');
+  const locks = join(home, 'character-data', 'mira', '.locks');
+  const writer = `session-writer:${conversationId}.1`;
+
+  await sayKilled('Hello.', 'hello');
+  killed.signal('SIGKILL');
+  await killed.exit();
+  expect(leases(locks)).toEqual([writer]);
+
+  const next = await startDaemon(home, fixedReplies);
+  const nextWire = wireOf(next);
+  const say = await converse(nextWire, 'mira');
+
+  expect(await say('Still there?', 'still')).toMatchObject({
+    status: 'completed',
+  });
+  expect(
+    readdirSync(locks).map(
+      lock =>
+        (
+          JSON.parse(readFileSync(join(locks, lock, 'owner.json'), 'utf8')) as {
+            readonly pid: number;
+          }
+        ).pid,
+    ),
+  ).toEqual([next.pid]);
+  next.signal('SIGINT');
+  await next.exit();
+
+  const malformed = join(
+    locks,
+    `${createHash('sha256').update(writer).digest('hex')}.lock`,
+  );
+
+  mkdirSync(malformed);
+  writeFileSync(join(malformed, 'owner.json'), '{"version":1,');
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  await wire.start('mira');
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'failed',
+    code: 'session_busy',
+  });
+
+  // A minute old: past the thirty seconds a crash's lease is given.
+  const minuteAgo = new Date(Date.now() - 60_000);
+
+  utimesSync(malformed, minuteAgo, minuteAgo);
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'opened',
+    conversationId,
+  });
+});
+
+it('storage.sqlite-views: a SQLite view another program holds locked is reported and kept as it is, and one that is no database is rebuilt', async () => {
+  const model = await startModelServer();
+  const stopped = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const first = await startDaemon(stopped);
+
+  const say = await converse(wireOf(first), 'mira');
+
+  model.answer(reply('Tea, always.'));
+  await say('Tea or coffee?', 'tea');
+  first.signal('SIGINT');
+  await first.exit();
+
+  /** A copy of the stopped home, its session index the one the test puts there. */
+  const withIndex = (bytes: string): {home: string; index: string} => {
+    const home = createHome();
+    const index = join(
+      home,
+      'character-data',
+      'mira',
+      'plugin-data',
+      'session-history',
+      'session-index.sqlite',
+    );
+
+    cpSync(stopped, home, {recursive: true});
+    writeFileSync(index, bytes);
+
+    return {home, index};
+  };
+  const searched = async (home: string): Promise<unknown> => {
+    const daemon = await startDaemon(home);
+    const say = await converse(wireOf(daemon), 'mira');
+
+    model.answer(calling('sessions_search', {query: 'tea'}), reply('Found.'));
+    expect(await say('Did we talk about tea?', 'search')).toMatchObject({
+      status: 'completed',
+    });
+    daemon.signal('SIGINT');
+    await daemon.exit();
+
+    return toolResults(model.requests.at(-1)).at(-1);
+  };
+  const locked = withIndex('');
+  // Another program's database in its place, which it holds locked.
+  const holder = new DatabaseSync(locked.index);
+
+  onTestFinished(() => {
+    holder.close();
+  });
+  holder.exec(
+    'CREATE TABLE keepsake (id INTEGER PRIMARY KEY); INSERT INTO keepsake (id) VALUES (7); BEGIN EXCLUSIVE',
+  );
+  expect(await searched(locked.home)).toMatchObject({
+    status: 'rejected',
+    reason: 'session_history_read_failed',
+  });
+  holder.exec('ROLLBACK');
+  expect(holder.prepare('SELECT id FROM keepsake').all()).toEqual([{id: 7}]);
+
+  const corrupt = withIndex('This is no database.');
+
+  expect(await searched(corrupt.home)).toMatchObject({status: 'accepted'});
+  expect(readFileSync(corrupt.index).subarray(0, 16).toString('latin1')).toBe(
+    'SQLite format 3\0',
+  );
+});
