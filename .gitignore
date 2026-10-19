@@ -19,6 +19,7 @@ node_modules/
 .project02-runtime/
 dist/
 build/
+/target/
 artifacts/
 coverage/
 .coverage
