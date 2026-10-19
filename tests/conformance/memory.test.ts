@@ -475,6 +475,8 @@ it("memory.session-history-index: the index holds the lines that committed, a re
   writeFileSync(index, 'not a database');
   await searchAgain('corrupt');
   expect(krakenFound()).toBe(2);
+  // Rebuilt, not worked around: a database again, at the version it was built at.
+  expect(version()).toEqual(built);
 });
 
 it('memory.session-history-search: sessions.search finds lines of earlier sessions and lines out of the window but never what the model sees or its own interim reply; it routes CJK, short, non-ASCII case-folded and literal queries, keeps one best hit per session, the newest of equals, and centers a 160-character snippet on the match beside text bounded to 200', async () => {

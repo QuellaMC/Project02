@@ -94,6 +94,17 @@ it("config.view-global: the home's view lists the host fields in page order, eac
     ),
   );
   const view = await viewOf(wire, {scope: 'global'});
+  /** A host field with its metadata, whatever its values. */
+  const shaped = (name: string) => ({
+    name,
+    authored: expect.objectContaining({
+      configured: expect.any(Boolean) as boolean,
+    }) as unknown,
+    effectiveSource: expect.any(String) as string,
+    effective: expect.objectContaining({
+      source: expect.any(String) as string,
+    }) as unknown,
+  });
 
   expect(view).toMatchObject({
     status: 'ok',
@@ -112,18 +123,18 @@ it("config.view-global: the home's view lists the host fields in page order, eac
         effectiveSource: 'global',
         effective: {source: 'config', value: 'Robin'},
       },
-      {name: 'roleModelProvider'},
-      {name: 'nvidiaApiKey'},
-      {name: 'nvidiaModel'},
-      {name: 'nvidiaBaseUrl'},
+      shaped('roleModelProvider'),
+      shaped('nvidiaApiKey'),
+      shaped('nvidiaModel'),
+      shaped('nvidiaBaseUrl'),
       {
         name: 'contextWindowTokens',
         authored: {configured: false},
         effectiveSource: 'default',
         effective: {source: 'default', value: 32768},
       },
-      {name: 'defaultMemoryProvider'},
-      {name: 'enabled'},
+      shaped('defaultMemoryProvider'),
+      shaped('enabled'),
     ],
   });
   expect(
