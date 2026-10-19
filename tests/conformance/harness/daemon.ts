@@ -168,12 +168,12 @@ export async function startDaemon(
 
 function addressOf(line: string): Address {
   const url = line.slice(addressPrefix.length);
-  const parsed = new URL(url);
 
   return {
     url,
-    origin: parsed.origin,
-    token: parsed.hash.slice('#token='.length),
+    origin: new URL(url).origin,
+    // From the line itself: a parsed fragment comes back percent-encoded.
+    token: /#token=(.*)$/u.exec(url)?.[1] ?? '',
   };
 }
 

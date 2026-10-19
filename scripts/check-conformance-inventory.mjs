@@ -152,14 +152,18 @@ function isFunction(node) {
   );
 }
 
-/** Whether the body takes its context, through which it could skip itself under any name. */
-function takesContext(call) {
+/** Whether the body takes its context, through which it could skip itself under any name: a table hands its case first, and `.each` hands nothing else. */
+function takesContext(call, modifiers) {
   const body = call.arguments.find(
     argument =>
       ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
   );
 
-  return body !== undefined && body.parameters.length > 0;
+  if (body === undefined || modifiers.includes('each')) {
+    return false;
+  }
+
+  return body.parameters.length > (modifiers.includes('for') ? 1 : 0);
 }
 
 /** Whether the test has no body to run: Vitest takes such a test as todo. */
@@ -321,7 +325,7 @@ function scan(file, source) {
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
             parkedByOptions(optionsOf(node)) ||
             bodiless(node) ||
-            takesContext(node) ||
+            takesContext(node, modifiers) ||
             runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
