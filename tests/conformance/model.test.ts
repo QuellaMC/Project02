@@ -10,6 +10,7 @@ import {
   startModelServer,
   visibleReply,
 } from './harness/model-server.ts';
+import {within} from './harness/wait.ts';
 import {converse, wireOf} from './harness/wire.ts';
 
 it('model.provider-request-body: a round asks the model for a streamed completion with usage, automatic and parallel tool calls, and thinking on', async () => {
@@ -77,9 +78,14 @@ it('model.reply-drafts: a visible_reply is drafted as its arguments stream, esca
   streaming.write(call.slice(2, 5));
 
   // Everything but the possible tag, which waits for the call to close.
-  while (drafted().join('') !== 'Say "hi"\nthen ') {
-    await events.next(delta);
-  }
+  await within(
+    'the drafts to spell the reply so far',
+    (async () => {
+      while (drafted().join('') !== 'Say "hi"\nthen ') {
+        await events.next(delta);
+      }
+    })(),
+  );
 
   streaming.write([...call.slice(5), finish('tool_calls')]);
   streaming.end();

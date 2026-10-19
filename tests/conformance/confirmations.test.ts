@@ -278,7 +278,7 @@ it("confirmations.approval-window: an approval that comes after the tool's five-
 });
 
 it('confirmations.cancelled-stopped: switching a character off or stopping the daemon cancels every parked confirmation as stopped, one raised while she shuts down is cancelled unannounced, and once she is back on they park again', async () => {
-  const {model, daemon, wire, say} = await demoConfigHome(
+  const {model, daemon, wire, say, home} = await demoConfigHome(
     {},
     {
       characters: {
@@ -365,4 +365,23 @@ it('confirmations.cancelled-stopped: switching a character off or stopping the d
   expect(await formal).toMatchObject({status: 'completed'});
   await events.ended();
   expect(await daemon.exit()).toBe(0);
+
+  // Park again after a restart: on the same home, a new confirmation is
+  // announced and answered.
+  const restarted = await startDaemon(home);
+  const wireAgain = wireOf(restarted);
+  const sayAgain = await converse(wireAgain, 'mira');
+  const later = await openEvents(restarted);
+
+  model.answer(await asksForTone(wireAgain, 'playful'), reply('Gladly.'));
+
+  const playful = sayAgain('Be playful.', 'playful');
+  const parkedAgain = parkedIn(
+    await later.next(frameOf('confirmation_requested')),
+  );
+
+  expect(await wireAgain.answer(parkedAgain.id, 'approved')).toEqual({
+    status: 'answered',
+  });
+  expect(await playful).toMatchObject({status: 'completed'});
 });
