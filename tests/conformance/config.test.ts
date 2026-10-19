@@ -1178,7 +1178,7 @@ it('config.secret-values: a secret is kept as it was typed and handed to its con
     ).toMatchObject({status: 'refused', reason: 'invalid'});
   }
 
-  for (const value of ['', 42]) {
+  for (const value of ['', '   ', 42]) {
     writeFileSync(
       join(home, 'config.json'),
       configJson({

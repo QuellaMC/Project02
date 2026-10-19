@@ -378,6 +378,24 @@ it('memory.mem0-recall: before a turn, what mem0 recalls rides the line in the r
     `- ${'x'.repeat(597)}...`,
   ]);
   expect([empty, failing]).toEqual(['Anything else?', 'And now?']);
+  // The recall before each turn, as its record marks it: the failing backend degrades the turn, an empty recall does not.
+  expect(
+    sessionRecords(home, 'mira', 'runtime_turn_completed').map(record =>
+      (
+        record['runtimePluginEvidence'] as readonly {
+          readonly pluginId: string;
+          readonly evidenceKind: string;
+          readonly status: string;
+        }[]
+      )
+        .filter(
+          entry =>
+            entry.pluginId === 'mem0' &&
+            entry.evidenceKind === 'before_role_model_call',
+        )
+        .map(entry => entry.status),
+    ),
+  ).toEqual([['accepted'], ['accepted'], ['degraded']]);
 
   // Each recalled item is recorded with the memory it came from.
   const [recalledRound] = sessionRecords(home, 'mira', 'role_model_round');

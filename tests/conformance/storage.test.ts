@@ -658,12 +658,23 @@ it('storage.stale-lock-reclaim: a lease a killed daemon left is taken over by th
   writeFileSync(join(malformed, 'owner.json'), '{"version":1,');
 
   const wire = wireOf(await startDaemon(home, fixedReplies));
+  const data = join(home, 'character-data', 'mira');
+  /** What a refused open must leave as it was. */
+  const durable = () => ({
+    sessions: snapshot(join(data, 'sessions')),
+    catalog: readFileSync(join(data, 'sessions.jsonl'), 'utf8'),
+    conversations: snapshot(join(home, 'conversations')),
+  });
 
   await wire.start('mira');
+
+  const before = durable();
+
   await expect(wire.open('mira')).resolves.toMatchObject({
     status: 'failed',
     code: 'session_busy',
   });
+  expect(durable()).toEqual(before);
 
   // A minute old: past the thirty seconds a crash's lease is given.
   const minuteAgo = new Date(Date.now() - 60_000);
@@ -734,7 +745,17 @@ it('storage.sqlite-views: a SQLite view another program holds locked is reported
     reason: 'session_history_read_failed',
   });
   holder.exec('ROLLBACK');
-  expect(holder.prepare('SELECT id FROM keepsake').all()).toEqual([{id: 7}]);
+
+  // Through the path, not the handle: the file there is still the holder's.
+  const stillThere = new DatabaseSync(locked.index);
+
+  try {
+    expect(stillThere.prepare('SELECT id FROM keepsake').all()).toEqual([
+      {id: 7},
+    ]);
+  } finally {
+    stillThere.close();
+  }
 
   const corrupt = withIndex('This is no database.');
 
