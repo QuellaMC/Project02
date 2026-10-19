@@ -98,6 +98,7 @@ describe('the conformance inventory check', () => {
         '  ${1}',
         "`('a tagged block parks them too', () => {});",
         "it.each([])('turns.g: an empty table runs no case', () => {});",
+        "it('turns.g: parked by its options', {skip: true}, () => {});",
         'it.each`',
         '  a',
         "`('turns.h: a header alone runs no case', () => {});",
