@@ -1,6 +1,5 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {
-  chmodSync,
   readdirSync,
   readFileSync,
   statSync,
@@ -19,7 +18,7 @@ import {
   type Events,
   type Frame,
 } from './harness/events.ts';
-import {characterJson, configJson, createHome} from './harness/home.ts';
+import {chmod, characterJson, configJson, createHome} from './harness/home.ts';
 import {
   finish,
   reply,
@@ -198,7 +197,12 @@ it("lifecycle.port-default-and-fallback: when another program holds the home's p
   });
   moved.signal('SIGINT');
   await moved.exit();
-  expect((await startDaemon(home)).url).toBe(moved.url);
+  const again = await startDaemon(home);
+
+  expect(again.url).toBe(moved.url);
+  await expect(wireOf(again).health()).resolves.toMatchObject({
+    homeRoot: home,
+  });
 });
 
 it('lifecycle.stop-signals: SIGINT, SIGTERM and SIGHUP each stop it cleanly, with exit 0, nothing on stderr and no running process in the record', async () => {
@@ -312,12 +316,13 @@ it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that doe
 
   holder.signal('SIGSTOP');
 
-  const silent = `Another daemon holds this home but did not answer at ${holder.origin}/ within 5 seconds`;
-  const patient = serve(['--store', home]);
+  const silent = `Another daemon holds this home but did not answer at ${holder.origin}/ within 0.5 seconds`;
+  const quick = {PROJECT02_TEST_DURATIONS: 'probe=500'};
+  const patient = serve(['--store', home], quick);
   const impatient = serve(['--store', home], {
-    PROJECT02_TEST_DURATIONS: 'hold=1',
+    PROJECT02_TEST_DURATIONS: 'hold=1,probe=500',
   });
-  const stopped = serve(['--store', home]);
+  const stopped = serve(['--store', home], quick);
 
   expect(await impatient.exit()).toBe(1);
   expect(impatient.stdout()).toBe('');
@@ -376,9 +381,9 @@ it('lifecycle.unwritable-record: when the home refuses daemon.json, serve exits 
   // Its lock directory is there to take the lease: the record is the first write refused.
   const home = createHome({'.locks': {}});
 
-  chmodSync(home, 0o500);
+  chmod(home, 0o500);
   onTestFinished(() => {
-    chmodSync(home, 0o755);
+    chmod(home, 0o755);
   });
 
   const refused = serve(['--store', home]);
@@ -390,7 +395,7 @@ it('lifecycle.unwritable-record: when the home refuses daemon.json, serve exits 
   expect(refused.stdout()).toBe('');
   expect(readdirSync(home)).toEqual(['.locks']);
   expect(readdirSync(join(home, '.locks'))).toEqual([]);
-  chmodSync(home, 0o755);
+  chmod(home, 0o755);
   await startDaemon(home);
 });
 
@@ -886,8 +891,12 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
 
   daemon.signal('SIGINT');
   expect(await daemon.exit()).toBe(0);
+
+  const took = performance.now() - stopped;
+
   // Timers fire up to a few milliseconds early.
-  expect(performance.now() - stopped).toBeGreaterThanOrEqual(1_900);
+  expect(took).toBeGreaterThanOrEqual(1_900);
+  expect(took).toBeLessThan(6_000);
   reader.resume();
   await reader.closed();
 
@@ -930,5 +939,10 @@ it('lifecycle.second-signal-exits: a second stop signal during a stop ends the p
   await daemon.exit();
   await expect(turn).rejects.toThrow();
   expect(record(home)).toMatchObject({running: {pid: daemon.pid}});
-  expect((await startDaemon(home)).url).toBe(daemon.url);
+  const again = await startDaemon(home);
+
+  expect(again.url).toBe(daemon.url);
+  await expect(wireOf(again).health()).resolves.toMatchObject({
+    homeRoot: home,
+  });
 });

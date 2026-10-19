@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -39,6 +40,20 @@ function plant(directory: string, tree: Tree): void {
       plant(join(directory, name), entry);
     }
   }
+}
+
+/**
+ * The path's permissions, for a test that provokes a permission failure.
+ * Permissions do not bind root, so such a test cannot run as root.
+ */
+export function chmod(path: string, mode: number): void {
+  if (process.getuid?.() === 0) {
+    throw new Error(
+      'Permissions do not bind root: run the suite as another user.',
+    );
+  }
+
+  chmodSync(path, mode);
 }
 
 /** A home's `config.json` holding these settings. */

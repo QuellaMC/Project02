@@ -201,6 +201,11 @@ it('stream.tail-bound: a Last-Event-ID more than the 1 MiB tail behind, past the
   }
 });
 
+/** The ids of a raw stream's frames, in order. */
+function idsOf(stream: string): string[] {
+  return [...stream.matchAll(/^id: (.*)$/gmu)].map(match => match[1] ?? '');
+}
+
 it('stream.shutdown-ends-streams: a stop ends each stream only once every frame queued for it is written, a client lagging within the grace included, and a stream asked for meanwhile is refused at once', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
@@ -231,7 +236,11 @@ it('stream.shutdown-ends-streams: a stop ends each stream only once every frame 
   expect(late.status).toBe(503);
   lagging.resume();
   await lagging.ended();
-  expect(lagging.body()).toContain(`id: ${String(keepingUp.lastEventId())}\n`);
+  expect(idsOf(lagging.body())).toEqual(
+    keepingUp.frames.flatMap(frame =>
+      frame.id === undefined ? [] : [frame.id],
+    ),
+  );
   expect(await daemon.exit()).toBe(0);
 });
 
