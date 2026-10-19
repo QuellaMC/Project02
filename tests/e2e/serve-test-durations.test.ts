@@ -43,7 +43,7 @@ describe('serve, with the test durations set', () => {
 
     expect(serve.status).toBe(1);
     expect(serve.stderr).toBe(
-      'Error: PROJECT02_TEST_DURATIONS: unknown key "edit"; the keys here are confirmation, pairing, silence, heartbeat, grace, hold.\n',
+      'Error: PROJECT02_TEST_DURATIONS: unknown key "edit"; the keys here are confirmation, pairing, silence, heartbeat, grace, hold, probe.\n',
     );
     expect(readdirSync(homeRoot)).toEqual([]);
   });

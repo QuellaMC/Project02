@@ -45,7 +45,7 @@ import {
 import {CliUsageError} from '../shared/usage-error.ts';
 
 /** How long one question to the daemon that holds the home may take. */
-const probeMs = 5_000;
+const defaultProbeMs = 5_000;
 /** How long a second serve keeps asking a holder that does not answer, and trying its lease. */
 const defaultHoldWaitMs = 30_000;
 /** Between two tries. */
@@ -65,6 +65,8 @@ export type ServeCliOptions = {
   readonly roleModelAdapter?: RoleModelAdapter;
   /** How long a second run waits for a holder that does not answer; tests shorten it. */
   readonly holdWaitMs?: number | undefined;
+  /** How long one question to that holder waits for its answer; tests shorten it. */
+  readonly probeMs?: number | undefined;
   /** The gateway's waits and its socket's, handed through: each owner keeps its default when absent. */
   readonly toolConfirmationTimeoutMs?: number | undefined;
   readonly pairingTtlMs?: number | undefined;
@@ -253,7 +255,12 @@ async function handOver(
   let waiting = false;
 
   for (;;) {
-    const answer = await askHolder(homeRoot, held.record, options.signal);
+    const answer = await askHolder(
+      homeRoot,
+      held.record,
+      options.signal,
+      options.probeMs ?? defaultProbeMs,
+    );
 
     if (answer.status === 'running') {
       options.stdout.write(`Already running on this home${answer.pid}.\n`);
@@ -305,6 +312,7 @@ async function askHolder(
   homeRoot: string,
   record: DaemonRecord | undefined,
   signal: AbortSignal,
+  probeMs: number,
 ): Promise<
   | {readonly status: 'running'; readonly address: string; readonly pid: string}
   | {readonly status: 'silent'; readonly why: string}
@@ -457,6 +465,7 @@ if (isMainModule(import.meta.url)) {
     'heartbeat',
     'grace',
     'hold',
+    'probe',
   ]);
   const testProvider = process.env[testProviderEnvVarName];
 
@@ -487,6 +496,7 @@ if (isMainModule(import.meta.url)) {
       heartbeatMs: durations.get('heartbeat'),
       graceMs: durations.get('grace'),
       holdWaitMs: durations.get('hold'),
+      probeMs: durations.get('probe'),
     });
   }
 }

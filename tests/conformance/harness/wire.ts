@@ -111,16 +111,9 @@ export async function converse(
   wire: Wire,
   characterId: string,
 ): Promise<(text: string, clientMessageId: string) => Promise<unknown>> {
-  const started = await wire.start(characterId);
-  const opened = await wire.open(characterId);
+  await wire.start(characterId);
 
-  if (opened.status !== 'opened') {
-    throw failure(
-      `${characterId} has no conversation: the start answered ${JSON.stringify(
-        started,
-      )}, the open ${JSON.stringify(opened)}.`,
-    );
-  }
+  const opened = await conversationOf(wire, characterId);
 
   return (text, clientMessageId) =>
     wire.turn({
@@ -130,4 +123,49 @@ export async function converse(
       source: 'web',
       clientMessageId,
     });
+}
+
+/** The direct conversation of a running character, as an open answers it. */
+export async function conversationOf(
+  wire: Wire,
+  characterId: string,
+): Promise<{
+  readonly conversationId: string;
+  readonly userParticipantId: string;
+}> {
+  const opened = await wire.open(characterId);
+
+  if (opened.status !== 'opened') {
+    throw failure(
+      `${characterId} has no conversation: the open answered ${JSON.stringify(opened)}.`,
+    );
+  }
+
+  return opened;
+}
+
+/**
+ * One change saved as a settings page saves it: against the fingerprint
+ * the target's view hands out now. A change not applied is a failure that
+ * names the outcome.
+ */
+export async function saveConfig(
+  wire: Wire,
+  target: Parameters<Wire['configView']>[0],
+  operation: object,
+): Promise<void> {
+  const view = (await wire.configView(target)) as {
+    readonly fingerprint?: string;
+  };
+  const outcome = await wire.configChange({
+    target,
+    expectedFingerprint: view.fingerprint,
+    operation,
+  });
+
+  if ((outcome as {readonly status?: string}).status !== 'applied') {
+    throw failure(
+      `The change ${JSON.stringify(operation)} answered ${JSON.stringify(outcome)}.`,
+    );
+  }
 }

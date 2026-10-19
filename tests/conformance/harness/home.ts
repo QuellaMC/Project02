@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -41,7 +42,39 @@ function plant(directory: string, tree: Tree): void {
   }
 }
 
+/**
+ * The path's permissions, for a test that provokes a permission failure.
+ * Permissions do not bind root, so such a test cannot run as root.
+ */
+export function chmod(path: string, mode: number): void {
+  if (process.getuid?.() === 0) {
+    throw new Error(
+      'Permissions do not bind root: run the suite as another user.',
+    );
+  }
+
+  chmodSync(path, mode);
+}
+
 /** A home's `config.json` holding these settings. */
 export function configJson(document: object): string {
   return JSON.stringify({version: 'project02.config.v2', ...document});
+}
+
+/**
+ * A character package's descriptor for this identity, with a one-line
+ * persona at version 1.0.0; the parts given replace those whole.
+ */
+export function characterJson(
+  id: string,
+  displayName: string,
+  descriptor: object = {},
+): string {
+  return JSON.stringify({
+    format: 'project02.character.v1',
+    identity: {id, displayName},
+    persona: {system: [`You are ${displayName}.`]},
+    meta: {version: '1.0.0'},
+    ...descriptor,
+  });
 }
