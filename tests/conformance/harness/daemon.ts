@@ -13,6 +13,10 @@ const inspectCommand = commandOf(
   'PROJECT02_INSPECT_CMD',
   'node src/cli/inspect/main.ts',
 );
+const connectorCommand = commandOf(
+  'PROJECT02_CONNECTOR_CMD',
+  'node src/frontends/telegram/main.ts',
+);
 /** serve on a pseudo-terminal, through python3's pty module. */
 const terminalCommand = [
   'python3',
@@ -141,6 +145,14 @@ export function inspect(
   env: Readonly<Record<string, string>> = {},
 ): Run {
   return start('inspect', [...inspectCommand, ...args], env).run;
+}
+
+/** The Telegram connector with these arguments: a client of the daemon its home's record names. */
+export function connector(
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Run {
+  return start('the connector', [...connectorCommand, ...args], env).run;
 }
 
 /** `serve --init` on the home, once it printed its address. */

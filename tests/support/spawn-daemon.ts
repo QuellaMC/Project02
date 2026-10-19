@@ -1,19 +1,16 @@
 /**
- * A real process, for a suite that must cross the process boundary: the
- * daemon — for the concurrency suite proving one home's leases — or a
- * connector beside it. `entry` is a script that runs one and prints what
- * it prints.
+ * A real daemon, for a suite that must cross the process boundary: the
+ * concurrency suite proving one home's leases. `entry` is a script that
+ * runs one and prints what it prints.
  */
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 
 import {gatewayUrlEnvVarName} from '../../src/gateway/client/index.ts';
 
-export type SpawnedProcess = {
+export type SpawnedDaemon = {
   readonly child: ChildProcessWithoutNullStreams;
-  /** The line it printed that made it ready. */
-  readonly line: string;
-  /** Everything it had printed on stdout once ready. */
-  readonly stdout: string;
+  /** The address a client opens: the line the daemon printed, past its name. */
+  readonly url: string;
   /**
    * The exit code once the process ends on its own or on a signal the
    * test sent itself; null when a signal ended it. A process that is
@@ -28,42 +25,21 @@ export type SpawnedProcess = {
   }>;
 };
 
-export type SpawnedDaemon = SpawnedProcess & {
-  /** The address a client opens: the line the daemon printed, past its name. */
-  readonly url: string;
-};
-
 const addressPrefix = `${gatewayUrlEnvVarName}=`;
 
 /**
  * Ready once the daemon printed its address. Started with the test switch
- * on, so a real `serve` runs its characters on the test provider.
+ * on, so a real `serve` runs its characters on the test provider; `env`
+ * is laid over this process's.
  */
 export async function spawnDaemon(
   entry: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv = {},
 ): Promise<SpawnedDaemon> {
-  const daemon = await spawnProcess(
-    entry,
-    args,
-    line => line.startsWith(addressPrefix),
-    {PROJECT02_TEST_PROVIDER: 'deterministic', ...env},
-  );
-
-  return {...daemon, url: daemon.line.slice(addressPrefix.length)};
-}
-
-/** Ready once it printed a line on stdout that `ready` accepts; `env` is laid over this process's. */
-export async function spawnProcess(
-  entry: string,
-  args: readonly string[],
-  ready: (line: string) => boolean,
-  env: NodeJS.ProcessEnv = {},
-): Promise<SpawnedProcess> {
   const child = spawn(process.execPath, [entry, ...args], {
     cwd: process.cwd(),
-    env: {...process.env, ...env},
+    env: {...process.env, PROJECT02_TEST_PROVIDER: 'deterministic', ...env},
     stdio: 'pipe',
   });
   // Taken now, not at stop: a process that died on its own has already
@@ -78,10 +54,7 @@ export async function spawnProcess(
     stderr += chunk;
   });
 
-  const {line, stdout} = await new Promise<{
-    readonly line: string;
-    readonly stdout: string;
-  }>((resolveReady, rejectReady) => {
+  const line = await new Promise<string>((resolveReady, rejectReady) => {
     let stdout = '';
     // An idle deadline, not a total one: a suite cold-starts several real
     // Node processes, so any fixed budget goes flaky under load.
@@ -102,11 +75,14 @@ export async function spawnProcess(
       stdout += chunk;
 
       // The last piece is a line still being written.
-      const line = stdout.split('\n').slice(0, -1).find(ready);
+      const address = stdout
+        .split('\n')
+        .slice(0, -1)
+        .find(printed => printed.startsWith(addressPrefix));
 
-      if (line !== undefined) {
+      if (address !== undefined) {
         clearTimeout(timeout);
-        resolveReady({line, stdout});
+        resolveReady(address);
 
         return;
       }
@@ -129,8 +105,7 @@ export async function spawnProcess(
 
   return {
     child,
-    line,
-    stdout,
+    url: line.slice(addressPrefix.length),
     exited,
     stop: async () => {
       child.kill('SIGINT');
