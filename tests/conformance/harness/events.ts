@@ -55,10 +55,14 @@ export async function openEvents(
 
   const frames: Frame[] = [];
   let arrival = Promise.withResolvers<undefined>();
-  const parser = createFrameParser(frame => {
-    frames.push(frame);
+  let over = false;
+  const wake = (): void => {
     arrival.resolve(undefined);
     arrival = Promise.withResolvers();
+  };
+  const parser = createFrameParser(frame => {
+    frames.push(frame);
+    wake();
   });
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   const reading = (async () => {
@@ -75,9 +79,13 @@ export async function openEvents(
     }
   })();
   let taken = 0;
+  const end = (): void => {
+    over = true;
+    wake();
+  };
 
   // Awaited by `ended`; a stream nobody asks about may break off unheard.
-  reading.catch(() => undefined);
+  reading.then(end, end);
   attachEvidence(
     () =>
       `events from ${daemon.origin}:\n${frames.map(describeFrame).join('\n')}`,
@@ -100,6 +108,10 @@ export async function openEvents(
               taken = index + 1;
 
               return frame;
+            }
+
+            if (over) {
+              throw failure('The stream ended before the next matching frame.');
             }
 
             await arrival.promise;
