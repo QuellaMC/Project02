@@ -262,7 +262,7 @@ it('turns.message-ids: committed messages are numbered <sessionId>:message-N in 
   });
 });
 
-it('turns.client-message-id-join: a repeat of a submission while it runs joins it, a repeat after it gets its outcome again, only a new id runs a new turn, and the same id on another conversation is another turn', async () => {
+it('turns.client-message-id-join: a repeat of a submission, while it runs or after, gets its outcome without a second model request; only a new id runs a new turn, and the same id on another conversation is another turn', async () => {
   const model = await startModelServer();
   const wire = wireOf(
     await startDaemon(
@@ -282,8 +282,9 @@ it('turns.client-message-id-join: a repeat of a submission while it runs joins i
 
   const repeat = say('Hello?', 'hello');
 
-  // Sent before a request the daemon has since answered: the repeat is in
-  // while the turn runs.
+  // Nothing outside the daemon shows whether the repeat is in before the
+  // turn ends or after; either way it gets the outcome and the model is
+  // not asked again. The round trip makes the first the likelier.
   await wire.health();
   held.release(reply('Hello.'));
 
@@ -652,7 +653,7 @@ it('turns.fatal-turn-restart: a turn whose reply the store cannot append fails o
   ).toEqual(['failed', 'starting', 'ready']);
 });
 
-it('turns.recovery-after-fatal-turn: after a turn whose line could not be appended, failed and uncommitted on its answer and the stream, the character recovers by itself; the next turn needs no reopen, and an open right after joins the recovery', async () => {
+it('turns.recovery-after-fatal-turn: after a turn whose line could not be appended, failed and uncommitted on its answer and the stream, the character recovers by itself; the next turn needs no reopen, and an open sent right after succeeds with the same id', async () => {
   const home = createHome();
   const daemon = await startDaemon(home, fixedReplies);
   const wire = wireOf(daemon);

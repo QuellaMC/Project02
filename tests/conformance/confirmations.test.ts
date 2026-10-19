@@ -263,11 +263,13 @@ it("confirmations.approval-window: an approval that comes after the tool's five-
 
   const turn = say('Talk like a pirate.', 'pirate');
   const {id} = parkedIn(await events.next(frameOf('confirmation_requested')));
+  const asked = performance.now();
   // A stream opened after the request pings six seconds on: the clock that
   // puts the approval past the tool's execution timeout.
   const clock = await openEvents(daemon);
 
   await clock.next(frame => frame.comment === 'ping');
+  expect(performance.now() - asked).toBeGreaterThanOrEqual(5_000);
   expect(await wire.answer(id, 'approved')).toEqual({status: 'answered'});
   expect(await turn).toMatchObject({status: 'completed'});
   expect(JSON.parse(miraOverlay(home))).toMatchObject({
