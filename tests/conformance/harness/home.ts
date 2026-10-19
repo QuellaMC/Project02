@@ -1,0 +1,47 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+import {onTestFinished} from 'vitest';
+
+/** A file's text, or a directory of more. */
+type Tree = {readonly [name: string]: string | Tree};
+
+/**
+ * A home of the test's own, removed after it: empty for `serve --init` to
+ * create, or seeded with the files the test names. Canonical, since a
+ * daemon reports its home by its real path and macOS links the temp dir.
+ */
+export function createHome(seed: Tree = {}): string {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'project02-home-')));
+
+  onTestFinished(() => {
+    rmSync(home, {recursive: true, force: true});
+  });
+  plant(home, seed);
+
+  return home;
+}
+
+function plant(directory: string, tree: Tree): void {
+  mkdirSync(directory, {recursive: true});
+
+  for (const [name, entry] of Object.entries(tree)) {
+    if (typeof entry === 'string') {
+      writeFileSync(join(directory, name), entry);
+    } else {
+      plant(join(directory, name), entry);
+    }
+  }
+}
+
+/** A home's `config.json` holding these settings. */
+export function configJson(document: object): string {
+  return JSON.stringify({version: 'project02.config.v2', ...document});
+}
