@@ -1,6 +1,5 @@
-import {onTestFinished} from 'vitest';
-
 import type {Address} from './daemon.ts';
+import {onTestFinished} from './runner.ts';
 import {attachEvidence, failure, within} from './wait.ts';
 
 /** One server-sent event as it came: data lines joined by LF, a comment line's text. */

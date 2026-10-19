@@ -4,7 +4,7 @@
  * fails shows what each process, stream and server the test started had
  * produced by then.
  */
-import {onTestFinished} from 'vitest';
+import {onTestFinished} from './runner.ts';
 
 export const ceilingMs = 10_000;
 

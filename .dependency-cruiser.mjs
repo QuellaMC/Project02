@@ -260,6 +260,27 @@ export default {
         dependencyTypesNot: ['core'],
       },
     },
+    {
+      name: 'browser-is-black-box',
+      comment:
+        'tests/browser drives the built page against a daemon it meets only ' +
+        'through the conformance harness, so it runs against any build of ' +
+        'the daemon. It may import Node built-ins, Playwright, the harness ' +
+        'and its own files — never src, tests/support or vitest, type-only ' +
+        'imports included. Green (zero baseline entries).',
+      severity: 'error',
+      from: {path: '^tests/browser/'},
+      to: {
+        // Unanchored: pnpm nests the package under node_modules/.pnpm/.
+        pathNot: [
+          '^tests/browser/',
+          '^tests/conformance/harness/',
+          '^@playwright/test$',
+          'node_modules/@playwright/test/',
+        ],
+        dependencyTypesNot: ['core'],
+      },
+    },
   ],
   options: {
     doNotFollow: {path: 'node_modules'},

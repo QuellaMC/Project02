@@ -11,7 +11,7 @@ import {
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-import {onTestFinished} from 'vitest';
+import {onTestFinished} from './runner.ts';
 
 /** A file's text, or a directory of more. */
 type Tree = {readonly [name: string]: string | Tree};
