@@ -39,7 +39,7 @@
     "test:coverage": "vitest run --coverage",
     "test:browser": "pnpm build:web && playwright test",
     "test:watch": "vitest",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage && pnpm test:browser"
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm build:web && pnpm test:coverage && pnpm test:browser"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
