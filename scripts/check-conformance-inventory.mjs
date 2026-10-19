@@ -127,9 +127,19 @@ function bodiless(call) {
   return !call.arguments.some(isFunction);
 }
 
+/** The options a test was given: its second argument when a third follows, or an object literal there. */
+function optionsOf(call) {
+  const [, second, third] = call.arguments;
+
+  return third !== undefined ||
+    (second !== undefined && ts.isObjectLiteralExpression(second))
+    ? second
+    : undefined;
+}
+
 /** Whether the test's options park it: skip, todo or fails set to anything but false, or options the checker cannot read. */
 function parkedByOptions(options) {
-  if (options === undefined || isFunction(options)) {
+  if (options === undefined) {
     return false;
   }
   return (
@@ -189,7 +199,7 @@ function scan(file, source) {
       const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
       const line =
         tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
-      const [title, options] = node.arguments;
+      const [title] = node.arguments;
 
       if (ROOTS.get(root) === 'block') {
         blocks.push(line);
@@ -202,7 +212,7 @@ function scan(file, source) {
           ),
           parked:
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
-            parkedByOptions(options) ||
+            parkedByOptions(optionsOf(node)) ||
             bodiless(node) ||
             runsNoCase(node),
           title:
