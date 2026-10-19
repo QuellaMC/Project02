@@ -18,8 +18,9 @@ any other build of them.
   the behavior as a sentence:
   `lifecycle.address-line: serve prints its address as its first stdout line once it answers there`.
   `pnpm arch:check` runs `scripts/check-conformance-inventory.mjs`, which
-  fails when a title names no row and when a row marked done has no test,
-  here or, for a page row, in `tests/browser`.
+  fails when a title names no row and when a row marked done has no test:
+  here, for a page row in `tests/browser`, or for a `rust-unit` row in
+  `crates`, where a test's title is the `///` line above its attributes.
 - A test waits only on what it can observe: a printed line, a frame, a
   request reaching a stand-in server, an exit, a file. Never a sleep.
 - Every wait has a ceiling of ten seconds, counted for a printed line from
@@ -51,7 +52,7 @@ any other build of them.
 | `harness/build-page.ts`      | Builds the page the daemon serves, once before the suite, when the checkout has none.                                                                                                                                                                                                                  |
 | `harness/terminal.py`        | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                                                                                                                           |
 | `harness/wait.ts`            | The ceiling, what a failed wait shows, and a wait on what a stand-in server keeps.                                                                                                                                                                                                                     |
-| `harness/runner.ts`          | The runner the harness serves: work for the end of the test running now, supplied by Vitest in `setup.ts` and by Playwright in the browser suite's `fixture.ts`. No other harness file imports a runner.                                                   |
+| `harness/runner.ts`          | The runner the harness serves: work for the end of the test running now, supplied by Vitest in `setup.ts` and by Playwright in the browser suite's `fixture.ts`. No other harness file imports a runner.                                                                                               |
 
 ## Environment
 

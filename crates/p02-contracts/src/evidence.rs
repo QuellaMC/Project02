@@ -62,6 +62,17 @@ impl EvidenceNote {
         self.policy_outcome
     }
 
+    /// Whether a `beforeRoleModelCall` answer carrying this note cannot
+    /// stand as accepted: the note itself says the hook rejected or failed.
+    #[must_use]
+    pub fn blocks_before_role_model_call(&self) -> bool {
+        self.kind == EvidenceKind::BeforeRoleModelCall
+            && (matches!(
+                self.status,
+                EvidenceStatus::Rejected | EvidenceStatus::Failed
+            ) || self.policy_outcome == Some(PolicyOutcome::RequiredRejected))
+    }
+
     /// Whether a tool result carrying this note cannot stand as accepted:
     /// the note itself says the call was refused or failed.
     #[must_use]
@@ -270,8 +281,9 @@ mod tests {
     }
 
     #[test]
-    fn a_tool_note_blocks_its_result_when_it_says_the_call_failed() {
+    fn a_note_blocks_its_answer_when_it_says_its_own_hook_failed() {
         let tool = |status| EvidenceNote::new(EvidenceKind::ToolInvocation, status, "Done.");
+        let before = |status| EvidenceNote::new(EvidenceKind::BeforeRoleModelCall, status, "Done.");
 
         assert!(!tool(EvidenceStatus::Accepted).blocks_tool_invocation());
         assert!(!tool(EvidenceStatus::Degraded).blocks_tool_invocation());
@@ -286,5 +298,13 @@ mod tests {
             !EvidenceNote::new(EvidenceKind::Health, EvidenceStatus::Failed, "Down.")
                 .blocks_tool_invocation()
         );
+        assert!(!before(EvidenceStatus::Degraded).blocks_before_role_model_call());
+        assert!(before(EvidenceStatus::Failed).blocks_before_role_model_call());
+        assert!(
+            before(EvidenceStatus::Accepted)
+                .with_policy_outcome(PolicyOutcome::RequiredRejected)
+                .blocks_before_role_model_call()
+        );
+        assert!(!tool(EvidenceStatus::Failed).blocks_before_role_model_call());
     }
 }
