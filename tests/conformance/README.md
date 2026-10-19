@@ -42,6 +42,7 @@ and against any other build of it.
 | `harness/socket.ts`       | A bare TCP connection, for a request stopped halfway or an answer left unread.                                                                                                                           |
 | `harness/model-server.ts` | An OpenAI-compatible model on loopback that answers as the test scripts it, streams at the test's pace, holds a request open on demand and keeps every request, with what each showed the model.         |
 | `harness/mem0-server.ts`  | A Mem0 backend on loopback, a self-hosted server or the platform, that answers each path as the test scripts it, holds a request open on demand and keeps every request.                                 |
+| `harness/build-page.ts`   | Builds the page the daemon serves, once before the suite, when the checkout has none.                                                                                                                    |
 | `harness/terminal.py`     | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                             |
 | `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                                                                                               |
 

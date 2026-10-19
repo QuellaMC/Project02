@@ -71,6 +71,7 @@ export default defineConfig({
         test: {
           name: 'conformance',
           include: ['tests/conformance/**/*.test.ts'],
+          globalSetup: ['tests/conformance/harness/build-page.ts'],
           // Its files run in parallel, unlike the processes project's. The
           // harness bounds every wait at ten seconds, and a test may hold a
           // dozen in sequence: these are a backstop behind those ceilings.
