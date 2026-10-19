@@ -28,7 +28,7 @@ import {
   startModelServer,
   toolResults,
 } from './harness/model-server.ts';
-import {connectSocket} from './harness/socket.ts';
+import {connectSocket, requestText} from './harness/socket.ts';
 import {within} from './harness/wait.ts';
 import {converse, wireOf} from './harness/wire.ts';
 
@@ -915,7 +915,15 @@ it('lifecycle.stop-not-held-by-stalled-client: a stop does not wait on a client 
   const stalled = await connectSocket(daemon);
 
   stalled.write(
-    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n`,
+    requestText(daemon, {
+      method: 'POST',
+      path: '/api/turns',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '100',
+        expect: '100-continue',
+      },
+    }),
   );
   await stalled.holds('HTTP/1.1 100 Continue\r\n\r\n');
   stalled.write('{"conversationId":');
@@ -961,9 +969,7 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
   const reader = await connectSocket(daemon);
 
   reader.pause();
-  reader.write(
-    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: ${String(Buffer.byteLength(body))}\r\n\r\n${body}`,
-  );
+  reader.write(requestText(daemon, {method: 'POST', path: '/api/turns', body}));
   await events.next(frameOf('turn_completed', {clientMessageId: 'everything'}));
 
   // The monotonic clock: the wall clock is adjusted under WSL2.
