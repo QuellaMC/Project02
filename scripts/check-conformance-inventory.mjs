@@ -28,8 +28,8 @@ const COLUMN_VALUES = {
 };
 
 // `it` or `test` at the start of a line, with any modifiers and type
-// arguments.
-const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?\(/gm;
+// arguments, called or given a tagged template.
+const TEST_CALL = /^[ \t]*(?:it|test)((?:\.\w+)*)(?:<[^\n]*?>)?[(`]/gm;
 // A describe or suite block, which could park every test under it.
 const BLOCK = /^[ \t]*(?:describe|suite)(?:\.\w+)*\(/gm;
 // The modifiers that take an argument list before the one with the title.
@@ -141,7 +141,7 @@ function testCalls(source) {
       line: lineOf(source, match.index),
       disabled: PROVES_NOTHING.test(match[1]),
       title:
-        end > start && closed.test(source)
+        !match[0].endsWith('`') && end > start && closed.test(source)
           ? source.slice(start + 1, end - 1)
           : undefined,
     };

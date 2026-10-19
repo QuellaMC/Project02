@@ -107,7 +107,12 @@ it('lifecycle.second-serve-hands-back: a second serve on a running home hands ba
   });
   first.signal('SIGINT');
   await first.exit();
-  expect((await startDaemon(home)).url).toBe(first.url);
+  const again = await startDaemon(home);
+
+  expect(again.url).toBe(first.url);
+  await expect(wireOf(again).health()).resolves.toMatchObject({
+    homeRoot: home,
+  });
 });
 
 it('lifecycle.crash-lease-reclaimed: after SIGKILL the record still names the dead run, and the next serve takes the home on the same address', async () => {
