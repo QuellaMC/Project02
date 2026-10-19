@@ -114,21 +114,26 @@ function titled(call) {
   return !MODIFIERS_WITH_ARGUMENTS.has(calleeNames(call.expression)?.at(-1));
 }
 
-/** Whether the test has no body to run: Vitest takes such a test as todo. */
-function bodiless(call) {
-  return !call.arguments.some(
-    argument =>
-      ts.isArrowFunction(argument) ||
-      ts.isFunctionExpression(argument) ||
-      ts.isIdentifier(argument),
+function isFunction(node) {
+  return (
+    ts.isArrowFunction(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isIdentifier(node)
   );
 }
 
-/** Whether the test's options park it: skip, todo or fails set to anything but false. */
+/** Whether the test has no body to run: Vitest takes such a test as todo. */
+function bodiless(call) {
+  return !call.arguments.some(isFunction);
+}
+
+/** Whether the test's options park it: skip, todo or fails set to anything but false, or options the checker cannot read. */
 function parkedByOptions(options) {
+  if (options === undefined || isFunction(options)) {
+    return false;
+  }
   return (
-    options !== undefined &&
-    ts.isObjectLiteralExpression(options) &&
+    !ts.isObjectLiteralExpression(options) ||
     options.properties.some(
       property =>
         (ts.isPropertyAssignment(property) &&
@@ -150,9 +155,9 @@ function runsNoCase(call) {
 
     return (
       TABLE_MODIFIERS.has(calleeNames(applied)?.at(-1)) &&
-      table !== undefined &&
-      ts.isArrayLiteralExpression(table) &&
-      table.elements.length === 0
+      (table === undefined ||
+        !ts.isArrayLiteralExpression(table) ||
+        table.elements.length === 0)
     );
   }
   if (ts.isTaggedTemplateExpression(applied)) {
@@ -191,6 +196,10 @@ function scan(file, source) {
       } else if (ROOTS.get(root) === 'test') {
         tests.push({
           line,
+          nested: !(
+            ts.isExpressionStatement(node.parent) &&
+            ts.isSourceFile(node.parent.parent)
+          ),
           parked:
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
             parkedByOptions(options) ||
@@ -250,6 +259,10 @@ function main() {
     }
     rows.set(row.id, row);
 
+    if (row.statement === '') {
+      failures.push(`${INVENTORY_FILE}: ${row.id} has no statement.`);
+    }
+
     for (const [column, values] of Object.entries(COLUMN_VALUES)) {
       if (!values.includes(row[column])) {
         failures.push(
@@ -271,11 +284,15 @@ function main() {
   for (const file of testFiles) {
     const {tests: calls, blocks} = scan(file, readFileSync(file, 'utf8'));
 
-    for (const {line, parked, title} of calls) {
+    for (const {line, nested, parked, title} of calls) {
       const id = title?.match(TITLE_SHAPE)?.[1];
 
       tests += 1;
-      if (title === undefined) {
+      if (nested) {
+        failures.push(
+          `${file}:${line}: a test below the top level; the suite is flat.`,
+        );
+      } else if (title === undefined) {
         failures.push(
           `${file}:${line}: the title is not a plain string literal.`,
         );
