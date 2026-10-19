@@ -197,9 +197,14 @@ it('connectors.telegram-draft-edits: a reply is posted with its first words, edi
     expect(story.startsWith(String(call.body['text']))).toBe(true);
   }
 
-  // One edit an interval while it was written, give or take one at either
-  // end of the clock: far fewer than its pieces, a tenth of a second apart.
-  expect(paced.length).toBeLessThanOrEqual((dropped.at - posted.at) / 400 + 2);
+  const gaps = paced
+    .slice(1)
+    .map((edit, before) => edit.at - (paced[before]?.at ?? edit.at));
+
+  // Each edit an interval after the one before, less a little for the time
+  // each took to arrive: none back to back, and far fewer than the pieces,
+  // a tenth of a second apart.
+  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(360);
   expect(paced.length).toBeLessThan(words.length - 2);
   expect(retried.body).toEqual({chat_id: alice.id, message_id: 1, text: story});
   expect(run.stderr()).toContain(

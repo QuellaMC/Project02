@@ -390,12 +390,11 @@ it('connectors.telegram-config-reads: the connector reads its settings on every 
   await stale.answered();
   await saveConfig(wire, mira, setTelegram('botToken', replacedBot.token));
   await run.printed('Telegram: @mira_new_bot answers for Mira.');
+  // The older answer lands after the newer one: that it was never applied
+  // is known once the connector has stopped.
   stale.release();
-  // Had the older answer been applied once it landed, Mira's first token
-  // would have been polled before this later change's answer.
   await saveConfig(wire, mira, setTelegram('botToken', novaBot.token));
   await run.printed('Telegram: @nova_bot answers for Mira.');
-  expect(telegram.calls(miraBot.token)).toEqual([]);
   expect(reads()).toBe(4);
 
   const cut = relay.requests.length;
@@ -427,6 +426,10 @@ it('connectors.telegram-config-reads: the connector reads its settings on every 
   await saveConfig(wire, mira, unsetTelegram('botToken'));
   await run.printed('Telegram: stopped @nova_bot (Mira).');
   expect(reads()).toBe(6);
+  run.signal('SIGINT');
+  expect(await run.exit()).toBe(0);
+  // Stopped, it takes in nothing more: Mira's first token was never polled.
+  expect(telegram.calls(miraBot.token)).toEqual([]);
 });
 
 it('connectors.telegram-stop: a stopped connector gives up the delivery whose turn waits on a confirmation and the pairing request still waiting on its answer, stops every bot and exits 0, while the turn runs on in the daemon with its confirmation pending', async () => {
