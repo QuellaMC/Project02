@@ -438,11 +438,13 @@ it('turns.one-turn-at-a-time: a character runs its turns one at a time, in the o
     ['Three.', 'three'],
   ] as const) {
     turns.push(say(text, id));
-    // Sent before a request the daemon has since answered: each is in
-    // before the next is sent.
+    // Nothing outside the daemon shows a turn waiting its turn; a round
+    // trip answered since makes each the likelier to be in before the next.
     await wire.health();
   }
 
+  // While the first is held, the model has seen no other.
+  expect(model.requests).toHaveLength(1);
   model.answer(reply('Second.'), reply('Third.'));
   first.release(reply('First.'));
   await Promise.all(turns);
