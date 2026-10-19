@@ -585,6 +585,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "p02-plugins"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "p02-contracts",
+ "p02-core",
+ "p02-shared",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "p02-shared"
 version = "0.0.0"
 dependencies = [

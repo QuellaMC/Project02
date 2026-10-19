@@ -18,10 +18,10 @@ p02-shared, and the runtime reaches plugins and providers only through it.
   session history, the opening of a plugin database) checks the token
   before it acts, so a hook past its deadline finishes the call it is in and
   starts nothing more, and store writes end when the hook settles. The
-  store crate implements what the handles reach, and it alone opens a
-  database. What a plugin returns, the host stamps into records held to
-  the JSON limits, so a plugin never writes another turn's record or
-  another plugin's.
+  store crate implements what the handles reach, one `CharacterStorage`
+  per character, and it alone opens a database. What a plugin returns,
+  the host stamps into records held to the JSON limits, so a plugin never
+  writes another turn's record or another plugin's.
 - **Tools.** A tool's input contract is one JSON Schema document, draft 7,
   with an object root, admitted only when every keyword in it is enforced
   as written; in a pattern, `.` keeps its JavaScript meaning. A call is

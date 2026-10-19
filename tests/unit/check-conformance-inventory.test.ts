@@ -39,7 +39,7 @@ describe('the conformance inventory check', () => {
         header,
         'lifecycle.a,lifecycle,"Says ""ready"", then serves.",PROCESS,-,none,yes,,conformance,0,done',
         row('lifecycle.b', 'conformance', 'todo'),
-        row('lifecycle.c', 'rust-unit', 'todo'),
+        row('lifecycle.c', 'rust-unit', 'done'),
         row('lifecycle.g', 'conformance', 'done'),
         row('turns.d', 'conformance', 'todo'),
         row('turns.h', 'conformance', 'done'),
@@ -82,14 +82,33 @@ describe('the conformance inventory check', () => {
         "import {test} from '@playwright/test';",
         "test('page.g: through Playwright\\'s own test', () => {});",
       ],
+      'crates/toy/src/lib.rs': [
+        '/// lifecycle.c: a test of the Rust suite, titled by its doc line',
+        '#[test]',
+        'fn titled() {}',
+        '',
+        '/// A doc line that is no title.',
+        '#[tokio::test(flavor = "multi_thread")]',
+        'async fn untitled() {}',
+        '',
+        '// /// lifecycle.c: a test in a comment is no test',
+        '// #[test]',
+        '// fn commented() {}',
+        '',
+        'const TEXT: &str = r#"',
+        '/// lifecycle.c: a test in a string is no test',
+        '#[test]',
+        'fn quoted() {}',
+        '"#;',
+      ],
     });
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 11 test(s) name rows of ' +
+      'conformance-inventory: 12 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
         'area: lifecycle 2/1, turns 1/1; client-ts rows done/todo by area: ' +
-        'page 2/1.\n',
+        'page 2/1; rust-unit rows done/todo by area: lifecycle 1/0.\n',
     );
     expect(result.status).toBe(0);
   });
@@ -110,6 +129,8 @@ describe('the conformance inventory check', () => {
         row('turns.f', 'retired', 'todo'),
         row('turns.g', 'conformance', 'done'),
         row('turns.h', 'conformance', 'done'),
+        row('turns.k', 'rust-unit', 'done'),
+        row('turns.r', 'retired', 'done'),
         row('page.h', 'client-ts', 'done'),
         row('page.i', 'client-ts', 'done'),
         row('page.j', 'client-ts', 'done'),
@@ -172,6 +193,28 @@ describe('the conformance inventory check', () => {
         "it('turns.g: two arguments, the second a name', options);",
         "it('turns.g: takes its context, so may skip itself', context => { const {skip} = context; skip(); });",
       ],
+      'crates/toy/src/lib.rs': [
+        '/// lifecycle.b: parked by ignore, so no proof',
+        '#[test]',
+        '#[ignore = "until the store crate exists"]',
+        'fn parked() {}',
+        '',
+        '/// turns.g: names a row the Rust suite does not prove',
+        '#[tokio::test]',
+        'async fn elsewhere() {}',
+        '',
+        '/// turns.k: one test of the row',
+        '#[test]',
+        'fn first() {}',
+        '',
+        '/// turns.k: a second test of the row',
+        '#[test]',
+        'fn second() {}',
+        '',
+        '/// lifecycle.z: names no row',
+        '#[test]',
+        'fn unknown() {}',
+      ],
     });
 
     expect(result.stdout).toBe('');
@@ -197,10 +240,14 @@ describe('the conformance inventory check', () => {
       "conformance-inventory: tests/browser/aliased.spec.ts:1: @playwright/test's test is imported under another name, which the index cannot follow.",
       'conformance-inventory: tests/browser/parked.spec.ts:8: turns.g is not a client-ts row of tests/conformance/inventory.csv.',
       'conformance-inventory: tests/browser/parked.spec.ts:7: a describe block; the suite is flat, so no block above a test can park it.',
+      'conformance-inventory: crates/toy/src/lib.rs:8: turns.g is not a rust-unit row of tests/conformance/inventory.csv.',
+      'conformance-inventory: crates/toy/src/lib.rs:16: a second test of turns.k; one behavior, one test.',
+      'conformance-inventory: crates/toy/src/lib.rs:20: lifecycle.z is not a rust-unit row of tests/conformance/inventory.csv.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
-      'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance or client-ts.',
+      'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but every test naming it in crates is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.r is done, but its test_location is retired, not conformance or client-ts or rust-unit.',
       'conformance-inventory: tests/conformance/inventory.csv: page.h is done, but every test naming it in tests/browser is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: page.i is done, but every test naming it in tests/browser is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: page.j is done, but every test naming it in tests/browser is skipped, runs no case or expects to fail.',

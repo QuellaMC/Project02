@@ -48,6 +48,9 @@ pub const CONTRACT_VERSION: &str = "mvp-008.runtime_plugin.v2";
 /// The reason a turn records when a plugin's `beforeRoleModelCall` rejects it.
 pub const BEFORE_ROLE_MODEL_CALL_REJECTION: &str = "plugin_before_role_model_call_rejected";
 
+/// The reason a turn records when a plugin's health check rejects it.
+pub const HEALTH_REJECTION: &str = "plugin_health_rejected";
+
 vocabulary! {
     /// What a plugin is for. Only a memory provider changes what the host
     /// does with it: the default memory provider is chosen among them.

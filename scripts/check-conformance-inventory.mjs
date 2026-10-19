@@ -1,10 +1,14 @@
-// The inventory is the index of the suites that prove behavior from
-// outside: each test is titled `<row id>: <sentence>` after the row it
-// proves, and a row is done only when a test of the suite for its
-// test_location names it. A title must be a plain string literal, so a
-// search for a row id finds its test; a file is read as TypeScript, so a
-// test in a comment or a string is no test; and each suite is flat, so no
-// block above a test can park it.
+// The inventory is the index of the suites that prove behavior: each test
+// is titled `<row id>: <sentence>` after the row it proves, and a row is
+// done only when a test of the suite for its test_location names it. In
+// the TypeScript suites, which prove it from outside, a title must be a
+// plain string literal, so a search for a row id finds its test; a file is
+// read as TypeScript, so a test in a comment or a string is no test; and
+// each suite is flat, so no block above a test can park it. In the Rust
+// suite a test's title is the first `///` line above its attributes, only
+// a test whose title has that shape names a row, and `#[ignore]` parks it;
+// a file is read as Rust tokens, so there too a test in a comment or a
+// string is no test.
 import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -72,13 +76,19 @@ const SUITES = [
     directory: 'tests/conformance',
     extension: '.test.ts',
     location: 'conformance',
-    runner: VITEST,
+    scan: (file, source) => scanTypeScript(file, source, VITEST),
   },
   {
     directory: 'tests/browser',
     extension: '.spec.ts',
     location: 'client-ts',
-    runner: PLAYWRIGHT,
+    scan: (file, source) => scanTypeScript(file, source, PLAYWRIGHT),
+  },
+  {
+    directory: 'crates',
+    extension: '.rs',
+    location: 'rust-unit',
+    scan: (_file, source) => scanRust(source),
   },
 ];
 // The modifiers applied with their own arguments before the titled call.
@@ -295,7 +305,7 @@ function runsNoCase(call) {
 }
 
 /** Each titled test call, with its title when that is a plain string literal, each block, and each of the runner's names imported under another, by line. */
-function scan(file, source, runner) {
+function scanTypeScript(file, source, runner) {
   const tree = ts.createSourceFile(
     file,
     source,
@@ -404,6 +414,203 @@ function scan(file, source, runner) {
   };
 }
 
+/** What a test attribute's path ends in: `test`, or `tokio::test` and its kin. */
+const RUST_TEST_ATTRIBUTE = /(?:^|::)test$/;
+// The words that may stand between an item's attributes and its `fn`.
+const RUST_QUALIFIERS = new Set([
+  'pub',
+  'crate',
+  'super',
+  'self',
+  'in',
+  'async',
+  'const',
+  'unsafe',
+  'extern',
+]);
+
+// Rust's lexemes, matched where the scan stands. A character literal is
+// tried before a lifetime: `'a'` is a character, `'a` a lifetime.
+const RUST_SPACE = /\s+/y;
+const RUST_LINE_COMMENT = /\/\/[^\n]*/y;
+const RUST_STRING = /[bc]?(?:r(#*))?"/y;
+const RUST_CHARACTER =
+  /b?'(?:\\(?:u\{[0-9A-Fa-f]+\}|x[0-9A-Fa-f]{2}|[^\n])|[^\\'\n])'/uy;
+const RUST_LIFETIME = /'[A-Za-z_][A-Za-z0-9_]*/y;
+const RUST_WORD = /[A-Za-z_][A-Za-z0-9_]*|[0-9][A-Za-z0-9_]*/y;
+
+/**
+ * The tokens of a Rust file that can tell a test: words, punctuation, and
+ * the text of each `///` line. Comments, strings, characters and lifetimes
+ * are read past, so nothing inside them is a token.
+ */
+function rustTokens(source) {
+  const tokens = [];
+  let line = 1;
+  let at = 0;
+  const lexeme = pattern => {
+    pattern.lastIndex = at;
+    return pattern.exec(source);
+  };
+  const moveTo = end => {
+    for (; at < end; at += 1) {
+      if (source[at] === '\n') {
+        line += 1;
+      }
+    }
+  };
+
+  while (at < source.length) {
+    const comment = lexeme(RUST_LINE_COMMENT);
+    const string = comment === null ? lexeme(RUST_STRING) : null;
+
+    if (lexeme(RUST_SPACE) !== null) {
+      moveTo(RUST_SPACE.lastIndex);
+    } else if (comment !== null) {
+      if (comment[0].startsWith('///') && !comment[0].startsWith('////')) {
+        tokens.push({kind: 'doc', text: comment[0].slice(3).trim(), line});
+      }
+      moveTo(RUST_LINE_COMMENT.lastIndex);
+    } else if (source.startsWith('/*', at)) {
+      let depth = 0;
+      let end = at;
+
+      do {
+        if (source.startsWith('/*', end)) {
+          depth += 1;
+          end += 2;
+        } else if (source.startsWith('*/', end)) {
+          depth -= 1;
+          end += 2;
+        } else {
+          end += 1;
+        }
+      } while (depth > 0 && end < source.length);
+      moveTo(end);
+    } else if (string !== null) {
+      const hashes = string[1];
+      let end = RUST_STRING.lastIndex;
+
+      if (hashes === undefined) {
+        while (end < source.length && source[end] !== '"') {
+          end += source[end] === '\\' ? 2 : 1;
+        }
+        end += 1;
+      } else {
+        const close = source.indexOf(`"${hashes}`, end);
+
+        end = close === -1 ? source.length : close + 1 + hashes.length;
+      }
+      moveTo(end);
+    } else if (lexeme(RUST_CHARACTER) !== null) {
+      moveTo(RUST_CHARACTER.lastIndex);
+    } else if (lexeme(RUST_LIFETIME) !== null) {
+      moveTo(RUST_LIFETIME.lastIndex);
+    } else {
+      const word = lexeme(RUST_WORD);
+      const text = word?.[0] ?? source[at];
+
+      tokens.push({kind: word === null ? 'punct' : 'word', text, line});
+      moveTo(at + text.length);
+    }
+  }
+  return tokens;
+}
+
+/** The index of the token that closes the bracket at `open`. */
+function closingBracket(tokens, open) {
+  let depth = 0;
+
+  for (let at = open; at < tokens.length; at += 1) {
+    const {kind, text} = tokens[at];
+
+    if (kind === 'punct' && '([{'.includes(text)) {
+      depth += 1;
+    } else if (kind === 'punct' && ')]}'.includes(text)) {
+      depth -= 1;
+      if (depth === 0) {
+        return at;
+      }
+    }
+  }
+  return tokens.length;
+}
+
+/**
+ * Each test of a Rust file that names a row: a function carrying a
+ * `#[test]`-family attribute, with or without arguments, whose first `///`
+ * line above its attributes is a title.
+ */
+function scanRust(source) {
+  const tokens = rustTokens(source);
+  const tests = [];
+  let docs = [];
+  let attributes = [];
+
+  for (let at = 0; at < tokens.length; at += 1) {
+    const token = tokens[at];
+    const next = tokens[at + 1]?.text;
+
+    if (token.kind === 'doc') {
+      docs.push(token.text);
+      continue;
+    }
+    if (token.text === '#' && (next === '[' || next === '!')) {
+      const open = next === '!' ? at + 2 : at + 1;
+      const close = closingBracket(tokens, open);
+      const path = [];
+
+      for (const {kind, text} of tokens.slice(open + 1, close)) {
+        if (kind !== 'word' && text !== ':') {
+          break;
+        }
+        path.push(text);
+      }
+      // An inner attribute belongs to what encloses it, not to the next item.
+      if (next === '!') {
+        docs = [];
+        attributes = [];
+      } else {
+        attributes.push(path.join(''));
+      }
+      at = close;
+      continue;
+    }
+
+    let item = at;
+
+    while (
+      tokens[item] !== undefined &&
+      (RUST_QUALIFIERS.has(tokens[item].text) ||
+        tokens[item].text === '(' ||
+        tokens[item].text === ')')
+    ) {
+      item += 1;
+    }
+
+    const [title] = docs;
+
+    if (
+      tokens[item]?.text === 'fn' &&
+      attributes.some(path => RUST_TEST_ATTRIBUTE.test(path)) &&
+      title !== undefined &&
+      TITLE_SHAPE.test(title)
+    ) {
+      tests.push({
+        line: tokens[item].line,
+        nested: false,
+        parked: attributes.includes('ignore'),
+        parksFile: false,
+        title,
+      });
+    }
+    docs = [];
+    attributes = [];
+    at = item;
+  }
+  return {tests, blocks: [], aliases: []};
+}
+
 function reportFailures(failures) {
   for (const failure of failures) {
     process.stderr.write(`conformance-inventory: ${failure}\n`);
@@ -491,7 +698,7 @@ function main() {
       tests: calls,
       blocks,
       aliases,
-    } = scan(file, readFileSync(file, 'utf8'), suite.runner);
+    } = suite.scan(file, readFileSync(file, 'utf8'));
 
     for (const {line, source, name} of aliases) {
       failures.push(

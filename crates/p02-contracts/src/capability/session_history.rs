@@ -113,8 +113,10 @@ impl ReadMessages {
         self
     }
 
-    /// Reads no more than `max_bytes` of the log in one call; the rest
-    /// stays for the next.
+    /// Reads about `max_bytes` of the log in one call and leaves the rest
+    /// for the next: never more than the budget, except that the next
+    /// record is read whole even when it alone is larger, so a read moves
+    /// on while the log has more.
     #[must_use]
     pub fn within(mut self, max_bytes: NonZeroUsize) -> Self {
         self.max_bytes = Some(max_bytes);
