@@ -154,8 +154,11 @@ it('lifecycle.store-consent-no-terminal: without --init and with no terminal to 
 
 it("lifecycle.store-init: serve --init makes a home of an empty directory, or of one holding only a home's own entries, and serves it", async () => {
   const empty = createHome();
+  const served = await startDaemon(empty);
 
-  await startDaemon(empty);
+  await expect(wireOf(served).health()).resolves.toMatchObject({
+    homeRoot: empty,
+  });
   expect(readdirSync(empty).sort()).toEqual([
     '.locks',
     'character-data',
