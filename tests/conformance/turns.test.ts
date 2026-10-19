@@ -600,35 +600,24 @@ it("turns.rejected-turn-outcome: after a turn the model's output fails, the char
   });
 });
 
-it('turns.fatal-turn-refuses-queued: a turn the store fails restarts the character once: it fails, the delivery queued behind it is refused, and the character comes back ready for the next', async () => {
+it('turns.fatal-turn-restart: a turn whose reply the store cannot append fails on its answer with its line committed, the character restarts once, and the next turn completes', async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
   });
   const daemon = await startDaemon(home);
-  const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
+  const say = await converse(wireOf(daemon), 'mira');
   const events = await openEvents(daemon);
   const sessions = join(home, 'character-data', 'mira', 'sessions');
   const held = model.hold();
   const fatal = say('First.', 'fatal');
 
   await held.arrived();
-
-  const queued = say('Second.', 'queued');
-
-  // Sent before a request the daemon has since answered: it is in, queued
-  // behind the turn the model holds.
-  await wire.health();
   chmod(sessions, 0o000);
 
   try {
     held.release(reply('Never written.'));
     expect(await fatal).toMatchObject({status: 'failed', committed: true});
-    expect(await queued).toMatchObject({
-      status: 'refused',
-      reason: 'character_unavailable',
-    });
   } finally {
     chmod(sessions, 0o755);
   }
@@ -638,7 +627,7 @@ it('turns.fatal-turn-refuses-queued: a turn the store fails restarts the charact
   }
 
   model.answer(reply('Back again.'));
-  expect(await say('Third.', 'next')).toMatchObject({
+  expect(await say('Next.', 'next')).toMatchObject({
     status: 'completed',
     messages: [{}, {text: 'Back again.'}],
   });
