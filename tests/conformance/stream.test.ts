@@ -192,11 +192,16 @@ it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the 
   const newest = await stream(idOf(frames.at(-1) ?? ''));
 
   await say('Three.', 'three');
-  await first.received('"clientMessageId":"three"');
-  await newest.received('"clientMessageId":"three"');
+  await first.received('"clientMessageId":"three","status":"completed"');
+
+  // The turn's frames as the first stream has them, once the resumed one
+  // has caught up with the last of them.
+  const live = framesOf(first.body()).slice(frames.length);
+
+  await newest.received(live.at(-1) ?? '');
   expect(newest.body().startsWith(resumed)).toBe(true);
   expect(framesOf(newest.body().slice(resumed.length)).map(idOf)).toEqual(
-    framesOf(first.body()).slice(frames.length).map(idOf),
+    live.map(idOf),
   );
 });
 
@@ -417,7 +422,11 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
 
   model.hold();
 
-  const turn = say('Hello there.', 'sync');
+  // Answered by the kill, so its handler is on from the start.
+  const turn = say('Hello there.', 'sync').then(
+    () => 'answered',
+    () => 'cut off',
+  );
   const line = dataOf(
     await events.next(
       frameOf('turn_progress', {progress: {kind: 'user_message'}}),
@@ -446,7 +455,7 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   // daemon leaves the line for the next run to read back.
   daemon.signal('SIGKILL');
   await daemon.exit();
-  await expect(turn).rejects.toBeDefined();
+  expect(await turn).toBe('cut off');
 
   const again = wireOf(await startDaemon(home));
 
