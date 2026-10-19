@@ -77,6 +77,50 @@ export async function within<T>(what: string, promise: Promise<T>): Promise<T> {
   }
 }
 
+/** What a stand-in server keeps as it comes, and a wait on what it comes to hold. */
+export type Observed<T> = {
+  readonly items: readonly T[];
+  readonly add: (item: T) => void;
+  /** Settles on what `find` finds in the items, as soon as they hold it. */
+  readonly until: <R>(
+    what: string,
+    find: (items: readonly T[]) => R | undefined,
+  ) => Promise<R>;
+};
+
+export function observed<T>(): Observed<T> {
+  const items: T[] = [];
+  const checks = new Set<() => void>();
+
+  return {
+    items,
+    add: item => {
+      items.push(item);
+
+      for (const check of [...checks]) {
+        check();
+      }
+    },
+    until: (what, find) =>
+      within(
+        what,
+        new Promise(resolve => {
+          const check = (): void => {
+            const found = find(items);
+
+            if (found !== undefined) {
+              checks.delete(check);
+              resolve(found);
+            }
+          };
+
+          checks.add(check);
+          check();
+        }),
+      ),
+  };
+}
+
 function withEvidence(message: string): string {
   return [message, ...[...evidence].map(describe => describe())].join('\n\n');
 }
