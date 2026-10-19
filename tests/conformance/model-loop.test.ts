@@ -3,6 +3,7 @@ import {expect, it} from 'vitest';
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionRecords} from './harness/home.ts';
+import {connectSocket, requestText} from './harness/socket.ts';
 import {
   calling,
   content,
@@ -105,7 +106,12 @@ it('model.round-budget: a turn ends rejected tool_rounds_exhausted once its roun
     'config.json': configJson({project02: model.settings}),
   });
   const daemon = await startDaemon(home);
-  const say = await converse(wireOf(daemon), 'mira');
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId, userParticipantId} = await conversationOf(
+    wire,
+    'mira',
+  );
   const events = await openEvents(daemon);
 
   model.answer(
@@ -114,19 +120,33 @@ it('model.round-budget: a turn ends rejected tool_rounds_exhausted once its roun
     ),
   );
 
-  const turn = say('Keep looking.', 'looking');
+  // A hundred rounds outlast one wait: the turn goes on a socket of its
+  // own, each dispatched call is seen through on the stream, and the
+  // answer is read once it has come.
+  const looking = await connectSocket(daemon);
 
-  // A hundred rounds outlast one wait: each dispatched call is seen through.
+  looking.write(
+    requestText(daemon, {
+      method: 'POST',
+      path: '/api/turns',
+      body: JSON.stringify({
+        conversationId,
+        senderId: userParticipantId,
+        text: 'Keep looking.',
+        source: 'web',
+        clientMessageId: 'looking',
+      }),
+    }),
+  );
+
   for (let round = 0; round < 99; round += 1) {
     await events.next(
       frameOf('turn_progress', {progress: {kind: 'tool_call_completed'}}),
     );
   }
 
-  expect(await turn).toMatchObject({
-    status: 'rejected',
-    reason: 'tool_rounds_exhausted',
-  });
+  await looking.holds('"tool_rounds_exhausted"');
+  expect(looking.received().toString('utf8')).toMatch(/"status":"rejected"/u);
   expect(model.requests).toHaveLength(100);
   expect(sessionRecords(home, 'mira', 'tool_call_started')).toHaveLength(99);
   model.answer({status: 400, body: {error: {message: 'Not now.'}}});
