@@ -1,4 +1,5 @@
 import {spawn} from 'node:child_process';
+import {setTimeout as sleep} from 'node:timers/promises';
 
 import {onTestFinished} from 'vitest';
 
@@ -102,10 +103,7 @@ export function serve(
   onTestFinished(async () => {
     signalGroup(pid, 'SIGKILL');
     await within(`pid ${String(pid)} to go after SIGKILL`, closed);
-    await within(
-      `the group of pid ${String(pid)} to go after SIGKILL`,
-      groupGone(pid),
-    );
+    await groupGone(pid);
   });
 
   /** An idle deadline: a daemon starting under load is slow, not silent. */
@@ -179,19 +177,24 @@ function addressOf(line: string): Address {
   };
 }
 
-/** Settles once no process of the group is left to signal. */
+/** Settles once no process of the group is left to signal, or fails at the ceiling. */
 async function groupGone(pid: number): Promise<void> {
-  for (;;) {
+  const failed = waitFailure(
+    `the group of pid ${String(pid)} to go after SIGKILL`,
+  );
+  const deadline = Date.now() + ceilingMs;
+
+  while (Date.now() < deadline) {
     try {
       process.kill(-pid, 0);
     } catch {
       return;
     }
 
-    await new Promise(resolve => {
-      setTimeout(resolve, 20);
-    });
+    await sleep(20);
   }
+
+  throw failed.ceiling();
 }
 
 function signalGroup(pid: number, name: NodeJS.Signals): void {

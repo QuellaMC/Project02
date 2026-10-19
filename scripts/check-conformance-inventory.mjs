@@ -152,44 +152,14 @@ function isFunction(node) {
   );
 }
 
-/** Whether the body skips the test itself through its context, as `context => context.skip()` does. */
-function skipsItself(call) {
+/** Whether the body takes its context, through which it could skip itself under any name. */
+function takesContext(call) {
   const body = call.arguments.find(
     argument =>
       ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
   );
-  const context = body?.parameters[0]?.name;
 
-  if (body === undefined || context === undefined) {
-    return false;
-  }
-  if (ts.isObjectBindingPattern(context)) {
-    return context.elements.some(element => {
-      const property = element.propertyName ?? element.name;
-
-      return ts.isIdentifier(property) && property.text === 'skip';
-    });
-  }
-  if (!ts.isIdentifier(context)) {
-    return false;
-  }
-
-  let skips = false;
-  const look = node => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === context.text &&
-      node.expression.name.text === 'skip'
-    ) {
-      skips = true;
-    }
-    ts.forEachChild(node, look);
-  };
-
-  look(body.body);
-  return skips;
+  return body !== undefined && body.parameters.length > 0;
 }
 
 /** Whether the test has no body to run: Vitest takes such a test as todo. */
@@ -351,7 +321,7 @@ function scan(file, source) {
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
             parkedByOptions(optionsOf(node)) ||
             bodiless(node) ||
-            skipsItself(node) ||
+            takesContext(node) ||
             runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
