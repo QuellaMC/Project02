@@ -27,6 +27,7 @@ import {
   type Answer,
 } from './harness/model-server.ts';
 import {connectSocket} from './harness/socket.ts';
+import {within} from './harness/wait.ts';
 import {converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
@@ -600,11 +601,18 @@ it('lifecycle.roster-boot: at boot every enabled character starts, and a disable
   );
   const events = await openEvents(daemon);
 
-  while (
-    !['nova', 'zeta'].every(id => statesOf(events, id).includes('ready'))
-  ) {
-    await events.next(() => true);
-  }
+  // One deadline for both: a character that keeps changing state must
+  // not keep the wait alive.
+  await within(
+    'nova and zeta to be ready',
+    (async () => {
+      while (
+        !['nova', 'zeta'].every(id => statesOf(events, id).includes('ready'))
+      ) {
+        await events.next(() => true);
+      }
+    })(),
+  );
 
   expect(await wireOf(daemon).health()).toMatchObject({
     characters: [

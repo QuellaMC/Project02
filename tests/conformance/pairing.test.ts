@@ -1,5 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {setTimeout as sleep} from 'node:timers/promises';
 
 import {expect, it} from 'vitest';
 
@@ -178,12 +179,18 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
 
 it('pairing.approve-write-failed: an approval the home cannot take answers failed with the reason, and the request waits on to its own deadline, announced again', async () => {
   const home = createHome();
-  const daemon = await startDaemon(home);
+  const daemon = await startDaemon(home, {
+    PROJECT02_TEST_DURATIONS: 'pairing=5000',
+  });
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
+  const asked = performance.now();
   const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
 
   await events.next(frameOf('pairing_requested', {code: request.code}));
+  // Halfway to the deadline: a request the failure re-armed would outlive
+  // its own deadline by as long again.
+  await sleep(2_500);
   chmod(home, 0o500);
 
   try {
@@ -202,6 +209,15 @@ it('pairing.approve-write-failed: an approval the home cannot take answers faile
     ),
   ).toEqual({kind: 'pairing_requested', ...request});
   expect(await wire.pendingPairings()).toEqual([request]);
+  await events.next(
+    frameOf('pairing_settled', {code: request.code, decision: 'expired'}),
+  );
+
+  const waited = performance.now() - asked;
+
+  // At its own deadline of five seconds, not five after the failure.
+  expect(waited).toBeGreaterThanOrEqual(4_900);
+  expect(waited).toBeLessThan(7_400);
 });
 
 it('pairing.paired-elsewhere-settles: a request whose account another settings window paired meanwhile settles approved, asked again or answered, keeping the name that window gave', async () => {
