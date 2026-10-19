@@ -349,36 +349,62 @@ it("inspect.config-report: inspect shows where the config came from, each plugin
     readonly plugins: readonly {readonly pluginId: string}[];
   };
 
-  expect(shown.plugins.map(plugin => plugin.pluginId).sort()).toEqual([
-    'character-memory',
-    'character-state',
-    'demo-config',
-    'mem0',
-    'runtime.plugin',
-    'session-history',
+  const fileStore = {
+    character_file_store: 'write',
+    model_input: 'write',
+    trusted_context: 'write',
+  };
+  const sessionHistory = {
+    session_history: 'read',
+    plugin_database: 'write',
+    turn_context: 'read',
+    model_input: 'write',
+    trusted_context: 'write',
+  };
+  const active = (pluginId: string, access: Record<string, string>) => ({
+    pluginId,
+    kind: 'first_party',
+    enabled: true,
+    requestedAccess: access,
+    grantedAccess: access,
+    activationStatus: 'active',
+    diagnostics: [],
+  });
+  const off = (
+    pluginId: string,
+    kind: string,
+    access: Record<string, string>,
+  ) => ({
+    pluginId,
+    kind,
+    enabled: false,
+    requestedAccess: access,
+    grantedAccess: {},
+    activationStatus: 'disabled',
+    diagnostics: [],
+  });
+
+  expect(
+    [...shown.plugins].sort((a, b) => a.pluginId.localeCompare(b.pluginId)),
+  ).toMatchObject([
+    active('character-memory', fileStore),
+    active('character-state', fileStore),
+    off('demo-config', 'context_provider', {
+      model_input: 'write',
+      trusted_context: 'write',
+    }),
+    off('mem0', 'memory_provider', {
+      turn_context: 'read',
+      model_input: 'write',
+    }),
+    active('runtime.plugin', {model_input: 'write'}),
+    active('session-history', sessionHistory),
   ]);
   expect(shown).toMatchObject({
     runtimeConfig: {source: 'path', path: join(home, 'config.json')},
     activationDiagnostics: [
       {code: 'runtime_config_unknown_plugin', path: 'plugins.ghost-plugin'},
     ],
-    plugins: expect.arrayContaining([
-      expect.objectContaining({
-        pluginId: 'runtime.plugin',
-        enabled: true,
-        requestedAccess: {model_input: 'write'},
-        grantedAccess: {model_input: 'write'},
-        activationStatus: 'active',
-        diagnostics: [],
-      }),
-      expect.objectContaining({
-        pluginId: 'demo-config',
-        enabled: false,
-        requestedAccess: {model_input: 'write', trusted_context: 'write'},
-        grantedAccess: {},
-        activationStatus: 'disabled',
-      }),
-    ]) as unknown[],
     connectors: [
       {
         id: 'telegram',

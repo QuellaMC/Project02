@@ -313,10 +313,13 @@ it("transport.page-files: the built page is served at / and under /assets withou
   expect(asset.headers['content-type']).toContain('javascript');
   expect(asset.headers['cache-control']).toBe('no-store');
 
-  const head = await exchange(daemon, {method: 'HEAD', path: '/'});
+  for (const path of ['/', script ?? '']) {
+    const head = await exchange(daemon, {method: 'HEAD', path});
 
-  expect(head.status).toBe(200);
-  expect(await head.whole()).toBe('');
+    expect(head.status, path).toBe(200);
+    expect(head.headers['cache-control'], path).toBe('no-store');
+    expect(await head.whole(), path).toBe('');
+  }
 
   const climbing = await exchange(daemon, {path: '/%2e%2e/package.json'});
 

@@ -239,14 +239,8 @@ it('memory.character-memory-caps: a batch that would carry a target past its ren
   await stop(first);
 
   // Neither refused entry was kept: the store holds the two notes alone.
-  const stored =
-    Object.entries(snapshot(join(home, 'character-data', 'mira'))).find(
-      ([path]) => path.endsWith('memory.json'),
-    )?.[1] ?? '';
-
-  expect(stored).toContain(longer);
-  expect(stored).not.toMatch(/"text":\s*"c"/u);
-  expect(stored).not.toContain('d'.repeat(1376));
+  expect(storedMemory(home)).toMatchObject({notes: [long, longer]});
+  expect(JSON.stringify(storedMemory(home))).not.toContain('d'.repeat(1376));
 
   const again = await converse(wireOf(await startDaemon(home)), 'mira');
 
@@ -348,6 +342,7 @@ it('memory.character-state-store: a patch is in events.jsonl and checkpoint.json
   );
 
   const asked = model.requests.length;
+  const unknown = snapshot(state);
   const sayLast = await converse(wireOf(await startDaemon(home)), 'mira');
 
   expect(await sayLast('And now?', 'unknown')).toMatchObject({
@@ -355,6 +350,8 @@ it('memory.character-state-store: a patch is in events.jsonl and checkpoint.json
     reason: 'plugin_before_role_model_call_rejected',
   });
   expect(model.requests).toHaveLength(asked);
+  // Left as it was, byte for byte: a newer runtime may still read it.
+  expect(snapshot(state)).toEqual(unknown);
 });
 
 it('memory.character-state-idempotency: a patch whose identity a crash replayed into the log counts once, at its first occurrence', async () => {
