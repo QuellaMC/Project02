@@ -1,12 +1,15 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {
+  mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import {createServer, type AddressInfo} from 'node:net';
+import {type AddressInfo, createServer, type Socket} from 'node:net';
+import {hostname} from 'node:os';
 import {join} from 'node:path';
 
 import {expect, it, onTestFinished} from 'vitest';
@@ -313,38 +316,95 @@ it('lifecycle.second-serve-waits-takeover: a serve started while the holder stop
 
 it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that does not answer says so and waits, takes the home on the record's address once the lease is freed, exits 1 asking to run it again when its wait runs out, and exits 1 quietly when stopped while waiting", async () => {
   const home = createHome();
-  const holder = await startDaemon(home);
+  const initialized = await startDaemon(home);
 
-  holder.signal('SIGSTOP');
+  initialized.signal('SIGINT');
+  await initialized.exit();
 
-  const silent = `Another daemon holds this home but did not answer at ${holder.origin}/ within 0.5 seconds`;
-  const quick = {PROJECT02_TEST_DURATIONS: 'probe=500'};
-  const patient = serve(['--store', home], quick);
+  // This test is the holder: its own pid on the home's lease, and in the
+  // record a socket of its own that takes every probe and answers none, so
+  // the moment a probe arrives is known.
+  const probes = createServer();
+  const taken = new Set<Socket>();
+  let probed = Promise.withResolvers<number>();
+
+  probes.on('connection', socket => {
+    taken.add(socket);
+    socket.on('error', () => undefined);
+    probed.resolve(performance.now());
+  });
+  await new Promise<void>(resolve => {
+    probes.listen(0, '127.0.0.1', resolve);
+  });
+
+  const {port} = probes.address() as AddressInfo;
+  const lease = join(
+    home,
+    '.locks',
+    `${createHash('sha256').update('daemon').digest('hex')}.lock`,
+  );
+  const freed = () =>
+    new Promise<void>(resolve => {
+      rmSync(lease, {recursive: true, force: true});
+      for (const socket of taken) {
+        socket.destroy();
+      }
+      probes.close(() => {
+        resolve();
+      });
+    });
+
+  onTestFinished(freed);
+  mkdirSync(lease, {recursive: true});
+  writeFileSync(
+    join(lease, 'owner.json'),
+    JSON.stringify({
+      version: 1,
+      resourceKey: 'daemon',
+      nonce: randomUUID(),
+      pid: process.pid,
+      hostname: hostname(),
+      acquiredAt: new Date().toISOString(),
+    }),
+  );
+  writeFileSync(
+    join(home, 'daemon.json'),
+    JSON.stringify({protocolVersion: 7, token: 'kept', port}),
+  );
+
+  const silent = `Another daemon holds this home but did not answer at http://127.0.0.1:${String(port)}/ within 0.5 seconds`;
   const impatient = serve(['--store', home], {
     PROJECT02_TEST_DURATIONS: 'hold=1,probe=500',
   });
+  const arrived = await probed.promise;
+
+  expect(await impatient.exit()).toBe(1);
+  // Half a second from the probe's arrival to the exit, give or take the
+  // process going: the probe is the wait, not the start-up.
+  expect(performance.now() - arrived).toBeGreaterThanOrEqual(400);
+  expect(performance.now() - arrived).toBeLessThan(2_500);
+  expect(impatient.stdout()).toBe('');
+  expect(impatient.stderr()).toBe(
+    `${silent}, still; run this again once it has started or stopped.\n`,
+  );
+
+  const quick = {PROJECT02_TEST_DURATIONS: 'probe=500'};
+  const patient = serve(['--store', home], quick);
   const stopped = serve(['--store', home], quick);
 
   await Promise.all([
     patient.printedOnStderr(`${silent}; waiting for it.`),
     stopped.printedOnStderr(`${silent}; waiting for it.`),
   ]);
-
-  // Its peers are past their probe: a wait of a millisecond is no retrying on.
-  const peersWaiting = performance.now();
-
-  expect(await impatient.exit()).toBe(1);
-  expect(performance.now() - peersWaiting).toBeLessThan(3_000);
-  expect(impatient.stdout()).toBe('');
-  expect(impatient.stderr()).toBe(
-    `${silent}, still; run this again once it has started or stopped.\n`,
-  );
   stopped.signal('SIGINT');
   expect(await stopped.exit()).toBe(1);
   expect(stopped.stdout()).toBe('');
   expect(stopped.stderr()).toBe(`${silent}; waiting for it.\n`);
-  holder.signal('SIGKILL');
-  expect((await patient.address()).url).toBe(holder.url);
+  probed = Promise.withResolvers<number>();
+  await freed();
+  expect((await patient.address()).url).toBe(
+    `http://127.0.0.1:${String(port)}/#token=kept`,
+  );
 });
 
 it('lifecycle.crash-lease-reclaimed: after SIGKILL the record still names the dead run, and the next serve takes the home on the same address', async () => {
@@ -433,6 +493,7 @@ it('lifecycle.test-switch-refusals: serve refuses to start, with exit 1, the rea
 
   for (const {variable, reason, run} of runs) {
     expect(await run.exit(), reason).toBe(1);
+    expect(run.stdout(), reason).toBe('');
     expect(run.stderr(), reason).toContain(variable);
     expect(run.stderr(), reason).toContain(reason);
   }
@@ -946,9 +1007,9 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
   expect(answer.length - headEnd - 4).toBeLessThan(announced);
 });
 
-it('lifecycle.first-run-port: a first run on a home binds a free port the system hands it, names it in its address line and records it', async () => {
-  // Two first runs at once: a port of the daemon's own choosing would be
-  // taken for one of them, whose first line would then say so.
+it('lifecycle.first-run-port: a first run on a home binds a free port of its own, names it in its address line and records it, two homes started together on different ports', async () => {
+  // Two first runs at once: one fixed port would be taken for one of them,
+  // whose first line would then say so.
   const runs = await Promise.all(
     [createHome(), createHome()].map(async home => ({
       home,
