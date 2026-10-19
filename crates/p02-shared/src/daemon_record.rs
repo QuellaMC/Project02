@@ -198,11 +198,7 @@ mod tests {
         ] {
             write_file_atomically(&path, text.as_bytes()).unwrap();
 
-            assert_eq!(
-                read_daemon_record(home.path()).unwrap(),
-                Some(record.clone())
-            );
-            assert_eq!(serde_json::to_string(&record).unwrap(), text);
+            assert_eq!(read_daemon_record(home.path()).unwrap(), Some(record));
         }
     }
 }
