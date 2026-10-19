@@ -631,6 +631,11 @@ it('turns.fatal-turn-restart: a turn whose reply the store cannot append fails o
     status: 'completed',
     messages: [{}, {text: 'Back again.'}],
   });
+  expect(
+    events.frames
+      .filter(frameOf('state_changed', {characterId: 'mira'}))
+      .map(frame => (JSON.parse(frame.data ?? '') as {state: string}).state),
+  ).toEqual(['failed', 'starting', 'ready']);
 });
 
 it('turns.recovery-after-fatal-turn: after a turn whose line could not be appended, failed and uncommitted on its answer and the stream, the character recovers by itself; the next turn needs no reopen, and an open right after joins the recovery', async () => {
