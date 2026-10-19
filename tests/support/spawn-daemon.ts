@@ -1,9 +1,8 @@
 /**
  * A real process, for a suite that must cross the process boundary: the
- * daemon — for the concurrency suite proving one home's leases, the
- * browser suite driving the built page — or a connector beside it.
- * `entry` is a script that runs one and prints what it prints. Nothing
- * here imports vitest, so Playwright's worker can use it too.
+ * daemon — for the concurrency suite proving one home's leases — or a
+ * connector beside it. `entry` is a script that runs one and prints what
+ * it prints.
  */
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 

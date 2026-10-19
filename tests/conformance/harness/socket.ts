@@ -5,9 +5,8 @@
  */
 import {connect} from 'node:net';
 
-import {onTestFinished} from 'vitest';
-
 import type {Address} from './daemon.ts';
+import {onTestFinished} from './runner.ts';
 import {attachEvidence, waitFailure, within} from './wait.ts';
 
 export type Socket = {
