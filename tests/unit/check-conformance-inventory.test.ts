@@ -128,6 +128,7 @@ describe('the conformance inventory check', () => {
         '  a',
         "`('turns.h: a header alone runs no case', () => {});",
         "it('turns.g: two arguments, the second a name', options);",
+        "it('turns.g: skips itself', context => { context.skip(); });",
       ],
     });
 

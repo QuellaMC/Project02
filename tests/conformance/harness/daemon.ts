@@ -171,7 +171,7 @@ function addressOf(line: string): Address {
   return {
     url,
     origin: parsed.origin,
-    token: new URLSearchParams(parsed.hash.slice(1)).get('token') ?? '',
+    token: parsed.hash.slice('#token='.length),
   };
 }
 
