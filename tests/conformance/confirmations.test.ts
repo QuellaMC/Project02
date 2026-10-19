@@ -198,8 +198,22 @@ it('confirmations.single-answer: a confirmation settles by its id alone, and a s
   const turn = say('Talk like a pirate.', 'pirate');
   const {id} = parkedIn(await events.next(frameOf('confirmation_requested')));
 
-  expect(await wire.answer(id, 'approved')).toEqual({status: 'answered'});
-  expect(await wire.answer(id, 'denied')).toEqual({status: 'unknown'});
+  // Both at once: one is answered, the other finds nothing left to answer,
+  // and the one settlement is the answered one's.
+  const statuses = (
+    await Promise.all([wire.answer(id, 'approved'), wire.answer(id, 'denied')])
+  ).map(outcome => (outcome as {readonly status: string}).status);
+
+  expect([...statuses].sort()).toEqual(['answered', 'unknown']);
+  await events.next(
+    frameOf('confirmation_settled', {
+      id,
+      decision: statuses[0] === 'answered' ? 'approved' : 'denied',
+    }),
+  );
+  expect(
+    events.frames.filter(frameOf('confirmation_settled', {id})),
+  ).toHaveLength(1);
   expect(await wire.answer('never-given', 'approved')).toEqual({
     status: 'unknown',
   });

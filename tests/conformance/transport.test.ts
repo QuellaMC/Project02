@@ -4,7 +4,7 @@ import {startDaemon} from './harness/daemon.ts';
 import {bearer, exchange, jsonFrom, type Exchange} from './harness/http.ts';
 import {configJson, createHome} from './harness/home.ts';
 import {reply, startModelServer} from './harness/model-server.ts';
-import {converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
@@ -83,6 +83,16 @@ it('transport.no-store: every /api answer carries Cache-Control: no-store, the r
       path: '/api/health',
       headers: {...bearer(daemon), host: 'evil.example'},
     }),
+    exchange(daemon, {
+      path: '/api/health',
+      headers: {...bearer(daemon), origin: 'http://evil.example'},
+    }),
+    exchange(daemon, {
+      method: 'POST',
+      path: '/api/turns',
+      headers: jsonFrom(daemon),
+      body: 'x'.repeat(64 * 1024 + 1),
+    }),
     exchange(daemon, {path: '/api/events', headers: bearer(daemon)}),
   ]);
 
@@ -94,6 +104,8 @@ it('transport.no-store: every /api answer carries Cache-Control: no-store, the r
     [401, 'no-store'],
     [404, 'no-store'],
     [421, 'no-store'],
+    [403, 'no-store'],
+    [413, 'no-store'],
     [200, 'no-store'],
   ]);
 });
@@ -289,7 +301,12 @@ it('transport.stopping-503: once stopping, every new /api request is 503 unavail
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
   );
-  const say = await converse(wireOf(daemon), 'mira');
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId, userParticipantId} = await conversationOf(
+    wire,
+    'mira',
+  );
   const held = model.hold();
   const turn = say('Still there?', 'in-flight');
 
@@ -302,13 +319,26 @@ it('transport.stopping-503: once stopping, every new /api request is 503 unavail
       {path: '/api/health', headers: bearer(daemon)},
       {path: '/api/events', headers: bearer(daemon)},
       {path: '/api/missing'},
-    ].map(sent => answered(exchange(daemon, sent))),
+      {
+        method: 'POST',
+        path: '/api/turns',
+        headers: jsonFrom(daemon),
+        body: JSON.stringify({
+          conversationId,
+          senderId: userParticipantId,
+          text: 'Too late.',
+          source: 'web',
+          clientMessageId: 'late',
+        }),
+      },
+    ].map(sent => exchange(daemon, sent)),
   );
 
   for (const answer of late) {
-    expect(answer).toEqual({
-      status: 503,
-      body: {error: {code: 'unavailable', message: 'The daemon is stopping.'}},
+    expect(answer.status).toBe(503);
+    expect(answer.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(await answer.whole())).toEqual({
+      error: {code: 'unavailable', message: 'The daemon is stopping.'},
     });
   }
 

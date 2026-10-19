@@ -406,14 +406,17 @@ it('stream.refused-submission-mid-turn: a submission refused on the spot complet
 
 it("stream.sync-rule: the person's line rides the stream as user_message, stamped, once it is on disk, and the reply follows", async () => {
   const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const daemon = await startDaemon(home);
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
   const events = await openEvents(daemon);
-  const held = model.hold();
+
+  model.hold();
+
   const turn = say('Hello there.', 'sync');
   const line = dataOf(
     await events.next(
@@ -439,13 +442,18 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{messageId: line.progress.messageId, text: 'Hello there.'}],
   });
-  held.release(reply('Hello.'));
-  await events.next(
-    frameOf('turn_progress', {
-      progress: {kind: 'visible_reply', text: 'Hello.'},
-    }),
-  );
-  await turn;
+  // And on disk: killed now, with the model still holding the turn, the
+  // daemon leaves the line for the next run to read back.
+  daemon.signal('SIGKILL');
+  await daemon.exit();
+  await expect(turn).rejects.toBeDefined();
+
+  const again = wireOf(await startDaemon(home));
+
+  await converse(again, 'mira');
+  await expect(again.history(conversationId)).resolves.toMatchObject({
+    messages: [{messageId: line.progress.messageId, text: 'Hello there.'}],
+  });
 });
 
 it('stream.drafts: a reply is drafted ahead of its commit under a draft id the commit names, each reply of a round under its own', async () => {
