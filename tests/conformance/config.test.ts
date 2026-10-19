@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import {join, relative} from 'node:path';
+import {setTimeout as sleep} from 'node:timers/promises';
 
 import {expect, it} from 'vitest';
 
@@ -791,6 +792,15 @@ it('config.reload-failure: a reload that cannot assemble leaves the character fa
         diagnostic: expect.stringContaining('contextWindowTokens') as string,
       },
     ],
+  });
+
+  // Tried again by nothing: two seconds on, she is failed as before.
+  const failedSoFar = timeline(events, 'mira');
+
+  await sleep(2_000);
+  expect(timeline(events, 'mira')).toEqual(failedSoFar);
+  expect(await wire.health()).toMatchObject({
+    characters: [{id: 'mira', state: 'failed'}],
   });
   writeFileSync(overlayPath(home, 'mira'), overlay);
   await mirror(true);
