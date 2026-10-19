@@ -755,6 +755,7 @@ it('memory.session-history-read: sessions.search anchors a view with the bookend
     status: 'rejected',
     reason: 'session_history_read_failed',
   });
-  expect(failed?.message).not.toContain(home);
-  expect(failed?.message).not.toContain(outside);
+  // Nowhere in what the model is handed, not only in the message.
+  expect(JSON.stringify(failed)).not.toContain(home);
+  expect(JSON.stringify(failed)).not.toContain(outside);
 });

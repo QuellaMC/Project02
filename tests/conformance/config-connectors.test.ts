@@ -189,6 +189,39 @@ it('config.connector-section-error-isolated: a connector value of the wrong type
     home: withoutValues,
     characters: [{characterId: 'mira', ...withoutValues}],
   });
+
+  // As they were: with the value fixed, every other section stands exactly
+  // as it stood beside the blocked connector.
+  const statuses = async () =>
+    Object.fromEntries(
+      (
+        (await wire.configView({scope: 'global'})) as {
+          readonly sections: readonly (Section & {
+            readonly activation: {readonly status: string};
+          })[];
+        }
+      ).sections.map(section => [
+        `${section.namespace}.${section.id}`,
+        section.activation.status,
+      ]),
+    );
+  const besideTheBlocked = await statuses();
+
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {
+      kind: 'section_field_set',
+      namespace: 'connectors',
+      id: 'telegram',
+      field: 'mirror',
+      value: true,
+    },
+  );
+  expect(await statuses()).toEqual({
+    ...besideTheBlocked,
+    'connectors.telegram': expect.not.stringMatching(/^blocked$/u) as string,
+  });
 });
 
 it("config.connector-config-read: a connector's read hands the home's entry and one for each character switched on, secrets in the clear, each with her own values over the home's, never a botToken from the home's document, each entry by its own switch, and none with values while off", async () => {

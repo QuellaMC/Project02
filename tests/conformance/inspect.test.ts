@@ -9,6 +9,7 @@ import {
   configJson,
   createHome,
   sessionLog,
+  sessionRecords,
   snapshot,
 } from './harness/home.ts';
 import {
@@ -19,16 +20,23 @@ import {
 } from './harness/model-server.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
+type Measure = {readonly chars: number; readonly estimatedTokens: number};
+
 type Round = {
   readonly round: number;
   readonly roleModelEvidence: {
     readonly input: {readonly contextSummary?: string};
     readonly promptSize: {
-      readonly frames: readonly {readonly kind: string}[];
+      readonly frames: readonly (Measure & {
+        readonly kind: string;
+        readonly count: number;
+      })[];
+      readonly tools: Measure;
+      readonly total: Measure;
     };
     readonly output: {
       readonly providerExchange: {
-        readonly renderedMessages: readonly {readonly role: string}[];
+        readonly renderedMessages: readonly unknown[];
         readonly renderedTools: readonly unknown[];
         readonly requestBody: unknown;
       };
@@ -179,17 +187,36 @@ it("inspect.session-report: inspect --session prints the session as JSON: its ev
   ]);
 
   for (const [index, round] of rounds.entries()) {
-    const exchange = round.roleModelEvidence.output.providerExchange;
-
-    expect(exchange.requestBody).toEqual(model.requests[index]?.body);
-    expect(exchange.renderedMessages.map(message => message.role)).toEqual(
-      (
-        model.requests[index]?.body as {
-          readonly messages: readonly {readonly role: string}[];
-        }
-      ).messages.map(message => message.role),
+    const {promptSize, output} = round.roleModelEvidence;
+    const exchange = output.providerExchange;
+    const body = model.requests[index]?.body as {
+      readonly messages: readonly unknown[];
+      readonly tools: readonly unknown[];
+    };
+    const wire = (value: unknown) => JSON.stringify(value).length;
+    const frameChars = promptSize.frames.reduce(
+      (sum, frame) => sum + frame.chars,
+      0,
     );
-    expect(exchange.renderedTools.length).toBeGreaterThan(0);
+    const measures = [...promptSize.frames, promptSize.tools, promptSize.total];
+
+    expect(exchange.requestBody).toEqual(body);
+    expect(exchange.renderedMessages).toEqual(body.messages);
+    expect(exchange.renderedTools).toEqual(body.tools);
+    // The frames are the wire messages, counted and measured as serialized;
+    // the tools weigh their serialization; the whole is their sum; and a
+    // token is four characters, rounded up.
+    expect(promptSize.frames.reduce((sum, frame) => sum + frame.count, 0)).toBe(
+      body.messages.length,
+    );
+    expect(frameChars).toBe(
+      body.messages.map(wire).reduce((sum, chars) => sum + chars, 0),
+    );
+    expect(promptSize.tools.chars).toBe(wire(body.tools));
+    expect(promptSize.total.chars).toBe(frameChars + promptSize.tools.chars);
+    expect(measures.map(measure => measure.estimatedTokens)).toEqual(
+      measures.map(measure => Math.ceil(measure.chars / 4)),
+    );
   }
 });
 
@@ -207,11 +234,22 @@ it('inspect.continued-session-report: inspect --session on a segment that contin
     `${conversationId}.2`,
   ])) as SessionReport;
 
+  const stored = sessionRecords(home, 'mira', 'session_continued')
+    .map(
+      record =>
+        record['sessionContinuation'] as {
+          readonly sessionId: string;
+          readonly summary: string;
+        },
+    )
+    .find(continuation => continuation.sessionId === `${conversationId}.2`);
+
+  expect(stored?.summary).toBeTruthy();
   expect(report).toMatchObject({
     continuation: {
       continuedFrom: {sessionId: `${conversationId}.1`},
       summarizer: {status: 'fallback'},
-      summary: expect.any(String) as string,
+      summary: stored?.summary,
     },
   });
   expect(
