@@ -23,6 +23,33 @@ export type Socket = {
   readonly closed: () => Promise<void>;
 };
 
+/** The text of a request to the daemon as a client writes it, the token added, a JSON body when given. */
+export function requestText(
+  daemon: Address,
+  sent: {
+    readonly method: string;
+    readonly path: string;
+    readonly body?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+  },
+): string {
+  const headers = {
+    host: new URL(daemon.origin).host,
+    authorization: `Bearer ${daemon.token}`,
+    ...(sent.body === undefined
+      ? {}
+      : {
+          'content-type': 'application/json',
+          'content-length': String(Buffer.byteLength(sent.body)),
+        }),
+    ...sent.headers,
+  };
+
+  return `${sent.method} ${sent.path} HTTP/1.1\r\n${Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}\r\n`)
+    .join('')}\r\n${sent.body ?? ''}`;
+}
+
 export async function connectSocket(daemon: Address): Promise<Socket> {
   const {hostname, port} = new URL(daemon.origin);
   const socket = connect(Number(port), hostname);

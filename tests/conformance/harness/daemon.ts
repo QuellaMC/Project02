@@ -1,15 +1,24 @@
-import {spawn} from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
+import {fileURLToPath} from 'node:url';
 
 import {onTestFinished} from 'vitest';
 
 import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 
-const serveCommand = (
-  process.env['PROJECT02_SERVE_CMD'] ?? 'node src/cli/serve/main.ts'
-)
-  .trim()
-  .split(/\s+/u);
+const serveCommand = commandOf(
+  'PROJECT02_SERVE_CMD',
+  'node src/cli/serve/main.ts',
+);
+const inspectCommand = commandOf(
+  'PROJECT02_INSPECT_CMD',
+  'node src/cli/inspect/main.ts',
+);
+/** serve on a pseudo-terminal, through python3's pty module. */
+const terminalCommand = [
+  'python3',
+  fileURLToPath(new URL('terminal.py', import.meta.url)),
+];
 const addressPrefix = 'PROJECT02_GATEWAY=';
 
 /** Where a client reaches the daemon: the printed address, and its parts. */
@@ -19,12 +28,11 @@ export type Address = {
   readonly token: string;
 };
 
-export type Serve = {
+/** A command the test started, met by its output, signals and exit. */
+export type Run = {
   readonly pid: number;
   readonly stdout: () => string;
   readonly stderr: () => string;
-  /** The address it printed, once it has. */
-  readonly address: () => Promise<Address>;
   /** Settles once stdout holds this whole line. */
   readonly printed: (line: string) => Promise<void>;
   /** Settles once stderr holds this whole line. */
@@ -35,7 +43,21 @@ export type Serve = {
   readonly exit: () => Promise<number | null>;
 };
 
+export type Serve = Run & {
+  /** The address it printed, once it has. */
+  readonly address: () => Promise<Address>;
+};
+
 export type Daemon = Serve & Address;
+
+/** serve on a terminal of its own: what it shows, stdout and stderr as one, and what is typed to it. */
+export type Terminal = Serve & {
+  /** Settles once the terminal shows this text, a whole line or not. */
+  readonly shows: (text: string) => Promise<void>;
+  readonly type: (text: string) => void;
+  /** The terminal goes away, as a closed window takes it. */
+  readonly hangUp: () => void;
+};
 
 /** This process's environment without the daemon's test switches: none leaks in from the shell running the suite. */
 const inherited = Object.fromEntries(
@@ -44,35 +66,125 @@ const inherited = Object.fromEntries(
   ),
 );
 
-/**
- * `serve` with these arguments, in a process group of its own so a signal
- * reaches whatever it started. The group is killed when the test ends,
- * and a process that outlasts that fails the test.
- */
+/** `serve` with these arguments. */
 export function serve(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
 ): Serve {
-  const commandLine = [...serveCommand, ...args];
+  return served(start('serve', [...serveCommand, ...args], env));
+}
+
+/** `serve` with these arguments on a pseudo-terminal, as a person runs it. */
+export function terminal(
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Terminal {
+  const started = start(
+    'serve',
+    [...terminalCommand, ...serveCommand, ...args],
+    env,
+    'pipe',
+  );
+
+  return {
+    ...served(started),
+    shows: async text => {
+      await started.awaiting(
+        `serve to show "${text}"`,
+        started.run.stdout,
+        shown => (shown.includes(text) ? text : undefined),
+      );
+    },
+    type: text => {
+      started.child.stdin?.write(text);
+    },
+    hangUp: () => {
+      started.child.stdin?.end();
+    },
+  };
+}
+
+function served({run, awaiting}: Started): Serve {
+  return {
+    ...run,
+    address: async () =>
+      addressOf(
+        await awaiting(
+          'serve to print its address',
+          run.stdout,
+          lineMatching(printed => printed.startsWith(addressPrefix)),
+        ),
+      ),
+  };
+}
+
+/** The first whole line of the output that matches. */
+function lineMatching(
+  match: (line: string) => boolean,
+): (output: string) => string | undefined {
+  return output => output.split('\n').slice(0, -1).find(match);
+}
+
+type Started = {
+  readonly run: Run;
+  readonly child: ChildProcess;
+  /** Settles on what `found` finds in the output, under an idle deadline. */
+  readonly awaiting: (
+    what: string,
+    output: () => string,
+    found: (output: string) => string | undefined,
+  ) => Promise<string>;
+};
+
+/** `inspect` with these arguments: a report on a home, then its exit. */
+export function inspect(
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Run {
+  return start('inspect', [...inspectCommand, ...args], env).run;
+}
+
+/** `serve --init` on the home, once it printed its address. */
+export async function startDaemon(
+  home: string,
+  env: Readonly<Record<string, string>> = {},
+): Promise<Daemon> {
+  const run = serve(['--store', home, '--init'], env);
+
+  return {...run, ...(await run.address())};
+}
+
+/**
+ * The command, in a process group of its own so a signal reaches whatever
+ * it started. The group is killed when the test ends, and a process that
+ * outlasts that fails the test. A terminal's lines end in CRLF, read as LF.
+ */
+function start(
+  name: string,
+  commandLine: readonly string[],
+  env: Readonly<Record<string, string>>,
+  stdin: 'ignore' | 'pipe' = 'ignore',
+): Started {
   const [command = '', ...commandArgs] = commandLine;
   const child = spawn(command, commandArgs, {
     env: {...inherited, ...env},
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [stdin, 'pipe', 'pipe'],
   });
-  const {pid} = child;
+  const {pid, stdout: out, stderr: err} = child;
 
   // A command that cannot start has no pid, below; its error event only
   // repeats that.
   child.once('error', () => undefined);
 
-  if (pid === undefined) {
+  if (pid === undefined || out === null || err === null) {
     throw new Error(`Could not start ${commandLine.join(' ')}.`);
   }
 
   let stdout = '';
   let stderr = '';
   let exitCode: number | null | undefined;
+  const shown = (): string => stdout.replaceAll('\r\n', '\n');
   const checks = new Set<() => void>();
   const changed = (): void => {
     for (const check of [...checks]) {
@@ -88,11 +200,11 @@ export function serve(
     });
   });
 
-  child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+  out.setEncoding('utf8').on('data', (chunk: string) => {
     stdout += chunk;
     changed();
   });
-  child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+  err.setEncoding('utf8').on('data', (chunk: string) => {
     stderr += chunk;
     changed();
   });
@@ -109,17 +221,13 @@ export function serve(
   });
 
   /** An idle deadline: a daemon starting under load is slow, not silent. */
-  const line = (
-    what: string,
-    output: () => string,
-    match: (line: string) => boolean,
-  ) => {
+  const awaiting: Started['awaiting'] = (what, output, find) => {
     const failed = waitFailure(what);
 
     return new Promise<string>((resolve, reject) => {
       let timer: NodeJS.Timeout | undefined;
       const check = (): void => {
-        const found = output().split('\n').slice(0, -1).find(match);
+        const found = find(output());
 
         clearTimeout(timer);
 
@@ -128,7 +236,7 @@ export function serve(
           resolve(found);
         } else if (exitCode !== undefined) {
           checks.delete(check);
-          reject(failed.because('serve exited first'));
+          reject(failed.because(`${name} exited first`));
         } else {
           timer = setTimeout(() => {
             checks.delete(check);
@@ -143,46 +251,37 @@ export function serve(
   };
 
   return {
-    pid,
-    stdout: () => stdout,
-    stderr: () => stderr,
-    address: async () =>
-      addressOf(
-        await line(
-          'serve to print its address',
-          () => stdout,
-          printed => printed.startsWith(addressPrefix),
-        ),
-      ),
-    printed: async text => {
-      await line(
-        `serve to print "${text}"`,
-        () => stdout,
-        printed => printed === text,
-      );
+    run: {
+      pid,
+      stdout: shown,
+      stderr: () => stderr,
+      printed: async text => {
+        await awaiting(
+          `${name} to print "${text}"`,
+          shown,
+          lineMatching(printed => printed === text),
+        );
+      },
+      printedOnStderr: async text => {
+        await awaiting(
+          `${name} to print "${text}" on stderr`,
+          () => stderr,
+          lineMatching(printed => printed === text),
+        );
+      },
+      signal: signalName => {
+        process.kill(-pid, signalName);
+      },
+      exit: () => within(`${name} to exit`, closed),
     },
-    printedOnStderr: async text => {
-      await line(
-        `serve to print "${text}" on stderr`,
-        () => stderr,
-        printed => printed === text,
-      );
-    },
-    signal: name => {
-      process.kill(-pid, name);
-    },
-    exit: () => within('serve to exit', closed),
+    child,
+    awaiting,
   };
 }
 
-/** `serve --init` on the home, once it printed its address. */
-export async function startDaemon(
-  home: string,
-  env: Readonly<Record<string, string>> = {},
-): Promise<Daemon> {
-  const run = serve(['--store', home, '--init'], env);
-
-  return {...run, ...(await run.address())};
+/** A command line from the environment, split on whitespace, or its default. */
+function commandOf(variable: string, fallback: string): readonly string[] {
+  return (process.env[variable] ?? fallback).trim().split(/\s+/u);
 }
 
 function addressOf(line: string): Address {
