@@ -929,15 +929,19 @@ it('lifecycle.second-signal-exits: a second stop signal during a stop ends the p
   const daemon = await startDaemon(home);
   const say = await converse(wireOf(daemon), 'mira');
   const held = model.hold();
-  // Never released: a stop that waited for this turn would never end.
-  const turn = say('Still there?', 'held');
+  // Never released: a stop that waited for this turn would never end. Its
+  // outcome is taken as it comes: the connection dies before the test looks.
+  const turn = say('Still there?', 'held').then(
+    () => 'answered',
+    () => 'cut off',
+  );
 
   await held.arrived();
   daemon.signal('SIGINT');
   await daemon.printed('Stopping; finishing what is in flight.');
   daemon.signal('SIGTERM');
   await daemon.exit();
-  await expect(turn).rejects.toThrow();
+  expect(await turn).toBe('cut off');
   expect(record(home)).toMatchObject({running: {pid: daemon.pid}});
   const again = await startDaemon(home);
 
