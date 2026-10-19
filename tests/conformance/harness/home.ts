@@ -2,6 +2,8 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -77,4 +79,53 @@ export function characterJson(
     meta: {version: '1.0.0'},
     ...descriptor,
   });
+}
+
+/** The records of one of a character's sessions, as its log holds them. */
+export function sessionLog(
+  home: string,
+  characterId: string,
+  sessionId: string,
+): Record<string, unknown>[] {
+  return readFileSync(
+    join(
+      home,
+      'character-data',
+      characterId,
+      'sessions',
+      sessionId,
+      'raw-events.jsonl',
+    ),
+    'utf8',
+  )
+    .trimEnd()
+    .split('\n')
+    .map(line => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** Every entry under a directory, a file with its text and a directory as null, so a later look shows whether anything changed. */
+export function snapshot(directory: string): Record<string, string | null> {
+  return Object.fromEntries(
+    readdirSync(directory, {recursive: true, withFileTypes: true}).map(
+      entry => {
+        const path = join(entry.parentPath, entry.name);
+
+        return [path, entry.isDirectory() ? null : readFileSync(path, 'utf8')];
+      },
+    ),
+  );
+}
+
+/** The records of this kind that a character's sessions logged, segment by segment. */
+export function sessionRecords(
+  home: string,
+  characterId: string,
+  kind: string,
+): Record<string, unknown>[] {
+  const sessions = join(home, 'character-data', characterId, 'sessions');
+
+  return readdirSync(sessions)
+    .sort((left, right) => left.localeCompare(right, 'en', {numeric: true}))
+    .flatMap(session => sessionLog(home, characterId, session))
+    .filter(record => record['kind'] === kind);
 }

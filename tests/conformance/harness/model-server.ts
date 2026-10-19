@@ -20,6 +20,16 @@ export type ModelRequest = {
   readonly body: unknown;
 };
 
+export type ChatMessage = {
+  readonly role: string;
+  readonly content: string | null;
+  readonly tool_calls?: readonly {
+    readonly id: string;
+    readonly function: {readonly name: string; readonly arguments: string};
+  }[];
+  readonly tool_call_id?: string;
+};
+
 /** How the server answers one request. */
 export type Answer =
   /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut or left hanging. */
@@ -36,10 +46,16 @@ export type Held = {
   readonly release: (answer: Answer) => void;
 };
 
-/** A streamed answer the test writes piece by piece, so a draft grows at the test's pace. */
+/**
+ * A streamed answer the test writes piece by piece, so a draft grows at the
+ * test's pace. The headers go out with the first piece, and an empty piece
+ * sends them alone.
+ */
 export type Driven = {
   readonly arrived: () => Promise<ModelRequest>;
   readonly write: (chunks: readonly unknown[]) => void;
+  /** These bytes as they are: a frame, or a character, may end in the next piece. */
+  readonly send: (bytes: Uint8Array) => void;
   /** Ends the answer with `[DONE]`. */
   readonly end: () => void;
 };
@@ -151,15 +167,15 @@ export async function startModelServer(): Promise<ModelServer> {
     stream: () => {
       const arrival = Promise.withResolvers<ModelRequest>();
       let response: ServerResponse | undefined;
-      let pending: unknown[] = [];
+      let pending: (string | Uint8Array)[] = [];
       let ended = false;
       const flush = (): void => {
         if (response === undefined) {
           return;
         }
 
-        for (const chunk of pending) {
-          response.write(dataLine(chunk));
+        for (const piece of pending) {
+          response.write(piece);
         }
 
         pending = [];
@@ -186,7 +202,11 @@ export async function startModelServer(): Promise<ModelServer> {
             arrival.promise,
           ),
         write: chunks => {
-          pending.push(...chunks);
+          pending.push(eventStream(chunks));
+          flush();
+        },
+        send: bytes => {
+          pending.push(bytes);
           flush();
         },
         end: () => {
@@ -196,6 +216,23 @@ export async function startModelServer(): Promise<ModelServer> {
       };
     },
   };
+}
+
+/** The messages a request showed the model, in order. */
+export function messagesOf(
+  request: ModelRequest | undefined,
+): readonly ChatMessage[] {
+  return (
+    (request?.body as {readonly messages?: readonly ChatMessage[]} | undefined)
+      ?.messages ?? []
+  );
+}
+
+/** What a request told the model each tool call it made answered, in order. */
+export function toolResults(request: ModelRequest | undefined): unknown[] {
+  return messagesOf(request)
+    .filter(message => message.role === 'tool')
+    .map(message => JSON.parse(message.content ?? 'null') as unknown);
 }
 
 function give(
@@ -221,10 +258,7 @@ function give(
     response.writeHead(200, {'content-type': 'text/event-stream'});
     // Out now, so a stream that then hangs or is cut had opened.
     response.flushHeaders();
-
-    for (const chunk of answer.chunks) {
-      response.write(dataLine(chunk));
-    }
+    response.write(eventStream(answer.chunks));
 
     // Ended, not destroyed: the chunks written so far still go out first.
     if (answer.end === 'cut') {
@@ -235,8 +269,14 @@ function give(
   }
 }
 
-function dataLine(chunk: unknown): string {
-  return `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}\n\n`;
+/** Each chunk a `data:` line: an object as its JSON, a string as written. */
+export function eventStream(chunks: readonly unknown[]): string {
+  return chunks
+    .map(
+      chunk =>
+        `data: ${typeof chunk === 'string' ? chunk : JSON.stringify(chunk)}\n\n`,
+    )
+    .join('');
 }
 
 /** Plain content, one chunk per piece, cut at the given offsets. */
@@ -311,6 +351,40 @@ export function usage(tokens: {
 /** The words as a whole reply: plain content, finished. */
 export function reply(words: string): Answer {
   return {chunks: [...content(words), finish('stop')]};
+}
+
+/** A whole completion, as a `stream: false` request is answered. */
+export function completion(words: string, finishReason = 'stop'): Answer {
+  return {
+    completion: {
+      choices: [
+        {
+          index: 0,
+          finish_reason: finishReason,
+          message: {role: 'assistant', content: words},
+        },
+      ],
+    },
+  };
+}
+
+/** The model calling these tools, each with its input, and nothing else in that round. */
+export function calling(
+  ...calls: readonly (readonly [name: string, input: object])[]
+): Answer {
+  return {
+    chunks: [
+      ...calls.flatMap(([name, input], index) =>
+        toolCall({
+          index,
+          id: `call_${String(index)}`,
+          name,
+          arguments: JSON.stringify(input),
+        }),
+      ),
+      finish('tool_calls'),
+    ],
+  };
 }
 
 function pieces(whole: string, cuts: readonly number[]): string[] {

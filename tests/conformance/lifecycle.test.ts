@@ -14,7 +14,7 @@ import {join} from 'node:path';
 
 import {expect, it, onTestFinished} from 'vitest';
 
-import {serve, startDaemon} from './harness/daemon.ts';
+import {serve, startDaemon, terminal, type Terminal} from './harness/daemon.ts';
 import {
   frameOf,
   openEvents,
@@ -23,13 +23,12 @@ import {
 } from './harness/events.ts';
 import {chmod, characterJson, configJson, createHome} from './harness/home.ts';
 import {
-  finish,
+  calling,
   reply,
   startModelServer,
-  toolCall,
-  type Answer,
+  toolResults,
 } from './harness/model-server.ts';
-import {connectSocket} from './harness/socket.ts';
+import {connectSocket, requestText} from './harness/socket.ts';
 import {within} from './harness/wait.ts';
 import {converse, wireOf} from './harness/wire.ts';
 
@@ -107,21 +106,6 @@ async function occupiedPort(): Promise<number> {
   });
 
   return (server.address() as AddressInfo).port;
-}
-
-/** The model calling one tool, and nothing else in that round. */
-function calling(name: string, input: object): Answer {
-  return {
-    chunks: [
-      ...toolCall({
-        index: 0,
-        id: `call_${name}`,
-        name,
-        arguments: JSON.stringify(input),
-      }),
-      finish('tool_calls'),
-    ],
-  };
 }
 
 it('lifecycle.address-line: serve prints its address as its first stdout line once it answers there', async () => {
@@ -872,28 +856,28 @@ it('lifecycle.stop-cancels-parked-confirmation: a stop with a confirmation parke
   const say = await converse(wire, 'mira');
   const events = await openEvents(daemon);
 
-  model.answer(calling('runtime_plugin_config', {pluginId: 'demo-config'}));
+  model.answer(calling(['runtime_plugin_config', {pluginId: 'demo-config'}]));
 
   const inspected = model.hold();
 
   model.answer(reply('Never mind.'));
 
   const turn = say('Be warmer.', 'warmer');
-  const {messages} = (await inspected.arrived()).body as {
-    messages: {content: string}[];
-  };
-  const {output} = JSON.parse(messages.at(-1)?.content ?? '') as {
-    output: {fingerprint: string};
+  const {output} = toolResults(await inspected.arrived()).at(-1) as {
+    readonly output: {readonly fingerprint: string};
   };
 
   inspected.release(
-    calling('runtime_plugin_config_update', {
-      pluginId: 'demo-config',
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: output.fingerprint,
-    }),
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: output.fingerprint,
+      },
+    ]),
   );
   await events.next(frameOf('confirmation_requested'));
 
@@ -931,7 +915,15 @@ it('lifecycle.stop-not-held-by-stalled-client: a stop does not wait on a client 
   const stalled = await connectSocket(daemon);
 
   stalled.write(
-    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: 100\r\nExpect: 100-continue\r\n\r\n`,
+    requestText(daemon, {
+      method: 'POST',
+      path: '/api/turns',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': '100',
+        expect: '100-continue',
+      },
+    }),
   );
   await stalled.holds('HTTP/1.1 100 Continue\r\n\r\n');
   stalled.write('{"conversationId":');
@@ -977,9 +969,7 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
   const reader = await connectSocket(daemon);
 
   reader.pause();
-  reader.write(
-    `POST /api/turns HTTP/1.1\r\nHost: ${new URL(daemon.origin).host}\r\nAuthorization: Bearer ${daemon.token}\r\nContent-Type: application/json\r\nContent-Length: ${String(Buffer.byteLength(body))}\r\n\r\n${body}`,
-  );
+  reader.write(requestText(daemon, {method: 'POST', path: '/api/turns', body}));
   await events.next(frameOf('turn_completed', {clientMessageId: 'everything'}));
 
   // The monotonic clock: the wall clock is adjusted under WSL2.
@@ -1062,4 +1052,51 @@ it('lifecycle.second-signal-exits: a second stop signal during a stop ends the p
   await expect(wireOf(again).health()).resolves.toMatchObject({
     homeRoot: home,
   });
+});
+
+it('lifecycle.store-consent-prompt: on a terminal serve asks before making a store: yes makes it and runs on to the address, and no, a terminal that goes away or a stop while asking exits 1 and writes nothing', async () => {
+  const question = (home: string) =>
+    `No Project02 store at "${home}". Create one there? [y/N]`;
+  const accepted = createHome();
+  const yes = terminal(['--store', accepted]);
+
+  // Asked before anything is made.
+  await yes.shows(question(accepted));
+  expect(readdirSync(accepted)).toEqual([]);
+  yes.type('y\n');
+  await expect(wireOf(await yes.address()).health()).resolves.toMatchObject({
+    homeRoot: accepted,
+  });
+  expect(yes.stdout()).toContain(question(accepted));
+
+  const refusals: readonly (readonly [string, (run: Terminal) => void])[] = [
+    [
+      'no',
+      run => {
+        run.type('n\n');
+      },
+    ],
+    [
+      'a terminal that goes away',
+      run => {
+        run.hangUp();
+      },
+    ],
+    [
+      'a stop while asking',
+      run => {
+        run.signal('SIGINT');
+      },
+    ],
+  ];
+
+  for (const [how, refuse] of refusals) {
+    const home = createHome();
+    const run = terminal(['--store', home]);
+
+    await run.shows(question(home));
+    refuse(run);
+    expect(await run.exit(), how).toBe(1);
+    expect(readdirSync(home), how).toEqual([]);
+  }
 });

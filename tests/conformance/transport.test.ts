@@ -296,6 +296,40 @@ it('transport.unknown-route-404: an unknown /api route, /api itself included, is
   }
 });
 
+it("transport.page-files: the built page is served at / and under /assets without a token and uncached, HEAD answers empty, and a path climbing out of the page's root or naming nothing it holds meets the daemon's own 404", async () => {
+  const daemon = await startDaemon(createHome());
+  const page = await exchange(daemon, {path: '/'});
+  const html = await page.whole();
+  const script = /<script[^>]* src="(\/assets\/[^"]+)"/u.exec(html)?.[1];
+
+  expect(page.status).toBe(200);
+  expect(page.headers['content-type']).toContain('text/html');
+  expect(page.headers['cache-control']).toBe('no-store');
+  expect(script).toBeDefined();
+
+  const asset = await exchange(daemon, {path: script ?? ''});
+
+  expect(asset.status).toBe(200);
+  expect(asset.headers['content-type']).toContain('javascript');
+  expect(asset.headers['cache-control']).toBe('no-store');
+
+  for (const path of ['/', script ?? '']) {
+    const head = await exchange(daemon, {method: 'HEAD', path});
+
+    expect(head.status, path).toBe(200);
+    expect(head.headers['cache-control'], path).toBe('no-store');
+    expect(await head.whole(), path).toBe('');
+  }
+
+  const climbing = await exchange(daemon, {path: '/%2e%2e/package.json'});
+
+  expect(climbing.status).toBe(404);
+  expect(await climbing.whole()).not.toContain('"scripts"');
+  expect(await answered(exchange(daemon, {path: '/missing.js'}))).toMatchObject(
+    refused(404, 'not_found'),
+  );
+});
+
 it('transport.stopping-503: once stopping, every new /api request is 503 unavailable, "The daemon is stopping.", while the accepted turn drains', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
