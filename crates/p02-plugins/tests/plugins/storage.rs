@@ -229,7 +229,14 @@ fn at_version(
               opener stands in for it"
 )]
 fn connect(path: &Path) -> rusqlite::Result<Connection> {
-    Connection::open(path)
+    let connection = Connection::open(path)?;
+
+    // Opened as the store crate will open every plugin database: a
+    // write-ahead log synced at checkpoints, not at each commit, which a
+    // crash of the process survives and a slow disk does not stall.
+    connection.pragma_update(None, "journal_mode", "WAL")?;
+    connection.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(connection)
 }
 
 /// One character's session history as the store crate serves it: a
