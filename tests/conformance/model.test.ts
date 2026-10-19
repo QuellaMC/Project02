@@ -251,6 +251,8 @@ it("model.provider-tool-names: the runtime's management tools and character_stat
   ).tools.map(tool => tool.function.name);
 
   expect(offered).toEqual(expect.arrayContaining(names));
+  // Provider-safe names only: none of the runtime's dotted ones beside them.
+  expect(offered.filter(name => name.includes('.'))).toEqual([]);
   expect(ids).toHaveLength(names.length);
 
   for (const request of model.requests.slice(1)) {
