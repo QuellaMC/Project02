@@ -221,7 +221,14 @@ it("plugins.config-tools-read: runtime_plugin_config answers a plugin's metadata
           effectiveSource: 'global',
           effective: {value: 'Yours.'},
         },
-        {name: 'operatorNote', agentMutable: false},
+        {
+          name: 'operatorNote',
+          agentMutable: false,
+          authored: {configured: false},
+          effective: expect.objectContaining({
+            source: expect.any(String) as string,
+          }) as unknown,
+        },
         {
           name: 'apiKey',
           sensitive: true,
@@ -603,7 +610,7 @@ it('plugins.memory-provider-selection: a default memory provider naming one that
   }
 });
 
-it("plugins.activation-fails-closed: a config.json that does not load, or an enabled plugin's invalid setting, leaves no plugin but runtime.plugin active and fails the character, the error in health", async () => {
+it("plugins.activation-fails-closed: a config.json that does not load fails the character with the error in health, and an enabled plugin's invalid setting leaves no plugin but runtime.plugin active and fails the character", async () => {
   const unloadable = wireOf(
     await startDaemon(createHome({'config.json': '{not json'})),
   );

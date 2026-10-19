@@ -6,6 +6,7 @@ import {
   characterJson,
   configJson,
   createHome,
+  sessionLog,
   sessionRecords,
 } from './harness/home.ts';
 import {
@@ -435,9 +436,10 @@ it('model.provider-retries: a 503, a 429 or a dropped connection is tried again 
 
 it('model.provider-errors: finish_reason length, a stream ending without a finish reason or cut before one, a chunk that is no JSON and an error carried in the stream each fail the round provider_error, the reply drafted so far withdrawn and kept nowhere, the key redacted', async () => {
   const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const daemon = await startDaemon(home);
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
@@ -490,6 +492,10 @@ it('model.provider-errors: finish_reason length, a stream ending without a finis
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: cases.map(id => ({role: 'user', text: `Try ${id}.`})),
   });
+  // Nowhere on disk either: the key is redacted in every record the turns left.
+  expect(
+    JSON.stringify(sessionLog(home, 'mira', `${conversationId}.1`)),
+  ).not.toContain(model.settings.nvidiaApiKey);
 });
 
 it('model.provider-timeout: provider silence is bounded: a provider that never answers, or stops between chunks, fails the round provider_error at the bound, while an answer whose headers and chunks each come within it completes however long it takes in all', async () => {
