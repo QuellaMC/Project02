@@ -296,7 +296,11 @@ function main() {
     }
     rows.set(row.id, row);
 
-    if (row.statement === '') {
+    if (row.id === '') {
+      failures.push(
+        `${INVENTORY_FILE}: a row has no id: "${record.join(',')}".`,
+      );
+    } else if (row.statement === '') {
       failures.push(`${INVENTORY_FILE}: ${row.id} has no statement.`);
     }
 
@@ -356,6 +360,10 @@ function main() {
         );
       } else if (parked) {
         parkedRows.add(id);
+      } else if (tested.has(id)) {
+        failures.push(
+          `${file}:${line}: a second test of ${id}; one behavior, one test.`,
+        );
       } else {
         tested.add(id);
       }
