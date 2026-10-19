@@ -49,29 +49,32 @@ it('model.reply-drafts: a visible_reply is drafted as its arguments stream, esca
   );
   const say = await converse(wireOf(daemon), 'mira');
   const events = await openEvents(daemon);
+  const delta = frameOf('turn_progress', {progress: {kind: 'reply_delta'}});
 
-  model.answer(
-    {chunks: [...content('Plain words.', 6), finish('stop')]},
-    {
-      chunks: [
-        ...content('A note to myself.'),
-        // Two cuts fall inside an escaped quote, and `<thin` could open a
-        // tag until the call is whole.
-        ...visibleReply('Say "hi"\nthen <thin', 10, 14, 18, 24),
-        finish('tool_calls'),
-      ],
-    },
-  );
+  model.answer({chunks: [...content('Plain words.', 6), finish('stop')]});
   expect(await say('One.', 'plain')).toMatchObject({
     messages: [{}, {text: 'Plain words.'}],
   });
-  expect(await say('Two.', 'drafted')).toMatchObject({
+
+  // Two cuts fall inside an escaped quote, and `<thin` could open a tag
+  // until the call is whole.
+  const call = visibleReply('Say "hi"\nthen <thin', 10, 14, 18, 24);
+  const streaming = model.stream();
+  const turn = say('Two.', 'drafted');
+
+  await streaming.arrived();
+  streaming.write([...content('A note to myself.'), ...call.slice(0, 2)]);
+  // Drafted while the rest of the call is still held.
+  await events.next(delta);
+  streaming.write([...call.slice(2), finish('tool_calls')]);
+  streaming.end();
+  expect(await turn).toMatchObject({
     messages: [{}, {text: 'Say "hi"\nthen <thin'}],
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'drafted'}));
   expect(
     events.frames
-      .filter(frameOf('turn_progress', {progress: {kind: 'reply_delta'}}))
+      .filter(delta)
       .map(
         frame =>
           (JSON.parse(frame.data ?? '') as {progress: {text: string}}).progress
