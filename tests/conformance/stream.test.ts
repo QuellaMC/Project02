@@ -150,29 +150,54 @@ it("stream.turn-frames-order: a turn reaches the stream as its line's user_messa
   expect(text('reply_delta')).toBe(text('visible_reply'));
 });
 
-it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the tail holds is resumed with exactly the frames after it, then the live ones under the same numbers, and with none after the newest', async () => {
+it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the tail holds is resumed with exactly the frames after it, byte for byte, then the live ones under the same numbers, and with none after the newest', async () => {
   const daemon = await startDaemon(createHome(), fixedReplies);
   const say = await converse(wireOf(daemon), 'mira');
-  const first = await openEvents(daemon);
+  const stream = (lastEventId?: string) =>
+    exchange(daemon, {
+      path: '/api/events',
+      headers: {
+        ...bearer(daemon),
+        ...(lastEventId === undefined ? {} : {'last-event-id': lastEventId}),
+      },
+    });
+  /** The whole frames of a stream's text so far, each with its blank line. */
+  const framesOf = (text: string) =>
+    text
+      .slice(0, text.lastIndexOf('\n\n') + 2)
+      .split(/(?<=\n\n)/u)
+      .filter(frame => frame !== '');
+  const idOf = (frame: string) => /^id: (.*)$/mu.exec(frame)?.[1];
+  const first = await stream();
 
   await say('One.', 'one');
-  await first.next(frameOf('turn_completed', {clientMessageId: 'one'}));
-
-  const seen = first.frames.length;
-  const [, line] = first.frames;
-  const back = await openEvents(daemon, line?.id);
-  const newest = await openEvents(daemon, first.lastEventId());
-
   await say('Two.', 'two');
+  // The frames of the first turn are whole once the second turn's end came.
+  await first.received('"clientMessageId":"two"');
 
-  for (const events of [first, back, newest]) {
-    await events.next(frameOf('turn_completed', {clientMessageId: 'two'}));
-  }
+  const frames = framesOf(first.body());
+  const cursor = frames.findIndex(frame =>
+    frame.includes('"clientMessageId":"one"'),
+  );
+  const resumed = 'event: resumed\ndata: {}\n\n';
+  const back = await stream(idOf(frames[cursor] ?? ''));
 
-  const resumed = {event: 'resumed', data: '{}'};
+  await back.received(frames.at(-1) ?? '');
+  expect(
+    back
+      .body()
+      .slice(0, resumed.length + frames.slice(cursor + 1).join('').length),
+  ).toBe(resumed + frames.slice(cursor + 1).join(''));
 
-  expect(back.frames).toEqual([resumed, ...first.frames.slice(2)]);
-  expect(newest.frames).toEqual([resumed, ...first.frames.slice(seen)]);
+  const newest = await stream(idOf(frames.at(-1) ?? ''));
+
+  await say('Three.', 'three');
+  await first.received('"clientMessageId":"three"');
+  await newest.received('"clientMessageId":"three"');
+  expect(newest.body().startsWith(resumed)).toBe(true);
+  expect(framesOf(newest.body().slice(resumed.length)).map(idOf)).toEqual(
+    framesOf(first.body()).slice(frames.length).map(idOf),
+  );
 });
 
 it('stream.tail-bound: a Last-Event-ID more than the 1 MiB tail behind, past the newest, from another run or malformed opens with ready, while one about 600 KiB behind is still resumed', async () => {
@@ -489,7 +514,19 @@ it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the bud
 
   model.answer(
     refused('Let me look.'),
-    refused('Let me look again.'),
+    {
+      chunks: [
+        ...visibleReply('Let me look again.'),
+        ...toolCall({
+          index: 2,
+          id: 'call_second_reply',
+          name: 'visible_reply',
+          arguments: JSON.stringify({text: 'And again.'}),
+        }),
+        ...search('tea'),
+        finish('tool_calls'),
+      ],
+    },
     // Rounds 3 to 99 decide nothing.
     ...undecided(97),
     // A sound round past the budget: refused, its search never run.
@@ -506,16 +543,47 @@ it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the bud
     reason: 'tool_rounds_exhausted',
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'tea'}));
-  expect(
-    events.frames
-      .filter(frameOf('turn_progress'))
-      .map(frame => (dataOf(frame) as {readonly progress: object}).progress),
-  ).toMatchObject([
-    {kind: 'user_message'},
+
+  const progress = events.frames.filter(frameOf('turn_progress')).map(
+    frame =>
+      (
+        dataOf(frame) as {
+          readonly progress: {
+            readonly kind: string;
+            readonly draftId?: string;
+            readonly text?: string;
+          };
+        }
+      ).progress,
+  );
+  const ofRound = (round: string) =>
+    progress.filter(step => step.draftId?.startsWith(`${round}.`) === true);
+
+  expect(progress[0]).toMatchObject({kind: 'user_message'});
+  expect(ofRound('1')).toMatchObject([
     {kind: 'reply_delta', draftId: '1.0', text: 'Let me look.'},
     {kind: 'reply_withdrawn', draftId: '1.0'},
+  ]);
+  // Both drafts of the second round are withdrawn, in whichever order, before anything of a later round.
+  expect(ofRound('2').slice(0, 2)).toMatchObject([
     {kind: 'reply_delta', draftId: '2.0', text: 'Let me look again.'},
-    {kind: 'reply_withdrawn', draftId: '2.0'},
+    {kind: 'reply_delta', draftId: '2.1', text: 'And again.'},
+  ]);
+  expect(
+    ofRound('2')
+      .slice(2)
+      .map(step => [step.kind, step.draftId])
+      .sort(),
+  ).toEqual([
+    ['reply_withdrawn', '2.0'],
+    ['reply_withdrawn', '2.1'],
+  ]);
+  expect(
+    progress.findLastIndex(step => step.draftId?.startsWith('2.') === true),
+  ).toBeLessThan(
+    progress.findIndex(step => step.draftId?.startsWith('100.') === true),
+  );
+  expect(ofRound('100')).toMatchObject([
     {kind: 'reply_delta', draftId: '100.0', text: 'One last look.'},
     {kind: 'reply_withdrawn', draftId: '100.0'},
   ]);
@@ -565,6 +633,7 @@ it('stream.turn-completed: turn_completed carries the turn identity, its status,
 
 it('stream.connector-presence: a stream opened with ?connector= holds its connector present from before its first frame until its last stream ends, health_changed marking only those crossings; an unknown connector is a 400 naming the known ones', async () => {
   const daemon = await startDaemon(createHome(), fixedReplies);
+  const say = await converse(wireOf(daemon), 'mira');
   const watching = await openEvents(daemon);
   const telegram = (connected: boolean) => ({
     health: {connectors: [{id: 'telegram', connected}]},
@@ -603,6 +672,12 @@ it('stream.connector-presence: a stream opened with ?connector= holds its connec
   const second = await connector();
 
   first.hangUp();
+  await first.ended();
+  // A turn the daemon finishes after the close reached it: the close is in.
+  await say('Still here?', 'after-the-first-close');
+  expect(
+    watching.frames.filter(frameOf('health_changed', telegram(false))),
+  ).toEqual([]);
 
   const meanwhile = await openEvents(daemon);
 

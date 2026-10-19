@@ -263,6 +263,9 @@ it("pairing.not-across-restart: pairing requests live as long as the daemon's ru
   const events = await openEvents(next);
 
   await events.next(frameOf('ready', {pairings: []}));
+  expect(
+    await wireOf(next).pairingAnswer(before.request.code, 'approved'),
+  ).toEqual({status: 'unknown'});
 
   const again = (await wireOf(next).pairingRequest('telegram', alice)) as Asked;
 
