@@ -114,6 +114,16 @@ function titled(call) {
   return !MODIFIERS_WITH_ARGUMENTS.has(calleeNames(call.expression)?.at(-1));
 }
 
+/** Whether the test has no body to run: Vitest takes such a test as todo. */
+function bodiless(call) {
+  return !call.arguments.some(
+    argument =>
+      ts.isArrowFunction(argument) ||
+      ts.isFunctionExpression(argument) ||
+      ts.isIdentifier(argument),
+  );
+}
+
 /** Whether the test's options park it: skip, todo or fails set to anything but false. */
 function parkedByOptions(options) {
   return (
@@ -184,6 +194,7 @@ function scan(file, source) {
           parked:
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
             parkedByOptions(options) ||
+            bodiless(node) ||
             runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
