@@ -163,7 +163,11 @@ function takesContext(call, modifiers) {
     return false;
   }
 
-  return body.parameters.length > (modifiers.includes('for') ? 1 : 0);
+  // A rest parameter takes whatever follows the case, the context included.
+  return (
+    body.parameters.length > (modifiers.includes('for') ? 1 : 0) ||
+    body.parameters.some(parameter => parameter.dotDotDotToken !== undefined)
+  );
 }
 
 /** Whether the test has no body to run: Vitest takes such a test as todo. */

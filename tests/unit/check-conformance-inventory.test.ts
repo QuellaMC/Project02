@@ -61,6 +61,7 @@ describe('the conformance inventory check', () => {
         "test.skip('turns.d: skipped for now', () => {});",
         "it.each([[1]])('turns.h: a case value is no context, %s', value => { String(value); });",
         "it.for([[1]])('turns.h: the case, then the context', ([value], {skip}) => { String(value); skip(); });",
+        "it.for([[1]])('turns.h: the context under a rest parameter', (...args) => { String(args); });",
       ],
       'tests/conformance/other.test.ts': [
         "import {it} from './helpers.ts';",
@@ -70,7 +71,7 @@ describe('the conformance inventory check', () => {
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 8 test(s) name rows of ' +
+      'conformance-inventory: 9 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
         'area: lifecycle 2/1, turns 1/1.\n',
     );
