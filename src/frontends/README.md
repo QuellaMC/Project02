@@ -153,6 +153,14 @@ The person is told in the chat they used, the operator on stderr, and
 stdout says what runs, from `Telegram connector: connected to …` to
 `Telegram is off, or no token is set; waiting for a change.`
 
+A test harness starts it with two variables, read once at start and
+neither of them a setting: `PROJECT02_TEST_TELEGRAM_API`, the http or
+https address of a Bot API to reach in Telegram's place, and
+`PROJECT02_TEST_DURATIONS` with the one key the connector reads, `edit`,
+the shortest wait between two edits of a draft. Any other key — `serve`'s
+among them — or an address that is not http or https refuses the start,
+on stderr with exit code 1, as `serve` refuses a key it does not read.
+
 `main.ts` is the entry; `connector.ts` finds and follows the daemon,
 keeps the reading rule, and holds the bot table; `bot.ts` runs one
 token's bot; `bot-api.ts` is the Bot API as outcomes, never a throw, and
@@ -165,4 +173,4 @@ gateway on a loopback socket and the fake Bot API in
 `tests/support/telegram-api.ts`, which answers as Telegram does — a
 second poll on one token ends the first with a 409 — and the process
 test (`tests/e2e/telegram-process.test.ts`) runs a real `serve` and the
-connector beside it.
+connector beside it, pointed at the fake by `PROJECT02_TEST_TELEGRAM_API`.

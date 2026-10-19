@@ -84,6 +84,46 @@ describe('NVIDIA role-model provider', () => {
     );
   });
 
+  it("sends a turn to NVIDIA's cloud when no base URL names another server", async () => {
+    let requestedUrl = '';
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'provider-secret',
+      fetchClient: url => {
+        requestedUrl = url;
+
+        return Promise.resolve(successfulReplyResponse('hello'));
+      },
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+
+    await adapter.invoke(inputEnvelope, testInvocation(inputEnvelope));
+
+    expect(requestedUrl).toBe(
+      'https://integrate.api.nvidia.com/v1/chat/completions',
+    );
+  });
+
+  it("sends a turn to a server of one's own without a key, at its chat completions", async () => {
+    let requested:
+      {url: string; headers: Readonly<Record<string, string>>} | undefined;
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      baseUrl: 'http://127.0.0.1:1234/v1/',
+      fetchClient: (url, request) => {
+        requested = {url, headers: request.headers};
+
+        return Promise.resolve(successfulReplyResponse('hello'));
+      },
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+
+    await adapter.invoke(inputEnvelope, testInvocation(inputEnvelope));
+
+    expect(requested).toEqual({
+      url: 'http://127.0.0.1:1234/v1/chat/completions',
+      headers: {'content-type': 'application/json'},
+    });
+  });
+
   it('retries transient transport failures and succeeds within the deadline', async () => {
     let fetchCalls = 0;
     const fetchClient: NvidiaFetchClient = () => {

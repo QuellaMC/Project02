@@ -15,9 +15,9 @@ import type {ApiEnv} from './env.ts';
 
 export type EventStreamsOptions = {
   /** Keeps an idle connection alive through client body timeouts; tests shorten it. */
-  readonly heartbeatMs?: number;
+  readonly heartbeatMs?: number | undefined;
   /** How long a client may leave one frame untaken before it is treated as gone; tests shorten it. */
-  readonly graceMs?: number;
+  readonly graceMs?: number | undefined;
   /** How much of the log is kept for a client that returns; tests shorten it. */
   readonly replayBytes?: number;
 };
@@ -41,8 +41,8 @@ export type EventStreams = {
 
 export type FrameQueue = {
   push(frame: string): void;
-  /** Settles once every frame pushed so far is written: true, or false for a client dropped on the way. */
-  drain(): Promise<boolean>;
+  /** Settles once every frame pushed so far is written, or the client was dropped on the way. */
+  drain(): Promise<void>;
 };
 
 /**
@@ -133,7 +133,7 @@ export function createFrameQueue(options: {
 
       chain = chain.then(() => (dropped ? undefined : writeWithinGrace(frame)));
     },
-    drain: () => chain.then(() => !dropped),
+    drain: () => chain.then(() => undefined),
   });
 }
 
@@ -265,12 +265,12 @@ export function createEventStreams(
     }
 
     const heartbeat = createHeartbeatClock();
-    const close = async (): Promise<void> => {
+    const {promise: ended, resolve: end}: PromiseWithResolvers<void> =
+      Promise.withResolvers();
+    const close = (): Promise<void> => {
       heartbeat.stop();
 
-      if (await queue.drain()) {
-        await stream.close();
-      }
+      return ended;
     };
     const queue = createFrameQueue({
       write: frame => stream.write(frame),
@@ -331,10 +331,15 @@ export function createEventStreams(
       while (await heartbeat.tick(heartbeatMs)) {
         queue.push(heartbeatFrame);
       }
+
+      // Hono ends the stream once this returns, so what is queued for it
+      // is written first.
+      await queue.drain();
     } finally {
       attached.delete(queue);
       closers.delete(close);
       leave?.();
+      end();
     }
   }
 }

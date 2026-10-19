@@ -73,7 +73,7 @@ test.describe('a fresh home', () => {
 
     await provider
       .getByRole('combobox', {name: 'Role model provider'})
-      .selectOption('local');
+      .selectOption('nvidia');
     await provider.getByRole('button', {name: 'Save'}).click();
     await expect(provider.getByRole('button', {name: 'Saved'})).toBeVisible();
     await expect(provider).toContainText('the home');

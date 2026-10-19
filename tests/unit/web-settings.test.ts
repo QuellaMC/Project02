@@ -90,9 +90,9 @@ function view(fingerprint = 'f1'): OkView {
     diagnostics: [],
     project02: [
       defaulted('userDisplayName', 'You'),
-      defaulted('roleModelProvider', 'local', {
+      field('roleModelProvider', {
         valueType: 'enum',
-        allowedValues: ['local', 'nvidia'],
+        allowedValues: ['nvidia'],
       }),
       field('nvidiaApiKey', {secret: true, valueType: 'secret'}),
       field('contextWindowTokens', {valueType: 'number'}),
@@ -593,7 +593,7 @@ describe('web settings', () => {
     expect(connectorPresenceSentence(undefined, 'telegram')).toBeUndefined();
   });
 
-  it('judges the first run by the home provider alone: unauthored, with only its default in effect', () => {
+  it('judges the first run by the home provider alone: none is chosen', () => {
     const fresh = view();
 
     expect(setupNeeded(fresh)).toBe(true);
@@ -604,9 +604,9 @@ describe('web settings', () => {
         host.name === 'roleModelProvider'
           ? {
               ...host,
-              authored: {configured: true, value: 'local'},
+              authored: {configured: true, value: 'nvidia'},
               effectiveSource: 'global',
-              effective: {...host.effective, source: 'config', value: 'local'},
+              effective: {...host.effective, source: 'config', value: 'nvidia'},
             }
           : host,
       ),

@@ -993,8 +993,8 @@ describe('plugin manifest config scope policy', () => {
     expect(character['roleModelProvider']).toMatchObject({
       authored: {configured: false},
       effectiveSource: 'default',
-      effective: {source: 'default', resolved: true, value: 'local'},
-      allowedValues: ['local', 'nvidia'],
+      effective: {source: 'missing', resolved: true},
+      allowedValues: ['nvidia'],
     });
     expect(global['userDisplayName']).toMatchObject({
       authored: {configured: true, value: 'Global Name'},

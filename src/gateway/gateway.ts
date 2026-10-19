@@ -59,6 +59,12 @@ export type CreateGatewayOptions = Project02HomeOptions & {
     characterId: string,
     confirmations: RuntimePluginToolConfirmationHandler,
   ) => RuntimePluginHost;
+  /** How long a tool confirmation waits for its answer in every character's plugin host; tests shorten it. */
+  readonly toolConfirmationTimeoutMs?: number | undefined;
+  /** How long a pairing request waits for its answer; tests shorten it. */
+  readonly pairingTtlMs?: number | undefined;
+  /** How long every character's configured provider may stay silent; tests shorten it. */
+  readonly roleModelRequestTimeoutMs?: number | undefined;
 };
 
 type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
@@ -129,6 +135,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       readConnectorAllowlist(loadHome(), connectorId, field),
     applyChange,
     emit,
+    ttlMs: options.pairingTtlMs,
   });
 
   return Object.freeze({
@@ -541,6 +548,8 @@ function createRuntimeFactory(seams: {
     const runtime = createLocalCharacterRuntime({
       loadHome: seams.loadHome,
       characterId,
+      toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
+      roleModelRequestTimeoutMs: options.roleModelRequestTimeoutMs,
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),

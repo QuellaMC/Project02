@@ -67,7 +67,6 @@ function serve(
     }),
     pluginHost: createRuntimePluginHost({plugins: []}),
     signal: abort.signal,
-    port: 0,
   });
 
   return {

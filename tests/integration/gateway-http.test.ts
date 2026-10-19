@@ -469,7 +469,7 @@ describe('gateway over HTTP', () => {
 
     await ensureInitializedProject02Store({homeRoot});
 
-    // The local adapter speaks its reply in word-sized pieces, all in one
+    // An agent's adapter speaks its reply in word-sized pieces, all in one
     // breath: three hundred frames queued at once, each one frame on the
     // wire, which a reading client takes in order — the stream judges a
     // client by the grace it gives a frame, never by what a burst left

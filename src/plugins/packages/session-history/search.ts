@@ -18,6 +18,7 @@ import type {
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {boundedText} from '../../api/bounded-text.ts';
+import {codePointBoundary} from '../../../shared/text-cut.ts';
 
 export const sessionHistorySessionIdPattern =
   '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$';
@@ -195,11 +196,14 @@ export function centeredSnippet(
   }
 
   const coreLength = maxLength - 6;
-  const start = Math.min(
-    Math.max(0, matchStart - Math.floor(coreLength / 2)),
-    Math.max(0, text.length - coreLength),
+  const start = codePointBoundary(
+    text,
+    Math.min(
+      Math.max(0, matchStart - Math.floor(coreLength / 2)),
+      Math.max(0, text.length - coreLength),
+    ),
   );
-  const end = start + coreLength;
+  const end = codePointBoundary(text, start + coreLength);
 
   return `${start > 0 ? '...' : ''}${text.slice(start, end)}${
     end < text.length ? '...' : ''

@@ -25,10 +25,14 @@ import {
   type GatewayServer,
 } from '../../gateway/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
-import type {RoleModelAdapter} from '../../role-model/index.ts';
+import {
+  createDeterministicTestRoleModelAdapter,
+  type RoleModelAdapter,
+} from '../../role-model/index.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {pathExistsSync} from '../../shared/file-system.ts';
 import {isMainModule, stopSignal} from '../../shared/main-module.ts';
+import {readTestDurations} from '../../shared/test-durations.ts';
 import {
   matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
@@ -39,8 +43,6 @@ import {
   isCliTerminalError,
 } from '../shared/terminal-errors.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
-
-export const defaultGatewayPort = 4310;
 
 /** How long one question to the daemon that holds the home may take. */
 const probeMs = 5_000;
@@ -61,13 +63,14 @@ export type ServeCliOptions = {
   /** Test and dev injection, handed through to the gateway. */
   readonly pluginHost?: RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
-  /**
-   * The port a first run on this home asks for; a later run binds the
-   * home's own. Tests inject 0, a free port.
-   */
-  readonly port?: number;
   /** How long a second run waits for a holder that does not answer; tests shorten it. */
-  readonly holdWaitMs?: number;
+  readonly holdWaitMs?: number | undefined;
+  /** The gateway's waits and its socket's, handed through: each owner keeps its default when absent. */
+  readonly toolConfirmationTimeoutMs?: number | undefined;
+  readonly pairingTtlMs?: number | undefined;
+  readonly roleModelRequestTimeoutMs?: number | undefined;
+  readonly heartbeatMs?: number | undefined;
+  readonly graceMs?: number | undefined;
 };
 
 type ServeCliFlags = {
@@ -98,6 +101,9 @@ export async function runServeCliFromArgs(
       ...(options.pluginHost === undefined
         ? {}
         : {createPluginHost: () => options.pluginHost as RuntimePluginHost}),
+      toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
+      pairingTtlMs: options.pairingTtlMs,
+      roleModelRequestTimeoutMs: options.roleModelRequestTimeoutMs,
     });
     const homeRoot = gateway.health().homeRoot;
     const claimed = await claimDaemonHome({homeRoot});
@@ -178,10 +184,12 @@ async function serve(
     server = await createGatewayServer({
       gateway,
       token: claim.token,
-      port: claim.port ?? options.port ?? defaultGatewayPort,
+      port: claim.port ?? 0,
       // Served only once built: the file handler warns about a root that is
       // not there, and a daemon run straight from `node` must not.
       ...(pathExistsSync(join(uiRoot, 'index.html')) ? {uiRoot} : {}),
+      heartbeatMs: options.heartbeatMs,
+      graceMs: options.graceMs,
     });
 
     const moved = claim.publish(server.port);
@@ -212,8 +220,9 @@ async function serve(
 
     return await released(claim, options.stderr, stopProblems === 0 ? 0 : 1);
   } catch (error: unknown) {
-    // The socket never opened, or a bug escaped: leave nothing running,
-    // and let the home go — a lease that would not go is said too.
+    // The socket never opened, the record could not be written, or a bug
+    // escaped: leave nothing running, and let the home go — a lease that
+    // would not go is said too.
     await (server === undefined ? gateway.stop() : server.close());
     await released(claim, options.stderr, 1);
 
@@ -434,13 +443,50 @@ function aborted(signal: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * A test's switch, never a setting: every character answers through the
+ * deterministic test provider, whatever its config chooses.
+ */
+const testProviderEnvVarName = 'PROJECT02_TEST_PROVIDER';
+
 if (isMainModule(import.meta.url)) {
-  // A second signal ends the process before the release; the lease left
-  // behind is the next start's to reclaim.
-  process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    signal: stopSignal(),
-  });
+  const testDurations = readTestDurations(process.env, [
+    'confirmation',
+    'pairing',
+    'silence',
+    'heartbeat',
+    'grace',
+    'hold',
+  ]);
+  const testProvider = process.env[testProviderEnvVarName];
+
+  if ('refusal' in testDurations) {
+    process.stderr.write(`Error: ${testDurations.refusal}\n`);
+    process.exitCode = 1;
+  } else if (testProvider !== undefined && testProvider !== 'deterministic') {
+    process.stderr.write(
+      `Error: ${testProviderEnvVarName} must be "deterministic" when it is set.\n`,
+    );
+    process.exitCode = 1;
+  } else {
+    const {durations} = testDurations;
+
+    // A second signal ends the process before the release; the lease left
+    // behind is the next start's to reclaim.
+    process.exitCode = await runServeCliFromArgs(process.argv.slice(2), {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      signal: stopSignal(),
+      ...(testProvider === undefined
+        ? {}
+        : {roleModelAdapter: createDeterministicTestRoleModelAdapter()}),
+      toolConfirmationTimeoutMs: durations.get('confirmation'),
+      pairingTtlMs: durations.get('pairing'),
+      roleModelRequestTimeoutMs: durations.get('silence'),
+      heartbeatMs: durations.get('heartbeat'),
+      graceMs: durations.get('grace'),
+      holdWaitMs: durations.get('hold'),
+    });
+  }
 }

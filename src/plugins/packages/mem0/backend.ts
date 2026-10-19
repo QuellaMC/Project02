@@ -11,6 +11,7 @@ import {
   firstUnacceptableComponent,
 } from '../../../shared/real-path.ts';
 
+import {endpointUnder} from '../../../shared/base-url.ts';
 import {isRecord} from '../../api/validation-primitives.ts';
 import type {RuntimePluginSourceReference} from '../../api/types.ts';
 
@@ -151,7 +152,7 @@ export function createMem0PlatformBackend(options: {
   readonly baseUrl?: string;
   readonly fetchFn?: Mem0FetchFunction;
 }): Mem0Backend {
-  const baseUrl = trimTrailingSlash(options.baseUrl ?? mem0PlatformBaseUrl);
+  const baseUrl = options.baseUrl ?? mem0PlatformBaseUrl;
   const headers = Object.freeze({
     Authorization: `Token ${options.apiKey}`,
     'Content-Type': 'application/json',
@@ -164,7 +165,7 @@ export function createMem0PlatformBackend(options: {
       const response = await mem0Request({
         fetchFn,
         operation: 'search',
-        url: `${baseUrl}/v3/memories/search/`,
+        url: endpointUnder(baseUrl, 'v3/memories/search/'),
         method: 'POST',
         requiresDocument: true,
         headers,
@@ -185,7 +186,7 @@ export function createMem0PlatformBackend(options: {
       const response = await mem0Request({
         fetchFn,
         operation: 'add',
-        url: `${baseUrl}/v3/memories/add/`,
+        url: endpointUnder(baseUrl, 'v3/memories/add/'),
         method: 'POST',
         requiresDocument: true,
         headers,
@@ -206,7 +207,7 @@ export function createMem0PlatformBackend(options: {
       await mem0Request({
         fetchFn,
         operation: 'ping',
-        url: `${baseUrl}/v1/ping/`,
+        url: endpointUnder(baseUrl, 'v1/ping/'),
         method: 'GET',
         headers,
         signal: pingOptions.signal,
@@ -222,7 +223,7 @@ export function createMem0ServerBackend(options: {
   readonly apiKey?: string;
   readonly fetchFn?: Mem0FetchFunction;
 }): Mem0Backend {
-  const baseUrl = trimTrailingSlash(options.baseUrl);
+  const baseUrl = options.baseUrl;
   const headers = Object.freeze({
     ...serverAuthHeaders(options.apiKey),
     'Content-Type': 'application/json',
@@ -235,7 +236,7 @@ export function createMem0ServerBackend(options: {
       const response = await mem0Request({
         fetchFn,
         operation: 'search',
-        url: `${baseUrl}/search`,
+        url: endpointUnder(baseUrl, 'search'),
         method: 'POST',
         requiresDocument: true,
         headers,
@@ -254,7 +255,7 @@ export function createMem0ServerBackend(options: {
       const response = await mem0Request({
         fetchFn,
         operation: 'add',
-        url: `${baseUrl}/memories`,
+        url: endpointUnder(baseUrl, 'memories'),
         method: 'POST',
         requiresDocument: true,
         headers,
@@ -275,7 +276,7 @@ export function createMem0ServerBackend(options: {
       await mem0Request({
         fetchFn,
         operation: 'ping',
-        url: `${baseUrl}/`,
+        url: endpointUnder(baseUrl, ''),
         method: 'GET',
         headers,
         signal: pingOptions.signal,
@@ -502,10 +503,6 @@ function firstString(...values: readonly unknown[]): string | undefined {
   }
 
   return undefined;
-}
-
-function trimTrailingSlash(url: string): string {
-  return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
 /**

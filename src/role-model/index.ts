@@ -127,9 +127,9 @@ export {
 } from './prompt/tool-wire.ts';
 export {createDeterministicCharacterAgent} from './providers/deterministic.ts';
 export {
-  createDeterministicLocalRoleModelAdapter,
+  createDeterministicTestRoleModelAdapter,
   createRoleModelAdapterFromCharacterAgent,
-} from './providers/local.ts';
+} from './providers/test-provider.ts';
 export {
   createNvidiaRoleModelProviderAdapter,
   type CreateNvidiaRoleModelProviderAdapterOptions,
