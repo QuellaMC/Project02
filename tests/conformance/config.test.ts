@@ -403,7 +403,10 @@ it('config.change-refusals: a change is refused invalid for a value of the wrong
       operation: {kind: 'set', path: 'project02.enabled', value: true},
     }),
   ).toMatchObject({status: 'refused', reason: 'unknown_character'});
-  expect(existsSync(join(home, 'character-data', 'mira'))).toBe(false);
+
+  const data = join(home, 'character-data');
+
+  expect(existsSync(data) ? readdirSync(data) : []).toEqual([]);
 });
 
 it('config.write-failed: a change to a home that cannot be written answers failed, and the fingerprint stays what it was', async () => {
@@ -1213,7 +1216,7 @@ it('config.user-display-name-bounds: the name a person goes by is used trimmed a
     ).toMatchObject({status: 'refused', reason: 'invalid'});
   }
 
-  for (const value of ['x'.repeat(129), 'Two\nlines']) {
+  for (const value of ['x'.repeat(129), 'Two\nlines', '   ']) {
     writeFileSync(
       join(home, 'config.json'),
       configJson({project02: {userDisplayName: value}}),

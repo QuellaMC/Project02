@@ -1054,6 +1054,9 @@ it('lifecycle.store-consent-prompt: on a terminal serve asks before making a sto
   const accepted = createHome();
   const yes = terminal(['--store', accepted]);
 
+  // Asked before anything is made.
+  await yes.shows(question(accepted));
+  expect(readdirSync(accepted)).toEqual([]);
   yes.type('y\n');
   await expect(wireOf(await yes.address()).health()).resolves.toMatchObject({
     homeRoot: accepted,
