@@ -5,11 +5,14 @@ import {onTestFinished} from 'vitest';
 
 import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 
-const serveCommand = (
-  process.env['PROJECT02_SERVE_CMD'] ?? 'node src/cli/serve/main.ts'
-)
-  .trim()
-  .split(/\s+/u);
+const serveCommand = commandOf(
+  'PROJECT02_SERVE_CMD',
+  'node src/cli/serve/main.ts',
+);
+const inspectCommand = commandOf(
+  'PROJECT02_INSPECT_CMD',
+  'node src/cli/inspect/main.ts',
+);
 const addressPrefix = 'PROJECT02_GATEWAY=';
 
 /** Where a client reaches the daemon: the printed address, and its parts. */
@@ -19,12 +22,11 @@ export type Address = {
   readonly token: string;
 };
 
-export type Serve = {
+/** A command the test started, met by its output, signals and exit. */
+export type Run = {
   readonly pid: number;
   readonly stdout: () => string;
   readonly stderr: () => string;
-  /** The address it printed, once it has. */
-  readonly address: () => Promise<Address>;
   /** Settles once stdout holds this whole line. */
   readonly printed: (line: string) => Promise<void>;
   /** Settles once stderr holds this whole line. */
@@ -33,6 +35,11 @@ export type Serve = {
   readonly signal: (name: NodeJS.Signals) => void;
   /** Its exit code; null when a signal ended it. */
   readonly exit: () => Promise<number | null>;
+};
+
+export type Serve = Run & {
+  /** The address it printed, once it has. */
+  readonly address: () => Promise<Address>;
 };
 
 export type Daemon = Serve & Address;
@@ -44,16 +51,60 @@ const inherited = Object.fromEntries(
   ),
 );
 
-/**
- * `serve` with these arguments, in a process group of its own so a signal
- * reaches whatever it started. The group is killed when the test ends,
- * and a process that outlasts that fails the test.
- */
+/** `serve` with these arguments. */
 export function serve(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
 ): Serve {
-  const commandLine = [...serveCommand, ...args];
+  const {run, line} = start('serve', [...serveCommand, ...args], env);
+
+  return {
+    ...run,
+    address: async () =>
+      addressOf(
+        await line('serve to print its address', run.stdout, printed =>
+          printed.startsWith(addressPrefix),
+        ),
+      ),
+  };
+}
+
+/** `inspect` with these arguments: a report on a home, then its exit. */
+export function inspect(
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {},
+): Run {
+  return start('inspect', [...inspectCommand, ...args], env).run;
+}
+
+/** `serve --init` on the home, once it printed its address. */
+export async function startDaemon(
+  home: string,
+  env: Readonly<Record<string, string>> = {},
+): Promise<Daemon> {
+  const run = serve(['--store', home, '--init'], env);
+
+  return {...run, ...(await run.address())};
+}
+
+/**
+ * The command, in a process group of its own so a signal reaches whatever
+ * it started. The group is killed when the test ends, and a process that
+ * outlasts that fails the test.
+ */
+function start(
+  name: string,
+  commandLine: readonly string[],
+  env: Readonly<Record<string, string>>,
+): {
+  readonly run: Run;
+  /** Settles on the first whole line of the output that matches. */
+  readonly line: (
+    what: string,
+    output: () => string,
+    match: (line: string) => boolean,
+  ) => Promise<string>;
+} {
   const [command = '', ...commandArgs] = commandLine;
   const child = spawn(command, commandArgs, {
     env: {...inherited, ...env},
@@ -128,7 +179,7 @@ export function serve(
           resolve(found);
         } else if (exitCode !== undefined) {
           checks.delete(check);
-          reject(failed.because('serve exited first'));
+          reject(failed.because(`${name} exited first`));
         } else {
           timer = setTimeout(() => {
             checks.delete(check);
@@ -143,46 +194,36 @@ export function serve(
   };
 
   return {
-    pid,
-    stdout: () => stdout,
-    stderr: () => stderr,
-    address: async () =>
-      addressOf(
+    run: {
+      pid,
+      stdout: () => stdout,
+      stderr: () => stderr,
+      printed: async text => {
         await line(
-          'serve to print its address',
+          `${name} to print "${text}"`,
           () => stdout,
-          printed => printed.startsWith(addressPrefix),
-        ),
-      ),
-    printed: async text => {
-      await line(
-        `serve to print "${text}"`,
-        () => stdout,
-        printed => printed === text,
-      );
+          printed => printed === text,
+        );
+      },
+      printedOnStderr: async text => {
+        await line(
+          `${name} to print "${text}" on stderr`,
+          () => stderr,
+          printed => printed === text,
+        );
+      },
+      signal: signalName => {
+        process.kill(-pid, signalName);
+      },
+      exit: () => within(`${name} to exit`, closed),
     },
-    printedOnStderr: async text => {
-      await line(
-        `serve to print "${text}" on stderr`,
-        () => stderr,
-        printed => printed === text,
-      );
-    },
-    signal: name => {
-      process.kill(-pid, name);
-    },
-    exit: () => within('serve to exit', closed),
+    line,
   };
 }
 
-/** `serve --init` on the home, once it printed its address. */
-export async function startDaemon(
-  home: string,
-  env: Readonly<Record<string, string>> = {},
-): Promise<Daemon> {
-  const run = serve(['--store', home, '--init'], env);
-
-  return {...run, ...(await run.address())};
+/** A command line from the environment, split on whitespace, or its default. */
+function commandOf(variable: string, fallback: string): readonly string[] {
+  return (process.env[variable] ?? fallback).trim().split(/\s+/u);
 }
 
 function addressOf(line: string): Address {

@@ -145,23 +145,32 @@ export async function conversationOf(
 }
 
 /**
- * One change saved as a settings page saves it: against the fingerprint
- * the target's view hands out now. A change not applied is a failure that
- * names the outcome.
+ * One change sent as a settings page sends it: against the fingerprint the
+ * target's view hands out now. Answers the outcome as the daemon sent it.
  */
+export async function changeConfig(
+  wire: Wire,
+  target: Parameters<Wire['configView']>[0],
+  operation: object,
+): Promise<unknown> {
+  const view = (await wire.configView(target)) as {
+    readonly fingerprint?: string;
+  };
+
+  return wire.configChange({
+    target,
+    expectedFingerprint: view.fingerprint,
+    operation,
+  });
+}
+
+/** One change as a page sends it; a change not applied is a failure that names the outcome. */
 export async function saveConfig(
   wire: Wire,
   target: Parameters<Wire['configView']>[0],
   operation: object,
 ): Promise<void> {
-  const view = (await wire.configView(target)) as {
-    readonly fingerprint?: string;
-  };
-  const outcome = await wire.configChange({
-    target,
-    expectedFingerprint: view.fingerprint,
-    operation,
-  });
+  const outcome = await changeConfig(wire, target, operation);
 
   if ((outcome as {readonly status?: string}).status !== 'applied') {
     throw failure(
