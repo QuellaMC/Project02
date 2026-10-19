@@ -3,8 +3,9 @@
  * connector's environment points it here, and it answers the methods the
  * connector calls by Telegram's envelope and its server's rules — a long
  * poll waits for updates until a newer poll on its token ends it with a
- * 409, an edit that changes nothing is a 400 — keeping every call, the
- * refused ones too, with the moment it came.
+ * 409, a message's id is unique only within its chat, an edit that
+ * changes nothing is a 400 — keeping every call, the refused ones too,
+ * with the moment it came.
  */
 import {
   createServer,
@@ -22,7 +23,7 @@ export type TelegramCall = {
   readonly body: Readonly<Record<string, unknown>>;
   /** When it reached the server, by the monotonic clock. */
   readonly at: number;
-  /** The id Telegram gave the message the call sent, a bot's numbered from one; none for a call that sent none. */
+  /** The id Telegram gave the message the call sent, numbered from one in its chat; none for a call that sent none. */
   readonly messageId: number | undefined;
 };
 
@@ -87,7 +88,8 @@ type Bot = {
   updates: TelegramUpdate[];
   /** Each sent message's text and keyboard, by chat and message id. */
   readonly contents: Map<string, string>;
-  nextMessageId: number;
+  /** The id of the last message sent in each chat. */
+  readonly lastMessageIds: Map<string, number>;
   webhook: boolean;
   throttled:
     | {readonly retryAfterSeconds: number; readonly method: string | undefined}
@@ -193,10 +195,14 @@ export async function startTelegramServer(
         bot.webhook = false;
         envelope(response, 200, {ok: true, result: true});
         break;
-      case 'sendMessage':
-        call.messageId = bot.nextMessageId++;
+      case 'sendMessage': {
+        const chat = String(fields['chat_id']);
+
+        call.messageId = (bot.lastMessageIds.get(chat) ?? 0) + 1;
+        bot.lastMessageIds.set(chat, call.messageId);
         answerMessage(bot, fields, call.messageId, response);
         break;
+      }
       case 'editMessageText':
         answerMessage(bot, fields, fields['message_id'], response);
         break;
@@ -230,7 +236,7 @@ export async function startTelegramServer(
       username,
       updates: [],
       contents: new Map(),
-      nextMessageId: 1,
+      lastMessageIds: new Map(),
       webhook: false,
       throttled: undefined,
       endWaitingPoll: undefined,
