@@ -237,12 +237,14 @@ it('stream.shutdown-ends-streams: a stop ends each stream only once every frame 
   await daemon.printed('Stopping; finishing what is in flight.');
   await keepingUp.ended();
 
+  const asked = performance.now();
   const late = await exchange(daemon, {
     path: '/api/events',
     headers: bearer(daemon),
   });
 
   expect(late.status).toBe(503);
+  expect(performance.now() - asked).toBeLessThan(2_000);
   lagging.resume();
   await lagging.ended();
   expect(idsOf(lagging.body())).toEqual(

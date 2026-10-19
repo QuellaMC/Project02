@@ -311,16 +311,24 @@ it('turns.client-message-id-join: a repeat of a submission, while it runs or aft
   expect(model.requests).toHaveLength(3);
 });
 
-it('turns.client-message-id-conflict: the same client message id with another line is refused', async () => {
-  const wire = wireOf(await startDaemon(createHome(), fixedReplies));
+it('turns.client-message-id-conflict: the same client message id with another line is refused, while the first runs and after it', async () => {
+  const model = await startModelServer();
+  const wire = wireOf(
+    await startDaemon(
+      createHome({'config.json': configJson({project02: model.settings})}),
+    ),
+  );
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
+  const held = model.hold();
+  const first = say('Hello.', 'mine');
+  const refused = {status: 'refused', reason: 'invalid_message'};
 
-  await say('Hello.', 'mine');
-  expect(await say('Something else.', 'mine')).toMatchObject({
-    status: 'refused',
-    reason: 'invalid_message',
-  });
+  await held.arrived();
+  expect(await say('Something else.', 'mine')).toMatchObject(refused);
+  held.release(reply('Hi.'));
+  expect(await first).toMatchObject({status: 'completed'});
+  expect(await say('Something else.', 'mine')).toMatchObject(refused);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{text: 'Hello.'}, {}],
   });
@@ -950,14 +958,17 @@ it("turns.speaker-name-persisted: committed messages keep the speaker id and nam
   });
 });
 
-it('turns.user-name-per-session: a thread keeps the names it began with, even in its next segment, when the user is renamed in config and the character in its package; a thread begun after takes the new user name', async () => {
-  const zeta = join('characters', 'zeta', 'project02.character.json');
+it('turns.user-name-per-session: a thread keeps the names it began with, even in its next segment, when the user is renamed in config and the character in its package; a thread begun after takes the new names', async () => {
+  const packageOf = (id: string) =>
+    join('characters', id, 'project02.character.json');
+  const zeta = packageOf('zeta');
   const home = createHome({
     'config.json': configJson({
       project02: {userDisplayName: 'Mike', contextWindowTokens: 1},
     }),
     characters: {
       zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+      nova: {'project02.character.json': characterJson('nova', 'Nova')},
     },
   });
   const earlier = await startDaemon(home, fixedReplies);
@@ -974,6 +985,8 @@ it('turns.user-name-per-session: a thread keeps the names it began with, even in
     }),
   );
   writeFileSync(join(home, zeta), characterJson('zeta', 'Zed'));
+  // Renamed before her first thread: it begins under the new name.
+  writeFileSync(join(home, packageOf('nova')), characterJson('nova', 'Nora'));
 
   const wire = wireOf(await startDaemon(home, fixedReplies));
   const named = (user: string, character: string) => [
@@ -995,6 +1008,12 @@ it('turns.user-name-per-session: a thread keeps the names it began with, even in
   });
   expect(await sayToMira('Hello, Mira.', 'mira')).toMatchObject({
     messages: named('Michael', 'Mira'),
+  });
+
+  const sayToNova = await converse(wire, 'nova');
+
+  expect(await sayToNova('Hello, Nova.', 'nova')).toMatchObject({
+    messages: named('Michael', 'Nora'),
   });
 });
 

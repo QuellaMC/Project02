@@ -319,23 +319,25 @@ it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that doe
   const silent = `Another daemon holds this home but did not answer at ${holder.origin}/ within 0.5 seconds`;
   const quick = {PROJECT02_TEST_DURATIONS: 'probe=500'};
   const patient = serve(['--store', home], quick);
-  const spawned = performance.now();
   const impatient = serve(['--store', home], {
     PROJECT02_TEST_DURATIONS: 'hold=1,probe=500',
   });
   const stopped = serve(['--store', home], quick);
 
-  expect(await impatient.exit()).toBe(1);
-  // One probe of half a second and a wait of a millisecond: no retrying on.
-  expect(performance.now() - spawned).toBeLessThan(6_000);
-  expect(impatient.stdout()).toBe('');
-  expect(impatient.stderr()).toBe(
-    `${silent}, still; run this again once it has started or stopped.\n`,
-  );
   await Promise.all([
     patient.printedOnStderr(`${silent}; waiting for it.`),
     stopped.printedOnStderr(`${silent}; waiting for it.`),
   ]);
+
+  // Its peers are past their probe: a wait of a millisecond is no retrying on.
+  const peersWaiting = performance.now();
+
+  expect(await impatient.exit()).toBe(1);
+  expect(performance.now() - peersWaiting).toBeLessThan(3_000);
+  expect(impatient.stdout()).toBe('');
+  expect(impatient.stderr()).toBe(
+    `${silent}, still; run this again once it has started or stopped.\n`,
+  );
   stopped.signal('SIGINT');
   expect(await stopped.exit()).toBe(1);
   expect(stopped.stdout()).toBe('');
