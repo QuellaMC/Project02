@@ -4,7 +4,12 @@ import {join} from 'node:path';
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
-import {configJson, createHome, sessionRecords} from './harness/home.ts';
+import {
+  configJson,
+  createHome,
+  sessionLog,
+  sessionRecords,
+} from './harness/home.ts';
 import {startMem0Server, type Mem0Server} from './harness/mem0-server.ts';
 import {
   calling,
@@ -132,7 +137,8 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
   server.answer(
     '/search',
     {status: 200, body: {results: []}},
-    {status: 302},
+    {status: 302, headers: {location: `${server.baseUrl}/elsewhere`}},
+    {status: 401, body: {detail: `The key ${serverKey} was rejected.`}},
     {status: 200, body: 'not json'},
     {status: 200, body: {results: [{memory: 'A row without an id.'}]}},
   );
@@ -144,6 +150,7 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
     calling(['mem0_search', {query: 'one'}]),
     calling(['mem0_search', {query: 'two'}]),
     calling(['mem0_search', {query: 'three'}]),
+    calling(['mem0_search', {query: 'four'}]),
     calling(['mem0_add', {text: 'The lighthouse is red.'}]),
     reply('Nothing came back.'),
   );
@@ -214,6 +221,7 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
   expect(errors).toEqual(
     [
       ['mem0.search', 'HTTP 302'],
+      ['mem0.search', 'HTTP 401'],
       ['mem0.search', 'unreadable'],
       ['mem0.search', 'unreadable'],
       ['mem0.add', 'unreadable'],
@@ -230,6 +238,15 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
   for (const key of [serverKey, platformKey]) {
     expect(JSON.stringify(errors)).not.toContain(key);
   }
+
+  // The redirect was never followed, and the key the backend echoed is in
+  // no record the turn left.
+  expect(server.requests.map(request => request.path)).not.toContain(
+    '/elsewhere',
+  );
+  expect(
+    JSON.stringify(sessionLog(home, 'mira', `${conversationId}.1`)),
+  ).not.toContain(serverKey);
 });
 
 it("memory.mem0-capture: mem0 takes each turn behind its answer, as the character's own under the speakers' names the session recorded; what is queued is sent before a stop ends the process, and once eight wait the next turns are not queued, which health then says", async () => {
