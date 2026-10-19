@@ -192,6 +192,11 @@ they cost the same maintenance as real ones, fail in groups for a single
 cause, and make the suite expensive to change — which is what stops people
 from refactoring.
 
+**The conformance suite is the daemon's acceptance gate.** A behavior the
+daemon must keep is a row of `tests/conformance/inventory.csv` with a test
+under `tests/conformance` titled by it, proved from outside the process; an
+internal test may not pin what that suite proves.
+
 Reach for a unit test when the logic is worth pinning on its own: validation,
 parsing, routing, deterministic state, schema normalization, ID assignment,
 model-output parsing, commit validation. Reach for an integration test at real
@@ -239,12 +244,16 @@ style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
 - No `any`, `as any`, `@ts-ignore`, `@ts-expect-error`, broad casts, or non-null
   assertions without explicit justification.
 - No branded types, complex conditional types, or framework-wide abstractions
-  unless the task requires them.
+  unless the task requires them. That rule is TypeScript's, against
+  type-level cleverness; the Rust crates under `crates/` follow the Rust API
+  Guidelines, which ask for newtypes with validating constructors.
 - Do not change public APIs unless the task requires it.
 
 `pnpm check` is the gate — format, lint, typecheck, arch, the web page's
 build, coverage, and the browser suite (Chromium via Playwright). CI runs
-the same command. For TypeScript-heavy changes also run:
+the same command. Beside it, `pnpm check:rust` is the gate for the crates —
+rustfmt, clippy, the tests, and cargo-deny — which CI runs on Linux, macOS,
+and Windows. For TypeScript-heavy changes also run:
 
 ```text
 pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters
