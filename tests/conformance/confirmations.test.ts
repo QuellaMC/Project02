@@ -7,12 +7,11 @@ import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {characterJson, configJson, createHome} from './harness/home.ts';
 import {
-  finish,
+  calling,
   reply,
   startModelServer,
-  toolCall,
+  toolResults,
   type Answer,
-  type ModelServer,
 } from './harness/model-server.ts';
 import {converse, saveConfig, wireOf, type Wire} from './harness/wire.ts';
 
@@ -55,23 +54,13 @@ async function asksForTone(
     readonly fingerprint: string;
   };
 
-  return {
-    chunks: [
-      ...toolCall({
-        index: 0,
-        id: `call_${tone}`,
-        name: 'runtime_plugin_config_update',
-        arguments: JSON.stringify({
-          pluginId: 'demo-config',
-          fieldName: 'tone',
-          operation: 'set',
-          value: tone,
-          expectedFingerprint: view.fingerprint,
-        }),
-      }),
-      finish('tool_calls'),
-    ],
-  };
+  return calling('runtime_plugin_config_update', {
+    pluginId: 'demo-config',
+    fieldName: 'tone',
+    operation: 'set',
+    value: tone,
+    expectedFingerprint: view.fingerprint,
+  });
 }
 
 function parkedIn(frame: Frame): Parked {
@@ -82,20 +71,6 @@ function miraOverlay(home: string): string {
   return readFileSync(
     join(home, 'character-data', 'mira', 'config.json'),
     'utf8',
-  );
-}
-
-/** What the model was told of its last tool call, in its newest request. */
-function lastToolResult(model: ModelServer): unknown {
-  const {messages} = model.requests.at(-1)?.body as {
-    readonly messages: readonly {
-      readonly role: string;
-      readonly content: string;
-    }[];
-  };
-
-  return JSON.parse(
-    messages.findLast(message => message.role === 'tool')?.content ?? 'null',
   );
 }
 
@@ -183,7 +158,7 @@ it('confirmations.answer: an approval is answered, heard settled by every client
   expect(await wire.answer(refused.id, 'denied')).toEqual({status: 'answered'});
   expect(await denied).toMatchObject({status: 'completed'});
   expect(miraOverlay(home)).toBe(written);
-  expect(lastToolResult(model)).toMatchObject({
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
     status: 'rejected',
     reason: 'plugin_config_approval_denied',
   });
@@ -324,7 +299,7 @@ it('confirmations.cancelled-stopped: switching a character off or stopping the d
   draining.release(await asksForTone(wire, 'formal'));
   model.answer(reply('Arr.'));
   expect(await pirate).toMatchObject({status: 'completed'});
-  expect(lastToolResult(model)).toMatchObject({
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
     reason: 'plugin_config_approval_cancelled',
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'pirate'}));

@@ -5,15 +5,21 @@ import {expect, it} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
-import {chmod, characterJson, configJson, createHome} from './harness/home.ts';
+import {
+  characterJson,
+  chmod,
+  configJson,
+  createHome,
+  sessionLog,
+} from './harness/home.ts';
 import {
   finish,
+  messagesOf,
   reply,
   startModelServer,
   toolCall,
   undecided,
   visibleReply,
-  type ModelRequest,
 } from './harness/model-server.ts';
 import {exchange, jsonFrom} from './harness/http.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
@@ -35,33 +41,6 @@ function segmentDirectory(home: string, conversationId: string): string {
     'sessions',
     `${conversationId}.1`,
   );
-}
-
-/** The records of a conversation's first segment, as the character's log holds them. */
-function segmentLog(
-  home: string,
-  conversationId: string,
-): Record<string, unknown>[] {
-  return readFileSync(
-    join(segmentDirectory(home, conversationId), 'raw-events.jsonl'),
-    'utf8',
-  )
-    .trimEnd()
-    .split('\n')
-    .map(line => JSON.parse(line) as Record<string, unknown>);
-}
-
-function messagesOf(
-  request: ModelRequest,
-): readonly {readonly role: string; readonly content: unknown}[] {
-  return (
-    request.body as {
-      readonly messages: readonly {
-        readonly role: string;
-        readonly content: unknown;
-      }[];
-    }
-  ).messages;
 }
 
 it('turns.open-direct: an open on a running character answers its direct conversation, the same one on every open, after a restart too', async () => {
@@ -587,7 +566,7 @@ it("turns.interim-reply-committed-before-tools: a reply beside a tool call is co
     'visible_reply',
   ]);
   expect(
-    segmentLog(home, conversationId)
+    sessionLog(home, 'mira', `${conversationId}.1`)
       .filter(record =>
         ['visible_message_committed', 'tool_call_started'].includes(
           String(record['kind']),
@@ -906,7 +885,7 @@ it("turns.speaker-name-persisted: committed messages keep the speaker id and nam
     'raw-events.jsonl',
   );
   const committed = readFileSync(transcript, 'utf8');
-  const records = segmentLog(home, conversationId);
+  const records = sessionLog(home, 'mira', `${conversationId}.1`);
   const messageOf = (record: Record<string, unknown>) =>
     record['visibleMessage'] as {readonly speakerId: string} | undefined;
 

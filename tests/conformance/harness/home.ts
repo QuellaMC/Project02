@@ -2,6 +2,8 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -77,4 +79,39 @@ export function characterJson(
     meta: {version: '1.0.0'},
     ...descriptor,
   });
+}
+
+/** The records of one of a character's sessions, as its log holds them. */
+export function sessionLog(
+  home: string,
+  characterId: string,
+  sessionId: string,
+): Record<string, unknown>[] {
+  return readFileSync(
+    join(
+      home,
+      'character-data',
+      characterId,
+      'sessions',
+      sessionId,
+      'raw-events.jsonl',
+    ),
+    'utf8',
+  )
+    .trimEnd()
+    .split('\n')
+    .map(line => JSON.parse(line) as Record<string, unknown>);
+}
+
+/** Every file under a directory with its text, so a later look shows whether anything changed. */
+export function snapshot(directory: string): Record<string, string> {
+  return Object.fromEntries(
+    readdirSync(directory, {recursive: true, withFileTypes: true})
+      .filter(entry => entry.isFile())
+      .map(entry => {
+        const path = join(entry.parentPath, entry.name);
+
+        return [path, readFileSync(path, 'utf8')];
+      }),
+  );
 }

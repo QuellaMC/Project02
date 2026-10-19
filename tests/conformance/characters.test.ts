@@ -12,8 +12,13 @@ import {expect, it} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
-import {characterJson, configJson, createHome} from './harness/home.ts';
-import {reply, startModelServer} from './harness/model-server.ts';
+import {
+  characterJson,
+  configJson,
+  createHome,
+  sessionLog,
+} from './harness/home.ts';
+import {messagesOf, reply, startModelServer} from './harness/model-server.ts';
 import {converse, saveConfig, wireOf} from './harness/wire.ts';
 
 type Health = {
@@ -219,25 +224,17 @@ it('characters.package-removed-while-running: a character whose package goes whi
 
 /** What each model round recorded of the character it ran for. */
 function characterRefs(home: string, characterId: string) {
-  const sessions = join(characterData(home, characterId), 'sessions');
-
-  return readdirSync(sessions)
-    .flatMap(session =>
-      readFileSync(join(sessions, session, 'raw-events.jsonl'), 'utf8')
-        .trim()
-        .split('\n'),
-    )
+  return readdirSync(join(characterData(home, characterId), 'sessions'))
+    .flatMap(session => sessionLog(home, characterId, session))
+    .filter(event => event['kind'] === 'role_model_round')
     .map(
-      line =>
-        JSON.parse(line) as {
-          readonly kind: string;
-          readonly roleModelIOSnapshot?: {
+      round =>
+        (
+          round['roleModelIOSnapshot'] as {
             readonly characterRef?: {readonly personaFingerprint?: string};
-          };
-        },
-    )
-    .filter(event => event.kind === 'role_model_round')
-    .map(round => round.roleModelIOSnapshot?.characterRef);
+          }
+        ).characterRef,
+    );
 }
 
 it("characters.persona-prompt: the persona's sections, a blank line apart, then the runtime's words naming the person, are the system message the model receives, and each round records the character's id, version and persona fingerprint", async () => {
@@ -267,19 +264,12 @@ it("characters.persona-prompt: the persona's sections, a blank line apart, then 
   model.answer(reply('Hi, Sam.'));
   await say('Hello.', 'hello');
 
-  const [system] = (
-    model.requests[0]?.body as {
-      readonly messages: readonly {
-        readonly role: string;
-        readonly content: string;
-      }[];
-    }
-  ).messages;
+  const [system] = messagesOf(model.requests[0]);
   const sections = `${persona.join('\n\n')}\n\n`;
 
   expect(system?.role).toBe('system');
-  expect(system?.content.slice(0, sections.length)).toBe(sections);
-  expect(system?.content.slice(sections.length)).toContain('Sam');
+  expect(system?.content?.slice(0, sections.length)).toBe(sections);
+  expect(system?.content?.slice(sections.length)).toContain('Sam');
   expect(characterRefs(home, 'nova')).toEqual([
     {
       id: 'nova',

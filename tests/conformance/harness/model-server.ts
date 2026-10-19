@@ -20,6 +20,11 @@ export type ModelRequest = {
   readonly body: unknown;
 };
 
+export type ChatMessage = {
+  readonly role: string;
+  readonly content: string | null;
+};
+
 /** How the server answers one request. */
 export type Answer =
   /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut or left hanging. */
@@ -198,6 +203,23 @@ export async function startModelServer(): Promise<ModelServer> {
   };
 }
 
+/** The messages a request showed the model, in order. */
+export function messagesOf(
+  request: ModelRequest | undefined,
+): readonly ChatMessage[] {
+  return (
+    (request?.body as {readonly messages?: readonly ChatMessage[]} | undefined)
+      ?.messages ?? []
+  );
+}
+
+/** What a request told the model each tool call it made answered, in order. */
+export function toolResults(request: ModelRequest | undefined): unknown[] {
+  return messagesOf(request)
+    .filter(message => message.role === 'tool')
+    .map(message => JSON.parse(message.content ?? 'null') as unknown);
+}
+
 function give(
   answer: Answer,
   request: IncomingMessage,
@@ -311,6 +333,21 @@ export function usage(tokens: {
 /** The words as a whole reply: plain content, finished. */
 export function reply(words: string): Answer {
   return {chunks: [...content(words), finish('stop')]};
+}
+
+/** The model calling one tool, and nothing else in that round. */
+export function calling(name: string, input: object): Answer {
+  return {
+    chunks: [
+      ...toolCall({
+        index: 0,
+        id: `call_${name}`,
+        name,
+        arguments: JSON.stringify(input),
+      }),
+      finish('tool_calls'),
+    ],
+  };
 }
 
 function pieces(whole: string, cuts: readonly number[]): string[] {
