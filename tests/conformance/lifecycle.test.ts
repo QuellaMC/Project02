@@ -198,10 +198,21 @@ it('lifecycle.roster-health: health lists each installed character with its disp
 
   await wire.start('mira');
   await wire.start('zeta');
-  expect(await wire.health()).toMatchObject({
-    characters: [
+
+  const {characters} = (await wire.health()) as {
+    readonly characters: readonly {readonly id: string}[];
+  };
+
+  expect(characters).toHaveLength(2);
+  expect(characters).toEqual(
+    expect.arrayContaining([
       {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
-      {id: 'zeta', displayName: 'Zeta', enabled: true, state: 'failed'},
-    ],
-  });
+      expect.objectContaining({
+        id: 'zeta',
+        displayName: 'Zeta',
+        enabled: true,
+        state: 'failed',
+      }),
+    ]),
+  );
 });

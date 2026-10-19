@@ -44,6 +44,7 @@ describe('the conformance inventory check', () => {
         row('page.e', 'client-ts', 'todo'),
       ],
       'tests/conformance/lifecycle/address.test.ts': [
+        "import {it, test} from 'vitest';",
         "it('lifecycle.a: says ready, then serves', () => {});",
         'it(',
         `  "lifecycle.b: a title that wrapped, and that's quoted",`,
@@ -55,6 +56,10 @@ describe('the conformance inventory check', () => {
         '  ${1}',
         "`('turns.d: a tagged table, $a', () => {});",
         "test.skip('turns.d: skipped for now', () => {});",
+      ],
+      'tests/conformance/other.test.ts': [
+        "import {it} from './helpers.ts';",
+        "it('lifecycle.a: a call to another it is no test', () => {});",
       ],
     });
 
@@ -84,6 +89,7 @@ describe('the conformance inventory check', () => {
         row('turns.h', 'conformance', 'done'),
       ],
       'tests/conformance/turns.test.ts': [
+        "import {describe, it, test} from 'vitest';",
         "import {it as check} from 'vitest';",
         "import * as v from 'vitest';",
         'it(`lifecycle.c: a template literal`, () => {});',
@@ -119,6 +125,7 @@ describe('the conformance inventory check', () => {
         'it.each`',
         '  a',
         "`('turns.h: a header alone runs no case', () => {});",
+        "it('turns.g: two arguments, the second a name', options);",
       ],
     });
 
@@ -129,18 +136,18 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/inventory.csv: the row starting "lifecycle.e" has 3 field(s), not 11.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.f has no statement.',
       'conformance-inventory: tests/conformance/inventory.csv: a row has no id: ",,A statement.,WIRE,-,none,yes,,conformance,0,todo".',
-      "conformance-inventory: tests/conformance/turns.test.ts:1: vitest's it is imported under another name, which the index cannot follow.",
-      'conformance-inventory: tests/conformance/turns.test.ts:2: vitest is imported as a namespace, which the index cannot follow.',
-      'conformance-inventory: tests/conformance/turns.test.ts:3: the title is not a plain string literal.',
+      "conformance-inventory: tests/conformance/turns.test.ts:2: vitest's it is imported under another name, which the index cannot follow.",
+      'conformance-inventory: tests/conformance/turns.test.ts:3: vitest is imported as a namespace, which the index cannot follow.',
       'conformance-inventory: tests/conformance/turns.test.ts:4: the title is not a plain string literal.',
       'conformance-inventory: tests/conformance/turns.test.ts:5: the title is not a plain string literal.',
-      'conformance-inventory: tests/conformance/turns.test.ts:6: the title "no row id here" is not "<row id>: <sentence>".',
-      'conformance-inventory: tests/conformance/turns.test.ts:7: lifecycle.z is not a conformance row of tests/conformance/inventory.csv.',
-      'conformance-inventory: tests/conformance/turns.test.ts:8: turns.f is not a conformance row of tests/conformance/inventory.csv.',
-      'conformance-inventory: tests/conformance/turns.test.ts:28: a test below the top level; the suite is flat.',
-      'conformance-inventory: tests/conformance/turns.test.ts:31: a second test of lifecycle.c; one behavior, one test.',
-      'conformance-inventory: tests/conformance/turns.test.ts:13: a describe block; the suite is flat, so no block above a test can park it.',
+      'conformance-inventory: tests/conformance/turns.test.ts:6: the title is not a plain string literal.',
+      'conformance-inventory: tests/conformance/turns.test.ts:7: the title "no row id here" is not "<row id>: <sentence>".',
+      'conformance-inventory: tests/conformance/turns.test.ts:8: lifecycle.z is not a conformance row of tests/conformance/inventory.csv.',
+      'conformance-inventory: tests/conformance/turns.test.ts:9: turns.f is not a conformance row of tests/conformance/inventory.csv.',
+      'conformance-inventory: tests/conformance/turns.test.ts:29: a test below the top level; the suite is flat.',
+      'conformance-inventory: tests/conformance/turns.test.ts:32: a second test of lifecycle.c; one behavior, one test.',
       'conformance-inventory: tests/conformance/turns.test.ts:14: a describe block; the suite is flat, so no block above a test can park it.',
+      'conformance-inventory: tests/conformance/turns.test.ts:15: a describe block; the suite is flat, so no block above a test can park it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',

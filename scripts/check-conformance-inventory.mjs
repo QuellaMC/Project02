@@ -127,12 +127,13 @@ function bodiless(call) {
   return !call.arguments.some(isFunction);
 }
 
-/** The options a test was given: its second argument when a third follows, or an object literal there. */
+/** The options a test was given: its second argument when a third follows, or an object literal or a name there, which may be options as well as a body. */
 function optionsOf(call) {
   const [, second, third] = call.arguments;
 
   return third !== undefined ||
-    (second !== undefined && ts.isObjectLiteralExpression(second))
+    (second !== undefined &&
+      (ts.isObjectLiteralExpression(second) || ts.isIdentifier(second)))
     ? second
     : undefined;
 }
@@ -200,6 +201,7 @@ function scan(file, source) {
   const tests = [];
   const blocks = [];
   const aliases = [];
+  const imported = new Set();
   const visit = node => {
     if (
       ts.isImportDeclaration(node) &&
@@ -222,6 +224,12 @@ function scan(file, source) {
         ? bindings.elements
         : []) {
         if (
+          binding.propertyName === undefined &&
+          ROOTS.has(binding.name.text)
+        ) {
+          imported.add(binding.name.text);
+        }
+        if (
           binding.propertyName !== undefined &&
           ROOTS.has(binding.propertyName.text)
         ) {
@@ -236,6 +244,11 @@ function scan(file, source) {
     }
     if (ts.isCallExpression(node) && titled(node)) {
       const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
+
+      if (!imported.has(root)) {
+        ts.forEachChild(node, visit);
+        return;
+      }
       const line =
         tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
       const [title] = node.arguments;
