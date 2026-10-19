@@ -503,7 +503,7 @@ describe('conversation driver', () => {
       expect(conversation.session.id).toBe(`${conversationId}.2`);
       await expect(
         openConversation({homeRoot, character: testCharacterProfile}),
-      ).rejects.toMatchObject({code: 'conversation_busy'});
+      ).rejects.toMatchObject({code: 'storage_busy'});
       await conversation.close();
 
       const reopened = await openConversation({

@@ -62,6 +62,21 @@ describe('session history output shaping', () => {
     expect(String(matchedRows[0]?.['text']).length).toBeLessThanOrEqual(200);
   });
 
+  it('stores no half of a surrogate pair where it cuts text or a snippet', () => {
+    const emoji = '😀'.repeat(150);
+    const output = createSessionHistorySearchOutput({
+      result: {
+        sessions: [sessionView({matchText: `${emoji} narwhal ${emoji}`})],
+        totalSessionsWithHits: 1,
+        damagedRecordCount: 0,
+      },
+      query: 'narwhal',
+    });
+
+    // JSON writes a lone half as an escape, `\udXXX`; a whole pair as is.
+    expect(JSON.stringify(output)).not.toMatch(/\\ud[89a-f]/u);
+  });
+
   it('maps read windows with paging flags', () => {
     const output = createSessionHistoryReadOutput({
       sessionId: 's1',

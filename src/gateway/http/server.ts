@@ -4,9 +4,14 @@ import {createAdaptorServer, type ServerType} from '@hono/node-server';
 
 import type {Gateway} from '../api/contract.ts';
 import {createGatewayApp} from './app.ts';
-import {clientGraceMs, createEventStreams} from './events.ts';
+import {
+  clientGraceMs,
+  createEventStreams,
+  type EventStreamsOptions,
+} from './events.ts';
 
-export type GatewayServerOptions = {
+/** The streams' options are the server's: `graceMs` is the client grace at a stop too. */
+export type GatewayServerOptions = EventStreamsOptions & {
   readonly gateway: Gateway;
   readonly token: string;
   /** 0 asks the OS for a free port; a busy port falls back to one. */
@@ -34,7 +39,7 @@ const loopback = '127.0.0.1';
 export async function createGatewayServer(
   options: GatewayServerOptions,
 ): Promise<GatewayServer> {
-  const events = createEventStreams(options.gateway);
+  const events = createEventStreams(options.gateway, options);
   let stopping = false;
   const app = createGatewayApp({
     gateway: options.gateway,
@@ -68,7 +73,7 @@ export async function createGatewayServer(
       // the grace, before the listener closes — Node's close counts a
       // connection whose answer is ended but unflushed as idle and cuts it.
       // Newcomers meanwhile get their 503; then whatever remains is cut.
-      await responses.drained(clientGraceMs);
+      await responses.drained(options.graceMs ?? clientGraceMs);
       await new Promise<void>(resolve => {
         server.close(() => {
           resolve();

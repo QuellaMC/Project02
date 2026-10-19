@@ -322,7 +322,9 @@ describe('local character runtime', () => {
     await runtime.start();
 
     expect(runtime.health().state).toBe('failed');
-    expect(runtime.health().failure).toContain('"local" or "nvidia"');
+    expect(runtime.health().failure).toContain(
+      'roleModelProvider must be "nvidia"',
+    );
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
   });
 

@@ -30,7 +30,7 @@ export type {SessionContinuationPlan} from '../evidence/records.ts';
 export async function planSessionContinuation(options: {
   readonly sessionId: string;
   readonly logStore: RuntimeLogStore;
-  readonly roleModelAdapter?: RoleModelAdapter;
+  readonly roleModelAdapter: RoleModelAdapter;
   readonly contextWindowTokens?: number;
   readonly characterName: string;
   readonly userDisplayName?: string;
@@ -75,7 +75,7 @@ export async function planSessionContinuation(options: {
 }
 
 async function summarize(options: {
-  readonly adapter: RoleModelAdapter | undefined;
+  readonly adapter: RoleModelAdapter;
   readonly turns: readonly ConversationTurn[];
   readonly previousSummary?: string;
   readonly characterName: string;
@@ -101,7 +101,7 @@ async function summarize(options: {
   });
   const adapter = options.adapter;
 
-  if (adapter?.completeText === undefined) {
+  if (adapter.completeText === undefined) {
     return fallback('The selected provider has no summariser model.');
   }
 

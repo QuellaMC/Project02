@@ -43,6 +43,8 @@ import {
   authoredTone,
   createConfirmationHome,
 } from '../support/gateway-fixtures.ts';
+import {listen} from '../support/gateway-http.ts';
+import {streamed} from '../support/nvidia-fixtures.ts';
 import {firstPartyPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -257,6 +259,79 @@ describe('gateway façade', () => {
     expect(summary).toMatchObject({enabled: false, state: 'failed'});
     expect(summary?.diagnostic).toContain('disabled');
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+  });
+
+  it('starts no character until a provider is chosen, then answers through the server the home names', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    expect(gateway.health().characters[0]).toMatchObject({
+      state: 'failed',
+      diagnostic:
+        'No model provider is chosen. Choose one on the settings page.',
+    });
+    await expect(gateway.openDirectConversation('mira')).resolves.toMatchObject(
+      {
+        status: 'refused',
+        reason: 'character_unavailable',
+        message:
+          'Character "mira" is not ready (state "failed"). No model provider ' +
+          'is chosen. Choose one on the settings page.',
+      },
+    );
+
+    const requests: Request[] = [];
+    const server = await listen({
+      fetch: request => {
+        requests.push(request);
+
+        return streamed({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {role: 'assistant', content: 'from your server'},
+            },
+          ],
+        });
+      },
+    });
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {
+        roleModelProvider: 'nvidia',
+        nvidiaApiKey: 'nim-key',
+        nvidiaBaseUrl: `${server.baseUrl}/v1`,
+      },
+    });
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello',
+        source: 'web',
+        clientMessageId: 'msg-1',
+      }),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      messages: [{text: 'hello'}, {text: 'from your server'}],
+    });
+    expect(
+      requests.map(request => [
+        new URL(request.url).pathname,
+        request.headers.get('authorization'),
+      ]),
+    ).toEqual([['/v1/chat/completions', 'Bearer nim-key']]);
+    await gateway.stop();
+    await server.close();
   });
 
   it('refuses an unknown character before creating a runtime', async () => {
@@ -915,38 +990,6 @@ describe('gateway façade', () => {
     expect(gateway.answerConfirmation('nope', 'approved')).toEqual({
       status: 'unknown',
     });
-  });
-
-  it('refuses a thread another gateway holds, then opens it once that one lets go', async () => {
-    const homeRoot = await createGatewayHome();
-    const options = {
-      location: {storeRoot: homeRoot},
-      roleModelAdapter: replyAdapter(),
-      createPluginHost: () => createRuntimePluginHost({plugins: []}),
-    };
-    const first = createGateway(options);
-    const second = createGateway(options);
-
-    await first.startCharacter('mira');
-    await second.startCharacter('mira');
-
-    const held = await open(first, 'mira');
-
-    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'refused',
-      reason: 'conversation_busy',
-    });
-    // The holder keeps its thread, and the refusal left nothing cached.
-    await expect(first.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'opened',
-      conversationId: held.conversationId,
-    });
-    await first.stop();
-    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
-      status: 'opened',
-      conversationId: held.conversationId,
-    });
-    await second.stop();
   });
 
   it('reports an unreadable conversation store as a failure, not a bug', async () => {
@@ -2113,6 +2156,7 @@ describe('gateway façade', () => {
       'roleModelProvider',
       'nvidiaApiKey',
       'nvidiaModel',
+      'nvidiaBaseUrl',
       'contextWindowTokens',
       'defaultMemoryProvider',
       'enabled',

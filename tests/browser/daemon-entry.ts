@@ -49,7 +49,7 @@ const disabledIds = args.filter(
 
 await ensureInitializedProject02Store({homeRoot});
 writeRuntimeConfig(join(homeRoot, 'config.json'), {
-  ...(fresh ? {} : {project02: {roleModelProvider: 'local'}}),
+  ...(fresh ? {} : {project02: {roleModelProvider: 'nvidia'}}),
   plugins: {[demoConfigPluginId]: {enabled: true}},
 });
 
@@ -74,7 +74,6 @@ try {
       stderr: process.stderr,
       signal: abort.signal,
       roleModelAdapter: createScriptedAdapter({homeRoot, characterId: 'mira'}),
-      port: 0,
     },
   );
 } finally {

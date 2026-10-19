@@ -45,7 +45,7 @@ export type DeliverUserMessageOptions = {
   /** Session-agnostic: a host constructed with its own session binding would
    * pin plugin file-store scoping to that session across rotations. */
   readonly pluginHost: RuntimePluginHost;
-  readonly roleModelAdapter?: RoleModelAdapter;
+  readonly roleModelAdapter: RoleModelAdapter;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly contextWindowTokens?: number;

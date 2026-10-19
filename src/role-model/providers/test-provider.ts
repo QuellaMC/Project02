@@ -9,7 +9,8 @@ import {conversationTurnVisibleMessages} from '../api/conversation-history.ts';
 import {scrubReasoningBlocks} from '../api/reasoning.ts';
 import {createRoleModelAdapterRawOutput} from '../api/adapter.ts';
 
-export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
+/** Fixed replies, with no model or network behind them: a test's, never a setting. */
+export function createDeterministicTestRoleModelAdapter(): RoleModelAdapter {
   return createRoleModelAdapterFromCharacterAgent(
     createDeterministicCharacterAgent(),
   );

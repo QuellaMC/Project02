@@ -387,6 +387,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
+  readonly toolConfirmationTimeoutMs?: number | undefined;
 }): Promise<Project02ConfiguredPluginHost> {
   const {activationPlan} = options;
   const {catalogEntries} = activationPlan;
@@ -427,6 +428,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         ),
         ...capabilityProviders,
         toolConfirmationHandler: options.toolConfirmationHandler,
+        toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
       }),
@@ -466,6 +468,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       pluginConfigControl: activationPlan.pluginConfigControl,
       ...capabilityProviders,
       toolConfirmationHandler: options.toolConfirmationHandler,
+      toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       pluginReloader: createConfiguredRuntimePluginReloader({activationPlan}),

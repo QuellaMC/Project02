@@ -1,3 +1,4 @@
+import {endpointUnder} from '../../shared/base-url.ts';
 import {setTimeout as sleep} from 'node:timers/promises';
 
 import {describeFetchFailure} from '../../shared/fetch-failure.ts';
@@ -117,12 +118,15 @@ export function createBotApi(options: {
     let answer: {readonly status: number; readonly text: string};
 
     try {
-      const response = await send(`${baseUrl}/bot${token}/${method}`, {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify(body),
-        ...(signal === undefined ? {} : {signal}),
-      });
+      const response = await send(
+        endpointUnder(baseUrl, `bot${token}/${method}`),
+        {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify(body),
+          ...(signal === undefined ? {} : {signal}),
+        },
+      );
 
       answer = {status: response.status, text: await response.text()};
     } catch (error: unknown) {

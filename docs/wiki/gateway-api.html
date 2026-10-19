@@ -72,7 +72,7 @@
         address is out.
       </p>
 
-      <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:4310/#token=&lt;token&gt;</code></pre>
+      <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:&lt;port&gt;/#token=&lt;token&gt;</code></pre>
 
       <p>
         The same address is kept beside the config, in
@@ -83,7 +83,7 @@
       <pre><code>{
   "protocolVersion": 7,
   "token": "…",
-  "port": 4310,
+  "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
 }</code></pre>
 
@@ -93,11 +93,13 @@
         a bookmark keeps working. The token travels in the URL fragment, so it
         never reaches a server log or a referrer; the same address, opened in
         a browser, is the web page, served from the daemon's root, and the
-        page takes the token from the fragment. A first run takes port 4310,
-        or a free one when that is taken, and records it. A later run whose
-        recorded port another program has taken since takes a free one, says
-        so on stdout before the address, and records the new one — open tabs
-        and bookmarks then need the new address, which nothing can tell them.
+        page takes the token from the fragment. A first run takes whatever
+        free port the system hands it and records it: the address is read
+        from the printed line or the record, never known in advance. A later
+        run whose recorded port another program has taken since takes a free
+        one, says so on stdout before the address, and records the new one —
+        open tabs and bookmarks then need the new address, which nothing can
+        tell them.
         <code>running</code> is removed by a clean stop and left behind by a
         crash: a reader never trusts it without asking the address, and the
         lease, not the record, is what says a daemon is alive. A record that
@@ -132,12 +134,15 @@
         Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the
         daemon prints <em>Stopping; finishing what is in flight</em>, requests
         the stop at once (a boot still under way is joined, and its late
-        <code>ready</code> suppressed), finishes the turns it accepted, lets
-        the streams and answers drain, closes the socket, then rewrites the
-        record without <code>running</code> and releases the lease. A second
-        signal of any kind ends the process at once; the lease left behind is
-        the next start's to reclaim. On Windows, the console window's close
-        is a SIGHUP followed by a kill about ten seconds later.
+        <code>ready</code> suppressed), finishes the turns it accepted, ends
+        each stream once every frame queued for it is written, gives an
+        answer still being written two seconds to finish, closes the socket,
+        then rewrites the record without <code>running</code> and releases
+        the lease. A client that does not take a frame within two seconds is
+        dropped, at a stop as at any other time. A second signal of any kind
+        ends the process at once; the lease left behind is the next start's
+        to reclaim. On Windows, the console window's close is a SIGHUP
+        followed by a kill about ten seconds later.
       </p>
 
       <h2>The four wire rules</h2>
@@ -315,8 +320,7 @@
               <code>{characterId}</code> → <code>OpenOutcome</code>:
               <code>opened</code> with the conversation and user participant
               ids, <code>refused</code> (<code>unknown_character</code>,
-              <code>character_unavailable</code>,
-              <code>conversation_busy</code>), or a storage failure.
+              <code>character_unavailable</code>), or a storage failure.
             </td>
           </tr>
           <tr>

@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -46,7 +47,6 @@ function runServe(
     readonly adapter?: RoleModelAdapter;
     readonly signal?: AbortSignal;
     readonly holdWaitMs?: number;
-    readonly port?: number;
   } = {},
 ) {
   const abort = new AbortController();
@@ -75,7 +75,6 @@ function runServe(
     pluginHost: createRuntimePluginHost({plugins: []}),
     roleModelAdapter: options.adapter ?? adapter,
     signal: options.signal ?? abort.signal,
-    port: options.port ?? 0,
     ...(options.holdWaitMs === undefined
       ? {}
       : {holdWaitMs: options.holdWaitMs}),
@@ -470,13 +469,25 @@ describe('serve', () => {
     }
   }, 20_000);
 
-  it('leaves nothing behind when the socket cannot be bound', async () => {
-    const storeRoot = await createGatewayTestHome('project02-serve-unbound-');
-    const unbound = runServe(['--store', storeRoot], {port: 65_536});
+  it('leaves nothing behind when it cannot record where it listens', async () => {
+    const storeRoot = await createGatewayTestHome('project02-serve-readonly-');
 
-    await expect(unbound.exit).resolves.toBe(1);
-    expect(unbound.stderr()).toContain('Error: ');
-    expect(unbound.stdout()).toBe('');
+    // The home refuses the record, while its lock directory still takes
+    // the lease: the failure comes after the claim.
+    chmodSync(storeRoot, 0o500);
+
+    try {
+      const unwritable = runServe(['--store', storeRoot]);
+
+      await expect(unwritable.exit).resolves.toBe(1);
+      expect(unwritable.stderr()).toContain(
+        'Error: Local runtime store could not be written.',
+      );
+      expect(unwritable.stdout()).toBe('');
+    } finally {
+      chmodSync(storeRoot, 0o755);
+    }
+
     expect(existsSync(join(storeRoot, 'daemon.json'))).toBe(false);
 
     // The home was let go: the next run is the daemon.

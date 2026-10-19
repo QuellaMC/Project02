@@ -1,4 +1,5 @@
 {
+  "base-url.ts": ["frontends", "plugins", "role-model", "runtime"],
   "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
   "daemon-record.ts": ["frontends", "gateway", "runtime"],
   "fetch-failure.ts": ["frontends", "gateway"],
@@ -20,5 +21,7 @@
   "package-metadata.ts": ["characters", "plugins", "runtime"],
   "real-path.ts": ["plugins", "runtime"],
   "redaction.ts": ["plugins", "runtime"],
-  "sse.ts": ["gateway", "role-model"]
+  "sse.ts": ["gateway", "role-model"],
+  "test-durations.ts": ["cli", "frontends"],
+  "text-cut.ts": ["frontends", "plugins", "runtime"]
 }

@@ -152,10 +152,10 @@ describe('character overlay config loader', () => {
     ],
     [
       'project02.roleModelProvider',
-      'local',
+      'nvidia',
       {
         version: runtimeConfigVersion,
-        project02: {roleModelProvider: 'local' as const},
+        project02: {roleModelProvider: 'nvidia' as const},
       },
     ],
     [
@@ -309,10 +309,7 @@ describe('layered runtime config resolution', () => {
 
   it('overrides project02 fields from the overlay and keeps the global path', () => {
     const loadedConfig = loadedGlobalConfig({
-      project02: {
-        userDisplayName: 'Global Name',
-        roleModelProvider: 'local',
-      },
+      project02: {userDisplayName: 'Global Name'},
     });
     const overlay = loadedOverlay({
       project02: {

@@ -9,7 +9,7 @@ export {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
 } from './role-model/index.ts';
-export {createDeterministicLocalRoleModelAdapter} from './role-model/index.ts';
+export {createDeterministicTestRoleModelAdapter} from './role-model/index.ts';
 export {runLocalUserMessageEvent} from './runtime/index.ts';
 export {createRuntimeLogStore} from './runtime/evidence/index.ts';
 export {

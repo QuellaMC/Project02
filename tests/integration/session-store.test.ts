@@ -18,6 +18,7 @@ import {
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {createDeterministicTestRoleModelAdapter} from '../../src/role-model/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -330,6 +331,7 @@ describe('local runtime session store', () => {
       session: originalSession,
       logStore,
       pluginHost: createRuntimePluginHost(),
+      roleModelAdapter: createDeterministicTestRoleModelAdapter(),
     });
 
     const reader = createConversationLogReader({

@@ -27,10 +27,6 @@ export function createNvidiaTextCompletion(options: {
   readonly transportRetryDelaysMs: readonly number[];
 }): NonNullable<RoleModelAdapter['completeText']> {
   return async request => {
-    if (options.apiKey === undefined || options.apiKey.length === 0) {
-      return {status: 'failed', reason: 'NVIDIA provider has no API key.'};
-    }
-
     const requestDeadline = createNvidiaRequestDeadline(
       options.requestTimeoutMs,
     );
@@ -39,7 +35,7 @@ export function createNvidiaTextCompletion(options: {
       const transport = await performNvidiaTransportRequest({
         fetchClient: options.fetchClient,
         endpoint: options.endpoint,
-        apiKey: options.apiKey,
+        ...(options.apiKey === undefined ? {} : {apiKey: options.apiKey}),
         body: JSON.stringify({
           model: options.model,
           messages: [

@@ -77,9 +77,10 @@ type Chat = {
  */
 export function characterChat(
   characterId: string,
+  draftEditMs?: number,
 ): (bot: BotContext) => BotRules {
   return bot => {
-    const outbox = createOutbox(bot);
+    const outbox = createOutbox(bot, draftEditMs);
     const chat: Chat = {
       bot,
       outbox,
