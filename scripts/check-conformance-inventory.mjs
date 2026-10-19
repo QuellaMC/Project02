@@ -114,6 +114,23 @@ function titled(call) {
   return !MODIFIERS_WITH_ARGUMENTS.has(calleeNames(call.expression)?.at(-1));
 }
 
+/** Whether the test's options park it: skip, todo or fails set to anything but false. */
+function parkedByOptions(options) {
+  return (
+    options !== undefined &&
+    ts.isObjectLiteralExpression(options) &&
+    options.properties.some(
+      property =>
+        (ts.isPropertyAssignment(property) &&
+          ts.isIdentifier(property.name) &&
+          PARKING_MODIFIERS.has(property.name.text) &&
+          property.initializer.kind !== ts.SyntaxKind.FalseKeyword) ||
+        (ts.isShorthandPropertyAssignment(property) &&
+          PARKING_MODIFIERS.has(property.name.text)),
+    )
+  );
+}
+
 /** Whether the call's table of cases, if it has one, holds none: then nothing runs. */
 function runsNoCase(call) {
   const applied = call.expression;
@@ -157,7 +174,7 @@ function scan(file, source) {
       const [root = '', ...modifiers] = calleeNames(node.expression) ?? [];
       const line =
         tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
-      const [title] = node.arguments;
+      const [title, options] = node.arguments;
 
       if (ROOTS.get(root) === 'block') {
         blocks.push(line);
@@ -166,6 +183,7 @@ function scan(file, source) {
           line,
           parked:
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
+            parkedByOptions(options) ||
             runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
