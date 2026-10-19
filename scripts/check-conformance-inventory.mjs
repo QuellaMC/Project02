@@ -149,6 +149,40 @@ function isFunction(node) {
   );
 }
 
+/** Whether the body skips the test itself through its context, as `context => context.skip()` does. */
+function skipsItself(call) {
+  const body = call.arguments.find(
+    argument =>
+      ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
+  );
+  const context = body?.parameters[0]?.name;
+
+  if (
+    body === undefined ||
+    context === undefined ||
+    !ts.isIdentifier(context)
+  ) {
+    return false;
+  }
+
+  let skips = false;
+  const look = node => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === context.text &&
+      node.expression.name.text === 'skip'
+    ) {
+      skips = true;
+    }
+    ts.forEachChild(node, look);
+  };
+
+  look(body.body);
+  return skips;
+}
+
 /** Whether the test has no body to run: Vitest takes such a test as todo. */
 function bodiless(call) {
   return !call.arguments.some(isFunction);
@@ -308,6 +342,7 @@ function scan(file, source) {
             modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
             parkedByOptions(optionsOf(node)) ||
             bodiless(node) ||
+            skipsItself(node) ||
             runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
