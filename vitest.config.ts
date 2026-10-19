@@ -66,6 +66,18 @@ export default defineConfig({
           testTimeout: 60000,
         },
       },
+      {
+        extends: true,
+        test: {
+          name: 'conformance',
+          include: ['tests/conformance/**/*.test.ts'],
+          // Its files run in parallel, unlike the processes project's. The
+          // harness bounds every wait at ten seconds, and a test may hold a
+          // dozen in sequence: these are a backstop behind those ceilings.
+          testTimeout: 120000,
+          hookTimeout: 120000,
+        },
+      },
     ],
     coverage: {
       provider: 'v8',
