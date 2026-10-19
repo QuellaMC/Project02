@@ -1,8 +1,7 @@
 import type {Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 
-import {onTestFinished} from 'vitest';
-
+import {onTestFinished} from './runner.ts';
 import {within} from './wait.ts';
 
 /**

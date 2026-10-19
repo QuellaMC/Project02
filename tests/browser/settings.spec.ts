@@ -1,99 +1,114 @@
-import {expect, test as base, type Page} from '@playwright/test';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import {spawnDaemon, type SpawnedDaemon} from '../support/spawn-daemon.ts';
+import {expect, type Page} from '@playwright/test';
 
-/** A daemon of its own per test, stopped the way an operator stops it. */
-const test = base.extend<{
-  /** Characters installed off beside Mira, so the roster has one that is not running. */
-  disabledCharacters: readonly string[];
-  /** A home whose provider is not chosen yet, the way a first run finds it. */
-  freshHome: boolean;
-  daemon: SpawnedDaemon;
-}>({
-  disabledCharacters: [[], {option: true}],
-  freshHome: [false, {option: true}],
-  daemon: async ({disabledCharacters, freshHome}, use) => {
-    const daemon = await spawnDaemon('tests/browser/daemon-entry.ts', [
-      ...(freshHome ? ['--fresh'] : []),
-      ...disabledCharacters,
-    ]);
+import {startDaemon} from '../conformance/harness/daemon.ts';
+import {frameOf, openEvents} from '../conformance/harness/events.ts';
+import {
+  characterJson,
+  configJson,
+  createHome,
+} from '../conformance/harness/home.ts';
+import {bearer, exchange} from '../conformance/harness/http.ts';
+import {startModelServer} from '../conformance/harness/model-server.ts';
+import {test} from './fixture.ts';
 
-    await use(daemon);
+/** Mira on the model server, the home's config.json holding these settings beside the model's. */
+async function miraHome(
+  config: {readonly project02?: object; readonly [section: string]: unknown},
+  seed: Parameters<typeof createHome>[0] = {},
+  env: Readonly<Record<string, string>> = {},
+) {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({
+      ...config,
+      project02: {...model.settings, ...config.project02},
+    }),
+    ...seed,
+  });
 
-    const stopped = await daemon.stop();
-
-    expect(stopped.code, stopped.stderr).toBe(0);
-  },
-});
+  return {home, daemon: await startDaemon(home, env)};
+}
 
 /** The row of one field, host or section, by its key. */
 function row(page: Page, key: string) {
   return page.locator(`[data-field="${key}"]`);
 }
 
-test.describe('a fresh home', () => {
-  test.use({freshHome: true});
+/** The home's config.json as it stands. */
+function homeConfig(home: string): unknown {
+  return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
+}
 
-  test("opens on the setup frame with the home's messaging app settings; a saved name reloads the character, a saved provider stays, and Chat leads to the composer", async ({
-    daemon,
-    page,
-  }) => {
-    await page.goto(daemon.url);
-    await expect(
-      page.getByRole('heading', {name: 'Set up your home'}),
-    ).toBeVisible();
+test("page.settings-setup-frame: a fresh home with no model provider chosen opens on Set up your home with the home's messaging app rows; a chosen provider starts the character, a saved name shows Saved from the home and reloads her to ready, and Chat leads to the composer", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const {roleModelProvider, ...endpoint} = model.settings;
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: endpoint})}),
+  );
+  const events = await openEvents(daemon);
+  const mira = page.getByRole('button', {name: /^Mira\b/u});
+  const settled = (state: string) =>
+    events.next(frameOf('state_changed', {characterId: 'mira', state}));
 
-    // A bot answers as one character, so its token is not the home's to set.
-    await expect(
-      page.getByRole('heading', {name: 'Messaging apps'}),
-    ).toBeVisible();
-    await expect(
-      row(page, 'connectors/telegram/managementBotToken'),
-    ).toBeVisible();
-    await expect(row(page, 'connectors/telegram/mirror')).toBeVisible();
-    await expect(row(page, 'connectors/telegram/botToken')).toHaveCount(0);
-    await expect(row(page, 'connectors/telegram')).toContainText(
-      'Characters that set their own switch keep it',
-    );
+  await page.goto(daemon.url);
+  await expect(
+    page.getByRole('heading', {name: 'Set up your home'}),
+  ).toBeVisible();
+  // A bot answers as one character, so its token is not the home's to set.
+  await expect(
+    page.getByRole('heading', {name: 'Messaging apps'}),
+  ).toBeVisible();
+  await expect(
+    row(page, 'connectors/telegram/managementBotToken'),
+  ).toBeVisible();
+  await expect(row(page, 'connectors/telegram/mirror')).toBeVisible();
+  await expect(row(page, 'connectors/telegram/botToken')).toHaveCount(0);
+  await expect(row(page, 'connectors/telegram')).toContainText(
+    'Characters that set their own switch keep it',
+  );
 
-    const name = row(page, 'project02.userDisplayName');
+  const provider = row(page, 'project02.roleModelProvider');
 
-    await expect(name).toContainText('default: You');
-    await name.getByRole('textbox', {name: 'User display name'}).fill('Sam');
-    await name.getByRole('button', {name: 'Save'}).click();
-    await expect(name.getByRole('button', {name: 'Saved'})).toBeVisible();
-    // The view is read again: the value is the home's now.
-    await expect(name).toContainText('the home');
-    // The change reached the running character; the roster says how.
-    await expect(page.getByRole('button', {name: /^Mira\b/u})).toContainText(
-      'ready',
-    );
+  await provider
+    .getByRole('combobox', {name: 'Role model provider'})
+    .selectOption(roleModelProvider);
+  await provider.getByRole('button', {name: 'Save'}).click();
+  await expect(provider.getByRole('button', {name: 'Saved'})).toBeVisible();
+  await expect(provider).toContainText('the home');
+  await settled('ready');
+  await expect(mira).toContainText('ready');
 
-    const provider = row(page, 'project02.roleModelProvider');
+  const name = row(page, 'project02.userDisplayName');
 
-    await provider
-      .getByRole('combobox', {name: 'Role model provider'})
-      .selectOption('nvidia');
-    await provider.getByRole('button', {name: 'Save'}).click();
-    await expect(provider.getByRole('button', {name: 'Saved'})).toBeVisible();
-    await expect(provider).toContainText('the home');
+  await expect(name).toContainText('default: You');
+  await name.getByRole('textbox', {name: 'User display name'}).fill('Sam');
+  await name.getByRole('button', {name: 'Save'}).click();
+  await expect(name.getByRole('button', {name: 'Saved'})).toBeVisible();
+  // The view is read again: the value is the home's now.
+  await expect(name).toContainText('the home');
+  await settled('reloading');
+  await settled('ready');
+  await expect(mira).toContainText('ready');
 
-    // The exit is the person's.
-    await expect(
-      page.getByRole('heading', {name: 'Set up your home'}),
-    ).toBeVisible();
-    await page.getByRole('button', {name: 'Chat'}).click();
-    await expect(
-      page.getByRole('textbox', {name: 'Message Mira'}),
-    ).toBeVisible();
-  });
+  // The exit is the person's.
+  await expect(
+    page.getByRole('heading', {name: 'Set up your home'}),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Chat'}).click();
+  await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
-test("saves a character's plugin field and secret and her bot token, shows a secret only as set, keeps a second page in step, and tells one that fell behind that someone saved first", async ({
-  daemon,
+test("page.settings-save-and-sync: a character's plugin field, a secret and her bot token save from her screen, a secret shown only as set and never in the page; a second page follows saves through the stream; a save whose read again fails says so and shows Saved only once a read lands; and a page that fell behind is told that someone saved first", async ({
   context,
   page,
 }) => {
+  const {daemon} = await miraHome({plugins: {'demo-config': {enabled: true}}});
+
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings for Mira'}).click();
   await expect(
@@ -190,61 +205,187 @@ test("saves a character's plugin field and secret and her bot token, shows a sec
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
-test('stops reading a screen that was left while its reads failed, and says nothing of it', async ({
-  daemon,
+test('page.settings-left-screen-quiet: a settings screen left while its reads were failing reads no more and says nothing more', async ({
   page,
 }) => {
+  // A stream pings this often: a screen still open reads again every second.
+  const {daemon} = await miraHome(
+    {plugins: {'demo-config': {enabled: true}}},
+    {},
+    {PROJECT02_TEST_DURATIONS: 'heartbeat=1500'},
+  );
+  const note = row(page, 'plugins/demo-config/operatorNote');
+  let reads = 0;
+
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings for Mira'}).click();
-
-  const note = row(page, 'plugins/demo-config/operatorNote');
-
-  await page.route('**/api/config?*', route => route.abort());
+  await page.route('**/api/config?*', async route => {
+    reads += 1;
+    await route.abort();
+  });
   await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(page.locator('.notice')).toBeVisible();
   await page.getByRole('button', {name: /^Mira\b/u}).click();
   await expect(page.locator('.notice')).toHaveCount(0);
-  // Past two of the retries a screen still open would make: none is made.
-  await page.waitForTimeout(2_500);
+
+  // From one ping to the next: a read that was on its way when the screen
+  // was left has failed by the first, and none begins after it.
+  const clock = await openEvents(daemon);
+  const ping = (frame: {readonly comment?: string}) => frame.comment === 'ping';
+
+  await clock.next(ping);
+
+  const readsBefore = reads;
+
+  await clock.next(ping);
+  expect(reads).toBe(readsBefore);
   await expect(page.locator('.notice')).toHaveCount(0);
 });
 
-test.describe('a roster with a character that is off', () => {
-  test.use({disabledCharacters: ['nova']});
+test('page.settings-character-switch: a character that is off shows off with no Start, and with two characters none opens itself; her Enabled switch turns her on to ready and off again', async ({
+  page,
+}) => {
+  const {daemon} = await miraHome(
+    {},
+    {
+      characters: {
+        nova: {'project02.character.json': characterJson('nova', 'Nova')},
+      },
+      'character-data': {
+        nova: {'config.json': configJson({project02: {enabled: false}})},
+      },
+    },
+  );
 
-  test('shows her off with no Start, and her settings switch turns her on and off again', async ({
-    daemon,
-    page,
-  }) => {
-    await page.goto(daemon.url);
+  await page.goto(daemon.url);
 
-    const nova = page.getByRole('listitem').filter({hasText: 'Nova'});
+  const nova = page.getByRole('listitem').filter({hasText: 'Nova'});
 
-    await expect(nova).toContainText('off');
-    await expect(
-      nova.getByRole('button', {name: 'Start', exact: true}),
-    ).toHaveCount(0);
-    // Two characters: none opens itself.
-    await expect(page.getByText('Pick a character.')).toBeVisible();
+  await expect(nova).toContainText('off');
+  await expect(
+    nova.getByRole('button', {name: 'Start', exact: true}),
+  ).toHaveCount(0);
+  await expect(page.getByText('Pick a character.')).toBeVisible();
 
-    await nova.getByRole('button', {name: 'Settings for Nova'}).click();
-    await expect(
-      page.getByRole('heading', {name: 'Settings · Nova'}),
-    ).toBeVisible();
+  await nova.getByRole('button', {name: 'Settings for Nova'}).click();
+  await expect(
+    page.getByRole('heading', {name: 'Settings · Nova'}),
+  ).toBeVisible();
 
-    const enabled = row(page, 'project02.enabled');
-    const control = enabled.getByRole('checkbox', {name: 'Enabled'});
+  const enabled = row(page, 'project02.enabled');
+  const control = enabled.getByRole('checkbox', {name: 'Enabled'});
 
-    await expect(enabled).toContainText('this character');
-    await expect(control).not.toBeChecked();
-    await control.check();
-    await expect(enabled.getByText('Saved')).toBeVisible();
-    await expect(nova).toContainText('ready');
-    await expect(control).toBeChecked();
+  await expect(enabled).toContainText('this character');
+  await expect(control).not.toBeChecked();
+  await control.check();
+  await expect(enabled.getByText('Saved')).toBeVisible();
+  await expect(nova).toContainText('ready');
+  await expect(control).toBeChecked();
 
-    await control.uncheck();
-    await expect(nova).toContainText('off');
-    await expect(control).not.toBeChecked();
+  await control.uncheck();
+  await expect(nova).toContainText('off');
+  await expect(control).not.toBeChecked();
+});
+
+test("page.settings-connector-presence: a connector's block says from health whether its process is on the daemon's stream, and how to start it when it is not", async ({
+  page,
+}) => {
+  const {daemon} = await miraHome({});
+  const telegram = page.locator('[data-section="connectors/telegram"]');
+  const notRunning = 'Connector: not running. Start it with pnpm telegram.';
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await expect(telegram).toContainText(notRunning);
+
+  const connector = await exchange(daemon, {
+    path: '/api/events?connector=telegram',
+    headers: bearer(daemon),
   });
+
+  await connector.received('event: ready');
+  await expect(telegram).toContainText('Connector: running.');
+  connector.hangUp();
+  await expect(telegram).toContainText(notRunning);
+});
+
+test("page.settings-field-editing: each row saves its field as its kind — text, a number, a switch, a secret, JSON for a structure, a section's switch — Reset unsets it, and a value shows as the text that saves it back as it was", async ({
+  page,
+}) => {
+  const kim = {'7': 'Kim'};
+  const {home, daemon} = await miraHome({
+    // A model's name that reads as a number, and a structure.
+    project02: {nvidiaModel: '1234'},
+    connectors: {telegram: {config: {pairedUsers: kim}}},
+  });
+  const landed = (key: string) =>
+    expect(row(page, key).getByText('Saved', {exact: true})).toBeVisible();
+  const saved = async (key: string, button = 'Save') => {
+    await row(page, key).getByRole('button', {name: button}).click();
+    await landed(key);
+  };
+  /** The value as the box shows it, typed back in. */
+  const retyped = async (key: string, label: string) => {
+    const box = row(page, key).getByLabel(label, {exact: true});
+    const shown = await box.inputValue();
+
+    await box.fill('');
+    await box.fill(shown);
+
+    return shown;
+  };
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+
+  expect(await retyped('project02.nvidiaModel', 'Nvidia model')).toBe('1234');
+  await saved('project02.nvidiaModel');
+  expect(await retyped('connectors/telegram/pairedUsers', 'Paired users')).toBe(
+    JSON.stringify(kim),
+  );
+  await saved('connectors/telegram/pairedUsers');
+  expect(homeConfig(home)).toMatchObject({
+    project02: {nvidiaModel: '1234'},
+    connectors: {telegram: {config: {pairedUsers: kim}}},
+  });
+
+  await row(page, 'project02.contextWindowTokens')
+    .getByLabel('Context window tokens', {exact: true})
+    .fill('4096');
+  await saved('project02.contextWindowTokens');
+  await row(page, 'connectors/telegram/mirror')
+    .getByRole('checkbox', {name: 'Mirror'})
+    .uncheck();
+  await landed('connectors/telegram/mirror');
+  await row(page, 'connectors/telegram/managementBotToken')
+    .getByLabel('Management bot token', {exact: true})
+    .fill('123456:home-bot');
+  await saved('connectors/telegram/managementBotToken', 'Replace');
+  await row(page, 'plugins/demo-config')
+    .getByRole('checkbox', {name: 'Demo Config enabled'})
+    .check();
+  await landed('plugins/demo-config');
+  expect(homeConfig(home)).toMatchObject({
+    project02: {contextWindowTokens: 4096},
+    connectors: {
+      telegram: {
+        config: {mirror: false, managementBotToken: '123456:home-bot'},
+      },
+    },
+    plugins: {'demo-config': {enabled: true}},
+  });
+  await expect(
+    row(page, 'connectors/telegram/managementBotToken'),
+  ).not.toContainText('not set');
+  expect(await page.content()).not.toContain('123456:home-bot');
+
+  await saved('project02.contextWindowTokens', 'Reset');
+  await expect(row(page, 'project02.contextWindowTokens')).toContainText(
+    'default: 32768',
+  );
+  expect(homeConfig(home)).not.toHaveProperty([
+    'project02',
+    'contextWindowTokens',
+  ]);
 });

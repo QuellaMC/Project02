@@ -11,9 +11,8 @@ import {
   type IncomingMessage,
 } from 'node:http';
 
-import {onTestFinished} from 'vitest';
-
 import type {Address} from './daemon.ts';
+import {onTestFinished} from './runner.ts';
 import {attachEvidence, waitFailure, within} from './wait.ts';
 
 export type Exchange = {

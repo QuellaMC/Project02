@@ -16,7 +16,8 @@ and against any other build of it.
   the behavior as a sentence:
   `lifecycle.address-line: serve prints its address as its first stdout line once it answers there`.
   `pnpm arch:check` runs `scripts/check-conformance-inventory.mjs`, which
-  fails when a title names no row and when a row marked done has no test.
+  fails when a title names no row and when a row marked done has no test,
+  here or, for a page row, in `tests/browser`.
 - A test waits only on what it can observe: a printed line, a frame, a
   request reaching the model server, an exit, a file. Never a sleep.
 - Every wait has a ceiling of ten seconds, counted for a printed line from
@@ -45,6 +46,7 @@ and against any other build of it.
 | `harness/build-page.ts`   | Builds the page the daemon serves, once before the suite, when the checkout has none.                                                                                                                    |
 | `harness/terminal.py`     | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                             |
 | `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                                                                                               |
+| `harness/runner.ts`       | The runner the harness serves: work for the end of the test running now, supplied by Vitest in `setup.ts` and by Playwright in the browser suite's `fixture.ts`. No other harness file imports a runner. |
 
 ## Environment
 
@@ -61,10 +63,12 @@ start.
 `python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal
 through its `pty` module (`harness/terminal.py`).
 
-Against another build of the daemon:
+Against another build of the daemon, this suite and the browser suite,
+which starts `serve` through the same harness:
 
 ```sh
 PROJECT02_SERVE_CMD='path/to/project02 serve' \
 PROJECT02_INSPECT_CMD='path/to/project02 inspect' \
   pnpm exec vitest run --project conformance
+PROJECT02_SERVE_CMD='path/to/project02 serve' pnpm test:browser
 ```
