@@ -10,11 +10,9 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import type {AddressInfo} from 'node:net';
 import {text} from 'node:stream/consumers';
 
-import {onTestFinished} from 'vitest';
-
+import {servedOnLoopback} from './server.ts';
 import {attachEvidence, within} from './wait.ts';
 
 export type Mem0Request = {
@@ -97,26 +95,14 @@ export async function startMem0Server(): Promise<Mem0Server> {
     });
   });
 
-  await new Promise<void>(resolve => {
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  onTestFinished(
-    () =>
-      new Promise<void>(resolve => {
-        server.closeAllConnections();
-        server.close(() => {
-          resolve();
-        });
-      }),
-  );
+  const port = await servedOnLoopback(server);
+
   attachEvidence(
     () =>
       `mem0 server: ${requests
         .map(request => `${request.method} ${request.path}`)
         .join(', ')}`,
   );
-
-  const {port} = server.address() as AddressInfo;
 
   return {
     baseUrl: `http://127.0.0.1:${String(port)}`,
