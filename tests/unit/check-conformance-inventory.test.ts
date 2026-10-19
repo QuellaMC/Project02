@@ -42,6 +42,7 @@ describe('the conformance inventory check', () => {
         row('lifecycle.c', 'rust-unit', 'todo'),
         row('lifecycle.g', 'conformance', 'done'),
         row('turns.d', 'conformance', 'todo'),
+        row('turns.h', 'conformance', 'done'),
         row('page.e', 'client-ts', 'todo'),
       ],
       'tests/conformance/lifecycle/address.test.ts': [
@@ -58,6 +59,8 @@ describe('the conformance inventory check', () => {
         '  ${1}',
         "`('turns.d: a tagged table, $a', () => {});",
         "test.skip('turns.d: skipped for now', () => {});",
+        "it.each([[1]])('turns.h: a case value is no context, %s', value => { String(value); });",
+        "it.for([[1]])('turns.h: the case, then the context', ([value], {skip}) => { String(value); skip(); });",
       ],
       'tests/conformance/other.test.ts': [
         "import {it} from './helpers.ts';",
@@ -67,9 +70,9 @@ describe('the conformance inventory check', () => {
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 6 test(s) name rows of ' +
+      'conformance-inventory: 8 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
-        'area: lifecycle 2/1, turns 0/1.\n',
+        'area: lifecycle 2/1, turns 1/1.\n',
     );
     expect(result.status).toBe(0);
   });
