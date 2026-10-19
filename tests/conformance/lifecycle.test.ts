@@ -861,8 +861,13 @@ it('lifecycle.stop-not-held-by-stalled-client: a stop does not wait on a client 
   );
   await stalled.holds('HTTP/1.1 100 Continue\r\n\r\n');
   stalled.write('{"conversationId":');
+
+  const stopped = performance.now();
+
   daemon.signal('SIGINT');
   expect(await daemon.exit()).toBe(0);
+  // Promptly: not the minute the stalled client had.
+  expect(performance.now() - stopped).toBeLessThan(5_000);
   await stalled.closed();
 });
 
