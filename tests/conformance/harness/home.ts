@@ -103,16 +103,16 @@ export function sessionLog(
     .map(line => JSON.parse(line) as Record<string, unknown>);
 }
 
-/** Every file under a directory with its text, so a later look shows whether anything changed. */
-export function snapshot(directory: string): Record<string, string> {
+/** Every entry under a directory, a file with its text and a directory as null, so a later look shows whether anything changed. */
+export function snapshot(directory: string): Record<string, string | null> {
   return Object.fromEntries(
-    readdirSync(directory, {recursive: true, withFileTypes: true})
-      .filter(entry => entry.isFile())
-      .map(entry => {
+    readdirSync(directory, {recursive: true, withFileTypes: true}).map(
+      entry => {
         const path = join(entry.parentPath, entry.name);
 
-        return [path, readFileSync(path, 'utf8')];
-      }),
+        return [path, entry.isDirectory() ? null : readFileSync(path, 'utf8')];
+      },
+    ),
   );
 }
 
