@@ -1,10 +1,15 @@
-import {readdirSync, readFileSync} from 'node:fs';
+import {readdirSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
 import {inspect, startDaemon, type Run} from './harness/daemon.ts';
-import {characterJson, configJson, createHome} from './harness/home.ts';
+import {
+  characterJson,
+  configJson,
+  createHome,
+  snapshot,
+} from './harness/home.ts';
 import {
   finish,
   startModelServer,
@@ -377,14 +382,11 @@ it('inspect.read-only: inspect writes nothing: on a directory with no store it r
     },
     'character-data': {mira: {'config.json': overlay}},
   });
-  const before = readdirSync(home, {recursive: true});
+  const before = snapshot(home);
 
   await reportOn(home, ['--character', 'nova', '--sessions']);
   await inspect(['--store', home, '--character', 'mira', '--sessions']).exit();
-  expect(readdirSync(home, {recursive: true})).toEqual(before);
-  expect(
-    readFileSync(join(home, 'character-data', 'mira', 'config.json'), 'utf8'),
-  ).toBe(overlay);
+  expect(snapshot(home)).toEqual(before);
 });
 
 it('inspect.damaged-store: inspect exits 1 with an error, never an empty list, on a character data directory that lost its marker but holds sessions or a foreign entry, on a directory that is not a home, and on a --store that is a file', async () => {

@@ -222,9 +222,19 @@ it("memory.mem0-capture: mem0 takes each turn behind its answer, as the characte
     mem0.requests.filter(request => request.path === '/memories');
 
   model.answer(reply('Reply 1.'));
-  // The capture of this turn is held at the backend: the turn answers anyway.
-  expect(await say('Line 1.', 'line-1')).toMatchObject({status: 'completed'});
-  expect(await held.arrived()).toMatchObject({
+
+  // The turn answers first; its capture reaches the backend behind it.
+  const answered = say('Line 1.', 'line-1');
+  const captured = held.arrived();
+
+  expect(
+    await Promise.race([
+      answered.then(() => 'answered'),
+      captured.then(() => 'captured'),
+    ]),
+  ).toBe('answered');
+  expect(await answered).toMatchObject({status: 'completed'});
+  expect(await captured).toMatchObject({
     body: {
       agent_id: 'mira',
       messages: [
