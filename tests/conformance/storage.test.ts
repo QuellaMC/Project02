@@ -229,9 +229,9 @@ it('storage.round-records: each model round is its own record of what the model 
   const {conversationId} = await conversationOf(wire, 'mira');
 
   model.answer(
-    calling('character_state_patch', {mood: 'curious'}),
+    calling(['character_state_patch', {mood: 'curious'}]),
     reply('Curious now.'),
-    calling('character_state_patch', {mood: 'playful'}),
+    calling(['character_state_patch', {mood: 'playful'}]),
     ...undecided(99),
   );
   await say('How do you feel?', 'feel');
@@ -550,7 +550,7 @@ it("storage.temp-residue-cleanup: the temp files writers that are gone left behi
   const {conversationId} = await conversationOf(firstWire, 'mira');
 
   model.answer(
-    calling('character_state_patch', {mood: 'curious'}),
+    calling(['character_state_patch', {mood: 'curious'}]),
     reply('Curious.'),
   );
   await sayFirst('How are you?', 'one');
@@ -595,7 +595,7 @@ it("storage.temp-residue-cleanup: the temp files writers that are gone left behi
   const say = await converse(wire, 'mira');
 
   model.answer(
-    calling('character_state_patch', {mood: 'playful'}),
+    calling(['character_state_patch', {mood: 'playful'}]),
     reply('Playful.'),
   );
   await say('And now?', 'two');
@@ -703,7 +703,7 @@ it('storage.sqlite-views: a SQLite view another program holds locked is reported
     const daemon = await startDaemon(home);
     const say = await converse(wireOf(daemon), 'mira');
 
-    model.answer(calling('sessions_search', {query: 'tea'}), reply('Found.'));
+    model.answer(calling(['sessions_search', {query: 'tea'}]), reply('Found.'));
     expect(await say('Did we talk about tea?', 'search')).toMatchObject({
       status: 'completed',
     });

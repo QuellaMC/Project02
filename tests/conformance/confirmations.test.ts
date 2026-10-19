@@ -54,13 +54,16 @@ async function asksForTone(
     readonly fingerprint: string;
   };
 
-  return calling('runtime_plugin_config_update', {
-    pluginId: 'demo-config',
-    fieldName: 'tone',
-    operation: 'set',
-    value: tone,
-    expectedFingerprint: view.fingerprint,
-  });
+  return calling([
+    'runtime_plugin_config_update',
+    {
+      pluginId: 'demo-config',
+      fieldName: 'tone',
+      operation: 'set',
+      value: tone,
+      expectedFingerprint: view.fingerprint,
+    },
+  ]);
 }
 
 function parkedIn(frame: Frame): Parked {

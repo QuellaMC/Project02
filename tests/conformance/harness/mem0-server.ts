@@ -1,11 +1,12 @@
 /**
- * A self-hosted Mem0 server on loopback, standing in for a character's
- * long-term memory: the home's mem0 settings point the daemon at it, it
- * answers a search with one memory naming the query and an add with the id
- * of one memory, holds a search open on demand, and keeps every request.
+ * A Mem0 REST backend on loopback, standing in for a self-hosted server and
+ * for the hosted platform: the mem0 plugin's baseUrl points the daemon at
+ * it, it answers each request on a path with the next answer the test
+ * scripted for that path, and it keeps every request the daemon sent.
  */
 import {
   createServer,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
@@ -17,68 +18,73 @@ import {onTestFinished} from 'vitest';
 import {attachEvidence, within} from './wait.ts';
 
 export type Mem0Request = {
+  readonly method: string;
   readonly path: string;
+  readonly headers: IncomingHttpHeaders;
   readonly body: unknown;
 };
 
-export type Mem0Server = {
-  /** The mem0 stanza of a home's `config.json` that switches it on and points it here. */
-  readonly settings: {
-    readonly enabled: true;
-    readonly config: {readonly backend: 'server'; readonly baseUrl: string};
-  };
-  readonly requests: readonly Mem0Request[];
-  /** The next search for this query waits for the test to release it. */
-  readonly hold: (query: string) => {
-    readonly arrived: () => Promise<Mem0Request>;
-    readonly release: () => void;
-  };
+/** The status, and a body sent as its JSON, or as written when it is a string. */
+export type Mem0Answer = {readonly status: number; readonly body?: unknown};
+
+export type Mem0Held = {
+  /** The request, once it reached the server. */
+  readonly arrived: () => Promise<Mem0Request>;
+  readonly release: (answer: Mem0Answer) => void;
 };
+
+export type Mem0Server = {
+  /** The origin a home's mem0 baseUrl names. */
+  readonly baseUrl: string;
+  readonly requests: readonly Mem0Request[];
+  /** The answers to the next requests on this path, in order; a request nobody scripted gets an empty result list. */
+  readonly answer: (path: string, ...answers: Mem0Answer[]) => void;
+  /** The next request on this path waits for the test to release it. */
+  readonly hold: (path: string) => Mem0Held;
+};
+
+type Scripted =
+  | Mem0Answer
+  | {
+      readonly reached: (request: Mem0Request) => void;
+      readonly released: Promise<Mem0Answer>;
+    };
 
 export async function startMem0Server(): Promise<Mem0Server> {
   const requests: Mem0Request[] = [];
-  const held = new Map<
-    string,
-    {
-      readonly reached: (request: Mem0Request) => void;
-      readonly released: Promise<void>;
-    }
-  >();
+  const scripts = new Map<string, Scripted[]>();
+  const scriptOf = (path: string): Scripted[] => {
+    const script = scripts.get(path) ?? [];
+
+    scripts.set(path, script);
+
+    return script;
+  };
   const respond = async (
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     const body = await text(request);
     const recorded = {
+      method: request.method ?? '',
       path: request.url ?? '',
+      headers: request.headers,
       body: body === '' ? undefined : (JSON.parse(body) as unknown),
     };
 
     requests.push(recorded);
 
-    const query = (recorded.body as {readonly query?: string} | undefined)
-      ?.query;
-    const hold = query === undefined ? undefined : held.get(query);
+    const next = scriptOf(recorded.path).shift() ?? {
+      status: 200,
+      body: {results: []},
+    };
 
-    if (query !== undefined && hold !== undefined) {
-      held.delete(query);
-      hold.reached(recorded);
-      await hold.released;
+    if ('released' in next) {
+      next.reached(recorded);
+      give(await next.released, response);
+    } else {
+      give(next, response);
     }
-
-    const id = `memory-${String(requests.length)}`;
-
-    response
-      .writeHead(200, {'content-type': 'application/json'})
-      .end(
-        JSON.stringify(
-          recorded.path === '/search'
-            ? {results: [{id, memory: `What I know of ${String(query)}.`}]}
-            : recorded.path === '/memories'
-              ? {results: [{id}]}
-              : {},
-        ),
-      );
   };
   const server = createServer((request, response) => {
     // A request that broke off has nobody left to answer.
@@ -101,33 +107,46 @@ export async function startMem0Server(): Promise<Mem0Server> {
   );
   attachEvidence(
     () =>
-      `mem0 server: ${requests.map(request => request.path).join(', ') || 'no requests'}`,
+      `mem0 server: ${requests
+        .map(request => `${request.method} ${request.path}`)
+        .join(', ')}`,
   );
 
   const {port} = server.address() as AddressInfo;
 
   return {
-    settings: {
-      enabled: true,
-      config: {backend: 'server', baseUrl: `http://127.0.0.1:${String(port)}`},
-    },
+    baseUrl: `http://127.0.0.1:${String(port)}`,
     requests,
-    hold: query => {
+    answer: (path, ...answers) => {
+      scriptOf(path).push(...answers);
+    },
+    hold: path => {
       const arrival = Promise.withResolvers<Mem0Request>();
-      const release = Promise.withResolvers<undefined>();
+      const release = Promise.withResolvers<Mem0Answer>();
 
-      held.set(query, {reached: arrival.resolve, released: release.promise});
+      scriptOf(path).push({
+        reached: arrival.resolve,
+        released: release.promise,
+      });
 
       return {
         arrived: () =>
           within(
-            `the search for "${query}" to reach the mem0 server`,
+            `the held request on ${path} to reach the mem0 server`,
             arrival.promise,
           ),
-        release: () => {
-          release.resolve(undefined);
-        },
+        release: release.resolve,
       };
     },
   };
+}
+
+function give(answer: Mem0Answer, response: ServerResponse): void {
+  response
+    .writeHead(answer.status, {'content-type': 'application/json'})
+    .end(
+      typeof answer.body === 'string'
+        ? answer.body
+        : JSON.stringify(answer.body ?? {}),
+    );
 }
