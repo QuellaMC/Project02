@@ -40,6 +40,29 @@ function lineOf(request: ModelRequest | undefined): string {
   );
 }
 
+/** The items a plugin handed the round, as the round's record keeps them. */
+function contextItemsOf(record: Record<string, unknown>): unknown[] {
+  const found: unknown[] = [];
+  const look = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const element of value) {
+        look(element);
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, inner] of Object.entries(value)) {
+        if (key === 'pluginContextItems' && Array.isArray(inner)) {
+          found.push(...(inner as unknown[]));
+        } else {
+          look(inner);
+        }
+      }
+    }
+  };
+
+  look(record);
+  return found;
+}
+
 /** What mem0 recorded about each turn it was handed after the commit. */
 function capturesOf(home: string): unknown[] {
   return sessionRecords(home, 'mira', 'after_turn_committed').map(record =>
@@ -304,19 +327,13 @@ it("memory.mem0-capture: mem0 takes each turn behind its answer, as the characte
   renamed.release({status: 200, body: {results: [{id: 'mem-11'}]}});
 });
 
-it('memory.mem0-recall: before a turn, what mem0 recalls rides the line in the recalled-memory fence, five items at most and each bounded; an empty recall adds nothing, and a failing backend leaves the turn to complete without it', async () => {
+it('memory.mem0-recall: before a turn, what mem0 recalls rides the line in the recalled-memory fence, five items at most and each bounded, each recorded with its source; an empty recall adds nothing, and a failing backend leaves the turn to complete without it', async () => {
   const model = await startModelServer();
   const mem0 = await startMem0Server();
-  const say = await converse(
-    wireOf(
-      await startDaemon(
-        createHome({
-          'config.json': mem0Config(model, mem0, {backend: 'server'}),
-        }),
-      ),
-    ),
-    'mira',
-  );
+  const home = createHome({
+    'config.json': mem0Config(model, mem0, {backend: 'server'}),
+  });
+  const say = await converse(wireOf(await startDaemon(home)), 'mira');
   const memories = [
     'Sam likes tea.',
     'Sam lives by the sea.',
@@ -361,6 +378,17 @@ it('memory.mem0-recall: before a turn, what mem0 recalls rides the line in the r
     `- ${'x'.repeat(597)}...`,
   ]);
   expect([empty, failing]).toEqual(['Anything else?', 'And now?']);
+
+  // Each recalled item is recorded with the memory it came from.
+  const [recalledRound] = sessionRecords(home, 'mira', 'role_model_round');
+
+  expect(contextItemsOf(recalledRound ?? {})).toMatchObject(
+    memories.slice(0, 5).map((_, at) => ({
+      pluginId: 'mem0',
+      kind: 'memory',
+      sourceReferences: [{kind: 'memory', id: `mem-${String(at)}`}],
+    })),
+  );
 });
 
 it('memory.mem0-search-tool: mem0.search answers the model with at most five items, each bounded and sourced to its memory, and a search that finds nothing is answered all the same', async () => {
