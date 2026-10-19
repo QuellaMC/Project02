@@ -257,7 +257,17 @@ it('transport.body-limit: a request body over 64 KiB is 413 payload_too_large, w
   expect(await answered(post(ofBytes(64 * 1024 + 1)))).toMatchObject(
     refused(413, 'payload_too_large'),
   );
-  expect((await post(ofBytes(64 * 1024))).status).not.toBe(413);
+  // Read through: the text inside is measured and refused for its own
+  // length, which a body cut short could never be.
+  expect(await answered(post(ofBytes(64 * 1024)))).toMatchObject({
+    status: 400,
+    body: {
+      error: {
+        code: 'invalid_request',
+        message: expect.stringContaining('message.text') as string,
+      },
+    },
+  });
 });
 
 it('transport.unknown-route-404: an unknown /api route, /api itself included, is 404 not_found in the envelope, behind the same auth', async () => {
