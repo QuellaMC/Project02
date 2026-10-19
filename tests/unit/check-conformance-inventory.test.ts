@@ -97,6 +97,10 @@ describe('the conformance inventory check', () => {
         '  a',
         '  ${1}',
         "`('a tagged block parks them too', () => {});",
+        "it.each([])('turns.g: an empty table runs no case', () => {});",
+        'it.each`',
+        '  a',
+        "`('turns.h: a header alone runs no case', () => {});",
       ],
     });
 
@@ -115,8 +119,8 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/turns.test.ts:12: a describe block; the suite is flat, so no block above a test can park it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.a is done, but no test in tests/conformance names it.',
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but its test_location is rust-unit, not conformance.',
-      'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped or expects to fail.',
-      'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped or expects to fail.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
       '',
     ]);
     expect(result.status).toBe(1);

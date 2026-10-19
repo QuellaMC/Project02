@@ -39,6 +39,8 @@ const ROOTS = new Map([
 ]);
 // The modifiers applied with their own arguments before the titled call.
 const MODIFIERS_WITH_ARGUMENTS = new Set(['each', 'for', 'skipIf', 'runIf']);
+// Of those, the ones whose argument is a table of cases.
+const TABLE_MODIFIERS = new Set(['each', 'for']);
 // The modifiers under which a test proves nothing: it never runs, or it passes by failing.
 const PARKING_MODIFIERS = new Set(['skip', 'todo', 'fails']);
 const TITLE_SHAPE = /^([^\s:]+): \S/;
@@ -112,6 +114,33 @@ function titled(call) {
   return !MODIFIERS_WITH_ARGUMENTS.has(calleeNames(call.expression)?.at(-1));
 }
 
+/** Whether the call's table of cases, if it has one, holds none: then nothing runs. */
+function runsNoCase(call) {
+  const applied = call.expression;
+
+  if (ts.isCallExpression(applied)) {
+    const [table] = applied.arguments;
+
+    return (
+      TABLE_MODIFIERS.has(calleeNames(applied)?.at(-1)) &&
+      table !== undefined &&
+      ts.isArrayLiteralExpression(table) &&
+      table.elements.length === 0
+    );
+  }
+  if (ts.isTaggedTemplateExpression(applied)) {
+    const {template} = applied;
+    const text = ts.isTemplateExpression(template)
+      ? template.head.text +
+        template.templateSpans.map(span => `${span.literal.text}`).join('')
+      : template.text;
+
+    // The first non-empty line is the header.
+    return text.split('\n').filter(line => line.trim() !== '').length < 2;
+  }
+  return false;
+}
+
 /** Each titled test call, with its title when that is a plain string literal, and each block, by line. */
 function scan(file, source) {
   const tree = ts.createSourceFile(
@@ -135,7 +164,9 @@ function scan(file, source) {
       } else if (ROOTS.get(root) === 'test') {
         tests.push({
           line,
-          parked: modifiers.some(name => PARKING_MODIFIERS.has(name)),
+          parked:
+            modifiers.some(name => PARKING_MODIFIERS.has(name)) ||
+            runsNoCase(node),
           title:
             title !== undefined && ts.isStringLiteral(title)
               ? title.text
@@ -256,7 +287,7 @@ function main() {
       failures.push(
         parkedRows.has(row.id)
           ? `${INVENTORY_FILE}: ${row.id} is done, but every test naming it ` +
-              `in ${SUITE_DIRECTORY} is skipped or expects to fail.`
+              `in ${SUITE_DIRECTORY} is skipped, runs no case or expects to fail.`
           : `${INVENTORY_FILE}: ${row.id} is done, but no test in ` +
               `${SUITE_DIRECTORY} names it.`,
       );
