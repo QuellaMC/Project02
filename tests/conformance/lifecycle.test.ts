@@ -14,7 +14,7 @@ import {join} from 'node:path';
 
 import {expect, it, onTestFinished} from 'vitest';
 
-import {serve, startDaemon} from './harness/daemon.ts';
+import {serve, startDaemon, terminal, type Terminal} from './harness/daemon.ts';
 import {
   frameOf,
   openEvents,
@@ -1046,4 +1046,48 @@ it('lifecycle.second-signal-exits: a second stop signal during a stop ends the p
   await expect(wireOf(again).health()).resolves.toMatchObject({
     homeRoot: home,
   });
+});
+
+it('lifecycle.store-consent-prompt: on a terminal serve asks before making a store: yes makes it and runs on to the address, and no, a terminal that goes away or a stop while asking exits 1 and writes nothing', async () => {
+  const question = (home: string) =>
+    `No Project02 store at "${home}". Create one there? [y/N]`;
+  const accepted = createHome();
+  const yes = terminal(['--store', accepted]);
+
+  yes.type('y\n');
+  await expect(wireOf(await yes.address()).health()).resolves.toMatchObject({
+    homeRoot: accepted,
+  });
+  expect(yes.stdout()).toContain(question(accepted));
+
+  const refusals: readonly (readonly [string, (run: Terminal) => void])[] = [
+    [
+      'no',
+      run => {
+        run.type('n\n');
+      },
+    ],
+    [
+      'a terminal that goes away',
+      run => {
+        run.hangUp();
+      },
+    ],
+    [
+      'a stop while asking',
+      run => {
+        run.signal('SIGINT');
+      },
+    ],
+  ];
+
+  for (const [how, refuse] of refusals) {
+    const home = createHome();
+    const run = terminal(['--store', home]);
+
+    await run.shows(question(home));
+    refuse(run);
+    expect(await run.exit(), how).toBe(1);
+    expect(readdirSync(home), how).toEqual([]);
+  }
 });

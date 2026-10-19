@@ -35,13 +35,14 @@ and against any other build of it.
 | File                      | Job                                                                                                                                                                                                      |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `harness/home.ts`         | A canonical temp home, empty for `serve --init` or seeded with the files a test names; a session log's records, the records of one kind across a character's sessions, and every file under a directory. |
-| `harness/daemon.ts`       | Spawns `serve` or `inspect` in its own process group: its address, signals, output and exit code.                                                                                                        |
+| `harness/daemon.ts`       | Spawns `serve` or `inspect` in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code.                                                                      |
 | `harness/wire.ts`         | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                                                                                      |
 | `harness/events.ts`       | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                                                                                                 |
 | `harness/http.ts`         | One request exactly as the test writes it, nothing added: the answer's status, headers and body as it comes, and a client that stops reading or hangs up.                                                |
 | `harness/socket.ts`       | A bare TCP connection, for a request stopped halfway or an answer left unread.                                                                                                                           |
 | `harness/model-server.ts` | An OpenAI-compatible model on loopback that answers as the test scripts it, streams at the test's pace, holds a request open on demand and keeps every request, with what each showed the model.         |
 | `harness/mem0-server.ts`  | A Mem0 backend on loopback, a self-hosted server or the platform, that answers each path as the test scripts it, holds a request open on demand and keeps every request.                                 |
+| `harness/terminal.py`     | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                             |
 | `harness/wait.ts`         | The ceiling, and what a failed wait shows.                                                                                                                                                               |
 
 ## Environment
@@ -55,6 +56,9 @@ own arguments, and the switches of `src/cli/README.md` it needs:
 `PROJECT02_TEST_DURATIONS` for shortened waits. A test that needs the
 model server or the mem0 server writes its settings into the home's `config.json` before the
 start.
+
+`python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal
+through its `pty` module (`harness/terminal.py`).
 
 Against another build of the daemon:
 
