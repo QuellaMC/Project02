@@ -8,12 +8,19 @@ publish = false
 rust-version = "1.99"
 
 [workspace.dependencies]
+async-trait = "0.1.92"
 dunce = "1.0.5"
+jsonschema = { version = "0.59.0", default-features = false }
+p02-core = { path = "crates/p02-core" }
+p02-shared = { path = "crates/p02-shared" }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
 sha2 = { version = "0.11.1", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+tokio = "1.53.3"
+tokio-util = "0.7.20"
 uuid = { version = "1.28.0", features = ["v4"] }
 
 [workspace.lints.rust]

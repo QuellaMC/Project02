@@ -1,0 +1,212 @@
+use p02_shared::{BoundJsonError, Credentials, JsonLimits, bound_json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::output::within;
+use crate::role_model::chat::{
+    ChatCompletionTool, ChatMessage, ProviderCapabilities, ToolNameMapping,
+};
+
+/// A provider a model call can go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderName {
+    Nvidia,
+}
+
+/// The exchange is the wire as sent and received, so it weighs what the
+/// prompt weighs: bounded by the context window, not by what one plugin may
+/// return. These limits stop only a runaway shape, so a prompt the window
+/// admits is always recordable and never fails the turn it describes.
+const EXCHANGE_LIMITS: JsonLimits = JsonLimits {
+    depth: 16,
+    entries_per_container: 65_536,
+    nodes: 1_048_576,
+    string_bytes: 8 * 1_024 * 1_024,
+    total_string_bytes: 64 * 1_024 * 1_024,
+};
+
+/// A model call as the provider saw it: the request body exactly as sent,
+/// the messages and tools it was rendered from, and what came back.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeRecord {
+    pub provider: ExchangeProvider,
+    pub capabilities: ProviderCapabilities,
+    pub reasoning_params: Value,
+    pub rendered_messages: Vec<ChatMessage>,
+    pub rendered_tools: Vec<ChatCompletionTool>,
+    pub tool_name_mappings: Vec<ToolNameMapping>,
+    pub request_body: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Value>,
+    /// The answer as the provider returned it; the runtime replays its own
+    /// rendering, never this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_assistant_message: Option<ChatMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeProvider {
+    pub name: ProviderName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
+/// An [`ExchangeRecord`] fit to keep: within the exchange's limits, its
+/// free-form parts with credential-named values redacted.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "ExchangeRecord", into = "ExchangeRecord")]
+pub struct ProviderExchange(ExchangeRecord);
+
+impl ProviderExchange {
+    /// # Errors
+    ///
+    /// [`BoundJsonError`] for the first limit the record breaks.
+    pub fn new(mut record: ExchangeRecord) -> Result<Self, BoundJsonError> {
+        let name = "Role-model provider exchange";
+
+        within(&record, name, EXCHANGE_LIMITS)?;
+
+        let redacted = |value: Value| bound_json(value, name, EXCHANGE_LIMITS, Credentials::Redact);
+
+        record.reasoning_params = redacted(record.reasoning_params)?;
+        record.request_body = redacted(record.request_body)?;
+        record.usage = record.usage.map(redacted).transpose()?;
+
+        Ok(Self(record))
+    }
+
+    #[must_use]
+    pub fn record(&self) -> &ExchangeRecord {
+        &self.0
+    }
+}
+
+impl TryFrom<ExchangeRecord> for ProviderExchange {
+    type Error = BoundJsonError;
+
+    fn try_from(record: ExchangeRecord) -> Result<Self, Self::Error> {
+        Self::new(record)
+    }
+}
+
+impl From<ProviderExchange> for ExchangeRecord {
+    fn from(exchange: ProviderExchange) -> Self {
+        exchange.0
+    }
+}
+
+/// What a round records of the provider it went to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderMetadata {
+    pub provider: ProviderName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<ProviderRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<ProviderResponse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ProviderFailure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderFailure {
+    pub code: String,
+    pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::role_model::chat::{ContextRole, ReasoningParameterStyle};
+
+    fn record(messages: Vec<ChatMessage>, request_body: Value) -> ExchangeRecord {
+        ExchangeRecord {
+            provider: ExchangeProvider {
+                name: ProviderName::Nvidia,
+                model: Some("nvidia/test-model".to_owned()),
+                endpoint: None,
+            },
+            capabilities: ProviderCapabilities {
+                supports_native_tools: true,
+                supports_developer_or_system_context: true,
+                preferred_model_context_role: ContextRole::System,
+                supports_strict_tool_schema: true,
+                supports_reasoning: true,
+                reasoning_parameter_style: ReasoningParameterStyle::Nvidia,
+                requires_reasoning_block_round_trip: false,
+                supports_tool_choice: true,
+                supports_parallel_tool_calls: true,
+            },
+            reasoning_params: json!({"chat_template_kwargs": {"thinking": true}}),
+            rendered_messages: messages,
+            rendered_tools: Vec::new(),
+            tool_name_mappings: Vec::new(),
+            request_body,
+            finish_reason: Some("stop".to_owned()),
+            usage: Some(json!({"prompt_tokens": 9000, "completion_tokens": 12})),
+            native_assistant_message: None,
+        }
+    }
+
+    #[test]
+    fn an_exchange_as_large_as_the_window_admits_is_recorded() {
+        let history: Vec<ChatMessage> = (0..48)
+            .map(|index| ChatMessage::User {
+                content: format!("{index}{}", "a".repeat(1_500)),
+            })
+            .collect();
+        let body = json!({"messages": serde_json::to_value(&history).unwrap()});
+        let exchange = ProviderExchange::new(record(history, body)).unwrap();
+
+        assert!(serde_json::to_string(&exchange).unwrap().len() > 64 * 1_024);
+        assert_eq!(exchange.record().rendered_messages.len(), 48);
+        assert_eq!(
+            exchange.record().usage,
+            Some(json!({"prompt_tokens": 9000, "completion_tokens": 12}))
+        );
+    }
+
+    #[test]
+    fn a_credential_sent_to_the_provider_is_never_kept() {
+        let exchange = ProviderExchange::new(record(
+            Vec::new(),
+            json!({"model": "nvidia/test-model", "api_key": "nvapi-secret", "messages": []}),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            exchange.record().request_body["api_key"],
+            json!("[redacted]")
+        );
+        assert_eq!(
+            serde_json::from_value::<ProviderExchange>(serde_json::to_value(&exchange).unwrap())
+                .unwrap(),
+            exchange
+        );
+    }
+}

@@ -1,0 +1,264 @@
+/// The one grammar for the reasoning a model leaks into its text. A block
+/// opens on `<think …>` or `<reasoning …>`, in any case and with any blank
+/// space and attributes, and closes on the first bare closing tag of the
+/// same name; the block is dropped whole, nested tags and all. A tag outside
+/// any block, or a block never closed, is a leak the text cannot be cleaned
+/// of. The filter reads the text as it arrives, so a draft can be shown
+/// while the model still writes.
+#[derive(Debug, Default)]
+pub struct ReasoningFilter {
+    buffer: String,
+    open_block: Option<&'static str>,
+    stray: bool,
+}
+
+/// The text holds a reasoning tag outside any block, or a block that never
+/// closes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the text leaks reasoning: a reasoning tag outside a block, or a block never closed")]
+pub struct ReasoningLeakError;
+
+const TAG_NAMES: [&str; 2] = ["think", "reasoning"];
+
+enum TagMatch {
+    Tag {
+        /// Just past the closing `>`.
+        end: usize,
+        closing: bool,
+        name: &'static str,
+        /// Only blank space between the name and the `>`: the one shape
+        /// that closes a block.
+        bare: bool,
+    },
+    Partial,
+    None,
+}
+
+enum NameMatch {
+    Found(&'static str),
+    Partial,
+    Absent,
+}
+
+impl ReasoningFilter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Takes the next piece of text and returns what of it lies outside
+    /// reasoning blocks; what could still open or close one is held until
+    /// it cannot.
+    pub fn push(&mut self, text: &str) -> String {
+        self.buffer.push_str(text);
+
+        let mut passed = String::new();
+        let mut cursor = 0;
+
+        loop {
+            let Some(offset) = self.buffer[cursor..].find('<') else {
+                if self.open_block.is_none() {
+                    passed.push_str(&self.buffer[cursor..]);
+                }
+
+                self.buffer.clear();
+                return passed;
+            };
+            let tag_start = cursor + offset;
+
+            if self.open_block.is_none() {
+                passed.push_str(&self.buffer[cursor..tag_start]);
+            }
+
+            match match_tag(&self.buffer, tag_start) {
+                TagMatch::Partial => {
+                    self.buffer.drain(..tag_start);
+                    return passed;
+                }
+                TagMatch::None => {
+                    if self.open_block.is_none() {
+                        passed.push('<');
+                    }
+
+                    cursor = tag_start + 1;
+                }
+                TagMatch::Tag {
+                    end,
+                    closing,
+                    name,
+                    bare,
+                } => {
+                    cursor = end;
+
+                    match self.open_block {
+                        None if closing => self.stray = true,
+                        None => self.open_block = Some(name),
+                        Some(open) if closing && bare && name == open => self.open_block = None,
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Releases what was held as text, a `<` that never became a tag.
+    ///
+    /// # Errors
+    ///
+    /// [`ReasoningLeakError`] when a block was left open or a tag stood
+    /// outside any block.
+    pub fn finish(self) -> Result<String, ReasoningLeakError> {
+        if self.open_block.is_some() || self.stray {
+            Err(ReasoningLeakError)
+        } else {
+            Ok(self.buffer)
+        }
+    }
+}
+
+/// The text with its reasoning blocks dropped.
+///
+/// # Errors
+///
+/// [`ReasoningLeakError`] when the text leaks reasoning it cannot be
+/// cleaned of.
+pub fn scrub_reasoning_blocks(text: &str) -> Result<String, ReasoningLeakError> {
+    let mut filter = ReasoningFilter::new();
+    let passed = filter.push(text);
+
+    filter.finish().map(|held| passed + &held)
+}
+
+fn match_tag(buffer: &str, start: usize) -> TagMatch {
+    let mut index = skip_blank(buffer, start + 1);
+
+    if index == buffer.len() {
+        return TagMatch::Partial;
+    }
+
+    let closing = buffer.as_bytes()[index] == b'/';
+
+    if closing {
+        index = skip_blank(buffer, index + 1);
+    }
+
+    let name = match match_tag_name(&buffer.as_bytes()[index..]) {
+        NameMatch::Found(name) => name,
+        NameMatch::Partial => return TagMatch::Partial,
+        NameMatch::Absent => return TagMatch::None,
+    };
+
+    index += name.len();
+
+    // The name must end here: `<thinking>` is not a reasoning tag.
+    match buffer.as_bytes().get(index) {
+        None => return TagMatch::Partial,
+        Some(byte) if byte.is_ascii_alphanumeric() || *byte == b'_' => return TagMatch::None,
+        Some(_) => {}
+    }
+
+    let Some(offset) = buffer[index..].find('>') else {
+        return TagMatch::Partial;
+    };
+    let tag_end = index + offset;
+
+    TagMatch::Tag {
+        end: tag_end + 1,
+        closing,
+        name,
+        bare: buffer[index..tag_end].trim().is_empty(),
+    }
+}
+
+fn match_tag_name(available: &[u8]) -> NameMatch {
+    for name in TAG_NAMES {
+        let name_bytes = name.as_bytes();
+
+        if available.len() >= name_bytes.len()
+            && available[..name_bytes.len()].eq_ignore_ascii_case(name_bytes)
+        {
+            return NameMatch::Found(name);
+        }
+
+        if available.len() < name_bytes.len()
+            && name_bytes[..available.len()].eq_ignore_ascii_case(available)
+        {
+            return NameMatch::Partial;
+        }
+    }
+
+    NameMatch::Absent
+}
+
+fn skip_blank(buffer: &str, start: usize) -> usize {
+    buffer[start..]
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(buffer.len(), |(offset, _)| start + offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The grammar, whole: what the decision parser and the adapters rely on.
+    const CASES: [(&str, Result<&str, ReasoningLeakError>); 15] = [
+        ("<think>plan</think>Hello", Ok("Hello")),
+        ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", Ok("a  b")),
+        ("<THINK>plan</Think>Hello", Ok("Hello")),
+        ("< think >plan</ think >Hello", Ok("Hello")),
+        ("<think>a<think>b</think>c", Ok("c")),
+        ("<think>a</reasoning>b</think>c", Ok("c")),
+        ("<thinking>x</thinking>", Ok("<thinking>x</thinking>")),
+        ("x < y and a<b", Ok("x < y and a<b")),
+        ("<thin", Ok("<thin")),
+        ("plain text", Ok("plain text")),
+        ("<think>still thinking about it", Err(ReasoningLeakError)),
+        ("<think/>", Err(ReasoningLeakError)),
+        ("a </think> b", Err(ReasoningLeakError)),
+        ("<think>a</think>b</think>", Err(ReasoningLeakError)),
+        ("<think>a</think foo>b", Err(ReasoningLeakError)),
+    ];
+
+    #[test]
+    fn the_grammar_reads_text_the_same_whole_and_at_every_split_point() {
+        for (input, expected) in CASES {
+            let expected = expected.map(str::to_owned);
+
+            assert_eq!(scrub_reasoning_blocks(input), expected, "{input:?}");
+
+            for split in (0..=input.len()).filter(|&split| input.is_char_boundary(split)) {
+                let mut filter = ReasoningFilter::new();
+                let passed = filter.push(&input[..split]) + &filter.push(&input[split..]);
+
+                assert_eq!(
+                    filter.finish().map(|held| passed + &held),
+                    expected,
+                    "{input:?} split at {split}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn text_before_a_tag_passes_at_once_and_only_a_possible_tag_is_held() {
+        let mut filter = ReasoningFilter::new();
+
+        assert_eq!(filter.push("hello <thi"), "hello ");
+        assert_eq!(filter.push("nk>hid"), "");
+        assert_eq!(filter.push("den</think> wor"), " wor");
+        assert_eq!(filter.push("ld <"), "ld ");
+        assert_eq!(filter.push("3"), "<3");
+        assert_eq!(filter.finish(), Ok(String::new()));
+
+        let mut held = ReasoningFilter::new();
+
+        assert_eq!(held.push("a <thin"), "a ");
+        assert_eq!(held.finish(), Ok("<thin".to_owned()));
+
+        let mut open = ReasoningFilter::new();
+
+        assert_eq!(open.push("a <think>b</thi"), "a ");
+        assert_eq!(open.finish(), Err(ReasoningLeakError));
+    }
+}
