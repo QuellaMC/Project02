@@ -135,7 +135,7 @@ fn snippet(text: &str, query: &str) -> String {
 /// The character where the folded query first occurs in the folded text,
 /// counted in the text as written.
 fn match_start(text: &str, query: &str) -> Option<usize> {
-    let needle = fold(query.trim());
+    let needle = fold(query);
     let mut folded = String::with_capacity(text.len());
     let mut origins = Vec::with_capacity(text.len());
 
@@ -146,7 +146,7 @@ fn match_start(text: &str, query: &str) -> Option<usize> {
         }
     }
 
-    let found = folded.find(&needle).filter(|_| !needle.is_empty())?;
+    let found = folded.find(&needle)?;
 
     origins.get(folded[..found].chars().count()).copied()
 }

@@ -5,13 +5,16 @@
 // plain string literal, so a search for a row id finds its test; a file is
 // read as TypeScript, so a test in a comment or a string is no test; and
 // each suite is flat, so no block above a test can park it. The Rust suite
-// is what `cargo test` builds: each crate's library, binaries and
-// integration tests, with every file their modules bring in. There a
-// test's title is the first `///` line above its attributes, only a test
-// whose title has that shape names a row, `#[ignore]` or a `cfg` other
-// than `cfg(test)` parks it, on the test or on any module around it, and
-// only a module may enclose it; a file is read as Rust tokens, so there
-// too a test in a comment or a string is no test.
+// is what `cargo test` builds of Cargo's default layout: each crate's
+// library, binaries and integration tests where Cargo finds them unasked,
+// with every file their modules bring in. There a test's title is the
+// first `///` line above its attributes, only a test whose title has that
+// shape names a row, `#[ignore]` or a `cfg` other than `cfg(test)` parks
+// it, on the test or on any module around it, and only a module may
+// enclose it; a file is read as Rust tokens, so there too a test in a
+// comment or a string is no test. The check runs where cargo may not be
+// installed, so it reads only Cargo's defaults and refuses a manifest key
+// that sets where or whether a target's tests run.
 import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 
@@ -305,7 +308,7 @@ function runsNoCase(call) {
   return false;
 }
 
-/** Each titled test call, with its title when that is a plain string literal, each block, and each of the runner's names imported under another, by line. */
+/** Each titled test call, with its title when that is a plain string literal, and each construct the index refuses, by line: a block, and the runner's names imported as a namespace or under another name. */
 function scanTypeScript(file, source, runner) {
   const tree = ts.createSourceFile(
     file,
@@ -315,8 +318,7 @@ function scanTypeScript(file, source, runner) {
     ts.ScriptKind.TS,
   );
   const tests = [];
-  const blocks = [];
-  const aliases = [];
+  const refusals = [];
   const imported = new Set();
   const visit = node => {
     if (
@@ -329,12 +331,13 @@ function scanTypeScript(file, source, runner) {
       const bindings = node.importClause.namedBindings;
 
       if (ts.isNamespaceImport(bindings)) {
-        aliases.push({
+        refusals.push({
           line:
             tree.getLineAndCharacterOfPosition(bindings.getStart(tree)).line +
             1,
-          source,
-          name: '*',
+          why:
+            `${source} is imported as a namespace, which the index ` +
+            'cannot follow.',
         });
       }
 
@@ -351,12 +354,13 @@ function scanTypeScript(file, source, runner) {
           binding.propertyName !== undefined &&
           runner.roots.has(binding.propertyName.text)
         ) {
-          aliases.push({
+          refusals.push({
             line:
               tree.getLineAndCharacterOfPosition(binding.getStart(tree)).line +
               1,
-            source,
-            name: binding.propertyName.text,
+            why:
+              `${source}'s ${binding.propertyName.text} is imported under ` +
+              'another name, which the index cannot follow.',
           });
         }
       }
@@ -379,7 +383,12 @@ function scanTypeScript(file, source, runner) {
       );
 
       if (kind === 'block') {
-        blocks.push(line);
+        refusals.push({
+          line,
+          why:
+            'a describe block; the suite is flat, so no block above a ' +
+            'test can park it.',
+        });
       } else if (kind === 'test') {
         tests.push({
           line,
@@ -410,8 +419,7 @@ function scanTypeScript(file, source, runner) {
 
   return {
     tests: tests.map(test => ({...test, parked: test.parked || fileParked})),
-    blocks,
-    aliases,
+    refusals,
   };
 }
 
@@ -674,10 +682,54 @@ function scanRust(source, parked) {
     // A brace the qualifiers led to is read as the brace it is.
     at = head === '{' || head === '}' ? item - 1 : item;
   }
-  return {tests, modules, blocks: [], aliases: []};
+  return {tests, modules, refusals: []};
 }
 
-/** The files a crate's test targets start from, as Cargo finds them: its library, its binaries and its integration tests. */
+// The manifest keys that set where a target's root is or whether
+// `cargo test` runs its tests, each dotted from the manifest's top.
+const RUST_TARGET_KEYS = new Set([
+  'package.autolib',
+  'package.autobins',
+  'package.autotests',
+  ...['lib', 'bin', 'test'].flatMap(target =>
+    ['path', 'test', 'harness', 'required-features'].map(
+      key => `${target}.${key}`,
+    ),
+  ),
+]);
+// A manifest as Cargo's reference writes one: a line opens with a table's
+// header or with a bare key, dotted or not.
+const TOML_TABLE = /^\s*\[\[?([^\]]*)\]/;
+const TOML_KEY = /^\s*([\w-]+(?:\s*\.\s*[\w-]+)*)\s*=/;
+
+/** Each line of a crate's manifest that sets one of the target keys, refused. */
+function manifestRefusals(manifest) {
+  const refusals = [];
+  let table = '';
+
+  for (const [at, text] of manifest.split('\n').entries()) {
+    const header = TOML_TABLE.exec(text);
+    const key = TOML_KEY.exec(text);
+
+    if (header !== null) {
+      table = `${header[1].replace(/\s/g, '')}.`;
+    } else if (key !== null) {
+      const path = table + key[1].replace(/\s/g, '');
+
+      if (RUST_TARGET_KEYS.has(path)) {
+        refusals.push({
+          line: at + 1,
+          why:
+            `${path} sets where or whether a target's tests run; the ` +
+            "index reads only Cargo's defaults.",
+        });
+      }
+    }
+  }
+  return refusals;
+}
+
+/** The files a crate's test targets start from, as Cargo finds them unasked: its library, its binaries and its integration tests. */
 function rustRoots(crate) {
   const targets = directory =>
     existsSync(directory)
@@ -700,10 +752,11 @@ function rustRoots(crate) {
 
 /**
  * Each file of the Rust suite as `cargo test` builds it, scanned: each
- * crate's roots, and every file a module declared out of line brings in,
- * found where Rust looks for it by default, beside a root or a `mod.rs` and
- * in the directory named after any other file. A file arrives parked when
- * the module that brings it in is.
+ * crate's manifest, for the keys the index refuses, its roots, and every
+ * file a module declared out of line brings in, found where Rust looks for
+ * it by default, beside a root or a `mod.rs` and in the directory named
+ * after any other file. A file arrives parked when the module that brings
+ * it in is.
  */
 function scanRustSuite(directory) {
   const scanned = new Map();
@@ -724,9 +777,19 @@ function scanRustSuite(directory) {
     }
   };
 
-  for (const crate of readdirSync(directory, {withFileTypes: true})) {
-    if (crate.isDirectory()) {
-      for (const root of rustRoots(join(directory, crate.name))) {
+  for (const entry of readdirSync(directory, {withFileTypes: true})) {
+    if (entry.isDirectory()) {
+      const crate = join(directory, entry.name);
+      const manifest = join(crate, 'Cargo.toml');
+
+      if (existsSync(manifest)) {
+        scanned.set(manifest, {
+          tests: [],
+          modules: [],
+          refusals: manifestRefusals(readFileSync(manifest, 'utf8')),
+        });
+      }
+      for (const root of rustRoots(crate)) {
         visit(root, true, false);
       }
     }
@@ -813,15 +876,9 @@ function main() {
   const parkedRows = new Set();
   let tests = 0;
 
-  for (const {suite, file, tests: calls, blocks, aliases} of testFiles) {
-    for (const {line, source, name} of aliases) {
-      failures.push(
-        name === '*'
-          ? `${file}:${line}: ${source} is imported as a namespace, which ` +
-              'the index cannot follow.'
-          : `${file}:${line}: ${source}'s ${name} is imported under another ` +
-              'name, which the index cannot follow.',
-      );
+  for (const {suite, file, tests: calls, refusals} of testFiles) {
+    for (const {line, why} of refusals) {
+      failures.push(`${file}:${line}: ${why}`);
     }
 
     for (const {line, nested, parked, title} of calls) {
@@ -855,12 +912,6 @@ function main() {
       } else {
         tested.add(id);
       }
-    }
-    for (const line of blocks) {
-      failures.push(
-        `${file}:${line}: a describe block; the ` +
-          'suite is flat, so no block above a test can park it.',
-      );
     }
   }
 
