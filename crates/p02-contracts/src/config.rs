@@ -169,12 +169,7 @@ impl ResolvedConfig {
     /// What `section` resolves to from `authored`, the values the settings
     /// set by field name. A name the section does not declare reaches no
     /// plugin.
-    ///
-    /// # Errors
-    ///
-    /// [`MissingConfigValueError`] for the first required field left
-    /// without a value it accepts.
-    pub fn resolve(
+    pub(crate) fn resolve(
         section: &ConfigSection,
         authored: &Map<String, Value>,
     ) -> Result<Self, MissingConfigValueError> {

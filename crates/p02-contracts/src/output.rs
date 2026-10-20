@@ -624,8 +624,9 @@ impl CommittedTurn {
         &self.committed_at
     }
 
-    /// The committed messages: absent, never empty, for a plugin without
-    /// `turn_context: read`.
+    /// The committed messages, for a plugin with `turn_context: read`; for
+    /// one without, absent rather than empty, so not being allowed never
+    /// reads as a turn that said nothing.
     #[must_use]
     pub fn messages(&self) -> Option<&[VisibleMessage]> {
         self.messages.as_deref()

@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use crate::role_model::chat::{ChatCompletionTool, ChatMessage};
 use crate::role_model::decision::InputEnvelope;
 use crate::role_model::exchange::{ProviderExchange, ProviderMetadata, ProviderName};
-use crate::role_model::history::ConversationTurn;
 
 /// A model provider. The runtime chooses one by its settings when it
 /// starts, so it is held as `dyn RoleModelAdapter`; the trait's methods are
@@ -31,22 +30,18 @@ pub trait RoleModelAdapter: Send + Sync + fmt::Debug {
 pub struct Invocation<'a> {
     messages: &'a [ChatMessage],
     tools: &'a [ChatCompletionTool],
-    conversation_history: &'a [ConversationTurn],
     reply_listener: Option<&'a (dyn Fn(ReplyDelta) + Send + Sync)>,
 }
 
 impl<'a> Invocation<'a> {
-    /// The wire a round sends, and the earlier turns it replays.
+    /// The wire a round sends. The earlier turns it replays are in its
+    /// messages as the round rendered them, so a provider replays nothing
+    /// else.
     #[must_use]
-    pub fn new(
-        messages: &'a [ChatMessage],
-        tools: &'a [ChatCompletionTool],
-        conversation_history: &'a [ConversationTurn],
-    ) -> Self {
+    pub fn new(messages: &'a [ChatMessage], tools: &'a [ChatCompletionTool]) -> Self {
         Self {
             messages,
             tools,
-            conversation_history,
             reply_listener: None,
         }
     }
@@ -70,11 +65,6 @@ impl<'a> Invocation<'a> {
         self.tools
     }
 
-    #[must_use]
-    pub fn conversation_history(&self) -> &'a [ConversationTurn] {
-        self.conversation_history
-    }
-
     /// Passes a piece of the reply to whoever listens.
     pub fn hear(&self, delta: ReplyDelta) {
         if let Some(listener) = self.reply_listener {
@@ -89,7 +79,6 @@ impl fmt::Debug for Invocation<'_> {
             .debug_struct("Invocation")
             .field("messages", &self.messages)
             .field("tools", &self.tools)
-            .field("conversation_history", &self.conversation_history)
             .field("listened", &self.reply_listener.is_some())
             .finish()
     }
@@ -197,7 +186,7 @@ mod tests {
     fn an_invocation_passes_drafts_to_its_listener_in_order() {
         let heard = Mutex::new(String::new());
         let listener = |delta: ReplyDelta| heard.lock().unwrap().push_str(&delta.text);
-        let invocation = Invocation::new(&[], &[], &[]).with_reply_listener(&listener);
+        let invocation = Invocation::new(&[], &[]).with_reply_listener(&listener);
 
         invocation.hear(ReplyDelta {
             reply: 0,
@@ -207,7 +196,7 @@ mod tests {
             reply: 0,
             text: "lo.".to_owned(),
         });
-        Invocation::new(&[], &[], &[]).hear(ReplyDelta {
+        Invocation::new(&[], &[]).hear(ReplyDelta {
             reply: 0,
             text: "nobody listens".to_owned(),
         });
