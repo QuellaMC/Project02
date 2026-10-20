@@ -7,11 +7,11 @@ use std::time::Duration;
 use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, Evidence, EvidenceKind,
     EvidenceNote, EvidenceStatus, FactoryInput, HookReport, HookStatus, PluginError, PolicyOutcome,
-    ResolvedConfig, RuntimePlugin,
+    RuntimePlugin,
 };
 use p02_core::Timestamp;
 use p02_plugins::{BeforeCallOutcome, PhaseStatus, PluginHost, ReloadError};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::storage::Storage;
 use crate::support::{
@@ -175,8 +175,8 @@ fn speaking(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginEr
     }))
 }
 
-fn line(text: &str) -> ResolvedConfig {
-    [(id("line"), json!(text))].into_iter().collect()
+fn line(text: &str) -> Map<String, Value> {
+    Map::from_iter([("line".to_owned(), json!(text))])
 }
 
 #[tokio::test(start_paused = true)]
@@ -187,6 +187,14 @@ async fn a_reload_serves_later_hooks_with_the_rebuilt_plugin_unless_the_rebuild_
             "handle_tool_call",
             "before_role_model_call"
         ]),
+        config_fields: json!([{
+            "name": "line",
+            "description": "What the speaker says.",
+            "required": false,
+            "secret": false,
+            "valueType": "string",
+            "redactionLabels": [],
+        }]),
         ..Spec::new("speaker")
     };
     let host = PluginHost::builder(Storage::new())
@@ -202,9 +210,7 @@ async fn a_reload_serves_later_hooks_with_the_rebuilt_plugin_unless_the_rebuild_
     host.reload(&id("speaker"), &line("second")).unwrap();
     assert_eq!(spoken(&host).await, "second");
 
-    let unbuilt = host
-        .reload(&id("speaker"), &ResolvedConfig::default())
-        .unwrap_err();
+    let unbuilt = host.reload(&id("speaker"), &Map::new()).unwrap_err();
     let retooled = host.reload(&id("speaker"), &line("tooled")).unwrap_err();
     let absent = host.reload(&id("ghost"), &line("third")).unwrap_err();
 
@@ -242,8 +248,7 @@ async fn a_reload_and_a_shutdown_never_wait_on_a_blocking_job() {
 
     let started = std::time::Instant::now();
 
-    host.reload(&id("indexer"), &ResolvedConfig::default())
-        .unwrap();
+    host.reload(&id("indexer"), &Map::new()).unwrap();
 
     let ended = tokio::time::timeout(Duration::from_secs(5), host.shutdown(&turn()))
         .await

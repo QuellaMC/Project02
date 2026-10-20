@@ -1,10 +1,10 @@
 //! The session-history package through the host: its index, its search
 //! and its read, over a character's session history.
 
-use p02_contracts::{CommittedTurn, ContextItemKind, ResolvedConfig, ToolCallResult};
+use p02_contracts::{CommittedTurn, ContextItemKind, ToolCallResult};
 use p02_core::{Timestamp, VisibleMessageRole};
 use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport, Turn, session_history};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::storage::Storage;
@@ -19,7 +19,7 @@ fn history_host(storage: &Arc<Storage>, timeout_ms: u64) -> PluginHost {
             bundled_manifest("session-history", |manifest| {
                 manifest["runtimePolicy"]["timeoutMs"] = json!(timeout_ms);
             }),
-            ResolvedConfig::default(),
+            Map::new(),
             session_history::create,
         )
         .activate()

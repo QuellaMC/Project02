@@ -5,15 +5,16 @@ use std::error::Error;
 use std::sync::Arc;
 
 use p02_contracts::{
-    CommittedTurn, EvidenceStatus, FactoryInput, PluginError, RedactionLabel, RegistrationError,
-    ResolvedConfig, StoreAccess,
+    CommittedTurn, EvidenceStatus, FactoryInput, MissingConfigValueError, PluginError,
+    RedactionLabel, RegistrationError, StoreAccess,
 };
 use p02_core::Timestamp;
 use p02_plugins::{
-    ActivationError, BeforeCallOutcome, PluginHost, RecordLabelsError, session_history,
+    ActivationError, BeforeCallOutcome, BuildPluginError, PluginHost, RecordLabelsError,
+    session_history,
 };
 use p02_shared::Identifier;
-use serde_json::json;
+use serde_json::{Map, json};
 
 use crate::storage::Storage;
 use crate::support::{
@@ -53,33 +54,69 @@ fn a_tool_name_offered_twice_is_refused_at_activation() {
     assert!(
         matches!(
             within,
-            ActivationError::Registration(RegistrationError::DuplicateTool { .. })
+            ActivationError::Build {
+                source: BuildPluginError::Registration(RegistrationError::DuplicateTool { .. }),
+                ..
+            }
         ),
         "{within:?}"
     );
     assert_eq!(
-        within.to_string(),
-        r#"plugin "notes" provides tool "notes.search" more than once"#
+        within.source().map(ToString::to_string),
+        Some(r#"plugin "notes" provides tool "notes.search" more than once"#.to_owned())
     );
 }
 
 #[test]
-fn a_plugin_enabled_twice_or_built_in_vain_is_refused_at_activation() {
+fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_at_activation() {
     let twice = PluginHost::builder(Storage::new())
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
         .activate()
         .unwrap_err();
+    let unset = PluginHost::builder(Storage::new())
+        .enable(
+            &Spec {
+                config_fields: json!([{
+                    "name": "backend",
+                    "description": "Where the notes are kept.",
+                    "required": true,
+                    "secret": false,
+                    "valueType": "string",
+                    "redactionLabels": [],
+                }]),
+                ..Spec::new("notes")
+            },
+            Arc::new(Scripted::default()),
+        )
+        .activate()
+        .unwrap_err();
     let in_vain = PluginHost::builder(Storage::new())
         .plugin(
             Spec::new("notes").manifest(),
-            ResolvedConfig::default(),
+            Map::new(),
             |_: &FactoryInput<'_>| Err(PluginError::new("no backend is configured")),
         )
         .activate()
         .unwrap_err();
 
     assert_eq!(twice.to_string(), r#"plugin "notes" is enabled twice"#);
+    assert!(
+        matches!(
+            &unset,
+            ActivationError::Build {
+                source: BuildPluginError::Config(MissingConfigValueError { field }),
+                ..
+            } if field.as_str() == "backend"
+        ),
+        "{unset:?}"
+    );
+    assert_eq!(
+        unset.source().map(ToString::to_string),
+        Some(
+            r#"required plugin config field "backend" is not set to a value it accepts"#.to_owned()
+        )
+    );
     assert_eq!(in_vain.to_string(), r#"plugin "notes" could not be built"#);
     assert_eq!(
         in_vain.source().map(ToString::to_string),
@@ -163,16 +200,12 @@ async fn the_bundled_plugins_activate_together() {
     .fold(
         PluginHost::builder(Storage::new()),
         |builder, (id, plugin)| {
-            builder.plugin(
-                bundled_manifest(id, |_| {}),
-                ResolvedConfig::default(),
-                serving(plugin),
-            )
+            builder.plugin(bundled_manifest(id, |_| {}), Map::new(), serving(plugin))
         },
     )
     .plugin(
         bundled_manifest("session-history", |_| {}),
-        ResolvedConfig::default(),
+        Map::new(),
         session_history::create,
     )
     .activate()
