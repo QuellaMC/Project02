@@ -12,10 +12,11 @@ const SESSION_ID_PATTERN: &str = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
 
 const SEARCH_DESCRIPTION: &str = "Search your own past conversations. Use it whenever they mention \
      an earlier conversation or the answer may sit further back than you can see, before asking \
-     them to repeat themselves. The query is matched as literal text (no operators). Messages you \
-     can currently see never match, so results always add to your context, including older parts \
-     of this conversation. Each matching session returns its opening messages, a window around \
-     the best match, and its closing messages; scroll further with sessions.read.";
+     them to repeat themselves. The query is matched as literal text, spaces included (no \
+     operators). Messages you can currently see never match, so results always add to your \
+     context, including older parts of this conversation. Each matching session returns its \
+     opening messages, a window around the best match, and its closing messages; scroll further \
+     with sessions.read.";
 
 const READ_DESCRIPTION: &str = "Read a window of messages from one of your past conversations, \
      oldest-first. Without anchorMessageId it returns the latest messages. To scroll, pass a \

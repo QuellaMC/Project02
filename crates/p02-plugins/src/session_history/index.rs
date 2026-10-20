@@ -113,7 +113,7 @@ pub(super) struct SessionView {
 
 /// The sessions with hits, best first, at most as many as asked for, and
 /// how many sessions have one.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hits {
     pub(super) views: Vec<SessionView>,
     pub(super) sessions_with_hits: u64,
@@ -309,17 +309,13 @@ impl SessionIndex {
         Ok(damaged.try_into().unwrap_or_default())
     }
 
-    /// The sessions whose messages hold `query` as written, case aside: a
-    /// trigram phrase, or a folded substring when the query is too short
-    /// for a trigram. Each session's best hit is its best rank, the newest
-    /// of equals, and sessions rank the same way.
+    /// The sessions whose messages hold `query` as written, case aside, the
+    /// literal text the tool promises: a space at either end counts like
+    /// any other character, and a query of spaces is literal too. It is a
+    /// trigram phrase, or a folded substring when it is too short for a
+    /// trigram. Each session's best hit is its best rank, the newest of
+    /// equals, and sessions rank the same way.
     pub(super) fn search(&self, query: &str, scope: &Scope<'_>) -> Result<Hits, IndexError> {
-        let query = query.trim();
-
-        if query.is_empty() {
-            return Ok(Hits::default());
-        }
-
         let hits = if query.chars().count() < TRIGRAM_CHARS {
             self.substring_hits(query, scope)?
         } else {

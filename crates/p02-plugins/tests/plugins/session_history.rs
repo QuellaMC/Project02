@@ -102,6 +102,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     history.exchange("chat.4", "Привет, как дела?", "Хорошо!");
     history.exchange("chat.5", &long, "Noted.");
     history.exchange("chat.7", "Call it foo bar, not C++.", "Fine.");
+    history.exchange("chat.8", "The food was cold.", "Sorry.");
     history.say(
         "chat.6",
         VisibleMessageRole::User,
@@ -121,23 +122,24 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     // What the model sees now: the person's line and its own interim reply.
     let now = turn_in("chat.6", "evt_6", &["chat.6:message-2", "chat.6:message-3"]);
     let host = history_host(&storage, 5_000);
-    let queries = [
-        "kraken",
-        "插件权限",
-        "su",
-        "ПР",
-        "\"kraken\" OR pier*",
-        "zephyr77",
-        "glimmerwing",
-        "anchovy",
-        "foo-bar",
-        "c++",
+    let cases: [(&str, &[&str]); 11] = [
+        ("kraken", &["chat.1", "chat.2"]),
+        ("插件权限", &["chat.3"]),
+        ("su", &["chat.1"]),
+        ("ПР", &["chat.4"]),
+        ("\"kraken\" OR pier*", &[]),
+        ("zephyr77", &["chat.6"]),
+        ("glimmerwing", &[]),
+        ("anchovy", &["chat.5"]),
+        ("foo-bar", &[]),
+        ("c++", &["chat.7"]),
+        (" foo ", &["chat.7"]),
     ];
     let reports = host
         .handle_tool_calls(
-            queries
+            cases
                 .iter()
-                .map(|query| call("c1", "sessions.search", json!({"query": query})))
+                .map(|(query, _)| call("c1", "sessions.search", json!({"query": query})))
                 .collect(),
             &now,
         )
@@ -149,18 +151,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
             .iter()
             .map(|result| found(result))
             .collect::<Vec<_>>(),
-        [
-            vec!["chat.1", "chat.2"],
-            vec!["chat.3"],
-            vec!["chat.1"],
-            vec!["chat.4"],
-            vec![],
-            vec!["chat.6"],
-            vec![],
-            vec!["chat.5"],
-            vec![],
-            vec!["chat.7"],
-        ]
+        cases.map(|(_, sessions)| sessions.to_vec())
     );
     assert_eq!(results[0]["totalSessionsWithHits"], json!(2));
 
