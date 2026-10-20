@@ -197,7 +197,11 @@ daemon must keep is a row of `tests/conformance/inventory.csv` with a test
 under `tests/conformance` titled by it, proved from outside the process; an
 internal test may not pin what that suite proves. A host rule no bundled
 plugin can show from outside is a `rust-unit` row, proved by a Rust test
-under `crates` titled by it, and the row says why.
+under `crates` titled by it, and the row says why. The differential run
+(`tests/differential`) holds a port to recorded behavior rather than to
+source: it drives one scenario through a reference build and a candidate
+and compares what each left, and CI runs it, as `pnpm test:differential`,
+in a job of its own.
 
 Reach for a unit test when the logic is worth pinning on its own: validation,
 parsing, routing, deterministic state, schema normalization, ID assignment,
@@ -255,7 +259,8 @@ style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
 build, coverage, and the browser suite (Chromium via Playwright). CI runs
 the same command. Beside it, `pnpm check:rust` is the gate for the crates —
 rustfmt, clippy, the tests, and cargo-deny — which CI runs on Linux, macOS,
-and Windows. For TypeScript-heavy changes also run:
+and Windows, and `pnpm test:differential` is the differential run, which
+CI runs in a job of its own. For TypeScript-heavy changes also run:
 
 ```text
 pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters
