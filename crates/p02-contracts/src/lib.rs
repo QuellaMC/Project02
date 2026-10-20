@@ -18,10 +18,10 @@ mod vocabulary;
 
 pub use access::{AccessMap, AccessMapError};
 pub use capability::{
-    DatabaseError, DatabaseOpener, FileStore, FileStoreBackend, HistoryCursor, HistoryMessage,
-    LeasedFiles, LeasedStore, MessageBatch, PluginDatabase, ReadMessages, SessionHistory,
-    SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary, StoreAccess,
-    StoreError, WriteHold,
+    CharacterStorage, DatabaseError, DatabaseOpener, FileStore, FileStoreBackend, HistoryCursor,
+    HistoryMessage, LeasedFiles, LeasedStore, MessageBatch, PluginDatabase, ReadMessages,
+    SessionHistory, SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary,
+    StoreAccess, StoreError, WriteHold,
 };
 pub use config::{ConfigField, ConfigSection, MissingConfigValueError, ResolvedConfig};
 pub use context::{HookContext, TurnIdentity, TurnText};
@@ -35,7 +35,7 @@ pub use output::{
     BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemError, CuratedSection,
     CuratedSectionError, HealthReport, HealthSnapshot, HealthSnapshotError, HookReport, HookStatus,
     PluginContextItem, PluginCuratedSection, SourceReference, SourceReferenceError,
-    contains_forbidden_control_character,
+    contains_forbidden_control_character, within_limits,
 };
 pub use plugin::{
     FactoryInput, Hook, PluginError, PluginFactory, Registration, RegistrationError, RuntimePlugin,
@@ -61,6 +61,6 @@ pub use tool::{
 pub use vocabulary::{
     AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,
     CONTRACT_VERSION, ConfigScope, ConfigValueType, ContextItemKind, Declaration, EvidenceKind,
-    EvidenceStatus, HandleToolCallFailure, HealthFailure, HealthStatus, PluginKind, PolicyOutcome,
-    SourceKind, ToolConcurrency, ValidationFailureReason,
+    EvidenceStatus, HEALTH_REJECTION, HandleToolCallFailure, HealthFailure, HealthStatus,
+    PluginKind, PolicyOutcome, SourceKind, ToolConcurrency, ValidationFailureReason,
 };

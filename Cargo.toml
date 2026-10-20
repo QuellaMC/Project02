@@ -10,7 +10,9 @@ rust-version = "1.99"
 [workspace.dependencies]
 async-trait = "0.1.92"
 dunce = "1.0.5"
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 jsonschema = { version = "0.59.0", default-features = false }
+p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
 p02-shared = { path = "crates/p02-shared" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
