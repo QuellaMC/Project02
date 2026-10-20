@@ -1,6 +1,6 @@
 use p02_core::{CharacterProfile, EventIdentity, SessionId, VisibleText};
 use p02_shared::Identifier;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::output::{PluginContextItem, PluginCuratedSection};
 use crate::role_model::history::{HistoryWindow, ToolRound};
@@ -23,11 +23,12 @@ const DECISION_OUTPUT_CONTRACT: &str = "Return exactly one complete valid JSON C
      \"text\" is your own note next to your calls: it is kept with the decision and shown to you \
      again, never to the person.";
 
-/// What the model is told its answer must be.
+/// What the model is told its answer must be: the decision contract, named
+/// by its version, in the words the model was given.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputContract {
-    pub version: String,
-    pub text: String,
+    version: DecisionVersion,
+    text: String,
 }
 
 impl OutputContract {
@@ -35,9 +36,15 @@ impl OutputContract {
     #[must_use]
     pub fn decision() -> Self {
         Self {
-            version: DECISION_CONTRACT_VERSION.to_owned(),
+            version: DecisionVersion,
             text: DECISION_OUTPUT_CONTRACT.to_owned(),
         }
+    }
+
+    /// The words the model was given.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
     }
 }
 
@@ -55,12 +62,13 @@ pub struct CharacterDecision {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UncheckedDecision {
-    version: String,
+    version: DecisionVersion,
     tool_calls: Vec<ModelToolCall>,
     text: Option<String>,
 }
 
-/// The decision contract version, which a decision cannot name otherwise.
+/// The decision contract's version, which a record cannot name otherwise:
+/// it is written in the one spelling and read back only from it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DecisionVersion;
 
@@ -70,11 +78,24 @@ impl Serialize for DecisionVersion {
     }
 }
 
+impl<'de> Deserialize<'de> for DecisionVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let version = String::deserialize(deserializer)?;
+
+        if version == DECISION_CONTRACT_VERSION {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(&version),
+                &DECISION_CONTRACT_VERSION,
+            ))
+        }
+    }
+}
+
 /// Why a recorded decision is not a [`CharacterDecision`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "a decision names this contract's version, has at least one call, and no blank note beside them"
-)]
+#[error("a decision has at least one call, and no blank note beside them")]
 pub struct ParseDecisionError;
 
 impl CharacterDecision {
@@ -108,14 +129,15 @@ impl TryFrom<UncheckedDecision> for CharacterDecision {
             .as_deref()
             .is_some_and(|text| text.trim().is_empty());
 
-        if unchecked.version != DECISION_CONTRACT_VERSION
-            || unchecked.tool_calls.is_empty()
-            || note_is_blank
-        {
+        if unchecked.tool_calls.is_empty() || note_is_blank {
             return Err(ParseDecisionError);
         }
 
-        Ok(Self::judged(unchecked.tool_calls, unchecked.text))
+        Ok(Self {
+            version: unchecked.version,
+            tool_calls: unchecked.tool_calls,
+            text: unchecked.text,
+        })
     }
 }
 
@@ -435,6 +457,20 @@ mod tests {
         )
     }
 
+    fn envelope(plugin_tools: PluginToolDefinitions) -> InputEnvelope {
+        InputEnvelope::new(
+            EventIdentity::new(
+                EventId::new("evt_1").unwrap(),
+                TraceId::new("trace_1").unwrap(),
+                Timestamp::new("2026-06-15T00:00:00.000Z").unwrap(),
+            )
+            .unwrap(),
+            VisibleText::normalize("hello").unwrap(),
+            context(),
+            plugin_tools,
+        )
+    }
+
     #[test]
     fn the_reply_is_offered_first_and_every_plugin_tool_after_it() {
         let tool = |name: &str| PluginToolDefinition {
@@ -446,15 +482,7 @@ mod tests {
             )
             .unwrap(),
         };
-        let envelope = InputEnvelope::new(
-            EventIdentity::new(
-                EventId::new("evt_1").unwrap(),
-                TraceId::new("trace_1").unwrap(),
-                Timestamp::new("2026-06-15T00:00:00.000Z").unwrap(),
-            )
-            .unwrap(),
-            VisibleText::normalize("hello").unwrap(),
-            context(),
+        let envelope = envelope(
             PluginToolDefinitions::new(vec![
                 tool("runtime.plugin.list"),
                 tool("character_state.patch"),
@@ -482,6 +510,25 @@ mod tests {
             serde_json::from_value::<InputEnvelope>(record).unwrap(),
             envelope
         );
+    }
+
+    #[test]
+    fn a_record_naming_another_decision_contract_is_refused() {
+        let mut envelope =
+            serde_json::to_value(envelope(PluginToolDefinitions::default())).unwrap();
+        let mut decision = json!({
+            "version": DECISION_CONTRACT_VERSION,
+            "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
+        });
+
+        assert!(serde_json::from_value::<InputEnvelope>(envelope.clone()).is_ok());
+        assert!(serde_json::from_value::<CharacterDecision>(decision.clone()).is_ok());
+
+        envelope["outputContract"]["version"] = json!("mvp-005.tool_calls.v0");
+        decision["version"] = json!("mvp-005.tool_calls.v0");
+
+        assert!(serde_json::from_value::<InputEnvelope>(envelope).is_err());
+        assert!(serde_json::from_value::<CharacterDecision>(decision).is_err());
     }
 
     #[test]

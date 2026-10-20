@@ -493,18 +493,13 @@ fn unsupported_fields(error: &ValidationError<'_>, instance: &Value) -> Vec<Stri
     }
 }
 
-/// `operations[0].text`, from a JSON pointer and an optional last key; a
-/// segment of digits reads as an index, and the input itself is `$`.
-fn field_path(at: &Location, last: Option<&str>) -> String {
+/// `operations[0].text`, from where in the input a failure is and the key
+/// it names in the object there, if any; the input itself is `$`.
+fn field_path(at: &Location, key: Option<&str>) -> String {
     let mut path = String::new();
-    let last = last.map(|key| {
-        key.parse::<usize>().map_or_else(
-            |_| LocationSegment::Property(Cow::Borrowed(key)),
-            LocationSegment::Index,
-        )
-    });
+    let key = key.map(|key| LocationSegment::Property(Cow::Borrowed(key)));
 
-    for segment in at.segments().chain(last) {
+    for segment in at.segments().chain(key) {
         match segment {
             LocationSegment::Index(index) => {
                 path.push('[');
@@ -1153,6 +1148,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one table of every refusal, read top to bottom"
+    )]
     fn a_refused_input_names_the_field_and_the_rule() {
         let branch = |name: &str| closed(json!({name: {"type": "string"}}), &[name]);
         let cases = [
@@ -1160,6 +1159,11 @@ mod tests {
                 closed(json!({"toString": {"type": "string"}}), &["toString"]),
                 json!({}),
                 r#"memory.capture input missing required field "toString"."#,
+            ),
+            (
+                closed(json!({"0": {"type": "string"}}), &["0"]),
+                json!({}),
+                r#"memory.capture input missing required field "0"."#,
             ),
             (
                 closed(
