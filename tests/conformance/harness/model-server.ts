@@ -261,12 +261,15 @@ function give(
     response.writeHead(200, {'content-type': 'text/event-stream'});
     // Out now, so a stream that then hangs or is cut had opened.
     response.flushHeaders();
-    response.write(eventStream(answer.chunks));
+    response.write(eventStream(answer.chunks), () => {
+      // Cut once the response has handed the chunks to the socket, which it
+      // may do a tick later, and ended, not destroyed: they still go out first.
+      if (answer.end === 'cut') {
+        request.socket.end();
+      }
+    });
 
-    // Ended, not destroyed: the chunks written so far still go out first.
-    if (answer.end === 'cut') {
-      request.socket.end();
-    } else if (answer.end === undefined) {
+    if (answer.end === undefined) {
       response.end('data: [DONE]\n\n');
     }
   }
