@@ -62,7 +62,9 @@ pub struct ExchangeProvider {
 
 /// An [`ExchangeRecord`] as it is kept: its JSON within the exchange's
 /// limits, every credential-named value redacted wherever it sits, in the
-/// request body, a tool's schema or the provider's usage alike.
+/// request body, a tool's schema or the provider's usage alike. A tool
+/// call's arguments stay the text the wire carried; the call they parse to
+/// is recorded redacted.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "ExchangeRecord", into = "Value")]
 pub struct ProviderExchange(Value);

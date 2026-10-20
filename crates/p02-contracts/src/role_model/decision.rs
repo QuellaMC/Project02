@@ -153,15 +153,17 @@ vocabulary! {
 
 /// A refused round, and in `details` what the model is told about it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DecisionRejection {
     pub reason: DecisionRejectionReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
 }
 
-/// The judgement of one model round.
+/// The judgement of one model round. A record of it is closed, so it holds
+/// one verdict and nothing beside it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DecisionResult {
     Accepted { decision: CharacterDecision },
     Rejected { rejection: DecisionRejection },
@@ -534,6 +536,17 @@ mod tests {
                 "version": DECISION_CONTRACT_VERSION,
                 "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
                 "sideEffect": "write a file",
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<DecisionResult>(json!({
+                "status": "accepted",
+                "decision": {
+                    "version": DECISION_CONTRACT_VERSION,
+                    "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
+                },
+                "rejection": {"reason": "malformed_output"},
             }))
             .is_err()
         );
