@@ -11,7 +11,7 @@ use p02_contracts::{
 use p02_shared::Identifier;
 use serde::Serialize;
 
-use crate::boundary::{RECORD_LIMIT, described, within_answer_limits};
+use crate::boundary::{RECORD_LIMIT, described, quoted, within_answer_limits};
 use crate::host::{PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure};
 use crate::policy::trusted_context;
@@ -43,6 +43,8 @@ pub struct PreparedContext {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TurnRejection {
     pub plugin_id: Identifier,
+    /// What failed, cut as a record repeats it, so a plugin's own words
+    /// never put the rejection past the limits.
     pub message: String,
     pub evidence: Vec<Evidence>,
 }
@@ -275,7 +277,7 @@ impl Slot {
 
         if rejects {
             Err(Rejection {
-                message: failure.message.clone(),
+                message: quoted(&failure.message).into_owned(),
                 evidence,
             })
         } else {

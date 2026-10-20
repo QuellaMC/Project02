@@ -42,6 +42,7 @@ describe('the conformance inventory check', () => {
         row('lifecycle.c', 'rust-unit', 'done'),
         row('lifecycle.g', 'conformance', 'done'),
         row('turns.d', 'conformance', 'todo'),
+        row('turns.e', 'rust-unit', 'done'),
         row('turns.h', 'conformance', 'done'),
         row('page.e', 'client-ts', 'todo'),
         row('page.f', 'client-ts', 'done'),
@@ -104,14 +105,20 @@ describe('the conformance inventory check', () => {
         '    "#;',
         '}',
       ],
+      'crates/toy/tests/toy/main.rs': ['mod area;'],
+      'crates/toy/tests/toy/area.rs': [
+        '/// turns.e: a test in a file its integration test brings in',
+        '#[test]',
+        'fn brought_in() {}',
+      ],
     });
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toBe(
-      'conformance-inventory: 12 test(s) name rows of ' +
+      'conformance-inventory: 13 test(s) name rows of ' +
         'tests/conformance/inventory.csv; conformance rows done/todo by ' +
         'area: lifecycle 2/1, turns 1/1; client-ts rows done/todo by area: ' +
-        'page 2/1; rust-unit rows done/todo by area: lifecycle 1/0.\n',
+        'page 2/1; rust-unit rows done/todo by area: lifecycle 1/0, turns 1/0.\n',
     );
     expect(result.status).toBe(0);
   });
@@ -133,6 +140,7 @@ describe('the conformance inventory check', () => {
         row('turns.g', 'conformance', 'done'),
         row('turns.h', 'conformance', 'done'),
         row('turns.k', 'rust-unit', 'done'),
+        row('turns.n', 'rust-unit', 'done'),
         row('turns.r', 'retired', 'done'),
         row('page.h', 'client-ts', 'done'),
         row('page.i', 'client-ts', 'done'),
@@ -228,6 +236,33 @@ describe('the conformance inventory check', () => {
         '/// lifecycle.z: names no row',
         '#[test]',
         'fn unknown() {}',
+        '',
+        '#[cfg(any())]',
+        'mod hidden {',
+        '    /// lifecycle.b: in a module compiled out',
+        '    #[test]',
+        '    fn inside() {}',
+        '}',
+        '',
+        'mod windows_only {',
+        '    #![cfg(windows)]',
+        '    /// lifecycle.b: in a module its own cfg compiles out',
+        '    #[test]',
+        '    fn inside() {}',
+        '}',
+        '',
+        '#[cfg(feature = "slow")]',
+        'mod slow;',
+      ],
+      'crates/toy/src/slow.rs': [
+        '/// lifecycle.b: in a file a module compiled out brings in',
+        '#[test]',
+        'fn brought_in() {}',
+      ],
+      'crates/toy/src/orphan.rs': [
+        '/// turns.n: in a file no module brings in, so never compiled',
+        '#[test]',
+        'fn never_built() {}',
       ],
     });
 
@@ -262,6 +297,7 @@ describe('the conformance inventory check', () => {
       'conformance-inventory: tests/conformance/inventory.csv: lifecycle.b is done, but every test naming it in crates is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.g is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.h is done, but every test naming it in tests/conformance is skipped, runs no case or expects to fail.',
+      'conformance-inventory: tests/conformance/inventory.csv: turns.n is done, but no test in crates names it.',
       'conformance-inventory: tests/conformance/inventory.csv: turns.r is done, but its test_location is retired, not conformance or client-ts or rust-unit.',
       'conformance-inventory: tests/conformance/inventory.csv: page.h is done, but every test naming it in tests/browser is skipped, runs no case or expects to fail.',
       'conformance-inventory: tests/conformance/inventory.csv: page.i is done, but every test naming it in tests/browser is skipped, runs no case or expects to fail.',

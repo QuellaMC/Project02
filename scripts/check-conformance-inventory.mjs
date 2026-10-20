@@ -4,13 +4,16 @@
 // the TypeScript suites, which prove it from outside, a title must be a
 // plain string literal, so a search for a row id finds its test; a file is
 // read as TypeScript, so a test in a comment or a string is no test; and
-// each suite is flat, so no block above a test can park it. In the Rust
-// suite a test's title is the first `///` line above its attributes, only
-// a test whose title has that shape names a row, `#[ignore]` or a `cfg`
-// parks it, and only a module may enclose it; a file is read as Rust
-// tokens, so there too a test in a comment or a string is no test.
+// each suite is flat, so no block above a test can park it. The Rust suite
+// is what `cargo test` builds: each crate's library, binaries and
+// integration tests, with every file their modules bring in. There a
+// test's title is the first `///` line above its attributes, only a test
+// whose title has that shape names a row, `#[ignore]` or a `cfg` other
+// than `cfg(test)` parks it, on the test or on any module around it, and
+// only a module may enclose it; a file is read as Rust tokens, so there
+// too a test in a comment or a string is no test.
 import {existsSync, readFileSync, readdirSync} from 'node:fs';
-import {join} from 'node:path';
+import {basename, dirname, join} from 'node:path';
 
 import ts from 'typescript';
 
@@ -70,25 +73,23 @@ const PLAYWRIGHT = {
   // The fixtures come first.
   contextAt: 1,
 };
-// Each suite proves the rows of one test_location.
+// Each suite proves the rows of one test_location, and its files are read
+// as its runner finds them.
 const SUITES = [
   {
     directory: 'tests/conformance',
-    extension: '.test.ts',
     location: 'conformance',
-    scan: (file, source) => scanTypeScript(file, source, VITEST),
+    scan: directory => scanTypeScriptSuite(directory, '.test.ts', VITEST),
   },
   {
     directory: 'tests/browser',
-    extension: '.spec.ts',
     location: 'client-ts',
-    scan: (file, source) => scanTypeScript(file, source, PLAYWRIGHT),
+    scan: directory => scanTypeScriptSuite(directory, '.spec.ts', PLAYWRIGHT),
   },
   {
     directory: 'crates',
-    extension: '.rs',
     location: 'rust-unit',
-    scan: (_file, source) => scanRust(source),
+    scan: scanRustSuite,
   },
 ];
 // The modifiers applied with their own arguments before the titled call.
@@ -414,6 +415,21 @@ function scanTypeScript(file, source, runner) {
   };
 }
 
+/** Each file of a TypeScript suite, scanned: every one under its directory with the suite's extension. */
+function scanTypeScriptSuite(directory, extension, runner) {
+  return readdirSync(directory, {recursive: true})
+    .filter(path => path.endsWith(extension))
+    .sort()
+    .map(path => {
+      const file = join(directory, path);
+
+      return {
+        file,
+        ...scanTypeScript(file, readFileSync(file, 'utf8'), runner),
+      };
+    });
+}
+
 /** What a test attribute's path ends in: `test`, or `tokio::test` and its kin. */
 const RUST_TEST_ATTRIBUTE = /(?:^|::)test$/;
 // The words that may stand between an item's attributes and its `fn`.
@@ -536,28 +552,42 @@ function closingBracket(tokens, open) {
   return tokens.length;
 }
 
-/** The attributes under which a Rust test proves nothing: it is parked, or compiled only under a cfg the index cannot evaluate. */
-const RUST_PARKING = new Set(['ignore', 'cfg', 'cfg_attr']);
+/** Whether an attribute parks what it is on and every test inside it: `#[ignore]`, or a `cfg` or `cfg_attr` the index cannot evaluate, which is any but `cfg(test)`, the one `cargo test` always sets. */
+function parks({path, text}) {
+  return (
+    path === 'ignore' ||
+    path === 'cfg_attr' ||
+    (path === 'cfg' && text !== 'cfg(test)')
+  );
+}
 
 /**
- * Each test of a Rust file that names a row: a function carrying a
- * `#[test]`-family attribute, with or without arguments, whose first `///`
- * line above its attributes is a title. Only a module may enclose it: the
- * harness never runs a test inside another item.
+ * Each test of a Rust file that names a row, and each module the file
+ * declares out of line. A test is a function carrying a `#[test]`-family
+ * attribute, with or without arguments, whose first `///` line above its
+ * attributes is a title. It is parked by an attribute on it or on any
+ * module around it, the file's own inner attributes included, and when the
+ * file arrives `parked`. Only a module may enclose it: the harness never
+ * runs a test inside another item.
  */
-function scanRust(source) {
+function scanRust(source, parked) {
   const tokens = rustTokens(source);
   const tests = [];
-  // For each open brace, whether it opened a module.
+  const modules = [];
+  // The file itself, then each block open where the scan stands: whether
+  // it is a module, the names of the modules down to it, and whether it is
+  // parked.
+  const top = {module: true, names: [], parked};
   const blocks = [];
   let docs = [];
   let attributes = [];
-  let opensModule = false;
-  let fileParked = false;
+  // The module a `mod` item declares, until its `{` or its `;`.
+  let declared;
 
   for (let at = 0; at < tokens.length; at += 1) {
     const token = tokens[at];
     const next = tokens[at + 1]?.text;
+    const block = blocks.at(-1) ?? top;
 
     if (token.kind === 'doc') {
       docs.push(token.text);
@@ -566,29 +596,36 @@ function scanRust(source) {
     if (token.text === '#' && (next === '[' || next === '!')) {
       const open = next === '!' ? at + 2 : at + 1;
       const close = closingBracket(tokens, open);
+      const inside = tokens.slice(open + 1, close);
       const path = [];
 
-      for (const {kind, text} of tokens.slice(open + 1, close)) {
+      for (const {kind, text} of inside) {
         if (kind !== 'word' && text !== ':') {
           break;
         }
         path.push(text);
       }
-      // An inner attribute belongs to what encloses it, not to the next
-      // item, and a cfg among them may compile the whole file out.
+
+      const attribute = {
+        path: path.join(''),
+        text: inside.map(({text}) => text).join(''),
+      };
+
+      // An inner attribute belongs to the block it stands in, not to the
+      // next item.
       if (next === '!') {
-        fileParked ||= path[0] === 'cfg' || path[0] === 'cfg_attr';
+        block.parked ||= parks(attribute);
         docs = [];
         attributes = [];
       } else {
-        attributes.push(path.join(''));
+        attributes.push(attribute);
       }
       at = close;
       continue;
     }
     if (token.text === '{') {
-      blocks.push(opensModule);
-      opensModule = false;
+      blocks.push(declared ?? {...block, module: false});
+      declared = undefined;
       continue;
     }
     if (token.text === '}') {
@@ -596,7 +633,10 @@ function scanRust(source) {
       continue;
     }
     if (token.text === ';') {
-      opensModule = false;
+      if (declared !== undefined) {
+        modules.push(declared);
+      }
+      declared = undefined;
     }
 
     let item = at;
@@ -612,32 +652,86 @@ function scanRust(source) {
 
     const head = tokens[item]?.text;
     const [title] = docs;
+    const nested = blocks.some(({module}) => !module);
+    const itemParked = block.parked || attributes.some(parks);
 
-    if (head === 'mod') {
-      opensModule = true;
+    if (head === 'mod' && !nested) {
+      declared = {
+        module: true,
+        names: [...block.names, tokens[item + 1]?.text],
+        parked: itemParked,
+      };
     } else if (
       head === 'fn' &&
-      attributes.some(path => RUST_TEST_ATTRIBUTE.test(path)) &&
+      attributes.some(({path}) => RUST_TEST_ATTRIBUTE.test(path)) &&
       title !== undefined &&
       TITLE_SHAPE.test(title)
     ) {
-      tests.push({
-        line: tokens[item].line,
-        nested: blocks.includes(false),
-        parked: attributes.some(path => RUST_PARKING.has(path)),
-        title,
-      });
+      tests.push({line: tokens[item].line, nested, parked: itemParked, title});
     }
     docs = [];
     attributes = [];
     // A brace the qualifiers led to is read as the brace it is.
     at = head === '{' || head === '}' ? item - 1 : item;
   }
-  return {
-    tests: tests.map(test => ({...test, parked: test.parked || fileParked})),
-    blocks: [],
-    aliases: [],
+  return {tests, modules, blocks: [], aliases: []};
+}
+
+/** The files a crate's test targets start from, as Cargo finds them: its library, its binaries and its integration tests. */
+function rustRoots(crate) {
+  const targets = directory =>
+    existsSync(directory)
+      ? readdirSync(directory, {withFileTypes: true})
+          .map(entry =>
+            entry.isDirectory()
+              ? join(directory, entry.name, 'main.rs')
+              : join(directory, entry.name),
+          )
+          .filter(path => path.endsWith('.rs'))
+      : [];
+
+  return [
+    join(crate, 'src', 'lib.rs'),
+    join(crate, 'src', 'main.rs'),
+    ...targets(join(crate, 'src', 'bin')),
+    ...targets(join(crate, 'tests')),
+  ];
+}
+
+/**
+ * Each file of the Rust suite as `cargo test` builds it, scanned: each
+ * crate's roots, and every file a module declared out of line brings in,
+ * found where Rust looks for it by default, beside a root or a `mod.rs` and
+ * in the directory named after any other file. A file arrives parked when
+ * the module that brings it in is.
+ */
+function scanRustSuite(directory) {
+  const scanned = new Map();
+  const visit = (file, ownsDirectory, parked) => {
+    if (scanned.has(file) || !existsSync(file)) {
+      return;
+    }
+
+    const found = scanRust(readFileSync(file, 'utf8'), parked);
+    const base = ownsDirectory
+      ? dirname(file)
+      : join(dirname(file), basename(file, '.rs'));
+
+    scanned.set(file, found);
+    for (const module of found.modules) {
+      visit(`${join(base, ...module.names)}.rs`, false, module.parked);
+      visit(join(base, ...module.names, 'mod.rs'), true, module.parked);
+    }
   };
+
+  for (const crate of readdirSync(directory, {withFileTypes: true})) {
+    if (crate.isDirectory()) {
+      for (const root of rustRoots(join(directory, crate.name))) {
+        visit(root, true, false);
+      }
+    }
+  }
+  return [...scanned.keys()].sort().map(file => ({file, ...scanned.get(file)}));
 }
 
 function reportFailures(failures) {
@@ -712,23 +806,14 @@ function main() {
   // A suite whose directory is not there holds no test, so none of its rows is done.
   const testFiles = SUITES.flatMap(suite =>
     existsSync(suite.directory)
-      ? readdirSync(suite.directory, {recursive: true})
-          .filter(path => path.endsWith(suite.extension))
-          .sort()
-          .map(path => ({suite, file: join(suite.directory, path)}))
+      ? suite.scan(suite.directory).map(scanned => ({suite, ...scanned}))
       : [],
   );
   const tested = new Set();
   const parkedRows = new Set();
   let tests = 0;
 
-  for (const {suite, file} of testFiles) {
-    const {
-      tests: calls,
-      blocks,
-      aliases,
-    } = suite.scan(file, readFileSync(file, 'utf8'));
-
+  for (const {suite, file, tests: calls, blocks, aliases} of testFiles) {
     for (const {line, source, name} of aliases) {
       failures.push(
         name === '*'
