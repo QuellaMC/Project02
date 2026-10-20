@@ -119,7 +119,7 @@ pub fn describe_entry(path: &Path) -> PathEntry {
 /// # Errors
 ///
 /// The `io::Error` the listing failed with, `NotFound` when nothing is at
-/// `path`.
+/// `path` or a link there leads nowhere.
 pub fn list_directory(path: &Path) -> io::Result<Vec<(OsString, PathEntry)>> {
     fs::read_dir(path)?
         .map(|entry| {
