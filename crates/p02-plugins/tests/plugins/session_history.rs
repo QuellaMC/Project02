@@ -103,6 +103,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     history.exchange("chat.5", &long, "Noted.");
     history.exchange("chat.7", "Call it foo bar, not C++.", "Fine.");
     history.exchange("chat.8", "The food was cold.", "Sorry.");
+    history.exchange("chat.9", "ᲐᲑᲒ, in capitals.", "Mtavruli.");
     history.say(
         "chat.6",
         VisibleMessageRole::User,
@@ -122,7 +123,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     // What the model sees now: the person's line and its own interim reply.
     let now = turn_in("chat.6", "evt_6", &["chat.6:message-2", "chat.6:message-3"]);
     let host = history_host(&storage, 5_000);
-    let cases: [(&str, &[&str]); 11] = [
+    let cases: [(&str, &[&str]); 12] = [
         ("kraken", &["chat.1", "chat.2"]),
         ("插件权限", &["chat.3"]),
         ("su", &["chat.1"]),
@@ -134,6 +135,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
         ("foo-bar", &[]),
         ("c++", &["chat.7"]),
         (" foo ", &["chat.7"]),
+        ("აბგ", &["chat.9"]),
     ];
     let reports = host
         .handle_tool_calls(
@@ -215,7 +217,7 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
     let around = ask(
         &host,
         "sessions.read",
-        json!({"sessionId": "chat.1", "anchorMessageId": "chat.1:message-13", "window": 2}),
+        json!({"sessionId": "chat.1", "anchorMessageId": "chat.1:message-13", "window": 2.0}),
         &now,
     )
     .await;
@@ -237,7 +239,11 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
         ],
         [vec![1, 2], vec![10, 11, 12, 13, 14, 15, 16], vec![21, 22]]
     );
-    assert_eq!(numbers(&output(&around)["messages"]), [11, 12, 13, 14, 15]);
+    assert_eq!(
+        numbers(&output(&around)["messages"]),
+        [11, 12, 13, 14, 15],
+        "a window written 2.0 is the whole number its contract admitted"
+    );
     assert_eq!(
         (
             &output(&around)["hasBefore"],
@@ -338,6 +344,9 @@ async fn the_index_holds_what_the_history_committed_and_is_rebuilt_from_it() {
     storage
         .history
         .exchange("chat.1", "The kraken surfaced.", "Noted.");
+    storage
+        .history
+        .exchange("chat.3", "The kraken slept.", "Hush.");
 
     let host = history_host(&storage, 5_000);
     let indexed = host.after_turn_committed(&turn(), &committed()).await;
@@ -347,17 +356,19 @@ async fn the_index_holds_what_the_history_committed_and_is_rebuilt_from_it() {
         "Caught the session index up to the committed turn."
     );
     assert_eq!(opener.opened(), 1, "the index opened once, and stays open");
-    assert_eq!(kraken(&host).await, ["chat.1"]);
+    assert_eq!(kraken(&host).await, ["chat.1", "chat.3"]);
     assert_eq!(opener.opened(), 1);
 
     storage
         .history
         .exchange("chat.2", "The kraken dove.", "Gone.");
     storage.history.shrink("chat.1", 0);
+    storage.history.forget("chat.3");
     assert_eq!(
         kraken(&host).await,
         ["chat.2"],
-        "a log that shrank is read again from its start"
+        "a log that shrank is read again from its start, and a session the history no longer \
+         lists is forgotten"
     );
     drop(host);
 

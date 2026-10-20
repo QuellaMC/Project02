@@ -149,9 +149,13 @@ async fn a_timed_out_hook_is_cancelled_and_its_future_dropped() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn abandoning_the_turn_ends_the_wait_on_its_hooks() {
+async fn abandoning_the_turn_ends_the_wait_on_its_hooks_and_starts_none_after() {
     let hanging = Arc::new(Hanging::default());
-    let host = host_of(vec![(Spec::new("hang"), Arc::clone(&hanging) as _)]);
+    let after = Arc::new(Scripted::answering(ContextItemKind::Resource, 1));
+    let host = host_of(vec![
+        (Spec::new("hang"), Arc::clone(&hanging) as _),
+        (Spec::new("after"), Arc::clone(&after) as _),
+    ]);
     let turn = turn();
     let abandon = turn.cancellation().clone();
     let started = Instant::now();
@@ -163,9 +167,22 @@ async fn abandoning_the_turn_ends_the_wait_on_its_hooks() {
 
     assert_eq!(started.elapsed(), Duration::from_millis(10));
     assert_eq!(
-        prepared.evidence[0].summary(),
-        "Optional before-role-model plugin hook degraded: Plugin \"hang\" beforeRoleModelCall \
-         was stopped: its turn was abandoned."
+        prepared
+            .evidence
+            .iter()
+            .map(Evidence::summary)
+            .collect::<Vec<_>>(),
+        [
+            "Optional before-role-model plugin hook degraded: Plugin \"hang\" \
+             beforeRoleModelCall was stopped: its turn was abandoned.",
+            "Optional before-role-model plugin hook degraded: Plugin \"after\" \
+             beforeRoleModelCall was stopped: its turn was abandoned."
+        ]
+    );
+    assert_eq!(
+        after.calls(),
+        0,
+        "no hook starts once its turn is abandoned"
     );
     tokio::time::timeout(Duration::from_secs(5), hanging.dropped.notified())
         .await

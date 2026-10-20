@@ -230,9 +230,9 @@ impl Core {
 }
 
 impl Slot {
-    /// Prepares an approval-gated call with the store read-only: what the
-    /// person is to be asked about, or the report of a call that ends
-    /// unasked.
+    /// Prepares an approval-gated call only reading, its store read-only and
+    /// no database open to it: what the person is to be asked about, or the
+    /// report of a call that ends unasked.
     async fn prepare(
         &self,
         tool: &ProvidedTool,

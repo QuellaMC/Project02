@@ -308,12 +308,18 @@ impl Request {
     fn of(call: &ToolCall) -> Result<Self, PluginError> {
         let input = call.input();
         let text = |field: &str| input.get(field).and_then(Value::as_str).map(str::to_owned);
+        // A number the contract admitted is a whole one within the tool's
+        // bounds, which JSON writes as 5 or as 5.0 alike.
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the contract admits only whole numbers from 1 to 15"
+        )]
         let number = |field: &str, default: u32| {
             input
                 .get(field)
-                .and_then(Value::as_u64)
-                .and_then(|value| u32::try_from(value).ok())
-                .unwrap_or(default)
+                .and_then(Value::as_f64)
+                .map_or(default, |value| value as u32)
         };
 
         match call.tool_name().as_str() {

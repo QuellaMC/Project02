@@ -36,7 +36,9 @@ const BOOKEND: i64 = 2;
 const TRIGRAM_CHARS: usize = 3;
 
 /// Messages are immutable once committed, so the full-text index follows
-/// inserts and deletes only.
+/// inserts and deletes only, and a session's messages go with it. The index
+/// holds each message's folded text with the tokenizer's own folding off,
+/// so a phrase and a substring read one folding.
 const SCHEMA: &str = "
 CREATE TABLE index_owner (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -62,13 +64,17 @@ CREATE TABLE messages (
   UNIQUE (session_id, message_id)
 );
 CREATE VIRTUAL TABLE trigrams USING fts5(
-  text, content = 'messages', content_rowid = 'id', tokenize = 'trigram'
+  folded, content = 'messages', content_rowid = 'id',
+  tokenize = 'trigram case_sensitive 1'
 );
 CREATE TRIGGER messages_indexed AFTER INSERT ON messages BEGIN
-  INSERT INTO trigrams (rowid, text) VALUES (new.id, new.text);
+  INSERT INTO trigrams (rowid, folded) VALUES (new.id, new.folded);
 END;
 CREATE TRIGGER messages_forgotten AFTER DELETE ON messages BEGIN
-  INSERT INTO trigrams (trigrams, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO trigrams (trigrams, rowid, folded) VALUES ('delete', old.id, old.folded);
+END;
+CREATE TRIGGER sessions_forgotten AFTER DELETE ON sessions BEGIN
+  DELETE FROM messages WHERE session_id = old.session_id;
 END;
 ";
 
@@ -167,7 +173,7 @@ impl SessionIndex {
                 let transaction =
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
-                transaction.execute_batch("DELETE FROM messages; DELETE FROM sessions;")?;
+                transaction.execute("DELETE FROM sessions", [])?;
                 transaction.execute(
                     "UPDATE index_owner SET character_id = ?1",
                     [character_id.as_str()],
@@ -185,14 +191,29 @@ impl SessionIndex {
         Ok(Self { connection })
     }
 
-    /// Ingests what the history committed since the last catch-up, of every
-    /// session or of `only`, and returns the listing it read.
+    /// Brings the index to the history, whose listing is the authority: a
+    /// session it no longer lists is forgotten, and what it committed since
+    /// the last catch-up is ingested, of every session or of `only`.
+    /// Returns the listing it read.
     pub(super) fn catch_up(
         &mut self,
         history: &SessionHistory,
         only: Option<&SessionId>,
     ) -> Result<SessionListing, IndexError> {
         let listing = history.list_sessions()?;
+        let listed = Value::from(
+            listing
+                .sessions
+                .iter()
+                .map(|session| session.session_id.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .to_string();
+
+        self.connection.execute(
+            "DELETE FROM sessions WHERE session_id NOT IN (SELECT value FROM json_each(?1))",
+            [listed],
+        )?;
 
         for session in &listing.sessions {
             if only.is_none_or(|only| only == &session.session_id) {
@@ -311,15 +332,17 @@ impl SessionIndex {
 
     /// The sessions whose messages hold `query` as written, case aside, the
     /// literal text the tool promises: a space at either end counts like
-    /// any other character, and a query of spaces is literal too. It is a
-    /// trigram phrase, or a folded substring when it is too short for a
-    /// trigram. Each session's best hit is its best rank, the newest of
-    /// equals, and sessions rank the same way.
+    /// any other character, and a query of spaces is literal too. The query
+    /// folds as the indexed text did, and is a trigram phrase, or a
+    /// substring when it is too short for a trigram. Each session's best
+    /// hit is its best rank, the newest of equals, and sessions rank the
+    /// same way.
     pub(super) fn search(&self, query: &str, scope: &Scope<'_>) -> Result<Hits, IndexError> {
-        let hits = if query.chars().count() < TRIGRAM_CHARS {
-            self.substring_hits(query, scope)?
+        let folded = fold(query);
+        let hits = if folded.chars().count() < TRIGRAM_CHARS {
+            self.substring_hits(&folded, scope)?
         } else {
-            self.ranked_hits(query, scope)?
+            self.ranked_hits(&folded, scope)?
         };
         let sessions_with_hits = hits.first().map_or(0, |hit| {
             hit.sessions_with_hits.try_into().unwrap_or_default()
@@ -391,10 +414,10 @@ impl SessionIndex {
             .unwrap_or(0))
     }
 
-    /// A phrase on the trigram index holds the query as written: no
+    /// A phrase on the trigram index holds the folded query as written: no
     /// operator of the query language is read.
-    fn ranked_hits(&self, query: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
-        let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+    fn ranked_hits(&self, folded: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
+        let phrase = format!("\"{}\"", folded.replace('"', "\"\""));
 
         self.hits(
             "WITH best AS (
@@ -414,7 +437,7 @@ impl SessionIndex {
     }
 
     /// Substring hits carry no rank, so sessions order by their newest.
-    fn substring_hits(&self, query: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
+    fn substring_hits(&self, folded: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
         self.hits(
             "WITH best AS (
                SELECT session_id, position, committed_at,
@@ -426,7 +449,7 @@ impl SessionIndex {
              )
              SELECT session_id, position, COUNT(*) OVER () FROM best WHERE place = 1
              ORDER BY committed_at DESC, session_id LIMIT ?4",
-            &fold(query),
+            folded,
             scope,
         )
     }

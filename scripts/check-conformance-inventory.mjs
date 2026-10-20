@@ -13,8 +13,10 @@
 // it, on the test or on any module around it, and only a module may
 // enclose it; a file is read as Rust tokens, so there too a test in a
 // comment or a string is no test. The check runs where cargo may not be
-// installed, so it reads only Cargo's defaults and refuses a manifest key
-// that sets where or whether a target's tests run.
+// installed, so it reads only Cargo's defaults and the workspace's members
+// as this repository declares them, `["crates/*"]`: it refuses a manifest
+// key that sets otherwise which crates the workspace tests or where or
+// whether a target's tests run, and a module's `#[path]`.
 import {existsSync, readFileSync, readdirSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 
@@ -570,18 +572,19 @@ function parks({path, text}) {
 }
 
 /**
- * Each test of a Rust file that names a row, and each module the file
- * declares out of line. A test is a function carrying a `#[test]`-family
- * attribute, with or without arguments, whose first `///` line above its
- * attributes is a title. It is parked by an attribute on it or on any
- * module around it, the file's own inner attributes included, and when the
- * file arrives `parked`. Only a module may enclose it: the harness never
- * runs a test inside another item.
+ * Each test of a Rust file that names a row, each module the file declares
+ * out of line, and each `#[path]`, refused. A test is a function carrying a
+ * `#[test]`-family attribute, with or without arguments, whose first `///`
+ * line above its attributes is a title. It is parked by an attribute on it
+ * or on any module around it, the file's own inner attributes included, and
+ * when the file arrives `parked`. Only a module may enclose it: the harness
+ * never runs a test inside another item.
  */
 function scanRust(source, parked) {
   const tokens = rustTokens(source);
   const tests = [];
   const modules = [];
+  const refusals = [];
   // The file itself, then each block open where the scan stands: whether
   // it is a module, the names of the modules down to it, and whether it is
   // parked.
@@ -619,6 +622,14 @@ function scanRust(source, parked) {
         text: inside.map(({text}) => text).join(''),
       };
 
+      if (attribute.path === 'path') {
+        refusals.push({
+          line: token.line,
+          why:
+            "#[path] sets where a module's file is; the index reads only " +
+            "Rust's defaults.",
+        });
+      }
       // An inner attribute belongs to the block it stands in, not to the
       // next item.
       if (next === '!') {
@@ -682,27 +693,35 @@ function scanRust(source, parked) {
     // A brace the qualifiers led to is read as the brace it is.
     at = head === '{' || head === '}' ? item - 1 : item;
   }
-  return {tests, modules, refusals: []};
+  return {tests, modules, refusals};
 }
 
-// The manifest keys that set where a target's root is or whether
-// `cargo test` runs its tests, each dotted from the manifest's top.
-const RUST_TARGET_KEYS = new Set([
-  'package.autolib',
-  'package.autobins',
-  'package.autotests',
-  ...['lib', 'bin', 'test'].flatMap(target =>
-    ['path', 'test', 'harness', 'required-features'].map(
-      key => `${target}.${key}`,
+// The manifest keys that decide what `cargo test --workspace` runs, each
+// dotted from the manifest's top, with what it sets and the one value the
+// index reads of it: the workspace's members as this repository declares
+// them, and every other key unset, at Cargo's default.
+const RUST_WORKSPACE_KEY = {sets: 'which crates the workspace tests'};
+const RUST_TARGET_KEY = {sets: "where or whether a target's tests run"};
+const RUST_MANIFEST_KEYS = new Map([
+  ['workspace.members', {...RUST_WORKSPACE_KEY, reads: '["crates/*"]'}],
+  ['workspace.exclude', RUST_WORKSPACE_KEY],
+  ...[
+    'package.autolib',
+    'package.autobins',
+    'package.autotests',
+    ...['lib', 'bin', 'test'].flatMap(target =>
+      ['path', 'test', 'harness', 'required-features'].map(
+        key => `${target}.${key}`,
+      ),
     ),
-  ),
+  ].map(key => [key, RUST_TARGET_KEY]),
 ]);
 // A manifest as Cargo's reference writes one: a line opens with a table's
 // header or with a bare key, dotted or not.
 const TOML_TABLE = /^\s*\[\[?([^\]]*)\]/;
 const TOML_KEY = /^\s*([\w-]+(?:\s*\.\s*[\w-]+)*)\s*=/;
 
-/** Each line of a crate's manifest that sets one of the target keys, refused. */
+/** Each line of a manifest, the workspace's or a crate's, that sets one of those keys to a value the index does not read, refused. */
 function manifestRefusals(manifest) {
   const refusals = [];
   let table = '';
@@ -715,13 +734,19 @@ function manifestRefusals(manifest) {
       table = `${header[1].replace(/\s/g, '')}.`;
     } else if (key !== null) {
       const path = table + key[1].replace(/\s/g, '');
+      const rule = RUST_MANIFEST_KEYS.get(path);
 
-      if (RUST_TARGET_KEYS.has(path)) {
+      if (
+        rule !== undefined &&
+        text.slice(key[0].length).trim() !== rule.reads
+      ) {
         refusals.push({
           line: at + 1,
           why:
-            `${path} sets where or whether a target's tests run; the ` +
-            "index reads only Cargo's defaults.",
+            `${path} sets ${rule.sets}; the index reads only ` +
+            (rule.reads === undefined
+              ? "Cargo's defaults."
+              : `${key[1].trim()} = ${rule.reads}.`),
         });
       }
     }
@@ -751,15 +776,25 @@ function rustRoots(crate) {
 }
 
 /**
- * Each file of the Rust suite as `cargo test` builds it, scanned: each
- * crate's manifest, for the keys the index refuses, its roots, and every
- * file a module declared out of line brings in, found where Rust looks for
- * it by default, beside a root or a `mod.rs` and in the directory named
- * after any other file. A file arrives parked when the module that brings
- * it in is.
+ * Each file of the Rust suite as `cargo test` builds it, scanned: the
+ * workspace's manifest beside the suite's directory and each crate's, for
+ * the keys the index refuses, each crate's roots, and every file a module
+ * declared out of line brings in, found where Rust looks for it by
+ * default, beside a root or a `mod.rs` and in the directory named after
+ * any other file. A file arrives parked when the module that brings it in
+ * is.
  */
 function scanRustSuite(directory) {
   const scanned = new Map();
+  const readManifest = manifest => {
+    if (existsSync(manifest)) {
+      scanned.set(manifest, {
+        tests: [],
+        modules: [],
+        refusals: manifestRefusals(readFileSync(manifest, 'utf8')),
+      });
+    }
+  };
   const visit = (file, ownsDirectory, parked) => {
     if (scanned.has(file) || !existsSync(file)) {
       return;
@@ -777,18 +812,12 @@ function scanRustSuite(directory) {
     }
   };
 
+  readManifest(join(dirname(directory), 'Cargo.toml'));
   for (const entry of readdirSync(directory, {withFileTypes: true})) {
     if (entry.isDirectory()) {
       const crate = join(directory, entry.name);
-      const manifest = join(crate, 'Cargo.toml');
 
-      if (existsSync(manifest)) {
-        scanned.set(manifest, {
-          tests: [],
-          modules: [],
-          refusals: manifestRefusals(readFileSync(manifest, 'utf8')),
-        });
-      }
+      readManifest(join(crate, 'Cargo.toml'));
       for (const root of rustRoots(crate)) {
         visit(root, true, false);
       }

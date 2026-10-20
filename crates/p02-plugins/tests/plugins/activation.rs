@@ -291,8 +291,13 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
         Some("0 message(s)".to_owned())
     );
     assert_eq!(
-        granted.seen("shutdown").and_then(|seen| seen.store),
-        Some(StoreAccess::ReadOnly)
+        granted.seen("shutdown"),
+        Some(Seen {
+            message: Some("hello".to_owned()),
+            store: Some(StoreAccess::ReadOnly),
+            history: true,
+            databases: false,
+        })
     );
     assert_eq!(
         reader.seen("before"),
