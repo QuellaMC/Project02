@@ -149,12 +149,18 @@ struct Candidate {
 /// The entries of `<home>/characters/` that could be packages, in name
 /// order: each folder is read, a link or an entry that cannot be told
 /// apart is refused, and anything else is ignored. The folder may itself be
-/// a link, and when it is missing the home has no packages of its own.
+/// a link. When nothing is there the home has no packages of its own, and
+/// anything there that does not list, a link leading nowhere among them,
+/// leaves the source unavailable.
 fn home_packages(home: &Path) -> Vec<Result<Candidate, PackageDiagnostic>> {
     let root = home.join(HOME_PACKAGES);
+
+    if matches!(describe_entry(&root), PathEntry::Absent) {
+        return Vec::new();
+    }
+
     let mut entries = match list_directory(&root) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
         Err(error) => {
             return vec![Err(PackageDiagnostic {
                 location: PackageLocation::Home(root),
@@ -586,21 +592,25 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_of_packages_that_cannot_be_listed_is_diagnosed() {
-        let home = Home::new();
+    fn a_folder_of_packages_that_is_there_but_cannot_be_listed_is_diagnosed() {
+        let file = Home::new();
+        let dangling = Home::new();
 
-        home.write("characters", b"not a folder");
+        file.write("characters", b"not a folder");
+        dangling.link("characters", &dangling.path("moved-away"));
 
-        let discovery = discover(&home.root);
+        for home in [file, dangling] {
+            let discovery = discover(&home.root);
 
-        assert_eq!(ids(&discovery), ["mira"]);
-        assert_eq!(
-            reported(&discovery),
-            [(
-                PackageLocation::Home(home.path("characters")),
-                None,
-                "package_source_unavailable"
-            )]
-        );
+            assert_eq!(ids(&discovery), ["mira"]);
+            assert_eq!(
+                reported(&discovery),
+                [(
+                    PackageLocation::Home(home.path("characters")),
+                    None,
+                    "package_source_unavailable"
+                )]
+            );
+        }
     }
 }
