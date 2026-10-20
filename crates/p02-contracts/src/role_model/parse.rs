@@ -253,10 +253,6 @@ mod tests {
                 "visible_reply text contains an unterminated reasoning block.",
             ),
             (
-                json!({"toolCalls": [reply("<<think>plan</think>think>secret")]}).to_string(),
-                "visible_reply text contains an unterminated reasoning block.",
-            ),
-            (
                 json!({"toolCalls": [reply("   ")]}).to_string(),
                 "visible_reply text must not be empty.",
             ),

@@ -110,6 +110,11 @@ pub enum ManifestError {
     )]
     RequiredDefault(Identifier),
     #[error(
+        "plugin config field \"{0}\" allowedValues must name one value at least, each a value of \
+         its valueType"
+    )]
+    AllowedValuesMismatch(Identifier),
+    #[error(
         "plugin config field \"{0}\" defaultValue must be a value of its valueType, and one of \
          its allowedValues when it has them"
     )]
@@ -164,6 +169,7 @@ impl ManifestError {
             | Self::SecretAgentMutable(_)
             | Self::SecretDefault(_)
             | Self::RequiredDefault(_)
+            | Self::AllowedValuesMismatch(_)
             | Self::DefaultMismatch(_)
             | Self::DefaultTooLarge { .. }
             | Self::CharacterOnlyDefaultEnabled
@@ -476,7 +482,7 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
             });
         }
 
-        check_default(&field)?;
+        check_values(&field)?;
         declared.push(field);
     }
 
@@ -535,10 +541,20 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     })
 }
 
-/// A default is what a field takes wherever nothing sets it, so it is a
-/// value the field accepts; a credential, or a value its operator must
-/// choose, is never one a manifest decides.
-fn check_default(field: &ConfigField) -> Result<(), ManifestError> {
+/// Every value a manifest names for a field is one the field accepts: each
+/// allowed value, of which there is one at least, and the default, which is
+/// what the field takes wherever nothing sets it. A credential, or a value
+/// its operator must choose, is never a default a manifest decides.
+fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
+    if let Some(allowed) = &field.allowed_values
+        && (allowed.is_empty()
+            || !allowed
+                .iter()
+                .all(|value| field.accepts(&Value::from(value.as_str()))))
+    {
+        return Err(ManifestError::AllowedValuesMismatch(field.name.clone()));
+    }
+
     let Some(default_value) = &field.default_value else {
         return Ok(());
     };
@@ -895,6 +911,16 @@ mod tests {
                     m["config"]["fields"][0]["defaultValue"] = json!("warm");
                 },
                 ManifestError::RequiredDefault(name("tone")),
+                MalformedManifest,
+            ),
+            (
+                |m| m["config"]["fields"][0]["valueType"] = json!("number"),
+                ManifestError::AllowedValuesMismatch(name("tone")),
+                MalformedManifest,
+            ),
+            (
+                |m| m["config"]["fields"][0]["allowedValues"] = json!([]),
+                ManifestError::AllowedValuesMismatch(name("tone")),
                 MalformedManifest,
             ),
             (

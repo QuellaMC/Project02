@@ -94,18 +94,13 @@ pub(crate) enum ReplyError {
 impl ModelToolCall {
     /// The character's reply as the model wrote it: what its reasoning
     /// blocks leave, normalized, so what the model said, what the person
-    /// sees and what the log keeps are one text. It shows no reasoning tag,
-    /// not even one that the text around a dropped block spells, so a reply
-    /// read again is left as it is.
+    /// sees and what the log keeps are one text.
     pub(crate) fn reply(written: &str) -> Result<Self, ReplyError> {
         let shown = scrub_reasoning_blocks(written).map_err(|_| ReplyError::Leak)?;
-        let text = VisibleText::normalize(&shown).map_err(|_| ReplyError::Blank)?;
 
-        if !scrub_reasoning_blocks(text.as_str()).is_ok_and(|again| again == text.as_str()) {
-            return Err(ReplyError::Leak);
-        }
-
-        Ok(Self::VisibleReply { text })
+        VisibleText::normalize(&shown)
+            .map(|text| Self::VisibleReply { text })
+            .map_err(|_| ReplyError::Blank)
     }
 
     /// A call of a plugin tool whose input crosses the JSON boundary, its

@@ -3,12 +3,17 @@
 /// space and attributes, and closes on the first bare closing tag of the
 /// same name; the block is dropped whole, nested tags and all. A tag outside
 /// any block, or a block never closed, is a leak the text cannot be cleaned
-/// of. The filter reads the text as it arrives, so a draft can be shown
-/// while the model still writes.
+/// of. What is taken out is read as never written: the text on its two
+/// sides is read again as one, so no tag is spelled across it, and what the
+/// filter passes reads back as itself. The filter reads the text as it
+/// arrives, so a draft can be shown while the model still writes.
 #[derive(Debug, Default)]
 pub struct ReasoningFilter {
     buffer: String,
     open_block: Option<&'static str>,
+    /// The start of a would-be tag that the open block began inside, read
+    /// again in front of what follows the block.
+    cut: String,
     stray: bool,
 }
 
@@ -30,12 +35,19 @@ enum TagMatch {
         /// that closes a block.
         bare: bool,
     },
+    /// A would-be tag cut off by another `<`, at `at`, before it could be
+    /// told from text.
+    Split {
+        at: usize,
+    },
     Partial,
     None,
 }
 
 enum NameMatch {
     Found(&'static str),
+    /// Another `<` begins this far in, where the name had more to match.
+    Cut(usize),
     Partial,
     Absent,
 }
@@ -70,12 +82,21 @@ impl ReasoningFilter {
                 passed.push_str(&self.buffer[cursor..tag_start]);
             }
 
-            match match_tag(&self.buffer, tag_start) {
+            // Inside a block nothing is read but its closing tag, so only
+            // outside one does a would-be tag wait for the tag that cuts it.
+            let (start, found) = match match_tag(&self.buffer, tag_start) {
+                TagMatch::Split { at } if self.open_block.is_none() => {
+                    cutting_tag(&self.buffer, at)
+                }
+                found => (tag_start, found),
+            };
+
+            match found {
                 TagMatch::Partial => {
                     self.buffer.drain(..tag_start);
                     return passed;
                 }
-                TagMatch::None => {
+                TagMatch::None | TagMatch::Split { .. } => {
                     if self.open_block.is_none() {
                         passed.push('<');
                     }
@@ -87,18 +108,36 @@ impl ReasoningFilter {
                     closing,
                     name,
                     bare,
-                } => {
-                    cursor = end;
+                } => match self.open_block {
+                    None => {
+                        self.cut = self.buffer[tag_start..start].to_owned();
 
-                    match self.open_block {
-                        None if closing => self.stray = true,
-                        None => self.open_block = Some(name),
-                        Some(open) if closing && bare && name == open => self.open_block = None,
-                        Some(_) => {}
+                        if closing {
+                            self.stray = true;
+                            self.read_on_after(end);
+                            cursor = 0;
+                        } else {
+                            self.open_block = Some(name);
+                            cursor = end;
+                        }
                     }
-                }
+                    Some(open) if closing && bare && name == open => {
+                        self.open_block = None;
+                        self.read_on_after(end);
+                        cursor = 0;
+                    }
+                    Some(_) => cursor = end,
+                },
             }
         }
+    }
+
+    /// Drops the text up to `end`, where a tag taken out ends, and puts the
+    /// would-be tag it cut off back in front of the rest, to be read again.
+    fn read_on_after(&mut self, end: usize) {
+        let cut = std::mem::take(&mut self.cut);
+
+        self.buffer.replace_range(..end, &cut);
     }
 
     /// Releases what was held as text, a `<` that never became a tag.
@@ -144,6 +183,7 @@ fn match_tag(buffer: &str, start: usize) -> TagMatch {
 
     let name = match match_tag_name(&buffer.as_bytes()[index..]) {
         NameMatch::Found(name) => name,
+        NameMatch::Cut(offset) => return TagMatch::Split { at: index + offset },
         NameMatch::Partial => return TagMatch::Partial,
         NameMatch::Absent => return TagMatch::None,
     };
@@ -154,6 +194,7 @@ fn match_tag(buffer: &str, start: usize) -> TagMatch {
     // `<think-aloud>` are other tags.
     match buffer[index..].chars().next() {
         None => return TagMatch::Partial,
+        Some('<') => return TagMatch::Split { at: index },
         Some(next) if next.is_whitespace() || next == '/' || next == '>' => {}
         Some(_) => return TagMatch::None,
     }
@@ -171,20 +212,33 @@ fn match_tag(buffer: &str, start: usize) -> TagMatch {
     }
 }
 
+/// The tag that cuts off a run of would-be tags, each cut off by the next,
+/// and where it starts.
+fn cutting_tag(buffer: &str, mut at: usize) -> (usize, TagMatch) {
+    loop {
+        match match_tag(buffer, at) {
+            TagMatch::Split { at: next } => at = next,
+            found => return (at, found),
+        }
+    }
+}
+
 fn match_tag_name(available: &[u8]) -> NameMatch {
     for name in TAG_NAMES {
-        let name_bytes = name.as_bytes();
+        let matched = available
+            .iter()
+            .zip(name.as_bytes())
+            .take_while(|(byte, expected)| byte.eq_ignore_ascii_case(expected))
+            .count();
 
-        if available.len() >= name_bytes.len()
-            && available[..name_bytes.len()].eq_ignore_ascii_case(name_bytes)
-        {
+        if matched == name.len() {
             return NameMatch::Found(name);
         }
 
-        if available.len() < name_bytes.len()
-            && name_bytes[..available.len()].eq_ignore_ascii_case(available)
-        {
-            return NameMatch::Partial;
+        match available.get(matched) {
+            None => return NameMatch::Partial,
+            Some(b'<') => return NameMatch::Cut(matched),
+            Some(_) => {}
         }
     }
 
@@ -203,7 +257,7 @@ mod tests {
     use super::*;
 
     /// The grammar, whole: what the decision parser and the adapters rely on.
-    const CASES: [(&str, Result<&str, ReasoningLeakError>); 16] = [
+    const CASES: [(&str, Result<&str, ReasoningLeakError>); 19] = [
         ("<think>plan</think>Hello", Ok("Hello")),
         ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", Ok("a  b")),
         ("<THINK>plan</Think>Hello", Ok("Hello")),
@@ -216,6 +270,9 @@ mod tests {
             Ok("<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>"),
         ),
         ("x < y and a<b", Ok("x < y and a<b")),
+        ("3 <<think>check</think> 5", Ok("3 < 5")),
+        ("<th<think>a</think>ink>b</think>c", Ok("c")),
+        ("<<think>plan</think>think>secret", Err(ReasoningLeakError)),
         ("<thin", Ok("<thin")),
         ("plain text", Ok("plain text")),
         ("<think>still thinking about it", Err(ReasoningLeakError)),
@@ -231,6 +288,14 @@ mod tests {
             let expected = expected.map(str::to_owned);
 
             assert_eq!(scrub_reasoning_blocks(input), expected, "{input:?}");
+
+            if let Ok(clean) = &expected {
+                assert_eq!(
+                    scrub_reasoning_blocks(clean).as_ref(),
+                    Ok(clean),
+                    "{input:?}"
+                );
+            }
 
             for split in (0..=input.len()).filter(|&split| input.is_char_boundary(split)) {
                 let mut filter = ReasoningFilter::new();
@@ -265,5 +330,16 @@ mod tests {
 
         assert_eq!(open.push("a <think>b</thi"), "a ");
         assert_eq!(open.finish(), Err(ReasoningLeakError));
+
+        let mut spelled = ReasoningFilter::new();
+
+        assert_eq!(spelled.push("a <<think>plan</think>"), "a ");
+        assert_eq!(spelled.push("think>secret"), "");
+        assert_eq!(spelled.finish(), Err(ReasoningLeakError));
+
+        let mut stray = ReasoningFilter::new();
+
+        assert_eq!(stray.push("a <th</think>ink>secret"), "a ");
+        assert_eq!(stray.finish(), Err(ReasoningLeakError));
     }
 }
