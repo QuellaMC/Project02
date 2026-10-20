@@ -1,6 +1,7 @@
 mod database;
 mod file_store;
 mod session_history;
+mod storage;
 
 pub use database::{DatabaseError, DatabaseOpener, PluginDatabase};
 pub use file_store::{
@@ -10,3 +11,4 @@ pub use session_history::{
     HistoryCursor, HistoryMessage, MessageBatch, ReadMessages, SessionHistory, SessionHistoryError,
     SessionHistoryFeed, SessionListing, SessionSummary,
 };
+pub use storage::CharacterStorage;

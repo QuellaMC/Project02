@@ -265,9 +265,21 @@ impl TryFrom<UncheckedContextItem> for PluginContextItem {
     }
 }
 
-/// The record's serialized form held to the default JSON limits, which
-/// bound every public string a plugin hands the host and their sum.
-pub(crate) fn within_limits<T: Serialize>(record: &T, name: &str) -> Result<(), BoundJsonError> {
+/// Whether `record`, serialized, keeps to the default JSON limits, which
+/// bound every string a plugin hands the host and their sum: the one judge
+/// of a plugin's records, each alone and a hook's whole answer together.
+///
+/// # Errors
+///
+/// [`BoundJsonError`] for the first limit the record breaks, named from
+/// `name`.
+///
+/// # Panics
+///
+/// When `record` does not serialize, which plain data always does: only a
+/// map with keys that are not strings, or a `Serialize` that fails by
+/// itself, could.
+pub fn within_limits<T: Serialize>(record: &T, name: &str) -> Result<(), BoundJsonError> {
     let value = serde_json::to_value(record).expect("a record of plain data always serializes");
 
     bound_json(value, name, JsonLimits::default(), Credentials::Keep).map(drop)
