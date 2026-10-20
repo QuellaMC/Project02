@@ -54,8 +54,9 @@ pub struct CharacterDecision {
     text: Option<String>,
 }
 
+/// A recorded decision, closed like the answer the parser judges.
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UncheckedDecision {
     version: DecisionVersion,
     tool_calls: Vec<ModelToolCall>,
@@ -508,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn a_record_naming_another_decision_contract_is_refused() {
+    fn a_record_outside_the_decision_contract_is_refused() {
         let mut envelope =
             serde_json::to_value(envelope(PluginToolDefinitions::default())).unwrap();
         let mut decision = json!({
@@ -528,6 +529,14 @@ mod tests {
 
         assert!(serde_json::from_value::<InputEnvelope>(envelope).is_err());
         assert!(serde_json::from_value::<CharacterDecision>(decision).is_err());
+        assert!(
+            serde_json::from_value::<CharacterDecision>(json!({
+                "version": DECISION_CONTRACT_VERSION,
+                "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
+                "sideEffect": "write a file",
+            }))
+            .is_err()
+        );
     }
 
     #[test]

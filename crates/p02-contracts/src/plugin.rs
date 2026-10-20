@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use p02_shared::Identifier;
+use serde_json::{Map, Value};
 
 use crate::capability::{DatabaseError, SessionHistoryError, StoreError};
-use crate::config::ResolvedConfig;
+use crate::config::{MissingConfigValueError, ResolvedConfig};
 use crate::context::HookContext;
 use crate::manifest::Manifest;
 use crate::output::{BeforeRoleModelCallOutput, CommittedTurn, HealthReport, HookReport};
@@ -311,17 +312,31 @@ impl Registration {
     }
 }
 
-/// What a plugin's factory is given: its manifest and its resolved config.
-#[derive(Clone, Copy, Debug)]
+/// What a plugin's factory is given: its manifest, and what that
+/// manifest's own config section resolves to.
+#[derive(Clone, Debug)]
 pub struct FactoryInput<'a> {
     manifest: &'a Manifest,
-    config: &'a ResolvedConfig,
+    config: ResolvedConfig,
 }
 
 impl<'a> FactoryInput<'a> {
-    #[must_use]
-    pub fn new(manifest: &'a Manifest, config: &'a ResolvedConfig) -> Self {
-        Self { manifest, config }
+    /// The input for `manifest`'s plugin, its config resolved against the
+    /// manifest's section from `authored`, the values the settings set for
+    /// it, so a plugin is never handed another's.
+    ///
+    /// # Errors
+    ///
+    /// [`MissingConfigValueError`] for the first required field left
+    /// without a value it accepts.
+    pub fn new(
+        manifest: &'a Manifest,
+        authored: &Map<String, Value>,
+    ) -> Result<Self, MissingConfigValueError> {
+        Ok(Self {
+            manifest,
+            config: ResolvedConfig::resolve(manifest.config(), authored)?,
+        })
     }
 
     #[must_use]
@@ -332,8 +347,8 @@ impl<'a> FactoryInput<'a> {
     /// The plugin's config with every default applied, so a plugin keeps no
     /// fallback of its own.
     #[must_use]
-    pub fn config(&self) -> &'a ResolvedConfig {
-        self.config
+    pub fn config(&self) -> &ResolvedConfig {
+        &self.config
     }
 }
 
@@ -347,7 +362,7 @@ mod tests {
     use p02_core::{
         CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId,
     };
-    use serde_json::{Map, Value, json};
+    use serde_json::json;
     use tokio::time::Instant;
     use tokio_util::sync::CancellationToken;
 
@@ -499,8 +514,7 @@ mod tests {
             &json!(["tool_provider", "handle_tool_call"]),
             &json!({"model_input": "write"}),
         );
-        let config = ResolvedConfig::resolve(manifest.config(), &Map::new()).unwrap();
-        let plugin = FACTORY(&FactoryInput::new(&manifest, &config)).unwrap();
+        let plugin = FACTORY(&FactoryInput::new(&manifest, &Map::new()).unwrap()).unwrap();
         let registration = Registration::new(manifest, plugin).unwrap();
 
         assert_eq!(registration.manifest().id().as_str(), "toolbox");
