@@ -139,7 +139,7 @@ impl Engine {
         query: &str,
         limit: usize,
     ) -> Result<Vec<Hit>, EngineError> {
-        let query = self.embed_one(query.to_owned()).await?;
+        let query = self.embed(query).await?;
         let (scope, generation) = (scope.clone(), self.shared.generation);
 
         self.with_store(move |connection| {
@@ -172,7 +172,7 @@ impl Engine {
             .map(|message| format!("{}: {}", message.role.as_str(), message.content))
             .collect::<Vec<_>>()
             .join("\n");
-        let conversation = self.embed_one(new_messages.clone()).await?;
+        let conversation = self.embed(&new_messages).await?;
         let (owned_scope, session, generation) =
             (scope.clone(), turn.session.clone(), self.shared.generation);
         let (history, nearby) = self
@@ -211,13 +211,14 @@ impl Engine {
             .model_answered
             .store(texts.is_ok(), Ordering::SeqCst);
 
-        let texts = texts?;
-        let vectors = if texts.is_empty() {
-            Vec::new()
-        } else {
-            self.embed(&texts).await?
-        };
-        let memories: Vec<(String, Vec<f32>)> = texts.into_iter().zip(vectors).collect();
+        let mut memories = Vec::new();
+
+        for text in texts? {
+            let vector = self.embed(&text).await?;
+
+            memories.push((text, vector));
+        }
+
         let scope = scope.clone();
 
         self.with_store(move |connection| {
@@ -249,7 +250,7 @@ impl Engine {
         sources: &[String],
     ) -> Result<Option<Memory>, EngineError> {
         let _writing = self.shared.writes.lock().await;
-        let memories = [(text.to_owned(), self.embed_one(text.to_owned()).await?)];
+        let memories = [(text.to_owned(), self.embed(text).await?)];
         let (scope, sources, generation) =
             (scope.clone(), sources.to_vec(), self.shared.generation);
         let stored = self
@@ -285,7 +286,7 @@ impl Engine {
             .with_store(move |connection| Ok(store::next_unembedded(connection, generation)?))
             .await?
         {
-            let vector = self.embed_one(text).await?;
+            let vector = self.embed(&text).await?;
 
             self.with_store(move |connection| {
                 store::store_vector(connection, generation, memory, &vector)
@@ -312,25 +313,17 @@ impl Engine {
         })
     }
 
-    async fn embed_one(&self, text: String) -> Result<Vec<f32>, EngineError> {
-        let mut vectors = self.embed(&[text]).await?;
-
-        Ok(vectors
-            .pop()
-            .expect("the embedder's answer holds one vector per text"))
-    }
-
-    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EngineError> {
-        let vectors = self
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, EngineError> {
+        let vector = self
             .shared
             .client
-            .embed(&self.shared.settings.embedder, texts)
+            .embed(&self.shared.settings.embedder, text)
             .await;
 
         self.shared
             .embedder_answered
-            .store(vectors.is_ok(), Ordering::SeqCst);
-        vectors.map_err(EngineError::Embedder)
+            .store(vector.is_ok(), Ordering::SeqCst);
+        vector.map_err(EngineError::Embedder)
     }
 
     /// Runs `work` on the store on the blocking pool.

@@ -1,7 +1,7 @@
 //! The OpenAI-wire requests the engine makes of the extraction model and
-//! of the embedder: a chat completion that answers in JSON, and a list of
-//! embeddings. A failure says what happened in words that hold neither the
-//! address nor the key.
+//! of the embedder: a chat completion that answers in JSON, and the
+//! embedding of one text. A failure says what happened in words that hold
+//! neither the address nor the key.
 
 use std::time::Duration;
 
@@ -120,16 +120,8 @@ struct AnswerMessage {
 #[derive(Serialize)]
 struct EmbeddingRequest<'a> {
     model: &'a str,
-    input: Input<'a>,
+    input: &'a str,
     encoding_format: &'static str,
-}
-
-/// One text alone, or several in one request.
-#[derive(Serialize)]
-#[serde(untagged)]
-enum Input<'a> {
-    One(&'a str),
-    Many(&'a [String]),
 }
 
 #[derive(Deserialize)]
@@ -139,7 +131,6 @@ struct Embeddings {
 
 #[derive(Deserialize)]
 struct Embedding {
-    index: usize,
     embedding: Vec<f32>,
 }
 
@@ -186,41 +177,27 @@ impl Client {
             .ok_or(EndpointError::Unreadable)
     }
 
-    /// One vector per text, in the texts' order, all of one width.
+    /// The vector of `text`, asked for alone, so the answer can be no
+    /// other text's.
     pub(crate) async fn embed(
         &self,
         endpoint: &Endpoint,
-        texts: &[String],
-    ) -> Result<Vec<Vec<f32>>, EndpointError> {
-        let input = match texts {
-            [text] => Input::One(text),
-            texts => Input::Many(texts),
-        };
+        text: &str,
+    ) -> Result<Vec<f32>, EndpointError> {
         let request = EmbeddingRequest {
             model: &endpoint.model,
-            input,
+            input: text,
             encoding_format: "float",
         };
-        let mut answer: Embeddings = self.post(endpoint, "embeddings", &request).await?;
+        let answer: Embeddings = self.post(endpoint, "embeddings", &request).await?;
 
-        answer.data.sort_by_key(|embedding| embedding.index);
-
-        let vectors: Vec<Vec<f32>> = answer
-            .data
-            .into_iter()
-            .map(|embedding| embedding.embedding)
-            .collect();
-        let readable = vectors.len() == texts.len()
-            && vectors.iter().all(|vector| {
-                !vector.is_empty()
-                    && vector.len() == vectors[0].len()
-                    && vector.iter().all(|value| value.is_finite())
-            });
-
-        if readable {
-            Ok(vectors)
-        } else {
-            Err(EndpointError::Unreadable)
+        match <[Embedding; 1]>::try_from(answer.data) {
+            Ok([Embedding { embedding }])
+                if !embedding.is_empty() && embedding.iter().all(|value| value.is_finite()) =>
+            {
+                Ok(embedding)
+            }
+            _ => Err(EndpointError::Unreadable),
         }
     }
 
