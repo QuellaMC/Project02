@@ -39,7 +39,7 @@ any other build of them.
 | File                         | Job                                                                                                                                                                                                                                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `harness/home.ts`            | A canonical temp home, empty for `serve --init` or seeded with the files a test names; a session log's records, the records of one kind across a character's sessions, and every file under a directory.                                                                                               |
-| `harness/daemon.ts`          | Spawns `serve`, `inspect` or the Telegram connector in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code.                                                                                                                                            |
+| `harness/daemon.ts`          | Spawns `serve`, `inspect` or the Telegram connector in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code. A start of `serve` or `inspect` may name its command, so one process can start two builds.                                                 |
 | `harness/wire.ts`            | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                                                                                                                                                                                    |
 | `harness/events.ts`          | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                                                                                                                                                                                               |
 | `harness/http.ts`            | One request exactly as the test writes it, nothing added: the answer's status, headers and body as it comes, and a client that stops reading or hangs up.                                                                                                                                              |
@@ -83,3 +83,8 @@ PROJECT02_CONNECTOR_CMD='path/to/project02 telegram' \
   pnpm exec vitest run --project conformance
 PROJECT02_SERVE_CMD='path/to/project02 serve' pnpm test:browser
 ```
+
+To compare two builds rather than prove one, `tests/differential` drives
+one scenario through a reference and a candidate and compares what each
+showed the model, the stream, history and `inspect`
+(`../differential/README.md`).

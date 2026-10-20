@@ -281,6 +281,27 @@ export default {
         dependencyTypesNot: ['core'],
       },
     },
+    {
+      name: 'differential-is-black-box',
+      comment:
+        'tests/differential drives one scenario through two builds of the ' +
+        'daemon, met only through the conformance harness, so it compares ' +
+        'any two builds. It may import Node built-ins, vitest, the harness ' +
+        'and its own files — never src or tests/support, type-only imports ' +
+        'included. Green (zero baseline entries).',
+      severity: 'error',
+      from: {path: '^tests/differential/'},
+      to: {
+        // Unanchored: pnpm nests the package under node_modules/.pnpm/.
+        pathNot: [
+          '^tests/differential/',
+          '^tests/conformance/harness/',
+          '^vitest$',
+          'node_modules/vitest/',
+        ],
+        dependencyTypesNot: ['core'],
+      },
+    },
   ],
   options: {
     doNotFollow: {path: 'node_modules'},

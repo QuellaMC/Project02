@@ -19,6 +19,8 @@ export type Mem0Request = {
   readonly method: string;
   readonly path: string;
   readonly headers: IncomingHttpHeaders;
+  /** The body as it came. */
+  readonly text: string;
   readonly body: unknown;
 };
 
@@ -71,6 +73,7 @@ export async function startMem0Server(): Promise<Mem0Server> {
       method: request.method ?? '',
       path: request.url ?? '',
       headers: request.headers,
+      text: body,
       body: body === '' ? undefined : (JSON.parse(body) as unknown),
     };
 
