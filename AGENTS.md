@@ -195,7 +195,9 @@ from refactoring.
 **The conformance suite is the daemon's acceptance gate.** A behavior the
 daemon must keep is a row of `tests/conformance/inventory.csv` with a test
 under `tests/conformance` titled by it, proved from outside the process; an
-internal test may not pin what that suite proves.
+internal test may not pin what that suite proves. A host rule no bundled
+plugin can show from outside is a `rust-unit` row, proved by a Rust test
+under `crates` titled by it, and the row says why.
 
 Reach for a unit test when the logic is worth pinning on its own: validation,
 parsing, routing, deterministic state, schema normalization, ID assignment,
