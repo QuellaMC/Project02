@@ -23,9 +23,10 @@ pub struct Settings {
 }
 
 /// The memory engine over one database, of which every clone is a handle.
-/// Writes run one at a time, each in the order it was asked for. The
-/// database work runs on the blocking pool; a caller that stops waiting
-/// leaves a commit already started to finish, and starts nothing more.
+/// The database work runs on the blocking pool, one call at a time, and a
+/// write holds the database only for its commit, so an added memory never
+/// waits on a capture's model; a caller that stops waiting leaves a commit
+/// already started to finish, and starts nothing more.
 #[derive(Clone, Debug)]
 pub struct Engine {
     shared: Arc<Shared>,
@@ -37,7 +38,6 @@ struct Shared {
     client: Client,
     settings: Settings,
     generation: Generation,
-    writes: tokio::sync::Mutex<()>,
     model_answered: AtomicBool,
     embedder_answered: AtomicBool,
 }
@@ -120,7 +120,6 @@ impl Engine {
                 client,
                 settings,
                 generation,
-                writes: tokio::sync::Mutex::new(()),
                 model_answered: AtomicBool::new(false),
                 embedder_answered: AtomicBool::new(false),
             }),
@@ -165,7 +164,6 @@ impl Engine {
     /// [`EngineError`] when an endpoint or the store fails, or the model's
     /// answer is unreadable; nothing of the turn is stored then.
     pub async fn capture(&self, scope: &Scope, turn: Turn) -> Result<Vec<Memory>, EngineError> {
-        let _writing = self.shared.writes.lock().await;
         let new_messages = turn
             .messages
             .iter()
@@ -249,7 +247,6 @@ impl Engine {
         text: &str,
         sources: &[String],
     ) -> Result<Option<Memory>, EngineError> {
-        let _writing = self.shared.writes.lock().await;
         let memories = [(text.to_owned(), self.embed(text).await?)];
         let (scope, sources, generation) =
             (scope.clone(), sources.to_vec(), self.shared.generation);

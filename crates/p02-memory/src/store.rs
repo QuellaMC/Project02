@@ -13,8 +13,9 @@ use uuid::Uuid;
 
 use crate::record::{Hit, Memory, MemoryId, Message, Role, Scope};
 
-/// A database at another version is rebuilt by its opener, never migrated:
-/// raise it whenever the schema changes.
+/// The version the opener holds the database to. Raising it empties the
+/// store, the person's memories with it: the opener rebuilds a database at
+/// another version, and nothing rebuilds a memory.
 pub const SCHEMA_VERSION: NonZeroU32 = NonZeroU32::MIN;
 
 /// How many messages of each session the extraction model is shown again.

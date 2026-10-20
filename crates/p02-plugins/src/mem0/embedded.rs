@@ -22,8 +22,9 @@ pub(super) struct Embedded {
     /// Opened by the first hook that needs it, and kept beyond it: the
     /// connection is the plugin's.
     engine: OnceCell<Engine>,
-    /// Re-embedding while it runs, which ends with the backend.
-    reembedding: Mutex<Option<JoinHandle<()>>>,
+    /// Re-embedding, running or as it last ended, which ends with the
+    /// backend.
+    reembedding: Mutex<Option<JoinHandle<Result<(), EngineError>>>>,
 }
 
 impl Embedded {
@@ -67,7 +68,7 @@ impl Embedded {
             .await
             .map_err(unopened)?;
 
-        self.keep_reembedding(engine);
+        self.keep_reembedding(engine).await;
         Ok(engine.clone())
     }
 
@@ -120,27 +121,31 @@ impl Embedded {
     /// Opens the engine and contacts nothing: verified only once the model
     /// and the embedder both answered since it opened, and every memory
     /// has a vector of the current embedder. Re-embedding that stopped on
-    /// a failure starts again here.
+    /// a failure is told, and starts again here.
     pub(super) async fn ping(
         &self,
         databases: Option<&PluginDatabase>,
     ) -> Result<Readiness, BackendError> {
         let engine = self.engine(databases, Operation::Ping).await?;
-
-        self.keep_reembedding(&engine);
-
         let status = engine
             .status()
             .await
             .map_err(|error| failed(Operation::Ping, &error))?;
+        let stopped = self.keep_reembedding(&engine).await;
         let (verified, summary) = if status.unembedded > 0 {
-            (
-                false,
-                format!(
+            let summary = match stopped {
+                Some(why) => format!(
+                    "Mem0 engine could not re-embed its memories for a new embedder ({} to go): \
+                     {why}.",
+                    status.unembedded
+                ),
+                None => format!(
                     "Mem0 engine is re-embedding its memories for a new embedder; {} to go.",
                     status.unembedded
                 ),
-            )
+            };
+
+            (false, summary)
         } else if status.ready() {
             (
                 true,
@@ -158,21 +163,26 @@ impl Embedded {
         Ok(Readiness { verified, summary })
     }
 
-    /// Starts re-embedding unless it runs already. A failure leaves the
-    /// rest to the next start.
-    fn keep_reembedding(&self, engine: &Engine) {
-        let mut running = self
-            .reembedding
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+    /// Starts re-embedding unless it runs already, and says why the run
+    /// before stopped short, if it did: what it left waits for this one.
+    async fn keep_reembedding(&self, engine: &Engine) -> Option<String> {
+        let ended = {
+            let mut running = self
+                .reembedding
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
 
-        if running.as_ref().is_none_or(JoinHandle::is_finished) {
+            if running.as_ref().is_some_and(|task| !task.is_finished()) {
+                return None;
+            }
+
             let engine = engine.clone();
 
-            *running = Some(tokio::spawn(async move {
-                let _ = engine.reembed().await;
-            }));
-        }
+            running.replace(tokio::spawn(async move { engine.reembed().await }))
+        };
+        let ended = ended?.await.unwrap_or(Err(EngineError::Interrupted));
+
+        ended.err().map(|error| described(&error))
     }
 }
 
