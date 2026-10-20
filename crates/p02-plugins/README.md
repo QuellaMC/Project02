@@ -69,4 +69,5 @@ the character's storage grants through the contracts.
   backend fails the call, a platform's queued write is never called
   stored, an add abandoned at its deadline says it may have landed, and
   no failure carries a credential. Health names what the settings lack,
-  and leads with any capture that did not complete.
+  says how many memories wait for a new embedder and why re-embedding
+  last stopped, and leads with any capture that did not complete.

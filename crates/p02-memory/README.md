@@ -15,7 +15,8 @@ reaches the disk only through the SQLite connection its caller opens.
   once between them across every session. A capture commits its memories,
   their vectors and the turn's messages (the last ten per session are
   kept) in one transaction; a failure, a locked database among them,
-  stores nothing and says why.
+  stores nothing and says why. A write holds the database only for its
+  commit, so an added memory never waits on a capture's model.
 - **Embedders.** The store records its embedder, model and endpoint, as
   a generation, with the width learned from its first vector; every
   vector carries its generation, and a search reads only the current
@@ -29,7 +30,7 @@ reaches the disk only through the SQLite connection its caller opens.
   cosine.
 - **Readiness.** The engine says whether the model and the embedder each
   last answered something usable since it opened, and how many memories
-  wait for a vector; writes run one at a time.
+  wait for a vector.
 
 ## Live check
 

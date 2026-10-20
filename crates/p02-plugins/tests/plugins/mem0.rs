@@ -1108,6 +1108,23 @@ async fn a_turn_is_extracted_with_mem0s_prompt_its_sessions_messages_and_its_nea
 }
 
 #[tokio::test]
+async fn an_add_is_stored_while_a_capture_waits_on_the_extraction_model() {
+    let openai = Stub::openai().await;
+    let storage = Storage::new();
+    let host = host(&storage, &embedded(&openai, "embed-a"));
+    let (turn, committed) = exchange("chat.1", "evt_1", "I like tea.", "Noted.");
+    let mut held = openai.hold(COMPLETIONS);
+
+    capture(&host, &turn, &committed).await;
+    held.arrived().await;
+
+    let report = ask(&host, "mem0.add", json!({"text": "Sam likes cake."}), &turn).await;
+
+    assert_eq!(output(&report)["sourceReferences"][0]["kind"], "memory");
+    held.release(Answer::extraction(&[]));
+}
+
+#[tokio::test]
 async fn recall_ranks_each_memory_by_the_vector_of_its_own_text_and_leaves_out_the_unalike() {
     let openai = Stub::openai().await;
     let storage = Storage::new();
@@ -1224,6 +1241,40 @@ async fn a_second_embedder_change_in_the_middle_of_re_embedding_re_embeds_for_th
     assert_eq!(embedded_texts(&openai, "embed-b"), &facts[..3]);
     assert_eq!(embedded_texts(&openai, "embed-c"), facts);
     assert_eq!(recall(&changing, &turn).await.context_items.len(), 5);
+}
+
+#[tokio::test]
+async fn health_says_why_re_embedding_stopped_and_it_resumes_once_the_embedder_answers() {
+    let openai = Stub::openai().await;
+    let storage = Storage::new();
+    let turn = line("Sam likes tea");
+    let first = host(&storage, &embedded(&openai, "embed-a"));
+
+    for fact in ["Sam likes tea at dawn.", "Sam likes tea at dusk."] {
+        output(&ask(&first, "mem0.add", json!({"text": fact}), &turn).await);
+    }
+
+    drop(first);
+    openai.answer(
+        EMBEDDINGS,
+        Answer::json(404, &json!({"error": "no such model"})),
+    );
+
+    let second = host(&storage, &embedded(&openai, "embed-b"));
+
+    assert_eq!(
+        health_saying(&second, &turn, "could not").await,
+        (
+            HealthStatus::Degraded,
+            "Mem0 engine could not re-embed its memories for a new embedder (2 to go): the \
+             embedder answered HTTP 404."
+                .to_owned()
+        )
+    );
+
+    health_saying(&second, &turn, "contacted on first capture or recall").await;
+
+    assert_eq!(recall(&second, &turn).await.context_items.len(), 2);
 }
 
 #[tokio::test]
