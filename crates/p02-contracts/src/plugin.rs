@@ -576,9 +576,10 @@ mod tests {
 
         let call = ToolCall::new(
             ToolCallId::new("call-1").unwrap(),
-            Identifier::new("notes.forget").unwrap(),
+            &search_tool(),
             Map::new(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             plugin
