@@ -1,9 +1,9 @@
 # p02-plugins
 
 The plugin host, its policy, and the plugins compiled into the daemon. It
-depends on p02-contracts, p02-core and p02-shared; the host runs whatever
-plugins its caller enables and hands their hooks only what the
-character's storage grants through the contracts.
+depends on p02-contracts, p02-core, p02-memory and p02-shared; the host
+runs whatever plugins its caller enables and hands their hooks only what
+the character's storage grants through the contracts.
 
 - **Activation.** A character's enabled plugins are built from their
   manifests, the values their settings give them, resolved against each
@@ -56,3 +56,17 @@ character's storage grants through the contracts.
   each query and holding no session the history no longer lists, with a
   literal full-text search that never matches what the model already sees
   and a read that scrolls a session by message.
+- **mem0.** Long-term memory kept by the hosted Mem0 platform, a
+  self-hosted Mem0 server, or the embedded engine of p02-memory in the
+  plugin's own database, and belonging to the person and the character,
+  never to a session. Before a turn the five memories most like the
+  person's line come to the model, each cut to 600 characters, sourced to
+  its memory, its score a confidence from 0 to 1; after it the turn is
+  queued for extraction behind the answer, eight at most waiting and each
+  within a minute, and what is queued drains at shutdown until its
+  deadline. A backend that fails costs the turn its memory, never the
+  turn. A redirect, an unreadable answer, or one shaped for the other
+  backend fails the call, a platform's queued write is never called
+  stored, an add abandoned at its deadline says it may have landed, and
+  no failure carries a credential. Health names what the settings lack,
+  and leads with any capture that did not complete.

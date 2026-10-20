@@ -4,8 +4,14 @@ edition.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# The HTTP client seam, for the crates that call services.
+http = ["dep:reqwest", "dep:rustls"]
+
 [dependencies]
 dunce.workspace = true
+reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
