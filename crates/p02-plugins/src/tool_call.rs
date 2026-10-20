@@ -1,23 +1,25 @@
 //! `handleToolCall`: a model's call routed to the plugin that provides its
-//! tool, its input held to the tool's contract, an approval-gated tool
-//! asked of the person first, and the plugin's answer held to the output
-//! boundary. A call never fails the turn: every failure is a rejected
-//! result the model reads, and the plugin's `handleToolCall` policy decides
-//! only how that is recorded.
+//! tool, its input held to the tool's contract, and what the plugin answers
+//! held to the output boundary. An approval-gated call is prepared first,
+//! which changes nothing, and its effect is applied only on the person's
+//! yes. A call never fails the turn: every failure is a rejected result the
+//! model reads, and the plugin's `handleToolCall` policy decides only how
+//! that is recorded.
 
 use futures_util::future::join_all;
 use p02_contracts::{
     Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, HandleToolCallFailure, Hook,
-    PolicyOutcome, ProvidedTool, ToolCall, ToolCallOutcome, ToolCallResult, ToolConcurrency,
+    PolicyOutcome, PreparedEffect, ProvidedTool, ToolCall, ToolCallOutcome, ToolCallResult,
+    ToolConcurrency, ToolPreparation,
 };
 use p02_shared::{Credentials, JsonLimits, bound_json, bound_json_object};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::boundary::{described, quoted, within_answer_limits};
 use crate::confirmation::{ConfirmationDecision, ConfirmationRequest};
 use crate::host::{Core, PluginHost, Slot};
-use crate::invoke::{FailureKind, HookFailure};
+use crate::invoke::{FailureKind, HookFailure, Invocation};
 use crate::turn::Turn;
 
 /// What one tool call came to: what the model reads, and the records the
@@ -32,6 +34,20 @@ pub struct ToolCallReport {
 struct Answer<'a> {
     result: &'a ToolCallResult,
     evidence: &'a [Evidence],
+}
+
+#[derive(Serialize)]
+struct PreparedAnswer<'a> {
+    preview: &'a Map<String, Value>,
+    evidence: &'a [Evidence],
+}
+
+/// A prepared call the output boundary let through: what the person is
+/// shown, the effect their yes applies, and the preparation's records.
+struct Prepared {
+    preview: Map<String, Value>,
+    effect: Box<dyn PreparedEffect>,
+    evidence: Vec<Evidence>,
 }
 
 impl PluginHost {
@@ -97,46 +113,36 @@ impl Core {
             );
         }
 
-        let approval = if tool.is_approval_gated() {
-            match self.ask(slot, tool, &call, turn).await {
-                Ok(approval) => Some(approval),
-                Err(refusal) => return refusal,
-            }
-        } else {
-            None
-        };
-        let answered = slot
-            .invoke(
-                slot.live(),
-                Hook::HandleToolCall,
-                turn,
-                move |plugin, context| async move { plugin.handle_tool_call(&call, &context).await },
-            )
-            .await;
-        let mut report = match answered.map(|outcome| slot.accept_tool_answer(turn, tool, outcome))
-        {
-            Ok(Ok(report)) => report,
-            Ok(Err(breach)) => slot.tool_failure(turn, &HookFailure::breach(breach)),
-            Err(failure) => slot.tool_failure(turn, &failure),
-        };
+        if tool.is_approval_gated() {
+            return self.approval_gated_call(slot, tool, call, turn).await;
+        }
 
-        report.evidence.splice(0..0, approval);
-        report
+        let plugin = slot.live();
+        let answered = slot
+            .invoke(Hook::HandleToolCall, turn, move |context| async move {
+                plugin.handle_tool_call(&call, &context).await
+            })
+            .await;
+
+        slot.tool_answer(turn, tool, answered)
     }
 
-    /// Asks the person before an approval-gated tool runs: a yes is the
-    /// record that it may, anything else a refusal, and a tool nobody can
-    /// be asked about never runs.
-    async fn ask(
+    /// Prepares an approval-gated call, shows the person what it would do,
+    /// and applies its effect, under a budget of its own, only on their
+    /// yes; a tool nobody can be asked about is never prepared. The
+    /// preparation and the effect each answer through the output boundary
+    /// on their own, and the host's records come on top: the call records
+    /// the preparation, then the person's answer, then the effect.
+    async fn approval_gated_call(
         &self,
         slot: &Slot,
         tool: &ProvidedTool,
-        call: &ToolCall,
+        call: ToolCall,
         turn: &Turn,
-    ) -> Result<Evidence, ToolCallReport> {
+    ) -> ToolCallReport {
         let plugin_id = slot.manifest.id();
         let Some(confirmer) = &self.confirmer else {
-            return Err(slot.refusal(
+            return slot.refusal(
                 turn,
                 "tool_not_routable",
                 &format!(
@@ -146,21 +152,24 @@ impl Core {
                 ),
                 EvidenceStatus::Rejected,
                 PolicyOutcome::DisallowedToolCall,
-            ));
+            );
+        };
+        let call_id = call.call_id().clone();
+        let Prepared {
+            preview,
+            effect,
+            mut evidence,
+        } = match slot.prepare(tool, call, turn).await {
+            Ok(prepared) => prepared,
+            Err(unasked) => return unasked,
         };
         let request = ConfirmationRequest {
             turn: turn.identity().clone(),
             plugin_id: plugin_id.clone(),
             tool_name: tool.name().clone(),
-            call_id: call.call_id().clone(),
+            call_id,
             summary: tool.description().to_owned(),
-            input: bound_json_object(
-                Value::Object(call.input().clone()),
-                "Confirmation input",
-                JsonLimits::default(),
-                Credentials::Redact,
-            )
-            .expect("an input its contract admitted is within the JSON limits"),
+            preview,
         };
         let decision = tokio::select! {
             decision = confirmer.confirm(request) => decision,
@@ -175,37 +184,90 @@ impl Core {
                 PolicyOutcome::HandlerRejected,
             )
         };
+        let decided = match decision {
+            ConfirmationDecision::Approved => {
+                evidence.push(slot.record(
+                    turn,
+                    EvidenceKind::Policy,
+                    EvidenceStatus::Accepted,
+                    &format!(
+                        "User approved plugin \"{plugin_id}\" tool \"{}\".",
+                        tool.name()
+                    ),
+                    Some(PolicyOutcome::UserApproved),
+                ));
 
-        match decision {
-            ConfirmationDecision::Approved => Ok(slot.record(
-                turn,
-                EvidenceKind::Policy,
-                EvidenceStatus::Accepted,
-                &format!(
-                    "User approved plugin \"{plugin_id}\" tool \"{}\".",
-                    tool.name()
-                ),
-                Some(PolicyOutcome::UserApproved),
-            )),
-            ConfirmationDecision::Denied => Err(refused(
+                let applied = slot
+                    .invoke(Hook::HandleToolCall, turn, move |context| async move {
+                        effect.apply(&context).await
+                    })
+                    .await;
+
+                slot.tool_answer(turn, tool, applied)
+            }
+            ConfirmationDecision::Denied => refused(
                 "plugin_config_approval_denied",
                 format!(
                     "Tool \"{}\" was denied by the user, so it did nothing.",
                     tool.name()
                 ),
-            )),
-            ConfirmationDecision::Cancelled => Err(refused(
+            ),
+            ConfirmationDecision::Cancelled => refused(
                 "plugin_config_approval_cancelled",
                 format!(
                     "Approval for tool \"{}\" was cancelled, so it did nothing.",
                     tool.name()
                 ),
-            )),
+            ),
+        };
+
+        evidence.extend(decided.evidence);
+        ToolCallReport {
+            result: decided.result,
+            evidence,
         }
     }
 }
 
 impl Slot {
+    /// Prepares an approval-gated call with the store read-only: what the
+    /// person is to be asked about, or the report of a call that ends
+    /// unasked.
+    async fn prepare(
+        &self,
+        tool: &ProvidedTool,
+        call: ToolCall,
+        turn: &Turn,
+    ) -> Result<Prepared, ToolCallReport> {
+        let plugin = self.live();
+        let prepared = self
+            .invoke(Invocation::Preparation, turn, move |context| async move {
+                plugin.prepare_tool_call(&call, &context).await
+            })
+            .await;
+
+        match prepared {
+            Ok(preparation) => self.accept_preparation(turn, tool, preparation),
+            Err(failure) => Err(self.tool_failure(turn, &failure)),
+        }
+    }
+
+    /// What a tool's answer comes to once held to the output boundary, and
+    /// a failure, or an answer that breaks the contract, refused by the
+    /// plugin's policy.
+    fn tool_answer(
+        &self,
+        turn: &Turn,
+        tool: &ProvidedTool,
+        answered: Result<ToolCallOutcome, HookFailure>,
+    ) -> ToolCallReport {
+        match answered.map(|outcome| self.accept_tool_answer(turn, tool, outcome)) {
+            Ok(Ok(report)) => report,
+            Ok(Err(breach)) => self.tool_failure(turn, &HookFailure::breach(breach)),
+            Err(failure) => self.tool_failure(turn, &failure),
+        }
+    }
+
     /// Holds a tool's answer to the output boundary: its output within the
     /// JSON limits with every credential-named value redacted, a rejection
     /// that says why, and its records within theirs.
@@ -255,15 +317,7 @@ impl Slot {
         )?;
 
         let result = match result {
-            ToolCallResult::Accepted { .. } if blocking => ToolCallResult::Rejected {
-                reason: "blocking_tool_invocation_evidence".to_owned(),
-                message: format!(
-                    "Plugin \"{}\" tool \"{}\" accepted result included blocking tool \
-                     invocation evidence.",
-                    self.manifest.id(),
-                    tool.name()
-                ),
-            },
+            ToolCallResult::Accepted { .. } if blocking => self.blocked(tool, "accepted result"),
             ToolCallResult::Rejected { ref message, .. } if !explained => {
                 let (status, outcome) = self.failure_record(FailureKind::Exception);
 
@@ -280,6 +334,86 @@ impl Slot {
         };
 
         Ok(ToolCallReport { result, evidence })
+    }
+
+    /// Holds a preparation to the output boundary as a tool's answer is
+    /// held: its preview within the JSON limits with every credential-named
+    /// value redacted, and its records within theirs. A call the tool
+    /// refused ends unasked, and so does one whose preparation breaks the
+    /// contract or whose own records say it was refused or failed.
+    fn accept_preparation(
+        &self,
+        turn: &Turn,
+        tool: &ProvidedTool,
+        preparation: ToolPreparation,
+    ) -> Result<Prepared, ToolCallReport> {
+        let (preview, effect, notes) = match preparation {
+            ToolPreparation::Prepared {
+                preview,
+                effect,
+                evidence,
+            } => (preview, effect, evidence),
+            ToolPreparation::Rejected {
+                reason,
+                message,
+                evidence,
+            } => {
+                return Err(self.tool_answer(
+                    turn,
+                    tool,
+                    Ok(ToolCallOutcome::Rejected {
+                        reason,
+                        message,
+                        evidence,
+                    }),
+                ));
+            }
+        };
+        let breach = |message| self.tool_failure(turn, &HookFailure::breach(message));
+        let preview = bound_json_object(
+            Value::Object(preview),
+            "Plugin tool preview",
+            JsonLimits::default(),
+            Credentials::Redact,
+        )
+        .map_err(|error| breach(described(&error)))?;
+        let blocking = notes.iter().any(EvidenceNote::blocks_tool_invocation);
+        let evidence = self.stamp_all(turn, notes).map_err(breach)?;
+
+        within_answer_limits(
+            &PreparedAnswer {
+                preview: &preview,
+                evidence: &evidence,
+            },
+            Hook::HandleToolCall,
+        )
+        .map_err(breach)?;
+
+        if blocking {
+            return Err(ToolCallReport {
+                result: self.blocked(tool, "prepared call"),
+                evidence,
+            });
+        }
+
+        Ok(Prepared {
+            preview,
+            effect,
+            evidence,
+        })
+    }
+
+    /// The refusal of an answer that stands as accepted while one of its
+    /// own records says the call was refused or failed.
+    fn blocked(&self, tool: &ProvidedTool, answer: &str) -> ToolCallResult {
+        ToolCallResult::Rejected {
+            reason: "blocking_tool_invocation_evidence".to_owned(),
+            message: format!(
+                "Plugin \"{}\" tool \"{}\" {answer} included blocking tool invocation evidence.",
+                self.manifest.id(),
+                tool.name()
+            ),
+        }
     }
 
     fn tool_failure(&self, turn: &Turn, failure: &HookFailure) -> ToolCallReport {

@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    Confirmation, ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
-    FileStore, HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError,
-    ToolCall, ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
+    ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore,
+    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall,
+    ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
     ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ToolCallReport, Turn,
@@ -18,7 +18,8 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Scripted, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note, tool, turn,
+    Enable, Scripted, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note, tool,
+    turn,
 };
 
 async fn one(host: &PluginHost, call: ToolCall, turn: &Turn) -> ToolCallReport {
@@ -372,48 +373,63 @@ async fn credential_named_output_values_are_redacted_at_the_boundary() {
     }
 }
 
-/// Answers every question the same way, and keeps what it was asked.
+/// Answers every question the same way a minute after it was asked, long
+/// past every plugin's budget, and keeps what it was asked.
 #[derive(Debug)]
 struct Asking {
     decision: ConfirmationDecision,
     asked: Mutex<Vec<ConfirmationRequest>>,
 }
 
+impl Asking {
+    fn answering(decision: ConfirmationDecision) -> Arc<Self> {
+        Arc::new(Self {
+            decision,
+            asked: Mutex::new(Vec::new()),
+        })
+    }
+}
+
 #[async_trait]
 impl Confirmer for Asking {
     async fn confirm(&self, request: ConfirmationRequest) -> ConfirmationDecision {
         self.asked.lock().unwrap().push(request);
+        tokio::time::sleep(Duration::from_secs(60)).await;
         self.decision
     }
 }
 
-/// plugins.tool-confirmation-gate: any plugin's confirmable tool asks the person first: a denial is `plugin_config_approval_denied` and does nothing, an approval runs it with `user_approved` evidence, and with nobody to ask it is never offered or run
-#[tokio::test(start_paused = true)]
-async fn a_confirmable_tool_runs_only_on_the_persons_yes() {
-    let settings = Arc::new(Scripted {
-        tools: vec![tool("settings.update").with_confirmation(Confirmation::Required)],
-        tool_outcome: Some(ToolCallOutcome::Accepted {
-            output: json!({"status": "applied"}),
-            evidence: Vec::new(),
-        }),
-        ..Scripted::default()
-    });
-    let hosted = |decision: Option<ConfirmationDecision>| {
-        let builder = PluginHost::builder(Storage::new())
-            .enable(&Spec::tools("settings"), Arc::clone(&settings) as _);
-        let asking = decision.map(|decision| {
-            Arc::new(Asking {
-                decision,
-                asked: Mutex::new(Vec::new()),
-            })
-        });
-        let builder = match &asking {
-            Some(asking) => builder.confirmer(Arc::clone(asking) as Arc<dyn Confirmer>),
-            None => builder,
-        };
-
-        (builder.activate().unwrap(), asking)
+/// A host of `settings`, granted its store in `storage`, that asks the
+/// person through `asking` when there is someone to ask.
+fn settings_host(
+    storage: &Arc<Storage>,
+    settings: &Arc<Settings>,
+    asking: Option<&Arc<Asking>>,
+) -> PluginHost {
+    let builder = PluginHost::builder(Arc::clone(storage) as _).enable(
+        &Spec {
+            access: json!({"model_input": "write", "character_file_store": "write"}),
+            ..Spec::tools("settings")
+        },
+        Arc::clone(settings) as _,
+    );
+    let builder = match asking {
+        Some(asking) => builder.confirmer(Arc::clone(asking) as _),
+        None => builder,
     };
+
+    builder.activate().unwrap()
+}
+
+/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared
+#[tokio::test(start_paused = true)]
+async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes() {
+    let storage = Storage::new();
+    let settings = Arc::new(Settings::noting(vec![note(
+        EvidenceKind::ToolInvocation,
+        "Prepared the settings.",
+    )]));
+    let hosted = |asking| settings_host(&storage, &settings, asking);
     let update = || {
         call(
             "c1",
@@ -421,11 +437,12 @@ async fn a_confirmable_tool_runs_only_on_the_persons_yes() {
             json!({"tone": "warm", "api_key": "k-1"}),
         )
     };
-    let (denying, asked_to_deny) = hosted(Some(ConfirmationDecision::Denied));
-    let denied = one(&denying, update(), &turn()).await;
+    let saved = || storage.files("settings").get("settings.json");
+    let denying = Asking::answering(ConfirmationDecision::Denied);
+    let denied = one(&hosted(Some(&denying)), update(), &turn()).await;
 
     assert_eq!(reason(&denied), Some("plugin_config_approval_denied"));
-    assert_eq!(settings.calls(), 0, "a denial does nothing");
+    assert_eq!(saved(), None, "a denial applies nothing");
     assert!(
         denied
             .evidence
@@ -433,19 +450,19 @@ async fn a_confirmable_tool_runs_only_on_the_persons_yes() {
             .all(|record| record.policy_outcome() != Some(PolicyOutcome::UserApproved))
     );
 
-    let asked = asked_to_deny.unwrap().asked.lock().unwrap().remove(0);
+    let asked = denying.asked.lock().unwrap().remove(0);
 
     assert_eq!(
         (asked.plugin_id.as_str(), asked.tool_name.as_str()),
         ("settings", "settings.update")
     );
     assert_eq!(
-        Value::Object(asked.input),
-        json!({"tone": "warm", "api_key": "[redacted]"})
+        Value::Object(asked.preview),
+        json!({"before": null, "after": {"tone": "warm", "api_key": "[redacted]"}})
     );
 
-    let (approving, _) = hosted(Some(ConfirmationDecision::Approved));
-    let approved = one(&approving, update(), &turn()).await;
+    let approving = Asking::answering(ConfirmationDecision::Approved);
+    let approved = one(&hosted(Some(&approving)), update(), &turn()).await;
 
     assert_eq!(
         approved.result,
@@ -453,20 +470,86 @@ async fn a_confirmable_tool_runs_only_on_the_persons_yes() {
             output: json!({"status": "applied"})
         }
     );
-    assert_eq!(settings.calls(), 1);
-    assert_eq!(approved.evidence[0].kind(), EvidenceKind::Policy);
-    assert_eq!(approved.evidence[0].status(), EvidenceStatus::Accepted);
     assert_eq!(
-        approved.evidence[0].policy_outcome(),
-        Some(PolicyOutcome::UserApproved)
+        saved(),
+        Some(json!({"tone": "warm", "api_key": "k-1"})),
+        "the effect runs on a budget of its own, though the person answered past the preparation's"
+    );
+    assert_eq!(
+        approved
+            .evidence
+            .iter()
+            .map(|record| (record.kind(), record.policy_outcome(), record.summary()))
+            .collect::<Vec<_>>(),
+        [
+            (EvidenceKind::ToolInvocation, None, "Prepared the settings."),
+            (
+                EvidenceKind::Policy,
+                Some(PolicyOutcome::UserApproved),
+                "User approved plugin \"settings\" tool \"settings.update\"."
+            ),
+            (EvidenceKind::ToolInvocation, None, "Saved the settings."),
+        ]
     );
 
-    let (unasked, _) = hosted(None);
+    let unasked = hosted(None);
     let refused = one(&unasked, update(), &turn()).await;
 
     assert!(unasked.tool_definitions().get("settings.update").is_none());
     assert_eq!(reason(&refused), Some("tool_not_routable"));
-    assert_eq!(settings.calls(), 1, "nobody could say yes");
+    assert!(
+        matches!(
+            settings.preparation_writes.lock().unwrap().as_slice(),
+            [Err(StoreError::ReadOnly), Err(StoreError::ReadOnly)]
+        ),
+        "each call the person was asked about was prepared unable to write, and the one nobody \
+         could be asked about was never prepared"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_call_refused_in_its_preparation_asks_nobody_and_the_model_reads_why() {
+    let storage = Storage::new();
+    let asking = Asking::answering(ConfirmationDecision::Approved);
+    let noting = |notes| settings_host(&storage, &Arc::new(Settings::noting(notes)), Some(&asking));
+    let unknown = one(
+        &noting(Vec::new()),
+        call("c1", "settings.update", json!({"tone": "grumpy"})),
+        &turn(),
+    )
+    .await;
+    let damaged = one(
+        &noting(vec![EvidenceNote::new(
+            EvidenceKind::ToolInvocation,
+            EvidenceStatus::Failed,
+            "The saved settings are damaged.",
+        )]),
+        call("c2", "settings.update", json!({"tone": "warm"})),
+        &turn(),
+    )
+    .await;
+
+    assert_eq!(
+        unknown.result,
+        ToolCallResult::Rejected {
+            reason: "unknown_tone".to_owned(),
+            message: "No tone is called \"grumpy\".".to_owned(),
+        }
+    );
+    assert_eq!(
+        damaged.result,
+        ToolCallResult::Rejected {
+            reason: "blocking_tool_invocation_evidence".to_owned(),
+            message: "Plugin \"settings\" tool \"settings.update\" prepared call included \
+                      blocking tool invocation evidence."
+                .to_owned(),
+        }
+    );
+    assert_eq!(
+        damaged.evidence[0].summary(),
+        "The saved settings are damaged."
+    );
+    assert!(asking.asked.lock().unwrap().is_empty(), "nobody was asked");
 }
 
 /// Saves a note under the store's lease, and keeps the store afterwards.

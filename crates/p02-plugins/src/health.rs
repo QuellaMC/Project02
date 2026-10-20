@@ -75,13 +75,11 @@ impl Slot {
 
     /// The plugin's snapshot, and the record of a plugin that is not ok.
     async fn check_health(&self, turn: &Turn) -> (HealthSnapshot, Option<Evidence>) {
+        let plugin = self.live();
         let checked = self
-            .invoke(
-                self.live(),
-                Hook::Health,
-                turn,
-                |plugin, context| async move { plugin.health(&context).await },
-            )
+            .invoke(Hook::Health, turn, |context| async move {
+                plugin.health(&context).await
+            })
             .await
             .and_then(|report| {
                 HealthSnapshot::new(

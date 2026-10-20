@@ -13,7 +13,7 @@ use std::any::Any;
 use std::future::Future;
 use std::sync::Arc;
 
-use p02_contracts::{Hook, HookContext, PluginError, RuntimePlugin, WriteHold};
+use p02_contracts::{Hook, HookContext, PluginError, WriteHold};
 use tokio::task::{AbortHandle, JoinError};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -21,6 +21,31 @@ use tokio_util::sync::CancellationToken;
 use crate::host::Slot;
 use crate::policy;
 use crate::turn::Turn;
+
+/// What the host runs under a plugin's budget: one of its hooks, or the
+/// preparation of an approval-gated call, which is part of `handleToolCall`
+/// and changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Invocation {
+    Hook(Hook),
+    Preparation,
+}
+
+impl Invocation {
+    /// The hook the host's records name it by.
+    fn hook(self) -> Hook {
+        match self {
+            Self::Hook(hook) => hook,
+            Self::Preparation => Hook::HandleToolCall,
+        }
+    }
+}
+
+impl From<Hook> for Invocation {
+    fn from(hook: Hook) -> Self {
+        Self::Hook(hook)
+    }
+}
 
 /// Why a hook gave the host no answer it could use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,25 +72,27 @@ impl HookFailure {
 }
 
 impl Slot {
-    /// Runs `call` against `plugin` under the manifest's `timeoutMs`.
+    /// Runs `call` under the manifest's `timeoutMs`, its context granting
+    /// what the invocation may reach.
     pub(crate) async fn invoke<T, F, Fut>(
         &self,
-        plugin: Arc<dyn RuntimePlugin>,
-        hook: Hook,
+        invocation: impl Into<Invocation>,
         turn: &Turn,
         call: F,
     ) -> Result<T, HookFailure>
     where
-        F: FnOnce(Arc<dyn RuntimePlugin>, HookContext) -> Fut,
+        F: FnOnce(HookContext) -> Fut,
         Fut: Future<Output = Result<T, PluginError>> + Send + 'static,
         T: Send + 'static,
     {
+        let invocation = invocation.into();
+        let hook = invocation.hook();
         let policy = self.manifest.runtime_policy();
         let deadline = Instant::now() + policy.timeout();
         let cancellation = turn.cancellation().child_token();
         let unanswered = cancellation.clone().drop_guard();
-        let (context, _writes) = self.context(turn, hook, deadline, cancellation);
-        let mut task = tokio::spawn(call(plugin, context));
+        let (context, _writes) = self.context(turn, invocation, deadline, cancellation);
+        let mut task = tokio::spawn(call(context));
         let _abort = AbortOnDrop(task.abort_handle());
         let failure = |kind, message| HookFailure { kind, message };
         let timed_out = || {
@@ -105,12 +132,12 @@ impl Slot {
         }
     }
 
-    /// The hook's view of its turn, with what the plugin is granted. The
-    /// store's hold stays with the host.
+    /// The call's view of its turn, with what the plugin is granted and the
+    /// invocation may use. The store's hold stays with the host.
     fn context(
         &self,
         turn: &Turn,
-        hook: Hook,
+        invocation: Invocation,
         deadline: Instant,
         cancellation: CancellationToken,
     ) -> (HookContext, Option<WriteHold>) {
@@ -141,7 +168,7 @@ impl Slot {
             Some((backend, access)) => {
                 let (context, hold) = context.with_character_file_store(
                     Arc::clone(backend),
-                    policy::access::hook_store_access(*access, hook),
+                    policy::access::store_access(*access, invocation),
                 );
 
                 (context, Some(hold))

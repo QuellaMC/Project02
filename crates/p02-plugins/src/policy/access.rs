@@ -1,5 +1,7 @@
 use p02_contracts::{AccessLevel, AccessMap, AccessName, Hook, StoreAccess};
 
+use crate::invoke::Invocation;
+
 /// The capabilities an access map grants a plugin's hooks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Grants {
@@ -26,12 +28,13 @@ pub(crate) fn grants(access: &AccessMap) -> Grants {
     }
 }
 
-/// What one hook may do with a store the plugin is granted: a plugin
-/// that is ending only reads.
-pub(crate) fn hook_store_access(granted: StoreAccess, hook: Hook) -> StoreAccess {
-    if hook == Hook::OnShutdown {
-        StoreAccess::ReadOnly
-    } else {
-        granted
+/// What one invocation may do with a store the plugin is granted: a plugin
+/// that is ending only reads, and so does an approval-gated call's
+/// preparation, since what the call changes is its effect's, applied only
+/// on the person's yes.
+pub(crate) fn store_access(granted: StoreAccess, invocation: Invocation) -> StoreAccess {
+    match invocation {
+        Invocation::Hook(Hook::OnShutdown) | Invocation::Preparation => StoreAccess::ReadOnly,
+        Invocation::Hook(_) => granted,
     }
 }

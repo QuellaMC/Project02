@@ -154,19 +154,19 @@ impl Slot {
                     CommittedTurn::new(committed.committed_at().clone())
                 };
 
-                self.invoke(plugin, hook, turn, |plugin, context| async move {
+                self.invoke(hook, turn, |context| async move {
                     plugin.after_turn_committed(&committed, &context).await
                 })
                 .await
             }
             Lifecycle::SessionEnd => {
-                self.invoke(plugin, hook, turn, |plugin, context| async move {
+                self.invoke(hook, turn, |context| async move {
                     plugin.on_session_end(&context).await
                 })
                 .await
             }
             Lifecycle::Shutdown => {
-                self.invoke(plugin, hook, turn, |plugin, context| async move {
+                self.invoke(hook, turn, |context| async move {
                     plugin.on_shutdown(&context).await
                 })
                 .await
