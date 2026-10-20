@@ -11,14 +11,14 @@ use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, Confirmation, ContextItem, ContextItemKind,
     EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HealthReport, HealthStatus,
     HookContext, HookReport, HookStatus, Manifest, PluginError, PreparedEffect, ProvidedTool,
-    RedactionLabel, ResolvedConfig, RuntimePlugin, StoreAccess, StoreError, ToolCall, ToolCallId,
-    ToolCallOutcome, ToolConcurrency, ToolInputContract, ToolPreparation, TurnIdentity, TurnText,
+    RedactionLabel, RuntimePlugin, StoreAccess, StoreError, ToolCall, ToolCallId, ToolCallOutcome,
+    ToolConcurrency, ToolInputContract, ToolPreparation, TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
-use p02_plugins::{PluginHost, PluginHostBuilder, Turn};
+use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, Turn};
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
@@ -59,12 +59,16 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
     .unwrap()
 }
 
-pub(crate) fn call(call_id: &str, tool: &str, input: Value) -> ToolCall {
+pub(crate) fn call(call_id: &str, tool: &str, input: Value) -> ProposedToolCall {
     let Value::Object(input) = input else {
         panic!("a tool input is an object");
     };
 
-    ToolCall::new(ToolCallId::new(call_id).unwrap(), id(tool), input)
+    ProposedToolCall {
+        call_id: ToolCallId::new(call_id).unwrap(),
+        tool_name: id(tool),
+        input,
+    }
 }
 
 pub(crate) fn tool(name: &str) -> ProvidedTool {
@@ -87,6 +91,7 @@ pub(crate) struct Spec {
     pub(crate) tool: &'static str,
     pub(crate) health: &'static str,
     pub(crate) access: Value,
+    pub(crate) config_fields: Value,
 }
 
 impl Spec {
@@ -100,6 +105,7 @@ impl Spec {
             tool: "reject_tool_call",
             health: "degrade",
             access: json!({"model_input": "write"}),
+            config_fields: json!([]),
         }
     }
 
@@ -121,7 +127,7 @@ impl Spec {
             "contractVersion": "mvp-008.runtime_plugin.v2",
             "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
             "declaredPlugins": self.declared,
-            "config": {"scope": "global_with_character_overrides", "fields": []},
+            "config": {"scope": "global_with_character_overrides", "fields": self.config_fields},
             "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": self.timeout_ms,
@@ -154,7 +160,7 @@ pub(crate) trait Enable {
 
 impl Enable for PluginHostBuilder {
     fn enable(self, spec: &Spec, plugin: Arc<dyn RuntimePlugin>) -> Self {
-        self.plugin(spec.manifest(), ResolvedConfig::default(), serving(plugin))
+        self.plugin(spec.manifest(), Map::new(), serving(plugin))
     }
 }
 

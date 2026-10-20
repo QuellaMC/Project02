@@ -11,7 +11,8 @@ use p02_contracts::{
     ToolCall, ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
-    ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ToolCallReport, Turn,
+    ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ProposedToolCall,
+    ToolCallReport, Turn,
 };
 use serde_json::{Map, Value, json};
 use tokio::time::Instant;
@@ -22,7 +23,7 @@ use crate::support::{
     tool, turn,
 };
 
-async fn one(host: &PluginHost, call: ToolCall, turn: &Turn) -> ToolCallReport {
+async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
     host.handle_tool_calls(vec![call], turn).await.remove(0)
 }
 

@@ -1,18 +1,18 @@
-//! `handleToolCall`: a model's call routed to the plugin that provides its
-//! tool, its input held to the tool's contract, and what the plugin answers
-//! held to the output boundary. An approval-gated call is prepared first,
-//! which changes nothing, and its effect is applied only on the person's
-//! yes. A call never fails the turn: every failure is a rejected result the
-//! model reads, and the plugin's `handleToolCall` policy decides only how
-//! that is recorded.
+//! `handleToolCall`: a model's proposed call routed to the plugin that
+//! provides its tool, made a call only with input the tool's contract
+//! admits, and what the plugin answers held to the output boundary. An
+//! approval-gated call is prepared first, which changes nothing, and its
+//! effect is applied only on the person's yes. A call never fails the turn:
+//! every failure is a rejected result the model reads, and the plugin's
+//! `handleToolCall` policy decides only how that is recorded.
 
 use futures_util::future::join_all;
 use p02_contracts::{
     Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, HandleToolCallFailure, Hook,
-    PolicyOutcome, PreparedEffect, ProvidedTool, ToolCall, ToolCallOutcome, ToolCallResult,
-    ToolConcurrency, ToolPreparation,
+    PolicyOutcome, PreparedEffect, ProvidedTool, ToolCall, ToolCallId, ToolCallOutcome,
+    ToolCallResult, ToolConcurrency, ToolPreparation,
 };
-use p02_shared::{Credentials, JsonLimits, bound_json, bound_json_object};
+use p02_shared::{Credentials, Identifier, JsonLimits, bound_json, bound_json_object};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -21,6 +21,15 @@ use crate::confirmation::{ConfirmationDecision, ConfirmationRequest};
 use crate::host::{Core, PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure, Invocation};
 use crate::turn::Turn;
+
+/// A tool call as a model round proposed it: the id the round gave it, the
+/// tool it names, and an input no contract has judged yet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProposedToolCall {
+    pub call_id: ToolCallId,
+    pub tool_name: Identifier,
+    pub input: Map<String, Value>,
+}
 
 /// What one tool call came to: what the model reads, and the records the
 /// call made.
@@ -57,7 +66,7 @@ impl PluginHost {
     /// never starved. The reports come back in call order.
     pub async fn handle_tool_calls(
         &self,
-        calls: Vec<ToolCall>,
+        calls: Vec<ProposedToolCall>,
         turn: &Turn,
     ) -> Vec<ToolCallReport> {
         let core = self.core();
@@ -82,36 +91,40 @@ impl PluginHost {
 
 impl Core {
     /// A call the host cannot route runs alone.
-    fn concurrency(&self, call: &ToolCall) -> ToolConcurrency {
-        self.route(call.tool_name().as_str())
+    fn concurrency(&self, call: &ProposedToolCall) -> ToolConcurrency {
+        self.route(call.tool_name.as_str())
             .map_or(ToolConcurrency::Exclusive, |(_, tool)| tool.concurrency())
     }
 
-    async fn tool_call(&self, call: ToolCall, turn: &Turn) -> ToolCallReport {
-        let Some((slot, tool)) = self.route(call.tool_name().as_str()) else {
+    async fn tool_call(&self, proposed: ProposedToolCall, turn: &Turn) -> ToolCallReport {
+        let ProposedToolCall {
+            call_id,
+            tool_name,
+            input,
+        } = proposed;
+        let Some((slot, tool)) = self.route(tool_name.as_str()) else {
             return ToolCallReport {
                 result: ToolCallResult::Rejected {
                     reason: "tool_not_declared".to_owned(),
-                    message: format!(
-                        "Tool \"{}\" is not declared for this turn.",
-                        call.tool_name()
-                    ),
+                    message: format!("Tool \"{tool_name}\" is not declared for this turn."),
                 },
                 evidence: Vec::new(),
             };
         };
+        let call = match ToolCall::new(call_id, tool, input) {
+            Ok(call) => call,
+            Err(rejection) => {
+                let (status, outcome) = slot.failure_record(FailureKind::Exception);
 
-        if let Err(rejection) = tool.input_contract().validate(tool.name(), call.input()) {
-            let (status, outcome) = slot.failure_record(FailureKind::Exception);
-
-            return slot.refusal(
-                turn,
-                "invalid_input",
-                &rejection.sentence(),
-                status,
-                outcome,
-            );
-        }
+                return slot.refusal(
+                    turn,
+                    "invalid_input",
+                    &rejection.sentence(),
+                    status,
+                    outcome,
+                );
+            }
+        };
 
         if tool.is_approval_gated() {
             return self.approval_gated_call(slot, tool, call, turn).await;

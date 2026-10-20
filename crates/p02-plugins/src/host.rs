@@ -3,11 +3,12 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use p02_contracts::{
     CharacterStorage, DatabaseOpener, Declaration, DuplicateToolError, FactoryInput,
-    FileStoreBackend, Manifest, PluginError, PluginToolDefinition, PluginToolDefinitions,
-    ProvidedTool, Registration, RegistrationError, ResolvedConfig, RuntimePlugin,
+    FileStoreBackend, Manifest, MissingConfigValueError, PluginError, PluginToolDefinition,
+    PluginToolDefinitions, ProvidedTool, Registration, RegistrationError, RuntimePlugin,
     SessionHistoryFeed, StoreAccess,
 };
 use p02_shared::Identifier;
+use serde_json::{Map, Value};
 
 use crate::boundary::{RecordLabelsError, within_label_allowance};
 use crate::confirmation::Confirmer;
@@ -36,9 +37,11 @@ pub struct PluginHostBuilder {
     confirmer: Option<Arc<dyn Confirmer>>,
 }
 
+/// A plugin as it is enabled: its manifest, the values its character's
+/// settings give it by field name, and its factory.
 struct Setup {
     manifest: Manifest,
-    config: ResolvedConfig,
+    authored: Map<String, Value>,
     factory: Box<Factory>,
 }
 
@@ -85,10 +88,8 @@ pub enum ActivationError {
     Build {
         plugin_id: Identifier,
         #[source]
-        source: PluginError,
+        source: BuildPluginError,
     },
-    #[error(transparent)]
-    Registration(RegistrationError),
     #[error(transparent)]
     DuplicateTool(DuplicateToolError),
 }
@@ -102,15 +103,26 @@ pub enum ReloadError {
     Build {
         plugin_id: Identifier,
         #[source]
-        source: PluginError,
+        source: BuildPluginError,
     },
-    #[error(transparent)]
-    Registration(RegistrationError),
     #[error(
         "plugin \"{0}\" was rebuilt with other tools than the model is offered, so it serves on \
          as it was"
     )]
     ToolsChanged(Identifier),
+}
+
+/// Why a plugin gave the host no instance to serve: its settings leave a
+/// required field without a value it accepts, its factory failed, or the
+/// instance contradicts its manifest.
+#[derive(Debug, thiserror::Error)]
+pub enum BuildPluginError {
+    #[error(transparent)]
+    Config(#[from] MissingConfigValueError),
+    #[error(transparent)]
+    Factory(PluginError),
+    #[error(transparent)]
+    Registration(#[from] RegistrationError),
 }
 
 impl PluginHost {
@@ -134,20 +146,20 @@ impl PluginHost {
         &self.core.offered
     }
 
-    /// Builds the plugin again from its factory with `config`, and serves
-    /// every later hook with the new instance. Hooks already running finish
-    /// on the instance they started with, and nothing waits for them: the
-    /// old instance ends when the last of them lets go of it.
+    /// Builds the plugin again, as activation did, from `authored`, the
+    /// values its character's settings now give it, and serves every later
+    /// hook with the new instance. Hooks already running finish on the
+    /// instance they started with, and nothing waits for them: the old
+    /// instance ends when the last of them lets go of it.
     ///
     /// # Errors
     ///
-    /// [`ReloadError`] when the plugin is not enabled here, its factory
-    /// fails, the new instance contradicts its manifest, or it would offer
-    /// other tools than the model was shown.
+    /// [`ReloadError`] when the plugin is not enabled here, cannot be
+    /// built, or would offer other tools than the model was shown.
     pub fn reload(
         &self,
         plugin_id: &Identifier,
-        config: &ResolvedConfig,
+        authored: &Map<String, Value>,
     ) -> Result<(), ReloadError> {
         let slot = self
             .core
@@ -155,15 +167,12 @@ impl PluginHost {
             .iter()
             .find(|slot| slot.manifest.id() == plugin_id)
             .ok_or_else(|| ReloadError::NotEnabled(plugin_id.clone()))?;
-        let plugin =
-            (slot.factory)(&FactoryInput::new(&slot.manifest, config)).map_err(|source| {
-                ReloadError::Build {
-                    plugin_id: plugin_id.clone(),
-                    source,
-                }
-            })?;
-        let registration =
-            Registration::new(slot.manifest.clone(), plugin).map_err(ReloadError::Registration)?;
+        let registration = build(&slot.manifest, authored, &slot.factory).map_err(|source| {
+            ReloadError::Build {
+                plugin_id: plugin_id.clone(),
+                source,
+            }
+        })?;
 
         if registration.tools() != slot.tools.as_slice() {
             return Err(ReloadError::ToolsChanged(plugin_id.clone()));
@@ -188,13 +197,14 @@ impl PluginHost {
 }
 
 impl PluginHostBuilder {
-    /// Enables a plugin. Its hooks run after those of every plugin added
-    /// before it.
+    /// Enables a plugin, to be built from `manifest` and `authored`, the
+    /// values its character's settings give it by field name. Its hooks run
+    /// after those of every plugin added before it.
     #[must_use]
     pub fn plugin(
         mut self,
         manifest: Manifest,
-        config: ResolvedConfig,
+        authored: Map<String, Value>,
         factory: impl Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError>
         + Send
         + Sync
@@ -202,7 +212,7 @@ impl PluginHostBuilder {
     ) -> Self {
         self.plugins.push(Setup {
             manifest,
-            config,
+            authored,
             factory: Box::new(factory),
         });
         self
@@ -223,15 +233,15 @@ impl PluginHostBuilder {
     /// # Errors
     ///
     /// [`ActivationError`] for the first plugin enabled twice, with more
-    /// labels than a record has room for, built in vain, or contradicting
-    /// its manifest, or the first tool name two plugins provide.
+    /// labels than a record has room for, or that cannot be built, or the
+    /// first tool name two plugins provide.
     pub fn activate(self) -> Result<PluginHost, ActivationError> {
         let mut slots: Vec<Slot> = Vec::with_capacity(self.plugins.len());
         let mut definitions = Vec::new();
 
         for Setup {
             manifest,
-            config,
+            authored,
             factory,
         } in self.plugins
         {
@@ -248,14 +258,11 @@ impl PluginHostBuilder {
                 },
             )?;
 
-            let plugin = factory(&FactoryInput::new(&manifest, &config)).map_err(|source| {
-                ActivationError::Build {
+            let registration =
+                build(&manifest, &authored, &factory).map_err(|source| ActivationError::Build {
                     plugin_id: plugin_id.clone(),
                     source,
-                }
-            })?;
-            let registration = Registration::new(manifest.clone(), plugin)
-                .map_err(ActivationError::Registration)?;
+                })?;
 
             definitions.extend(
                 registration
@@ -288,6 +295,20 @@ impl PluginHostBuilder {
             }),
         })
     }
+}
+
+/// Builds `manifest`'s plugin with its config resolved from `authored`
+/// against that manifest, and checks the instance against it: the one way
+/// a plugin is built, at activation and at a reload.
+fn build(
+    manifest: &Manifest,
+    authored: &Map<String, Value>,
+    factory: &Factory,
+) -> Result<Registration, BuildPluginError> {
+    let plugin =
+        factory(&FactoryInput::new(manifest, authored)?).map_err(BuildPluginError::Factory)?;
+
+    Ok(Registration::new(manifest.clone(), plugin)?)
 }
 
 impl Core {
