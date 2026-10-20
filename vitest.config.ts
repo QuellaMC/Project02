@@ -79,6 +79,16 @@ export default defineConfig({
           hookTimeout: 120000,
         },
       },
+      {
+        extends: true,
+        test: {
+          name: 'differential',
+          include: ['tests/differential/**/*.test.ts'],
+          setupFiles: ['tests/conformance/setup.ts'],
+          testTimeout: 120000,
+          hookTimeout: 120000,
+        },
+      },
     ],
     coverage: {
       provider: 'v8',

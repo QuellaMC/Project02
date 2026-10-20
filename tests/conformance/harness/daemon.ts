@@ -5,17 +5,24 @@ import {fileURLToPath} from 'node:url';
 import {onTestFinished} from './runner.ts';
 import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 
-const serveCommand = commandOf(
-  'PROJECT02_SERVE_CMD',
-  'node src/cli/serve/main.ts',
-);
+/** A program's command line, run from the repository root. */
+export type Command = readonly string[];
+
+/** The programs of this checkout, the TypeScript daemon's and the connector's. */
+export const typescriptPrograms = {
+  serve: 'node src/cli/serve/main.ts',
+  inspect: 'node src/cli/inspect/main.ts',
+  connector: 'node src/frontends/telegram/main.ts',
+} as const;
+
+const serveCommand = commandOf('PROJECT02_SERVE_CMD', typescriptPrograms.serve);
 const inspectCommand = commandOf(
   'PROJECT02_INSPECT_CMD',
-  'node src/cli/inspect/main.ts',
+  typescriptPrograms.inspect,
 );
 const connectorCommand = commandOf(
   'PROJECT02_CONNECTOR_CMD',
-  'node src/frontends/telegram/main.ts',
+  typescriptPrograms.connector,
 );
 /** serve on a pseudo-terminal, through python3's pty module. */
 const terminalCommand = [
@@ -69,12 +76,13 @@ const inherited = Object.fromEntries(
   ),
 );
 
-/** `serve` with these arguments. */
+/** `serve` with these arguments, started by the command given or else the one `PROJECT02_SERVE_CMD` names. */
 export function serve(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
+  command: Command = serveCommand,
 ): Serve {
-  return served(start('serve', [...serveCommand, ...args], env));
+  return served(start('serve', [...command, ...args], env));
 }
 
 /** `serve` with these arguments on a pseudo-terminal, as a person runs it. */
@@ -139,12 +147,13 @@ type Started = {
   ) => Promise<string>;
 };
 
-/** `inspect` with these arguments: a report on a home, then its exit. */
+/** `inspect` with these arguments, started by the command given or else the one `PROJECT02_INSPECT_CMD` names: a report on a home, then its exit. */
 export function inspect(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
+  command: Command = inspectCommand,
 ): Run {
-  return start('inspect', [...inspectCommand, ...args], env).run;
+  return start('inspect', [...command, ...args], env).run;
 }
 
 /** The Telegram connector with these arguments: a client of the daemon its home's record names. */
@@ -159,8 +168,9 @@ export function connector(
 export async function startDaemon(
   home: string,
   env: Readonly<Record<string, string>> = {},
+  command: Command = serveCommand,
 ): Promise<Daemon> {
-  const run = serve(['--store', home, '--init'], env);
+  const run = serve(['--store', home, '--init'], env, command);
 
   return {...run, ...(await run.address())};
 }
@@ -290,8 +300,8 @@ function start(
   };
 }
 
-/** A command line from the environment, split on whitespace, or its default. */
-function commandOf(variable: string, fallback: string): readonly string[] {
+/** The command line a variable of the environment names, or else the fallback, split on whitespace. */
+export function commandOf(variable: string, fallback: string): Command {
   return (process.env[variable] ?? fallback).trim().split(/\s+/u);
 }
 

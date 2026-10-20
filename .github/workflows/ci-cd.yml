@@ -92,18 +92,42 @@ jobs:
       - name: Run Rust quality gate
         run: pnpm check:rust
 
+  differential:
+    name: differential
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the scenario through the reference and the candidate
+        run: pnpm test:differential
+
   pull-request-gate:
     name: pull-request-gate
     runs-on: ubuntu-latest
     needs:
       - test
       - rust
+      - differential
     if: ${{ always() }}
 
     steps:
       - name: Require ci jobs to pass
         run: |
-          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.rust.result }}" != "success" ]; then
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.rust.result }}" != "success" ] || [ "${{ needs.differential.result }}" != "success" ]; then
             echo "ci gate failed."
             exit 1
           fi

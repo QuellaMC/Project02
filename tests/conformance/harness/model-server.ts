@@ -17,6 +17,8 @@ import {attachEvidence, within} from './wait.ts';
 export type ModelRequest = {
   readonly path: string;
   readonly authorization: string | undefined;
+  /** The body as it came. */
+  readonly text: string;
   readonly body: unknown;
 };
 
@@ -98,6 +100,7 @@ export async function startModelServer(): Promise<ModelServer> {
     const recorded = {
       path: request.url ?? '',
       authorization: request.headers.authorization,
+      text: body,
       body: body === '' ? undefined : (JSON.parse(body) as unknown),
     };
 

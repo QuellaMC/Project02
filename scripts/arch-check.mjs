@@ -7,7 +7,12 @@ import extractTsConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 
 const CONFIG_FILE = './.dependency-cruiser.mjs';
 const KNOWN_VIOLATIONS_FILE = '.dependency-cruiser-known-violations.json';
-const CRUISE_SCOPE = ['src', 'tests/conformance', 'tests/browser'];
+const CRUISE_SCOPE = [
+  'src',
+  'tests/conformance',
+  'tests/browser',
+  'tests/differential',
+];
 
 async function main() {
   const baselineMode = process.argv.includes('--baseline');
