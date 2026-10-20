@@ -104,6 +104,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     history.exchange("chat.7", "Call it foo bar, not C++.", "Fine.");
     history.exchange("chat.8", "The food was cold.", "Sorry.");
     history.exchange("chat.9", "ᲐᲑᲒ, in capitals.", "Mtavruli.");
+    history.exchange("chat.10", "ΤΕΛΟΣ, the film said.", "The end.");
     history.say(
         "chat.6",
         VisibleMessageRole::User,
@@ -123,7 +124,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
     // What the model sees now: the person's line and its own interim reply.
     let now = turn_in("chat.6", "evt_6", &["chat.6:message-2", "chat.6:message-3"]);
     let host = history_host(&storage, 5_000);
-    let cases: [(&str, &[&str]); 12] = [
+    let cases: [(&str, &[&str]); 13] = [
         ("kraken", &["chat.1", "chat.2"]),
         ("插件权限", &["chat.3"]),
         ("su", &["chat.1"]),
@@ -136,6 +137,7 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
         ("c++", &["chat.7"]),
         (" foo ", &["chat.7"]),
         ("აბგ", &["chat.9"]),
+        ("τελος", &["chat.10"]),
     ];
     let reports = host
         .handle_tool_calls(

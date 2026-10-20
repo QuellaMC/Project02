@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 
-use super::index::{Hits, IndexedMessage, SessionView, Window, fold};
+use super::index::{Hits, IndexedMessage, SessionView, Window, fold, fold_character};
 use crate::text::{ELLIPSIS, excerpt};
 
 const SEARCH_TEXT_CHARS: usize = 200;
@@ -140,8 +140,8 @@ fn match_start(text: &str, query: &str) -> Option<usize> {
     let mut origins = Vec::with_capacity(text.len());
 
     for (at, character) in text.chars().enumerate() {
-        for lower in character.to_lowercase() {
-            folded.push(lower);
+        for folded_character in fold_character(character) {
+            folded.push(folded_character);
             origins.push(at);
         }
     }
