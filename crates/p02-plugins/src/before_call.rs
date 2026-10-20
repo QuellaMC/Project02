@@ -110,13 +110,11 @@ impl PluginHost {
 
 impl Slot {
     async fn before_call(&self, turn: &Turn) -> Result<PreparedContext, Rejection> {
+        let plugin = self.live();
         let answered = self
-            .invoke(
-                self.live(),
-                Hook::BeforeRoleModelCall,
-                turn,
-                |plugin, context| async move { plugin.before_role_model_call(&context).await },
-            )
+            .invoke(Hook::BeforeRoleModelCall, turn, |context| async move {
+                plugin.before_role_model_call(&context).await
+            })
             .await;
 
         match answered.map(|output| self.accept(turn, output)) {

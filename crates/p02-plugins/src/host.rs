@@ -207,7 +207,7 @@ impl PluginHostBuilder {
         self
     }
 
-    /// Who asks the person before an approval-gated tool runs.
+    /// Who asks the person before an approval-gated call takes effect.
     #[must_use]
     pub fn confirmer(mut self, confirmer: Arc<dyn Confirmer>) -> Self {
         self.confirmer = Some(confirmer);

@@ -25,18 +25,21 @@ character's storage grants through the contracts.
   after a commit, at a session's end and at shutdown, where stores only
   read, are collected and reported, never thrown; a health check that is
   not ok rejects the turn when its plugin's policy says so.
-- **The output boundary.** Nothing a plugin returns reaches the model or
-  the log until it keeps to the record limits and the JSON limits, each
-  record and each answer as a whole, stamped with its turn, its plugin
-  and their labels, which are held where they enter, by the turn and at
-  activation, to what a record has room for; a tool's output has every
-  credential-named value redacted. A breach fails the plugin; nothing is
-  cut to fit.
+- **The output boundary.** Nothing a plugin returns reaches the model,
+  the person or the log until it keeps to the record limits and the JSON
+  limits, each record and each answer as a whole, stamped with its turn,
+  its plugin and their labels, which are held where they enter, by the
+  turn and at activation, to what a record has room for; a tool's output,
+  and what the person is shown of a call, have every credential-named
+  value redacted. A breach fails the plugin; nothing is cut to fit.
 - **Tools.** A round's calls run in the model's order: consecutive shared
   calls overlap, an exclusive one runs alone, none overtakes another. An
-  input is judged by its tool's contract before any plugin sees it, and a
-  tool that asks first runs only on the person's yes, through the
-  confirmer the caller supplies; without one it is never offered.
+  input is judged by its tool's contract before any plugin sees it. A tool
+  that asks first prepares each call with its store read-only: a call it
+  refuses is refused without asking, otherwise the person is shown what the
+  call would do, through the confirmer the caller supplies, and only on
+  their yes does the host apply the prepared effect, under a budget of its
+  own. Without a confirmer such a tool is never offered.
 - **The trusted frame.** Only a plugin granted `trusted_context: write`
   puts runtime notes and curated sections there, whole and within their
   caps; its other items, and every item of another plugin, ride the
