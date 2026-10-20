@@ -9,13 +9,17 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 async-trait = "0.1.92"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 dunce = "1.0.5"
-futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 jsonschema = { version = "0.59.0", default-features = false }
 p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
+p02-memory = { path = "crates/p02-memory" }
 p02-shared = { path = "crates/p02-shared" }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
 sha2 = { version = "0.11.1", default-features = false }

@@ -21,6 +21,12 @@ crate graph: it depends on no crate of this workspace.
 - **The daemon record**, `<home>/daemon.json`, which the daemon writes and
   its clients read to find it: its shape, its token and port rules, and its
   reader; and the default home, `.project02`.
+- **HTTP**, behind the `http` feature for the crates that call services:
+  a service's base URL, held to one rule a refusal can state without
+  echoing the value, its endpoints below it, a credential as a header no
+  `Debug` prints, and the client builder every caller starts from, with
+  TLS through the ring provider and no redirect or environment proxy
+  followed.
 - **Identifiers**, **credential-shaped key names**, and the **server-sent
   event splitter** the gateway client and the model provider read streams
   with.

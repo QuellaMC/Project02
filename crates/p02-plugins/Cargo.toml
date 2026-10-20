@@ -9,17 +9,20 @@ async-trait.workspace = true
 futures-util.workspace = true
 p02-contracts.workspace = true
 p02-core.workspace = true
-p02-shared.workspace = true
+p02-memory.workspace = true
+p02-shared = { workspace = true, features = ["http"] }
+reqwest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "test-util"] }
 
 [lints]
 workspace = true
