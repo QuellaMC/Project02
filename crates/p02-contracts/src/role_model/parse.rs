@@ -1,11 +1,9 @@
-use p02_core::VisibleText;
 use p02_shared::{Credentials, Identifier};
 use serde_json::{Map, Value};
 
 use crate::role_model::decision::{
     CharacterDecision, DecisionRejection, DecisionRejectionReason, DecisionResult,
 };
-use crate::role_model::reasoning::scrub_reasoning_blocks;
 use crate::role_model::tools::{ModelToolCall, VISIBLE_REPLY};
 
 impl DecisionResult {
@@ -127,15 +125,7 @@ fn parse_reply(index: usize, input: &Map<String, Value>) -> Result<ModelToolCall
         ));
     }
 
-    let Ok(scrubbed) = scrub_reasoning_blocks(text) else {
-        return Err("visible_reply text contains an unterminated reasoning block.".to_owned());
-    };
-
-    // Normalized here, so what the model said, what the person sees and
-    // what the log keeps are one text.
-    VisibleText::normalize(&scrubbed)
-        .map(|text| ModelToolCall::VisibleReply { text })
-        .map_err(|_| "visible_reply text must not be empty.".to_owned())
+    ModelToolCall::reply(text).map_err(|error| format!("{error}."))
 }
 
 /// The keys of `record` outside `supported`, in document order.
@@ -260,6 +250,10 @@ mod tests {
             ),
             (
                 json!({"toolCalls": [reply("<think>still thinking")]}).to_string(),
+                "visible_reply text contains an unterminated reasoning block.",
+            ),
+            (
+                json!({"toolCalls": [reply("<<think>plan</think>think>secret")]}).to_string(),
                 "visible_reply text contains an unterminated reasoning block.",
             ),
             (

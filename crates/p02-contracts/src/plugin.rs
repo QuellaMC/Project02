@@ -52,9 +52,11 @@ pub trait RuntimePlugin: Send + Sync + fmt::Debug {
     }
 
     /// Prepares a call of one of the plugin's approval-gated tools before
-    /// the person is asked, and changes nothing: a call the tool refuses is
-    /// refused without asking, and what the call does is its effect's, which
-    /// the host applies only on the person's yes.
+    /// the person is asked, and changes nothing, so its context holds
+    /// nothing that writes: its store only reads here, and it has no
+    /// database. A call the tool refuses is refused without asking, and what
+    /// the call does is its effect's, which the host applies only on the
+    /// person's yes.
     async fn prepare_tool_call(
         &self,
         call: &ToolCall,

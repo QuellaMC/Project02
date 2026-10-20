@@ -286,8 +286,9 @@ pub enum ToolPreparation {
 /// drops it unapplied.
 #[async_trait]
 pub trait PreparedEffect: Send + fmt::Debug {
-    /// Applies the approved effect, under a hook context of its own: the
-    /// person may answer after the preparation's deadline has passed.
+    /// Applies the approved effect, with what the plugin is granted, under
+    /// a hook context of its own: the person may answer after the
+    /// preparation's deadline has passed.
     async fn apply(self: Box<Self>, context: &HookContext) -> Result<ToolCallOutcome, PluginError>;
 }
 

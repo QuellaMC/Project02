@@ -27,11 +27,13 @@ pub trait DatabaseOpener: Send + Sync + fmt::Debug {
     ) -> Result<Connection, DatabaseError>;
 }
 
-/// The databases a hook may open: the plugin's own, through the store. The
-/// connection is the plugin's to keep, beyond the hook that opened it, and
-/// it is rusqlite's whole: a plugin is first-party code compiled into the
-/// daemon, so what it runs on its connection is reviewed like the rest of
-/// its code, not narrowed at run time.
+/// The databases a hook may open: the plugin's own, through the store.
+/// Opening one is the capability call, checked against the hook's token;
+/// the connection is then the plugin's to keep, beyond the hook that opened
+/// it, and it is rusqlite's whole. A plugin is first-party code compiled
+/// into the daemon, so what it runs on its connection is its own work:
+/// reviewed like the rest of its code, cooperative like the rest of its
+/// work, and not narrowed at run time.
 #[derive(Clone, Debug)]
 pub struct PluginDatabase {
     opener: Arc<dyn DatabaseOpener>,

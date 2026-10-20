@@ -16,9 +16,13 @@ pub enum ProviderName {
 /// The exchange is the wire as sent and received, so it weighs what the
 /// prompt weighs: bounded by the context window, not by what one plugin may
 /// return. These limits stop only a runaway shape, so a prompt the window
-/// admits is always recordable and never fails the turn it describes.
+/// admits is always recordable and never fails the turn it describes. A
+/// tool's schema is admitted as deep as a plugin's record, sixteen levels,
+/// and the request body holds it five levels down, at
+/// `tools[].function.parameters`, so the exchange takes twice a record's
+/// depth.
 const EXCHANGE_LIMITS: JsonLimits = JsonLimits {
-    depth: 16,
+    depth: 32,
     entries_per_container: 65_536,
     nodes: 1_048_576,
     string_bytes: 8 * 1_024 * 1_024,
@@ -145,6 +149,7 @@ mod tests {
 
     use super::*;
     use crate::role_model::chat::{ChatToolFunction, ContextRole, ReasoningParameterStyle};
+    use crate::schema::ToolInputContract;
 
     fn record(messages: Vec<ChatMessage>, request_body: Value) -> ExchangeRecord {
         ExchangeRecord {
@@ -176,18 +181,47 @@ mod tests {
     }
 
     #[test]
-    fn an_exchange_as_large_as_the_window_admits_is_recorded() {
+    fn an_exchange_as_large_and_as_deep_as_an_admitted_prompt_is_recorded() {
         let history: Vec<ChatMessage> = (0..48)
             .map(|index| ChatMessage::User {
                 content: format!("{index}{}", "a".repeat(1_500)),
             })
             .collect();
-        let body = json!({"messages": serde_json::to_value(&history).unwrap()});
-        let exchange = ProviderExchange::new(record(history, body)).unwrap();
+        let deepest = (0..64)
+            .map(|levels| {
+                let items = (0..levels).fold(
+                    json!({}),
+                    |items, _| json!({"type": "array", "items": items}),
+                );
+
+                ToolInputContract::new(json!({"type": "object", "properties": {"notes": items}}))
+            })
+            .map_while(Result::ok)
+            .last()
+            .unwrap();
+        let tool = ChatCompletionTool::new(ChatToolFunction {
+            name: "notes.add".to_owned(),
+            description: "Adds a note.".to_owned(),
+            parameters: deepest.schema().clone(),
+            strict: false,
+        });
+        let body = json!({
+            "messages": serde_json::to_value(&history).unwrap(),
+            "tools": [&tool],
+        });
+        let mut prompt = record(history, body);
+
+        prompt.rendered_tools = vec![tool];
+
+        let exchange = ProviderExchange::new(prompt).unwrap();
         let kept = exchange.as_value();
 
         assert!(serde_json::to_string(&exchange).unwrap().len() > 64 * 1_024);
         assert_eq!(kept["renderedMessages"].as_array().map(Vec::len), Some(48));
+        assert_eq!(
+            kept["requestBody"]["tools"][0]["function"]["parameters"],
+            json!(deepest.schema())
+        );
         assert_eq!(
             kept["usage"],
             json!({"prompt_tokens": 9000, "completion_tokens": 12})

@@ -758,7 +758,7 @@ mod tests {
                         "description": "A credential.",
                         "required": false,
                         "secret": true,
-                        "valueType": "secret",
+                        "valueType": "string",
                         "redactionLabels": ["secret"],
                     },
                 ],
@@ -864,6 +864,14 @@ mod tests {
                     path: "config.fields[0]".to_owned(),
                     key: "defaultValueSummary".to_owned(),
                 },
+                MalformedManifest,
+            ),
+            (
+                |m| m["config"]["fields"][0]["valueType"] = json!("secret"),
+                invalid(
+                    "config.fields[0].valueType",
+                    &format!("one of {}", spellings(ConfigValueType::ALL)),
+                ),
                 MalformedManifest,
             ),
             (

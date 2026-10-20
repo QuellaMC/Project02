@@ -199,14 +199,14 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// The kind of value a config field holds.
+    /// The kind of value a config field holds. Whether it holds a
+    /// credential is the field's `secret` flag alone to say.
     ConfigValueType {
         String = "string",
         Number = "number",
         Boolean = "boolean",
         Object = "object",
         Array = "array",
-        Secret = "secret",
         Path = "path",
         Enum = "enum",
     }

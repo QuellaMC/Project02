@@ -15,8 +15,8 @@ p02-shared, and the runtime reaches plugins and providers only through it.
 - **Hooks.** The host calls only what a manifest declares, each hook under
   its plugin's one budget and its own cancellation token. Cancellation is
   cooperative: every call on a capability handle (the character store, the
-  session history, the plugin's databases) checks the token before it
-  acts, so a hook past its deadline finishes the statement it is in and
+  session history, the opening of a plugin database) checks the token
+  before it acts, so a hook past its deadline finishes the call it is in and
   starts nothing more, and store writes end when the hook settles. The
   store crate implements what the handles reach, and it alone opens a
   database. What a plugin returns, the host stamps into records held to
@@ -26,9 +26,10 @@ p02-shared, and the runtime reaches plugins and providers only through it.
   with an object root, admitted only when every keyword in it is enforced
   as written; in a pattern, `.` keeps its JavaScript meaning. A refused
   input names the field and the rule, and the model is told so. A tool
-  that asks the person first prepares each call and changes nothing: a
-  call it refuses is refused without asking, the person is shown what the
-  call would do, and the host applies the prepared effect only on a yes.
+  that asks the person first prepares each call, with its store read-only
+  and no database, and changes nothing: a call it refuses is refused
+  without asking, the person is shown what the call would do, and the host
+  applies the prepared effect only on a yes.
 - **The model.** A provider is a `RoleModelAdapter` over the chat wire,
   and answers with what the model wrote or with how the provider failed.
   `DecisionResult::parse` is the one judge of what a model round wrote:

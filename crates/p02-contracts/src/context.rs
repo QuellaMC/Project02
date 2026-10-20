@@ -35,8 +35,8 @@ pub struct TurnText {
 /// Cancellation is cooperative. When the hook overruns its plugin's budget
 /// or the turn is abandoned, the host stops waiting and cancels the token:
 /// async work should watch it, and every capability handle refuses each
-/// later call, so a hook past its deadline finishes the statement it is in
-/// and starts nothing more.
+/// later call, so a hook past its deadline finishes the call it is in and
+/// starts no other.
 #[derive(Clone, Debug)]
 pub struct HookContext {
     plugin_id: Identifier,
@@ -103,7 +103,8 @@ impl HookContext {
         (self, hold)
     }
 
-    /// Grants the character's session history (`session_history: read`).
+    /// Grants the session history of the turn's character
+    /// (`session_history: read`); the turn alone says whose it is.
     #[must_use]
     pub fn with_session_history(mut self, feed: Arc<dyn SessionHistoryFeed>) -> Self {
         self.session_history = Some(SessionHistory::new(feed, self.cancellation.clone()));
@@ -247,15 +248,10 @@ mod tests {
 
     #[derive(Debug)]
     struct Feed {
-        character: Identifier,
         reads: AtomicUsize,
     }
 
     impl SessionHistoryFeed for Feed {
-        fn character_id(&self) -> &Identifier {
-            &self.character
-        }
-
         fn list_sessions(&self) -> Result<SessionListing, SessionHistoryError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
             Ok(SessionListing {
@@ -304,7 +300,6 @@ mod tests {
         let memory = Arc::new(Memory::default());
         let opener = Arc::new(Opener::default());
         let feed = Arc::new(Feed {
-            character: Identifier::new("mira").unwrap(),
             reads: AtomicUsize::new(0),
         });
         let (granted, _hold) = context(cancellation.clone())
