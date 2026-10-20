@@ -5,10 +5,12 @@
 //! the lost turn back.
 
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use futures_util::FutureExt as _;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -104,17 +106,8 @@ impl Captures {
         }
 
         let mut worker = self.worker.lock().unwrap_or_else(PoisonError::into_inner);
-        let unsent = match &*worker {
-            Some(running) => running.jobs.send(job).err().map(|unsent| unsent.0),
-            None => Some(job),
-        };
 
-        // A worker ends only when a job of it panicked; the next one takes
-        // its place.
-        if let Some(job) = unsent {
-            drop(worker.insert(self.start()).jobs.send(job));
-        }
-
+        drop(worker.get_or_insert_with(|| self.start()).jobs.send(job));
         drop(worker);
 
         Queued::Accepted {
@@ -186,9 +179,14 @@ impl Captures {
         let shared = Arc::clone(&self.shared);
         let task = tokio::spawn(async move {
             while let Some(job) = queued.recv().await {
-                match tokio::time::timeout(BOUND, job).await {
-                    Ok(Ok(written)) => shared.completed(&written),
-                    Ok(Err(error)) => shared.lose(1, &error.to_string()),
+                // A capture that panics is lost like one that failed, so
+                // the worker, and the captures queued behind it, go on.
+                match tokio::time::timeout(BOUND, AssertUnwindSafe(job).catch_unwind()).await {
+                    Ok(Ok(Ok(written))) => shared.completed(&written),
+                    Ok(Ok(Err(error))) => shared.lose(1, &error.to_string()),
+                    Ok(Err(_)) => {
+                        shared.lose(1, "mem0 add panicked; whether it completed is unknown.");
+                    }
                     Err(_) => shared.lose(
                         1,
                         &BackendError::new(Operation::Add, Failure::Abandoned).to_string(),
@@ -232,5 +230,36 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .last = Some(last);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_capture_that_panics_is_lost_and_the_captures_behind_it_go_on() {
+        let captures = Captures::default();
+
+        captures.queue(Box::pin(async { panic!("a capture's own fault") }));
+        captures.queue(Box::pin(async {
+            Ok(Written::Stored(vec!["mem-1".to_owned()]))
+        }));
+
+        assert_eq!(
+            captures
+                .drain(Instant::now() + Duration::from_secs(10))
+                .await,
+            Outcomes {
+                pending: 0,
+                incomplete: 1,
+                loss: Some(
+                    "1 capture(s) did not complete; most recent: mem0 add panicked; whether it \
+                     completed is unknown."
+                        .to_owned()
+                ),
+                last: Some("Stored 1 memory item(s) from the last captured turn.".to_owned()),
+            }
+        );
     }
 }
