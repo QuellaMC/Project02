@@ -18,7 +18,8 @@ pub use daemon_record::{
 };
 pub use fs::{
     DanglingLinks, PathEntry, ResolvePathError, canonical_path, create_new_file, describe_entry,
-    read_text_lossy, relative_path_if_contained, write_file_atomically,
+    list_directory, read_at_most, read_text_lossy, relative_path_if_contained,
+    write_file_atomically,
 };
 #[cfg(feature = "http")]
 pub use http::{

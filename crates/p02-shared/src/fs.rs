@@ -8,8 +8,8 @@
 )]
 
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write as _};
+use std::fs::{self, File, FileType, OpenOptions};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
@@ -23,6 +23,21 @@ use uuid::Uuid;
 /// The `io::Error` the read failed with.
 pub fn read_text_lossy(path: &Path) -> io::Result<String> {
     fs::read(path).map(String::from_utf8_lossy_owned)
+}
+
+/// Reads the file at `path` up to its first `limit` bytes, so a file that
+/// should be small costs no more than that however large it is.
+///
+/// # Errors
+///
+/// The `io::Error` the open or the read failed with.
+pub fn read_at_most(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+
+    File::open(path)?
+        .take(u64::try_from(limit).unwrap_or(u64::MAX))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Replaces the file at `path` with `content`, owner-only, so that a reader
@@ -91,21 +106,42 @@ pub enum PathEntry {
 #[must_use]
 pub fn describe_entry(path: &Path) -> PathEntry {
     match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            let kind = metadata.file_type();
-
-            if kind.is_symlink() {
-                PathEntry::Link
-            } else if kind.is_dir() {
-                PathEntry::Directory
-            } else if kind.is_file() {
-                PathEntry::File
-            } else {
-                PathEntry::Other
-            }
-        }
+        Ok(metadata) => entry_of(metadata.file_type()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => PathEntry::Absent,
         Err(error) => PathEntry::Unreadable(error),
+    }
+}
+
+/// The entries of the directory at `path`, in no particular order, each
+/// named and described as [`describe_entry`] describes a path: a link among
+/// them is not followed, though a link at `path` itself is.
+///
+/// # Errors
+///
+/// The `io::Error` the listing failed with, `NotFound` when nothing is at
+/// `path`.
+pub fn list_directory(path: &Path) -> io::Result<Vec<(OsString, PathEntry)>> {
+    fs::read_dir(path)?
+        .map(|entry| {
+            let entry = entry?;
+            let described = entry
+                .file_type()
+                .map_or_else(PathEntry::Unreadable, entry_of);
+
+            Ok((entry.file_name(), described))
+        })
+        .collect()
+}
+
+fn entry_of(kind: FileType) -> PathEntry {
+    if kind.is_symlink() {
+        PathEntry::Link
+    } else if kind.is_dir() {
+        PathEntry::Directory
+    } else if kind.is_file() {
+        PathEntry::File
+    } else {
+        PathEntry::Other
     }
 }
 
@@ -345,6 +381,17 @@ mod tests {
     }
 
     #[test]
+    fn reads_no_more_of_a_file_than_asked() {
+        let (_directory, root) = temp_root();
+        let path = root.join("descriptor.json");
+
+        fs::write(&path, b"0123456789").unwrap();
+
+        assert_eq!(read_at_most(&path, 4).unwrap(), b"0123");
+        assert_eq!(read_at_most(&path, 64).unwrap(), b"0123456789");
+    }
+
+    #[test]
     fn an_atomic_write_replaces_the_file_owner_only_and_leaves_no_temporary() {
         let (_directory, root) = temp_root();
         let path = root.join("config.json");
@@ -401,6 +448,35 @@ mod tests {
         ] {
             assert_eq!(format!("{:?}", describe_entry(&root.join(name))), entry);
         }
+    }
+
+    #[test]
+    fn lists_a_directory_saying_what_each_entry_is_without_following_links() {
+        let (_directory, root) = temp_root();
+
+        fs::create_dir(root.join("folder")).unwrap();
+        fs::write(root.join("file.txt"), "contents\n").unwrap();
+        link(&root.join("folder"), &root.join("link"));
+
+        let mut listed: Vec<(String, String)> = list_directory(&root)
+            .unwrap()
+            .into_iter()
+            .map(|(name, entry)| (name.into_string().unwrap(), format!("{entry:?}")))
+            .collect();
+
+        listed.sort();
+        assert_eq!(
+            listed,
+            [
+                ("file.txt".to_owned(), "File".to_owned()),
+                ("folder".to_owned(), "Directory".to_owned()),
+                ("link".to_owned(), "Link".to_owned()),
+            ]
+        );
+        assert_eq!(
+            list_directory(&root.join("missing")).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
     }
 
     /// Windows answers this one as absent.
