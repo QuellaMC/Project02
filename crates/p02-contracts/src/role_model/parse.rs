@@ -1,5 +1,5 @@
 use p02_core::VisibleText;
-use p02_shared::{Credentials, Identifier, JsonLimits, bound_json_object};
+use p02_shared::{Credentials, Identifier};
 use serde_json::{Map, Value};
 
 use crate::role_model::decision::{
@@ -111,14 +111,7 @@ fn parse_call(
 
     // The tool's own contract is the host's to judge; here the input only
     // has to cross the JSON boundary.
-    bound_json_object(
-        Value::Object(input.clone()),
-        &format!("Model tool \"{name}\" input"),
-        JsonLimits::default(),
-        credentials,
-    )
-    .map(|input| ModelToolCall::Plugin { name, input })
-    .map_err(|error| format!("{error}."))
+    ModelToolCall::plugin(name, input.clone(), credentials).map_err(|error| format!("{error}."))
 }
 
 fn parse_reply(index: usize, input: &Map<String, Value>) -> Result<ModelToolCall, String> {

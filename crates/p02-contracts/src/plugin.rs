@@ -176,12 +176,13 @@ impl From<SessionHistoryError> for PluginError {
     }
 }
 
-/// A plugin paired with the manifest it was built from, its tools checked
-/// against what the manifest declares and requests.
+/// A plugin paired with the manifest it was built from and the tools it
+/// provided then, checked against what the manifest declares and requests.
 #[derive(Clone, Debug)]
 pub struct Registration {
     manifest: Arc<Manifest>,
     plugin: Arc<dyn RuntimePlugin>,
+    tools: Arc<[ProvidedTool]>,
 }
 
 /// Why a plugin does not match its manifest.
@@ -224,7 +225,7 @@ impl Registration {
         manifest: Manifest,
         plugin: Arc<dyn RuntimePlugin>,
     ) -> Result<Self, RegistrationError> {
-        let tools = plugin.provided_tools();
+        let tools: Arc<[ProvidedTool]> = plugin.provided_tools().into();
         let plugin_id = || manifest.id().clone();
         let tools_declared = manifest.declares(Declaration::ToolProvider)
             && manifest.declares(Declaration::HandleToolCall);
@@ -260,6 +261,7 @@ impl Registration {
         Ok(Self {
             manifest: Arc::new(manifest),
             plugin,
+            tools,
         })
     }
 
@@ -273,9 +275,11 @@ impl Registration {
         &self.plugin
     }
 
+    /// The tools as they were checked when the plugin registered. The
+    /// plugin is not asked again, so no later answer escapes the check.
     #[must_use]
     pub fn tools(&self) -> &[ProvidedTool] {
-        self.plugin.provided_tools()
+        &self.tools
     }
 
     #[must_use]
@@ -317,6 +321,8 @@ pub type PluginFactory = fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>,
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use p02_core::{
         CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId,
     };
@@ -484,6 +490,32 @@ mod tests {
             Some(ToolConcurrency::Shared)
         );
         assert!(registration.tool("notes.add").is_none());
+    }
+
+    #[test]
+    fn tools_a_plugin_provides_after_it_registered_are_never_offered() {
+        #[derive(Debug)]
+        struct Lazy {
+            tools: OnceLock<Vec<ProvidedTool>>,
+        }
+
+        #[async_trait]
+        impl RuntimePlugin for Lazy {
+            fn provided_tools(&self) -> &[ProvidedTool] {
+                self.tools.get().map_or(&[], Vec::as_slice)
+            }
+        }
+
+        let plugin = Arc::new(Lazy {
+            tools: OnceLock::new(),
+        });
+        let registration =
+            Registration::new(manifest(&json!(["health"]), &json!({})), plugin.clone()).unwrap();
+
+        plugin.tools.set(vec![search_tool()]).unwrap();
+
+        assert_eq!(registration.tools(), []);
+        assert!(registration.tool("notes.search").is_none());
     }
 
     #[tokio::test]
