@@ -17,9 +17,9 @@ pub use chat::{
     ProviderCapabilities, ReasoningParameterStyle, ToolNameMapping,
 };
 pub use decision::{
-    BlankContextTextError, CharacterDecision, DECISION_CONTRACT_VERSION, DecisionContext,
-    DecisionRejection, DecisionRejectionReason, DecisionResult, InputEnvelope, OutputContract,
-    ParseDecisionError, RuntimeNote,
+    BlankContextTextError, CharacterDecision, DECISION_CONTRACT_VERSION, DECISION_OUTPUT_CONTRACT,
+    DecisionContext, DecisionRejection, DecisionRejectionReason, DecisionResult, InputEnvelope,
+    OutputContract, ParseDecisionError, RuntimeNote,
 };
 pub use exchange::{
     ExchangeProvider, ExchangeRecord, ProviderExchange, ProviderFailure, ProviderMetadata,

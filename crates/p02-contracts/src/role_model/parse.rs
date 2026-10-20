@@ -37,7 +37,7 @@ fn parse_decision(raw_output: &str, credentials: Credentials) -> Result<Characte
         return Err("Adapter output must be a CharacterDecision JSON object.".to_owned());
     };
 
-    if let Some(keys) = unsupported_keys(&output, &["version", "toolCalls", "text"]) {
+    if let Some(keys) = unsupported_keys(&output, &["toolCalls", "text"]) {
         return Err(format!("Decision includes unsupported fields: {keys}."));
     }
 
@@ -160,7 +160,6 @@ mod tests {
     #[test]
     fn an_answer_in_the_contract_becomes_a_stamped_decision() {
         let decision = accepted(&json!({
-            "version": "mvp-008.runtime_plugin.v2",
             "toolCalls": [
                 reply("<think>plan it</think> first\r\n"),
                 reply("second"),
@@ -203,8 +202,13 @@ mod tests {
                 "Adapter output must be a CharacterDecision JSON object.",
             ),
             (
-                json!({"toolCalls": [reply("hello")], "sideEffect": "write a file"}).to_string(),
-                "Decision includes unsupported fields: sideEffect.",
+                json!({
+                    "version": DECISION_CONTRACT_VERSION,
+                    "toolCalls": [reply("hello")],
+                    "sideEffect": "write a file",
+                })
+                .to_string(),
+                "Decision includes unsupported fields: version, sideEffect.",
             ),
             (
                 json!({"toolCalls": "visible_reply"}).to_string(),

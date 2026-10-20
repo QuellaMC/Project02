@@ -9,7 +9,7 @@ use crate::context::HookContext;
 use crate::evidence::EvidenceNote;
 use crate::plugin::PluginError;
 use crate::role_model::VISIBLE_REPLY;
-use crate::schema::ToolInputContract;
+use crate::schema::{ToolInputContract, ToolInputRejection};
 use crate::vocabulary::{ToolConcurrency, ValidationFailureReason};
 
 /// A tool a plugin offers the model. Every plugin tool is shown to the
@@ -208,9 +208,9 @@ impl fmt::Display for ToolCallId {
     }
 }
 
-/// A call of one of a plugin's tools, with input the host already judged
-/// against the tool's contract. Which turn it belongs to is the hook
-/// context's to say.
+/// A call of one of a plugin's tools, made only with input the tool's
+/// contract admits, so a plugin reads no other. Which turn it belongs to is
+/// the hook context's to say.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolCall {
     call_id: ToolCallId,
@@ -219,13 +219,24 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    #[must_use]
-    pub fn new(call_id: ToolCallId, tool_name: Identifier, input: Map<String, Value>) -> Self {
-        Self {
+    /// A call of `tool` with `input`, which the tool's contract judges.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolInputRejection`] naming the field and the rule `input`
+    /// breaks, which the model is told.
+    pub fn new(
+        call_id: ToolCallId,
+        tool: &ProvidedTool,
+        input: Map<String, Value>,
+    ) -> Result<Self, ToolInputRejection> {
+        tool.input_contract().validate(tool.name(), &input)?;
+
+        Ok(Self {
             call_id,
-            tool_name,
+            tool_name: tool.name().clone(),
             input,
-        }
+        })
     }
 
     #[must_use]
@@ -317,6 +328,38 @@ mod tests {
             named("sessions.search", " "),
             Err(ToolDefinitionError::BlankDescription { .. })
         ));
+    }
+
+    #[test]
+    fn a_call_is_made_only_with_input_its_tools_contract_admits() {
+        let tool = ProvidedTool::new(
+            Identifier::new("notes.add").unwrap(),
+            "Add a note.",
+            ToolInputContract::new(json!({
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": false,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let input = |value: Value| value.as_object().cloned().unwrap();
+        let call = ToolCall::new(
+            ToolCallId::new("call-1").unwrap(),
+            &tool,
+            input(json!({"text": "milk"})),
+        )
+        .unwrap();
+
+        assert_eq!(call.tool_name(), tool.name());
+        assert_eq!(call.input(), &input(json!({"text": "milk"})));
+        assert_eq!(
+            ToolCall::new(ToolCallId::new("call-2").unwrap(), &tool, input(json!({})))
+                .unwrap_err()
+                .sentence(),
+            r#"notes.add input missing required field "text"."#
+        );
     }
 
     #[test]

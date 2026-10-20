@@ -10,7 +10,9 @@ use crate::vocabulary::vocabulary;
 /// The version of the decision contract every accepted decision carries.
 pub const DECISION_CONTRACT_VERSION: &str = "mvp-006.tool_calls.v1";
 
-const DECISION_OUTPUT_CONTRACT: &str = "Return exactly one complete valid JSON CharacterDecision object. The only top-level fields \
+/// What the model is told its answer must be, under
+/// [`DECISION_CONTRACT_VERSION`].
+pub const DECISION_OUTPUT_CONTRACT: &str = "Return exactly one complete valid JSON CharacterDecision object. The only top-level fields \
      are \"toolCalls\" (required, non-empty, in order) and optional \"text\". Do not include a \
      version field; the runtime stamps the internal decision version after validation. Do not \
      copy input envelope fields such as event, decisionContext, historyWindow, toolRounds, \
@@ -23,12 +25,12 @@ const DECISION_OUTPUT_CONTRACT: &str = "Return exactly one complete valid JSON C
      \"text\" is your own note next to your calls: it is kept with the decision and shown to you \
      again, never to the person.";
 
-/// What the model is told its answer must be: the decision contract, named
-/// by its version, in the words the model was given.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The contract a round's answer must keep, recorded by its version alone:
+/// its words are the code's, [`DECISION_OUTPUT_CONTRACT`], and what the
+/// model was sent is its round's provider exchange.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputContract {
     version: DecisionVersion,
-    text: String,
 }
 
 impl OutputContract {
@@ -37,14 +39,7 @@ impl OutputContract {
     pub fn decision() -> Self {
         Self {
             version: DecisionVersion,
-            text: DECISION_OUTPUT_CONTRACT.to_owned(),
         }
-    }
-
-    /// The words the model was given.
-    #[must_use]
-    pub fn text(&self) -> &str {
-        &self.text
     }
 }
 
@@ -521,6 +516,10 @@ mod tests {
             "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
         });
 
+        assert_eq!(
+            envelope["outputContract"],
+            json!({"version": DECISION_CONTRACT_VERSION})
+        );
         assert!(serde_json::from_value::<InputEnvelope>(envelope.clone()).is_ok());
         assert!(serde_json::from_value::<CharacterDecision>(decision.clone()).is_ok());
 
