@@ -499,7 +499,7 @@ mod tests {
             &json!(["tool_provider", "handle_tool_call"]),
             &json!({"model_input": "write"}),
         );
-        let config = ResolvedConfig::default();
+        let config = ResolvedConfig::resolve(manifest.config(), &Map::new()).unwrap();
         let plugin = FACTORY(&FactoryInput::new(&manifest, &config)).unwrap();
         let registration = Registration::new(manifest, plugin).unwrap();
 

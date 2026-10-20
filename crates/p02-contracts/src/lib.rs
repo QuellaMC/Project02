@@ -23,7 +23,7 @@ pub use capability::{
     SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary, StoreAccess,
     StoreError, WriteHold,
 };
-pub use config::{ConfigField, ConfigSection, ResolvedConfig};
+pub use config::{ConfigField, ConfigSection, MissingConfigValueError, ResolvedConfig};
 pub use context::{HookContext, TurnIdentity, TurnText};
 pub use descriptor::{DESCRIPTOR_FORMAT, DescriptorError};
 pub use evidence::{Evidence, EvidenceError, EvidenceNote};

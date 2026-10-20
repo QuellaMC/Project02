@@ -39,5 +39,6 @@ p02-shared, and the runtime reaches plugins and providers only through it.
   calls a round replays and the exchange it had with its provider are kept
   with every credential-named value redacted.
 - **Config.** A plugin's config section declares its fields, one judge
-  decides whether a value fits a field, and a factory receives the values
-  its config resolved to.
+  decides whether a value fits a field, and a factory receives what its
+  section resolves to: each field's authored value when the field accepts
+  it, or else its default, with every required field set.

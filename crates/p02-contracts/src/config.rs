@@ -3,7 +3,7 @@ use std::fmt;
 
 use p02_shared::Identifier;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::label::RedactionLabel;
 use crate::vocabulary::{ConfigScope, ConfigValueType};
@@ -153,25 +153,58 @@ impl ConfigField {
 
 /// The values a plugin's config resolved to, by field name: an authored
 /// value its field accepts, or the field's default. A field with neither is
-/// absent.
-#[derive(Clone, Default, PartialEq)]
+/// absent, and a required field is never absent.
+#[derive(Clone, PartialEq)]
 pub struct ResolvedConfig(BTreeMap<String, Value>);
 
+/// A required field the settings leave without a value it accepts, so its
+/// plugin cannot run.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("required plugin config field \"{field}\" is not set to a value it accepts")]
+pub struct MissingConfigValueError {
+    pub field: Identifier,
+}
+
 impl ResolvedConfig {
+    /// What `section` resolves to from `authored`, the values the settings
+    /// set by field name. A name the section does not declare reaches no
+    /// plugin.
+    ///
+    /// # Errors
+    ///
+    /// [`MissingConfigValueError`] for the first required field left
+    /// without a value it accepts.
+    pub fn resolve(
+        section: &ConfigSection,
+        authored: &Map<String, Value>,
+    ) -> Result<Self, MissingConfigValueError> {
+        let mut values = BTreeMap::new();
+
+        for field in section.fields() {
+            let value = authored
+                .get(field.name().as_str())
+                .filter(|value| field.accepts(value))
+                .or_else(|| field.default_value());
+
+            match value {
+                Some(value) => {
+                    values.insert(field.name().as_str().to_owned(), value.clone());
+                }
+                None if field.required() => {
+                    return Err(MissingConfigValueError {
+                        field: field.name().clone(),
+                    });
+                }
+                None => {}
+            }
+        }
+
+        Ok(Self(values))
+    }
+
     #[must_use]
     pub fn value(&self, field: &str) -> Option<&Value> {
         self.0.get(field)
-    }
-}
-
-impl FromIterator<(Identifier, Value)> for ResolvedConfig {
-    fn from_iter<T: IntoIterator<Item = (Identifier, Value)>>(values: T) -> Self {
-        Self(
-            values
-                .into_iter()
-                .map(|(name, value)| (name.as_str().to_owned(), value))
-                .collect(),
-        )
     }
 }
 
@@ -248,13 +281,38 @@ mod tests {
     }
 
     #[test]
-    fn a_resolved_config_hands_out_values_and_never_debugs_them() {
-        let config: ResolvedConfig = [(Identifier::new("apiKey").unwrap(), json!("m0sk_secret"))]
-            .into_iter()
-            .collect();
+    fn a_config_resolves_each_field_to_a_value_it_accepts_or_its_default() {
+        let mut tone = field(Some(ConfigValueType::String), Some(&["warm", "formal"]));
+        let mut key = field(Some(ConfigValueType::String), None);
 
+        tone.default_value = Some(json!("warm"));
+        key.name = Identifier::new("apiKey").unwrap();
+        key.required = true;
+        key.secret = true;
+
+        let section = ConfigSection {
+            scope: ConfigScope::GlobalWithCharacterOverrides,
+            fields: vec![tone, key],
+        };
+        let authored = |values: Value| values.as_object().cloned().unwrap();
+        let config = ResolvedConfig::resolve(
+            &section,
+            &authored(json!({"tone": "sarcastic", "apiKey": "m0sk_secret", "baseUrl": "x"})),
+        )
+        .unwrap();
+
+        assert_eq!(config.value("tone"), Some(&json!("warm")));
         assert_eq!(config.value("apiKey"), Some(&json!("m0sk_secret")));
         assert_eq!(config.value("baseUrl"), None);
-        assert_eq!(format!("{config:?}"), r#"ResolvedConfig(["apiKey"])"#);
+        assert_eq!(
+            format!("{config:?}"),
+            r#"ResolvedConfig(["apiKey", "tone"])"#
+        );
+        assert_eq!(
+            ResolvedConfig::resolve(&section, &authored(json!({"apiKey": 7}))),
+            Err(MissingConfigValueError {
+                field: Identifier::new("apiKey").unwrap(),
+            })
+        );
     }
 }
