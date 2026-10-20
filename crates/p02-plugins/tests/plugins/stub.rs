@@ -358,17 +358,12 @@ fn default_answer(kind: Kind, request: &Request) -> Answer {
         Kind::Mem0 => Answer::json(200, &json!({"results": []})),
         Kind::OpenAi if request.path.ends_with("/embeddings") => {
             let model = request.body["model"].as_str().unwrap_or_default();
-            let texts: Vec<&str> = match &request.body["input"] {
-                Value::String(text) => vec![text],
-                Value::Array(texts) => texts.iter().filter_map(Value::as_str).collect(),
-                _ => Vec::new(),
-            };
-            let data: Vec<Value> = texts
-                .iter()
-                .enumerate()
-                .map(|(index, text)| {
-                    json!({"object": "embedding", "index": index, "embedding": embedding(model, text)})
+            let data: Vec<Value> = request.body["input"]
+                .as_str()
+                .map(|text| {
+                    json!({"object": "embedding", "index": 0, "embedding": embedding(model, text)})
                 })
+                .into_iter()
                 .collect();
 
             Answer::json(

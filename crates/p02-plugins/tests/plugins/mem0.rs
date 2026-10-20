@@ -1108,7 +1108,7 @@ async fn a_turn_is_extracted_with_mem0s_prompt_its_sessions_messages_and_its_nea
 }
 
 #[tokio::test]
-async fn recall_finds_the_engines_memories_most_alike_first_and_leaves_out_the_unalike() {
+async fn recall_ranks_each_memory_by_the_vector_of_its_own_text_and_leaves_out_the_unalike() {
     let openai = Stub::openai().await;
     let storage = Storage::new();
     let host = host(&storage, &embedded(&openai, "embed-a"));
@@ -1127,6 +1127,10 @@ async fn recall_finds_the_engines_memories_most_alike_first_and_leaves_out_the_u
     let recalled = recall(&host, &line(query)).await;
     let alike = |text| cosine(&embedding("embed-a", query), &embedding("embed-a", text));
 
+    assert_eq!(
+        embedded_texts(&openai, "embed-a")[1..],
+        [tea, cat, "Biscuit sleeps all day.", query]
+    );
     assert_eq!(
         items(&recalled),
         [(tea, Some(alike(tea))), (cat, Some(alike(cat)))]
