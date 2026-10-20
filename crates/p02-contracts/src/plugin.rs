@@ -10,7 +10,7 @@ use crate::config::ResolvedConfig;
 use crate::context::HookContext;
 use crate::manifest::Manifest;
 use crate::output::{BeforeRoleModelCallOutput, CommittedTurn, HealthReport, HookReport};
-use crate::tool::{ProvidedTool, ToolCall, ToolCallOutcome};
+use crate::tool::{ProvidedTool, ToolCall, ToolCallOutcome, ToolPreparation};
 use crate::vocabulary::{AccessLevel, AccessName, Declaration, ValidationFailureReason};
 
 /// A plugin compiled into the daemon. Which plugins run is decided by the
@@ -23,7 +23,8 @@ use crate::vocabulary::{AccessLevel, AccessName, Declaration, ValidationFailureR
 /// the hook's failure policy like any other failure.
 #[async_trait]
 pub trait RuntimePlugin: Send + Sync + fmt::Debug {
-    /// The tools the plugin answers in [`RuntimePlugin::handle_tool_call`].
+    /// The tools the plugin answers in [`RuntimePlugin::handle_tool_call`],
+    /// or, when approval-gated, in [`RuntimePlugin::prepare_tool_call`].
     fn provided_tools(&self) -> &[ProvidedTool] {
         &[]
     }
@@ -38,7 +39,8 @@ pub trait RuntimePlugin: Send + Sync + fmt::Debug {
         Err(PluginError::not_implemented(Hook::BeforeRoleModelCall))
     }
 
-    /// Answers a call of one of the plugin's tools.
+    /// Answers a call of one of the plugin's tools that act without
+    /// approval.
     async fn handle_tool_call(
         &self,
         call: &ToolCall,
@@ -47,6 +49,23 @@ pub trait RuntimePlugin: Send + Sync + fmt::Debug {
         let _ = (call, context);
 
         Err(PluginError::not_implemented(Hook::HandleToolCall))
+    }
+
+    /// Prepares a call of one of the plugin's approval-gated tools before
+    /// the person is asked, and changes nothing: a call the tool refuses is
+    /// refused without asking, and what the call does is its effect's, which
+    /// the host applies only on the person's yes.
+    async fn prepare_tool_call(
+        &self,
+        call: &ToolCall,
+        context: &HookContext,
+    ) -> Result<ToolPreparation, PluginError> {
+        let _ = (call, context);
+
+        Err(PluginError::new(format!(
+            "{} is declared, but the plugin prepares no approval-gated call",
+            Hook::HandleToolCall.name()
+        )))
     }
 
     /// Follows a turn that is already durable; it can undo nothing.
@@ -326,14 +345,14 @@ mod tests {
     use p02_core::{
         CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId,
     };
-    use serde_json::{Value, json};
+    use serde_json::{Map, Value, json};
     use tokio::time::Instant;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::context::TurnIdentity;
     use crate::schema::ToolInputContract;
-    use crate::tool::Confirmation;
+    use crate::tool::{Confirmation, ToolCallId};
     use crate::vocabulary::ToolConcurrency;
 
     #[derive(Debug)]
@@ -551,6 +570,21 @@ mod tests {
         assert_eq!(
             plugin.health(&context).await.unwrap_err().to_string(),
             "health is declared but not implemented"
+        );
+
+        let call = ToolCall::new(
+            ToolCallId::new("call-1").unwrap(),
+            Identifier::new("notes.forget").unwrap(),
+            Map::new(),
+        );
+
+        assert_eq!(
+            plugin
+                .prepare_tool_call(&call, &context)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "handleToolCall is declared, but the plugin prepares no approval-gated call"
         );
     }
 }

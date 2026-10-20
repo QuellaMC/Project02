@@ -25,8 +25,12 @@ p02-shared, and the runtime reaches plugins and providers only through it.
 - **Tools.** A tool's input contract is one JSON Schema document, draft 7,
   with an object root, admitted only when every keyword in it is enforced
   as written; in a pattern, `.` keeps its JavaScript meaning. A refused
-  input names the field and the rule, and the model is told so.
-- **The model.** A provider is a `RoleModelAdapter` over the chat wire.
+  input names the field and the rule, and the model is told so. A tool
+  that asks the person first prepares each call and changes nothing: a
+  call it refuses is refused without asking, the person is shown what the
+  call would do, and the host applies the prepared effect only on a yes.
+- **The model.** A provider is a `RoleModelAdapter` over the chat wire,
+  and answers with what the model wrote or with how the provider failed.
   `DecisionResult::parse` is the one judge of what a model round wrote:
   anything the decision contract does not allow is `malformed_output`,
   with details the model is told in its next round. One grammar reads the

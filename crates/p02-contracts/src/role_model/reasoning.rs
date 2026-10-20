@@ -150,11 +150,12 @@ fn match_tag(buffer: &str, start: usize) -> TagMatch {
 
     index += name.len();
 
-    // The name must end here: `<thinking>` is not a reasoning tag.
-    match buffer.as_bytes().get(index) {
+    // Only blank space, `/` or `>` ends a tag's name: `<thinking>` and
+    // `<think-aloud>` are other tags.
+    match buffer[index..].chars().next() {
         None => return TagMatch::Partial,
-        Some(byte) if byte.is_ascii_alphanumeric() || *byte == b'_' => return TagMatch::None,
-        Some(_) => {}
+        Some(next) if next.is_whitespace() || next == '/' || next == '>' => {}
+        Some(_) => return TagMatch::None,
     }
 
     let Some(offset) = buffer[index..].find('>') else {
@@ -202,7 +203,7 @@ mod tests {
     use super::*;
 
     /// The grammar, whole: what the decision parser and the adapters rely on.
-    const CASES: [(&str, Result<&str, ReasoningLeakError>); 15] = [
+    const CASES: [(&str, Result<&str, ReasoningLeakError>); 16] = [
         ("<think>plan</think>Hello", Ok("Hello")),
         ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", Ok("a  b")),
         ("<THINK>plan</Think>Hello", Ok("Hello")),
@@ -210,6 +211,10 @@ mod tests {
         ("<think>a<think>b</think>c", Ok("c")),
         ("<think>a</reasoning>b</think>c", Ok("c")),
         ("<thinking>x</thinking>", Ok("<thinking>x</thinking>")),
+        (
+            "<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>",
+            Ok("<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>"),
+        ),
         ("x < y and a<b", Ok("x < y and a<b")),
         ("<thin", Ok("<thin")),
         ("plain text", Ok("plain text")),

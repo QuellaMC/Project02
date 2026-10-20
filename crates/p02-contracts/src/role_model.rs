@@ -9,7 +9,8 @@ mod reasoning;
 mod tools;
 
 pub use adapter::{
-    Invocation, RawOutput, ReplyDelta, RoleModelAdapter, TextCompletion, TextCompletionRequest,
+    Invocation, ProviderAnswer, RawOutput, ReplyDelta, RoleModelAdapter, TextCompletion,
+    TextCompletionRequest,
 };
 pub use chat::{
     ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction, ContextRole,
