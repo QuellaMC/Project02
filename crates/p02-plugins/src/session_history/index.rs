@@ -565,8 +565,19 @@ fn positioned_message(row: &Row<'_>) -> rusqlite::Result<(i64, IndexedMessage)> 
     ))
 }
 
-/// Text as a case-insensitive match reads it: every character lowercased
-/// by itself, so a query and the text it is found in fold alike.
+/// Text as a case-insensitive match reads it, each character folded by
+/// itself, so a query and the text it is found in fold alike.
 pub(super) fn fold(text: &str) -> String {
-    text.chars().flat_map(char::to_lowercase).collect()
+    text.chars().flat_map(fold_character).collect()
+}
+
+/// A character lowercased, uppercased and lowercased again. That puts
+/// together every case variant Unicode's full case folding does (a final
+/// sigma with sigma, ß with SS, a ligature with its letters), and the
+/// dotless ı with I and i besides, as Turkish capitals write it.
+pub(super) fn fold_character(character: char) -> impl Iterator<Item = char> {
+    character
+        .to_lowercase()
+        .flat_map(char::to_uppercase)
+        .flat_map(char::to_lowercase)
 }
