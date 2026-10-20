@@ -8,6 +8,8 @@ mod health;
 mod host;
 mod invoke;
 mod lifecycle;
+pub mod mem0;
+mod package;
 mod policy;
 pub mod session_history;
 mod text;
