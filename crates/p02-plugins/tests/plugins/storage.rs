@@ -321,7 +321,7 @@ impl Feed {
             VisibleMessageRole::Character => "mira",
         };
         let message_id = MessageId::new(
-            SessionId::new(session).unwrap(),
+            SessionId::parse(session).unwrap(),
             NonZeroU64::new(u64::try_from(number).unwrap()).unwrap(),
         );
 
@@ -366,7 +366,7 @@ impl Feed {
 
     /// The catalog no longer lists the session.
     pub(crate) fn forget(&self, session: &str) {
-        let session = SessionId::new(session).unwrap();
+        let session = SessionId::parse(session).unwrap();
 
         self.log
             .lock()
@@ -403,7 +403,7 @@ impl Feed {
 
 impl Log {
     fn session(&mut self, session: &str) -> &mut Vec<Record> {
-        let session_id = SessionId::new(session).unwrap();
+        let session_id = SessionId::parse(session).unwrap();
         let at = self
             .sessions
             .iter()

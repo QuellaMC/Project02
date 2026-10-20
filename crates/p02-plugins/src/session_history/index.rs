@@ -230,13 +230,14 @@ impl SessionIndex {
         history: &SessionHistory,
         session_id: &SessionId,
     ) -> Result<bool, IndexError> {
+        let session = session_id.to_string();
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stored: Option<(String, i64, i64)> = transaction
             .query_row(
                 "SELECT cursor, message_count, damaged_records FROM sessions WHERE session_id = ?1",
-                [session_id.as_str()],
+                [session.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
@@ -262,7 +263,7 @@ impl SessionIndex {
         if batch.reset {
             transaction.execute(
                 "DELETE FROM messages WHERE session_id = ?1",
-                [session_id.as_str()],
+                [session.as_str()],
             )?;
         }
 
@@ -284,7 +285,7 @@ impl SessionIndex {
                     VisibleMessageRole::Character => "character",
                 };
                 let inserted = insert.execute(params![
-                    session_id.as_str(),
+                    session,
                     count,
                     message.id.to_string(),
                     role,
@@ -308,12 +309,7 @@ impl SessionIndex {
                cursor = excluded.cursor,
                message_count = excluded.message_count,
                damaged_records = excluded.damaged_records",
-            params![
-                session_id.as_str(),
-                batch.next_cursor.as_str(),
-                count,
-                damaged
-            ],
+            params![session, batch.next_cursor.as_str(), count, damaged],
         )?;
         transaction.commit()?;
         Ok(true)
@@ -367,8 +363,8 @@ impl SessionIndex {
         anchor: Option<&str>,
         window: i64,
     ) -> Result<Window, IndexError> {
-        let session = session_id.as_str();
-        let last = self.message_count(session)? - 1;
+        let session = session_id.to_string();
+        let last = self.message_count(&session)? - 1;
         let (start, end) = match anchor {
             None => ((last - window + 1).max(0), last),
             Some(anchor) => {
@@ -376,12 +372,12 @@ impl SessionIndex {
                     .connection
                     .query_row(
                         "SELECT position FROM messages WHERE session_id = ?1 AND message_id = ?2",
-                        [session, anchor],
+                        [session.as_str(), anchor],
                         |row| row.get::<_, i64>(0),
                     )
                     .optional()?
                     .ok_or_else(|| IndexError::MessageNotFound {
-                        session: session.to_owned(),
+                        session: session.clone(),
                         message: anchor.to_owned(),
                     })?;
 
@@ -462,7 +458,7 @@ impl SessionIndex {
             .query_map(
                 params![
                     matching,
-                    scope.session.map(SessionId::as_str),
+                    scope.session.map(SessionId::to_string),
                     unseen,
                     scope.limit
                 ],
