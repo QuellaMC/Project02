@@ -1,8 +1,7 @@
-use std::error::Error;
+use p02_contracts::{PluginError, ProvidedTool};
+use serde_json::json;
 
-use p02_contracts::{PluginError, ProvidedTool, ToolInputContract};
-use p02_shared::Identifier;
-use serde_json::{Value, json};
+use crate::package::tool;
 
 pub(super) const SEARCH: &str = "sessions.search";
 pub(super) const READ: &str = "sessions.read";
@@ -85,17 +84,4 @@ pub(super) fn provided() -> Result<Vec<ProvidedTool>, PluginError> {
             }),
         )?,
     ])
-}
-
-fn tool(name: &str, description: &str, contract: Value) -> Result<ProvidedTool, PluginError> {
-    ProvidedTool::new(
-        Identifier::new(name).map_err(refused(name))?,
-        description,
-        ToolInputContract::new(contract).map_err(refused(name))?,
-    )
-    .map_err(refused(name))
-}
-
-fn refused<E: Error + Send + Sync + 'static>(name: &str) -> impl Fn(E) -> PluginError + '_ {
-    move |error| PluginError::with_source(format!("tool \"{name}\" was refused"), error)
 }
