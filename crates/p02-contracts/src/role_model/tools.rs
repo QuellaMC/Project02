@@ -1,5 +1,5 @@
 use p02_core::VisibleText;
-use p02_shared::Identifier;
+use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json_object};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -76,12 +76,29 @@ struct WireCall {
 /// Why a recorded call is not a [`ModelToolCall`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "a recorded tool call names a tool by identifier, and a visible_reply carries one \
-     normalized \"text\""
+    "a recorded tool call names a tool by identifier, a plugin tool's input keeps within the \
+     JSON limits, and a visible_reply carries one normalized \"text\""
 )]
 pub struct ParseModelToolCallError;
 
 impl ModelToolCall {
+    /// A call of a plugin tool whose input crosses the JSON boundary, its
+    /// credential-named values kept to run the call or redacted to record it.
+    pub(crate) fn plugin(
+        name: Identifier,
+        input: Map<String, Value>,
+        credentials: Credentials,
+    ) -> Result<Self, BoundJsonError> {
+        let input = bound_json_object(
+            Value::Object(input),
+            &format!("Model tool \"{name}\" input"),
+            JsonLimits::default(),
+            credentials,
+        )?;
+
+        Ok(Self::Plugin { name, input })
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
@@ -111,10 +128,11 @@ impl TryFrom<WireCall> for ModelToolCall {
 
     fn try_from(call: WireCall) -> Result<Self, Self::Error> {
         if call.name != VISIBLE_REPLY {
-            return Ok(Self::Plugin {
-                name: Identifier::new(&call.name).map_err(|_| ParseModelToolCallError)?,
-                input: call.input,
-            });
+            let name = Identifier::new(&call.name).map_err(|_| ParseModelToolCallError)?;
+
+            // A record is judged as it stands, never rewritten.
+            return Self::plugin(name, call.input, Credentials::Keep)
+                .map_err(|_| ParseModelToolCallError);
         }
 
         match (
@@ -247,9 +265,14 @@ mod tests {
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), call);
         }
 
+        let many_fields: Map<String, Value> = (0..257)
+            .map(|index| (format!("field{index}"), json!(index)))
+            .collect();
+
         for refused in [
             json!({"name": "visible_reply", "input": {"text": " Hello."}}),
             json!({"name": "visible_reply", "input": {"text": "Hi.", "mood": "warm"}}),
+            json!({"name": "memory.capture", "input": many_fields}),
         ] {
             assert!(serde_json::from_value::<ModelToolCall>(refused).is_err());
         }

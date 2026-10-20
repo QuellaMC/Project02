@@ -22,8 +22,9 @@ use crate::vocabulary::ValidationFailureReason;
 /// checks, a keyword that applies to a type the schema never says the
 /// value has, a tuple of unstated length, a keyword ignored for want of
 /// its partner, a constraint beside a `$ref` and a `$ref` outside the
-/// document are refused. In a `pattern`, `.` keeps its JavaScript meaning:
-/// any character but a line terminator.
+/// document are refused. In a pattern, a `pattern` or a `patternProperties`
+/// key, `.` keeps its JavaScript meaning: any character but a line
+/// terminator. Two keys that are then one pattern are refused.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(try_from = "Value", into = "Value")]
 pub struct ToolInputContract {
@@ -75,6 +76,11 @@ pub enum InputContractError {
          {length} or additionalItems false"
     )]
     OpenTuple { length: usize, at: String },
+    #[error(
+        "pattern \"{pattern}\" at \"{at}\" spells an earlier pattern another way, so only one of \
+         their schemas would apply: merge them"
+    )]
+    DuplicatePattern { pattern: String, at: String },
     #[error("{rule} at \"{at}\"")]
     Ignored { rule: &'static str, at: String },
 }
@@ -429,7 +435,8 @@ impl ToolInputContract {
         }
     }
 
-    /// The keyword's value as authored, which a compiled pattern is not.
+    /// The keyword's value as authored, which a compiled pattern is not,
+    /// reached by the authored spelling of each key on the way.
     fn authored(&self, schema_path: &Location) -> Option<&Value> {
         let mut segments = schema_path.segments();
         let first = match segments.next()? {
@@ -438,13 +445,26 @@ impl ToolInputContract {
         };
 
         segments.try_fold(first, |value, segment| match segment {
-            LocationSegment::Property(key) => value.get(key.as_ref()),
+            LocationSegment::Property(key) => authored_entry(value, key.as_ref()),
             LocationSegment::Index(index) => match value {
                 Value::Object(entries) => entries.get(&index.to_string()),
                 _ => value.get(index),
             },
         })
     }
+}
+
+/// The entry of `value` a compiled path names: by its key, or by the
+/// authored pattern the key is the translation of.
+fn authored_entry<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let entries = value.as_object()?;
+
+    entries.get(key).or_else(|| {
+        entries
+            .iter()
+            .find(|(authored, _)| ecma_dots(authored) == key)
+            .map(|(_, entry)| entry)
+    })
 }
 
 /// The fields an `additionalProperties` failure names: every key of an
@@ -763,7 +783,17 @@ fn admit_pattern_properties(value: &mut Value, at: &str) -> Result<(), InputCont
 
     for (pattern, mut schema) in std::mem::take(entries) {
         admit(&mut schema, &format!("{at}/{}", escape(&pattern)), &[])?;
-        translated.insert(ecma_dots(&pattern).into_owned(), schema);
+
+        // Translation can make two authored keys one.
+        if translated
+            .insert(ecma_dots(&pattern).into_owned(), schema)
+            .is_some()
+        {
+            return Err(InputContractError::DuplicatePattern {
+                pattern,
+                at: at.to_owned(),
+            });
+        }
     }
 
     *entries = translated;
@@ -1084,6 +1114,19 @@ mod tests {
                 }),
                 InputContractError::UnsupportedDialect { at: at("#") },
             ),
+            (
+                json!({
+                    "type": "object",
+                    "patternProperties": {
+                        "^a.$": {"type": "string"},
+                        "^a[^\\n\\r\u{2028}\u{2029}]$": {"type": "number"},
+                    },
+                }),
+                InputContractError::DuplicatePattern {
+                    pattern: "^a[^\\n\\r\u{2028}\u{2029}]$".to_owned(),
+                    at: at("#/patternProperties"),
+                },
+            ),
         ];
 
         for (schema, expected) in cases {
@@ -1244,6 +1287,20 @@ mod tests {
                 &json!({"version": "v1.."}).as_object().cloned().unwrap()
             ),
             Ok(())
+        );
+
+        let keyed = contract(json!({
+            "type": "object",
+            "patternProperties": {"^a.$": {"type": "string", "pattern": "^x.$"}},
+        }));
+
+        assert_eq!(
+            keyed
+                .validate(&tool, &json!({"ab": "yy"}).as_object().cloned().unwrap())
+                .unwrap_err()
+                .sentence(),
+            r#"notes.add input field "ab" must match pattern "^x.$"."#,
+            "the pattern is named as authored under a translated key"
         );
     }
 }
