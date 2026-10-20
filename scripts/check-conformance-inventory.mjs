@@ -9,10 +9,11 @@
 // library, binaries and integration tests where Cargo finds them unasked,
 // with every file their modules bring in. There a test's title is the
 // first `///` line above its attributes, only a test whose title has that
-// shape names a row, `#[ignore]` or a `cfg` other than `cfg(test)` parks
-// it, on the test or on any module around it, and only a module may
-// enclose it; a file is read as Rust tokens, so there too a test in a
-// comment or a string is no test. The check runs where cargo may not be
+// shape names a row, `#[ignore]`, `#[should_panic]`, which passes by
+// failing, or a `cfg` other than `cfg(test)` parks it, on the test or on
+// any module around it, and only a module may enclose it; a file is read
+// as Rust tokens, so there too a test in a comment or a string is no
+// test. The check runs where cargo may not be
 // installed, so it reads only Cargo's defaults and the workspace's members
 // as this repository declares them, `["crates/*"]`: it refuses a manifest
 // key that sets otherwise which crates the workspace tests or where or
@@ -562,10 +563,11 @@ function closingBracket(tokens, open) {
   return tokens.length;
 }
 
-/** Whether an attribute parks what it is on and every test inside it: `#[ignore]`, or a `cfg` or `cfg_attr` the index cannot evaluate, which is any but `cfg(test)`, the one `cargo test` always sets. */
+/** Whether an attribute parks what it is on and every test inside it: `#[ignore]`; `#[should_panic]`, under which a test passes by failing; or a `cfg` or `cfg_attr` the index cannot evaluate, which is any but `cfg(test)`, the one `cargo test` always sets. */
 function parks({path, text}) {
   return (
     path === 'ignore' ||
+    path === 'should_panic' ||
     path === 'cfg_attr' ||
     (path === 'cfg' && text !== 'cfg(test)')
   );

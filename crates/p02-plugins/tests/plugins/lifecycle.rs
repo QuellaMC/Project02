@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, EvidenceKind,
-    EvidenceStatus, FactoryInput, HookReport, HookStatus, PluginError, PolicyOutcome,
+    BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, Evidence, EvidenceKind,
+    EvidenceNote, EvidenceStatus, FactoryInput, HookReport, HookStatus, PluginError, PolicyOutcome,
     ResolvedConfig, RuntimePlugin,
 };
 use p02_core::Timestamp;
@@ -114,6 +114,40 @@ async fn after_turn_failures_are_collected_and_reported_never_thrown() {
     );
     assert_eq!(reported.policy_outcome(), None);
     assert_eq!(clean.calls(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_report_its_own_record_says_failed_fails_its_phase() {
+    let report = host_of(vec![(
+        Spec {
+            declared: json!(["after_turn_committed"]),
+            ..Spec::new("contradicting")
+        },
+        Arc::new(Scripted {
+            report: Some(HookReport {
+                status: HookStatus::Completed,
+                evidence: vec![EvidenceNote::new(
+                    EvidenceKind::AfterTurnCommitted,
+                    EvidenceStatus::Failed,
+                    "The index was out of reach.",
+                )],
+            }),
+            ..Scripted::default()
+        }),
+    )])
+    .after_turn_committed(&turn(), &committed())
+    .await;
+
+    assert_eq!(report.status, PhaseStatus::CompletedWithFailures);
+    assert_eq!(
+        report
+            .evidence
+            .iter()
+            .map(Evidence::summary)
+            .collect::<Vec<_>>(),
+        ["The index was out of reach."],
+        "the plugin's own record says why, so the host adds none"
+    );
 }
 
 /// Answers its turns with the line its config gives it, and offers a tool

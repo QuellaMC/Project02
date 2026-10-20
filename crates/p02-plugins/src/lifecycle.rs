@@ -115,20 +115,25 @@ impl Core {
                         &format!("{} plugin hook failed: {}", hook.name(), failed.message),
                     ));
                 }
-                Ok((HookStatus::Completed, records)) => evidence.extend(records),
-                Ok((HookStatus::Failed, records)) => {
+                Ok((reported, records)) => {
                     let recorded = records.iter().any(|record| {
                         record.kind() == kind && record.status() == EvidenceStatus::Failed
                     });
 
-                    status = PhaseStatus::CompletedWithFailures;
                     evidence.extend(records);
 
-                    if !recorded {
-                        evidence.push(failure(
-                            FailureKind::Exception,
-                            &format!("{} plugin hook reported failure.", hook.name()),
-                        ));
+                    // A report fails by its status or by a failed record of
+                    // its phase, and one whose records do not say so gets
+                    // the host's.
+                    if recorded || reported == HookStatus::Failed {
+                        status = PhaseStatus::CompletedWithFailures;
+
+                        if !recorded {
+                            evidence.push(failure(
+                                FailureKind::Exception,
+                                &format!("{} plugin hook reported failure.", hook.name()),
+                            ));
+                        }
                     }
                 }
             }
