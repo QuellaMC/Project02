@@ -50,11 +50,15 @@ pub(crate) struct Core {
     pub(crate) confirmer: Option<Arc<dyn Confirmer>>,
 }
 
-/// One enabled plugin: its manifest, how to build it again, the instance
-/// serving now, and the handles its grants reach.
+/// One enabled plugin: its manifest, how to build it again, the tools it
+/// was activated with, the instance serving now, and the handles its
+/// grants reach.
 pub(crate) struct Slot {
     pub(crate) manifest: Manifest,
     factory: Box<Factory>,
+    /// The tools checked at activation, which the model is offered; a
+    /// rebuilt instance must provide the same.
+    tools: Vec<ProvidedTool>,
     live: RwLock<Arc<dyn RuntimePlugin>>,
     pub(crate) capabilities: Capabilities,
 }
@@ -161,7 +165,7 @@ impl PluginHost {
         let registration =
             Registration::new(slot.manifest.clone(), plugin).map_err(ReloadError::Registration)?;
 
-        if registration.tools() != slot.live().provided_tools() {
+        if registration.tools() != slot.tools.as_slice() {
             return Err(ReloadError::ToolsChanged(plugin_id.clone()));
         }
 
@@ -265,6 +269,7 @@ impl PluginHostBuilder {
                 capabilities: Capabilities::reached(&manifest, self.storage.as_ref()),
                 manifest,
                 factory,
+                tools: registration.tools().to_vec(),
                 live: RwLock::new(Arc::clone(registration.plugin())),
             });
         }
