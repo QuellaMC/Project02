@@ -7,8 +7,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use p02_contracts::{
     ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore,
-    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall,
-    ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
+    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreAccess, StoreError,
+    ToolCall, ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
     ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ToolCallReport, Turn,
@@ -18,8 +18,8 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Scripted, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note, tool,
-    turn,
+    Enable, Scripted, Seen, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note,
+    tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ToolCall, turn: &Turn) -> ToolCallReport {
@@ -408,7 +408,11 @@ fn settings_host(
 ) -> PluginHost {
     let builder = PluginHost::builder(Arc::clone(storage) as _).enable(
         &Spec {
-            access: json!({"model_input": "write", "character_file_store": "write"}),
+            access: json!({
+                "model_input": "write",
+                "character_file_store": "write",
+                "plugin_database": "write",
+            }),
             ..Spec::tools("settings")
         },
         Arc::clone(settings) as _,
@@ -421,7 +425,7 @@ fn settings_host(
     builder.activate().unwrap()
 }
 
-/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared
+/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and no database and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared
 #[tokio::test(start_paused = true)]
 async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes() {
     let storage = Storage::new();
@@ -494,16 +498,18 @@ async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes(
 
     let unasked = hosted(None);
     let refused = one(&unasked, update(), &turn()).await;
+    let unable_to_write = Seen {
+        store: Some(StoreAccess::ReadOnly),
+        ..Seen::default()
+    };
 
     assert!(unasked.tool_definitions().get("settings.update").is_none());
     assert_eq!(reason(&refused), Some("tool_not_routable"));
-    assert!(
-        matches!(
-            settings.preparation_writes.lock().unwrap().as_slice(),
-            [Err(StoreError::ReadOnly), Err(StoreError::ReadOnly)]
-        ),
-        "each call the person was asked about was prepared unable to write, and the one nobody \
-         could be asked about was never prepared"
+    assert_eq!(
+        settings.prepared_with.lock().unwrap().as_slice(),
+        [unable_to_write.clone(), unable_to_write],
+        "each call the person was asked about was prepared unable to write, with no database, \
+         and the one nobody could be asked about was never prepared"
     );
 }
 

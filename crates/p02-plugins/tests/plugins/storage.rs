@@ -349,6 +349,17 @@ impl Feed {
         self.log.lock().unwrap().damaged_entries += 1;
     }
 
+    /// The catalog no longer lists the session.
+    pub(crate) fn forget(&self, session: &str) {
+        let session = SessionId::new(session).unwrap();
+
+        self.log
+            .lock()
+            .unwrap()
+            .sessions
+            .retain(|(summary, _)| summary.session_id != session);
+    }
+
     /// The session's log keeps only its first `records`: it shrank.
     pub(crate) fn shrink(&self, session: &str, records: usize) {
         self.log.lock().unwrap().session(session).truncate(records);

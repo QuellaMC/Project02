@@ -28,13 +28,14 @@ pub(crate) fn grants(access: &AccessMap) -> Grants {
     }
 }
 
-/// What one invocation may do with a store the plugin is granted: a plugin
-/// that is ending only reads, and so does an approval-gated call's
-/// preparation, since what the call changes is its effect's, applied only
-/// on the person's yes.
-pub(crate) fn store_access(granted: StoreAccess, invocation: Invocation) -> StoreAccess {
-    match invocation {
-        Invocation::Hook(Hook::OnShutdown) | Invocation::Preparation => StoreAccess::ReadOnly,
-        Invocation::Hook(_) => granted,
-    }
+/// Whether an invocation only reads what its plugin is granted: a plugin
+/// that is ending does, and so does an approval-gated call's preparation,
+/// since what the call changes is its effect's, applied only on the
+/// person's yes. Its store is then read-only, and it opens no database,
+/// which has no read-only view.
+pub(crate) fn only_reads(invocation: Invocation) -> bool {
+    matches!(
+        invocation,
+        Invocation::Hook(Hook::OnShutdown) | Invocation::Preparation
+    )
 }

@@ -3,17 +3,17 @@
 //! Each hook runs as a task of its own, so a hook that blocks its thread
 //! holds that worker alone and the host keeps its deadline, and a hook
 //! that panics fails through its plugin's policy instead of taking the
-//! turn down. Whichever
-//! way the host stops waiting (an answer, the deadline, the turn being
-//! abandoned, or the caller dropping the wait) the hook's writes end, and
-//! unless it answered in time its task is aborted and its token cancelled,
-//! so work it started elsewhere starts nothing more.
+//! turn down. A hook of a turn already abandoned is never started.
+//! Whichever way the host stops waiting (an answer, the deadline, the turn
+//! being abandoned, or the caller dropping the wait) the hook's writes
+//! end, and unless it answered in time its task is aborted and its token
+//! cancelled, so work it started elsewhere starts nothing more.
 
 use std::any::Any;
 use std::future::Future;
 use std::sync::Arc;
 
-use p02_contracts::{Hook, HookContext, PluginError, WriteHold};
+use p02_contracts::{Hook, HookContext, PluginError, StoreAccess, WriteHold};
 use tokio::task::{AbortHandle, JoinError};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -88,13 +88,17 @@ impl Slot {
         let invocation = invocation.into();
         let hook = invocation.hook();
         let policy = self.manifest.runtime_policy();
-        let deadline = Instant::now() + policy.timeout();
-        let cancellation = turn.cancellation().child_token();
-        let unanswered = cancellation.clone().drop_guard();
-        let (context, _writes) = self.context(turn, invocation, deadline, cancellation);
-        let mut task = tokio::spawn(call(context));
-        let _abort = AbortOnDrop(task.abort_handle());
         let failure = |kind, message| HookFailure { kind, message };
+        let abandoned = || {
+            failure(
+                FailureKind::Exception,
+                format!(
+                    "Plugin \"{}\" {} was stopped: its turn was abandoned.",
+                    self.manifest.id(),
+                    hook.name()
+                ),
+            )
+        };
         let timed_out = || {
             failure(
                 FailureKind::Timeout,
@@ -107,18 +111,20 @@ impl Slot {
             )
         };
 
+        if turn.cancellation().is_cancelled() {
+            return Err(abandoned());
+        }
+
+        let deadline = Instant::now() + policy.timeout();
+        let cancellation = turn.cancellation().child_token();
+        let unanswered = cancellation.clone().drop_guard();
+        let (context, _writes) = self.context(turn, invocation, deadline, cancellation);
+        let mut task = tokio::spawn(call(context));
+        let _abort = AbortOnDrop(task.abort_handle());
+
         let settled = tokio::select! {
             settled = tokio::time::timeout_at(deadline, &mut task) => settled,
-            () = turn.cancellation().cancelled() => {
-                return Err(failure(
-                    FailureKind::Exception,
-                    format!(
-                        "Plugin \"{}\" {} was stopped: its turn was abandoned.",
-                        self.manifest.id(),
-                        hook.name()
-                    ),
-                ));
-            }
+            () = turn.cancellation().cancelled() => return Err(abandoned()),
         };
 
         match settled {
@@ -142,6 +148,7 @@ impl Slot {
         cancellation: CancellationToken,
     ) -> (HookContext, Option<WriteHold>) {
         let capabilities = &self.capabilities;
+        let only_reads = policy::access::only_reads(invocation);
         let mut context = HookContext::new(
             self.manifest.id().clone(),
             turn.shared_identity(),
@@ -160,16 +167,21 @@ impl Slot {
             context = context.with_session_history(Arc::clone(feed));
         }
 
-        if let Some(opener) = &capabilities.databases {
+        if let Some(opener) = &capabilities.databases
+            && !only_reads
+        {
             context = context.with_plugin_database(Arc::clone(opener));
         }
 
         match &capabilities.file_store {
-            Some((backend, access)) => {
-                let (context, hold) = context.with_character_file_store(
-                    Arc::clone(backend),
-                    policy::access::store_access(*access, invocation),
-                );
+            Some((backend, granted)) => {
+                let access = if only_reads {
+                    StoreAccess::ReadOnly
+                } else {
+                    *granted
+                };
+                let (context, hold) =
+                    context.with_character_file_store(Arc::clone(backend), access);
 
                 (context, Some(hold))
             }

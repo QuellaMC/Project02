@@ -16,15 +16,17 @@ character's storage grants through the contracts.
   budget: a hook that panics fails through its policy, and a hook that
   blocks its worker holds that worker alone, so the host keeps its
   deadline; blocking work belongs on the blocking pool, where session
-  history does its database work. When the host stops waiting (an
-  answer, the deadline, the turn
+  history does its database work. No hook of a turn already abandoned
+  starts. When the host stops waiting (an answer, the deadline, the turn
   abandoned) the hook's writes end, and a hook that did not answer in time
-  has its task aborted and its token cancelled. A failure goes through
-  the hook's failure policy: `beforeRoleModelCall` degrades or rejects the
-  turn; a tool call is refused with a reason the model reads; the hooks
-  after a commit, at a session's end and at shutdown, where stores only
-  read, are collected and reported, never thrown; a health check that is
-  not ok rejects the turn when its plugin's policy says so.
+  has its task aborted and its token cancelled. A plugin that is ending
+  only reads: its store is read-only and it opens no database, which has
+  no read-only view. A failure goes through the hook's failure policy:
+  `beforeRoleModelCall` degrades or rejects the turn; a tool call is
+  refused with a reason the model reads; the hooks after a commit, at a
+  session's end and at shutdown are collected and reported, never thrown;
+  a health check that is not ok rejects the turn when its plugin's policy
+  says so.
 - **The output boundary.** Nothing a plugin returns reaches the model,
   the person or the log until it keeps to the record limits and the JSON
   limits, each record and each answer as a whole, stamped with its turn,
@@ -35,11 +37,12 @@ character's storage grants through the contracts.
 - **Tools.** A round's calls run in the model's order: consecutive shared
   calls overlap, an exclusive one runs alone, none overtakes another. An
   input is judged by its tool's contract before any plugin sees it. A tool
-  that asks first prepares each call with its store read-only: a call it
-  refuses is refused without asking, otherwise the person is shown what the
-  call would do, through the confirmer the caller supplies, and only on
-  their yes does the host apply the prepared effect, under a budget of its
-  own. Without a confirmer such a tool is never offered.
+  that asks first prepares each call only reading, as an ending plugin
+  does: a call it refuses is refused without asking, otherwise the person
+  is shown what the call would do, through the confirmer the caller
+  supplies, and only on their yes does the host apply the prepared effect,
+  under a budget of its own. Without a confirmer such a tool is never
+  offered.
 - **The trusted frame.** Only a plugin granted `trusted_context: write`
   puts runtime notes and curated sections there, whole and within their
   caps; its other items, and every item of another plugin, ride the
@@ -47,5 +50,6 @@ character's storage grants through the contracts.
 - **Session history.** The first plugin compiled in: an index of the
   character's own conversations in its own database, caught up slice by
   slice from the session history after each committed turn and before
-  each query, with a literal full-text search that never matches what the
-  model already sees and a read that scrolls a session by message.
+  each query and holding no session the history no longer lists, with a
+  literal full-text search that never matches what the model already sees
+  and a read that scrolls a session by message.

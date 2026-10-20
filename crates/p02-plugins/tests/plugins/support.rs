@@ -538,6 +538,29 @@ pub(crate) struct Seen {
     pub(crate) databases: bool,
 }
 
+impl Seen {
+    /// What `context` carries; how its store may be used is found by
+    /// trying to write.
+    pub(crate) fn of(context: &HookContext) -> Self {
+        let store = context.character_file_store().map(|store| {
+            match store.with_lease(|leased| leased.write_json("probe.json", &json!("probed"))) {
+                Ok(()) => StoreAccess::ReadWrite,
+                Err(StoreError::ReadOnly) => StoreAccess::ReadOnly,
+                Err(error) => panic!("the probed store failed: {error}"),
+            }
+        });
+
+        Self {
+            message: context
+                .turn_text()
+                .map(|text| text.current_user_message.to_string()),
+            store,
+            history: context.session_history().is_some(),
+            databases: context.plugin_database().is_some(),
+        }
+    }
+}
+
 /// Records what its contexts carried, by hook.
 #[derive(Debug, Default)]
 pub(crate) struct Probe {
@@ -546,25 +569,7 @@ pub(crate) struct Probe {
 
 impl Probe {
     fn look(&self, hook: &'static str, context: &HookContext) {
-        let store = context.character_file_store().map(|store| {
-            match store.with_lease(|leased| leased.write_json("probe.json", &json!(hook))) {
-                Ok(()) => StoreAccess::ReadWrite,
-                Err(StoreError::ReadOnly) => StoreAccess::ReadOnly,
-                Err(error) => panic!("the probe's store failed: {error}"),
-            }
-        });
-
-        self.seen.lock().unwrap().insert(
-            hook,
-            Seen {
-                message: context
-                    .turn_text()
-                    .map(|text| text.current_user_message.to_string()),
-                store,
-                history: context.session_history().is_some(),
-                databases: context.plugin_database().is_some(),
-            },
-        );
+        self.seen.lock().unwrap().insert(hook, Seen::of(context));
     }
 
     pub(crate) fn seen(&self, hook: &str) -> Option<Seen> {
@@ -667,14 +672,14 @@ impl RuntimePlugin for SlowTools {
 const SETTINGS: &str = "settings.json";
 
 /// `settings.update` asks the person first. Its preparation refuses a tone
-/// it does not know; otherwise it reads the settings saved now, tries, as
-/// no preparation should, to save the new ones, keeping what that write
-/// came to, and answers with `notes`. Its effect saves the new settings.
+/// it does not know; otherwise it reads the settings saved now, keeps what
+/// its context carried, trying its store, as no preparation should, with a
+/// write, and answers with `notes`. Its effect saves the new settings.
 #[derive(Debug)]
 pub(crate) struct Settings {
     tools: Vec<ProvidedTool>,
     notes: Vec<EvidenceNote>,
-    pub(crate) preparation_writes: Mutex<Vec<Result<(), StoreError>>>,
+    pub(crate) prepared_with: Mutex<Vec<Seen>>,
 }
 
 impl Settings {
@@ -682,7 +687,7 @@ impl Settings {
         Self {
             tools: vec![tool("settings.update").with_confirmation(Confirmation::Required)],
             notes,
-            preparation_writes: Mutex::new(Vec::new()),
+            prepared_with: Mutex::new(Vec::new()),
         }
     }
 }
@@ -716,15 +721,9 @@ impl RuntimePlugin for Settings {
             .character_file_store()
             .ok_or_else(|| PluginError::new("the store was not granted"))?;
         let settings = Value::Object(call.input().clone());
-        let saved = store.with_lease(|leased| {
-            let saved = leased.read_json(SETTINGS)?;
+        let saved = store.with_lease(|leased| leased.read_json(SETTINGS))?;
 
-            self.preparation_writes
-                .lock()
-                .unwrap()
-                .push(leased.write_json(SETTINGS, &settings));
-            Ok(saved)
-        })?;
+        self.prepared_with.lock().unwrap().push(Seen::of(context));
 
         Ok(ToolPreparation::Prepared {
             preview: [
