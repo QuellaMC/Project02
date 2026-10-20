@@ -14,11 +14,10 @@ use p02_shared::{Credentials, JsonLimits, bound_json, bound_json_object};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::boundary::{QUOTED_CHARS, described, within_answer_limits};
+use crate::boundary::{described, quoted, within_answer_limits};
 use crate::confirmation::{ConfirmationDecision, ConfirmationRequest};
 use crate::host::{Core, PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure};
-use crate::text::excerpt;
 use crate::turn::Turn;
 
 /// What one tool call came to: what the model reads, and the records the
@@ -325,7 +324,7 @@ impl Slot {
         status: EvidenceStatus,
         outcome: PolicyOutcome,
     ) -> ToolCallReport {
-        let message = excerpt(message, QUOTED_CHARS).into_owned();
+        let message = quoted(message).into_owned();
 
         ToolCallReport {
             evidence: vec![self.record(

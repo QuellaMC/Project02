@@ -14,7 +14,7 @@ use serde_json::json;
 use tokio::time::Instant;
 
 use crate::support::{
-    Blocking, Failing, Hanging, Panicking, Scripted, Spec, host_of, id, note, turn,
+    Blocking, Failing, Hanging, Panicking, Scripted, Spec, Verbose, host_of, id, note, turn,
 };
 
 fn prepared(outcome: BeforeCallOutcome) -> PreparedContext {
@@ -206,6 +206,24 @@ async fn a_failing_hook_follows_its_failure_behavior() {
         rejection.evidence[0].policy_outcome(),
         Some(PolicyOutcome::RequiredRejected)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_verbose_failure_rejects_the_turn_with_what_a_record_keeps() {
+    let rejection = rejected(
+        host_of(vec![(
+            Spec {
+                before: "reject_turn",
+                ..Spec::new("chatty")
+            },
+            Arc::new(Verbose::default()),
+        )])
+        .before_role_model_call(&turn())
+        .await,
+    );
+
+    assert_eq!(rejection.message.chars().count(), 4_096);
+    assert!(rejection.message.ends_with("..."));
 }
 
 #[tokio::test(start_paused = true)]

@@ -28,8 +28,10 @@ character's storage grants through the contracts.
 - **The output boundary.** Nothing a plugin returns reaches the model or
   the log until it keeps to the record limits and the JSON limits, each
   record and each answer as a whole, stamped with its turn, its plugin
-  and their labels; a tool's output has every credential-named value
-  redacted. A breach fails the plugin; nothing is cut to fit.
+  and their labels, which are held where they enter, by the turn and at
+  activation, to what a record has room for; a tool's output has every
+  credential-named value redacted. A breach fails the plugin; nothing is
+  cut to fit.
 - **Tools.** A round's calls run in the model's order: consecutive shared
   calls overlap, an exclusive one runs alone, none overtakes another. An
   input is judged by its tool's contract before any plugin sees it, and a

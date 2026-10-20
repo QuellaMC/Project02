@@ -9,6 +9,7 @@ use p02_contracts::{
 };
 use p02_shared::Identifier;
 
+use crate::boundary::{RecordLabelsError, within_label_allowance};
 use crate::confirmation::Confirmer;
 use crate::lifecycle::{HookPhaseReport, Lifecycle};
 use crate::policy;
@@ -70,6 +71,12 @@ pub(crate) struct Capabilities {
 pub enum ActivationError {
     #[error("plugin \"{0}\" is enabled twice")]
     DuplicatePlugin(Identifier),
+    #[error("plugin \"{plugin_id}\" has redaction labels its records cannot carry")]
+    RedactionLabels {
+        plugin_id: Identifier,
+        #[source]
+        source: RecordLabelsError,
+    },
     #[error("plugin \"{plugin_id}\" could not be built")]
     Build {
         plugin_id: Identifier,
@@ -204,14 +211,15 @@ impl PluginHostBuilder {
     }
 
     /// Builds every plugin and holds the set to the host's rules: one
-    /// instance per plugin, each matching its manifest, and each tool name
-    /// offered to the model by one plugin alone.
+    /// instance per plugin, each matching its manifest and with labels its
+    /// records can carry, and each tool name offered to the model by one
+    /// plugin alone.
     ///
     /// # Errors
     ///
-    /// [`ActivationError`] for the first plugin enabled twice, built in
-    /// vain, or contradicting its manifest, or the first tool name two
-    /// plugins provide.
+    /// [`ActivationError`] for the first plugin enabled twice, with more
+    /// labels than a record has room for, built in vain, or contradicting
+    /// its manifest, or the first tool name two plugins provide.
     pub fn activate(self) -> Result<PluginHost, ActivationError> {
         let mut slots: Vec<Slot> = Vec::with_capacity(self.plugins.len());
         let mut definitions = Vec::new();
@@ -227,6 +235,13 @@ impl PluginHostBuilder {
             if slots.iter().any(|slot| slot.manifest.id() == &plugin_id) {
                 return Err(ActivationError::DuplicatePlugin(plugin_id));
             }
+
+            within_label_allowance(manifest.runtime_policy().redaction_labels()).map_err(
+                |source| ActivationError::RedactionLabels {
+                    plugin_id: plugin_id.clone(),
+                    source,
+                },
+            )?;
 
             let plugin = factory(&FactoryInput::new(&manifest, &config)).map_err(|source| {
                 ActivationError::Build {

@@ -15,6 +15,7 @@ mod tool_call;
 mod turn;
 
 pub use before_call::{BeforeCallOutcome, PreparedContext, TurnRejection};
+pub use boundary::RecordLabelsError;
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 pub use health::{HealthCheck, HealthRejection};
 pub use host::{ActivationError, PluginHost, PluginHostBuilder, ReloadError};

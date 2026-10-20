@@ -5,16 +5,20 @@ use std::error::Error;
 use std::sync::Arc;
 
 use p02_contracts::{
-    CommittedTurn, EvidenceStatus, FactoryInput, PluginError, RegistrationError, ResolvedConfig,
-    StoreAccess,
+    CommittedTurn, EvidenceStatus, FactoryInput, PluginError, RedactionLabel, RegistrationError,
+    ResolvedConfig, StoreAccess,
 };
 use p02_core::Timestamp;
-use p02_plugins::{ActivationError, BeforeCallOutcome, PluginHost, session_history};
+use p02_plugins::{
+    ActivationError, BeforeCallOutcome, PluginHost, RecordLabelsError, session_history,
+};
 use p02_shared::Identifier;
 use serde_json::json;
 
 use crate::storage::Storage;
-use crate::support::{Enable, Probe, Scripted, Seen, Spec, bundled_manifest, serving, tool, turn};
+use crate::support::{
+    Enable, Probe, Scripted, Seen, Spec, Verbose, bundled_manifest, serving, tool, turn,
+};
 
 /// plugins.manifest-validation: two enabled plugins offering one tool name, or one plugin offering a tool twice, are refused at activation
 #[test]
@@ -80,6 +84,64 @@ fn a_plugin_enabled_twice_or_built_in_vain_is_refused_at_activation() {
     assert_eq!(
         in_vain.source().map(ToString::to_string),
         Some("no backend is configured".to_owned())
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn labels_are_held_where_they_enter_to_what_a_record_has_room_for() {
+    let fullest = |source: &str| {
+        (0..16)
+            .map(|index| RedactionLabel::new(&format!("{source}{index:0>124}")).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let one_more =
+        |source: &str| [fullest(source), vec![RedactionLabel::new("extra").unwrap()]].concat();
+    let chatty = |labels: Vec<RedactionLabel>| Spec {
+        before: "reject_turn",
+        labels: json!(
+            labels
+                .iter()
+                .map(RedactionLabel::as_str)
+                .collect::<Vec<_>>()
+        ),
+        ..Spec::new("chatty")
+    };
+    let host = PluginHost::builder(Storage::new())
+        .enable(&chatty(fullest("plug")), Arc::new(Verbose::default()))
+        .activate()
+        .unwrap();
+    let labeled = turn().with_privacy_labels(fullest("turn")).unwrap();
+    let BeforeCallOutcome::Rejected(rejection) = host.before_role_model_call(&labeled).await else {
+        panic!("a verbose required hook rejects the turn");
+    };
+    let refused = PluginHost::builder(Storage::new())
+        .enable(&chatty(one_more("plug")), Arc::new(Verbose::default()))
+        .activate()
+        .unwrap_err();
+
+    // The fullest labels of a turn and of a plugin ride even the longest record.
+    assert_eq!(rejection.evidence[0].redaction_labels().len(), 32);
+    assert_eq!(
+        refused.to_string(),
+        r#"plugin "chatty" has redaction labels its records cannot carry"#
+    );
+    assert_eq!(
+        refused.source().map(ToString::to_string),
+        Some(
+            "a turn or a plugin brings at most 16 labels to each record, each of at most 128 \
+             bytes"
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        turn().with_privacy_labels(one_more("turn")).unwrap_err(),
+        RecordLabelsError
+    );
+    assert_eq!(
+        turn()
+            .with_privacy_labels(vec![RedactionLabel::new(&"x".repeat(129)).unwrap()])
+            .unwrap_err(),
+        RecordLabelsError
     );
 }
 

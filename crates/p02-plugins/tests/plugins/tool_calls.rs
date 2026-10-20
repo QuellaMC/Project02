@@ -18,7 +18,7 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Scripted, SlowTools, Spec, Stalling, call, host_of, id, note, tool, turn,
+    Enable, Scripted, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note, tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ToolCall, turn: &Turn) -> ToolCallReport {
@@ -304,27 +304,6 @@ async fn a_plugin_answer_is_recorded_as_what_it_says_or_fails_the_call() {
         message(&oversized),
         "Plugin tool output exceeds the JSON string byte limit"
     );
-}
-
-/// Fails every call with more words than any record keeps.
-#[derive(Debug)]
-struct Verbose {
-    tools: Vec<ProvidedTool>,
-}
-
-#[async_trait]
-impl RuntimePlugin for Verbose {
-    fn provided_tools(&self) -> &[ProvidedTool] {
-        &self.tools
-    }
-
-    async fn handle_tool_call(
-        &self,
-        _call: &ToolCall,
-        _context: &HookContext,
-    ) -> Result<ToolCallOutcome, PluginError> {
-        Err(PluginError::new("x".repeat(20_000)))
-    }
 }
 
 #[tokio::test(start_paused = true)]

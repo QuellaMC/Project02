@@ -3,6 +3,8 @@ use std::sync::Arc;
 use p02_contracts::{RedactionLabel, TurnIdentity, TurnText};
 use tokio_util::sync::CancellationToken;
 
+use crate::boundary::{RecordLabelsError, within_label_allowance};
+
 /// What the runtime hands the host for one turn, or for the event that
 /// ends a session or the character: who and when, what was said if
 /// anything was, the privacy labels the turn carries, and the token that
@@ -33,10 +35,20 @@ impl Turn {
         self
     }
 
-    #[must_use]
-    pub fn with_privacy_labels(mut self, labels: Vec<RedactionLabel>) -> Self {
+    /// The privacy labels every record of the turn carries, beside its
+    /// plugin's.
+    ///
+    /// # Errors
+    ///
+    /// [`RecordLabelsError`] for more labels, or a longer one, than a record
+    /// has room for.
+    pub fn with_privacy_labels(
+        mut self,
+        labels: Vec<RedactionLabel>,
+    ) -> Result<Self, RecordLabelsError> {
+        within_label_allowance(&labels)?;
         self.privacy_labels = labels.into();
-        self
+        Ok(self)
     }
 
     #[must_use]

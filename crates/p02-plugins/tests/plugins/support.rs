@@ -56,6 +56,7 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
             .collect(),
     })
     .with_privacy_labels(vec![RedactionLabel::new("turn").unwrap()])
+    .unwrap()
 }
 
 pub(crate) fn call(call_id: &str, tool: &str, input: Value) -> ToolCall {
@@ -81,6 +82,7 @@ pub(crate) struct Spec {
     pub(crate) id: &'static str,
     pub(crate) declared: Value,
     pub(crate) timeout_ms: u64,
+    pub(crate) labels: Value,
     pub(crate) before: &'static str,
     pub(crate) tool: &'static str,
     pub(crate) health: &'static str,
@@ -93,6 +95,7 @@ impl Spec {
             id,
             declared: json!(["before_role_model_call"]),
             timeout_ms: 1_000,
+            labels: json!(["toy"]),
             before: "degrade",
             tool: "reject_tool_call",
             health: "degrade",
@@ -122,7 +125,7 @@ impl Spec {
             "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": self.timeout_ms,
-                "redactionLabels": ["toy"],
+                "redactionLabels": self.labels,
                 "failureBehavior": {
                     "beforeRoleModelCall": self.before,
                     "handleToolCall": self.tool,
@@ -359,6 +362,40 @@ impl RuntimePlugin for Failing {
 
     async fn health(&self, _context: &HookContext) -> Result<HealthReport, PluginError> {
         Err(PluginError::new("backend unreachable"))
+    }
+}
+
+/// Fails every hook with more words than any record keeps.
+#[derive(Debug, Default)]
+pub(crate) struct Verbose {
+    pub(crate) tools: Vec<ProvidedTool>,
+}
+
+impl Verbose {
+    fn failure() -> PluginError {
+        PluginError::new("x".repeat(20_000))
+    }
+}
+
+#[async_trait]
+impl RuntimePlugin for Verbose {
+    fn provided_tools(&self) -> &[ProvidedTool] {
+        &self.tools
+    }
+
+    async fn before_role_model_call(
+        &self,
+        _context: &HookContext,
+    ) -> Result<BeforeRoleModelCallOutput, PluginError> {
+        Err(Self::failure())
+    }
+
+    async fn handle_tool_call(
+        &self,
+        _call: &ToolCall,
+        _context: &HookContext,
+    ) -> Result<ToolCallOutcome, PluginError> {
+        Err(Self::failure())
     }
 }
 

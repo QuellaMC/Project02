@@ -3,6 +3,7 @@
 //! its plugin and their labels. A breach is the plugin's failure, routed
 //! through its failure policy; nothing a plugin returns is cut to fit.
 
+use std::borrow::Cow;
 use std::error::Error;
 
 use p02_contracts::{
@@ -21,7 +22,41 @@ pub(crate) const RECORD_LIMIT: usize = 64;
 
 /// How much of a plugin's own text a host record repeats: enough to say
 /// what failed, and within the JSON limits whatever the plugin said.
-pub(crate) const QUOTED_CHARS: usize = 4_096;
+const QUOTED_CHARS: usize = 4_096;
+
+/// What the host repeats of a plugin's own text, in a record and in the
+/// refusal or rejection it reports.
+pub(crate) fn quoted(text: &str) -> Cow<'_, str> {
+    excerpt(text, QUOTED_CHARS)
+}
+
+/// How many labels a turn, or a plugin's manifest, brings to each record,
+/// and how long each may be: more than any record needs, and few enough
+/// that the labels of both, beside the longest summary the host writes,
+/// keep the record within the JSON limits.
+const LABEL_LIMIT: usize = 16;
+const LABEL_BYTES: usize = 128;
+
+/// Why labels cannot ride a record.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "a turn or a plugin brings at most {LABEL_LIMIT} labels to each record, each of at most \
+     {LABEL_BYTES} bytes"
+)]
+pub struct RecordLabelsError;
+
+/// Holds labels, where they enter the host, to what a record has room for.
+pub(crate) fn within_label_allowance(labels: &[RedactionLabel]) -> Result<(), RecordLabelsError> {
+    if labels.len() <= LABEL_LIMIT
+        && labels
+            .iter()
+            .all(|label| label.as_str().len() <= LABEL_BYTES)
+    {
+        Ok(())
+    } else {
+        Err(RecordLabelsError)
+    }
+}
 
 impl Slot {
     pub(crate) fn labels(&self, turn: &Turn) -> Vec<RedactionLabel> {
@@ -64,7 +99,7 @@ impl Slot {
         summary: &str,
         outcome: Option<PolicyOutcome>,
     ) -> Evidence {
-        let note = EvidenceNote::new(kind, status, excerpt(summary, QUOTED_CHARS));
+        let note = EvidenceNote::new(kind, status, quoted(summary));
         let note = match outcome {
             Some(outcome) => note.with_policy_outcome(outcome),
             None => note,
@@ -76,7 +111,10 @@ impl Slot {
             note,
             self.labels(turn),
         )
-        .expect("a host record says something, within the limits once its quote is cut")
+        .expect(
+            "a host record says something, within the limits once its quote is cut and its \
+             labels were held where they entered",
+        )
     }
 }
 

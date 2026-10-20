@@ -126,7 +126,10 @@ impl Slot {
                     },
                     self.labels(turn),
                 )
-                .expect("a failure says something, within the limits once it is cut");
+                .expect(
+                    "a failure says something, within the limits once it is cut and its labels \
+                     were held where they entered",
+                );
                 let record = self.record(
                     turn,
                     EvidenceKind::Health,
