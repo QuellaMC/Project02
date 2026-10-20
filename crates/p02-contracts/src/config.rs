@@ -147,7 +147,6 @@ impl ConfigField {
             Some(ConfigValueType::Boolean) => value.is_boolean(),
             Some(ConfigValueType::Object) => value.is_object(),
             Some(ConfigValueType::Array) => value.is_array(),
-            Some(ConfigValueType::Secret) => self.secret && value.is_string(),
         }
     }
 }
@@ -197,7 +196,7 @@ mod tests {
             name: Identifier::new("tone").unwrap(),
             description: "Reply tone.".to_owned(),
             required: false,
-            secret: value_type == Some(ConfigValueType::Secret),
+            secret: false,
             scope: None,
             value_type,
             default_value: None,
@@ -226,11 +225,6 @@ mod tests {
             ),
             (field(Some(ConfigValueType::Object), None), json!([]), false),
             (field(Some(ConfigValueType::Array), None), json!([]), true),
-            (
-                field(Some(ConfigValueType::Secret), None),
-                json!("key"),
-                true,
-            ),
             (
                 field(Some(ConfigValueType::String), Some(&["warm", "formal"])),
                 json!("formal"),

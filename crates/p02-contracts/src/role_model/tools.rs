@@ -3,6 +3,7 @@ use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use crate::role_model::reasoning::scrub_reasoning_blocks;
 use crate::tool::ProvidedTool;
 
 /// The built-in tool a character speaks with. It is always offered, ahead
@@ -77,11 +78,36 @@ struct WireCall {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
     "a recorded tool call names a tool by identifier, a plugin tool's input keeps within the \
-     JSON limits, and a visible_reply carries one normalized \"text\""
+     JSON limits, and a visible_reply carries one normalized \"text\" with no reasoning in it"
 )]
 pub struct ParseModelToolCallError;
 
+/// Why what the model wrote is no reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ReplyError {
+    #[error("visible_reply text contains an unterminated reasoning block")]
+    Leak,
+    #[error("visible_reply text must not be empty")]
+    Blank,
+}
+
 impl ModelToolCall {
+    /// The character's reply as the model wrote it: what its reasoning
+    /// blocks leave, normalized, so what the model said, what the person
+    /// sees and what the log keeps are one text. It shows no reasoning tag,
+    /// not even one that the text around a dropped block spells, so a reply
+    /// read again is left as it is.
+    pub(crate) fn reply(written: &str) -> Result<Self, ReplyError> {
+        let shown = scrub_reasoning_blocks(written).map_err(|_| ReplyError::Leak)?;
+        let text = VisibleText::normalize(&shown).map_err(|_| ReplyError::Blank)?;
+
+        if !scrub_reasoning_blocks(text.as_str()).is_ok_and(|again| again == text.as_str()) {
+            return Err(ReplyError::Leak);
+        }
+
+        Ok(Self::VisibleReply { text })
+    }
+
     /// A call of a plugin tool whose input crosses the JSON boundary, its
     /// credential-named values kept to run the call or redacted to record it.
     pub(crate) fn plugin(
@@ -127,10 +153,11 @@ impl TryFrom<WireCall> for ModelToolCall {
     type Error = ParseModelToolCallError;
 
     fn try_from(call: WireCall) -> Result<Self, Self::Error> {
+        // A record is judged as it stands, never rewritten: it must already
+        // be what reading the call makes of it.
         if call.name != VISIBLE_REPLY {
             let name = Identifier::new(&call.name).map_err(|_| ParseModelToolCallError)?;
 
-            // A record is judged as it stands, never rewritten.
             return Self::plugin(name, call.input, Credentials::Keep)
                 .map_err(|_| ParseModelToolCallError);
         }
@@ -139,9 +166,12 @@ impl TryFrom<WireCall> for ModelToolCall {
             call.input.len(),
             call.input.get("text").and_then(Value::as_str),
         ) {
-            (1, Some(text)) => VisibleText::parse(text)
-                .map(|text| Self::VisibleReply { text })
-                .map_err(|_| ParseModelToolCallError),
+            (1, Some(text)) => match Self::reply(text) {
+                Ok(Self::VisibleReply { text: read }) if read.as_str() == text => {
+                    Ok(Self::VisibleReply { text: read })
+                }
+                _ => Err(ParseModelToolCallError),
+            },
             _ => Err(ParseModelToolCallError),
         }
     }
@@ -271,6 +301,7 @@ mod tests {
 
         for refused in [
             json!({"name": "visible_reply", "input": {"text": " Hello."}}),
+            json!({"name": "visible_reply", "input": {"text": "<think>secret</think>Hello."}}),
             json!({"name": "visible_reply", "input": {"text": "Hi.", "mood": "warm"}}),
             json!({"name": "memory.capture", "input": many_fields}),
         ] {

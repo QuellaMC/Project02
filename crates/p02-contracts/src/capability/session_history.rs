@@ -4,7 +4,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use p02_core::{SessionId, Timestamp, VisibleMessage};
-use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -13,8 +12,6 @@ use tokio_util::sync::CancellationToken;
 /// counted and skipped, and every batch agrees with a prefix of the log.
 /// The store crate implements it.
 pub trait SessionHistoryFeed: Send + Sync + fmt::Debug {
-    fn character_id(&self) -> &Identifier;
-
     /// # Errors
     ///
     /// [`SessionHistoryError::Feed`] when the catalog cannot be read.
@@ -46,12 +43,6 @@ pub enum SessionHistoryError {
 impl SessionHistory {
     pub(crate) fn new(feed: Arc<dyn SessionHistoryFeed>, cancellation: CancellationToken) -> Self {
         Self { feed, cancellation }
-    }
-
-    /// The character whose history this is.
-    #[must_use]
-    pub fn character_id(&self) -> &Identifier {
-        self.feed.character_id()
     }
 
     /// # Errors
