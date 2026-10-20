@@ -1,10 +1,13 @@
 use std::fmt;
 
+use async_trait::async_trait;
 use p02_shared::Identifier;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
+use crate::context::HookContext;
 use crate::evidence::EvidenceNote;
+use crate::plugin::PluginError;
 use crate::role_model::VISIBLE_REPLY;
 use crate::schema::ToolInputContract;
 use crate::vocabulary::{ToolConcurrency, ValidationFailureReason};
@@ -35,8 +38,9 @@ struct UncheckedTool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confirmation {
     NotRequired,
-    /// The tool is approval-gated: what it prepares is applied by the host
-    /// only once the person says yes.
+    /// The tool is approval-gated: its plugin prepares each call
+    /// (`prepare_tool_call`), and the host shows the person what the call
+    /// would do and applies its effect only on a yes.
     Required,
 }
 
@@ -241,7 +245,8 @@ impl ToolCall {
     }
 }
 
-/// What `handleToolCall` answers.
+/// What a call comes to: the answer of a tool that acts without approval,
+/// or of an effect the person approved.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToolCallOutcome {
     /// The tool ran; the model reads `output`.
@@ -255,6 +260,35 @@ pub enum ToolCallOutcome {
         message: String,
         evidence: Vec<EvidenceNote>,
     },
+}
+
+/// What preparing a call of an approval-gated tool comes to.
+#[derive(Debug)]
+pub enum ToolPreparation {
+    /// What the call would do, waiting for the person: they are shown
+    /// `preview`, and the host applies `effect` only on their yes.
+    Prepared {
+        preview: Map<String, Value>,
+        effect: Box<dyn PreparedEffect>,
+        evidence: Vec<EvidenceNote>,
+    },
+    /// The tool refused the call, so nobody is asked; the model reads
+    /// `message` and goes on.
+    Rejected {
+        reason: String,
+        message: String,
+        evidence: Vec<EvidenceNote>,
+    },
+}
+
+/// The effect of an approval-gated call, prepared and not yet applied. The
+/// host applies it once, and only on the person's yes; any other answer
+/// drops it unapplied.
+#[async_trait]
+pub trait PreparedEffect: Send + fmt::Debug {
+    /// Applies the approved effect, under a hook context of its own: the
+    /// person may answer after the preparation's deadline has passed.
+    async fn apply(self: Box<Self>, context: &HookContext) -> Result<ToolCallOutcome, PluginError>;
 }
 
 #[cfg(test)]

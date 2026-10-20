@@ -47,16 +47,16 @@ pub use role_model::{
     DecisionResult, DuplicateToolError, ExchangeProvider, ExchangeRecord, FrameSize, HistoryWindow,
     InputEnvelope, Invocation, ModelToolCall, ModelToolDefinition, OutputContract,
     ParseDecisionError, ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions,
-    PromptSize, PromptSizeError, ProviderCapabilities, ProviderExchange, ProviderFailure,
-    ProviderMetadata, ProviderName, ProviderRequest, ProviderResponse, RawOutput, ReasoningFilter,
-    ReasoningLeakError, ReasoningParameterStyle, ReplyDelta, RoleModelAdapter, RuntimeNote,
-    TextCompletion, TextCompletionRequest, ToolCallResult, ToolNameMapping, ToolRound,
+    PromptSize, PromptSizeError, ProviderAnswer, ProviderCapabilities, ProviderExchange,
+    ProviderFailure, ProviderMetadata, ProviderName, ProviderRequest, ProviderResponse, RawOutput,
+    ReasoningFilter, ReasoningLeakError, ReasoningParameterStyle, ReplyDelta, RoleModelAdapter,
+    RuntimeNote, TextCompletion, TextCompletionRequest, ToolCallResult, ToolNameMapping, ToolRound,
     VISIBLE_REPLY, scrub_reasoning_blocks,
 };
 pub use schema::{InputContractError, ToolInputContract, ToolInputRejection};
 pub use tool::{
-    Confirmation, ParseToolCallIdError, ProvidedTool, ToolCall, ToolCallId, ToolCallOutcome,
-    ToolDefinitionError,
+    Confirmation, ParseToolCallIdError, PreparedEffect, ProvidedTool, ToolCall, ToolCallId,
+    ToolCallOutcome, ToolDefinitionError, ToolPreparation,
 };
 pub use vocabulary::{
     AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,

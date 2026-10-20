@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use async_trait::async_trait;
 
 use crate::role_model::chat::{ChatCompletionTool, ChatMessage};
-use crate::role_model::decision::{DecisionRejection, InputEnvelope};
+use crate::role_model::decision::InputEnvelope;
 use crate::role_model::exchange::{ProviderExchange, ProviderMetadata, ProviderName};
 use crate::role_model::history::ConversationTurn;
 
@@ -13,8 +13,8 @@ use crate::role_model::history::ConversationTurn;
 /// boxed futures for that reason.
 #[async_trait]
 pub trait RoleModelAdapter: Send + Sync + fmt::Debug {
-    /// Asks the model for one round. A provider failure is an answer too:
-    /// its output carries a `provider_error` rejection, never a panic.
+    /// Asks the model for one round. A provider failure is an answer too,
+    /// [`ProviderAnswer::Failed`], never a panic.
     async fn invoke(&self, envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput;
 
     /// A plain completion on the same model, without persona or tools, which
@@ -107,11 +107,21 @@ pub struct ReplyDelta {
 /// What a provider answered, before it is judged.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawOutput {
-    pub raw_output_text: String,
+    pub answer: ProviderAnswer,
     pub provider_metadata: Option<ProviderMetadata>,
     pub provider_exchange: Option<ProviderExchange>,
-    /// Set when nothing usable arrived, and the turn ends.
-    pub rejection: Option<DecisionRejection>,
+}
+
+/// What came back from the model, if anything usable did. An adapter says
+/// no more than this: every verdict on what the model wrote is the decision
+/// parser's, so a recorded round replays to the result it was given.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderAnswer {
+    /// What the model wrote.
+    Text(String),
+    /// Nothing usable arrived: the provider failed, as `details` says, and
+    /// the turn ends with `provider_error`.
+    Failed { details: String },
 }
 
 impl RawOutput {
@@ -119,10 +129,9 @@ impl RawOutput {
     #[must_use]
     pub fn text(raw_output_text: impl Into<String>) -> Self {
         Self {
-            raw_output_text: raw_output_text.into(),
+            answer: ProviderAnswer::Text(raw_output_text.into()),
             provider_metadata: None,
             provider_exchange: None,
-            rejection: None,
         }
     }
 }
