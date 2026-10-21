@@ -125,6 +125,8 @@ pub enum RecordError {
     EnvelopeOfAnotherEvent,
     #[error("model round {round} records a decision its output does not read as")]
     Verdict { round: std::num::NonZeroU32 },
+    #[error("a model round keeps what it wrote with every credential-named value redacted")]
+    UnkeptOutput,
     #[error(
         "a tool call is kept other than its session keeps it: within the JSON limits, credentials redacted"
     )]

@@ -71,14 +71,76 @@ fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
     assert_eq!(second.session_id(), &session("conv_a.2"));
 }
 
-/// Each case is a log whose last line breaks one rule a record keeps,
-/// alone or given the records before it.
 #[test]
 fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
     let world = World::new();
     let conversation = world.conversation_named("conv_a");
     let log = world.log_of(&conversation, 1);
     let path = world.path_of(log.session_id());
+
+    for (rule, says, lines) in broken_logs() {
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
+        match log.read().map(|replay| replay.records().len()) {
+            Err(
+                error @ (StorageError::MalformedRecord { line, .. }
+                | StorageError::BrokenLog { line, .. }),
+            ) => {
+                assert_eq!(line, lines.len(), "{rule}");
+                assert_eq!(error.code(), "malformed_record", "{rule}");
+                assert!(
+                    chain_of(&error).contains(says),
+                    "{rule}: {}",
+                    chain_of(&error)
+                );
+            }
+            other => panic!("{rule}: {other:?}"),
+        }
+    }
+
+    let continued = world.log_of(&conversation, 2);
+
+    world.data.continue_session(&session("conv_a.1")).unwrap();
+    std::fs::write(
+        world.path_of(continued.session_id()),
+        [
+            CONTINUED,
+            &replace(
+                &replace(
+                    &replace(TEA_RECEIVED, "evt_1", "evt_5"),
+                    "trace_1",
+                    "trace_5",
+                ),
+                "09:00:00",
+                "09:06:00",
+            ),
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            continued.read(),
+            Err(StorageError::BrokenLog { line: 2, ref source, .. })
+                if source.to_string().contains("under the continuation's identity")
+        ),
+        "a turn under the continuation's identity"
+    );
+
+    std::fs::write(&path, b"{\"eventId\":\"\xff\"}\n").unwrap();
+    assert!(
+        matches!(
+            log.read(),
+            Err(StorageError::MalformedRecord { line: 1, .. })
+        ),
+        "a line that is not UTF-8"
+    );
+}
+
+/// Each a log whose last line breaks one rule a record keeps, alone or
+/// given the records before it: the rule, what its refusal says, the log.
+fn broken_logs() -> Vec<(&'static str, &'static str, Vec<String>)> {
     let start = [TEA_RECEIVED, TEA_NORMALIZED];
     let asked = [TEA_RECEIVED, TEA_NORMALIZED, TEA_ASKED];
     let called = [
@@ -88,11 +150,8 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         TEA_ROUND_1,
         TEA_CALLED,
     ];
-    let replace = |line: &str, from: &str, to: &str| {
-        assert!(line.contains(from), "{from}");
-        line.replacen(from, to, 1)
-    };
-    let cases: Vec<(&str, &str, Vec<String>)> = vec![
+
+    vec![
         ("no record", "missing field `traceId`", vec![r#"{"eventId": "evt_torn"}"#.to_owned()]),
         ("not JSON", "not JSON", vec![TEA_RECEIVED[..40].to_owned()]),
         ("an array", "not a JSON object", vec!["[]".to_owned()]),
@@ -126,6 +185,7 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ("an undeclared call answered", "never an answer", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""dispatchedToHost":true"#, r#""dispatchedToHost":false"#)]).collect()),
         ("a call that finished before it started", "never started", strings(&[TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_ANSWERED])),
         ("a call that finished as another", "as another call", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""toolName":"character_state.patch","toolPluginId":"character-state","dispatched"#, r#""toolName":"character_state.reset","toolPluginId":"character-state","dispatched"#)]).collect()),
+        ("a round that kept a credential it wrote", "every credential-named value redacted", strings(&asked).into_iter().chain([replace(&replace(TEA_ROUND_1, r#"{\"mood\":\"warm\"}"#, r#"{\"api_key\":\"sk-live\"}"#), r#"{"mood":"warm"}"#, r#"{"api_key":"[redacted]"}"#)]).collect()),
         ("a call that kept a credential", "credentials redacted", strings(&asked).into_iter().chain([replace(&replace(TEA_ROUND_1, r#"{\"mood\":\"warm\"}"#, r#"{\"api_key\":\"[redacted]\"}"#), r#"{"mood":"warm"}"#, r#"{"api_key":"[redacted]"}"#), replace(TEA_CALLED, r#"{"mood":"warm"}"#, r#"{"api_key":"sk-live"}"#)]).collect()),
         ("evidence of another event", "evidence of another event", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""createdAt":"2026-10-21T09:00:00.000Z","pluginId""#, r#""createdAt":"2026-10-21T09:00:01.000Z","pluginId""#)]).collect()),
         ("a reply its round never said", "not the next reply", strings(&[TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_CALLED, TEA_ANSWERED, TEA_ROUND_2, &replace(TEA_REPLIED, "Tea, always.", "Coffee.")])),
@@ -143,36 +203,13 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ("after_turn_committed before the turn completed", "follows the record that completed", strings(&asked).into_iter().chain([TEA_AFTER.to_owned()]).collect()),
         ("a continuation not first", "before any other", strings(&[END_RECEIVED, END_COMPLETED, CONTINUED])),
         ("a continuation of another session", "not its own", vec![CONTINUED.to_owned()]),
-    ];
+    ]
+}
 
-    for (rule, says, lines) in cases {
-        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
-
-        match log.read().map(|replay| replay.records().len()) {
-            Err(
-                error @ (StorageError::MalformedRecord { line, .. }
-                | StorageError::BrokenLog { line, .. }),
-            ) => {
-                assert_eq!(line, lines.len(), "{rule}");
-                assert_eq!(error.code(), "malformed_record", "{rule}");
-                assert!(
-                    chain_of(&error).contains(says),
-                    "{rule}: {}",
-                    chain_of(&error)
-                );
-            }
-            other => panic!("{rule}: {other:?}"),
-        }
-    }
-
-    std::fs::write(&path, b"{\"eventId\":\"\xff\"}\n").unwrap();
-    assert!(
-        matches!(
-            log.read(),
-            Err(StorageError::MalformedRecord { line: 1, .. })
-        ),
-        "a line that is not UTF-8"
-    );
+/// `line` with the first `from` in it made `to`; `from` must be there.
+fn replace(line: &str, from: &str, to: &str) -> String {
+    assert!(line.contains(from), "{from}");
+    line.replacen(from, to, 1)
 }
 
 /// A record of the first turn, made the second turn's: its event and trace,

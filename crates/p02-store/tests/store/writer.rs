@@ -2,6 +2,7 @@
 //! after whatever a crash or a failed write left after the last line.
 
 use p02_store::{LogRecord, RecordBody, StorageError, TurnCompleted, TurnStatus};
+use serde_json::json;
 
 use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
 
@@ -120,11 +121,19 @@ fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
+    let written = "model-written-credential";
+
     world.data.create_session(world.conversation.id()).unwrap();
     script
         .turn("Patch?")
         .user("patch")
-        .round(Some(answer(&[], &["curious"], None)))
+        .round(Some(
+            json!({"toolCalls": [{
+                "name": "character_state.patch",
+                "input": {"mood": "curious", "api_key": written},
+            }]})
+            .to_string(),
+        ))
         .start_calls()
         .finish_calls()
         .round(Some(answer(&["Done."], &[], None)))
@@ -143,6 +152,7 @@ fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
     let log = std::fs::read_to_string(&path).unwrap();
 
     assert!(!log.contains(ECHOED_CREDENTIAL));
+    assert!(!log.contains(written));
     assert!(!log.contains("kept-secret"));
     assert!(log.contains(r#""api_key":"[redacted]""#));
     #[cfg(unix)]

@@ -5,8 +5,9 @@ use p02_contracts::{
     DecisionRejectionReason, DecisionResult, InputEnvelope, PromptSize, ProviderExchange,
     ProviderMetadata,
 };
-use p02_shared::{Credentials, Fingerprint};
+use p02_shared::{Credentials, Fingerprint, redact_credentials};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::RecordError;
 
@@ -62,18 +63,21 @@ struct ParsedDecision {
 }
 
 impl RoundRecord {
-    /// Round `round`, judged `result`. The verdict must be what the
-    /// round's output reads as: the decision parser's, credentials
-    /// redacted, or, when nothing came, the provider's failure.
+    /// Round `round`, judged `result`, what it wrote kept as the rest of the
+    /// record keeps a value: every credential-named one in it redacted. The
+    /// verdict must be what that output reads as: the decision parser's,
+    /// credentials redacted, or, when nothing came, the provider's failure.
     ///
     /// # Errors
     ///
     /// [`RecordError::Verdict`] when it is not.
     pub fn new(
         round: NonZeroU32,
-        snapshot: RoundSnapshot,
+        mut snapshot: RoundSnapshot,
         result: DecisionResult,
     ) -> Result<Self, RecordError> {
+        snapshot.raw_output_text = snapshot.raw_output_text.map(kept_output);
+
         let agrees = match &snapshot.raw_output_text {
             None => matches!(
                 &result,
@@ -114,6 +118,12 @@ impl TryFrom<WireRound> for RoundRecord {
     type Error = RecordError;
 
     fn try_from(wire: WireRound) -> Result<Self, Self::Error> {
+        if let Some(raw) = &wire.snapshot.raw_output_text
+            && kept_output(raw.clone()) != *raw
+        {
+            return Err(RecordError::UnkeptOutput);
+        }
+
         Self::new(
             wire.round,
             wire.snapshot,
@@ -131,5 +141,23 @@ impl From<RoundRecord> for WireRound {
                 result: record.result,
             },
         }
+    }
+}
+
+/// What a round wrote, as its session keeps it: the value of every
+/// credential-named key in it redacted, and the rest as written. Output
+/// that holds no such value, or is no JSON, is kept as it came.
+fn kept_output(raw: String) -> String {
+    let Ok(written) = serde_json::from_str::<Value>(&raw) else {
+        return raw;
+    };
+    let mut kept = written.clone();
+
+    redact_credentials(&mut kept);
+
+    if kept == written {
+        raw
+    } else {
+        kept.to_string()
     }
 }

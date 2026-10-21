@@ -28,6 +28,8 @@ pub use http::{
     http_client,
 };
 pub use identifier::{Identifier, ParseIdentifierError};
-pub use json_boundary::{BoundJsonError, Credentials, JsonLimits, bound_json, bound_json_object};
+pub use json_boundary::{
+    BoundJsonError, Credentials, JsonLimits, bound_json, bound_json_object, redact_credentials,
+};
 pub use redaction::is_credential_key;
 pub use sse::{SseFrame, SseFrameSplitter};
