@@ -592,6 +592,13 @@ impl Ear {
         .expect("the event comes")
     }
 
+    /// Hears every event sent so far.
+    pub(crate) fn drain(&mut self) {
+        while let Ok(event) = self.events.try_recv() {
+            self.heard.push(event);
+        }
+    }
+
     /// Hears events until `character` reaches `state`.
     pub(crate) async fn reached(&mut self, character: &str, state: CharacterState) {
         self.until(|event| {

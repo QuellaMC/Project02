@@ -93,8 +93,11 @@ pub struct Durations {
     /// How long the model may say nothing; the provider's own bound when
     /// none.
     pub model_silence: Option<Duration>,
-    /// How long a settings document's lock is waited for while it changes
-    /// hands.
+    /// How long a settings document's lock is waited for while its holder
+    /// makes no progress, the wait starting again whenever it changes
+    /// hands: as long as the store waits out a short guarded write, since
+    /// characters start together and one's first start on a loaded disk
+    /// holds the home's lock a while.
     pub settings_lock: Duration,
 }
 
@@ -103,7 +106,7 @@ impl Default for Durations {
         Self {
             confirmation: Duration::from_mins(5),
             model_silence: None,
-            settings_lock: Duration::from_millis(500),
+            settings_lock: Duration::from_secs(10),
         }
     }
 }
@@ -170,7 +173,7 @@ pub(crate) struct Events {
 }
 
 impl Events {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             sender: broadcast::channel(EVENT_BACKLOG).0,
             running: Mutex::new(RunningTurns::default()),

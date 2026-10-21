@@ -222,6 +222,23 @@ async fn a_start_during_her_start_joins_it_and_answers_once_she_is_ready() {
     assert_eq!(ear.states("mira"), [Starting, Ready]);
 }
 
+/// A start whose boot fails starts her once: it answers with her failure,
+/// and nothing starts her again behind it.
+#[tokio::test(start_paused = true)]
+async fn a_start_whose_boot_fails_starts_her_once() {
+    let world = World::new();
+    let daemon = world.daemon_answering(None, Vec::new()).await;
+    let mut ear = Ear::on(&daemon);
+    let StartOutcome::Settled { character } = daemon.start_character("mira").await else {
+        panic!("her start runs");
+    };
+
+    settle().await;
+    ear.drain();
+    assert_eq!(character.state, Some(Failed));
+    assert_eq!(ear.states("mira"), [Starting, Failed]);
+}
+
 /// A change to a plugin's settings makes the next reconcile reload her
 /// between turns, and a line sent meanwhile lands on her thread after it;
 /// a change that leaves what she runs on as it was reloads nothing.

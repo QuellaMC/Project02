@@ -63,7 +63,6 @@ pub(crate) struct Broker {
 #[derive(Debug)]
 struct Parked {
     pending: PendingConfirmation,
-    deadline: Instant,
     answer: oneshot::Sender<ConfirmationDecision>,
 }
 
@@ -96,9 +95,12 @@ impl Broker {
             .collect()
     }
 
-    /// Settles the confirmation `id` as the person answered it, unless its
-    /// deadline had passed: then it is settled cancelled, whatever the
-    /// timer has done so far, since the client never judges the deadline.
+    /// Settles the confirmation `id` as the person answered it, unless the
+    /// deadline they were shown had passed: then it is settled cancelled,
+    /// whatever the timer has done so far, since the client never judges
+    /// the deadline. The timer runs on a clock of its own, which a suspend
+    /// can stop; the deadline is the one shown, on the clock it was shown
+    /// on.
     pub(crate) fn answer(&self, id: &str, answer: Answer) -> ConfirmationAnswer {
         let Some(parked) = Uuid::try_parse(id)
             .ok()
@@ -107,7 +109,7 @@ impl Broker {
             return ConfirmationAnswer::Unknown;
         };
 
-        if Instant::now() >= parked.deadline {
+        if Timestamp::now().unix_millis() >= parked.pending.deadline_at {
             self.settled(
                 parked,
                 Settlement::Cancelled {
@@ -195,7 +197,6 @@ impl Confirmer for Broker {
 
         self.parked().push(Parked {
             pending: pending.clone(),
-            deadline,
             answer,
         });
         self.events.emit(Event::ConfirmationRequested(pending));
@@ -233,5 +234,68 @@ impl Drop for Abandoned<'_> {
                 reason: CancelReason::Stopped,
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU64;
+
+    use p02_contracts::{ToolCallId, TurnIdentity};
+    use p02_core::{CharacterProfile, ConversationId, EventIdentity, SessionId, SpeakerName};
+    use serde_json::Map;
+
+    use super::*;
+
+    fn mira() -> Identifier {
+        Identifier::new("mira").unwrap()
+    }
+
+    fn request() -> ConfirmationRequest {
+        ConfirmationRequest {
+            turn: TurnIdentity {
+                session_id: SessionId::new(ConversationId::mint(), NonZeroU64::MIN),
+                event: EventIdentity::mint(),
+                character: CharacterProfile {
+                    id: mira(),
+                    display_name: SpeakerName::new("Mira").unwrap(),
+                },
+            },
+            plugin_id: Identifier::new("notes").unwrap(),
+            tool_name: Identifier::new("notes.save").unwrap(),
+            call_id: ToolCallId::new("call-1").unwrap(),
+            summary: "Saves a note.".to_owned(),
+            preview: Map::new(),
+        }
+    }
+
+    /// An answer at or past the deadline the person was shown is expired,
+    /// though the timer, on a clock of its own, has not fired, as after a
+    /// suspend.
+    #[tokio::test(start_paused = true)]
+    async fn an_answer_past_the_deadline_shown_is_expired_before_the_timer_fires() {
+        let broker = Arc::new(Broker::new(
+            mira(),
+            Duration::from_millis(10),
+            CancellationToken::new(),
+            Arc::new(Events::new()),
+        ));
+        let asking = tokio::spawn({
+            let broker = Arc::clone(&broker);
+
+            async move { broker.confirm(request()).await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        let id = broker.pending()[0].id.to_string();
+
+        // The wall clock passes the deadline while the paused timer waits.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(
+            broker.answer(&id, Answer::Approved),
+            ConfirmationAnswer::Expired
+        );
+        assert_eq!(asking.await.unwrap(), ConfirmationDecision::Cancelled);
     }
 }
