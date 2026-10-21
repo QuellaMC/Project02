@@ -2,13 +2,14 @@
 //! author read, made in the target's own document, judged as the document
 //! it makes over the documents beside it, and written whole.
 
-use std::path::{Path, PathBuf};
+use std::fmt;
+use std::path::PathBuf;
 use std::time::Duration;
 
-use p02_characters::Discovery;
+use p02_characters::{CharacterDefinition, Discovery};
 use p02_contracts::ConfigField;
-use p02_shared::{Fingerprint, Identifier};
-use p02_store::{CharacterData, Home, StorageError};
+use p02_shared::Fingerprint;
+use p02_store::{Home, StorageError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -17,8 +18,9 @@ use crate::declaration::{
     outside_scope,
 };
 use crate::document::{Document, Read};
+use crate::materialize::merged_overlay;
 use crate::resolve::{Layers, Overlay, Resolution, Written, WrittenOverlay, target_fingerprint};
-use crate::transaction::{with_character, with_home, write};
+use crate::transaction::{settle, with_character, with_home, write};
 use crate::view::{chain, sentence};
 
 /// Whose settings a view reads or a change writes: the home's, or one
@@ -46,7 +48,7 @@ pub struct ConfigChange {
 /// `project02.<name>`; switches a section on or off, or leaves it to the
 /// document beneath when `enabled` is absent; or sets or unsets one field
 /// of a section.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Set {
@@ -73,6 +75,51 @@ pub enum Operation {
         id: String,
         field: String,
     },
+}
+
+/// Says what the change does and where, never the value it sets: that may
+/// be a secret.
+impl fmt::Debug for Operation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Set { path, .. } => formatter
+                .debug_struct("Set")
+                .field("path", path)
+                .finish_non_exhaustive(),
+            Self::Unset { path } => formatter.debug_struct("Unset").field("path", path).finish(),
+            Self::SectionEnabled {
+                namespace,
+                id,
+                enabled,
+            } => formatter
+                .debug_struct("SectionEnabled")
+                .field("namespace", namespace)
+                .field("id", id)
+                .field("enabled", enabled)
+                .finish(),
+            Self::SectionFieldSet {
+                namespace,
+                id,
+                field,
+                ..
+            } => formatter
+                .debug_struct("SectionFieldSet")
+                .field("namespace", namespace)
+                .field("id", id)
+                .field("field", field)
+                .finish_non_exhaustive(),
+            Self::SectionFieldUnset {
+                namespace,
+                id,
+                field,
+            } => formatter
+                .debug_struct("SectionFieldUnset")
+                .field("namespace", namespace)
+                .field("id", id)
+                .field("field", field)
+                .finish(),
+        }
+    }
 }
 
 /// What came of a change. `Applied` means the document is on disk, under
@@ -113,8 +160,11 @@ pub enum ChangeRefusal {
 /// secret at once both succeed and the later value stands. A refused
 /// change writes nothing, and makes no data directory for a character who
 /// has none; a character's first change makes hers, as her first start
-/// does. What a running character does about it is the runtime's to judge,
-/// by comparing what she would now run on with what she runs on.
+/// does, and is made in her settings as her view shows them, with her
+/// package's settings merged in while they are still to be, as her start
+/// merges them, so her start finds nothing left to merge. What a running
+/// character does about it is the runtime's to judge, by comparing what
+/// she would now run on with what she runs on.
 #[must_use]
 pub fn apply_change(
     home: &Home,
@@ -123,10 +173,10 @@ pub fn apply_change(
     change: &ConfigChange,
     wait: Duration,
 ) -> ChangeOutcome {
-    let target = match &change.target {
-        ConfigTarget::Global => Target::Home,
+    let character = match &change.target {
+        ConfigTarget::Global => None,
         ConfigTarget::Character { character_id } => match discovery.find(character_id) {
-            Ok(character) => Target::Character(character.profile.id.clone()),
+            Ok(character) => Some(character),
             Err(error) => {
                 return refused(
                     ChangeRefusal::UnknownCharacter,
@@ -135,26 +185,27 @@ pub fn apply_change(
             }
         },
     };
+    let target = character.map_or(Target::Home, |character| {
+        Target::Character(character.profile.id.clone())
+    });
     let edit = match Edit::new(sections, &target, &change.operation) {
         Ok(edit) => edit,
         Err(message) => return refused(ChangeRefusal::Invalid, message),
     };
     let expected = change.expected_fingerprint.as_str();
-    let committed = match &target {
-        Target::Home => with_home(home, wait, |written| {
+    let committed = match character {
+        None => with_home(home, wait, |written| {
             commit(home, sections, Loaded::home(written), &edit, expected)
         }),
-        Target::Character(character) => {
-            with_character(home, character, wait, |written, overlay| {
-                commit(
-                    home,
-                    sections,
-                    Loaded::character(written, character, overlay),
-                    &edit,
-                    expected,
-                )
-            })
-        }
+        Some(character) => with_character(home, &character.profile.id, wait, |written, overlay| {
+            commit(
+                home,
+                sections,
+                Loaded::character(sections, written, character, overlay),
+                &edit,
+                expected,
+            )
+        }),
     };
 
     committed.unwrap_or_else(|error| ChangeOutcome::Failed {
@@ -458,7 +509,7 @@ fn commit(
         ));
     }
 
-    let after = loaded.with_own(made);
+    let mut after = loaded.with_own(made);
 
     if let Some(declared) = edit.section() {
         let judged = Resolution::new(sections, after.layers(), Vec::new());
@@ -480,11 +531,7 @@ fn commit(
         });
     }
 
-    if let Some((character, _, _)) = &after.overlay {
-        CharacterData::ensure(home, character)?;
-    }
-
-    write(after.own_path(), after.own().raw())?;
+    after.write(home)?;
 
     Ok(ChangeOutcome::Applied {
         fingerprint: target_fingerprint(sections, &after.layers()),
@@ -495,7 +542,7 @@ fn commit(
 struct Loaded {
     home_path: PathBuf,
     home: Document,
-    overlay: Option<(Identifier, PathBuf, Document)>,
+    overlay: Option<Overlay>,
 }
 
 impl Loaded {
@@ -511,10 +558,13 @@ impl Loaded {
     }
 
     /// The home's document, which must load for a change to her settings to
-    /// be judged over it, and her overlay, which a change may repair.
+    /// be judged over it, and her overlay, which a change may repair, as her
+    /// view shows it: with her package's settings merged in while they are
+    /// still to be.
     fn character(
+        sections: &Sections,
         written: Written,
-        character: &Identifier,
+        character: &CharacterDefinition,
         overlay: WrittenOverlay,
     ) -> Result<Self, String> {
         let home = written.read.usable().map_err(|diagnostics| {
@@ -525,37 +575,53 @@ impl Loaded {
 
             format!("The home's settings failed to load: {reason}")
         })?;
+        let absent = matches!(overlay.read, Read::Absent);
         let document = repairable(overlay.read).map_err(|message| {
-            format!("The settings of \"{character}\" failed to load: {message}")
+            format!(
+                "The settings of \"{}\" failed to load: {message}",
+                character.profile.id
+            )
         })?;
+        let (merged, _) = merged_overlay(
+            sections,
+            character,
+            overlay.path,
+            document,
+            absent,
+            overlay.package_version.as_ref(),
+        );
 
         Ok(Self {
             home_path: written.path,
             home,
-            overlay: Some((character.clone(), overlay.path, document)),
+            overlay: Some(merged),
         })
     }
 
-    /// The document the change is made in.
+    /// The document the change is made in: the home's, or her settings as
+    /// her view shows them.
     fn own(&self) -> &Document {
         self.overlay
             .as_ref()
-            .map_or(&self.home, |(_, _, document)| document)
-    }
-
-    fn own_path(&self) -> &Path {
-        self.overlay
-            .as_ref()
-            .map_or(&self.home_path, |(_, path, _)| path)
+            .map_or(&self.home, |overlay| &overlay.read)
     }
 
     fn with_own(mut self, made: Document) -> Self {
         match &mut self.overlay {
-            Some((_, _, document)) => *document = made,
+            Some(overlay) => overlay.read = made,
             None => self.home = made,
         }
 
         self
+    }
+
+    /// Writes the document the change made: the home's, or her overlay, as
+    /// her start would settle it.
+    fn write(&mut self, home: &Home) -> Result<(), StorageError> {
+        match &mut self.overlay {
+            Some(overlay) => settle(home, overlay).map(drop),
+            None => write(&self.home_path, self.home.raw()),
+        }
     }
 
     fn layers(&self) -> Layers {
@@ -563,15 +629,7 @@ impl Loaded {
             home_path: self.home_path.clone(),
             home_present: true,
             home: self.home.clone(),
-            overlay: self
-                .overlay
-                .as_ref()
-                .map(|(character, path, document)| Overlay {
-                    character: character.clone(),
-                    path: path.clone(),
-                    written: document.clone(),
-                    read: document.clone(),
-                }),
+            overlay: self.overlay.clone(),
         }
     }
 }

@@ -1,6 +1,7 @@
 //! The settings as a settings screen, a connector and `inspect` are shown
 //! them.
 
+use p02_config::{ConfigChange, ConnectorConfigView};
 use serde_json::{Value, json};
 
 use crate::support::{World, document, field, findings, home, host_field, of, section};
@@ -174,7 +175,7 @@ fn her_view_shows_the_homes_values_in_effect_her_own_as_authored_and_her_package
 }
 
 #[test]
-fn no_secret_reaches_a_view_or_a_report_but_as_redacted() {
+fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let secrets = [
         "nvapi-home-secret",
         "demo-key-secret",
@@ -255,9 +256,25 @@ fn no_secret_reaches_a_view_or_a_report_but_as_redacted() {
         "[redacted]"
     );
 
-    for shown in [&home_view, &mira_view, &report] {
-        let text = shown.to_string();
+    let change: ConfigChange = serde_json::from_value(json!({
+        "target": {"scope": "global"},
+        "expectedFingerprint": home_view["fingerprint"],
+        "operation": {"kind": "set", "path": "project02.nvidiaApiKey", "value": "nvapi-home-secret"},
+    }))
+    .unwrap();
+    let shown = [
+        home_view.to_string(),
+        mira_view.to_string(),
+        report.to_string(),
+        format!("{:?}", world.resolve(&of("mira"))),
+        format!(
+            "{:?}",
+            ConnectorConfigView::read(&world.home, &world.sections, &world.discovery(), "telegram")
+        ),
+        format!("{change:?}"),
+    ];
 
+    for text in shown {
         for secret in secrets {
             assert!(!text.contains(secret), "{secret} in {text}");
         }

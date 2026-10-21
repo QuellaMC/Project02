@@ -53,11 +53,13 @@ outcome are the wire's own types.
   default; for a character it is hers, else the home's, else the default,
   each from a document its scope lets her read, with where it came from. A
   value its field refuses stays in effect, refused, rather than reaching
-  past it. A section switched off, or a memory provider the settings do
-  not choose, never runs, so its settings are not judged. What a character
-  runs on is one value: the host's values, and each plugin her settings
-  switch on with the values they give it, secrets in the clear, for the
-  plugin host to resolve against its manifest. Two equal ones run the same
+  past it, and a section's switch is a value as any other: one that is no
+  boolean blocks its section. A section that is off, by a document or by
+  its default, or a memory provider the settings do not choose, never
+  runs, so its settings are not judged. What a character runs on is one
+  value: the host's values, and each plugin that runs by her settings with
+  the values they give it, secrets in the clear, for the plugin host to
+  resolve against its manifest. Two equal ones run the same
   character, so she is rebuilt exactly when hers differ from those she was
   built from: a home value she overrides, a switched-off plugin's settings
   or a connector's rebuild no one, and a re-keyed secret does.
@@ -82,16 +84,20 @@ outcome are the wire's own types.
   the new fingerprint, `refused`
   as a `conflict`, `invalid` or `unknown_character`, or `failed`, with a
   sentence that never repeats a value.
-- **Her package's settings.** At her first start the plugins her package
-  requires or recommends are switched on in her overlay, above a home that
-  switches them off, beside the values it gives them, in a document
-  holding only that. At the first start after her package changes version
-  only what her overlay lacks is filled in, and nothing she set changes. A
-  package carrying a credential, or a value its field refuses or a
-  character may not set, is refused before anything is written for her.
-  The version merged is recorded after her overlay, so a crash between the
-  two merges again what is still missing. Until she starts, her settings
-  are shown as her start will have merged them.
+- **Her package's settings.** At her first start the plugins of this
+  build her package requires or recommends are switched on in her
+  overlay, above a home that switches them off, beside the values it
+  gives them, in a document holding only that; a section for a plugin
+  this build lacks configures nothing and is not copied. At the first
+  start after her package changes version only what her overlay lacks is
+  filled in, and nothing she set changes. A package carrying a
+  credential, or a value its field refuses or a character may not set, is
+  refused before anything is written for her. The version merged is
+  recorded after her overlay, so a crash between the two merges again
+  what is still missing. Until she starts, her settings are shown as her
+  start will have merged them, and a change to them is made in those
+  settings, merging her package's in as her start would, so her start
+  finds nothing left to merge.
 - **The views.** A settings screen's view of the home or of a character:
   every host field, and every section and every field of it the target
   may set, each with what the target's own document holds and what is in
@@ -101,4 +107,5 @@ outcome are the wire's own types.
   for it, secrets in the clear, since a token is what a connector exists
   to use. And the part of `inspect`'s report that is the settings'. A
   character not installed, or settings that cannot be resolved, is refused
-  with the reason.
+  with the reason. Formatted for a log, a resolution, a change and a
+  connector's read name what they hold and never show a value.

@@ -24,11 +24,10 @@ use crate::declaration::{
 };
 use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{Document, Read, Stanza};
-use crate::materialize::{merge_package, package_document, receives_package};
+use crate::materialize::merged_overlay;
 
 /// A target's settings, resolved: the home's, or one character's over the
 /// home's.
-#[derive(Debug)]
 pub struct Resolution<'s> {
     target: Target,
     layers: Layers,
@@ -36,6 +35,19 @@ pub struct Resolution<'s> {
     host: Vec<Field<'s>>,
     resolved: Vec<Section<'s>>,
     diagnostics: Vec<Diagnostic>,
+}
+
+/// Names whose settings they are, by their fingerprint and findings, and
+/// never a value: the values include secrets.
+impl fmt::Debug for Resolution<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Resolution")
+            .field("target", &self.target)
+            .field("fingerprint", &self.fingerprint)
+            .field("diagnostics", &self.diagnostics)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Why a target's settings cannot be resolved.
@@ -62,16 +74,20 @@ pub(crate) struct Layers {
 }
 
 /// A character's overlay as resolved.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Overlay {
     pub(crate) character: Identifier,
     pub(crate) path: PathBuf,
     /// As its file holds it: what a change to her settings is bound to.
     pub(crate) written: Document,
-    /// What her settings are read from: as written, or with her package's
-    /// settings merged in as her first start, or the start after a new
-    /// version of her package, will merge them.
+    /// What her settings are read from, and what a change to them edits:
+    /// as written, or with her package's settings merged in as her first
+    /// start, or the start after a new version of her package, will merge
+    /// them.
     pub(crate) read: Document,
+    /// The version of her package whose settings `read` merges in,
+    /// recorded once her file holds `read`.
+    pub(crate) merges: Option<CharacterVersion>,
 }
 
 impl Layers {
@@ -213,10 +229,13 @@ impl Effective {
 #[derive(Debug)]
 pub(crate) struct Section<'s> {
     pub(crate) declared: Declared<'s>,
+    /// Its switch, a value as any other: the nearest document's, refused
+    /// when it is not a boolean, else the declaration's default.
     pub(crate) switch: Effective,
     pub(crate) fields: Vec<Field<'s>>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) fingerprint: Fingerprint,
+    pub(crate) status: Status,
 }
 
 /// Whether a section runs as its settings decide, and the one reason.
@@ -229,33 +248,7 @@ pub(crate) enum Status {
 
 impl Section<'_> {
     pub(crate) fn enabled(&self) -> bool {
-        self.switch.value().and_then(Value::as_bool) == Some(true)
-    }
-
-    fn explicitly_off(&self) -> bool {
-        matches!(
-            self.switch,
-            Effective::Authored {
-                value: Value::Bool(false),
-                ..
-            }
-        )
-    }
-
-    /// Off when a document switches it off, blocked by an error of its
-    /// own, otherwise on or off as its documents or its default say.
-    pub(crate) fn status(&self) -> Status {
-        if self.explicitly_off() {
-            Status::Disabled("disabled_by_config")
-        } else if self.diagnostics.iter().any(Diagnostic::is_error) {
-            Status::Blocked
-        } else if !self.enabled() {
-            Status::Disabled("not_enabled")
-        } else if matches!(self.switch, Effective::Authored { .. }) {
-            Status::Active("enabled_by_config")
-        } else {
-            Status::Active("enabled_by_default")
-        }
+        self.switch.value() == Some(&Value::Bool(true))
     }
 }
 
@@ -340,19 +333,14 @@ impl<'s> Resolution<'s> {
                 .map_err(|diagnostics| ReadSettingsError::Unloadable {
                     diagnostics: in_overlay(diagnostics, id, &overlay.path),
                 })?;
-        let mut package_problems = Vec::new();
-        let read = if receives_package(absent, overlay.package_version.as_ref(), &character.version)
-        {
-            match package_document(sections, &character.plugins) {
-                Ok(package) => Document::parse(merge_package(on_disk.raw(), &package)),
-                Err(problems) => {
-                    package_problems = problems;
-                    on_disk.clone()
-                }
-            }
-        } else {
-            on_disk.clone()
-        };
+        let (merged, package_problems) = merged_overlay(
+            sections,
+            character,
+            overlay.path,
+            on_disk,
+            absent,
+            overlay.package_version.as_ref(),
+        );
 
         Ok(Self::new(
             sections,
@@ -360,12 +348,7 @@ impl<'s> Resolution<'s> {
                 home_path: written.path,
                 home_present,
                 home: home_document,
-                overlay: Some(Overlay {
-                    character: id.clone(),
-                    path: overlay.path,
-                    written: on_disk,
-                    read,
-                }),
+                overlay: Some(merged),
             },
             package_problems,
         ))
@@ -492,7 +475,7 @@ impl<'s> Resolution<'s> {
             .iter()
             .filter(|section| {
                 section.declared.namespace() == Namespace::Plugins
-                    && matches!(section.status(), Status::Active(_))
+                    && matches!(section.status, Status::Active(_))
             })
             .map(|section| {
                 let values = section
@@ -654,12 +637,8 @@ fn section<'s>(
     let read = target.layers(declared.config().scope());
     let switch = resolve(
         &read,
-        |layer| {
-            stanza(layer)
-                .and_then(|stanza| stanza.enabled)
-                .map(Value::Bool)
-        },
-        |_| true,
+        |layer| stanza(layer).and_then(|stanza| stanza.enabled.clone()),
+        Value::is_boolean,
         Some(&Value::Bool(declared.default_enabled())),
     );
     let fields: Vec<Field<'s>> = declared
@@ -688,33 +667,52 @@ fn section<'s>(
             }
         })
         .collect();
-    let mut resolved = Section {
+    let mut diagnostics = outside_scope_warnings(declared, layers);
+    let switched = matches!(switch, Effective::Authored { .. });
+
+    // A section that does not run, switched off by a document or by its
+    // default, or a memory provider the settings do not choose, stops
+    // nothing, so what its settings lack or misspell is not judged.
+    let status = if switch.value() == Some(&Value::Bool(false)) {
+        Status::Disabled(if switched {
+            "disabled_by_config"
+        } else {
+            "not_enabled"
+        })
+    } else if declared.is_memory_provider() && chosen_memory.is_some_and(|chosen| chosen != id) {
+        Status::Disabled("not_selected_as_default_memory_provider")
+    } else {
+        diagnostics.extend(judge(declared, &fields, &switch, &read, layers));
+
+        if diagnostics.iter().any(Diagnostic::is_error) {
+            Status::Blocked
+        } else if switched {
+            Status::Active("enabled_by_config")
+        } else {
+            Status::Active("enabled_by_default")
+        }
+    };
+
+    Section {
         declared,
         switch,
         fields,
-        diagnostics: outside_scope_warnings(declared, layers),
+        diagnostics,
         fingerprint: section_fingerprint(sections, declared, layers),
-    };
-    let unselected_memory =
-        declared.is_memory_provider() && chosen_memory.is_some_and(|chosen| chosen != id);
-
-    // A section switched off, or a memory provider the settings do not
-    // choose, never runs, so what its settings lack or misspell stops
-    // nothing and is not judged.
-    if !resolved.explicitly_off() && !unselected_memory {
-        let judged = judge(&resolved, &read, layers);
-
-        resolved.diagnostics.extend(judged);
+        status,
     }
-
-    resolved
 }
 
 /// What is wrong with a section's settings in the documents `read`: the
-/// shape of its stanzas, fields it does not declare, and values its fields
-/// refuse or lack.
-fn judge(section: &Section<'_>, read: &[Layer], layers: &Layers) -> Vec<Diagnostic> {
-    let declared = section.declared;
+/// shape of its stanzas, its switch among them, fields it does not
+/// declare, and values its fields refuse or, while it is on, lack.
+fn judge(
+    declared: Declared<'_>,
+    fields: &[Field<'_>],
+    switch: &Effective,
+    read: &[Layer],
+    layers: &Layers,
+) -> Vec<Diagnostic> {
     let namespace = declared.namespace();
     let id = declared.id().as_str();
     let stanzas: Vec<(Layer, &Stanza)> = read
@@ -753,7 +751,9 @@ fn judge(section: &Section<'_>, read: &[Layer], layers: &Layers) -> Vec<Diagnost
         );
     }
 
-    for field in &section.fields {
+    let on = switch.value() == Some(&Value::Bool(true));
+
+    for field in fields {
         let name = field.declaration.name().as_str();
         let secret = field.declaration.secret();
         let diagnostic = match &field.effective {
@@ -772,7 +772,7 @@ fn judge(section: &Section<'_>, read: &[Layer], layers: &Layers) -> Vec<Diagnost
                     crate::declaration::expectation(field.declaration)
                 ),
             ),
-            Effective::Missing if field.required && section.enabled() => Diagnostic::error(
+            Effective::Missing if field.required && on => Diagnostic::error(
                 if secret {
                     Code::RequiredSecretMissing
                 } else {
@@ -860,9 +860,9 @@ fn unknown_sections(sections: &Sections, layers: &Layers) -> Vec<Diagnostic> {
             let switched_off = layers
                 .present()
                 .filter_map(|(_, document)| document.stanza(namespace, id))
-                .filter_map(|stanza| stanza.enabled)
+                .filter_map(|stanza| stanza.enabled.as_ref())
                 .last()
-                == Some(false);
+                == Some(&Value::Bool(false));
 
             if switched_off {
                 continue;

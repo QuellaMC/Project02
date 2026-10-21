@@ -217,15 +217,11 @@ fn settings(random: &mut Random, document: &mut Map<String, Value>) {
     }
 }
 
-/// Switches a section back on where a document switched it off, so what
-/// is planted in it is judged.
+/// Switches a section on in both documents, so what is planted in it is
+/// judged: the settings of a section that is off are not.
 fn judged(generated: &mut Generated, path: &[&str]) {
     for document in [&mut generated.home, &mut generated.overlay] {
-        let section = stanza(document, path);
-
-        if section.get("enabled") == Some(&json!(false)) {
-            section.insert("enabled".to_owned(), json!(true));
-        }
+        stanza(document, path).insert("enabled".to_owned(), json!(true));
     }
 }
 
