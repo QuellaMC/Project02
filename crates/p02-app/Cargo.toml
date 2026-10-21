@@ -1,0 +1,31 @@
+[package]
+name = "p02-app"
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+p02-characters.workspace = true
+p02-config.workspace = true
+p02-contracts.workspace = true
+p02-core.workspace = true
+p02-plugins.workspace = true
+p02-role-model.workspace = true
+p02-runtime.workspace = true
+p02-shared.workspace = true
+p02-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tokio-util.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "test-util", "time"] }
+
+[lints]
+workspace = true

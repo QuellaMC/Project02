@@ -50,6 +50,12 @@ the character's storage grants through the contracts.
   puts runtime notes and curated sections there, whole and within their
   caps; its other items, and every item of another plugin, ride the
   person's turn.
+- **The list.** The plugins compiled into the daemon, each with the
+  manifest its package's descriptor carries, read once from the descriptor
+  the repository keeps for both daemons, and its factory: what a home's
+  settings are judged against and what a character's plugins are built
+  from. A manifest that does not parse is a build that must not ship: the
+  list fails at its first use, naming the package.
 - **Session history.** The first plugin compiled in: an index of the
   character's own conversations in its own database, caught up slice by
   slice from the session history after each committed turn and before

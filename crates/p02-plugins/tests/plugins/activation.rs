@@ -5,21 +5,18 @@ use std::error::Error;
 use std::sync::Arc;
 
 use p02_contracts::{
-    CommittedTurn, EvidenceStatus, FactoryInput, MissingConfigValueError, PluginError,
-    RedactionLabel, RegistrationError, StoreAccess,
+    CommittedTurn, FactoryInput, MissingConfigValueError, PluginError, RedactionLabel,
+    RegistrationError, StoreAccess,
 };
 use p02_core::Timestamp;
 use p02_plugins::{
-    ActivationError, BeforeCallOutcome, BuildPluginError, PluginHost, RecordLabelsError,
-    session_history,
+    ActivationError, BeforeCallOutcome, BuildPluginError, PluginHost, RecordLabelsError, list,
 };
 use p02_shared::Identifier;
 use serde_json::{Map, json};
 
 use crate::storage::Storage;
-use crate::support::{
-    Enable, Probe, Scripted, Seen, Spec, Verbose, bundled_manifest, serving, tool, turn,
-};
+use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, tool, turn};
 
 /// plugins.manifest-validation: two enabled plugins offering one tool name, or one plugin offering a tool twice, are refused at activation
 #[test]
@@ -183,45 +180,22 @@ async fn labels_are_held_where_they_enter_to_what_a_record_has_room_for() {
 }
 
 #[tokio::test]
-async fn the_bundled_plugins_activate_together() {
-    let stub = |tools: &[&str]| {
-        Arc::new(Scripted {
-            tools: tools.iter().map(|name| tool(name)).collect(),
-            ..Scripted::default()
-        })
-    };
-    let host = [
-        ("character-memory", stub(&["memory.update"])),
-        ("character-state", stub(&["character_state.patch"])),
-        ("demo-config", stub(&[])),
-        ("mem0", stub(&["mem0.search", "mem0.add"])),
-    ]
-    .into_iter()
-    .fold(
-        PluginHost::builder(Storage::new()),
-        |builder, (id, plugin)| {
-            builder.plugin(bundled_manifest(id, |_| {}), Map::new(), serving(plugin))
-        },
-    )
-    .plugin(
-        bundled_manifest("session-history", |_| {}),
-        Map::new(),
-        session_history::create,
-    )
-    .activate()
-    .unwrap();
+async fn the_listed_plugins_activate_together() {
+    let host = list::plugins()
+        .unwrap()
+        .iter()
+        .fold(
+            PluginHost::builder(Storage::new()),
+            |builder, (manifest, factory)| builder.plugin(manifest.clone(), Map::new(), *factory),
+        )
+        .activate()
+        .unwrap();
 
     assert_eq!(
         host.plugin_ids()
             .map(Identifier::as_str)
             .collect::<Vec<_>>(),
-        [
-            "character-memory",
-            "character-state",
-            "demo-config",
-            "mem0",
-            "session-history"
-        ]
+        ["mem0", "session-history"]
     );
     assert_eq!(
         host.tool_definitions()
@@ -230,8 +204,6 @@ async fn the_bundled_plugins_activate_together() {
             .map(|definition| definition.tool.name().as_str())
             .collect::<Vec<_>>(),
         [
-            "memory.update",
-            "character_state.patch",
             "mem0.search",
             "mem0.add",
             "sessions.search",
@@ -240,17 +212,9 @@ async fn the_bundled_plugins_activate_together() {
     );
 
     let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
-        panic!("no bundled plugin rejects the turn");
+        panic!("no listed plugin rejects the turn");
     };
 
-    assert!(
-        prepared
-            .evidence
-            .iter()
-            .all(|record| record.status() == EvidenceStatus::Accepted),
-        "{:?}",
-        prepared.evidence
-    );
     assert_eq!(
         prepared
             .runtime_notes

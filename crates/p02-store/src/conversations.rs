@@ -11,7 +11,6 @@ use p02_shared::{
     PathEntry, create_directories, describe_entry, list_directory, read_file, remove_directory,
     write_file_atomically,
 };
-use uuid::Uuid;
 
 use crate::error::StorageError;
 use crate::home::Home;
@@ -50,10 +49,6 @@ impl Home {
     ///
     /// [`StorageError`] when the home is refused, a thread there cannot be
     /// read, the participants make no conversation, or a write fails.
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "conv_ and a UUID make a conversation id"
-    )]
     pub fn ensure_conversation(
         &self,
         participants: Vec<Participant>,
@@ -69,10 +64,9 @@ impl Home {
                 return Ok(existing);
             }
 
-            let id = ConversationId::new(&format!("conv_{}", Uuid::new_v4()))
-                .expect("conv_ and a UUID make a conversation id");
-            let conversation = Conversation::new(id, participants, Timestamp::now())
-                .map_err(StorageError::InvalidParticipants)?;
+            let conversation =
+                Conversation::new(ConversationId::mint(), participants, Timestamp::now())
+                    .map_err(StorageError::InvalidParticipants)?;
 
             self.ensure()?;
             self.write_conversation(&conversation, &write_file_atomically)?;

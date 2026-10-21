@@ -28,6 +28,23 @@ pub struct HookPhaseReport {
     pub evidence: Vec<Evidence>,
 }
 
+impl HookPhaseReport {
+    /// What failed in a phase that completed with failures: each failed
+    /// record's summary.
+    #[must_use]
+    pub fn failures(&self) -> Vec<String> {
+        if self.status == PhaseStatus::Completed {
+            return Vec::new();
+        }
+
+        self.evidence
+            .iter()
+            .filter(|evidence| evidence.status() == EvidenceStatus::Failed)
+            .map(|evidence| evidence.summary().to_owned())
+            .collect()
+    }
+}
+
 pub(crate) enum Lifecycle {
     AfterTurnCommitted(CommittedTurn),
     SessionEnd,
