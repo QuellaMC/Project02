@@ -45,17 +45,35 @@ the character's storage grants through the contracts.
   refuses is refused without asking, otherwise the person is shown what
   the call would do, through the confirmer the caller supplies, and only
   on their yes does the host apply the prepared effect, under a budget of
-  its own. Without a confirmer such a tool is never offered.
+  its own. Without a confirmer such a tool is never offered, and a call
+  of a tool the model is not offered is refused as undeclared, whichever
+  plugin provides it.
 - **The trusted frame.** Only a plugin granted `trusted_context: write`
   puts runtime notes and curated sections there, whole and within their
   caps; its other items, and every item of another plugin, ride the
   person's turn.
-- **The list.** The plugins compiled into the daemon, each with the
-  manifest its package's descriptor carries, read once from the descriptor
-  the repository keeps for both daemons, and its factory: what a home's
+- **The list.** The plugins compiled into the daemon, each with its
+  manifest, read once from its descriptor, and its factory: what a home's
   settings are judged against and what a character's plugins are built
-  from. A manifest that does not parse is a build that must not ship: the
-  list fails at its first use, naming the package.
+  from. A package's descriptor is the one the repository keeps for both
+  daemons; the host's own plugin keeps its own beside its code. Whether a
+  plugin is on where no settings switch it is its manifest's to say:
+  character memory, session history and the host's own plugin are on and
+  the rest off, character state switched on for a character whose package
+  requires it. A manifest that does not parse is a build that must not
+  ship: the list fails at its first use, naming the plugin.
+- **The host's own plugin.** `runtime.plugin`, which the host builds
+  itself, linked to it, when a character's settings run it. It lists the
+  plugins the host runs, each with the access it holds, the hooks the
+  host calls of it and exactly the tools the model is offered, and on
+  asking every other plugin of the build, disabled or blocked as her
+  settings decide; and where the host's caller hands it her settings, it
+  shows one plugin's settings as her settings screen does, a secret
+  redacted, and changes one field of them a plugin lets the model change,
+  bound to the fingerprint the model read: prepared without writing,
+  shown to the person, and written to her own settings, never the home's,
+  only on her yes, the plugin then rebuilt live when its field allows.
+  Without her settings it offers its list alone.
 - **Session history.** The first plugin compiled in: an index of the
   character's own conversations in its own database, caught up slice by
   slice from the session history after each committed turn and before
@@ -77,3 +95,21 @@ the character's storage grants through the contracts.
   no failure carries a credential. Health names what the settings lack,
   says how many memories wait for a new embedder and why re-embedding
   last stopped, and leads with any capture that did not complete.
+- **Character state.** How the character is right now, five aspects of
+  her own inner state shown to her before each turn and patched by her
+  through one tool whose contract enumerates every value. Each accepted
+  patch is a line of her log, the state's one truth, then a checkpoint of
+  what the log folds to; a read takes the checkpoint while nothing was
+  written after it, folds the log anew otherwise, a line a crash left
+  twice counting once, and fails closed on a checkpoint of another
+  version, leaving it as it is.
+- **Character memory.** Two notebooks the character keeps herself, notes
+  to herself and what she knows about the person, changed by her a batch
+  at a time, every operation or none: an entry is trimmed text the trusted
+  frame can show, an old text selects exactly one entry, and each notebook
+  holds what fits its capacity in characters, its entries joined as the
+  frame joins them. What the frame shows of them is taken once a session,
+  so a change shows from her next one, and an empty notebook shows
+  nothing.
+- **Demo config.** A reply style its settings choose, a tone and a
+  signoff, there for the host's own plugin to have settings to change.

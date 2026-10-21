@@ -195,7 +195,14 @@ async fn the_listed_plugins_activate_together() {
         host.plugin_ids()
             .map(Identifier::as_str)
             .collect::<Vec<_>>(),
-        ["mem0", "session-history"]
+        [
+            "character-memory",
+            "character-state",
+            "demo-config",
+            "mem0",
+            "runtime.plugin",
+            "session-history"
+        ]
     );
     assert_eq!(
         host.tool_definitions()
@@ -204,11 +211,15 @@ async fn the_listed_plugins_activate_together() {
             .map(|definition| definition.tool.name().as_str())
             .collect::<Vec<_>>(),
         [
+            "memory.update",
+            "character_state.patch",
             "mem0.search",
             "mem0.add",
+            "runtime.plugin.list",
             "sessions.search",
             "sessions.read"
-        ]
+        ],
+        "without the character's settings, the host's own plugin offers its list alone"
     );
 
     let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
@@ -221,7 +232,11 @@ async fn the_listed_plugins_activate_together() {
             .iter()
             .map(|note| note.plugin_id().map(Identifier::as_str))
             .collect::<Vec<_>>(),
-        [Some("session-history")]
+        [
+            Some("character-state"),
+            Some("demo-config"),
+            Some("session-history")
+        ]
     );
 }
 

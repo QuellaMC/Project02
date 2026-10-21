@@ -21,6 +21,9 @@ tokio-util.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+p02-characters.workspace = true
+p02-config.workspace = true
+p02-store.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "test-util"] }
 

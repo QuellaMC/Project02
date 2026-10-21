@@ -186,8 +186,6 @@ impl Resolution<'_> {
     /// never.
     #[must_use]
     pub fn view(&self) -> ConfigView {
-        let target = self.target();
-
         ConfigView::Ok {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
@@ -195,28 +193,49 @@ impl Resolution<'_> {
             sections: self
                 .sections()
                 .iter()
-                .filter(|section| target.authors(section.declared.config().scope()))
-                .map(|section| SectionView {
-                    namespace: section.declared.namespace(),
-                    id: section.declared.id().clone(),
-                    display_name: section.declared.display_name().to_owned(),
-                    version: section.declared.version().to_owned(),
-                    enabled: section.enabled(),
-                    enabled_source: section.switch.source(),
-                    activation: activation(section),
-                    fields: section
-                        .fields
-                        .iter()
-                        .filter(|field| {
-                            target.authors(section.declared.scope_of(field.declaration))
-                        })
-                        .map(field_view)
-                        .collect(),
-                    diagnostics: section.diagnostics.clone(),
-                    fingerprint: section.fingerprint.clone(),
-                })
+                .filter_map(|section| self.section_shown(section))
                 .collect(),
         }
+    }
+
+    /// The section `id` of `namespace` as the view shows it; none when the
+    /// target may not set it.
+    #[must_use]
+    pub fn section_view(&self, namespace: Namespace, id: &str) -> Option<SectionView> {
+        self.section(namespace, id)
+            .and_then(|section| self.section_shown(section))
+    }
+
+    fn section_shown(&self, section: &Section<'_>) -> Option<SectionView> {
+        let target = self.target();
+
+        target
+            .authors(section.declared.config().scope())
+            .then(|| SectionView {
+                namespace: section.declared.namespace(),
+                id: section.declared.id().clone(),
+                display_name: section.declared.display_name().to_owned(),
+                version: section.declared.version().to_owned(),
+                enabled: section.enabled(),
+                enabled_source: section.switch.source(),
+                activation: activation(section),
+                fields: section
+                    .fields
+                    .iter()
+                    .filter(|field| target.authors(section.declared.scope_of(field.declaration)))
+                    .map(field_view)
+                    .collect(),
+                diagnostics: section.diagnostics.clone(),
+                fingerprint: section.fingerprint.clone(),
+            })
+    }
+}
+
+impl SectionView {
+    /// Whether the section runs, as its settings decide.
+    #[must_use]
+    pub fn activation_status(&self) -> ActivationStatus {
+        self.activation.status
     }
 }
 

@@ -66,8 +66,8 @@ pub(crate) async fn begun<F: Future>(future: F) -> Pin<Box<F>> {
 pub(crate) struct World {
     _directory: TempDir,
     pub(crate) home: Home,
-    /// The gate the stand-in for Mira's required plugin is built behind,
-    /// open unless a test shuts it.
+    /// The gate a plugin every character runs is built behind, so a test
+    /// that shuts it holds her assembly in flight.
     pub(crate) assembly: Arc<Gate>,
     pub(crate) model: Arc<Model>,
 }
@@ -123,8 +123,8 @@ impl World {
     }
 
     /// A daemon on this home whose characters answer through the scripted
-    /// model, with the plugins of the daemon's list, the stand-in for Mira's
-    /// required one, and `plugins`.
+    /// model, with the plugins of the daemon's list, the one built behind
+    /// the assembly gate, and `plugins`.
     pub(crate) async fn daemon(&self, plugins: Vec<Plugin>) -> Daemon {
         self.daemon_answering(Some(Arc::clone(&self.model) as _), plugins)
             .await
@@ -141,16 +141,14 @@ impl World {
             .unwrap()
             .iter()
             .map(|(manifest, factory)| Plugin::new(manifest.clone(), *factory));
-        let stand_in = Toy::new("character-state")
-            .built_behind(&self.assembly)
-            .plugin();
+        let gated = Toy::new("assembly").built_behind(&self.assembly).plugin();
 
         Daemon::open(
             self.home.clone(),
             DaemonSettings {
                 test_provider: model,
                 durations: Durations::default(),
-                plugins: listed.chain([stand_in]).chain(plugins).collect(),
+                plugins: listed.chain([gated]).chain(plugins).collect(),
             },
         )
         .await

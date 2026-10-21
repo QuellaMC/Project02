@@ -1,0 +1,36 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "runtime.plugin",
+    "displayName": "Runtime Plugin Management",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "Host-owned plugin inventory, redacted config inspection, and approval-gated config updates.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": ["tool_provider", "handle_tool_call"],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": []
+    },
+    "firstParty": true,
+    "runtimePolicy": {
+      "timeoutMs": 5000,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": true,
+      "reasons": ["host_provided_plugin_management"]
+    },
+    "requestedAccess": {
+      "model_input": "write"
+    }
+  }
+}

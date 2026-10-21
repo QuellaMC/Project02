@@ -45,7 +45,9 @@ tokio's blocking pool.
   package or her settings differ from those she was built from; lines sent
   meanwhile wait and land on her thread opened again. Her stop cancels her
   parked confirmations first, closes her thread, its end hooks run, and
-  shuts her plugins down, saying what failed of that.
+  shuts her plugins down, saying what failed of that. Her
+  host is handed her settings, which its own plugin reads and changes in
+  her overlay alone.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her
