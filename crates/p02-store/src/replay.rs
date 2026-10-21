@@ -11,11 +11,13 @@ use p02_core::{
     Timestamp, TraceId, VisibleText,
 };
 use p02_shared::Identifier;
+use serde_json::{Map, Value};
 
 use crate::history::{ConversationHistory, project};
 use crate::record::{
-    EventReceived, LogRecord, MessageCommitted, RecordBody, RoundRecord, SessionContinuation,
-    ToolCallFinished, ToolCallStarted, TurnCompleted, TurnRejected, TurnRejection,
+    EventReceived, LogRecord, MessageCommitted, RecordBody, RoundRecord, RuntimeRejection,
+    SessionContinuation, ToolCallFinished, ToolCallStarted, TurnCompleted, TurnRejected,
+    TurnRejection,
 };
 
 /// A session as its log has it: the records that replayed, in order, and
@@ -48,6 +50,8 @@ pub enum ReplayError {
     AfterEnd(EventId),
     #[error("turn \"{0}\" is not the open turn")]
     Interleaved(EventId),
+    #[error("a model round comes after the turn committed the person's line")]
+    RoundBeforeLine,
     #[error("model round {round} is out of sequence: the turn has run {ran}")]
     RoundOutOfSequence { round: NonZeroU32, ran: usize },
     #[error("the record names model round {round}, which the turn never ran: it has run {ran}")]
@@ -60,6 +64,8 @@ pub enum ReplayError {
     InputDisagrees,
     #[error("tool call \"{0}\" starts a second time")]
     CallStartedTwice(ToolCallId),
+    #[error("tool call \"{0}\" is not the next call an accepted round of its turn asked for")]
+    CallNotAsked(ToolCallId),
     #[error("tool call \"{0}\" finishes but never started")]
     CallNotStarted(ToolCallId),
     #[error("tool call \"{0}\" finishes a second time")]
@@ -86,13 +92,20 @@ pub enum ReplayError {
     JudgedNotLast { round: NonZeroU32, ran: usize },
     #[error("a completed turn ends on a round the parser accepted, which asked for no tool")]
     CompletedOnRefusal,
-    #[error("a completed turn anchors a reply the round it ended on said")]
+    #[error("the turn completes before committing every reply round {0} said")]
+    RepliesUncommitted(NonZeroU32),
+    #[error("a completed turn anchors the last reply the round it ended on said")]
     AnchorNotSaid,
     #[error(
         "a rejection repeats the refusal of the round it judged, or names a refusal of the \
          runtime itself"
     )]
     RejectionDisagrees,
+    #[error(
+        "a turn is rejected as \"{0}\" only before it goes further: a line refused before it is \
+         committed, a plugin's refusal before any round"
+    )]
+    RejectionTooLate(&'static str),
     #[error("after_turn_committed follows the record that completed its turn")]
     AfterIncompleteTurn,
 }
@@ -104,15 +117,24 @@ struct Turn {
     /// The one text the turn's model input is: the line it came in as, the
     /// person's message and what each round was given.
     input: Option<VisibleText>,
-    rounds: Vec<DecisionResult>,
+    rounds: Vec<Round>,
     messages: Vec<MessageId>,
-    /// The last round a reply was said in, and how many replies each round
-    /// said, so rows keep their rounds' order.
+    /// The last round a reply was said in, so rows keep their rounds'
+    /// order.
     last_reply_round: Option<NonZeroU32>,
-    replies_said: BTreeMap<NonZeroU32, usize>,
     finished: Vec<ToolCallId>,
     unfinished: Vec<ToolCallId>,
     end: Option<End>,
+}
+
+/// A round a turn ran: its verdict, and how many of the replies it said
+/// and of the calls it asked for the turn has taken up so far, each in the
+/// order the round gave them.
+#[derive(Clone, Debug)]
+struct Round {
+    result: DecisionResult,
+    replies_said: usize,
+    calls_started: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,6 +303,10 @@ impl SessionReplay {
     }
 
     fn check_round(&self, turn: &Turn, round: &RoundRecord) -> Result<(), ReplayError> {
+        if turn.messages.is_empty() {
+            return Err(ReplayError::RoundBeforeLine);
+        }
+
         if index_of(round.round()) != turn.rounds.len() {
             return Err(ReplayError::RoundOutOfSequence {
                 round: round.round(),
@@ -302,10 +328,21 @@ impl SessionReplay {
     }
 
     fn check_started(&self, turn: &Turn, call: &ToolCallStarted) -> Result<(), ReplayError> {
-        ran(turn, call.round())?;
+        let round = ran(turn, call.round())?;
+        let id = call.tool_call_id();
 
-        if self.calls.contains_key(call.tool_call_id()) {
-            return Err(ReplayError::CallStartedTwice(call.tool_call_id().clone()));
+        if self.calls.contains_key(id) {
+            return Err(ReplayError::CallStartedTwice(id.clone()));
+        }
+
+        let DecisionResult::Accepted { decision } = &round.result else {
+            return Err(ReplayError::CallNotAsked(id.clone()));
+        };
+
+        if asked(decision.tool_calls()).nth(round.calls_started)
+            != Some((call.tool_name(), call.tool_input()))
+        {
+            return Err(ReplayError::CallNotAsked(id.clone()));
         }
 
         Ok(())
@@ -352,13 +389,11 @@ impl SessionReplay {
         };
 
         match record.body() {
-            RecordBody::ModelRound(round) => {
-                let turn = &mut self.turns[index];
-
-                turn.rounds.push(round.result().clone());
-                turn.input
-                    .get_or_insert_with(|| round.snapshot().input_envelope.user_message.clone());
-            }
+            RecordBody::ModelRound(round) => self.turns[index].rounds.push(Round {
+                result: round.result().clone(),
+                replies_said: 0,
+                calls_started: 0,
+            }),
             RecordBody::ToolCallStarted(call) => {
                 self.calls.insert(
                     call.tool_call_id().clone(),
@@ -369,9 +404,11 @@ impl SessionReplay {
                         plugin_id: call.tool_plugin_id().clone(),
                     },
                 );
-                self.turns[index]
-                    .unfinished
-                    .push(call.tool_call_id().clone());
+
+                let turn = &mut self.turns[index];
+
+                turn.rounds[index_of(call.round())].calls_started += 1;
+                turn.unfinished.push(call.tool_call_id().clone());
             }
             RecordBody::ToolCallFinished(call) => {
                 let turn = &mut self.turns[index];
@@ -387,7 +424,7 @@ impl SessionReplay {
                 match commit.round() {
                     Some(round) => {
                         turn.last_reply_round = Some(round);
-                        *turn.replies_said.entry(round).or_default() += 1;
+                        turn.rounds[index_of(round)].replies_said += 1;
                     }
                     None => {
                         turn.input
@@ -416,7 +453,6 @@ impl SessionReplay {
             rounds: Vec::new(),
             messages: Vec::new(),
             last_reply_round: None,
-            replies_said: BTreeMap::new(),
             finished: Vec::new(),
             unfinished: Vec::new(),
             end: None,
@@ -438,8 +474,8 @@ fn index_of(round: NonZeroU32) -> usize {
     usize::try_from(round.get() - 1).unwrap_or(usize::MAX)
 }
 
-/// The decision of round `round` of `turn`, when the turn ran it.
-fn ran(turn: &Turn, round: NonZeroU32) -> Result<&DecisionResult, ReplayError> {
+/// Round `round` of `turn`, when the turn ran it.
+fn ran(turn: &Turn, round: NonZeroU32) -> Result<&Round, ReplayError> {
     turn.rounds
         .get(index_of(round))
         .ok_or(ReplayError::UnknownRound {
@@ -472,11 +508,11 @@ fn check_commit(turn: &Turn, commit: &MessageCommitted) -> Result<(), ReplayErro
                 return Err(ReplayError::UserMessagePlace);
             }
 
-            let DecisionResult::Accepted { decision } = ran(turn, round)? else {
+            let ran = ran(turn, round)?;
+            let DecisionResult::Accepted { decision } = &ran.result else {
                 return Err(ReplayError::ReplyWithoutAcceptedRound(message.id.clone()));
             };
-            let said = turn.replies_said.get(&round).copied().unwrap_or(0);
-            let next = replies(decision.tool_calls()).nth(said);
+            let next = replies(decision.tool_calls()).nth(ran.replies_said);
 
             if turn.last_reply_round.is_some_and(|last| round < last) || next != Some(&message.text)
             {
@@ -506,7 +542,8 @@ fn check_completed(turn: &Turn, completed: &TurnCompleted) -> Result<(), ReplayE
             Err(ReplayError::Unjudged)
         };
     };
-    let DecisionResult::Accepted { decision } = last_round(turn, judgement.round)? else {
+    let round = last_round(turn, judgement.round)?;
+    let DecisionResult::Accepted { decision } = &round.result else {
         return Err(ReplayError::CompletedOnRefusal);
     };
 
@@ -514,13 +551,13 @@ fn check_completed(turn: &Turn, completed: &TurnCompleted) -> Result<(), ReplayE
         return Err(ReplayError::CompletedOnRefusal);
     }
 
-    let mut said = replies(decision.tool_calls());
-    let anchored = match &judgement.accepted_reply {
-        None => said.next().is_none(),
-        Some(reply) => said.any(|text| text == reply),
-    };
+    let said: Vec<&VisibleText> = replies(decision.tool_calls()).collect();
 
-    if anchored {
+    if round.replies_said != said.len() {
+        return Err(ReplayError::RepliesUncommitted(judgement.round));
+    }
+
+    if judgement.accepted_reply.as_ref() == said.last().copied() {
         Ok(())
     } else {
         Err(ReplayError::AnchorNotSaid)
@@ -530,10 +567,11 @@ fn check_completed(turn: &Turn, completed: &TurnCompleted) -> Result<(), ReplayE
 fn check_rejected(turn: &Turn, rejected: &TurnRejected) -> Result<(), ReplayError> {
     check_summary(turn, &rejected.visible_message_ids, &rejected.tool_call_ids)?;
 
-    let TurnRejection::Judged { round, reason } = rejected.rejection() else {
-        return Ok(());
+    let (round, reason) = match rejected.rejection() {
+        TurnRejection::Judged { round, reason } => (round, reason),
+        TurnRejection::Runtime(rejection) => return check_in_time(turn, rejection),
     };
-    let agrees = match last_round(turn, round)? {
+    let agrees = match &last_round(turn, round)?.result {
         DecisionResult::Rejected { rejection } => {
             rejection.reason == reason
                 && rejection.details.as_deref().unwrap_or(reason.as_str()) == rejected.message()
@@ -549,6 +587,23 @@ fn check_rejected(turn: &Turn, rejected: &TurnRejected) -> Result<(), ReplayErro
         Ok(())
     } else {
         Err(ReplayError::RejectionDisagrees)
+    }
+}
+
+/// The runtime refuses a turn for its own reason only where that reason
+/// stops a turn: a line before it is committed, a plugin's refusal before
+/// any round, a failure at any point.
+fn check_in_time(turn: &Turn, rejection: RuntimeRejection) -> Result<(), ReplayError> {
+    let in_time = match rejection {
+        RuntimeRejection::InputValidationRejected => turn.messages.is_empty(),
+        RuntimeRejection::PluginBeforeRoleModelCallRejected => turn.rounds.is_empty(),
+        RuntimeRejection::RuntimeFailure => true,
+    };
+
+    if in_time {
+        Ok(())
+    } else {
+        Err(ReplayError::RejectionTooLate(rejection.as_str()))
     }
 }
 
@@ -570,9 +625,8 @@ fn check_summary(
     Ok(())
 }
 
-/// The decision of the round a terminal record judges, which is the last
-/// the turn ran.
-fn last_round(turn: &Turn, round: NonZeroU32) -> Result<&DecisionResult, ReplayError> {
+/// The round a terminal record judges, which is the last the turn ran.
+fn last_round(turn: &Turn, round: NonZeroU32) -> Result<&Round, ReplayError> {
     if turn.rounds.len().checked_sub(1) != Some(index_of(round)) {
         return Err(ReplayError::JudgedNotLast {
             round,
@@ -590,8 +644,14 @@ fn replies(calls: &[ModelToolCall]) -> impl Iterator<Item = &VisibleText> {
     })
 }
 
+/// The calls of plugin tools a decision asked for, in its order.
+fn asked(calls: &[ModelToolCall]) -> impl Iterator<Item = (&Identifier, &Map<String, Value>)> {
+    calls.iter().filter_map(|call| match call {
+        ModelToolCall::Plugin { name, input } => Some((name, input)),
+        ModelToolCall::VisibleReply { .. } => None,
+    })
+}
+
 fn executable(calls: &[ModelToolCall]) -> bool {
-    calls
-        .iter()
-        .any(|call| matches!(call, ModelToolCall::Plugin { .. }))
+    asked(calls).next().is_some()
 }

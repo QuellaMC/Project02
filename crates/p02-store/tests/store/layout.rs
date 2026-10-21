@@ -175,9 +175,11 @@ fn an_unmarked_data_directory_holding_history_or_a_foreign_file_is_never_adopted
         let (_directory, home) = World::empty();
         let data = home.root().join("character-data").join("mira");
 
+        home.ensure().unwrap();
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(data.join(name), "").unwrap();
 
+        let before = snapshot(home.root());
         let refused = CharacterData::ensure(&home, &mira().id).unwrap_err();
 
         assert_eq!(refused.code(), "missing_file", "{name}");
@@ -187,10 +189,7 @@ fn an_unmarked_data_directory_holding_history_or_a_foreign_file_is_never_adopted
                 .contains(&format!("holds \"{name}\" without a data marker")),
             "{refused}"
         );
-        assert_eq!(
-            snapshot(home.root()),
-            BTreeMap::from([(format!("character-data/mira/{name}"), String::new())])
-        );
+        assert_eq!(snapshot(home.root()), before, "{name}");
     }
 }
 
@@ -199,6 +198,7 @@ fn an_unmarked_data_directory_of_control_state_alone_is_adopted() {
     let (_directory, home) = World::empty();
     let data = home.root().join("character-data").join("mira");
 
+    home.ensure().unwrap();
     std::fs::create_dir_all(data.join("sessions")).unwrap();
     std::fs::create_dir_all(data.join(".locks")).unwrap();
     std::fs::write(data.join("config.json"), "{}").unwrap();
@@ -223,7 +223,6 @@ fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left
     for name in ["schema.json", "sessions.jsonl"] {
         std::fs::copy(data.join(name), zeta.join(name)).unwrap();
     }
-    std::fs::remove_file(world.root().join("schema.json")).unwrap();
 
     let copied = snapshot(world.root());
     let zeta_id = p02_shared::Identifier::new("zeta").unwrap();
@@ -248,34 +247,57 @@ fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left
     assert_eq!(snapshot(world.root()), copied);
 }
 
+/// What a home holds before its marker, its history directories still
+/// empty among it, is no reason to refuse it; history, or anything else,
+/// is, whichever way in is asked.
 #[test]
-fn an_unmarked_home_holding_more_than_a_home_holds_is_refused_and_left_as_it_was() {
-    let (_directory, home) = World::empty();
-    let elsewhere = tempfile::TempDir::new().unwrap();
+fn an_unmarked_home_holding_history_or_more_than_a_home_holds_is_refused_and_left_as_it_was() {
+    for (entry, held) in [
+        ("notes.txt", "notes.txt"),
+        ("character-data", "character-data/mira/schema.json"),
+        ("conversations", "conversations/conv_a/conversation.json"),
+    ] {
+        let (_directory, home) = World::empty();
+        let elsewhere = tempfile::TempDir::new().unwrap();
+        let held = home.root().join(held);
 
-    std::fs::write(home.root().join("config.json"), "{}").unwrap();
-    std::fs::write(
-        home.root()
-            .join(format!(".config.json.{}.tmp", uuid::Uuid::new_v4())),
-        "{",
-    )
-    .unwrap();
-    link(elsewhere.path(), &home.root().join("characters"));
-    home.check().unwrap();
+        std::fs::write(home.root().join("config.json"), "{}").unwrap();
+        std::fs::write(
+            home.root()
+                .join(format!(".config.json.{}.tmp", uuid::Uuid::new_v4())),
+            "{",
+        )
+        .unwrap();
+        std::fs::create_dir(home.root().join("character-data")).unwrap();
+        std::fs::create_dir(home.root().join("conversations")).unwrap();
+        link(elsewhere.path(), &home.root().join("characters"));
+        home.check().unwrap();
 
-    std::fs::write(home.root().join("notes.txt"), "Mine.").unwrap();
+        std::fs::create_dir_all(held.parent().unwrap()).unwrap();
+        std::fs::write(&held, "{}").unwrap();
 
-    let before = snapshot(home.root());
-    let refused = CharacterData::ensure(&home, &mira().id).unwrap_err();
+        let before = snapshot(home.root());
 
-    assert_eq!(refused.code(), "missing_file");
-    assert!(
-        refused
-            .to_string()
-            .contains("holds \"notes.txt\" and no home marker"),
-        "{refused}"
-    );
-    assert_eq!(snapshot(home.root()), before);
+        for refused in [
+            CharacterData::ensure(&home, &mira().id)
+                .map(drop)
+                .unwrap_err(),
+            CharacterData::open(&home, &mira().id)
+                .map(drop)
+                .unwrap_err(),
+            home.conversations().map(drop).unwrap_err(),
+        ] {
+            assert_eq!(refused.code(), "missing_file", "{entry}");
+            assert!(
+                refused
+                    .to_string()
+                    .contains(&format!("holds \"{entry}\" and no home marker")),
+                "{refused}"
+            );
+        }
+
+        assert_eq!(snapshot(home.root()), before, "{entry}");
+    }
 }
 
 /// Each entry, moved elsewhere and linked back, is refused before anything

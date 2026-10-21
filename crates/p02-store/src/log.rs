@@ -268,6 +268,23 @@ impl SessionWriter {
         self.lease.release();
     }
 
+    /// Discards the session, which must hold no evidence: the rollback of a
+    /// continuation whose first record never landed, or the segment an
+    /// interrupted one left. Only its writer discards a session, so nothing
+    /// is appended while it goes; the lease is released after, whatever
+    /// the discard came to.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::SessionNotEmpty`] when the session holds evidence, or
+    /// an error of [`CharacterData::sessions`] or of the writes.
+    pub fn discard(self) -> Result<(), StorageError> {
+        let discarded = self.log.data.discard_empty_session(&self.log.session);
+
+        self.lease.release();
+        discarded
+    }
+
     fn fresh(&mut self) -> Result<&mut Cached, StorageError> {
         let path = self.log.path();
         let current = file_stamp(&path).map_err(StorageError::read(&path))?;

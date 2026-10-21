@@ -63,17 +63,21 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   continuation is a session's first record, and names it. A turn starts
   once, with its event received; while it is open no other turn's record
   comes, and once it has ended only the plugins' work after its commit
-  does; a new turn closes one a crash left open. Its rounds are numbered as
-  they happen, each shown this session and its character, and every other
-  record that names a round names one the turn ran. It commits the
-  person's line first and once, the one text its rounds were given, and a
-  reply only from an accepted round, in the order that round said them;
-  every message joins the session through the core session's gate. A call
-  starts once and finishes once, as itself, in its turn. The record that ends
-  a turn names exactly what it committed and what finished; a completed
-  turn that ran the model ends on an accepted round that asked for no tool
-  and anchors a reply that round said, and a rejection that judges a round
-  repeats that round's refusal or is the runtime's own.
+  does; a new turn closes one a crash left open. It commits the person's
+  line first and once, before any round, the one text its rounds were
+  given. Its rounds are numbered as they happen, each shown this session
+  and its character, and every other record that names a round names one
+  the turn ran. A reply comes only from an accepted round, in the order
+  that round said them, and a call only from an accepted round, in the
+  order it asked for them; every message joins the session through the
+  core session's gate. A call starts once and finishes once, as itself, in
+  its turn. The record that ends a turn names exactly what it committed and
+  what finished. A completed turn that ran the model ends on an accepted
+  round that asked for no tool, having committed every reply that round
+  said, and anchors the last; a rejection that judges a round repeats that
+  round's refusal or is the runtime's own, and one that judges none comes
+  where its reason stops a turn: a line refused before it is committed, a
+  plugin's refusal before any round.
 - **History.** The one projection of a log into the turns its model is
   shown: a turn once it committed the person's line, a round of tool calls
   once a call it started came back, a continued session's carried turns
@@ -86,9 +90,11 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   start or discard left, empty or holding only a torn line, is no
   session. A catalog row cut by a crash is no row; a damaged row fails a
   listing but not a read of another session. A conversation's first
-  segment is made once, and each next one only from the newest. Sessions and
-  conversations list oldest first, in code-point order. A conversation is
-  made once per set of participants, as `conv_` and a random UUID, and a
-  directory without its record is a make a crash interrupted. A
-  conversation's taken lines are read leniently and written whole by the
-  holder of the conversation; the segments stay their truth.
+  segment is made once, and each next one only from the newest; a segment
+  that never took a record is discarded by its writer alone, so nothing is
+  appended while it goes. Sessions and conversations list oldest first, in
+  code-point order. A conversation is made once per set of participants,
+  as `conv_` and a random UUID, and a directory without its record is a
+  make a crash interrupted. A conversation's taken lines are read
+  leniently and written whole by the holder of the conversation; the
+  segments stay their truth.
