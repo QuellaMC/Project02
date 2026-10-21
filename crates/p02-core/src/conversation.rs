@@ -35,6 +35,12 @@ impl Participant {
         }
     }
 
+    /// Whether this is the person, whoever else a conversation is between.
+    #[must_use]
+    pub fn is_local_user(&self) -> bool {
+        self.kind == VisibleMessageRole::User && self.id == *LOCAL_USER
+    }
+
     fn key(&self) -> (VisibleMessageRole, &Identifier) {
         (self.kind, &self.id)
     }

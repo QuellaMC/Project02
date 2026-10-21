@@ -85,11 +85,7 @@ impl CharacterData {
         &self,
         conversation: &ConversationId,
     ) -> Result<Option<SessionEntry>, StorageError> {
-        Ok(self
-            .read_catalog()?
-            .into_values()
-            .filter(|entry| entry.session_id.conversation_id() == conversation)
-            .max_by_key(|entry| entry.session_id.segment()))
+        Ok(newest(&self.read_catalog()?, conversation).cloned())
     }
 
     /// Makes the first segment of `conversation`, `<conversation>.1`.
@@ -123,12 +119,7 @@ impl CharacterData {
     /// an error of [`CharacterData::sessions`] or of the writes.
     pub fn continue_session(&self, from: &SessionId) -> Result<SessionEntry, StorageError> {
         self.with_catalog(|catalog| {
-            let latest = catalog
-                .keys()
-                .filter(|id| id.conversation_id() == from.conversation_id())
-                .max_by_key(|id| id.segment());
-
-            if latest != Some(from) {
+            if newest(catalog, from.conversation_id()).map(SessionEntry::session_id) != Some(from) {
                 return Err(StorageError::NotLatestSegment(from.clone()));
             }
 
@@ -141,14 +132,18 @@ impl CharacterData {
         })
     }
 
-    /// Removes session `id`, which must hold no evidence, for its writer,
-    /// whose lease keeps every append out while it goes. The catalog row
-    /// goes first; a directory left behind reads as an interrupted start.
+    /// Removes session `id`, which must hold no evidence and be its
+    /// conversation's newest segment, so the segments left run unbroken
+    /// from the first; for its writer, whose lease keeps every append out
+    /// while it goes. The catalog row goes first; a directory left behind
+    /// reads as an interrupted start.
     pub(crate) fn discard_empty_session(&self, id: &SessionId) -> Result<(), StorageError> {
         self.with_catalog(|catalog| {
-            if catalog.remove(id).is_none() {
-                return Ok(());
+            if newest(catalog, id.conversation_id()).map(SessionEntry::session_id) != Some(id) {
+                return Err(StorageError::NotLatestSegment(id.clone()));
             }
+
+            catalog.remove(id);
 
             let directory = self.sessions_root().join(id.to_string());
 
@@ -364,6 +359,14 @@ impl CharacterData {
 
         replace(&path, &content).map_err(StorageError::write(&path))
     }
+}
+
+/// The newest segment of `conversation` the catalog lists.
+fn newest<'a>(catalog: &'a Catalog, conversation: &ConversationId) -> Option<&'a SessionEntry> {
+    catalog
+        .values()
+        .filter(|entry| entry.session_id.conversation_id() == conversation)
+        .max_by_key(|entry| entry.session_id.segment())
 }
 
 /// Oldest first: by when each session was made, then by its id, both in
