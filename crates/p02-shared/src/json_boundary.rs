@@ -78,7 +78,7 @@ pub fn bound_json(
     .visit(&value, name, 0)?;
 
     if credentials == Credentials::Redact {
-        redact(&mut value);
+        redact_credentials(&mut value);
     }
 
     Ok(value)
@@ -176,15 +176,17 @@ impl Tally<'_> {
     }
 }
 
-fn redact(value: &mut Value) {
+/// Makes the value of every credential-named key in `value`, however deep,
+/// `"[redacted]"`, whatever its kind.
+pub fn redact_credentials(value: &mut Value) {
     match value {
-        Value::Array(items) => items.iter_mut().for_each(redact),
+        Value::Array(items) => items.iter_mut().for_each(redact_credentials),
         Value::Object(entries) => {
             for (key, item) in entries.iter_mut() {
                 if is_credential_key(key) {
                     *item = Value::from("[redacted]");
                 } else {
-                    redact(item);
+                    redact_credentials(item);
                 }
             }
         }

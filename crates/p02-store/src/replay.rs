@@ -28,9 +28,18 @@ pub struct SessionReplay {
     session: Session,
     records: Vec<LogRecord>,
     turns: Vec<Turn>,
-    turn_of: HashMap<(EventId, TraceId), usize>,
+    /// What each event identity of the log names, so one names one thing.
+    named: HashMap<(EventId, TraceId), Named>,
     open: Option<usize>,
     calls: HashMap<ToolCallId, Call>,
+}
+
+/// What an event identity names: the continuation a session began with,
+/// or one of its turns.
+#[derive(Clone, Copy, Debug)]
+enum Named {
+    Continuation,
+    Turn(usize),
 }
 
 /// Why a record does not follow the records before it.
@@ -42,7 +51,7 @@ pub enum ReplayError {
     ContinuationNotFirst,
     #[error("the continuation names session \"{0}\", not its own")]
     ContinuationOfAnotherSession(SessionId),
-    #[error("turn \"{0}\" starts a second time")]
+    #[error("turn \"{0}\" starts a second time, or under the continuation's identity")]
     TurnStartedTwice(EventId),
     #[error("event \"{0}\" has no runtime_event_received that starts its turn")]
     NotStarted(EventId),
@@ -189,7 +198,7 @@ impl SessionReplay {
             session,
             records: Vec::new(),
             turns: Vec::new(),
-            turn_of: HashMap::new(),
+            named: HashMap::new(),
             open: None,
             calls: HashMap::new(),
         }
@@ -258,7 +267,7 @@ impl SessionReplay {
                 return Ok(Place::Continuation);
             }
             RecordBody::EventReceived(received) => {
-                if self.turn_of.contains_key(&key) {
+                if self.named.contains_key(&key) {
                     return Err(ReplayError::TurnStartedTwice(identity.event_id().clone()));
                 }
 
@@ -267,10 +276,9 @@ impl SessionReplay {
             _ => {}
         }
 
-        let index = *self
-            .turn_of
-            .get(&key)
-            .ok_or_else(|| ReplayError::NotStarted(identity.event_id().clone()))?;
+        let Some(Named::Turn(index)) = self.named.get(&key).copied() else {
+            return Err(ReplayError::NotStarted(identity.event_id().clone()));
+        };
         let turn = &self.turns[index];
 
         if &turn.created_at != identity.created_at() {
@@ -407,7 +415,11 @@ impl SessionReplay {
     /// What `record`, which [`SessionReplay::check`] placed, changes.
     fn take(&mut self, place: Place<'_>, record: &LogRecord) {
         let index = match place {
-            Place::Continuation => return,
+            Place::Continuation => {
+                self.named
+                    .insert(key_of(record.identity()), Named::Continuation);
+                return;
+            }
             Place::Opening(received) => {
                 self.open(record.identity(), received);
                 return;
@@ -463,7 +475,8 @@ impl SessionReplay {
     }
 
     fn open(&mut self, identity: &EventIdentity, received: &EventReceived) {
-        self.turn_of.insert(key_of(identity), self.turns.len());
+        self.named
+            .insert(key_of(identity), Named::Turn(self.turns.len()));
         self.open = Some(self.turns.len());
         self.turns.push(Turn {
             created_at: identity.created_at().clone(),

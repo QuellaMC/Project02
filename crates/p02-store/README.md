@@ -51,36 +51,36 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
 - **Records.** A session's log holds one record per line: the event it
   belongs to, its kind, and exactly the fields its kind has, in the order
   they are written. A model round records what it was shown and what it
-  wrote, and its verdict must be what the decision parser reads that output
-  as, or the provider's failure when nothing came. A tool call's input and
-  result are kept as the model is shown them again, and an exchange as its
-  provider's, so no credential-named value reaches the log; a call no plugin
-  offers comes back as the runtime's refusal of it, never an answer. A
-  committed line that is no record is damage and fails the read, never a
-  shorter history; a read whose file changes beneath it is tried once more,
-  then refused as raced.
+  wrote, every credential-named value in that redacted too, and its verdict
+  must be what the decision parser reads that output as, or the provider's
+  failure when nothing came. A tool call's input and result are kept as the
+  model is shown them again, and an exchange as its provider's, so no
+  credential-named value reaches the log; a call no plugin offers comes back
+  as the runtime's refusal of it, never an answer. A committed line that is
+  no record is damage and fails the read, never a shorter history; a read
+  whose file changes beneath it is tried once more, then refused as raced.
 - **The gate.** Every record enters through one gate, replayed or appended
   now, and is checked whole before anything of it is taken in. A
   continuation is a session's first record, and names it. A turn starts
-  once, with its event received; while it is open no other turn's record
-  comes, and once it has ended only the plugins' work after its commit does;
-  a new turn closes one a crash left open. It commits the line its event was
-  taken as, first and once and before any round, and its rounds are given
-  that one text. Its rounds are numbered as they happen, each shown this
-  session and its character, and every other record that names a round names
-  one the turn ran. A reply comes only from an accepted round, in the order
-  that round said them, and a call only from an accepted round, in the order
-  it asked for them; a round comes only once the turn took up all the round
-  before it gave, every reply committed and every call started and finished.
-  Every message joins the session through the core session's gate. A call
-  starts once and finishes once, as itself, in its turn. The record that
-  ends a turn names exactly what it committed and what finished. A completed
-  turn that ran the model ends on an accepted round that asked for no tool,
-  having committed every reply that round said, and anchors the last; a
-  rejection that judges a round repeats that round's refusal or is the
-  runtime's own, and one that judges none comes where its reason stops a
-  turn: a line refused before it is committed, a plugin's refusal before any
-  round.
+  once, with its event received, under an identity of its own; while it is
+  open no other turn's record comes, and once it has ended only the plugins'
+  work after its commit does; a new turn closes one a crash left open. It
+  commits the line its event was taken as, first and once and before any
+  round, and its rounds are given that one text. Its rounds are numbered as
+  they happen, each shown this session and its character, and every other
+  record that names a round names one the turn ran. A reply comes only from
+  an accepted round, in the order that round said them, and a call only from
+  an accepted round, in the order it asked for them; a round comes only once
+  the turn took up all the round before it gave, every reply committed and
+  every call started and finished. Every message joins the session through
+  the core session's gate. A call starts once and finishes once, as itself,
+  in its turn. The record that ends a turn names exactly what it committed
+  and what finished. A completed turn that ran the model ends on an accepted
+  round that asked for no tool, having committed every reply that round
+  said, and anchors the last; a rejection that judges a round repeats that
+  round's refusal or is the runtime's own, and one that judges none comes
+  where its reason stops a turn: a line refused before it is committed, a
+  plugin's refusal before any round.
 - **History.** The one projection of a log into the turns its model is
   shown: a turn once it committed the person's line, a round of tool calls
   once a call it started came back, a continued session's carried turns
