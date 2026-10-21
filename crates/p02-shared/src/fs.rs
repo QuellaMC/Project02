@@ -127,15 +127,18 @@ pub fn append_line(path: &Path, line: &[u8]) -> io::Result<()> {
     file.write_all(&bytes)
 }
 
-/// Flushes what was written to the file at `path` to disk, so it outlasts a
+/// Flushes what was written to the file at `path` to disk, then its
+/// directory, which holds its name when the file is new, so it outlasts a
 /// crash of the machine, not only of the process: for a write whose record
 /// of having happened is flushed after it.
 ///
 /// # Errors
 ///
-/// The `io::Error` the open or the flush failed with.
+/// The `io::Error` the open or the flush of the file failed with.
 pub fn sync_file(path: &Path) -> io::Result<()> {
-    OpenOptions::new().write(true).open(path)?.sync_data()
+    OpenOptions::new().write(true).open(path)?.sync_data()?;
+    sync_directory_of(path);
+    Ok(())
 }
 
 /// How many bytes of `file` its last newline ends, read back from the end.
@@ -502,8 +505,9 @@ fn remove_after_failure(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-/// Makes a rename durable. Best effort: Windows cannot open a directory as
-/// a file, and some file systems refuse to flush one.
+/// Makes the name `path` was given durable, by a rename or a create. Best
+/// effort: Windows cannot open a directory as a file, and some file systems
+/// refuse to flush one.
 fn sync_directory_of(path: &Path) {
     let directory = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
