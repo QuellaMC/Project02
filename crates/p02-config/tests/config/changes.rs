@@ -480,24 +480,56 @@ fn a_change_on_her_screen_is_written_into_her_overlay_alone_secrets_too() {
 }
 
 #[test]
-fn while_the_homes_document_does_not_load_a_change_of_hers_is_refused_and_makes_no_overlay() {
+fn a_change_over_a_document_that_does_not_load_is_refused_saying_why_and_writes_nothing() {
     let world = World::new();
+    let name = json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"});
+    let tokens = json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096});
+    let refused_saying = |outcome: &ChangeOutcome, why: &str| {
+        assert_eq!(
+            refusal(outcome),
+            Some(ChangeRefusal::Invalid),
+            "{outcome:?}"
+        );
+        assert!(format!("{outcome:?}").contains(why), "{why} in {outcome:?}");
+    };
     let read = fingerprint(&world.view(&of("mira")));
 
     std::fs::write(world.home_document(), "{not json").unwrap();
-
-    let outcome = world.change_bound(
-        &of("mira"),
-        &read,
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"}),
-    );
-
-    assert_eq!(refusal(&outcome), Some(ChangeRefusal::Invalid));
-    assert!(
-        format!("{outcome:?}").contains("failed to load"),
-        "{outcome:?}"
+    refused_saying(
+        &world.change_bound(&of("mira"), &read, name.clone()),
+        "not valid JSON",
     );
     assert!(!world.overlay("mira").exists());
+
+    let broken = document(json!({"project02": {"contextWindowTokens": -5}}));
+
+    world.write_home(&document(json!({})));
+
+    let read = fingerprint(&world.view(&home()));
+
+    world.write_home(&broken);
+    refused_saying(
+        &world.change_bound(&home(), &read, tokens.clone()),
+        "contextWindowTokens",
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(world.home_document()).unwrap()).unwrap(),
+        broken
+    );
+
+    world.write_home(&document(json!({})));
+
+    let read = fingerprint(&world.view(&of("mira")));
+
+    world.write_overlay("mira", &broken);
+    refused_saying(
+        &world.change_bound(&of("mira"), &read, tokens),
+        "contextWindowTokens",
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap()).unwrap(),
+        broken
+    );
 }
 
 #[test]
