@@ -1,6 +1,6 @@
 {
   "name": "only-the-reply",
-  "about": "No plugin tool at all: visible_reply alone, so the request carries no tool_choice or parallel_tool_calls beside it; a one-section persona would read the same, and the person is unnamed.",
+  "about": "No plugin tool at all: visible_reply alone is offered, with tool_choice and parallel_tool_calls beside it as always; a one-section persona would read the same, and the person is unnamed.",
   "recordedFrom": "6e1e9fdc4f0a05d03233889fa08356f3360c658e",
   "input": {
     "event": {
