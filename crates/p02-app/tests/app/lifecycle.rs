@@ -343,6 +343,34 @@ async fn a_stop_during_her_recovery_wins() {
     assert_eq!(ear.states("mira"), [Failed, Starting, Stopping, Stopped]);
 }
 
+/// A package changed under her, her name and nothing else, makes the next
+/// reconcile build her again from it, so her thread, made after, is in her
+/// new name.
+#[tokio::test(start_paused = true)]
+async fn a_package_changed_under_her_rebuilds_her_from_it() {
+    let world = World::new();
+
+    world.package("nova", "Nova");
+
+    let daemon = world.daemon(Vec::new()).await;
+
+    daemon.reconcile().await;
+    world.package("nova", "Nova Prime");
+    assert_eq!(daemon.reconcile().await.reloading, [id("nova")]);
+
+    let OpenOutcome::Opened {
+        conversation_id, ..
+    } = daemon.open_conversation("nova").await
+    else {
+        panic!("her thread opens");
+    };
+    let outcome = daemon
+        .deliver(line(conversation_id.as_str(), "Hello?", "hello"))
+        .await;
+
+    assert_eq!(wire(&outcome)["messages"][1]["speakerName"], "Nova Prime");
+}
+
 /// A character whose package leaves the home while she runs is stopped by
 /// the next reconcile, and is then no character to reach.
 #[tokio::test(start_paused = true)]

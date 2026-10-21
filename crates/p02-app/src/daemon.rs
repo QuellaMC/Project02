@@ -5,9 +5,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use futures_util::future::join_all;
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{Connector, Sections, connectors};
@@ -195,8 +197,10 @@ pub struct Daemon {
 struct Inner {
     world: Arc<World>,
     characters: Mutex<Characters>,
-    /// Which character each conversation this run routed belongs to.
-    routes: Mutex<HashMap<ConversationId, Identifier>>,
+    /// Which character each conversation this run routed belongs to. A
+    /// delivery holds it from its routing until its line is in her queue,
+    /// and deliveries take it in the order they came.
+    routes: tokio::sync::Mutex<HashMap<ConversationId, Identifier>>,
     ledger: Arc<Ledger>,
     reconciler: Arc<Reconciler>,
     /// How many streams of each connector are open.
@@ -247,10 +251,6 @@ impl Inner {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn routes(&self) -> MutexGuard<'_, HashMap<ConversationId, Identifier>> {
-        self.routes.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
     fn presence(&self) -> MutexGuard<'_, BTreeMap<Identifier, usize>> {
         self.presence.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -287,7 +287,7 @@ impl Daemon {
                     events: Arc::new(Events::new()),
                 }),
                 characters: Mutex::default(),
-                routes: Mutex::default(),
+                routes: tokio::sync::Mutex::default(),
                 ledger: Arc::default(),
                 reconciler: Arc::default(),
                 presence: Mutex::default(),
@@ -350,20 +350,16 @@ impl Daemon {
     /// The thread between `character` and the person, opened on her the
     /// first time; every later open answers the same.
     pub async fn open_conversation(&self, character: &str) -> OpenOutcome {
-        let handle = match self.reach(character).await {
-            Ok(handle) => handle,
-            Err(Unreached::NotInstalled(message)) => {
-                return OpenOutcome::Refused {
-                    reason: OpenRefusal::UnknownCharacter,
-                    message,
-                };
-            }
-            Err(Unreached::NotStarted(message)) => {
-                return OpenOutcome::Refused {
-                    reason: OpenRefusal::CharacterUnavailable,
-                    message,
-                };
-            }
+        let Some(handle) = Identifier::new(character)
+            .ok()
+            .and_then(|id| self.live(&id))
+        else {
+            let (reason, message) = match self.unreached(character).await {
+                Unreached::NotInstalled(message) => (OpenRefusal::UnknownCharacter, message),
+                Unreached::Unavailable(message) => (OpenRefusal::CharacterUnavailable, message),
+            };
+
+            return OpenOutcome::Refused { reason, message };
         };
         let opened = handle.open().await;
 
@@ -374,7 +370,9 @@ impl Daemon {
         } = &opened
         {
             self.inner
-                .routes()
+                .routes
+                .lock()
+                .await
                 .insert(conversation_id.clone(), character_id.clone());
         }
 
@@ -382,7 +380,9 @@ impl Daemon {
     }
 
     /// Takes `message` to the character its conversation belongs to, once
-    /// per submission, and announces how the delivery ended.
+    /// per submission, and announces how the delivery ended. Its routing
+    /// and its place in her queue are one step, which lines take in the
+    /// order they came, so they reach her in that order.
     pub async fn deliver(&self, message: Message) -> TurnOutcome {
         let (Ok(source), Ok(client_message_id)) = (
             ClientStamp::new(&message.source),
@@ -395,61 +395,32 @@ impl Daemon {
                     .to_owned(),
             );
         };
-        let (conversation, character) = match self.route(&message.conversation_id).await {
-            Ok(routed) => routed,
-            Err(refused) => return refused,
-        };
-        let stamp = TurnStamp {
-            conversation_id: conversation.clone(),
-            source: source.clone(),
-            client_message_id: client_message_id.clone(),
-        };
-        let line = Line {
-            sender: message.sender_id.clone(),
-            source,
-            text: message.text.clone(),
-        };
-        let daemon = self.clone();
-
-        self.inner
-            .ledger
-            .submit(conversation, client_message_id, line, async move {
-                let outcome = match daemon.reach(character.as_str()).await {
-                    // Refused at once, while a turn ahead of it still runs.
-                    Ok(_) if message.sender_id != Participant::local_user_id().as_str() => {
-                        TurnOutcome::refused(
-                            TurnRefusal::SenderNotSupported,
-                            format!(
-                                "Conversation \"{}\" accepts messages from its local user only; \
-                                 \"{}\" is not driven yet.",
-                                stamp.conversation_id, message.sender_id
-                            ),
-                        )
-                    }
-                    Ok(handle) => {
-                        handle
-                            .deliver(Request {
-                                stamp: stamp.clone(),
-                                text: message.text,
-                            })
-                            .await
-                    }
-                    Err(Unreached::NotInstalled(sentence)) => {
-                        TurnOutcome::refused(TurnRefusal::UnknownCharacter, sentence)
-                    }
-                    Err(Unreached::NotStarted(sentence)) => {
-                        TurnOutcome::refused(TurnRefusal::CharacterUnavailable, sentence)
-                    }
+        let outcome = {
+            let mut routes = self.inner.routes.lock().await;
+            let (conversation, character) =
+                match self.route(&mut routes, &message.conversation_id).await {
+                    Ok(found) => found,
+                    Err(refused) => return refused,
                 };
+            let stamp = TurnStamp {
+                conversation_id: conversation.clone(),
+                source: source.clone(),
+                client_message_id: client_message_id.clone(),
+            };
+            let line = Line {
+                sender: message.sender_id.clone(),
+                source,
+                text: message.text.clone(),
+            };
 
-                daemon
-                    .inner
-                    .world
-                    .events
-                    .emit(Event::turn_completed(character, stamp, &outcome));
-                outcome
-            })
-            .await
+            self.inner
+                .ledger
+                .submit(conversation, client_message_id, line, || {
+                    self.take(character, stamp, message)
+                })
+        };
+
+        outcome.await
     }
 
     /// The confirmations parked now, by character, oldest first.
@@ -698,39 +669,104 @@ impl Daemon {
         }
     }
 
-    /// Her actor, when she is installed and has one: the roster is the truth
-    /// about who is installed, so an actor kept after her package left is
-    /// no character to reach.
-    async fn reach(&self, character: &str) -> Result<Arc<CharacterHandle>, Unreached> {
+    /// Her actor while it takes lines. Who runs is the reconciler's to say,
+    /// so the roster is not read to reach her: the next reconcile stops one
+    /// whose package left, and she is then no character to reach.
+    pub(crate) fn live(&self, id: &Identifier) -> Option<Arc<CharacterHandle>> {
+        self.handle(id).filter(|handle| !handle.ended())
+    }
+
+    /// A new submission's line put in her queue at once, unless she takes
+    /// none now, and how its delivery ended, announced to every surface.
+    fn take(
+        &self,
+        character: Identifier,
+        stamp: TurnStamp,
+        message: Message,
+    ) -> impl Future<Output = TurnOutcome> + Send + 'static {
+        let answer = match self.live(&character) {
+            // Refused at once, while a turn ahead of it still runs.
+            Some(_) if message.sender_id != Participant::local_user_id().as_str() => {
+                std::future::ready(TurnOutcome::refused(
+                    TurnRefusal::SenderNotSupported,
+                    format!(
+                        "Conversation \"{}\" accepts messages from its local user only; \"{}\" \
+                         is not driven yet.",
+                        stamp.conversation_id, message.sender_id
+                    ),
+                ))
+                .boxed()
+            }
+            Some(handle) => handle
+                .deliver(Request {
+                    stamp: stamp.clone(),
+                    text: message.text,
+                })
+                .boxed(),
+            None => {
+                let daemon = self.clone();
+                let character = character.clone();
+
+                async move {
+                    match daemon.unreached(character.as_str()).await {
+                        Unreached::NotInstalled(sentence) => {
+                            TurnOutcome::refused(TurnRefusal::UnknownCharacter, sentence)
+                        }
+                        Unreached::Unavailable(sentence) => {
+                            TurnOutcome::refused(TurnRefusal::CharacterUnavailable, sentence)
+                        }
+                    }
+                }
+                .boxed()
+            }
+        };
+        let events = Arc::clone(&self.inner.world.events);
+
+        async move {
+            let outcome = answer.await;
+
+            events.emit(Event::turn_completed(character, stamp, &outcome));
+            outcome
+        }
+    }
+
+    /// Why `character` takes nothing now, the roster read to say it: she is
+    /// not installed, has no runtime, or hers takes nothing.
+    async fn unreached(&self, character: &str) -> Unreached {
         let world = Arc::clone(&self.inner.world);
         let discovery = blocking(move || discover(world.home.root())).await;
 
-        if let Some(definition) = installed(&discovery, character) {
-            return self.handle(&definition.profile.id).ok_or_else(|| {
-                Unreached::NotStarted(format!("Character \"{character}\" has not been started."))
-            });
-        }
+        let Some(definition) = installed(&discovery, character) else {
+            let installed: Vec<&str> = discovery
+                .characters
+                .iter()
+                .map(|definition| definition.profile.id.as_str())
+                .collect();
 
-        let installed: Vec<&str> = discovery
-            .characters
-            .iter()
-            .map(|definition| definition.profile.id.as_str())
-            .collect();
+            return Unreached::NotInstalled(format!(
+                "Character \"{character}\" is not installed. Installed characters: {}.",
+                if installed.is_empty() {
+                    "(none)".to_owned()
+                } else {
+                    installed.join(", ")
+                }
+            ));
+        };
 
-        Err(Unreached::NotInstalled(format!(
-            "Character \"{character}\" is not installed. Installed characters: {}.",
-            if installed.is_empty() {
-                "(none)".to_owned()
-            } else {
-                installed.join(", ")
-            }
-        )))
+        Unreached::Unavailable(match self.handle(&definition.profile.id) {
+            Some(handle) => handle.unavailable(),
+            None => format!("Character \"{character}\" has not been started."),
+        })
     }
 
     /// The character `conversation` belongs to: the route this run holds from
     /// an open or an earlier delivery, else the store's record of it,
     /// remembered once found.
-    async fn route(&self, conversation: &str) -> Result<(ConversationId, Identifier), TurnOutcome> {
+    async fn route(
+        &self,
+        routes: &mut HashMap<ConversationId, Identifier>,
+        conversation: &str,
+    ) -> Result<(ConversationId, Identifier), TurnOutcome> {
         let unknown = || {
             TurnOutcome::refused(
                 TurnRefusal::UnknownConversation,
@@ -741,7 +777,7 @@ impl Daemon {
             return Err(unknown());
         };
 
-        if let Some(character) = self.inner.routes().get(&id).cloned() {
+        if let Some(character) = routes.get(&id).cloned() {
             return Ok((id, character));
         }
 
@@ -763,15 +799,15 @@ impl Daemon {
             }
         };
 
-        self.inner.routes().insert(id.clone(), character.clone());
+        routes.insert(id.clone(), character.clone());
         Ok((id, character))
     }
 }
 
-/// Why a character cannot be reached, in a sentence.
+/// Why a character takes nothing now, in a sentence.
 enum Unreached {
     NotInstalled(String),
-    NotStarted(String),
+    Unavailable(String),
 }
 
 /// The character among a conversation's participants.
