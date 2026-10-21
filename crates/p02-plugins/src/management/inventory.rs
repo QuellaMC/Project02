@@ -89,15 +89,14 @@ pub(super) async fn answer(
     })
 }
 
-/// How the character's settings decide each plugin; none known when they
-/// cannot be read, which lists every plugin the host does not run as off.
+/// How the character's settings decide each plugin.
 async fn statuses(
     control: Arc<dyn ConfigControl>,
 ) -> Result<BTreeMap<Identifier, ActivationStatus>, PluginError> {
     Ok(blocking(move || control.activations())
-        .await?
-        .map(|statuses| statuses.into_iter().collect())
-        .unwrap_or_default())
+        .await??
+        .into_iter()
+        .collect())
 }
 
 /// One plugin as the list shows it; `running`, the tools the model is
