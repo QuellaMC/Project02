@@ -218,7 +218,7 @@ fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left
     let zeta = world.root().join("character-data").join("zeta");
     let data = world.data.root();
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     std::fs::create_dir_all(&zeta).unwrap();
     for name in ["schema.json", "sessions.jsonl"] {
         std::fs::copy(data.join(name), zeta.join(name)).unwrap();
@@ -326,7 +326,7 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
         };
         let path = path.as_str();
 
-        world.data.create_session(world.conversation.id()).unwrap();
+        world.first_segment(world.conversation.id()).unwrap();
         std::fs::create_dir_all(world.data.root().join("taken-lines")).unwrap();
         std::fs::write(world.data.root().join("config.json"), "{}").unwrap();
 
@@ -340,9 +340,13 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
         let refused = CharacterData::open(&world.home, &mira().id)
             .and_then(|data| {
                 let data = data.unwrap();
+                let holder = world
+                    .home
+                    .conversation_writer(&ConversationId::new("conv_new").unwrap())?;
 
                 data.sessions()?;
-                data.create_session(&ConversationId::new("conv_new").unwrap())?;
+                data.create_session(&holder)?;
+                holder.release();
                 world.home.conversations().map(drop)
             })
             .unwrap_err();

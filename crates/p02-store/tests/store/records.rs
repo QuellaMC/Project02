@@ -54,7 +54,7 @@ const FIRST_SEGMENT: [&str; 18] = [
 fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
     let world = World::new();
     let conversation = world.conversation_named("conv_a");
-    let second = world.data.continue_session(&session("conv_a.1")).unwrap();
+    let second = world.next_segment(&session("conv_a.1")).unwrap();
 
     for (segment, lines) in [(1, FIRST_SEGMENT.as_slice()), (2, &[CONTINUED])] {
         let log = world.log_of(&conversation, segment);
@@ -100,7 +100,7 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
 
     let continued = world.log_of(&conversation, 2);
 
-    world.data.continue_session(&session("conv_a.1")).unwrap();
+    world.next_segment(&session("conv_a.1")).unwrap();
     std::fs::write(
         world.path_of(continued.session_id()),
         [

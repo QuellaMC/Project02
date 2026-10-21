@@ -36,7 +36,7 @@ fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Feeling?")
         .user("feeling")
@@ -103,7 +103,7 @@ fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
     let world = World::new();
     let mut first = Script::new(world.segment(1));
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     first
         .turn("Tea?")
         .user("tea")
@@ -113,7 +113,7 @@ fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
     written(&world, 1, &first.records);
 
     let carried = world.log(1).read().unwrap().history().turns;
-    let continued = world.data.continue_session(&world.segment(1)).unwrap();
+    let continued = world.next_segment(&world.segment(1)).unwrap();
     let mut second = Script::new(continued.session_id().clone());
     let identity = first.records[0].identity().clone();
     let continuation = SessionContinuation::new(
@@ -162,7 +162,7 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("One?")
         .user("one")
@@ -247,7 +247,7 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
     );
     let mut script = Script::new(SessionId::new(group.id().clone(), NonZeroU64::MIN));
 
-    world.data.create_session(group.id()).unwrap();
+    world.first_segment(group.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")

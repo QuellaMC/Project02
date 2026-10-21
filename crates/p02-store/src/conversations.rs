@@ -8,7 +8,8 @@ use std::path::Path;
 
 use p02_core::{Conversation, ConversationId, Participant, Timestamp};
 use p02_shared::{
-    PathEntry, create_directories, describe_entry, list_directory, read_file, write_file_atomically,
+    PathEntry, create_directories, describe_entry, list_directory, read_file, remove_directory,
+    write_file_atomically,
 };
 use uuid::Uuid;
 
@@ -18,8 +19,8 @@ use crate::layout::{CONVERSATION_FILE, EntryKind, FINDER_METADATA};
 use crate::lock::{Lease, Resource, acquire, with_lock};
 
 /// One process's hold on an open conversation, refused at once to every
-/// other: the conversation's segments and the record of its taken lines
-/// are written only by its holder.
+/// other: only its holder makes the conversation's segments and writes the
+/// record of its taken lines.
 #[derive(Debug)]
 #[must_use = "a writer holds its conversation until it is released"]
 pub struct ConversationWriter {
@@ -51,7 +52,7 @@ impl Home {
     /// read, the participants make no conversation, or a write fails.
     #[expect(
         clippy::missing_panics_doc,
-        reason = "conv_ and a UUID make a conversation id, and a conversation always serializes"
+        reason = "conv_ and a UUID make a conversation id"
     )]
     pub fn ensure_conversation(
         &self,
@@ -74,17 +75,33 @@ impl Home {
                 .map_err(StorageError::InvalidParticipants)?;
 
             self.ensure()?;
-
-            let directory = self.conversations_root().join(conversation.id().as_str());
-            let path = directory.join(CONVERSATION_FILE);
-            let mut content = serde_json::to_vec(&conversation)
-                .expect("a conversation of plain fields always serializes");
-
-            content.push(b'\n');
-            create_directories(&directory).map_err(StorageError::write(&directory))?;
-            write_file_atomically(&path, &content).map_err(StorageError::write(&path))?;
+            self.write_conversation(&conversation, &write_file_atomically)?;
             Ok(conversation)
         })
+    }
+
+    /// Writes the record of `conversation`, new, in a directory made for it,
+    /// with `write`; when the write fails the directory is taken back, so a
+    /// make that fails leaves nothing.
+    pub(crate) fn write_conversation(
+        &self,
+        conversation: &Conversation,
+        write: &dyn Fn(&Path, &[u8]) -> io::Result<()>,
+    ) -> Result<(), StorageError> {
+        let directory = self.conversations_root().join(conversation.id().as_str());
+        let path = directory.join(CONVERSATION_FILE);
+        let mut content = serde_json::to_vec(conversation)
+            .expect("a conversation of plain fields always serializes");
+
+        content.push(b'\n');
+        create_directories(&directory).map_err(StorageError::write(&directory))?;
+
+        if let Err(source) = write(&path, &content) {
+            remove_directory(&directory).map_err(StorageError::write(&directory))?;
+            return Err(StorageError::Write { path, source });
+        }
+
+        Ok(())
     }
 
     /// The conversation `id`.

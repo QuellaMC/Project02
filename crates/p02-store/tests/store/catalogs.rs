@@ -139,22 +139,18 @@ fn a_conversation_directory_without_its_record_is_no_conversation_and_one_naming
 fn segments_are_made_in_order_and_only_the_newest_goes_on_or_is_discarded() {
     let world = World::new();
     let conversation = world.conversation.id();
-    let first = world.data.create_session(conversation).unwrap();
+    let first = world.first_segment(conversation).unwrap();
 
     assert_eq!(
-        world.data.create_session(conversation).unwrap_err().code(),
+        world.first_segment(conversation).unwrap_err().code(),
         "session_already_exists"
     );
 
-    let second = world.data.continue_session(first.session_id()).unwrap();
+    let second = world.next_segment(first.session_id()).unwrap();
 
     assert_eq!(second.session_id(), &world.segment(2));
     assert_eq!(
-        world
-            .data
-            .continue_session(first.session_id())
-            .unwrap_err()
-            .code(),
+        world.next_segment(first.session_id()).unwrap_err().code(),
         "session_not_found"
     );
     assert_eq!(
@@ -174,9 +170,9 @@ fn a_catalog_a_crash_cut_mid_row_still_lists_every_session_before_the_cut() {
     let world = World::new();
     let catalog = world.data.root().join("sessions.jsonl");
 
-    world.data.create_session(world.conversation.id()).unwrap();
-    world.data.continue_session(&world.segment(1)).unwrap();
-    world.data.continue_session(&world.segment(2)).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
+    world.next_segment(&world.segment(1)).unwrap();
+    world.next_segment(&world.segment(2)).unwrap();
 
     let rows = lines_of(&catalog);
 
@@ -198,7 +194,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
     let world = World::new();
     let sessions = world.data.root().join("sessions");
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
 
     let orphan = sessions.join("conv_orphan.1");
     let torn = world.path_of(&world.segment(2));
@@ -214,7 +210,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
         [world.segment(1).to_string()]
     );
 
-    let continued = world.data.continue_session(&world.segment(1)).unwrap();
+    let continued = world.next_segment(&world.segment(1)).unwrap();
     let mut script = Script::new(continued.session_id().clone());
 
     script.session_end();
@@ -229,7 +225,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
         "session_not_empty"
     );
 
-    let empty = world.data.continue_session(&world.segment(2)).unwrap();
+    let empty = world.next_segment(&world.segment(2)).unwrap();
 
     world.log(3).writer().unwrap().discard().unwrap();
     assert_eq!(
@@ -247,7 +243,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
 fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions() {
     let world = World::new();
     let catalog = world.data.root().join("sessions.jsonl");
-    let first = world.data.create_session(world.conversation.id()).unwrap();
+    let first = world.first_segment(world.conversation.id()).unwrap();
     let mut script = Script::new(world.segment(1));
 
     script.session_end();
@@ -300,8 +296,7 @@ fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions()
             .map(drop)
             .unwrap_err(),
         world
-            .data
-            .create_session(&ConversationId::new("conv_new").unwrap())
+            .first_segment(&ConversationId::new("conv_new").unwrap())
             .map(drop)
             .unwrap_err(),
     ] {
@@ -431,14 +426,14 @@ fn a_listing_raced_by_a_session_made_or_discarded_never_reports_damage() {
 
     std::fs::write(world.data.root().join("sessions.jsonl"), rows).unwrap();
 
-    let first = world.data.create_session(world.conversation.id()).unwrap();
+    let first = world.first_segment(world.conversation.id()).unwrap();
 
     std::thread::scope(|scope| {
         let writer = scope.spawn(|| {
             let mut latest = first.session_id().clone();
 
             for _ in 0..20 {
-                let kept = world.data.continue_session(&latest).unwrap();
+                let kept = world.next_segment(&latest).unwrap();
                 let mut script = Script::new(kept.session_id().clone());
                 let mut writer = world
                     .log(kept.session_id().segment().get())
@@ -450,7 +445,7 @@ fn a_listing_raced_by_a_session_made_or_discarded_never_reports_damage() {
                 writer.release();
                 latest = kept.session_id().clone();
 
-                let empty = world.data.continue_session(&latest).unwrap();
+                let empty = world.next_segment(&latest).unwrap();
 
                 world
                     .log(empty.session_id().segment().get())

@@ -10,7 +10,7 @@ use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
 fn a_session_has_one_writer_at_a_time() {
     let world = World::new();
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
 
     let writer = world.log(1).writer().unwrap();
     let busy = world.log(1).writer().unwrap_err();
@@ -26,7 +26,7 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")
@@ -78,7 +78,7 @@ fn a_writer_reads_its_log_again_when_it_changed_beneath_it_and_cuts_a_torn_line(
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")
@@ -123,7 +123,7 @@ fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
 
     let written = "model-written-credential";
 
-    world.data.create_session(world.conversation.id()).unwrap();
+    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Patch?")
         .user("patch")

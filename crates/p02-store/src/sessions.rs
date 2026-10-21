@@ -17,6 +17,7 @@ use p02_shared::{
 use serde::{Deserialize, Serialize};
 
 use crate::character_data::CharacterData;
+use crate::conversations::ConversationWriter;
 use crate::error::StorageError;
 use crate::jsonl::{committed_lines, holds_a_line, read_coherently, read_lines};
 use crate::layout::{EntryKind, FINDER_METADATA, RAW_EVENTS_FILE};
@@ -88,7 +89,8 @@ impl CharacterData {
         Ok(newest(&self.read_catalog()?, conversation).cloned())
     }
 
-    /// Makes the first segment of `conversation`, `<conversation>.1`.
+    /// Makes the first segment, `<conversation>.1`, of the conversation
+    /// `holder` holds: only its holder makes a conversation's segments.
     ///
     /// # Errors
     ///
@@ -96,9 +98,9 @@ impl CharacterData {
     /// of [`CharacterData::sessions`] or of the writes.
     pub fn create_session(
         &self,
-        conversation: &ConversationId,
+        holder: &ConversationWriter,
     ) -> Result<SessionEntry, StorageError> {
-        let id = SessionId::new(conversation.clone(), NonZeroU64::MIN);
+        let id = SessionId::new(holder.conversation_id().clone(), NonZeroU64::MIN);
 
         self.with_catalog(|catalog| {
             if catalog.contains_key(&id) {
@@ -109,17 +111,24 @@ impl CharacterData {
         })
     }
 
-    /// Makes the segment after `from`, which must be its conversation's
-    /// newest: the number is chosen and written under one lock, so two
-    /// continuations of one segment cannot name one session twice.
+    /// Makes the segment after `from`, which must be the newest of the
+    /// conversation `holder` holds: only its holder makes a conversation's
+    /// segments, so none comes after one it is still writing, and the
+    /// number is chosen and written under one lock.
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotLatestSegment`] when `from` is not the newest, or
-    /// an error of [`CharacterData::sessions`] or of the writes.
-    pub fn continue_session(&self, from: &SessionId) -> Result<SessionEntry, StorageError> {
+    /// [`StorageError::NotLatestSegment`] when `from` is not the newest
+    /// segment of the conversation `holder` holds, or an error of
+    /// [`CharacterData::sessions`] or of the writes.
+    pub fn continue_session(
+        &self,
+        holder: &ConversationWriter,
+        from: &SessionId,
+    ) -> Result<SessionEntry, StorageError> {
         self.with_catalog(|catalog| {
-            if newest(catalog, from.conversation_id()).map(SessionEntry::session_id) != Some(from) {
+            if newest(catalog, holder.conversation_id()).map(SessionEntry::session_id) != Some(from)
+            {
                 return Err(StorageError::NotLatestSegment(from.clone()));
             }
 
@@ -454,7 +463,7 @@ pub(crate) fn holds_evidence(directory: &Path) -> Result<bool, StorageError> {
     reason = "a test reads the files the store wrote, and puts a directory where one must fail"
 )]
 mod tests {
-    use p02_core::{CharacterProfile, Participant, SpeakerName};
+    use p02_core::{CharacterProfile, Conversation, Participant, SpeakerName};
     use p02_shared::{DanglingLinks, Identifier, canonical_path, temporary_target};
 
     use super::*;
@@ -478,10 +487,9 @@ mod tests {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777
     }
 
-    /// storage.atomic-writes: the files the store replaces appear whole and owner-only with no temporary left beside them, also when a write fails, and a failed catalog rewrite takes back the session directory it made
+    /// storage.atomic-writes: the files the store replaces appear whole and owner-only with no temporary left beside them, also when a write fails, and a failed catalog rewrite, like a conversation's failed make, takes back the directory it made
     #[test]
-    fn replaced_files_appear_whole_owner_only_and_a_failed_catalog_rewrite_takes_its_directory_back()
-     {
+    fn replaced_files_appear_whole_owner_only_and_a_failed_make_takes_its_directory_back() {
         let directory = tempfile::tempdir().unwrap();
         let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
         let mira = CharacterProfile {
@@ -489,13 +497,13 @@ mod tests {
             display_name: SpeakerName::new("Mira").unwrap(),
         };
         let data = CharacterData::ensure(&home, &mira.id).unwrap();
-        let conversation = home
-            .ensure_conversation(vec![
-                Participant::character(mira),
-                Participant::local_user(SpeakerName::new("Sam").unwrap()),
-            ])
-            .unwrap();
-        let first = data.create_session(conversation.id()).unwrap();
+        let participants = vec![
+            Participant::character(mira),
+            Participant::local_user(SpeakerName::new("Sam").unwrap()),
+        ];
+        let conversation = home.ensure_conversation(participants.clone()).unwrap();
+        let writer = home.conversation_writer(conversation.id()).unwrap();
+        let first = data.create_session(&writer).unwrap();
         let conversation_directory = home.conversations_root().join(conversation.id().as_str());
         let replaced = [
             home.root().join("schema.json"),
@@ -545,7 +553,25 @@ mod tests {
             [first.session_id().to_string()]
         );
 
-        let writer = home.conversation_writer(conversation.id()).unwrap();
+        let unmade = Conversation::new(
+            ConversationId::new("conv_unmade").unwrap(),
+            participants,
+            Timestamp::now(),
+        )
+        .unwrap();
+        let refused = home.write_conversation(&unmade, &|_, _| {
+            Err(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "the disk is full",
+            ))
+        });
+
+        assert_eq!(refused.unwrap_err().code(), "write_failed");
+        assert_eq!(
+            names_in(&home.conversations_root()),
+            [conversation.id().to_string()]
+        );
+
         let record = data
             .taken_lines_root()
             .join(format!("{}.json", conversation.id()));
