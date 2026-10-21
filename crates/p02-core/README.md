@@ -1,15 +1,32 @@
 # p02-core
 
-The domain's identities and the message record every layer above it
-carries. It depends on p02-shared alone.
+The domain every layer above it is written in: conversations, the
+sessions characters keep in them, the messages those hold, and the
+identities of each. It depends on p02-shared alone.
 
-- **Identities.** A session is named by a `SessionId`; its messages by
-  a `MessageId`, the session's id and the message's place in it; a
-  runtime event by an `EventIdentity`, its event and trace ids and the
-  canonical UTC time it was created at, in the one spelling
-  `toISOString` gives: `2026-06-15T00:00:00.000Z`.
-- **Messages.** A `VisibleMessage` is what a person and a character
-  said to each other: who spoke, under the name they had then, and the
-  text as shown. Visible text is normalized once, line endings to `\n`
-  and the ends trimmed, and a stored text that is not already
-  normalized is refused, never silently rewritten.
+- **Conversations.** A conversation is a thread between participants,
+  the person and characters, each under the name they had when it began:
+  two at least, each listed once, kept in one order whatever order they
+  came in, so its set of kinds and ids alone tells which thread it is.
+  The person is the speaker `local-user` in every conversation. A
+  conversation id is a token without a `.`, and each of its sessions is
+  `<conversation id>.<segment>`, numbered from 1.
+- **Sessions.** A session is one character's part in one segment of a
+  conversation: its messages in the order they were committed, each
+  numbered after the last and said by the session's character or by the
+  person, under the names the session began with, so a rename never
+  reaches it. Numbers climb but may skip, since a message whose write
+  failed spent its number. Every message joins through one gate, whether
+  it is said now or read back, and one that breaks a rule is refused.
+- **Messages.** A `VisibleMessage` is what a person and a character said
+  to each other: who spoke, under the name they had then, and the text as
+  shown. Visible text is normalized once, line endings to `\n` and the
+  ends trimmed, and a stored text that is not already normalized is
+  refused, never silently rewritten. What a person says in a turn is one
+  line: trimmed, and refused when blank or when it breaks a line anywhere.
+- **Identities.** A runtime event is named by an `EventIdentity`, its
+  event and trace ids and the canonical UTC time it was created at, in
+  the one spelling `toISOString` gives: `2026-06-15T00:00:00.000Z`.
+- **Selection.** When the person does not say which character to talk
+  to, it is the one character enabled; none, or several, is refused,
+  naming them.

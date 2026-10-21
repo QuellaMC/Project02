@@ -5,11 +5,12 @@ crate graph: it depends on no crate of this workspace.
 
 - **Files.** The fs seam is the one place the file system is reached;
   `clippy.toml` refuses `std::fs`, `tokio::fs` and the `Path` methods that
-  touch the disk everywhere else. It reads text lossily, writes owner-only
-  files whole (a replacement through a sibling temporary and a rename, or
-  an exclusive create), says what is at a path, spells a path canonically
-  even before it exists (without Windows' `\\?\` prefix), and says whether
-  one path lies inside another.
+  touch the disk everywhere else. It reads text lossily, or a file's first
+  bytes up to a limit, writes owner-only files whole (a replacement
+  through a sibling temporary and a rename, or an exclusive create), says
+  what is at a path and what each entry of a directory is, spells a path
+  canonically even before it exists (without Windows' `\\?\` prefix), and
+  says whether one path lies inside another.
 - **JSON.** `serde_json` parses each decimal to the nearest double
   (`float_roundtrip`) and keeps object keys in document order
   (`preserve_order`); both features are set once, in the workspace

@@ -447,7 +447,7 @@ mod tests {
 
     fn context() -> DecisionContext {
         DecisionContext::new(
-            SessionId::new("chat.1").unwrap(),
+            SessionId::parse("chat.1").unwrap(),
             CharacterProfile {
                 id: id("mira"),
                 display_name: SpeakerName::new("Mira").unwrap(),

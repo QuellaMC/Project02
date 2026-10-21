@@ -82,7 +82,7 @@ fn spoken(
     (speaker, line): (&str, &str),
     (character, reply): (&str, &str),
 ) -> (Turn, CommittedTurn) {
-    let session_id = SessionId::new(session).unwrap();
+    let session_id = SessionId::parse(session).unwrap();
     let message = |number: u64, role, speaker_id: &str, name: &str, text: &str| VisibleMessage {
         id: MessageId::new(session_id.clone(), NonZeroU64::new(number).unwrap()),
         role,

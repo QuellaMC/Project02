@@ -1,9 +1,17 @@
 use std::fmt;
+use std::sync::LazyLock;
 
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 
 use crate::id::MessageId;
+
+/// The speaker id of the person in every conversation of a home.
+pub(crate) static LOCAL_USER: LazyLock<Identifier> =
+    LazyLock::new(|| Identifier::new("local-user").expect("local-user is an identifier"));
+
+/// What ends a line, in a terminal or a browser alike.
+const LINE_BREAKS: [char; 4] = ['\r', '\n', '\u{2028}', '\u{2029}'];
 
 /// Text as a person sees it: line endings are `\n`, neither end is blank
 /// space, and something is left.
@@ -76,6 +84,58 @@ impl fmt::Display for VisibleText {
     }
 }
 
+/// What a person says in a turn: one line, trimmed, with something left.
+/// It is visible text as it stands.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct UserLine(VisibleText);
+
+/// Why a text is not a [`UserLine`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ParseUserLineError {
+    #[error("a message must not be blank")]
+    Blank,
+    #[error("a message must be a single line")]
+    Multiline,
+}
+
+impl UserLine {
+    /// What a person typed, trimmed. A line break refuses it wherever it
+    /// stands, even at an end the trim would cut away.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseUserLineError::Blank`] when nothing is left, else
+    /// [`ParseUserLineError::Multiline`] when `raw` breaks a line.
+    pub fn new(raw: &str) -> Result<Self, ParseUserLineError> {
+        let trimmed = raw.trim();
+
+        if trimmed.is_empty() {
+            Err(ParseUserLineError::Blank)
+        } else if raw.contains(LINE_BREAKS) {
+            Err(ParseUserLineError::Multiline)
+        } else {
+            Ok(Self(VisibleText(trimmed.to_owned())))
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<UserLine> for VisibleText {
+    fn from(line: UserLine) -> Self {
+        line.0
+    }
+}
+
+impl fmt::Display for UserLine {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// The name a speaker goes by on a message: one line of at most 128
 /// characters, without blank space at either end. It is set before a
 /// colon in chat, which is why a line break is refused.
@@ -99,7 +159,7 @@ impl SpeakerName {
         let valid = !value.is_empty()
             && value.chars().count() <= Self::MAX_CHARS
             && value.trim() == value
-            && !value.contains(['\r', '\n', '\u{2028}', '\u{2029}']);
+            && !value.contains(LINE_BREAKS);
 
         if valid {
             Ok(Self(value.to_owned()))
@@ -128,12 +188,14 @@ impl fmt::Display for SpeakerName {
     }
 }
 
-/// Who said a visible message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Which side of a conversation someone speaks for: a character, or the
+/// person. A visible message carries its speaker's, and the two order as
+/// they are spelled, characters first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VisibleMessageRole {
-    User,
     Character,
+    User,
 }
 
 /// A message a person or a character said, as it was shown.
@@ -182,6 +244,27 @@ mod tests {
             VisibleText::parse(" padded"),
             Err(ParseVisibleTextError::Unnormalized)
         );
+    }
+
+    #[test]
+    fn a_user_line_is_one_trimmed_line_with_something_left() {
+        assert_eq!(
+            UserLine::new("  are you there?\t").map(|line| line.to_string()),
+            Ok("are you there?".to_owned())
+        );
+
+        for (raw, refusal) in [
+            ("", ParseUserLineError::Blank),
+            (" \t ", ParseUserLineError::Blank),
+            ("\n", ParseUserLineError::Blank),
+            ("hello\nthere", ParseUserLineError::Multiline),
+            ("hello\r", ParseUserLineError::Multiline),
+            ("hello\n", ParseUserLineError::Multiline),
+            ("hello\u{2028}there", ParseUserLineError::Multiline),
+            ("hello\u{2029}", ParseUserLineError::Multiline),
+        ] {
+            assert_eq!(UserLine::new(raw), Err(refusal), "{raw:?}");
+        }
     }
 
     #[test]
