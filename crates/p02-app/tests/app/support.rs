@@ -104,8 +104,8 @@ impl World {
         );
     }
 
-    /// Puts a package of character `id`, who expects no plugin, in the
-    /// home's packages.
+    /// Puts a package of character `id` named `name`, who expects no plugin,
+    /// in the home's packages: every such package has one persona.
     pub(crate) fn package(&self, id: &str, name: &str) {
         let folder = self.path(&format!("characters/{id}"));
 
@@ -115,7 +115,7 @@ impl World {
             &json!({
                 "format": "project02.character.v1",
                 "identity": {"id": id, "displayName": name},
-                "persona": {"system": [format!("You are {name}.")]},
+                "persona": {"system": ["You are a character of a test."]},
                 "meta": {"version": "1.0.0"},
             })
             .to_string(),

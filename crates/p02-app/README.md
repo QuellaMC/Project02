@@ -22,26 +22,30 @@ tokio's blocking pool.
   she is switched on is read as yes, and her start says what is wrong.
 - **One actor per character.** A task owns everything of hers and answers
   what it is asked in the order it was asked, so one character runs one
-  turn at a time, and her health is read without asking her. She lives from
-  her start to her stop, and a stop is read between two steps: a boot, a
-  reload or a recovery in flight is overtaken, a turn in flight finishes,
-  and from then on she publishes only `stopping` and `stopped`. Her start
-  reads her package, her settings, which must load and switch her on before
-  anything is written for her, merges her package's settings into her
-  overlay, chooses her model, holds her to the plugins her package
-  requires, a recommended one missing only warning, and to one memory
-  provider, and builds her plugins with her confirmer. A start sent while
-  one is in flight is answered when it settles, and one that failed stays
-  failed until the next start or settings change. Her thread with the
-  person is opened the first time a client opens it or a line comes for it,
-  and opened again after a reload or a recovery, so no client reopens it. A
-  turn the runtime itself fails leaves her failed and earns one restart:
-  the lines queued behind it are refused, her thread is closed and her
-  plugins shut down, and she starts again. A reload happens between turns,
-  when what she would be built from now differs from what she was built
-  from; lines sent meanwhile wait and land on her thread opened again. Her
-  stop cancels her parked confirmations first, closes her thread, its end
-  hooks run, and shuts her plugins down, saying what failed of that.
+  turn at a time, and her health is read without asking her. A line is
+  routed and put in her queue in one step, which lines take in the order
+  they came, so they reach her in that order; a running character is
+  reached without reading the roster, since who runs is the reconciler's
+  to say. She lives from her start to her stop, and a stop is read between
+  two steps: a boot, a reload or a recovery in flight is overtaken, a turn
+  in flight finishes, and from then on she publishes only `stopping` and
+  `stopped`. Her start reads her package, her settings, which must load
+  and switch her on before anything is written for her, merges her
+  package's settings into her overlay, chooses her model, holds her to the
+  plugins her package requires, a recommended one missing only warning,
+  and to one memory provider, and builds her plugins with her confirmer. A
+  start sent while one is in flight is answered when it settles, and one
+  that failed stays failed until the next start or settings change. Her
+  thread with the person is opened the first time a client opens it or a
+  line comes for it, and opened again after a reload or a recovery, so no
+  client reopens it. A turn the runtime itself fails leaves her failed and
+  earns one restart: the lines queued behind it are refused, her thread is
+  closed and her plugins shut down, and she starts again. A reload happens
+  between turns, when her package or her settings differ from those she
+  was built from; lines sent meanwhile wait and land on her thread opened
+  again. Her stop cancels her parked confirmations first, closes her
+  thread, its end hooks run, and shuts her plugins down, saying what
+  failed of that.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her
@@ -55,16 +59,18 @@ tokio's blocking pool.
   its last 32 settled submissions. Only an outcome whose line is in the log
   is remembered: a line that never reached it is its client's to send
   again under the same id. A line a run before this one took is the
-  thread's to answer. The turn runs as a task of its own, so a client that
-  stops waiting abandons nothing, and every delivery that reaches a
-  character is announced as completed once, however it ended.
+  thread's to answer. The turn runs as a task of its own, which settles its
+  submission however it ends, so a client that stops waiting abandons
+  nothing; and every delivery that reaches a character is announced as
+  completed once, however it ended.
 - **Reconcile.** One rule for boot and for every settings change: an
   enabled character who runs nothing starts, one who failed starts again,
-  one who is ready and would be built from other settings now reloads, and
-  a disabled one who still runs stops, as does one whose package left the
-  roster. Passes never overlap: a request while one runs marks one more
-  after it, so the newest roster has the last word. A settings change is
-  announced at once and acted on behind its answer.
+  one who is ready and would be built from another package or other
+  settings now reloads, and a disabled one who still runs stops, as does
+  one whose package left the roster, who is then no character to reach.
+  Passes never overlap: a request while one runs marks one more after it,
+  so the newest roster has the last word. A settings change is announced
+  at once and acted on behind its answer.
 - **History.** A conversation's committed messages as one scrollback
   across her segments, newest page first and chronological within it, the
   cursor `v1:<segment>:<index>` naming where the next page ends; a limit is

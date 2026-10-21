@@ -4,11 +4,12 @@
 //! and between two steps reads whether she is to stop.
 
 use std::collections::VecDeque;
+use std::future::Future;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use p02_characters::{CharacterRef, discover};
+use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
@@ -77,12 +78,13 @@ pub(crate) struct CharacterHealth {
     pub(crate) maintenance: Option<MaintenanceFailure>,
 }
 
-/// What a character was built from: what a later reconcile compares with
-/// what she would be built from now, to decide a reload.
+/// What a character was built from, her package and her settings: what a
+/// later reconcile compares with what she would be built from now, to
+/// decide a reload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Built {
+    pub(crate) definition: CharacterDefinition,
     pub(crate) settings: CharacterSettings,
-    pub(crate) character: CharacterRef,
 }
 
 /// A line of the person's for a character, as the daemon routed it to her.
@@ -106,7 +108,7 @@ enum Command {
     Start(oneshot::Sender<()>),
     Open(oneshot::Sender<OpenOutcome>),
     Deliver(Request, oneshot::Sender<TurnOutcome>),
-    Reconcile(Option<Built>, oneshot::Sender<Reconciled>),
+    Reconcile(Option<Box<Built>>, oneshot::Sender<Reconciled>),
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -186,35 +188,48 @@ impl CharacterHandle {
     /// Answered once her start settles: the one in flight, or a new one when
     /// she has failed.
     pub(crate) async fn start(&self) {
-        self.ask(Command::Start).await;
+        let _ = self.ask(Command::Start).await;
     }
 
     pub(crate) async fn open(&self) -> OpenOutcome {
         self.ask(Command::Open)
             .await
-            .unwrap_or_else(|| OpenOutcome::Refused {
+            .unwrap_or_else(|_| OpenOutcome::Refused {
                 reason: OpenRefusal::CharacterUnavailable,
-                message: not_ready(&self.id, &self.health()),
+                message: self.unavailable(),
             })
     }
 
-    pub(crate) async fn deliver(&self, request: Request) -> TurnOutcome {
-        self.ask(|reply| Command::Deliver(request, reply))
-            .await
-            .unwrap_or_else(|| {
+    /// Puts `request` in her queue at once, behind what she was asked
+    /// before it, and answers once she has.
+    pub(crate) fn deliver(
+        &self,
+        request: Request,
+    ) -> impl Future<Output = TurnOutcome> + Send + 'static {
+        let answer = self.ask(|reply| Command::Deliver(request, reply));
+        let (id, health) = (self.id.clone(), self.health.clone());
+
+        async move {
+            answer.await.unwrap_or_else(|_| {
                 TurnOutcome::refused(
                     TurnRefusal::CharacterUnavailable,
-                    not_ready(&self.id, &self.health()),
+                    not_ready(&id, &health.borrow()),
                 )
             })
+        }
     }
 
     /// Makes her match `now`, what she would be built from now, which is
     /// none when her settings cannot be resolved.
     pub(crate) async fn reconcile(&self, now: Option<Built>) -> Reconciled {
-        self.ask(|reply| Command::Reconcile(now, reply))
+        self.ask(|reply| Command::Reconcile(now.map(Box::new), reply))
             .await
             .unwrap_or(Reconciled::Unchanged)
+    }
+
+    /// The sentence she answers with while she takes nothing.
+    pub(crate) fn unavailable(&self) -> String {
+        not_ready(&self.id, &self.health())
     }
 
     /// Asks her to stop, which she reads between two steps; her parked
@@ -237,12 +252,14 @@ impl CharacterHandle {
             .await;
     }
 
-    /// Her answer, or none once her stop took her.
-    async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {
+    /// Asks her at once, behind what she was asked before: her answer comes
+    /// unless her stop takes her first.
+    fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> oneshot::Receiver<T> {
         let (reply, answer) = oneshot::channel();
 
-        self.commands.send(command(reply)).ok()?;
-        answer.await.ok()
+        // A command she no longer takes drops its reply, which answers none.
+        let _ = self.commands.send(command(reply));
+        answer
     }
 }
 
@@ -354,7 +371,7 @@ impl Actor {
                         Reconciled::Started
                     }
                     CharacterState::Ready
-                        if self.parts.as_ref().map(|parts| &parts.built) != now.as_ref() =>
+                        if self.parts.as_ref().map(|parts| &parts.built) != now.as_deref() =>
                     {
                         self.reload().await;
                         Reconciled::Reloaded
@@ -866,7 +883,7 @@ fn assemble(world: &World, id: &Identifier, broker: Arc<Broker>) -> Result<Assem
             adapter,
             host,
             built: Built {
-                character: definition.character_ref(),
+                definition: definition.clone(),
                 settings,
             },
             thread: None,
@@ -903,7 +920,7 @@ fn model(world: &World, host: &HostSettings) -> Result<Arc<dyn RoleModelAdapter>
 /// warns, in what her start says.
 fn expected_plugins(
     world: &World,
-    definition: &p02_characters::CharacterDefinition,
+    definition: &CharacterDefinition,
     settings: &CharacterSettings,
     resolution: &Resolution<'_>,
 ) -> Result<Option<String>, String> {

@@ -167,20 +167,20 @@ enum Did {
 impl Daemon {
     /// One pass of the rule: an enabled character who runs nothing starts,
     /// one who failed starts again, one who is ready and would be built from
-    /// other settings now reloads, and a disabled one who still runs stops,
-    /// as does one whose package left the roster.
+    /// another package or other settings now reloads, and a disabled one who
+    /// still runs stops, as does one whose package left the roster.
     pub(crate) async fn pass(&self) -> ReconcilePlan {
         let roster = self.roster().await;
         let mut work: Vec<BoxFuture<'_, Did>> = Vec::new();
 
         for (definition, settings) in roster.characters() {
             let id = definition.profile.id.clone();
-            let running = self.handle(&id).filter(|handle| !handle.ended());
+            let running = self.live(&id);
 
             if settings.is_none_or(|settings| settings.host().enabled) {
                 let now = settings.map(|settings| Built {
+                    definition: definition.clone(),
                     settings: settings.clone(),
-                    character: definition.character_ref(),
                 });
 
                 work.push(Box::pin(async move {
