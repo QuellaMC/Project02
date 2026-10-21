@@ -184,7 +184,7 @@ fn a_catalog_a_crash_cut_mid_row_still_lists_every_session_before_the_cut() {
         );
     }
 
-    world.data.discard_empty_session(&world.segment(2)).unwrap();
+    world.log(2).writer().unwrap().discard().unwrap();
     assert_eq!(catalog_ids(&world), [world.segment(1).to_string()]);
 }
 
@@ -220,20 +220,13 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
     writer.release();
     assert_eq!(lines_of(&torn), [script.records[0].to_line()]);
     assert_eq!(
-        world
-            .data
-            .discard_empty_session(&world.segment(2))
-            .unwrap_err()
-            .code(),
+        world.log(2).writer().unwrap().discard().unwrap_err().code(),
         "session_not_empty"
     );
 
     let empty = world.data.continue_session(&world.segment(2)).unwrap();
 
-    world
-        .data
-        .discard_empty_session(empty.session_id())
-        .unwrap();
+    world.log(3).writer().unwrap().discard().unwrap();
     assert_eq!(
         world
             .data
@@ -377,13 +370,15 @@ fn taken_lines_read_back_whole_and_a_record_that_cannot_be_read_reads_as_none() 
     );
 
     for unreadable in [
-        "not JSON",
-        r#"{"segments": {"01": {}}}"#,
-        r#"{"segments": {"1": {"one": 7}}}"#,
-        r#"{"segments": {"1": {"two words": "conv.1:message-1"}}}"#,
-        r#"{"segments": []}"#,
+        "not JSON".to_owned(),
+        r#"{"segments": {"01": {}}}"#.to_owned(),
+        r#"{"segments": {"1": {"one": 7}}}"#.to_owned(),
+        json!({"segments": {"1": {"two words": message(1, 1)}}}).to_string(),
+        r#"{"segments": []}"#.to_owned(),
+        json!({"segments": {"1": {"one": "conv_other.1:message-1"}}}).to_string(),
+        json!({"segments": {"2": {"one": message(1, 1)}}}).to_string(),
     ] {
-        std::fs::write(&path, unreadable).unwrap();
+        std::fs::write(&path, &unreadable).unwrap();
 
         assert_eq!(
             TakenLines::read(&world.data, world.conversation.id()),

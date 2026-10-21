@@ -1,5 +1,6 @@
 //! The home: a folder the daemon serves from, marked by its `schema.json`.
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -51,9 +52,10 @@ impl Home {
 
     /// Refuses, writing nothing, a folder that is no home and could not be
     /// made one: one marked as something else; one with no marker holding
-    /// anything but what a home holds; or one whose control entries are
-    /// not the real files and directories a home's state lives in, since a
-    /// link would carry that state outside it.
+    /// history, or anything else a home does not hold before its marker; or
+    /// one whose control entries are not the real files and directories a
+    /// home's state lives in, since a link would carry that state outside
+    /// it. Every way into a home asks this first.
     ///
     /// # Errors
     ///
@@ -123,11 +125,7 @@ impl Home {
         };
 
         for (name, entry) in entries {
-            let belongs = name
-                .to_str()
-                .is_some_and(|name| belongs_in_a_new_home(name, &entry));
-
-            if !belongs {
+            if !self.belongs_before_its_marker(&name, &entry)? {
                 return Err(StorageError::UnmarkedHome {
                     path: self.root.clone(),
                     entry: name.to_string_lossy().into_owned(),
@@ -136,6 +134,41 @@ impl Home {
         }
 
         Ok(())
+    }
+
+    /// What a home holds before its marker is written: its settings, the
+    /// daemon's record, its locks, the character packages its person added,
+    /// which may be linked in, the directories its history goes in while
+    /// they are still empty, and what a writer of a control file left when
+    /// it died.
+    fn belongs_before_its_marker(
+        &self,
+        name: &OsStr,
+        entry: &PathEntry,
+    ) -> Result<bool, StorageError> {
+        let Some(name) = name.to_str() else {
+            return Ok(false);
+        };
+
+        Ok(match name {
+            LOCKS_DIRECTORY => matches!(entry, PathEntry::Directory),
+            CHARACTER_DATA_DIRECTORY | CONVERSATIONS_DIRECTORY => {
+                let path = self.root.join(name);
+
+                matches!(entry, PathEntry::Directory)
+                    && list_directory(&path)
+                        .map_err(StorageError::read(&path))?
+                        .is_empty()
+            }
+            HOME_PACKAGES => matches!(entry, PathEntry::Directory | PathEntry::Link),
+            CONFIG_FILE | DAEMON_RECORD_FILE => matches!(entry, PathEntry::File),
+            _ => {
+                matches!(entry, PathEntry::File)
+                    && temporary_target(name.as_ref()).is_some_and(|target| {
+                        [SCHEMA_FILE, CONFIG_FILE, DAEMON_RECORD_FILE].contains(&target)
+                    })
+            }
+        })
     }
 
     fn check_control_entries(&self) -> Result<(), StorageError> {
@@ -150,25 +183,6 @@ impl Home {
         }
 
         Ok(())
-    }
-}
-
-/// What a home without a marker may hold: its control entries, the
-/// character packages its person added, which may be linked in, and what a
-/// writer of a control file left when it died before its marker.
-fn belongs_in_a_new_home(name: &str, entry: &PathEntry) -> bool {
-    match name {
-        CHARACTER_DATA_DIRECTORY | CONVERSATIONS_DIRECTORY | LOCKS_DIRECTORY => {
-            matches!(entry, PathEntry::Directory)
-        }
-        HOME_PACKAGES => matches!(entry, PathEntry::Directory | PathEntry::Link),
-        CONFIG_FILE | DAEMON_RECORD_FILE => matches!(entry, PathEntry::File),
-        _ => {
-            matches!(entry, PathEntry::File)
-                && temporary_target(name.as_ref()).is_some_and(|target| {
-                    [SCHEMA_FILE, CONFIG_FILE, DAEMON_RECORD_FILE].contains(&target)
-                })
-        }
     }
 }
 

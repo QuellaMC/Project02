@@ -16,7 +16,6 @@ use crate::error::StorageError;
 use crate::home::Home;
 use crate::layout::{CONVERSATION_FILE, EntryKind, FINDER_METADATA};
 use crate::lock::{Lease, Resource, acquire, with_lock};
-use crate::marker::{self, Marker, Scope};
 
 /// One process's hold on an open conversation, refused at once to every
 /// other: the conversation's segments and the record of its taken lines
@@ -93,11 +92,10 @@ impl Home {
     /// # Errors
     ///
     /// [`StorageError::ConversationNotFound`] when the home holds no such
-    /// thread, or an error when its record cannot be read or is malformed.
+    /// thread, or an error when the home is refused or the thread's record
+    /// cannot be read or is malformed.
     pub fn conversation(&self, id: &ConversationId) -> Result<Conversation, StorageError> {
-        if !self.holds_conversations()? {
-            return Err(StorageError::ConversationNotFound(id.clone()));
-        }
+        self.check()?;
 
         read_conversation(&self.conversations_root().join(id.as_str()))?
             .ok_or_else(|| StorageError::ConversationNotFound(id.clone()))
@@ -111,14 +109,17 @@ impl Home {
     /// [`StorageError`] when the home is refused, or a thread there cannot
     /// be read or is malformed.
     pub fn conversations(&self) -> Result<Vec<Conversation>, StorageError> {
-        if !self.holds_conversations()? {
-            return Ok(Vec::new());
-        }
+        self.check()?;
 
         let root = self.conversations_root();
+        let entries = match list_directory(&root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(StorageError::Read { path: root, source }),
+        };
         let mut conversations = Vec::new();
 
-        for (name, _) in list_directory(&root).map_err(StorageError::read(&root))? {
+        for (name, _) in entries {
             if name == FINDER_METADATA {
                 continue;
             }
@@ -150,33 +151,6 @@ impl Home {
             conversation: id.clone(),
             lease: acquire(&[(&self.locks_root(), &Resource::ConversationWriter(id))])?,
         })
-    }
-
-    /// Whether the home is marked and has a conversations directory, which
-    /// must be real; a home of another kind is refused.
-    fn holds_conversations(&self) -> Result<bool, StorageError> {
-        match marker::read(self.root())? {
-            None => return Ok(false),
-            Some(Marker::Home { .. }) => {}
-            Some(Marker::CharacterData { .. }) => {
-                return Err(StorageError::WrongScope {
-                    path: self.root().to_path_buf(),
-                    found: Scope::CharacterData,
-                });
-            }
-        }
-
-        let root = self.conversations_root();
-
-        match describe_entry(&root) {
-            PathEntry::Absent => Ok(false),
-            PathEntry::Directory => Ok(true),
-            PathEntry::Unreadable(source) => Err(StorageError::Read { path: root, source }),
-            PathEntry::File | PathEntry::Link | PathEntry::Other => Err(StorageError::NotReal {
-                path: root,
-                expected: EntryKind::Directory,
-            }),
-        }
     }
 }
 

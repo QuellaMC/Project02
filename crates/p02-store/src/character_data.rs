@@ -40,6 +40,8 @@ impl CharacterData {
     pub fn ensure(home: &Home, character: &Identifier) -> Result<Self, StorageError> {
         let root = data_root(home, character);
 
+        home.check()?;
+
         if let Some(marker) = adoptable_marker(home, &root)? {
             Self::of_marker(home, character, root.clone(), marker)?;
         }
@@ -61,19 +63,21 @@ impl CharacterData {
     }
 
     /// The reader's way in: the character's data as it is, `None` while she
-    /// has none, writing nothing. A directory without a marker is never
+    /// has none, writing nothing. The home is judged first, as
+    /// [`Home::check`] judges it. A directory without a marker is never
     /// adopted when it holds history or anything foreign, and one marked
     /// for another character is refused, naming her.
     ///
     /// # Errors
     ///
-    /// [`StorageError`] for a refused directory: one marked as another
-    /// character's or as something else, an unmarked one holding more than
-    /// control files, a control entry that is not a real file or directory,
-    /// or a marker of another schema version.
+    /// [`StorageError`] for a refused home, or a refused directory: one
+    /// marked as another character's or as something else, an unmarked one
+    /// holding more than control files, a control entry that is not a real
+    /// file or directory, or a marker of another schema version.
     pub fn open(home: &Home, character: &Identifier) -> Result<Option<Self>, StorageError> {
         let root = data_root(home, character);
 
+        home.check()?;
         adoptable_marker(home, &root)?
             .map(|marker| Self::of_marker(home, character, root, marker))
             .transpose()

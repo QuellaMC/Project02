@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 
-use p02_core::{ClientStamp, ConversationId, MessageId};
+use p02_core::{ClientStamp, ConversationId, MessageId, SessionId};
 use p02_shared::{create_directories, read_file, write_file_atomically};
 use serde_json::{Map, Value};
 
@@ -32,7 +32,7 @@ impl TakenLines {
         read_file(&path(data, conversation))
             .ok()
             .and_then(|content| serde_json::from_slice(&content).ok())
-            .and_then(|record| decode(&record))
+            .and_then(|record| decode(&record, conversation))
             .unwrap_or_default()
     }
 
@@ -98,8 +98,9 @@ fn path(data: &CharacterData, conversation: &ConversationId) -> PathBuf {
         .join(format!("{}.json", conversation.as_str()))
 }
 
-/// The record's shape exactly, or no record at all.
-fn decode(record: &Value) -> Option<TakenLines> {
+/// The record's shape exactly, each line a message of its own segment of
+/// `conversation`, or no record at all.
+fn decode(record: &Value, conversation: &ConversationId) -> Option<TakenLines> {
     let mut segments = BTreeMap::new();
 
     for (segment, lines) in record.get("segments")?.as_object()? {
@@ -107,18 +108,23 @@ fn decode(record: &Value) -> Option<TakenLines> {
             return None;
         }
 
+        let segment = segment.parse().ok()?;
+        let session = SessionId::new(conversation.clone(), segment);
         let lines = lines
             .as_object()?
             .iter()
             .map(|(stamp, message)| {
-                Some((
-                    ClientStamp::new(stamp).ok()?,
-                    MessageId::parse(message.as_str()?).ok()?,
-                ))
+                let message = MessageId::parse(message.as_str()?).ok()?;
+
+                if message.session_id() != &session {
+                    return None;
+                }
+
+                Some((ClientStamp::new(stamp).ok()?, message))
             })
             .collect::<Option<BTreeMap<_, _>>>()?;
 
-        segments.insert(segment.parse().ok()?, lines);
+        segments.insert(segment, lines);
     }
 
     Some(TakenLines { segments })

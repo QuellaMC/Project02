@@ -169,15 +169,10 @@ impl CharacterData {
         })
     }
 
-    /// Removes a session that holds no evidence: the rollback of a
-    /// continuation whose first record never landed. The catalog row goes
-    /// first; a directory left behind reads as an interrupted start.
-    ///
-    /// # Errors
-    ///
-    /// [`StorageError::SessionNotEmpty`] when the session holds evidence, or
-    /// an error of [`CharacterData::sessions`] or of the writes.
-    pub fn discard_empty_session(&self, id: &SessionId) -> Result<(), StorageError> {
+    /// Removes session `id`, which must hold no evidence, for its writer,
+    /// whose lease keeps every append out while it goes. The catalog row
+    /// goes first; a directory left behind reads as an interrupted start.
+    pub(crate) fn discard_empty_session(&self, id: &SessionId) -> Result<(), StorageError> {
         self.with_catalog(|catalog| {
             if catalog.remove(id).is_none() {
                 return Ok(());
