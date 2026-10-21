@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use p02_contracts::{BeforeRoleModelCallOutput, CharacterStorage};
-use p02_runtime::{Delivery, Progress};
+use p02_runtime::{Delivery, Progress, RunTurnError};
 use p02_store::{RecordBody, RecordKind, RuntimeRejection, TurnRejection};
 use serde_json::json;
+use tokio::sync::Notify;
 
 use crate::support::{Chat, Round, Toy, id, make_read_only, reply, restore};
 
@@ -153,4 +154,60 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         [message(3), message(4)]
     );
     assert_eq!(mood, Some(json!({"mood": "curious"})));
+}
+
+/// A delivery its caller drops while the model is still answering loses the
+/// thread, every later step failing, its close too, and the thread opened
+/// again goes on, its next line closing the turn the dropped one left open.
+#[tokio::test]
+async fn a_thread_whose_delivery_was_dropped_opens_again_and_goes_on() {
+    let mut chat = Chat::new(&[]);
+    let asking = Notify::new();
+
+    chat.model
+        .script([Round::hangs(), Round::says(reply(&["Here."]))]);
+
+    tokio::select! {
+        () = asking.notified() => {}
+        delivery = chat.say_hearing("Still there?", "first", |progress| {
+            if let Progress::UserMessage { .. } = progress {
+                asking.notify_one();
+            }
+        }) => panic!("the model never answers: {delivery:?}"),
+    }
+
+    let lost = chat.say("Hello?", "second").await;
+    let closed = chat.reopen().await;
+    let reopened = chat.say("Hello?", "third").await;
+
+    assert!(
+        matches!(
+            lost,
+            Delivery::Failed {
+                error: RunTurnError::StateLost,
+                ..
+            }
+        ),
+        "{lost:?}"
+    );
+    assert_eq!(
+        closed.as_deref(),
+        Some("the conversation lost its hold on the disk to an earlier failure")
+    );
+    assert!(
+        matches!(reopened, Delivery::Completed { .. }),
+        "{reopened:?}"
+    );
+    assert_eq!(
+        chat.kinds(1),
+        [
+            RecordKind::RuntimeEventReceived,
+            RecordKind::VisibleMessageCommitted,
+            RecordKind::RuntimeEventReceived,
+            RecordKind::VisibleMessageCommitted,
+            RecordKind::RoleModelRound,
+            RecordKind::VisibleMessageCommitted,
+            RecordKind::RuntimeTurnCompleted,
+        ]
+    );
 }

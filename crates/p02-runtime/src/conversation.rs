@@ -52,7 +52,8 @@ pub struct Submission<'a> {
 pub struct Conversation {
     id: ConversationId,
     cast: Cast,
-    /// None once a panic on the blocking pool lost it.
+    /// None once a panic on the blocking pool, or a delivery dropped before
+    /// it ended, lost it.
     disk: Option<Disk>,
 }
 
@@ -225,6 +226,11 @@ impl Conversation {
     /// session in a new segment after a completed turn whose history the
     /// window would no longer hold whole. `listener` hears the turn's
     /// progress on the turn's own task, in order, and is never awaited.
+    ///
+    /// A delivery dropped before it ends loses the thread, as a panic on
+    /// the blocking pool does: every later step fails. The thread opens
+    /// again once the disk work in flight lets its leases go, and its next
+    /// line closes the turn the dropped one left open.
     pub async fn deliver(
         &mut self,
         submission: Submission<'_>,

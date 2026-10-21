@@ -240,17 +240,17 @@ impl Chat {
 }
 
 /// One round of a scripted model: the pieces of a reply it drafts, then its
-/// answer.
+/// answer, if it ever gives one.
 pub(crate) struct Round {
     drafts: Vec<ReplyDelta>,
-    answer: ProviderAnswer,
+    answer: Option<ProviderAnswer>,
 }
 
 impl Round {
     pub(crate) fn says(text: impl Into<String>) -> Self {
         Self {
             drafts: Vec::new(),
-            answer: ProviderAnswer::Text(text.into()),
+            answer: Some(ProviderAnswer::Text(text.into())),
         }
     }
 
@@ -258,9 +258,17 @@ impl Round {
     pub(crate) fn fails(details: &str) -> Self {
         Self {
             drafts: Vec::new(),
-            answer: ProviderAnswer::Failed {
+            answer: Some(ProviderAnswer::Failed {
                 details: details.to_owned(),
-            },
+            }),
+        }
+    }
+
+    /// A provider that never answers.
+    pub(crate) fn hangs() -> Self {
+        Self {
+            drafts: Vec::new(),
+            answer: None,
         }
     }
 
@@ -336,8 +344,12 @@ impl RoleModelAdapter for Model {
             invocation.hear(delta);
         }
 
+        let Some(answer) = round.answer else {
+            return std::future::pending().await;
+        };
+
         RawOutput {
-            answer: round.answer,
+            answer,
             provider_metadata: None,
             provider_exchange: None,
         }
