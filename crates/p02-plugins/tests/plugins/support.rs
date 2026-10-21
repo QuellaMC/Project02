@@ -36,7 +36,7 @@ pub(crate) fn turn() -> Turn {
 
 pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
     Turn::new(TurnIdentity {
-        session_id: SessionId::new(session).unwrap(),
+        session_id: SessionId::parse(session).unwrap(),
         event: EventIdentity::new(
             EventId::new(event).unwrap(),
             TraceId::new(&format!("trace-{event}")).unwrap(),

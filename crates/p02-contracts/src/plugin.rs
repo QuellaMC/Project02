@@ -558,7 +558,7 @@ mod tests {
         let context = HookContext::new(
             Identifier::new("toolbox").unwrap(),
             Arc::new(TurnIdentity {
-                session_id: SessionId::new("chat.1").unwrap(),
+                session_id: SessionId::parse("chat.1").unwrap(),
                 event: EventIdentity::new(
                     EventId::new("evt_1").unwrap(),
                     TraceId::new("trace_1").unwrap(),

@@ -294,7 +294,7 @@ impl Reach {
                             "Returned {} message(s) from one session.",
                             window.messages.len()
                         ),
-                        output: output::read(session.as_str(), &window, damaged),
+                        output: output::read(&session.to_string(), &window, damaged),
                     })
                 })
             }
@@ -343,7 +343,7 @@ impl Request {
 /// A session the model named, which is in no history unless it is a
 /// session id.
 fn session_id(text: String) -> Result<SessionId, IndexError> {
-    SessionId::new(&text).map_err(|_| IndexError::SessionNotFound(text))
+    SessionId::parse(&text).map_err(|_| IndexError::SessionNotFound(text))
 }
 
 /// What the model is told when the index answers nothing. A storage
