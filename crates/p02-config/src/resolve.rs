@@ -705,8 +705,9 @@ fn section<'s>(
 }
 
 /// What is wrong with a section's settings in the documents `read`: the
-/// shape of its stanzas, its switch among them, fields it does not
-/// declare, and values its fields refuse or, while it is on, lack.
+/// shape of its stanzas, a switch in effect that is no boolean, fields it
+/// does not declare, and values its fields refuse or, while it is on,
+/// lack.
 fn judge(
     declared: Declared<'_>,
     fields: &[Field<'_>],
@@ -734,6 +735,9 @@ fn judge(
                 .map(|problem| layers.found_in(*layer, problem.clone()))
         })
         .collect();
+
+    diagnostics.extend(refused_switch(declared, switch, layers));
+
     let names: Vec<&str> = declared
         .config()
         .fields()
@@ -809,6 +813,34 @@ fn judge(
     }
 
     diagnostics
+}
+
+/// The finding of a switch in effect that is no boolean, made in the
+/// document that holds it: a farther one it overrides is not in effect,
+/// and is not judged.
+fn refused_switch(
+    declared: Declared<'_>,
+    switch: &Effective,
+    layers: &Layers,
+) -> Option<Diagnostic> {
+    let Effective::Authored {
+        layer,
+        accepted: false,
+        ..
+    } = switch
+    else {
+        return None;
+    };
+    let path = format!("{}.enabled", declared.path());
+
+    Some(
+        layers.found_in(
+            *layer,
+            Diagnostic::error(Code::BooleanInvalid, format!("{path} must be a boolean."))
+                .at(path)
+                .in_section(declared.namespace(), declared.id().as_str()),
+        ),
+    )
 }
 
 /// A warning for each value a document holds for the section that its

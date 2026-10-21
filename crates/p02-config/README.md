@@ -79,18 +79,19 @@ outcome are the wire's own types.
   the home's and for a character her overlay's, in one order, waiting as
   long as the caller says while a lock changes hands; the documents are
   read again; the fingerprint presented must be the target's, or for a
-  change to one section that section's; and the document made must be
-  valid and leave the section it changes without an error over the
-  documents beside it. Only then is anything written. Her first change
-  makes her data directory, as her first start does, and a refused change
-  makes none. Her package's settings her view merges in are settled first,
-  as her start settles them, and the change is written last, so a failure
-  between the two leaves her settings as shown, under the same
-  fingerprint. A new home is given a document naming its version alone,
-  and a file already there stays as it is. The answer is `applied` with
-  the new fingerprint, `refused`
-  as a `conflict`, `invalid` or `unknown_character`, or `failed`, with a
-  sentence that never repeats a value.
+  change to one section that section's; and the document made must read
+  back as its file would be read, be valid and leave the section it
+  changes without an error over the documents beside it. Only then is
+  anything written, and nothing when the target's files already hold it.
+  Her first change makes her data directory, as her first start does, and
+  a refused change makes none. Her package's settings her view merges in
+  are settled first, as her start settles them, and the change is written
+  last, so a failure between the two leaves her settings as shown, under
+  the same fingerprint. A new home is given a document naming its version
+  alone, and a file already there stays as it is. The answer is `applied`
+  with the new fingerprint, `refused` as a `conflict`, `invalid` or
+  `unknown_character`, or `failed`, with a sentence that never repeats a
+  value.
 - **Her package's settings.** At her first start the plugins of this
   build her package requires or recommends are switched on in her
   overlay, above a home that switches them off, beside the values it

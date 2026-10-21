@@ -14,7 +14,7 @@ use crate::declaration::{
     Declared, Layer, Namespace, Sections, VERSION, authorable, expectation, outside_scope,
 };
 use crate::diagnostic::{Code, Diagnostic};
-use crate::document::{Document, Read};
+use crate::document::{Document, Read, encode};
 use crate::resolve::{Overlay, Written, WrittenOverlay, in_overlay};
 use crate::transaction::{settle, with_character};
 
@@ -112,16 +112,15 @@ pub(crate) fn merged_overlay(
     recorded: Option<&CharacterVersion>,
 ) -> (Overlay, Vec<Diagnostic>) {
     let pending = absent || recorded != Some(&character.version);
-    let (read, merges, problems) =
-        match pending.then(|| package_document(sections, &character.plugins)) {
-            None => (written.clone(), None, Vec::new()),
-            Some(Ok(package)) => (
-                Document::parse(merge_package(written.raw(), &package)),
-                Some(character.version.clone()),
-                Vec::new(),
-            ),
-            Some(Err(problems)) => (written.clone(), None, problems),
-        };
+    let (read, merges, problems) = match pending.then(|| {
+        package_document(sections, &character.plugins).and_then(|package| {
+            Read::bytes(&encode(&merge_package(written.raw(), &package))).usable()
+        })
+    }) {
+        None => (written.clone(), None, Vec::new()),
+        Some(Ok(read)) => (read, Some(character.version.clone()), Vec::new()),
+        Some(Err(problems)) => (written.clone(), None, problems),
+    };
 
     (
         Overlay {

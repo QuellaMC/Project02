@@ -275,6 +275,13 @@ fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switc
             json!(["blocked_by_config_errors"])
         )
     );
+    assert_eq!(
+        demo(&of("mira")),
+        (
+            Vec::new(),
+            json!(["bundled_demo-config", "enabled_by_config"])
+        )
+    );
 }
 
 #[test]

@@ -117,18 +117,26 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
 fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start_merges_them() {
     let world = World::new();
     let demo = |kind: &str| json!({"kind": kind, "namespace": "plugins", "id": "demo-config"});
-    let mut tone = demo("section_field_unset");
-
-    tone["field"] = json!("tone");
-    world
-        .package(
+    let package = |tone: &str, signoff: &str, version: &str| {
+        world.package(
             "nova",
             &json!({
                 "recommended": ["demo-config"],
-                "config": {"demo-config": {"tone": "warm", "signoff": "Yours."}},
+                "config": {"demo-config": {"tone": tone, "signoff": signoff}},
             }),
-            "1.0.0",
-        )
+            version,
+        );
+    };
+    let mut signoff = demo("section_field_set");
+    let mut tone = demo("section_field_unset");
+
+    signoff["field"] = json!("signoff");
+    signoff["value"] = json!("Yours.");
+    tone["field"] = json!("tone");
+    package("warm", "Yours.", "1.0.0");
+    world.save(&of("nova"), signoff);
+    package("formal", "Cheers.", "2.0.0");
+    world
         .save(&of("nova"), tone)
         .save(&of("nova"), demo("section_enabled"));
 
@@ -137,7 +145,7 @@ fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start
     assert_eq!(
         data.package_version()
             .map(p02_characters::CharacterVersion::as_str),
-        Some("1.0.0")
+        Some("2.0.0")
     );
     assert_eq!(
         overlay_of(&world, "nova"),

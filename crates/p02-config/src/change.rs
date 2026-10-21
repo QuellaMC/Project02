@@ -17,7 +17,8 @@ use crate::declaration::{
     Declared, HostField, Namespace, Sections, Target, expectation, host_field, host_fields,
     outside_scope,
 };
-use crate::document::{Document, Read};
+use crate::diagnostic::Diagnostic;
+use crate::document::{Document, Read, encode};
 use crate::materialize::merged_overlay;
 use crate::resolve::{Layers, Overlay, Resolution, Written, WrittenOverlay, target_fingerprint};
 use crate::transaction::{settle, with_character, with_home, write};
@@ -495,18 +496,21 @@ fn commit(
         return Ok(refused(ChangeRefusal::Invalid, message));
     }
 
-    let unchanged = raw == *loaded.own().raw();
-    let made = Document::parse(raw);
-
-    if let Some(problem) = made.problems().first() {
-        return Ok(refused(
-            ChangeRefusal::Invalid,
-            format!(
-                "The change would leave the settings invalid: {}",
-                problem.message()
-            ),
-        ));
-    }
+    let made = match Read::bytes(&encode(&raw)).usable() {
+        Ok(made) => made,
+        Err(problems) => {
+            return Ok(refused(
+                ChangeRefusal::Invalid,
+                format!(
+                    "The change would leave the settings invalid: {}",
+                    problems
+                        .first()
+                        .map(Diagnostic::message)
+                        .unwrap_or_default()
+                ),
+            ));
+        }
+    };
 
     if let Some(declared) = edit.section() {
         let judged = Resolution::new(sections, loaded.layers_with(&made), Vec::new());
@@ -522,7 +526,7 @@ fn commit(
         }
     }
 
-    if unchanged {
+    if loaded.holds(&made) {
         return Ok(ChangeOutcome::Applied {
             fingerprint: current.fingerprint().clone(),
         });
@@ -604,17 +608,29 @@ impl Loaded {
         layers
     }
 
+    /// Whether the target's files already hold `made`: it is the document
+    /// the change started from, and no package settings of hers wait
+    /// beneath it to be settled.
+    fn holds(&self, made: &Document) -> bool {
+        made.raw() == self.own().raw()
+            && self
+                .overlay
+                .as_ref()
+                .is_none_or(|overlay| overlay.merges.is_none())
+    }
+
     /// Writes `made` in place of the target's own document. Her package's
     /// settings her view merges in are settled first, as her start settles
-    /// them, and the change is written last: a failure or a crash between
-    /// the writes leaves her settings as her view showed them, under the
-    /// same fingerprint, rather than her change over a merge her start
-    /// would make again.
+    /// them, and the change is written last, unless her file already holds
+    /// it: a failure or a crash between the writes leaves her settings as
+    /// her view showed them, under the same fingerprint, rather than her
+    /// change over a merge her start would make again.
     fn write(self, home: &Home, made: &Document) -> Result<(), StorageError> {
         match self.overlay {
             Some(mut overlay) => {
                 settle(home, &mut overlay)?;
-                write(&overlay.path, made.raw())
+                overlay.read = made.clone();
+                settle(home, &mut overlay).map(drop)
             }
             None => write(&self.home_path, made.raw()),
         }
