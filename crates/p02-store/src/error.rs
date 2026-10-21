@@ -88,6 +88,12 @@ pub enum StorageError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("line {line} of sessions catalog {} lists session \"{session}\" again", .path.display())]
+    RepeatedCatalogRow {
+        path: PathBuf,
+        line: usize,
+        session: SessionId,
+    },
     #[error("conversation record {} is malformed", .path.display())]
     MalformedConversation {
         path: PathBuf,
@@ -165,6 +171,7 @@ impl StorageError {
             | Self::MalformedRecord { .. }
             | Self::BrokenLog { .. }
             | Self::MalformedCatalogRow { .. }
+            | Self::RepeatedCatalogRow { .. }
             | Self::MalformedConversation { .. }
             | Self::MisplacedConversation { .. }
             | Self::Refused(_)
