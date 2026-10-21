@@ -12,6 +12,14 @@ pub(crate) const SESSION_CATALOG_FILE: &str = "sessions.jsonl";
 pub(crate) const SESSIONS_DIRECTORY: &str = "sessions";
 pub(crate) const RAW_EVENTS_FILE: &str = "raw-events.jsonl";
 pub(crate) const TAKEN_LINES_DIRECTORY: &str = "taken-lines";
+pub(crate) const PLUGIN_DATA_DIRECTORY: &str = "plugin-data";
+/// A plugin store's count of its writes and journal of the one in flight.
+/// No path a plugin names begins with a dot, so none is its ledger.
+pub(crate) const PLUGIN_STORE_LEDGER: &str = ".plugin-store.json";
+pub(crate) const DATABASE_SUFFIX: &str = ".sqlite";
+/// What SQLite keeps beside a database in write-ahead-log mode, each named
+/// by the database's name and this.
+pub(crate) const DATABASE_COMPANIONS: [&str; 2] = ["-wal", "-shm"];
 
 /// What Finder leaves in every folder it shows: never evidence, and never
 /// in the way.

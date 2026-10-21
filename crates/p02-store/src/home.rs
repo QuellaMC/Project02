@@ -11,12 +11,13 @@ use p02_shared::{
     temporary_target,
 };
 
+use crate::daemon::DaemonLease;
 use crate::error::StorageError;
 use crate::layout::{
     CHARACTER_DATA_DIRECTORY, CONFIG_FILE, CONVERSATIONS_DIRECTORY, EntryKind, LOCKS_DIRECTORY,
     SCHEMA_FILE,
 };
-use crate::lock::{Lease, Resource, acquire};
+use crate::lock::{Resource, acquire};
 use crate::marker::{self, Marker, Scope};
 
 /// A home, spelled from its canonical root: every path below it is made
@@ -101,15 +102,18 @@ impl Home {
     }
 
     /// The one daemon's lease on the home, refused at once while another
-    /// process serves it.
+    /// process serves it: its holder alone writes the daemon record.
     ///
     /// # Errors
     ///
     /// [`StorageError::Busy`] while another daemon holds it, or another
     /// refusal of [`Home::check`].
-    pub fn daemon_lease(&self) -> Result<Lease, StorageError> {
+    pub fn daemon_lease(&self) -> Result<DaemonLease, StorageError> {
         self.check()?;
-        acquire(&[(&self.locks_root(), &Resource::Daemon)])
+
+        let lease = acquire(&[(&self.locks_root(), &Resource::Daemon)])?;
+
+        Ok(DaemonLease::new(self.clone(), lease))
     }
 
     fn check_unmarked(&self) -> Result<(), StorageError> {

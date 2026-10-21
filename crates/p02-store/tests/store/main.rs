@@ -10,9 +10,12 @@
 )]
 
 mod catalogs;
+mod databases;
+mod feed;
 mod generated;
 mod history;
 mod layout;
+mod plugin_files;
 mod records;
 mod support;
 mod writer;

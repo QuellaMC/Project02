@@ -20,7 +20,8 @@ pub use fs::{
     DanglingLinks, FileStamp, LockedFile, PathEntry, ResolvePathError, append_line, canonical_path,
     create_directories, create_directory, create_new_file, describe_entry, file_stamp,
     list_directory, read_at_most, read_file, read_text_lossy, relative_path_if_contained,
-    remove_directory, remove_file, temporary_target, try_lock_file, write_file_atomically,
+    remove_directory, remove_file, sync_file, temporary_target, try_lock_file,
+    write_file_atomically,
 };
 #[cfg(feature = "http")]
 pub use http::{
