@@ -42,7 +42,7 @@ p02-shared, and the runtime reaches plugins and providers only through it.
 - **Config.** A plugin's config section declares its fields, and a
   section declared in code, as the host's settings and the connectors'
   are, meets the same rules. One judge decides whether a value fits a
-  field, a secret's being a string that is not blank, and a factory
-  receives what its section resolves to: each field's authored value when
-  the field accepts it, or else its default, with every required field
-  set.
+  field, a secret's being a string that is not blank, so a secret is
+  declared only of a type that holds one, and a factory receives what its
+  section resolves to: each field's authored value when the field accepts
+  it, or else its default, with every required field set.

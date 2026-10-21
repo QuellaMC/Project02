@@ -10,7 +10,7 @@ use p02_characters::{CharacterDefinition, Discovery};
 use p02_contracts::ConfigField;
 use p02_shared::Fingerprint;
 use p02_store::{Home, StorageError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::declaration::{
@@ -62,7 +62,7 @@ pub enum Operation {
     SectionEnabled {
         namespace: Namespace,
         id: String,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "given_switch")]
         enabled: Option<bool>,
     },
     SectionFieldSet {
@@ -76,6 +76,12 @@ pub enum Operation {
         id: String,
         field: String,
     },
+}
+
+/// A switch a change gives: a boolean, or, when `enabled` is absent, none,
+/// which leaves the switch to the document beneath. A null is no switch.
+fn given_switch<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }
 
 /// Says what the change does and where, never the value it sets: that may

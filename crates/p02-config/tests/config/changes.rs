@@ -3,7 +3,9 @@
 
 use std::sync::Barrier;
 
-use p02_config::{ChangeOutcome, ChangeRefusal, create_home_document};
+use p02_config::{
+    ChangeOutcome, ChangeRefusal, ConfigChange, Namespace, Operation, create_home_document,
+};
 use serde_json::{Value, json};
 
 use crate::support::{WAIT, World, document, field, home, of, section, tree};
@@ -77,6 +79,44 @@ fn every_kind_of_change_applies_under_the_fingerprint_the_next_view_carries() {
                 .unwrap(),
             document,
             "{operation}"
+        );
+    }
+}
+
+#[test]
+fn a_switch_a_change_gives_is_a_boolean_and_absent_one_leaves_it_to_the_document_beneath() {
+    let operation = |enabled: Option<Value>| {
+        let mut operation =
+            json!({"kind": "section_enabled", "namespace": "plugins", "id": "demo-config"});
+
+        if let Some(enabled) = enabled {
+            operation["enabled"] = enabled;
+        }
+
+        serde_json::from_value::<ConfigChange>(json!({
+            "target": {"scope": "global"},
+            "expectedFingerprint": "sha256:read",
+            "operation": operation,
+        }))
+        .map(|change| change.operation)
+    };
+
+    for refused in [json!(null), json!("on")] {
+        assert!(operation(Some(refused.clone())).is_err(), "{refused}");
+    }
+
+    for (given, enabled) in [
+        (None, None),
+        (Some(json!(true)), Some(true)),
+        (Some(json!(false)), Some(false)),
+    ] {
+        assert_eq!(
+            operation(given).unwrap(),
+            Operation::SectionEnabled {
+                namespace: Namespace::Plugins,
+                id: "demo-config".to_owned(),
+                enabled,
+            }
         );
     }
 }

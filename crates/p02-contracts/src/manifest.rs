@@ -100,6 +100,11 @@ pub enum ManifestError {
     #[error("secret plugin config field \"{0}\" cannot allow agent mutation")]
     SecretAgentMutable(Identifier),
     #[error(
+        "secret plugin config field \"{0}\" must be of a valueType that holds a string: a \
+         credential is one"
+    )]
+    SecretNotText(Identifier),
+    #[error(
         "plugin config field \"{0}\" is secret and cannot declare a defaultValue: a credential \
          never ships in a manifest"
     )]
@@ -167,6 +172,7 @@ impl ManifestError {
             | Self::UnknownKey { .. }
             | Self::FieldScopeWidens { .. }
             | Self::SecretAgentMutable(_)
+            | Self::SecretNotText(_)
             | Self::SecretDefault(_)
             | Self::RequiredDefault(_)
             | Self::AllowedValuesMismatch(_)
@@ -561,8 +567,13 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
 /// Every value a manifest names for a field is one the field accepts: each
 /// allowed value, of which there is one at least, and the default, which is
 /// what the field takes wherever nothing sets it. A credential, or a value
-/// its operator must choose, is never a default a manifest decides.
+/// its operator must choose, is never a default a manifest decides, and a
+/// secret's type is one that holds a string, since a credential is one.
 fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
+    if field.secret && !field.of_its_type(&Value::from("")) {
+        return Err(ManifestError::SecretNotText(field.name.clone()));
+    }
+
     if let Some(allowed) = &field.allowed_values
         && (allowed.is_empty()
             || !allowed
@@ -920,6 +931,11 @@ mod tests {
             (
                 |m| m["config"]["fields"][1]["defaultValue"] = json!("key"),
                 ManifestError::SecretDefault(name("apiKey")),
+                MalformedManifest,
+            ),
+            (
+                |m| m["config"]["fields"][1]["valueType"] = json!("number"),
+                ManifestError::SecretNotText(name("apiKey")),
                 MalformedManifest,
             ),
             (
