@@ -129,6 +129,8 @@ pub enum RecordError {
         "a tool call is kept other than its session keeps it: within the JSON limits, credentials redacted"
     )]
     UnkeptToolCall(#[source] Option<BoundJsonError>),
+    #[error("a call no plugin offers comes back as the runtime's refusal of it, never an answer")]
+    UndeclaredAnswered,
     #[error(
         "a user commit holds the person's message and no round, a character commit the character's and its round, each anchoring its own message alone"
     )]

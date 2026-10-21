@@ -110,9 +110,12 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ("a round before the line", "after the turn committed the person's line", strings(&start).into_iter().chain([TEA_ROUND_1.to_owned()]).collect()),
         ("a reply before the line", "exactly one message of the person's", strings(&start).into_iter().chain([TEA_REPLIED.to_owned()]).collect()),
         ("a second line", "exactly one message of the person's", strings(&[TEA_RECEIVED, TEA_ASKED, &TEA_ASKED.replace("message-1", "message-2")])),
-        ("a line other than the model was given", "one model input text", strings(&start).into_iter().chain([replace(TEA_ASKED, "Tea?", "Coffee?")]).collect()),
+        ("a line other than the model was given", "the line its event was taken as", strings(&start).into_iter().chain([replace(TEA_ASKED, "Tea?", "Coffee?")]).collect()),
         ("a message under another name", "not under its speaker's id and name", strings(&start).into_iter().chain([replace(TEA_ASKED, r#""speakerName":"Sam""#, r#""speakerName":"Samuel""#)]).collect()),
-        ("a message number that does not climb", "does not climb", strings(&[TEA_RECEIVED, TEA_ASKED, SPLIT_RECEIVED, &replace(&replace(&replace(TEA_ASKED, "evt_1", "evt_2"), "trace_1", "trace_2"), "09:00:00", "09:01:00")])),
+        ("a message number that does not climb", "does not climb", strings(&[TEA_RECEIVED, TEA_ASKED, &second(TEA_RECEIVED), &second(TEA_ASKED)])),
+        ("a line committed from an event refused as one", "the line its event was taken as", strings(&[SPLIT_RECEIVED, &second(TEA_ASKED)])),
+        ("a round before its round's calls", "before taking up all it gave", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), TEA_ROUND_2.to_owned()]).collect()),
+        ("a round while a call is unfinished", "before taking up all it gave", strings(&called).into_iter().chain([TEA_ROUND_2.to_owned()]).collect()),
         ("a round out of sequence", "out of sequence", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""round":1"#, r#""round":2"#)]).collect()),
         ("a decision the output does not read as", "does not read as", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""text":"Checking."}}}}"#, r#""text":"Something else."}}}}"#)]).collect()),
         ("a round shown another session", "another session", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""sessionId":"conv_a.1""#, r#""sessionId":"conv_b.1""#)]).collect()),
@@ -120,6 +123,7 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ("a call of a round never run", "which the turn never ran", strings(&asked).into_iter().chain([TEA_CALLED.to_owned()]).collect()),
         ("a call of a refused round", "not the next call an accepted round", strings(&[FAILED_RECEIVED, FAILED_ASKED, FAILED_ROUND, &replace(&replace(&replace(TEA_CALLED, "evt_1", "evt_3"), "trace_1", "trace_3"), "09:00:00", "09:02:00")])),
         ("a call its round never asked", "not the next call an accepted round", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), replace(TEA_CALLED, r#"{"mood":"warm"}"#, r#"{"mood":"cold"}"#)]).collect()),
+        ("an undeclared call answered", "never an answer", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""dispatchedToHost":true"#, r#""dispatchedToHost":false"#)]).collect()),
         ("a call that finished before it started", "never started", strings(&[TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_ANSWERED])),
         ("a call that finished as another", "as another call", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""toolName":"character_state.patch","toolPluginId":"character-state","dispatched"#, r#""toolName":"character_state.reset","toolPluginId":"character-state","dispatched"#)]).collect()),
         ("a call that kept a credential", "credentials redacted", strings(&asked).into_iter().chain([replace(&replace(TEA_ROUND_1, r#"{\"mood\":\"warm\"}"#, r#"{\"api_key\":\"[redacted]\"}"#), r#"{"mood":"warm"}"#, r#"{"api_key":"[redacted]"}"#), replace(TEA_CALLED, r#"{"mood":"warm"}"#, r#"{"api_key":"sk-live"}"#)]).collect()),
@@ -130,7 +134,7 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ("a terminal naming other messages", "other messages", strings(&FIRST_SEGMENT[..8]).into_iter().chain([replace(TEA_COMPLETED, r#""conv_a.1:message-1","#, "")]).collect()),
         ("a terminal judging an earlier round", "not the round the turn ended on", strings(&FIRST_SEGMENT[..8]).into_iter().chain([replace(TEA_COMPLETED, r#""round":2"#, r#""round":1"#)]).collect()),
         ("a terminal anchoring a reply never said", "anchors the last reply", strings(&FIRST_SEGMENT[..8]).into_iter().chain([replace(TEA_COMPLETED, r#""acceptedVisibleReplyText":"Tea, always.""#, r#""acceptedVisibleReplyText":"Coffee.""#)]).collect()),
-        ("a turn completed short of its replies", "before committing every reply round 2 said", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#"["conv_a.1:message-1","conv_a.1:message-2"]"#, r#"["conv_a.1:message-1"]"#)]).collect()),
+        ("a turn completed short of its replies", "goes on past round 2 before taking up all it gave", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#"["conv_a.1:message-1","conv_a.1:message-2"]"#, r#"["conv_a.1:message-1"]"#)]).collect()),
         ("a completed turn that judges nothing", "judges the round it ended on", strings(&FIRST_SEGMENT[..8]).into_iter().chain([replace(TEA_COMPLETED, r#","round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}"#, "")]).collect()),
         ("a model refusal that judges no round", "names the round it judged", strings(&FIRST_SEGMENT[12..15]).into_iter().chain([replace(FAILED_REJECTED, r#","round":1"#, "")]).collect()),
         ("a refusal other than its round's", "repeats the refusal", strings(&FIRST_SEGMENT[12..15]).into_iter().chain([replace(FAILED_REJECTED, r#""message":"The provider answered 503.""#, r#""message":"The provider answered 502.""#)]).collect()),
@@ -169,6 +173,14 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
         ),
         "a line that is not UTF-8"
     );
+}
+
+/// A record of the first turn, made the second turn's: its event and trace,
+/// a minute later.
+fn second(line: &str) -> String {
+    line.replace("evt_1", "evt_2")
+        .replace("trace_1", "trace_2")
+        .replace("09:00:00", "09:01:00")
 }
 
 fn strings(lines: &[&str]) -> Vec<String> {

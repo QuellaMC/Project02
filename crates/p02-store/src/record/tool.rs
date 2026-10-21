@@ -135,26 +135,44 @@ impl TryFrom<WireStarted> for ToolCallStarted {
     }
 }
 
+impl ToolDispatch {
+    fn of(dispatched_to_host: bool) -> Self {
+        if dispatched_to_host {
+            Self::Host
+        } else {
+            Self::Undeclared
+        }
+    }
+}
+
 impl ToolCallFinished {
     /// The call `started` came back with `result`, kept as its session
-    /// keeps a call's result, and the evidence the call made.
+    /// keeps a call's result, and the evidence the call made. A call no
+    /// plugin offers comes back as the runtime's refusal of it.
     ///
     /// # Errors
     ///
-    /// [`BoundJsonError`] when the result breaks the JSON limits.
+    /// [`RecordError::UnkeptToolCall`] when the result breaks the JSON
+    /// limits, and [`RecordError::UndeclaredAnswered`] when a call no
+    /// plugin offers comes back accepted.
     pub fn new(
         started: &ToolCallStarted,
         dispatch: ToolDispatch,
         result: ToolCallResult,
         evidence: Vec<Evidence>,
-    ) -> Result<Self, BoundJsonError> {
+    ) -> Result<Self, RecordError> {
+        let tool_result = ConversationToolCall::kept_result(result)
+            .map_err(|error| RecordError::UnkeptToolCall(Some(error)))?;
+
+        check_dispatch(dispatch, &tool_result)?;
+
         Ok(Self {
             round: started.round,
             tool_call_id: started.tool_call_id.clone(),
             tool_name: started.tool_name.clone(),
             tool_plugin_id: started.tool_plugin_id.clone(),
             dispatched_to_host: dispatch == ToolDispatch::Host,
-            tool_result: ConversationToolCall::kept_result(result)?,
+            tool_result,
             runtime_plugin_evidence: evidence,
         })
     }
@@ -181,11 +199,7 @@ impl ToolCallFinished {
 
     #[must_use]
     pub fn dispatch(&self) -> ToolDispatch {
-        if self.dispatched_to_host {
-            ToolDispatch::Host
-        } else {
-            ToolDispatch::Undeclared
-        }
+        ToolDispatch::of(self.dispatched_to_host)
     }
 
     #[must_use]
@@ -210,6 +224,8 @@ impl TryFrom<WireFinished> for ToolCallFinished {
             return Err(RecordError::UnkeptToolCall(None));
         }
 
+        check_dispatch(ToolDispatch::of(wire.dispatched_to_host), &wire.tool_result)?;
+
         Ok(Self {
             round: wire.round,
             tool_call_id: wire.tool_call_id,
@@ -219,5 +235,15 @@ impl TryFrom<WireFinished> for ToolCallFinished {
             tool_result: wire.tool_result,
             runtime_plugin_evidence: wire.runtime_plugin_evidence,
         })
+    }
+}
+
+/// A call no plugin offers was never run, so what came back is the
+/// runtime's refusal of it, never an answer.
+fn check_dispatch(dispatch: ToolDispatch, result: &ToolCallResult) -> Result<(), RecordError> {
+    if dispatch == ToolDispatch::Undeclared && matches!(result, ToolCallResult::Accepted { .. }) {
+        Err(RecordError::UndeclaredAnswered)
+    } else {
+        Ok(())
     }
 }

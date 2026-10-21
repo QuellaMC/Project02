@@ -3,18 +3,17 @@
 //! line through the gate; writing it takes the session's writer lease,
 //! which one writer holds at a time.
 
-use std::io;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use p02_core::{
     CharacterProfile, Conversation, Session, SessionId, SpeakerName, VisibleMessageRole,
 };
-use p02_shared::{FileStamp, PathEntry, append_line, describe_entry, file_stamp, read_file};
+use p02_shared::{FileStamp, PathEntry, append_line, describe_entry, file_stamp};
 
 use crate::character_data::CharacterData;
 use crate::error::StorageError;
-use crate::jsonl::committed_lines;
+use crate::jsonl::{committed_lines, read_coherently, read_lines};
 use crate::layout::{EntryKind, RAW_EVENTS_FILE};
 use crate::lock::{Lease, Resource, acquire};
 use crate::record::LogRecord;
@@ -179,7 +178,7 @@ impl SessionLog {
             }
         }
 
-        let (stamp, content) = read_coherently(&path, read_file)?;
+        let (stamp, content) = read_coherently(&path, || read_lines(&path))?;
 
         Ok(Cached {
             stamp,
@@ -299,87 +298,5 @@ impl SessionWriter {
 fn cached_stamp(cache: &mut Option<Cached>, stamp: Option<FileStamp>) {
     if let Some(cached) = cache {
         cached.stamp = stamp;
-    }
-}
-
-/// The file at `path` as it was at one moment: its stamp is taken before
-/// and after it is read, and a read the two do not agree on is tried once
-/// more before it is given up as raced.
-fn read_coherently(
-    path: &Path,
-    read: impl Fn(&Path) -> io::Result<Vec<u8>>,
-) -> Result<(Option<FileStamp>, Vec<u8>), StorageError> {
-    for _ in 0..2 {
-        let before = file_stamp(path).map_err(StorageError::read(path))?;
-        let content = match &before {
-            None => Vec::new(),
-            Some(_) => match read(path) {
-                Ok(content) => content,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-                Err(source) => {
-                    return Err(StorageError::Read {
-                        path: path.to_path_buf(),
-                        source,
-                    });
-                }
-            },
-        };
-        let after = file_stamp(path).map_err(StorageError::read(path))?;
-
-        if before == after {
-            return Ok((after, content));
-        }
-    }
-
-    Err(StorageError::ConcurrentWrite {
-        path: path.to_path_buf(),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cell::Cell;
-
-    use p02_shared::{DanglingLinks, canonical_path};
-
-    use super::*;
-
-    /// storage.coherent-read: a read that meets a change to its file is tried once more, and one whose two attempts both race is refused `concurrent_write`
-    #[test]
-    fn a_read_the_file_changes_beneath_is_tried_again_once_then_refused() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = canonical_path(directory.path(), DanglingLinks::Keep).unwrap();
-        let path = root.join(RAW_EVENTS_FILE);
-        let attempts = Cell::new(0);
-        let changing = |changes: usize| {
-            let attempts = &attempts;
-
-            move |path: &Path| {
-                attempts.set(attempts.get() + 1);
-
-                let content = read_file(path);
-
-                if attempts.get() <= changes {
-                    append_line(path, b"{}").unwrap();
-                }
-
-                content
-            }
-        };
-
-        append_line(&path, b"{}").unwrap();
-
-        let (stamp, content) = read_coherently(&path, changing(1)).unwrap();
-
-        assert_eq!(attempts.get(), 2);
-        assert_eq!(content, b"{}\n{}\n");
-        assert_eq!(stamp, file_stamp(&path).unwrap());
-
-        attempts.set(0);
-
-        let raced = read_coherently(&path, changing(2)).unwrap_err();
-
-        assert_eq!(attempts.get(), 2);
-        assert_eq!(raced.code(), "concurrent_write");
     }
 }
