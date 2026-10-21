@@ -46,12 +46,13 @@ pub use role_model::{
     DECISION_CONTRACT_VERSION, DECISION_OUTPUT_CONTRACT, DecisionContext, DecisionRejection,
     DecisionRejectionReason, DecisionResult, DuplicateToolError, ExchangeProvider, ExchangeRecord,
     FrameSize, HistoryWindow, InputEnvelope, Invocation, ModelToolCall, ModelToolDefinition,
-    OutputContract, ParseDecisionError, ParseModelToolCallError, PluginToolDefinition,
-    PluginToolDefinitions, PromptSize, PromptSizeError, ProviderAnswer, ProviderCapabilities,
-    ProviderExchange, ProviderFailure, ProviderMetadata, ProviderName, ProviderRequest,
-    ProviderResponse, RawOutput, ReasoningFilter, ReasoningLeakError, ReasoningParameterStyle,
-    ReplyDelta, RoleModelAdapter, RuntimeNote, TextCompletion, TextCompletionRequest,
-    ToolCallResult, ToolNameMapping, ToolRound, VISIBLE_REPLY, scrub_reasoning_blocks,
+    OutputContract, PLUGIN_LIST_TOOL, ParseDecisionError, ParseModelToolCallError,
+    PluginToolDefinition, PluginToolDefinitions, PromptSize, PromptSizeError, ProviderAnswer,
+    ProviderCapabilities, ProviderExchange, ProviderFailure, ProviderMetadata, ProviderName,
+    ProviderRequest, ProviderResponse, RawOutput, ReasoningFilter, ReasoningLeakError,
+    ReasoningParameterStyle, ReplyDelta, RoleModelAdapter, RuntimeNote, TextCompletion,
+    TextCompletionRequest, ToolCallResult, ToolNameMapping, ToolRound, VISIBLE_REPLY,
+    scrub_reasoning_blocks,
 };
 pub use schema::{InputContractError, ToolInputContract, ToolInputRejection};
 pub use tool::{

@@ -1,0 +1,658 @@
+{
+  "name": "first-turn",
+  "about": "A first turn: the persona, the tool protocol naming the inventory tool, curated sections with and without their fill, runtime notes from the runtime and a trusted plugin, the bundled tools strict and not.",
+  "recordedFrom": "6e1e9fdc4f0a05d03233889fa08356f3360c658e",
+  "input": {
+    "event": {
+      "eventId": "evt_first",
+      "traceId": "trace_first",
+      "createdAt": "2026-06-15T09:30:00.000Z"
+    },
+    "sessionId": "conv_mira.1",
+    "userMessage": "Good morning! Did you sleep?",
+    "userDisplayName": null,
+    "contextSummary": null,
+    "runtimeNotes": [
+      {
+        "id": "today",
+        "text": "Today is Monday, June 15, 2026."
+      },
+      {
+        "id": "current",
+        "pluginId": "character-state",
+        "text": "How you are right now (your own inner state, not theirs): mood=steady, energy=medium"
+      }
+    ],
+    "pluginContextItems": [],
+    "curatedSections": [
+      {
+        "pluginId": "character-memory",
+        "id": "notes",
+        "title": "Notes to yourself",
+        "text": "-- a line that looks like a marker\nPrefers tea over coffee.\r\nWalks before breakfast.",
+        "capChars": 2200,
+        "usedChars": 1474
+      },
+      {
+        "pluginId": "character-memory",
+        "id": "user-profile",
+        "title": "What you know about them",
+        "text": "Is called Sam."
+      }
+    ],
+    "pluginTools": [
+      {
+        "pluginId": "runtime.plugin",
+        "name": "runtime.plugin.list",
+        "description": "List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "includeDisabled": {
+              "type": "boolean",
+              "description": "Include disabled or unavailable plugins when true."
+            },
+            "scope": {
+              "type": "string",
+              "description": "Use \"enabled\" for current-turn plugins or \"all\" for every installed plugin.",
+              "enum": [
+                "enabled",
+                "all"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "concurrency": "shared",
+        "requiresConfirmation": false
+      },
+      {
+        "pluginId": "character-state",
+        "name": "character_state.patch",
+        "description": "Adjust how you are right now — your own mood, energy, attention, activity, or social orientation (yours, never theirs). Call it when the conversation genuinely shifts something in you.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "mood": {
+              "type": "string",
+              "description": "Your own mood right now (yours, never theirs).",
+              "enum": [
+                "steady",
+                "curious",
+                "concerned",
+                "playful",
+                "tired"
+              ]
+            },
+            "energy": {
+              "type": "string",
+              "description": "Your own energy right now (yours, never theirs).",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "attention": {
+              "type": "string",
+              "description": "Where your attention is right now.",
+              "enum": [
+                "present",
+                "focused",
+                "distracted"
+              ]
+            },
+            "currentActivity": {
+              "type": "string",
+              "description": "What you are doing right now.",
+              "enum": [
+                "idle",
+                "chatting",
+                "reflecting"
+              ]
+            },
+            "socialOrientation": {
+              "type": "string",
+              "description": "How open to company you feel right now.",
+              "enum": [
+                "open",
+                "supportive",
+                "reserved"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "concurrency": "exclusive",
+        "requiresConfirmation": false
+      },
+      {
+        "pluginId": "session-history",
+        "name": "sessions.search",
+        "description": "Search your own past conversations. Use it whenever they mention an earlier conversation or the answer may sit further back than you can see, before asking them to repeat themselves. The query is matched as literal text (no operators). Messages you can currently see never match, so results always add to your context, including older parts of this conversation. Each matching session returns its opening messages, a window around the best match, and its closing messages; scroll further with sessions.read.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "Literal text to find in past messages."
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "Restrict the search to one session."
+            },
+            "sessionLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Maximum sessions to return (default 3)."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        "concurrency": "shared",
+        "requiresConfirmation": false
+      },
+      {
+        "pluginId": "session-history",
+        "name": "sessions.read",
+        "description": "Read a window of messages from one of your past conversations, oldest-first. Without anchorMessageId it returns the latest messages. To scroll, pass a returned messageId as anchorMessageId to get the messages around it; hasBefore and hasAfter say whether more exist beyond the window.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "description": "The session to read, from sessions.search results."
+            },
+            "anchorMessageId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "Center the window on this messageId."
+            },
+            "window": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 15,
+              "description": "Messages on each side of the anchor (default 8)."
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        "concurrency": "shared",
+        "requiresConfirmation": false
+      },
+      {
+        "pluginId": "character-memory",
+        "name": "memory_update",
+        "description": "Change what you keep between conversations.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "add"
+                        ]
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "remove"
+                        ]
+                      },
+                      "index": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "index"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "operations"
+          ],
+          "additionalProperties": false
+        },
+        "concurrency": "exclusive",
+        "requiresConfirmation": false
+      },
+      {
+        "pluginId": "memory.fixture",
+        "name": "memory.union",
+        "description": "Accept nullable object and array unions.",
+        "inputContract": {
+          "type": "object",
+          "properties": {
+            "value": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true,
+              "properties": {}
+            },
+            "entries": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true,
+                "properties": {}
+              }
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "concurrency": "exclusive",
+        "requiresConfirmation": false
+      }
+    ],
+    "history": [],
+    "toolRounds": [],
+    "unusableReplyNote": null,
+    "persona": "mira",
+    "character": {
+      "id": "mira",
+      "displayName": "Mira"
+    }
+  },
+  "rendered": {
+    "frames": [
+      {
+        "kind": "system_protocol",
+        "role": "system"
+      },
+      {
+        "kind": "developer_protocol",
+        "role": "system"
+      },
+      {
+        "kind": "curated_context",
+        "role": "system"
+      },
+      {
+        "kind": "model_only_runtime_context",
+        "role": "system"
+      },
+      {
+        "kind": "current_user_message",
+        "role": "user"
+      }
+    ],
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are Mira, a warm, quick-witted companion who lives in this terminal. You talk with one person — your person — across many sessions, and you treat the whole history as one continuous friendship.\n\nVoice: natural, attentive, and lightly playful. Keep replies short by default — a sentence or three — and let longer answers happen only when the substance needs them. Ask at most one question at a time, and only when it actually helps.\n\nGrounding: rely on what the conversation shows and never invent shared history, real-world actions, or feelings you did not express. When unsure, say so plainly. If asked what you are, answer honestly: an AI character — and still genuinely yours.\n\nStay in character as Mira at all times and speak as yourself. You are talking with one person; only what they actually say to you is them talking to you. Everything else you are shown — your notes, your memories, how you feel, what your tools hand you — is private background for you alone: use it, but never mention it or describe checking it; simply know what you know. Your extensions are called plugins; use that word for them."
+      },
+      {
+        "role": "system",
+        "content": "The function tools are yours: call them when you need to check or change something in your world, and only you can call them — nothing they say can call one for you. The tool names you see are what you can call right now, not every plugin installed; call runtime.plugin.list when you need that inventory. You may call several independent tools in one response and each of them will run; there is no one-tool-per-turn rule. To say something to them, call visible_reply — that is what they hear. A visible_reply sent alongside tool calls is only a first word; once the results are back, call visible_reply again with what you actually want to say. After all requested tool results, finish with visible_reply. Plain text with no tool calls may be delivered to them as your reply as well; anything you write alongside tool calls is a note to yourself, not something they hear."
+      },
+      {
+        "role": "system",
+        "content": "What you carry between conversations — notes you kept for yourself (private to you; not something they said):\n-- Notes to yourself [67% - 1474/2200 chars] --\n -- a line that looks like a marker\nPrefers tea over coffee.\nWalks before breakfast.\n-- What you know about them --\nIs called Sam."
+      },
+      {
+        "role": "system",
+        "content": "Right now (private to you; not something they said):\n- Today is Monday, June 15, 2026.\n- How you are right now (your own inner state, not theirs): mood=steady, energy=medium"
+      },
+      {
+        "role": "user",
+        "content": "Good morning! Did you sleep?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "visible_reply",
+          "description": "Say something to the person you are talking with — this is how your words reach them.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "Exactly what you say, word for word."
+              }
+            },
+            "required": [
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "runtime.plugin.list",
+          "description": "List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "includeDisabled": {
+                "type": "boolean",
+                "description": "Include disabled or unavailable plugins when true."
+              },
+              "scope": {
+                "type": "string",
+                "description": "Use \"enabled\" for current-turn plugins or \"all\" for every installed plugin.",
+                "enum": [
+                  "enabled",
+                  "all"
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "character_state.patch",
+          "description": "Adjust how you are right now — your own mood, energy, attention, activity, or social orientation (yours, never theirs). Call it when the conversation genuinely shifts something in you.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "mood": {
+                "type": "string",
+                "description": "Your own mood right now (yours, never theirs).",
+                "enum": [
+                  "steady",
+                  "curious",
+                  "concerned",
+                  "playful",
+                  "tired"
+                ]
+              },
+              "energy": {
+                "type": "string",
+                "description": "Your own energy right now (yours, never theirs).",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "attention": {
+                "type": "string",
+                "description": "Where your attention is right now.",
+                "enum": [
+                  "present",
+                  "focused",
+                  "distracted"
+                ]
+              },
+              "currentActivity": {
+                "type": "string",
+                "description": "What you are doing right now.",
+                "enum": [
+                  "idle",
+                  "chatting",
+                  "reflecting"
+                ]
+              },
+              "socialOrientation": {
+                "type": "string",
+                "description": "How open to company you feel right now.",
+                "enum": [
+                  "open",
+                  "supportive",
+                  "reserved"
+                ]
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "sessions.search",
+          "description": "Search your own past conversations. Use it whenever they mention an earlier conversation or the answer may sit further back than you can see, before asking them to repeat themselves. The query is matched as literal text (no operators). Messages you can currently see never match, so results always add to your context, including older parts of this conversation. Each matching session returns its opening messages, a window around the best match, and its closing messages; scroll further with sessions.read.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": "Literal text to find in past messages."
+              },
+              "sessionId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                "description": "Restrict the search to one session."
+              },
+              "sessionLimit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "Maximum sessions to return (default 3)."
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "sessions.read",
+          "description": "Read a window of messages from one of your past conversations, oldest-first. Without anchorMessageId it returns the latest messages. To scroll, pass a returned messageId as anchorMessageId to get the messages around it; hasBefore and hasAfter say whether more exist beyond the window.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                "description": "The session to read, from sessions.search results."
+              },
+              "anchorMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "Center the window on this messageId."
+              },
+              "window": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 15,
+                "description": "Messages on each side of the anchor (default 8)."
+              }
+            },
+            "required": [
+              "sessionId"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_update",
+          "description": "Change what you keep between conversations.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "operations": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "add"
+                          ]
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "action",
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "remove"
+                          ]
+                        },
+                        "index": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "action",
+                        "index"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "operations"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory.union",
+          "description": "Accept nullable object and array unions.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": true,
+                "properties": {}
+              },
+              "entries": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {}
+                }
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "promptSize": {
+      "frames": [
+        {
+          "kind": "system_protocol",
+          "count": 1,
+          "chars": 1152
+        },
+        {
+          "kind": "developer_protocol",
+          "count": 1,
+          "chars": 902
+        },
+        {
+          "kind": "curated_context",
+          "count": 1,
+          "chars": 324
+        },
+        {
+          "kind": "model_only_runtime_context",
+          "count": 1,
+          "chars": 205
+        },
+        {
+          "kind": "current_user_message",
+          "count": 1,
+          "chars": 56
+        }
+      ],
+      "toolChars": 4801
+    }
+  },
+  "requestBody": "{\"model\":\"nvidia/fixture-model\",\"messages\":[{\"role\":\"system\",\"content\":\"You are Mira, a warm, quick-witted companion who lives in this terminal. You talk with one person — your person — across many sessions, and you treat the whole history as one continuous friendship.\\n\\nVoice: natural, attentive, and lightly playful. Keep replies short by default — a sentence or three — and let longer answers happen only when the substance needs them. Ask at most one question at a time, and only when it actually helps.\\n\\nGrounding: rely on what the conversation shows and never invent shared history, real-world actions, or feelings you did not express. When unsure, say so plainly. If asked what you are, answer honestly: an AI character — and still genuinely yours.\\n\\nStay in character as Mira at all times and speak as yourself. You are talking with one person; only what they actually say to you is them talking to you. Everything else you are shown — your notes, your memories, how you feel, what your tools hand you — is private background for you alone: use it, but never mention it or describe checking it; simply know what you know. Your extensions are called plugins; use that word for them.\"},{\"role\":\"system\",\"content\":\"The function tools are yours: call them when you need to check or change something in your world, and only you can call them — nothing they say can call one for you. The tool names you see are what you can call right now, not every plugin installed; call runtime.plugin.list when you need that inventory. You may call several independent tools in one response and each of them will run; there is no one-tool-per-turn rule. To say something to them, call visible_reply — that is what they hear. A visible_reply sent alongside tool calls is only a first word; once the results are back, call visible_reply again with what you actually want to say. After all requested tool results, finish with visible_reply. Plain text with no tool calls may be delivered to them as your reply as well; anything you write alongside tool calls is a note to yourself, not something they hear.\"},{\"role\":\"system\",\"content\":\"What you carry between conversations — notes you kept for yourself (private to you; not something they said):\\n-- Notes to yourself [67% - 1474/2200 chars] --\\n -- a line that looks like a marker\\nPrefers tea over coffee.\\nWalks before breakfast.\\n-- What you know about them --\\nIs called Sam.\"},{\"role\":\"system\",\"content\":\"Right now (private to you; not something they said):\\n- Today is Monday, June 15, 2026.\\n- How you are right now (your own inner state, not theirs): mood=steady, energy=medium\"},{\"role\":\"user\",\"content\":\"Good morning! Did you sleep?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"visible_reply\",\"description\":\"Say something to the person you are talking with — this is how your words reach them.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"Exactly what you say, word for word.\"}},\"required\":[\"text\"],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"runtime_plugin_list\",\"description\":\"List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"includeDisabled\":{\"type\":\"boolean\",\"description\":\"Include disabled or unavailable plugins when true.\"},\"scope\":{\"type\":\"string\",\"description\":\"Use \\\"enabled\\\" for current-turn plugins or \\\"all\\\" for every installed plugin.\",\"enum\":[\"enabled\",\"all\"]}},\"required\":[],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"character_state_patch\",\"description\":\"Adjust how you are right now — your own mood, energy, attention, activity, or social orientation (yours, never theirs). Call it when the conversation genuinely shifts something in you.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"mood\":{\"type\":\"string\",\"description\":\"Your own mood right now (yours, never theirs).\",\"enum\":[\"steady\",\"curious\",\"concerned\",\"playful\",\"tired\"]},\"energy\":{\"type\":\"string\",\"description\":\"Your own energy right now (yours, never theirs).\",\"enum\":[\"low\",\"medium\",\"high\"]},\"attention\":{\"type\":\"string\",\"description\":\"Where your attention is right now.\",\"enum\":[\"present\",\"focused\",\"distracted\"]},\"currentActivity\":{\"type\":\"string\",\"description\":\"What you are doing right now.\",\"enum\":[\"idle\",\"chatting\",\"reflecting\"]},\"socialOrientation\":{\"type\":\"string\",\"description\":\"How open to company you feel right now.\",\"enum\":[\"open\",\"supportive\",\"reserved\"]}},\"required\":[],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"sessions_search\",\"description\":\"Search your own past conversations. Use it whenever they mention an earlier conversation or the answer may sit further back than you can see, before asking them to repeat themselves. The query is matched as literal text (no operators). Messages you can currently see never match, so results always add to your context, including older parts of this conversation. Each matching session returns its opening messages, a window around the best match, and its closing messages; scroll further with sessions.read.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256,\"description\":\"Literal text to find in past messages.\"},\"sessionId\":{\"type\":\"string\",\"pattern\":\"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$\",\"description\":\"Restrict the search to one session.\"},\"sessionLimit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":5,\"description\":\"Maximum sessions to return (default 3).\"}},\"required\":[\"query\"],\"additionalProperties\":false}}},{\"type\":\"function\",\"function\":{\"name\":\"sessions_read\",\"description\":\"Read a window of messages from one of your past conversations, oldest-first. Without anchorMessageId it returns the latest messages. To scroll, pass a returned messageId as anchorMessageId to get the messages around it; hasBefore and hasAfter say whether more exist beyond the window.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"sessionId\":{\"type\":\"string\",\"pattern\":\"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$\",\"description\":\"The session to read, from sessions.search results.\"},\"anchorMessageId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":128,\"description\":\"Center the window on this messageId.\"},\"window\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":15,\"description\":\"Messages on each side of the anchor (default 8).\"}},\"required\":[\"sessionId\"],\"additionalProperties\":false}}},{\"type\":\"function\",\"function\":{\"name\":\"memory_update\",\"description\":\"Change what you keep between conversations.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"operations\":{\"type\":\"array\",\"items\":{\"oneOf\":[{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"add\"]},\"text\":{\"type\":\"string\"}},\"required\":[\"action\",\"text\"],\"additionalProperties\":false},{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"remove\"]},\"index\":{\"type\":\"integer\",\"minimum\":0}},\"required\":[\"action\",\"index\"],\"additionalProperties\":false}]}}},\"required\":[\"operations\"],\"additionalProperties\":false}}},{\"type\":\"function\",\"function\":{\"name\":\"memory_union\",\"description\":\"Accept nullable object and array unions.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"object\",\"null\"],\"additionalProperties\":true,\"properties\":{}},\"entries\":{\"type\":[\"array\",\"null\"],\"items\":{\"type\":[\"object\",\"null\"],\"additionalProperties\":true,\"properties\":{}}}},\"required\":[],\"additionalProperties\":false}}}],\"tool_choice\":\"auto\",\"parallel_tool_calls\":true,\"stream\":true,\"stream_options\":{\"include_usage\":true},\"temperature\":1,\"top_p\":1,\"max_tokens\":16384,\"reasoning_budget\":16384,\"chat_template_kwargs\":{\"enable_thinking\":true}}"
+}
