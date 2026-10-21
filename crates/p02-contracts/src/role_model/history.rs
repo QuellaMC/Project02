@@ -80,13 +80,13 @@ pub enum ToolCallResult {
 }
 
 impl ConversationToolCall {
-    /// A finished call as the model is shown it again: its input and output
-    /// held to the JSON limits with credential-named values redacted, and a
-    /// rejection's reason and message held to the same limits.
+    /// A finished call as the model is shown it again: its input and its
+    /// result as [`ConversationToolCall::kept_input`] and
+    /// [`ConversationToolCall::kept_result`] keep them.
     ///
     /// # Errors
     ///
-    /// [`BoundJsonError`] when the input or the output breaks a limit.
+    /// [`BoundJsonError`] when the input or the result breaks a limit.
     pub fn new(
         tool_call_id: ToolCallId,
         plugin_id: Identifier,
@@ -94,34 +94,53 @@ impl ConversationToolCall {
         input: Map<String, Value>,
         result: ToolCallResult,
     ) -> Result<Self, BoundJsonError> {
-        let input = bound_json_object(
+        Ok(Self {
+            tool_call_id,
+            plugin_id,
+            tool_name,
+            input: Self::kept_input(input)?,
+            result: Self::kept_result(result)?,
+        })
+    }
+
+    /// A call's input as the model is shown it again and its session keeps
+    /// it: held to the JSON limits, with credential-named values redacted.
+    ///
+    /// # Errors
+    ///
+    /// [`BoundJsonError`] when the input breaks a limit.
+    pub fn kept_input(input: Map<String, Value>) -> Result<Map<String, Value>, BoundJsonError> {
+        bound_json_object(
             Value::Object(input),
             "Conversation tool call input",
             JsonLimits::default(),
             Credentials::Redact,
-        )?;
-        let result = match result {
-            ToolCallResult::Accepted { output } => ToolCallResult::Accepted {
+        )
+    }
+
+    /// A call's result as the model is shown it again and its session keeps
+    /// it: an output held to the JSON limits with credential-named values
+    /// redacted, or a rejection's reason and message held to the same
+    /// limits.
+    ///
+    /// # Errors
+    ///
+    /// [`BoundJsonError`] when the result breaks a limit.
+    pub fn kept_result(result: ToolCallResult) -> Result<ToolCallResult, BoundJsonError> {
+        match result {
+            ToolCallResult::Accepted { output } => Ok(ToolCallResult::Accepted {
                 output: bound_json(
                     output,
                     "Conversation tool call output",
                     JsonLimits::default(),
                     Credentials::Redact,
                 )?,
-            },
+            }),
             rejected @ ToolCallResult::Rejected { .. } => {
                 within_limits(&rejected, "Conversation tool call rejection")?;
-                rejected
+                Ok(rejected)
             }
-        };
-
-        Ok(Self {
-            tool_call_id,
-            plugin_id,
-            tool_name,
-            input,
-            result,
-        })
+        }
     }
 
     #[must_use]

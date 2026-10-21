@@ -24,9 +24,12 @@ identities of each. It depends on p02-shared alone.
   ends trimmed, and a stored text that is not already normalized is
   refused, never silently rewritten. What a person says in a turn is one
   line: trimmed, and refused when blank or when it breaks a line anywhere.
+  A client stamps the line it carries with its surface and the id it
+  submitted the line under, each one token.
 - **Identities.** A runtime event is named by an `EventIdentity`, its
   event and trace ids and the canonical UTC time it was created at, in
-  the one spelling `toISOString` gives: `2026-06-15T00:00:00.000Z`.
+  the one spelling `toISOString` gives: `2026-06-15T00:00:00.000Z`. A
+  moment is minted in one place, from the clock, to the millisecond.
 - **Selection.** When the person does not say which character to talk
   to, it is the one character enabled; none, or several, is refused,
   naming them.

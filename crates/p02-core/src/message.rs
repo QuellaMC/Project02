@@ -188,6 +188,63 @@ impl fmt::Display for SpeakerName {
     }
 }
 
+/// What a client stamps on a line it carries: the surface it came from, or
+/// the id it submitted the line under, which a repeat of the line reuses. An
+/// ASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`
+/// or `-`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct ClientStamp(String);
+
+/// Why a text is not a [`ClientStamp`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "not a client stamp: an ASCII letter or digit, then up to 63 ASCII letters, digits, ':', \
+     '.', '_' or '-'"
+)]
+pub struct ParseClientStampError;
+
+impl ClientStamp {
+    const MAX_LEN: usize = 64;
+
+    /// # Errors
+    ///
+    /// [`ParseClientStampError`] when `value` is not in the pattern.
+    pub fn new(value: &str) -> Result<Self, ParseClientStampError> {
+        let mut bytes = value.bytes();
+        let in_pattern = value.len() <= Self::MAX_LEN
+            && bytes
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
+            && bytes.all(|byte| byte.is_ascii_alphanumeric() || b":._-".contains(&byte));
+
+        if in_pattern {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(ParseClientStampError)
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ClientStamp {
+    type Error = ParseClientStampError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(&value)
+    }
+}
+
+impl fmt::Display for ClientStamp {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// Which side of a conversation someone speaks for: a character, or the
 /// person. A visible message carries its speaker's, and the two order as
 /// they are spelled, characters first.
@@ -264,6 +321,27 @@ mod tests {
             ("hello\u{2029}", ParseUserLineError::Multiline),
         ] {
             assert_eq!(UserLine::new(raw), Err(refusal), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn a_client_stamp_is_one_token_of_at_most_64_characters() {
+        let longest = format!("w{}", "1".repeat(63));
+        let too_long = format!("{longest}2");
+
+        for (text, accepted) in [
+            ("web", true),
+            ("telegram:42.7_x-y", true),
+            ("7", true),
+            (longest.as_str(), true),
+            ("", false),
+            (":web", false),
+            ("two words", false),
+            ("caf\u{e9}", false),
+            ("web/1", false),
+            (too_long.as_str(), false),
+        ] {
+            assert_eq!(ClientStamp::new(text).is_ok(), accepted, "{text}");
         }
     }
 

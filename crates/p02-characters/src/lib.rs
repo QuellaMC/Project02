@@ -8,4 +8,6 @@ pub use descriptor::{
     CharacterDefinition, CharacterVersion, DescriptorPart, ParseCharacterVersionError,
     ParseDescriptorError, Persona, PluginExpectations, PluginList,
 };
-pub use discovery::{Discovery, PackageDiagnostic, PackageLocation, PackageProblem, discover};
+pub use discovery::{
+    Discovery, HOME_PACKAGES, PackageDiagnostic, PackageLocation, PackageProblem, discover,
+};

@@ -1,6 +1,6 @@
 use std::fmt::{self, Write as _};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
@@ -18,14 +18,43 @@ pub fn canonical_json(value: &Value) -> String {
 
 /// A value's identity, comparable without the value: `sha256:` and the
 /// lowercase hex SHA-256 of its [`canonical_json`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct Fingerprint(String);
 
+/// Why a text is not a [`Fingerprint`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("not a fingerprint: \"sha256:\" and 64 lowercase hex digits")]
+pub struct ParseFingerprintError;
+
 impl Fingerprint {
+    const PREFIX: &str = "sha256:";
+
+    /// A fingerprint as a record keeps it.
+    ///
+    /// # Errors
+    ///
+    /// [`ParseFingerprintError`] when `text` is not `sha256:` and 64
+    /// lowercase hex digits.
+    pub fn parse(text: &str) -> Result<Self, ParseFingerprintError> {
+        let digest = text
+            .strip_prefix(Self::PREFIX)
+            .ok_or(ParseFingerprintError)?;
+
+        if digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ParseFingerprintError)
+        }
+    }
+
     #[must_use]
     pub fn new(value: &Value) -> Self {
-        let mut text = String::from("sha256:");
+        let mut text = String::from(Self::PREFIX);
 
         for byte in Sha256::digest(canonical_json(value)) {
             // Writing to a String cannot fail.
@@ -38,6 +67,14 @@ impl Fingerprint {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for Fingerprint {
+    type Error = ParseFingerprintError;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text)
     }
 }
 
@@ -114,6 +151,30 @@ mod tests {
             fingerprint.as_str(),
             "sha256:51705a2c9eb3e7e410a58f696a770c3ac3885a0cf43eb7fc88f5e47c11d4d30d"
         );
+    }
+
+    #[test]
+    fn a_fingerprint_reads_back_only_in_its_own_spelling() {
+        let fingerprint = Fingerprint::new(&json!({"persona": {"system": ["Kind."]}}));
+        let record = serde_json::to_value(&fingerprint).unwrap();
+
+        assert_eq!(
+            serde_json::from_value::<Fingerprint>(record).unwrap(),
+            fingerprint
+        );
+
+        for refused in [
+            "51705a2c9eb3e7e410a58f696a770c3ac3885a0cf43eb7fc88f5e47c11d4d30d",
+            "sha256:51705A2C9EB3E7E410A58F696A770C3AC3885A0CF43EB7FC88F5E47C11D4D30D",
+            "sha256:51705a2c",
+            "md5:51705a2c9eb3e7e410a58f696a770c3ac3885a0cf43eb7fc88f5e47c11d4d30d",
+        ] {
+            assert_eq!(
+                Fingerprint::parse(refused),
+                Err(ParseFingerprintError),
+                "{refused}"
+            );
+        }
     }
 
     /// Doubles with the spelling Node 24's `JSON.stringify` gave each: the

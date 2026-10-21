@@ -12,6 +12,7 @@ async-trait = "0.1.92"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
 dunce = "1.0.5"
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+jiff = { version = "0.2.38", default-features = false, features = ["std"] }
 jsonschema = { version = "0.59.0", default-features = false }
 p02-characters = { path = "crates/p02-characters" }
 p02-contracts = { path = "crates/p02-contracts" }
