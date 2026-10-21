@@ -320,6 +320,62 @@ fn a_memory_provider_the_settings_do_not_choose_never_runs_and_is_never_judged()
 }
 
 #[test]
+fn a_finding_in_her_overlay_names_her_and_one_in_the_homes_document_no_one() {
+    let world = World::new();
+
+    world
+        .write_home(&document(json!({
+            "plugins": {"demo-config": {"enabled": true, "config": {"signoff": 1}}, "ghost": {}},
+        })))
+        .write_overlay(
+            "mira",
+            &document(json!({
+                "plugins": {"demo-config": {"config": {"tone": "shouty", "nope": 1}}, "spirit": {}},
+            })),
+        );
+
+    let resolution = world.resolve(&of("mira"));
+    let found: Vec<(&str, &str, Option<&str>)> = resolution
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code().as_str(),
+                diagnostic.path().unwrap_or(""),
+                diagnostic.character().map(p02_shared::Identifier::as_str),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        found,
+        [
+            ("runtime_config_unknown_plugin", "plugins.ghost", None),
+            (
+                "runtime_config_unknown_plugin",
+                "plugins.spirit",
+                Some("mira")
+            ),
+            (
+                "runtime_config_unknown_plugin_config_field",
+                "plugins.demo-config.config.nope",
+                Some("mira")
+            ),
+            (
+                "runtime_config_value_type_invalid",
+                "plugins.demo-config.config.tone",
+                Some("mira")
+            ),
+            (
+                "runtime_config_value_type_invalid",
+                "plugins.demo-config.config.signoff",
+                None
+            ),
+        ]
+    );
+}
+
+#[test]
 fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
     let mut declared = plugins();
 
@@ -363,10 +419,12 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
 #[test]
 fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() {
     let world = World::new();
+    let key = |key: &str| json!({"nvidiaApiKey": key});
+    let mem0 = json!({"enabled": true});
 
     world
         .write_home(&document(
-            json!({"project02": {"nvidiaApiKey": "nvapi-first"}}),
+            json!({"project02": key("nvapi-first"), "plugins": {"mem0": mem0}}),
         ))
         .write_overlay(
             "mira",
@@ -377,14 +435,22 @@ fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() 
     let before = settings();
 
     for unchanged in [
-        document(json!({"project02": {"nvidiaApiKey": "nvapi-first", "userDisplayName": "Robin"}})),
         document(json!({
-            "project02": {"nvidiaApiKey": "nvapi-first"},
-            "plugins": {"demo-config": {"config": {"tone": "warm"}}},
+            "project02": {"nvidiaApiKey": "nvapi-first", "userDisplayName": "Robin"},
+            "plugins": {"mem0": mem0},
         })),
         document(json!({
-            "project02": {"nvidiaApiKey": "nvapi-first"},
+            "project02": key("nvapi-first"),
+            "plugins": {"mem0": mem0, "demo-config": {"config": {"tone": "warm"}}},
+        })),
+        document(json!({
+            "project02": key("nvapi-first"),
+            "plugins": {"mem0": mem0},
             "connectors": {"telegram": {"config": {"mirror": false}}},
+        })),
+        document(json!({
+            "project02": key("nvapi-first"),
+            "plugins": {"mem0": {"enabled": true, "config": {"backend": "platform"}}},
         })),
     ] {
         world.write_home(&unchanged);
@@ -392,13 +458,13 @@ fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() 
     }
 
     world.write_home(&document(
-        json!({"project02": {"nvidiaApiKey": "nvapi-second"}}),
+        json!({"project02": key("nvapi-second"), "plugins": {"mem0": mem0}}),
     ));
     assert_ne!(settings(), before);
 
     world
         .write_home(&document(
-            json!({"project02": {"nvidiaApiKey": "nvapi-first"}}),
+            json!({"project02": key("nvapi-first"), "plugins": {"mem0": mem0}}),
         ))
         .write_overlay(
             "mira",

@@ -23,7 +23,7 @@ use crate::declaration::{
     user_display_name,
 };
 use crate::diagnostic::{Code, Diagnostic};
-use crate::document::{Document, Read, Stanza};
+use crate::document::{Document, Read, Stanza, unknown};
 use crate::materialize::merged_overlay;
 
 /// A target's settings, resolved: the home's, or one character's over the
@@ -78,12 +78,12 @@ pub(crate) struct Layers {
 pub(crate) struct Overlay {
     pub(crate) character: Identifier,
     pub(crate) path: PathBuf,
-    /// As its file holds it: what a change to her settings is bound to.
+    /// As its file holds it.
     pub(crate) written: Document,
-    /// What her settings are read from, and what a change to them edits:
-    /// as written, or with her package's settings merged in as her first
-    /// start, or the start after a new version of her package, will merge
-    /// them.
+    /// What her settings are read from, and what a change to them is bound
+    /// to and edits: as written, or with her package's settings merged in
+    /// as her first start, or the start after a new version of her
+    /// package, will merge them.
     pub(crate) read: Document,
     /// The version of her package whose settings `read` merges in,
     /// recorded once her file holds `read`.
@@ -423,8 +423,9 @@ impl<'s> Resolution<'s> {
         }
     }
 
-    /// What a change to this target's settings is bound to: the documents
-    /// its files hold, a secret's presence counted and its value never.
+    /// What a change to this target's settings is bound to: its documents
+    /// as its settings are read from them, a secret's presence counted and
+    /// its value never.
     #[must_use]
     pub fn fingerprint(&self) -> &Fingerprint {
         &self.fingerprint
@@ -439,9 +440,10 @@ impl<'s> Resolution<'s> {
     }
 
     /// What a character runs on by these settings: the host's values, and
-    /// the plugins they switch on, each with the values its settings give
-    /// it. Two that are equal run the same character, so a running one is
-    /// rebuilt only when hers differ from those she was built from.
+    /// the plugins that run by them, each with its values in effect, so a
+    /// field left to its default and one set to the same value run her
+    /// alike. Two that are equal run the same character, so a running one
+    /// is rebuilt only when hers differ from those she was built from.
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -481,13 +483,11 @@ impl<'s> Resolution<'s> {
                 let values = section
                     .fields
                     .iter()
-                    .filter_map(|field| match &field.effective {
-                        Effective::Authored {
-                            value,
-                            accepted: true,
-                            ..
-                        } => Some((field.declaration.name().to_string(), value.clone())),
-                        _ => None,
+                    .filter_map(|field| {
+                        field
+                            .effective
+                            .value()
+                            .map(|value| (field.declaration.name().to_string(), value.clone()))
                     })
                     .collect();
 
@@ -556,9 +556,10 @@ impl fmt::Debug for HostSettings {
     }
 }
 
-/// What a character runs on: the host's values, and each plugin her
-/// settings switch on with the values they give it by field name, secrets
-/// in the clear, for the plugin host to resolve against its manifest.
+/// What a character runs on: the host's values, and each plugin that runs
+/// by her settings with each of its values in effect by field name, a
+/// declared default among them, secrets in the clear, for the plugin host
+/// to resolve against its manifest.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CharacterSettings {
     host: HostSettings,
@@ -733,22 +734,31 @@ fn judge(
                 .map(|problem| layers.found_in(*layer, problem.clone()))
         })
         .collect();
-    let undeclared: BTreeSet<&String> = stanzas
+    let names: Vec<&str> = declared
+        .config()
+        .fields()
         .iter()
-        .filter_map(|(_, stanza)| stanza.config.as_ref())
-        .flat_map(|config| config.keys())
-        .filter(|name| declared.config().field(name).is_none())
+        .map(|field| field.name().as_str())
         .collect();
 
-    for name in undeclared {
-        diagnostics.push(
-            Diagnostic::error(
-                Code::UnknownPluginConfigField,
-                format!("Unknown config field \"{name}\" for section \"{id}\"."),
-            )
-            .at(declared.field_path(name))
-            .on_field(namespace, id, name),
-        );
+    for (layer, stanza) in &stanzas {
+        for name in stanza
+            .config
+            .iter()
+            .flat_map(|config| unknown(config, &names))
+        {
+            diagnostics.push(
+                layers.found_in(
+                    *layer,
+                    Diagnostic::error(
+                        Code::UnknownPluginConfigField,
+                        format!("Unknown config field \"{name}\" for section \"{id}\"."),
+                    )
+                    .at(declared.field_path(name))
+                    .on_field(namespace, id, name),
+                ),
+            );
+        }
     }
 
     let on = switch.value() == Some(&Value::Bool(true));
@@ -758,19 +768,27 @@ fn judge(
         let secret = field.declaration.secret();
         let diagnostic = match &field.effective {
             Effective::Authored {
-                accepted: false, ..
-            } if secret => Diagnostic::error(
-                Code::SecretValueInvalid,
-                format!("Secret config field \"{name}\" of \"{id}\" must be a non-blank string."),
-            ),
-            Effective::Authored {
-                accepted: false, ..
-            } => Diagnostic::error(
-                Code::ValueTypeInvalid,
-                format!(
-                    "Config field \"{name}\" of \"{id}\" must be {}.",
-                    crate::declaration::expectation(field.declaration)
-                ),
+                layer,
+                accepted: false,
+                ..
+            } => layers.found_in(
+                *layer,
+                if secret {
+                    Diagnostic::error(
+                        Code::SecretValueInvalid,
+                        format!(
+                            "Secret config field \"{name}\" of \"{id}\" must be a non-blank string."
+                        ),
+                    )
+                } else {
+                    Diagnostic::error(
+                        Code::ValueTypeInvalid,
+                        format!(
+                            "Config field \"{name}\" of \"{id}\" must be {}.",
+                            crate::declaration::expectation(field.declaration)
+                        ),
+                    )
+                },
             ),
             Effective::Missing if field.required && on => Diagnostic::error(
                 if secret {
@@ -873,22 +891,29 @@ fn unknown_sections(sections: &Sections, layers: &Layers) -> Vec<Diagnostic> {
                 Namespace::Connectors => (Code::UnknownConnector, "connector"),
             };
 
-            warnings.push(
-                Diagnostic::warning(
-                    code,
-                    format!("Runtime config references unknown {kind} \"{id}\"."),
-                )
-                .at(format!("{}.{id}", namespace.as_str()))
-                .in_section(namespace, id),
-            );
+            for (layer, document) in layers.present() {
+                if document.stanza(namespace, id).is_some() {
+                    warnings.push(
+                        layers.found_in(
+                            layer,
+                            Diagnostic::warning(
+                                code,
+                                format!("Runtime config references unknown {kind} \"{id}\"."),
+                            )
+                            .at(format!("{}.{id}", namespace.as_str()))
+                            .in_section(namespace, id),
+                        ),
+                    );
+                }
+            }
         }
     }
 
     warnings
 }
 
-/// The fingerprint of a target: its documents as their files hold them,
-/// and whose they are.
+/// The fingerprint of a target: its documents as its settings are read
+/// from them, and whose they are.
 pub(crate) fn target_fingerprint(sections: &Sections, layers: &Layers) -> Fingerprint {
     let home = conceal_document(layers.home.raw(), sections);
 
@@ -897,14 +922,14 @@ pub(crate) fn target_fingerprint(sections: &Sections, layers: &Layers) -> Finger
         Some(overlay) => json!({
             "character": overlay.character,
             "home": home,
-            "overlay": conceal_document(overlay.written.raw(), sections),
+            "overlay": conceal_document(overlay.read.raw(), sections),
         }),
     })
 }
 
 /// The fingerprint of one section for a target: its stanzas as the
-/// target's files hold them, so a change to that section alone is bound to
-/// nothing else.
+/// target's settings are read from them, so a change to that section alone
+/// is bound to nothing else.
 fn section_fingerprint(
     sections: &Sections,
     declared: Declared<'_>,
@@ -927,7 +952,7 @@ fn section_fingerprint(
             "section": declared.path(),
             "character": overlay.character,
             "home": home,
-            "overlay": stanza(&overlay.written),
+            "overlay": stanza(&overlay.read),
         }),
     })
 }
