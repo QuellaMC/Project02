@@ -54,13 +54,21 @@ pub enum ReplayError {
     RoundBeforeLine,
     #[error("model round {round} is out of sequence: the turn has run {ran}")]
     RoundOutOfSequence { round: NonZeroU32, ran: usize },
+    #[error(
+        "the turn goes on past round {0} before taking up all it gave: every reply it said \
+         committed, every call it asked for started and finished"
+    )]
+    RoundLeftUnfinished(NonZeroU32),
     #[error("the record names model round {round}, which the turn never ran: it has run {ran}")]
     UnknownRound { round: NonZeroU32, ran: usize },
     #[error("a model round was shown another session than its own")]
     EnvelopeOfAnotherSession,
     #[error("a model round was shown another character than the session's")]
     EnvelopeOfAnotherCharacter,
-    #[error("a turn records one model input text, the person's line")]
+    #[error(
+        "a turn's line, as committed and as each round was given it, is the line its event was \
+         taken as"
+    )]
     InputDisagrees,
     #[error("tool call \"{0}\" starts a second time")]
     CallStartedTwice(ToolCallId),
@@ -92,8 +100,6 @@ pub enum ReplayError {
     JudgedNotLast { round: NonZeroU32, ran: usize },
     #[error("a completed turn ends on a round the parser accepted, which asked for no tool")]
     CompletedOnRefusal,
-    #[error("the turn completes before committing every reply round {0} said")]
-    RepliesUncommitted(NonZeroU32),
     #[error("a completed turn anchors the last reply the round it ended on said")]
     AnchorNotSaid,
     #[error(
@@ -114,8 +120,9 @@ pub enum ReplayError {
 struct Turn {
     /// When the turn's event was made, which every record of it says.
     created_at: Timestamp,
-    /// The one text the turn's model input is: the line it came in as, the
-    /// person's message and what each round was given.
+    /// The line the turn's event was taken as, none when it was refused as
+    /// one: the person's message and what each round is given are this one
+    /// text.
     input: Option<VisibleText>,
     rounds: Vec<Round>,
     messages: Vec<MessageId>,
@@ -135,6 +142,20 @@ struct Round {
     result: DecisionResult,
     replies_said: usize,
     calls_started: usize,
+}
+
+impl Round {
+    /// Whether the turn has taken up all the round gave: every reply it
+    /// said and every call it asked for. A refused round gave nothing.
+    fn taken_up(&self) -> bool {
+        match &self.result {
+            DecisionResult::Rejected { .. } => true,
+            DecisionResult::Accepted { decision } => {
+                self.replies_said == replies(decision.tool_calls()).count()
+                    && self.calls_started == asked(decision.tool_calls()).count()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,6 +335,12 @@ impl SessionReplay {
             });
         }
 
+        if let Some(before) = NonZeroU32::new(round.round().get() - 1)
+            && (!turn.unfinished.is_empty() || !ran(turn, before)?.taken_up())
+        {
+            return Err(ReplayError::RoundLeftUnfinished(before));
+        }
+
         let envelope = &round.snapshot().input_envelope;
 
         if envelope.decision_context.session_id() != self.session.id() {
@@ -421,15 +448,9 @@ impl SessionReplay {
 
                 turn.messages.push(commit.message().id.clone());
 
-                match commit.round() {
-                    Some(round) => {
-                        turn.last_reply_round = Some(round);
-                        turn.rounds[index_of(round)].replies_said += 1;
-                    }
-                    None => {
-                        turn.input
-                            .get_or_insert_with(|| commit.message().text.clone());
-                    }
+                if let Some(round) = commit.round() {
+                    turn.last_reply_round = Some(round);
+                    turn.rounds[index_of(round)].replies_said += 1;
                 }
             }
             RecordBody::TurnCompleted(_) => self.end(index, End::Completed),
@@ -485,10 +506,10 @@ fn ran(turn: &Turn, round: NonZeroU32) -> Result<&Round, ReplayError> {
 }
 
 fn check_input(turn: &Turn, text: &VisibleText) -> Result<(), ReplayError> {
-    if turn.input.as_ref().is_some_and(|input| input != text) {
-        Err(ReplayError::InputDisagrees)
-    } else {
+    if turn.input.as_ref() == Some(text) {
         Ok(())
+    } else {
+        Err(ReplayError::InputDisagrees)
     }
 }
 
@@ -551,13 +572,11 @@ fn check_completed(turn: &Turn, completed: &TurnCompleted) -> Result<(), ReplayE
         return Err(ReplayError::CompletedOnRefusal);
     }
 
-    let said: Vec<&VisibleText> = replies(decision.tool_calls()).collect();
-
-    if round.replies_said != said.len() {
-        return Err(ReplayError::RepliesUncommitted(judgement.round));
+    if !round.taken_up() {
+        return Err(ReplayError::RoundLeftUnfinished(judgement.round));
     }
 
-    if judgement.accepted_reply.as_ref() == said.last().copied() {
+    if judgement.accepted_reply.as_ref() == replies(decision.tool_calls()).last() {
         Ok(())
     } else {
         Err(ReplayError::AnchorNotSaid)

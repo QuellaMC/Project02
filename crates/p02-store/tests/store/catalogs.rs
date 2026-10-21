@@ -3,6 +3,7 @@
 //! the lines a conversation's segments took.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
 use p02_core::{ClientStamp, ConversationId, MessageId, Participant, SpeakerName};
@@ -386,4 +387,71 @@ fn taken_lines_read_back_whole_and_a_record_that_cannot_be_read_reads_as_none() 
             "{unreadable}"
         );
     }
+}
+
+/// A listing that meets a session being made or discarded in the middle of
+/// its read is read again, and never reports what it raced as damage. The
+/// race needs a read that takes a while, as a long-lived home's does, so
+/// the catalog first lists thousands of sessions.
+#[test]
+fn a_listing_raced_by_a_session_made_or_discarded_never_reports_damage() {
+    let world = World::new();
+    let mut rows = String::new();
+
+    for n in 1..=3_000 {
+        let id = format!("conv_old{n}.1");
+
+        std::fs::create_dir_all(world.data.root().join("sessions").join(&id)).unwrap();
+        writeln!(
+            rows,
+            r#"{{"sessionId":"{id}","createdAt":"2026-10-20T00:00:00.000Z"}}"#
+        )
+        .unwrap();
+    }
+
+    std::fs::write(world.data.root().join("sessions.jsonl"), rows).unwrap();
+
+    let first = world.data.create_session(world.conversation.id()).unwrap();
+
+    std::thread::scope(|scope| {
+        let writer = scope.spawn(|| {
+            let mut latest = first.session_id().clone();
+
+            for _ in 0..20 {
+                let kept = world.data.continue_session(&latest).unwrap();
+                let mut script = Script::new(kept.session_id().clone());
+                let mut writer = world
+                    .log(kept.session_id().segment().get())
+                    .writer()
+                    .unwrap();
+
+                script.session_end();
+                writer.append(script.records[0].clone()).unwrap();
+                writer.release();
+                latest = kept.session_id().clone();
+
+                let empty = world.data.continue_session(&latest).unwrap();
+
+                world
+                    .log(empty.session_id().segment().get())
+                    .writer()
+                    .unwrap()
+                    .discard()
+                    .unwrap();
+            }
+        });
+
+        while !writer.is_finished() {
+            for read in [
+                world.data.sessions().map(drop),
+                world.data.latest_segment(world.conversation.id()).map(drop),
+            ] {
+                if let Err(error) = read {
+                    assert_eq!(error.code(), "concurrent_write", "{error}");
+                }
+            }
+        }
+
+        writer.join().unwrap();
+    });
 }

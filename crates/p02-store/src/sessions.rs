@@ -11,14 +11,14 @@ use std::path::Path;
 
 use p02_core::{ConversationId, SessionId, Timestamp};
 use p02_shared::{
-    PathEntry, create_directories, create_directory, describe_entry, list_directory, read_file,
+    PathEntry, create_directories, create_directory, describe_entry, list_directory,
     remove_directory, remove_file, write_file_atomically,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::character_data::CharacterData;
 use crate::error::StorageError;
-use crate::jsonl::{committed_lines, holds_a_line};
+use crate::jsonl::{committed_lines, holds_a_line, read_coherently, read_lines};
 use crate::layout::{EntryKind, FINDER_METADATA, RAW_EVENTS_FILE};
 use crate::lock::{Resource, with_lock};
 
@@ -72,36 +72,8 @@ impl CharacterData {
     /// directory is missing or not real.
     pub fn session(&self, id: &SessionId) -> Result<SessionEntry, StorageError> {
         let path = self.catalog_path();
-        let content = match read_file(&path) {
-            Ok(content) => content,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-            Err(source) => return Err(StorageError::Read { path, source }),
-        };
-        let mut found = None;
 
-        for (line, bytes) in committed_lines(&content) {
-            let names_it = serde_json::from_slice::<serde_json::Value>(bytes)
-                .ok()
-                .and_then(|row| row.get("sessionId").cloned())
-                .is_some_and(|named| named == id.to_string());
-
-            if names_it {
-                found = Some(decode_row(&path, line, bytes)?);
-            }
-        }
-
-        let directory = self.sessions_root().join(id.to_string());
-
-        let Some(entry) = found else {
-            return Err(if holds_evidence(&directory)? {
-                StorageError::UncataloguedSession { path: directory }
-            } else {
-                StorageError::SessionNotFound(id.clone())
-            });
-        };
-
-        check_session_directory(&directory)?;
-        Ok(entry)
+        read_coherently(&path, || self.agreeing_row(&path, id)).map(|(_, entry)| entry)
     }
 
     /// The newest segment of `conversation`, if it has one.
@@ -217,19 +189,55 @@ impl CharacterData {
         })
     }
 
-    /// The catalog as the directories agree with it. A catalog that is
-    /// missing or empty while directories hold evidence is a catalog lost.
+    /// The catalog as the directories agree with it, both as they were at
+    /// one moment, so a session made or discarded while they are read is
+    /// never taken for damage.
     fn read_catalog(&self) -> Result<Catalog, StorageError> {
         let path = self.catalog_path();
-        let content = match read_file(&path) {
-            Ok(content) => content,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-            Err(source) => return Err(StorageError::Read { path, source }),
+
+        read_coherently(&path, || self.agreeing_catalog(&path)).map(|(_, catalog)| catalog)
+    }
+
+    /// Row `id` of the catalog at `path` as its directory agrees with it,
+    /// read once.
+    fn agreeing_row(&self, path: &Path, id: &SessionId) -> Result<SessionEntry, StorageError> {
+        let content = read_lines(path)?;
+        let mut found = None;
+
+        for (line, bytes) in committed_lines(&content) {
+            let names_it = serde_json::from_slice::<serde_json::Value>(bytes)
+                .ok()
+                .and_then(|row| row.get("sessionId").cloned())
+                .is_some_and(|named| named == id.to_string());
+
+            if names_it {
+                found = Some(decode_row(path, line, bytes)?);
+            }
+        }
+
+        let directory = self.sessions_root().join(id.to_string());
+
+        let Some(entry) = found else {
+            return Err(if holds_evidence(&directory)? {
+                StorageError::UncataloguedSession { path: directory }
+            } else {
+                StorageError::SessionNotFound(id.clone())
+            });
         };
+
+        check_session_directory(&directory)?;
+        Ok(entry)
+    }
+
+    /// The catalog at `path` as the directories agree with it, read once.
+    /// A catalog that is missing or empty while directories hold evidence
+    /// is a catalog lost.
+    fn agreeing_catalog(&self, path: &Path) -> Result<Catalog, StorageError> {
+        let content = read_lines(path)?;
         let mut catalog = Catalog::new();
 
         for (line, bytes) in committed_lines(&content) {
-            let entry = decode_row(&path, line, bytes)?;
+            let entry = decode_row(path, line, bytes)?;
 
             catalog.insert(entry.session_id.clone(), entry);
         }
@@ -270,7 +278,9 @@ impl CharacterData {
 
             if !listed && holds_evidence(&directory)? {
                 return Err(if catalog.is_empty() {
-                    StorageError::MissingCatalog { path }
+                    StorageError::MissingCatalog {
+                        path: path.to_path_buf(),
+                    }
                 } else {
                     StorageError::UncataloguedSession { path: directory }
                 });
@@ -412,9 +422,7 @@ pub(crate) fn holds_evidence(directory: &Path) -> Result<bool, StorageError> {
             return Ok(true);
         }
 
-        let log = directory.join(RAW_EVENTS_FILE);
-
-        if holds_a_line(&read_file(&log).map_err(StorageError::read(&log))?) {
+        if holds_a_line(&read_lines(&directory.join(RAW_EVENTS_FILE))?) {
             return Ok(true);
         }
     }
