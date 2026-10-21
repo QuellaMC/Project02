@@ -34,7 +34,7 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     let id = chat.id();
 
     chat.model
-        .script([Round::says(reply(&["Hello."])).drafting(&["Hel", "lo."])]);
+        .script([Round::says(reply(&["Hello."])).drafting(0, &["Hel", "lo."])]);
 
     let Chat {
         world,

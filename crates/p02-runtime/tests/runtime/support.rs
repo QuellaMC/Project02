@@ -180,6 +180,17 @@ impl Chat {
 
     /// Sam says `line`, submitted from the web page as `client_message_id`.
     pub(crate) async fn say(&mut self, line: &str, client_message_id: &str) -> Delivery {
+        self.say_hearing(line, client_message_id, |_| {}).await
+    }
+
+    /// Sam says `line` as [`Chat::say`] has it, `hearing` each piece of
+    /// what the turn says the moment it is said.
+    pub(crate) async fn say_hearing(
+        &mut self,
+        line: &str,
+        client_message_id: &str,
+        hearing: impl Fn(&Progress) + Send + Sync,
+    ) -> Delivery {
         let heard = &self.heard;
 
         self.conversation
@@ -194,7 +205,10 @@ impl Chat {
                 &self.model,
                 &self.host,
                 self.window,
-                &|progress| heard.push(progress),
+                &|progress| {
+                    hearing(&progress);
+                    heard.push(progress);
+                },
             )
             .await
     }
@@ -225,11 +239,10 @@ impl Chat {
     }
 }
 
-/// One round of a scripted model: the pieces of a reply it drafts, what it
-/// does just before it answers, and its answer.
+/// One round of a scripted model: the pieces of a reply it drafts, then its
+/// answer.
 pub(crate) struct Round {
-    drafts: Vec<String>,
-    first: Option<Box<dyn FnOnce() + Send>>,
+    drafts: Vec<ReplyDelta>,
     answer: ProviderAnswer,
 }
 
@@ -237,7 +250,6 @@ impl Round {
     pub(crate) fn says(text: impl Into<String>) -> Self {
         Self {
             drafts: Vec::new(),
-            first: None,
             answer: ProviderAnswer::Text(text.into()),
         }
     }
@@ -246,22 +258,22 @@ impl Round {
     pub(crate) fn fails(details: &str) -> Self {
         Self {
             drafts: Vec::new(),
-            first: None,
             answer: ProviderAnswer::Failed {
                 details: details.to_owned(),
             },
         }
     }
 
-    /// Drafts the first reply in `pieces` before it answers.
-    pub(crate) fn drafting(mut self, pieces: &[&str]) -> Self {
-        self.drafts = pieces.iter().map(|piece| (*piece).to_owned()).collect();
-        self
-    }
-
-    /// Does `first` once it has drafted, just before it answers.
-    pub(crate) fn first(mut self, first: impl FnOnce() + Send + 'static) -> Self {
-        self.first = Some(Box::new(first));
+    /// Drafts its reply `reply`, counted from zero, in `pieces` before it
+    /// answers.
+    pub(crate) fn drafting(mut self, reply: usize, pieces: &[&str]) -> Self {
+        self.drafts = pieces
+            .iter()
+            .map(|piece| ReplyDelta {
+                reply,
+                text: (*piece).to_owned(),
+            })
+            .collect();
         self
     }
 }
@@ -320,15 +332,8 @@ impl RoleModelAdapter for Model {
             };
         };
 
-        for piece in round.drafts {
-            invocation.hear(ReplyDelta {
-                reply: 0,
-                text: piece,
-            });
-        }
-
-        if let Some(first) = round.first {
-            first();
+        for delta in round.drafts {
+            invocation.hear(delta);
         }
 
         RawOutput {
