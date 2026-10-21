@@ -10,6 +10,11 @@ use crate::tool::ProvidedTool;
 /// of every plugin tool, so no configuration can take a character's voice.
 pub const VISIBLE_REPLY: &str = "visible_reply";
 
+/// The tool that lists the plugins installed, offered by the runtime's own
+/// plugin. While it is offered, the model is told it can ask for the
+/// inventory rather than take the tools it sees for all there is.
+pub const PLUGIN_LIST_TOOL: &str = "runtime.plugin.list";
+
 const VISIBLE_REPLY_DESCRIPTION: &str =
     "Say something to the person you are talking with — this is how your words reach them.";
 const VISIBLE_REPLY_TEXT_DESCRIPTION: &str = "Exactly what you say, word for word.";
