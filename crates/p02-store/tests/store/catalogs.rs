@@ -136,7 +136,7 @@ fn a_conversation_directory_without_its_record_is_no_conversation_and_one_naming
 }
 
 #[test]
-fn segments_are_made_in_order_and_only_the_newest_goes_on() {
+fn segments_are_made_in_order_and_only_the_newest_goes_on_or_is_discarded() {
     let world = World::new();
     let conversation = world.conversation.id();
     let first = world.data.create_session(conversation).unwrap();
@@ -155,6 +155,10 @@ fn segments_are_made_in_order_and_only_the_newest_goes_on() {
             .continue_session(first.session_id())
             .unwrap_err()
             .code(),
+        "session_not_found"
+    );
+    assert_eq!(
+        world.log(1).writer().unwrap().discard().unwrap_err().code(),
         "session_not_found"
     );
     assert_eq!(

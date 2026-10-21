@@ -51,7 +51,8 @@ struct Cached {
 
 impl CharacterData {
     /// The log of segment `segment` of `conversation`, as this character
-    /// keeps it.
+    /// keeps it, its user the person, whoever else the conversation is
+    /// between.
     ///
     /// # Errors
     ///
@@ -62,21 +63,19 @@ impl CharacterData {
         conversation: &Conversation,
         segment: NonZeroU64,
     ) -> Result<SessionLog, StorageError> {
-        let participant = |role: VisibleMessageRole| {
-            conversation
-                .participants()
-                .iter()
-                .find(|participant| {
-                    participant.kind == role
-                        && (role == VisibleMessageRole::User || participant.id == *self.character())
-                })
-                .ok_or_else(|| StorageError::NotAParticipant {
-                    conversation: conversation.id().clone(),
-                    participant: self.character().clone(),
-                })
+        let participants = conversation.participants();
+        let character = participants.iter().find(|participant| {
+            participant.kind == VisibleMessageRole::Character && participant.id == *self.character()
+        });
+        let person = participants
+            .iter()
+            .find(|participant| participant.is_local_user());
+        let (Some(character), Some(person)) = (character, person) else {
+            return Err(StorageError::NotAParticipant {
+                conversation: conversation.id().clone(),
+                participant: self.character().clone(),
+            });
         };
-        let character = participant(VisibleMessageRole::Character)?;
-        let person = participant(VisibleMessageRole::User)?;
 
         Ok(SessionLog {
             data: self.clone(),
@@ -267,16 +266,17 @@ impl SessionWriter {
         self.lease.release();
     }
 
-    /// Discards the session, which must hold no evidence: the rollback of a
-    /// continuation whose first record never landed, or the segment an
-    /// interrupted one left. Only its writer discards a session, so nothing
-    /// is appended while it goes; the lease is released after, whatever
-    /// the discard came to.
+    /// Discards the session, which must hold no evidence and be its
+    /// conversation's newest segment: the rollback of a continuation whose
+    /// first record never landed, or the segment an interrupted one left.
+    /// Only its writer discards a session, so nothing is appended while it
+    /// goes; the lease is released after, whatever the discard came to.
     ///
     /// # Errors
     ///
-    /// [`StorageError::SessionNotEmpty`] when the session holds evidence, or
-    /// an error of [`CharacterData::sessions`] or of the writes.
+    /// [`StorageError::SessionNotEmpty`] when the session holds evidence,
+    /// [`StorageError::NotLatestSegment`] when a later segment follows it,
+    /// or an error of [`CharacterData::sessions`] or of the writes.
     pub fn discard(self) -> Result<(), StorageError> {
         let discarded = self.log.data.discard_empty_session(&self.log.session);
 

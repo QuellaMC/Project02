@@ -32,6 +32,7 @@ pub struct SessionReplay {
     named: HashMap<(EventId, TraceId), Named>,
     open: Option<usize>,
     calls: HashMap<ToolCallId, Call>,
+    user_lines: BTreeMap<ClientStamp, MessageId>,
 }
 
 /// What an event identity names: the continuation a session began with,
@@ -79,6 +80,8 @@ pub enum ReplayError {
          taken as"
     )]
     InputDisagrees,
+    #[error("the line submitted as \"{0}\" is committed a second time")]
+    LineTakenTwice(ClientStamp),
     #[error("tool call \"{0}\" starts a second time")]
     CallStartedTwice(ToolCallId),
     #[error("tool call \"{0}\" is not the next call an accepted round of its turn asked for")]
@@ -201,6 +204,7 @@ impl SessionReplay {
             named: HashMap::new(),
             open: None,
             calls: HashMap::new(),
+            user_lines: BTreeMap::new(),
         }
     }
 
@@ -226,16 +230,8 @@ impl SessionReplay {
     /// The lines the person's client submitted in this session, by the id
     /// it submitted each under, with the message each was committed as.
     #[must_use]
-    pub fn user_lines(&self) -> BTreeMap<ClientStamp, MessageId> {
-        self.records
-            .iter()
-            .filter_map(|record| match record.body() {
-                RecordBody::MessageCommitted(commit) => commit
-                    .client_message_id()
-                    .map(|id| (id.clone(), commit.message().id.clone())),
-                _ => None,
-            })
-            .collect()
+    pub fn user_lines(&self) -> &BTreeMap<ClientStamp, MessageId> {
+        &self.user_lines
     }
 
     /// Takes `record` in after the records before it, or refuses it and
@@ -305,7 +301,15 @@ impl SessionReplay {
             RecordBody::ModelRound(round) => self.check_round(turn, round)?,
             RecordBody::ToolCallStarted(call) => self.check_started(turn, call)?,
             RecordBody::ToolCallFinished(call) => self.check_finished(index, turn, call)?,
-            RecordBody::MessageCommitted(commit) => check_commit(turn, commit)?,
+            RecordBody::MessageCommitted(commit) => {
+                if let Some(stamp) = commit.client_message_id()
+                    && self.user_lines.contains_key(stamp)
+                {
+                    return Err(ReplayError::LineTakenTwice(stamp.clone()));
+                }
+
+                check_commit(turn, commit)?;
+            }
             RecordBody::TurnCompleted(completed) => check_completed(turn, completed)?,
             RecordBody::TurnRejected(rejected) => check_rejected(turn, rejected)?,
             RecordBody::EventNormalized(_)
@@ -463,6 +467,11 @@ impl SessionReplay {
                 if let Some(round) = commit.round() {
                     turn.last_reply_round = Some(round);
                     turn.rounds[index_of(round)].replies_said += 1;
+                }
+
+                if let Some(stamp) = commit.client_message_id() {
+                    self.user_lines
+                        .insert(stamp.clone(), commit.message().id.clone());
                 }
             }
             RecordBody::TurnCompleted(_) => self.end(index, End::Completed),

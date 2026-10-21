@@ -4,13 +4,16 @@
 use std::num::{NonZeroU32, NonZeroU64};
 
 use p02_contracts::{ConversationTurn, ToolCallResult};
-use p02_core::{EventId, UserLine, VisibleMessageRole};
+use p02_core::{
+    Conversation, ConversationId, EventId, Participant, SessionId, SpeakerName, Timestamp,
+    UserLine, VisibleMessageRole,
+};
 use p02_store::{
     ContinuedFrom, LogRecord, RecordBody, SessionContinuation, SessionContinued, Summarizer,
 };
 use serde_json::json;
 
-use crate::support::{Script, World, answer};
+use crate::support::{Script, World, answer, id, mira, sam};
 
 fn written(world: &World, segment: u64, records: &[LogRecord]) {
     let mut writer = world.log(segment).writer().unwrap();
@@ -213,5 +216,63 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
             .map(p02_core::ClientStamp::as_str)
             .collect::<Vec<_>>(),
         ["one", "three"]
+    );
+}
+
+/// A session's user is the person, whoever else its conversation is
+/// between, and a conversation she is not in has no session of hers.
+#[test]
+fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
+    let world = World::new();
+    let alice = Participant {
+        kind: VisibleMessageRole::User,
+        id: id("alice"),
+        display_name: SpeakerName::new("Alice").unwrap(),
+    };
+    let between = |id: &str, participants| {
+        Conversation::new(
+            ConversationId::new(id).unwrap(),
+            participants,
+            Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
+        )
+        .unwrap()
+    };
+    let group = between(
+        "conv_group",
+        vec![
+            Participant::character(mira()),
+            alice.clone(),
+            Participant::local_user(sam()),
+        ],
+    );
+    let mut script = Script::new(SessionId::new(group.id().clone(), NonZeroU64::MIN));
+
+    world.data.create_session(group.id()).unwrap();
+    script
+        .turn("Hello?")
+        .user("hello")
+        .round(Some(answer(&["Hi."], &[], None)))
+        .replies()
+        .completed();
+
+    let log = world.data.session_log(&group, NonZeroU64::MIN).unwrap();
+    let mut writer = log.clone().writer().unwrap();
+
+    for record in &script.records {
+        writer.append(record.clone()).unwrap();
+    }
+
+    writer.release();
+    assert_eq!(log.read().unwrap().session().user_name(), &sam());
+
+    let without = between("conv_without", vec![Participant::character(mira()), alice]);
+
+    assert_eq!(
+        world
+            .data
+            .session_log(&without, NonZeroU64::MIN)
+            .unwrap_err()
+            .code(),
+        "character_identity_mismatch"
     );
 }
