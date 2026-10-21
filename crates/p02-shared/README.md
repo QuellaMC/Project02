@@ -12,11 +12,12 @@ crate graph: it depends on no crate of this workspace.
   writer's and goes first; appends a line, first cutting what a crash left
   after the last one; flushes a file to disk, its name in its directory
   with it; stamps a file, so a reader can tell it changed while it read;
-  makes and removes files and directories; takes a file's exclusive
-  advisory lock, which the operating system releases when its holder dies;
-  says what is at a path and what each entry of a directory is; spells a
-  path canonically even before it exists (without Windows' `\\?\` prefix);
-  and says whether one path lies inside another.
+  makes and removes files and directories, a directory it makes flushed
+  into the one above it; takes a file's exclusive advisory lock, which the
+  operating system releases when its holder dies; says what is at a path
+  and what each entry of a directory is; spells a path canonically even
+  before it exists (without Windows' `\\?\` prefix); and says whether one
+  path lies inside another.
 - **JSON.** `serde_json` parses each decimal to the nearest double
   (`float_roundtrip`) and keeps object keys in document order
   (`preserve_order`); both features are set once, in the workspace

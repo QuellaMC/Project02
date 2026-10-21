@@ -210,23 +210,39 @@ pub fn file_stamp(path: &Path) -> io::Result<Option<FileStamp>> {
     }))
 }
 
-/// Creates the directory at `path`, whose parent must exist.
+/// Creates the directory at `path`, whose parent must exist, and flushes
+/// its name into its parent, so a crash of the machine keeps it.
 ///
 /// # Errors
 ///
 /// `io::ErrorKind::AlreadyExists` when something is at `path`; otherwise
 /// the `io::Error` the create failed with.
 pub fn create_directory(path: &Path) -> io::Result<()> {
-    fs::create_dir(path)
+    fs::create_dir(path)?;
+    sync_directory_of(path);
+    Ok(())
 }
 
-/// Creates the directory at `path` and any parent missing above it.
+/// Creates the directory at `path` and any parent missing above it, each
+/// one made flushed into the directory above it, from the top down, so a
+/// crash of the machine keeps every directory a later write is made in.
 ///
 /// # Errors
 ///
 /// The `io::Error` the create failed with; none when the directory exists.
 pub fn create_directories(path: &Path) -> io::Result<()> {
-    fs::create_dir_all(path)
+    let missing: Vec<&Path> = path
+        .ancestors()
+        .take_while(|ancestor| matches!(describe_entry(ancestor), PathEntry::Absent))
+        .collect();
+
+    fs::create_dir_all(path)?;
+
+    for made in missing.into_iter().rev() {
+        sync_directory_of(made);
+    }
+
+    Ok(())
 }
 
 /// Removes the file at `path`; a link there is removed, not followed.
