@@ -5,6 +5,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+jiff.workspace = true
 p02-shared.workspace = true
 serde.workspace = true
 thiserror.workspace = true

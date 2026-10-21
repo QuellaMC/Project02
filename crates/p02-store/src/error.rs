@@ -1,0 +1,201 @@
+use std::io;
+use std::path::PathBuf;
+
+use p02_core::{ConversationId, ParseConversationError, SessionId};
+use p02_shared::Identifier;
+
+use crate::layout::EntryKind;
+use crate::marker::{MarkerProblem, SCHEMA_VERSION, Scope};
+use crate::record::RecordError;
+use crate::replay::ReplayError;
+
+/// Why the store refused or could not do what it was asked. Each is
+/// reported under [`StorageError::code`].
+#[derive(Debug, thiserror::Error)]
+pub enum StorageError {
+    #[error(
+        "{} uses storage schema version {found}, but this build reads only version \
+         {SCHEMA_VERSION}: to keep it, run the build that made it; to go on here, choose \
+         another home or start a new one",
+        .path.display()
+    )]
+    UnsupportedSchemaVersion { path: PathBuf, found: u64 },
+    #[error("storage schema marker {} {problem}", .path.display())]
+    MalformedMarker {
+        path: PathBuf,
+        problem: MarkerProblem,
+    },
+    #[error("{} is {}, not {}", .path.display(), .found.article(), .found.other().article())]
+    WrongScope { path: PathBuf, found: Scope },
+    #[error(
+        "character data directory {} holds history for character \"{holds}\" but character \
+         \"{requested}\" was requested: select \"{holds}\", or start fresh data for \
+         \"{requested}\"",
+        .path.display()
+    )]
+    CharacterMismatch {
+        path: PathBuf,
+        holds: Identifier,
+        requested: Identifier,
+    },
+    #[error(
+        "character data directory {} holds \"{entry}\" without a data marker; refusing to adopt it",
+        .path.display()
+    )]
+    UnmarkedData { path: PathBuf, entry: String },
+    #[error(
+        "{} holds \"{entry}\" and no home marker; choose an empty folder or an existing \
+         Project02 home",
+        .path.display()
+    )]
+    UnmarkedHome { path: PathBuf, entry: String },
+    #[error("{} must be a real {expected} inside its storage directory", .path.display())]
+    NotReal { path: PathBuf, expected: EntryKind },
+    #[error("character data directory {} has no storage schema marker", .path.display())]
+    NoMarker { path: PathBuf },
+    #[error("session directory {} is missing", .path.display())]
+    MissingSessionDirectory { path: PathBuf },
+    #[error(
+        "sessions catalog {} is missing or empty while session directories hold evidence",
+        .path.display()
+    )]
+    MissingCatalog { path: PathBuf },
+    #[error(
+        "session directory {} holds evidence the sessions catalog does not list",
+        .path.display()
+    )]
+    UncataloguedSession { path: PathBuf },
+    #[error("sessions directory {} holds an entry that is no session", .path.display())]
+    UnsupportedEntry { path: PathBuf },
+    #[error("line {line} of {} is no record", .path.display())]
+    MalformedRecord {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: RecordError,
+    },
+    #[error("line {line} of {} does not follow the records before it", .path.display())]
+    BrokenLog {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: ReplayError,
+    },
+    #[error("line {line} of sessions catalog {} is no session row", .path.display())]
+    MalformedCatalogRow {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("conversation record {} is malformed", .path.display())]
+    MalformedConversation {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("conversation record {} names \"{named}\", not its own directory", .path.display())]
+    MisplacedConversation {
+        path: PathBuf,
+        named: ConversationId,
+    },
+    #[error("the record does not follow the session's log")]
+    Refused(#[source] ReplayError),
+    #[error("{} changed while it was read, twice", .path.display())]
+    ConcurrentWrite { path: PathBuf },
+    #[error("{resource} is busy")]
+    Busy { resource: String, code: BusyCode },
+    #[error("session \"{0}\" already exists")]
+    SessionExists(SessionId),
+    #[error("session \"{0}\" does not exist")]
+    SessionNotFound(SessionId),
+    #[error("session \"{0}\" is not the latest segment of its conversation")]
+    NotLatestSegment(SessionId),
+    #[error("session \"{0}\" holds evidence and cannot be discarded")]
+    SessionNotEmpty(SessionId),
+    #[error("conversation \"{0}\" does not exist")]
+    ConversationNotFound(ConversationId),
+    #[error("conversation \"{conversation}\" is not between {participant} and the person")]
+    NotAParticipant {
+        conversation: ConversationId,
+        participant: Identifier,
+    },
+    #[error("a conversation cannot be made between these participants")]
+    InvalidParticipants(#[source] ParseConversationError),
+    #[error("could not read {}", .path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("could not write {}", .path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// What a busy lock is reported as: the session it would let its holder
+/// write, or anything else in the store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BusyCode {
+    Session,
+    Storage,
+}
+
+impl StorageError {
+    /// The code the error is reported under, which clients read.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
+            Self::MalformedMarker { .. } | Self::WrongScope { .. } => "malformed_schema_marker",
+            Self::CharacterMismatch { .. } | Self::NotAParticipant { .. } => {
+                "character_identity_mismatch"
+            }
+            Self::UnmarkedData { .. }
+            | Self::UnmarkedHome { .. }
+            | Self::NotReal { .. }
+            | Self::NoMarker { .. }
+            | Self::MissingSessionDirectory { .. }
+            | Self::MissingCatalog { .. }
+            | Self::UncataloguedSession { .. } => "missing_file",
+            Self::UnsupportedEntry { .. }
+            | Self::MalformedRecord { .. }
+            | Self::BrokenLog { .. }
+            | Self::MalformedCatalogRow { .. }
+            | Self::MalformedConversation { .. }
+            | Self::MisplacedConversation { .. }
+            | Self::Refused(_)
+            | Self::InvalidParticipants(_) => "malformed_record",
+            Self::ConcurrentWrite { .. } => "concurrent_write",
+            Self::Busy {
+                code: BusyCode::Session,
+                ..
+            } => "session_busy",
+            Self::Busy {
+                code: BusyCode::Storage,
+                ..
+            } => "storage_busy",
+            Self::SessionExists(_) => "session_already_exists",
+            Self::SessionNotFound(_) | Self::NotLatestSegment(_) => "session_not_found",
+            Self::SessionNotEmpty(_) => "session_not_empty",
+            Self::ConversationNotFound(_) => "conversation_not_found",
+            Self::Read { .. } => "read_failed",
+            Self::Write { .. } => "write_failed",
+        }
+    }
+
+    pub(crate) fn read(path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
+        let path = path.into();
+
+        move |source| Self::Read { path, source }
+    }
+
+    pub(crate) fn write(path: impl Into<PathBuf>) -> impl FnOnce(io::Error) -> Self {
+        let path = path.into();
+
+        move |source| Self::Write { path, source }
+    }
+}

@@ -1,0 +1,236 @@
+//! A home's conversations, `conversations/<id>/conversation.json`: one file
+//! per thread, made under the catalog's lock. The directories are the
+//! catalog; a directory whose file was never written is a make a crash
+//! interrupted, and no thread.
+
+use std::io;
+use std::path::Path;
+
+use p02_core::{Conversation, ConversationId, Participant, Timestamp};
+use p02_shared::{
+    PathEntry, create_directories, describe_entry, list_directory, read_file, write_file_atomically,
+};
+use uuid::Uuid;
+
+use crate::error::StorageError;
+use crate::home::Home;
+use crate::layout::{CONVERSATION_FILE, EntryKind, FINDER_METADATA};
+use crate::lock::{Lease, Resource, acquire, with_lock};
+use crate::marker::{self, Marker, Scope};
+
+/// One process's hold on an open conversation, refused at once to every
+/// other: the conversation's segments and the record of its taken lines
+/// are written only by its holder.
+#[derive(Debug)]
+#[must_use = "a writer holds its conversation until it is released"]
+pub struct ConversationWriter {
+    conversation: ConversationId,
+    lease: Lease,
+}
+
+impl ConversationWriter {
+    #[must_use]
+    pub fn conversation_id(&self) -> &ConversationId {
+        &self.conversation
+    }
+
+    /// Releases the conversation.
+    pub fn release(self) {
+        self.lease.release();
+    }
+}
+
+impl Home {
+    /// The one conversation between exactly `participants`, made the first
+    /// time it is asked for, with a new id, `conv_` and a random UUID.
+    /// Participants are told apart by kind and id: their names are the ones
+    /// they had when the thread began.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the home is refused, a thread there cannot be
+    /// read, the participants make no conversation, or a write fails.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "conv_ and a UUID make a conversation id, and a conversation always serializes"
+    )]
+    pub fn ensure_conversation(
+        &self,
+        participants: Vec<Participant>,
+    ) -> Result<Conversation, StorageError> {
+        self.check()?;
+
+        with_lock(&self.locks_root(), &Resource::ConversationsCatalog, || {
+            if let Some(existing) = self
+                .conversations()?
+                .into_iter()
+                .find(|conversation| conversation.is_between(&participants))
+            {
+                return Ok(existing);
+            }
+
+            let id = ConversationId::new(&format!("conv_{}", Uuid::new_v4()))
+                .expect("conv_ and a UUID make a conversation id");
+            let conversation = Conversation::new(id, participants, Timestamp::now())
+                .map_err(StorageError::InvalidParticipants)?;
+
+            self.ensure()?;
+
+            let directory = self.conversations_root().join(conversation.id().as_str());
+            let path = directory.join(CONVERSATION_FILE);
+            let mut content = serde_json::to_vec(&conversation)
+                .expect("a conversation of plain fields always serializes");
+
+            content.push(b'\n');
+            create_directories(&directory).map_err(StorageError::write(&directory))?;
+            write_file_atomically(&path, &content).map_err(StorageError::write(&path))?;
+            Ok(conversation)
+        })
+    }
+
+    /// The conversation `id`.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::ConversationNotFound`] when the home holds no such
+    /// thread, or an error when its record cannot be read or is malformed.
+    pub fn conversation(&self, id: &ConversationId) -> Result<Conversation, StorageError> {
+        if !self.holds_conversations()? {
+            return Err(StorageError::ConversationNotFound(id.clone()));
+        }
+
+        read_conversation(&self.conversations_root().join(id.as_str()))?
+            .ok_or_else(|| StorageError::ConversationNotFound(id.clone()))
+    }
+
+    /// Every conversation of the home, oldest first: by when each began,
+    /// then by id, both in code-point order.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the home is refused, or a thread there cannot
+    /// be read or is malformed.
+    pub fn conversations(&self) -> Result<Vec<Conversation>, StorageError> {
+        if !self.holds_conversations()? {
+            return Ok(Vec::new());
+        }
+
+        let root = self.conversations_root();
+        let mut conversations = Vec::new();
+
+        for (name, _) in list_directory(&root).map_err(StorageError::read(&root))? {
+            if name == FINDER_METADATA {
+                continue;
+            }
+
+            if let Some(conversation) = read_conversation(&root.join(&name))? {
+                conversations.push(conversation);
+            }
+        }
+
+        conversations.sort_by(|left, right| {
+            (left.created_at(), left.id()).cmp(&(right.created_at(), right.id()))
+        });
+        Ok(conversations)
+    }
+
+    /// The writer's hold on conversation `id`.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Busy`] while another process holds it, or a refusal
+    /// of [`Home::check`].
+    pub fn conversation_writer(
+        &self,
+        id: &ConversationId,
+    ) -> Result<ConversationWriter, StorageError> {
+        self.check()?;
+
+        Ok(ConversationWriter {
+            conversation: id.clone(),
+            lease: acquire(&[(&self.locks_root(), &Resource::ConversationWriter(id))])?,
+        })
+    }
+
+    /// Whether the home is marked and has a conversations directory, which
+    /// must be real; a home of another kind is refused.
+    fn holds_conversations(&self) -> Result<bool, StorageError> {
+        match marker::read(self.root())? {
+            None => return Ok(false),
+            Some(Marker::Home { .. }) => {}
+            Some(Marker::CharacterData { .. }) => {
+                return Err(StorageError::WrongScope {
+                    path: self.root().to_path_buf(),
+                    found: Scope::CharacterData,
+                });
+            }
+        }
+
+        let root = self.conversations_root();
+
+        match describe_entry(&root) {
+            PathEntry::Absent => Ok(false),
+            PathEntry::Directory => Ok(true),
+            PathEntry::Unreadable(source) => Err(StorageError::Read { path: root, source }),
+            PathEntry::File | PathEntry::Link | PathEntry::Other => Err(StorageError::NotReal {
+                path: root,
+                expected: EntryKind::Directory,
+            }),
+        }
+    }
+}
+
+/// The conversation in `directory`, `None` when there is none or its file
+/// was never written.
+fn read_conversation(directory: &Path) -> Result<Option<Conversation>, StorageError> {
+    match describe_entry(directory) {
+        PathEntry::Absent => return Ok(None),
+        PathEntry::Directory => {}
+        PathEntry::Unreadable(source) => {
+            return Err(StorageError::Read {
+                path: directory.to_path_buf(),
+                source,
+            });
+        }
+        PathEntry::File | PathEntry::Link | PathEntry::Other => {
+            return Err(StorageError::NotReal {
+                path: directory.to_path_buf(),
+                expected: EntryKind::Directory,
+            });
+        }
+    }
+
+    let path = directory.join(CONVERSATION_FILE);
+
+    match describe_entry(&path) {
+        PathEntry::Absent => return Ok(None),
+        PathEntry::File => {}
+        PathEntry::Unreadable(source) => return Err(StorageError::Read { path, source }),
+        PathEntry::Directory | PathEntry::Link | PathEntry::Other => {
+            return Err(StorageError::NotReal {
+                path,
+                expected: EntryKind::File,
+            });
+        }
+    }
+
+    let content = match read_file(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(StorageError::Read { path, source }),
+    };
+    let conversation: Conversation =
+        serde_json::from_slice(&content).map_err(|source| StorageError::MalformedConversation {
+            path: path.clone(),
+            source,
+        })?;
+
+    if directory.file_name() != Some(conversation.id().as_str().as_ref()) {
+        return Err(StorageError::MisplacedConversation {
+            path,
+            named: conversation.id().clone(),
+        });
+    }
+
+    Ok(Some(conversation))
+}

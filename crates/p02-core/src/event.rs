@@ -93,6 +93,20 @@ pub struct Timestamp(String);
 pub struct ParseTimestampError;
 
 impl Timestamp {
+    /// The moment it is now, to the millisecond: the one way a moment is
+    /// minted.
+    ///
+    /// # Panics
+    ///
+    /// When the system clock reads a year before 0 or after 9999, which no
+    /// moment of a conversation is.
+    #[must_use]
+    pub fn now() -> Self {
+        // A precision of 3 truncates to the millisecond.
+        Self::new(&format!("{:.3}", jiff::Timestamp::now()))
+            .expect("the system clock reads a year from 0 to 9999")
+    }
+
     /// # Errors
     ///
     /// [`ParseTimestampError`] when `value` is not a real moment written as
@@ -258,6 +272,15 @@ mod tests {
         ] {
             assert_eq!(Timestamp::new(text).is_ok(), accepted, "{text}");
         }
+    }
+
+    #[test]
+    fn now_is_a_canonical_moment_that_never_runs_backwards_in_text() {
+        let earlier = Timestamp::now();
+        let later = Timestamp::now();
+
+        assert_eq!(Timestamp::new(earlier.as_str()), Ok(earlier.clone()));
+        assert!(earlier <= later, "{earlier} then {later}");
     }
 
     #[test]

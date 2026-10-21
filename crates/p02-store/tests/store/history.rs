@@ -1,0 +1,217 @@
+//! What a session's log is replayed into: the turns its model is shown,
+//! and the session its visible messages make.
+
+use std::num::{NonZeroU32, NonZeroU64};
+
+use p02_contracts::{ConversationTurn, ToolCallResult};
+use p02_core::{EventId, UserLine, VisibleMessageRole};
+use p02_store::{
+    ContinuedFrom, LogRecord, RecordBody, SessionContinuation, SessionContinued, Summarizer,
+};
+use serde_json::json;
+
+use crate::support::{Script, World, answer};
+
+fn written(world: &World, segment: u64, records: &[LogRecord]) {
+    let mut writer = world.log(segment).writer().unwrap();
+
+    for record in records {
+        writer.append(record.clone()).unwrap();
+    }
+
+    writer.release();
+}
+
+fn texts(turn: &ConversationTurn) -> Vec<&str> {
+    turn.visible_messages()
+        .map(|message| message.text.as_str())
+        .collect()
+}
+
+#[test]
+fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
+    let world = World::new();
+    let mut script = Script::new(world.segment(1));
+
+    world.data.create_session(world.conversation.id()).unwrap();
+    script
+        .turn("Feeling?")
+        .user("feeling")
+        .round(Some(answer(
+            &["Let me see."],
+            &["curious", "calm"],
+            Some("Checking my mood."),
+        )))
+        .replies()
+        .start_calls()
+        .finish_calls()
+        .round(Some(answer(&["Curious.", "And calm."], &[], None)))
+        .replies()
+        .completed();
+    script.refused_input("one\ntwo");
+    script
+        .turn("Cut short?")
+        .user("cut")
+        .round(Some(answer(&[], &["tired"], None)))
+        .start_calls();
+    script
+        .turn("Still there?")
+        .user("still")
+        .round(Some(answer(&["Here."], &[], None)))
+        .replies()
+        .completed();
+    written(&world, 1, &script.records);
+
+    let history = world.log(1).read().unwrap().history();
+    let [tools, cut_short, replied] = history.turns.as_slice() else {
+        panic!("{:#?}", history.turns);
+    };
+    let round = &tools.tool_rounds[0];
+
+    assert_eq!(history.summary, None);
+    assert_eq!(
+        texts(tools),
+        ["Feeling?", "Let me see.", "Curious.", "And calm."]
+    );
+    assert_eq!(tools.tool_rounds.len(), 1);
+    assert_eq!(round.round, NonZeroU32::MIN);
+    assert_eq!(round.text.as_deref(), Some("Checking my mood."));
+    assert_eq!(round.interim_replies.len(), 1);
+    assert_eq!(
+        round
+            .tool_calls
+            .iter()
+            .map(|call| (call.input().clone(), call.result().clone()))
+            .collect::<Vec<_>>(),
+        ["curious", "calm"].map(|mood| (
+            json!({"mood": mood}).as_object().cloned().unwrap(),
+            ToolCallResult::Accepted {
+                output: json!({"applied": {"mood": mood}, "token": "[redacted]"}),
+            },
+        ))
+    );
+    assert_eq!(texts(cut_short), ["Cut short?"]);
+    assert_eq!(cut_short.tool_rounds, []);
+    assert_eq!(texts(replied), ["Still there?", "Here."]);
+}
+
+#[test]
+fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
+    let world = World::new();
+    let mut first = Script::new(world.segment(1));
+
+    world.data.create_session(world.conversation.id()).unwrap();
+    first
+        .turn("Tea?")
+        .user("tea")
+        .round(Some(answer(&["Tea, always."], &[], None)))
+        .replies()
+        .completed();
+    written(&world, 1, &first.records);
+
+    let carried = world.log(1).read().unwrap().history().turns;
+    let continued = world.data.continue_session(&world.segment(1)).unwrap();
+    let mut second = Script::new(continued.session_id().clone());
+    let identity = first.records[0].identity().clone();
+    let continuation = SessionContinuation::new(
+        continued.session_id().clone(),
+        ContinuedFrom {
+            session_id: world.segment(1),
+            last_event_id: EventId::new("evt_1").unwrap(),
+        },
+        "  They talked about tea.  ",
+        NonZeroU32::MIN,
+        carried.clone(),
+        Summarizer::Fallback {
+            reason: "The provider has no model to ask.".to_owned(),
+        },
+    )
+    .unwrap();
+
+    second.push(
+        &p02_core::EventIdentity::new(
+            EventId::new("evt_continued").unwrap(),
+            p02_core::TraceId::new("trace_continued").unwrap(),
+            identity.created_at().clone(),
+        )
+        .unwrap(),
+        RecordBody::SessionContinued(SessionContinued {
+            session_continuation: continuation,
+        }),
+    );
+    second
+        .turn("Coffee?")
+        .user("coffee")
+        .round(Some(answer(&["Never."], &[], None)))
+        .replies()
+        .completed();
+    written(&world, 2, &second.records);
+
+    let history = world.log(2).read().unwrap().history();
+
+    assert_eq!(history.summary.as_deref(), Some("They talked about tea."));
+    assert_eq!(history.turns[..1], carried);
+    assert_eq!(texts(&history.turns[1]), ["Coffee?", "Never."]);
+}
+
+#[test]
+fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_message() {
+    let world = World::new();
+    let mut script = Script::new(world.segment(1));
+
+    world.data.create_session(world.conversation.id()).unwrap();
+    script
+        .turn("One?")
+        .user("one")
+        .round(Some(answer(&["Two."], &[], None)))
+        .replies()
+        .completed();
+    script.skip_message();
+    script
+        .turn("Three?")
+        .user("three")
+        .round(None)
+        .rejected_by_its_round();
+    written(&world, 1, &script.records);
+
+    let replay = world.log(1).read().unwrap();
+    let session = replay.session();
+    let said: Vec<(String, VisibleMessageRole)> = session
+        .messages()
+        .iter()
+        .map(|message| (message.id.to_string(), message.role))
+        .collect();
+
+    assert_eq!(
+        said,
+        [
+            (
+                format!("{}:message-1", world.segment(1)),
+                VisibleMessageRole::User
+            ),
+            (
+                format!("{}:message-2", world.segment(1)),
+                VisibleMessageRole::Character
+            ),
+            (
+                format!("{}:message-4", world.segment(1)),
+                VisibleMessageRole::User
+            ),
+        ]
+    );
+    assert_eq!(
+        session
+            .user_message(UserLine::new("Five?").unwrap())
+            .id
+            .number(),
+        NonZeroU64::new(5).unwrap()
+    );
+    assert_eq!(
+        replay
+            .user_lines()
+            .keys()
+            .map(p02_core::ClientStamp::as_str)
+            .collect::<Vec<_>>(),
+        ["one", "three"]
+    );
+}

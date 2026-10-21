@@ -7,11 +7,11 @@
     reason = "this module is the fs seam every other module goes through"
 )]
 
-use std::ffi::OsString;
-use std::fs::{self, File, FileType, OpenOptions};
-use std::io::{self, Read as _, Write as _};
+use std::ffi::{OsStr, OsString};
+use std::fs::{self, File, FileType, OpenOptions, TryLockError};
+use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Component, Path, PathBuf};
-use std::process;
+use std::time::SystemTime;
 
 use uuid::Uuid;
 
@@ -23,6 +23,15 @@ use uuid::Uuid;
 /// The `io::Error` the read failed with.
 pub fn read_text_lossy(path: &Path) -> io::Result<String> {
     fs::read(path).map(String::from_utf8_lossy_owned)
+}
+
+/// Reads the whole file at `path` as it is on disk.
+///
+/// # Errors
+///
+/// The `io::Error` the read failed with.
+pub fn read_file(path: &Path) -> io::Result<Vec<u8>> {
+    fs::read(path)
 }
 
 /// Reads the file at `path` up to its first `limit` bytes, so a file that
@@ -42,18 +51,30 @@ pub fn read_at_most(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 
 /// Replaces the file at `path` with `content`, owner-only, so that a reader
 /// and a crash both see the old file or the new one, never a mix. The
-/// directory must exist.
+/// directory must exist, and the caller must hold the lock that guards
+/// `path`: every writer of a file holds it.
 ///
-/// The content goes first to a sibling `.<name>.<pid>.<uuid>.tmp`, flushed
-/// to disk before the rename: the pid lets a sweep tell a temporary that a
-/// crashed writer abandoned from one still being written.
+/// The content goes first to a sibling `.<name>.<uuid>.tmp`, flushed to disk
+/// before the rename, and the directory after it. Because no other writer of
+/// `path` can be at work while the caller holds its lock, a temporary of
+/// `path` found beside it was left by a writer that died, and it is removed
+/// first; nothing else in the directory is touched.
 ///
 /// # Errors
 ///
-/// The `io::Error` of the step that failed. The temporary is removed and
-/// the file at `path` is as it was.
+/// The `io::Error` of the step that failed. The new temporary is removed
+/// and the file at `path` is as it was.
 pub fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
-    let temporary = temporary_sibling(path)?;
+    let name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a file to replace needs a name",
+        )
+    })?;
+
+    remove_abandoned_temporaries(path, name)?;
+
+    let temporary = path.with_file_name(temporary_name(name));
     let file = create_owner_only(&temporary)?;
 
     if let Err(error) = write_then_rename(file, content, &temporary, path) {
@@ -63,6 +84,192 @@ pub fn write_file_atomically(path: &Path, content: &[u8]) -> io::Result<()> {
 
     sync_directory_of(path);
     Ok(())
+}
+
+/// Appends `line` and a newline to the file at `path`, creating the file
+/// owner-only. The file is a sequence of lines each ending in a newline, so
+/// text after its last newline is an append a crash cut short: it is cut
+/// away first, and `line` follows the last whole one. The append is not
+/// flushed to disk: a line counts once its newline is there, and a crash
+/// before that loses it as it would have lost the call.
+///
+/// # Errors
+///
+/// `io::ErrorKind::InvalidInput` when `line` holds a newline; otherwise the
+/// `io::Error` of the step that failed, which may leave part of the line
+/// behind for the next append to cut.
+pub fn append_line(path: &Path, line: &[u8]) -> io::Result<()> {
+    if line.contains(&b'\n') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a line to append holds no newline",
+        ));
+    }
+
+    let mut options = OpenOptions::new();
+
+    options.read(true).write(true).create(true).truncate(false);
+    owner_only(&mut options);
+
+    let mut file = options.open(path)?;
+    let whole = whole_lines_length(&mut file)?;
+
+    if whole != file.metadata()?.len() {
+        file.set_len(whole)?;
+    }
+
+    file.seek(SeekFrom::Start(whole))?;
+
+    let mut bytes = Vec::with_capacity(line.len() + 1);
+
+    bytes.extend_from_slice(line);
+    bytes.push(b'\n');
+    file.write_all(&bytes)
+}
+
+/// How many bytes of `file` its last newline ends, read back from the end.
+fn whole_lines_length(file: &mut File) -> io::Result<u64> {
+    const CHUNK: usize = 64 * 1_024;
+
+    let mut end = file.metadata()?.len();
+    let mut chunk = vec![0; CHUNK];
+
+    while end > 0 {
+        let size = usize::try_from(end).map_or(CHUNK, |end| end.min(CHUNK));
+        let start = end - size as u64;
+
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut chunk[..size])?;
+
+        if let Some(at) = chunk[..size].iter().rposition(|byte| *byte == b'\n') {
+            return Ok(start + at as u64 + 1);
+        }
+
+        end = start;
+    }
+
+    Ok(0)
+}
+
+/// What a file is at one moment, as far as a reader can tell without reading
+/// it: two stamps of one path differ when it was written, cut or replaced
+/// between them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    identity: (u64, u64, i64, i64),
+    #[cfg(windows)]
+    created: Option<SystemTime>,
+}
+
+/// The stamp of the file at `path`, following a link at its end; `None`
+/// when nothing is there.
+///
+/// # Errors
+///
+/// The `io::Error` the question failed with, but `NotFound`.
+pub fn file_stamp(path: &Path) -> io::Result<Option<FileStamp>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+
+    Ok(Some(FileStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        #[cfg(unix)]
+        identity: {
+            use std::os::unix::fs::MetadataExt as _;
+
+            (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            )
+        },
+        #[cfg(windows)]
+        created: metadata.created().ok(),
+    }))
+}
+
+/// Creates the directory at `path`, whose parent must exist.
+///
+/// # Errors
+///
+/// `io::ErrorKind::AlreadyExists` when something is at `path`; otherwise
+/// the `io::Error` the create failed with.
+pub fn create_directory(path: &Path) -> io::Result<()> {
+    fs::create_dir(path)
+}
+
+/// Creates the directory at `path` and any parent missing above it.
+///
+/// # Errors
+///
+/// The `io::Error` the create failed with; none when the directory exists.
+pub fn create_directories(path: &Path) -> io::Result<()> {
+    fs::create_dir_all(path)
+}
+
+/// Removes the file at `path`; a link there is removed, not followed.
+///
+/// # Errors
+///
+/// The `io::Error` the removal failed with, `NotFound` when nothing is
+/// there.
+pub fn remove_file(path: &Path) -> io::Result<()> {
+    fs::remove_file(path)
+}
+
+/// Removes the directory at `path`, which must be empty.
+///
+/// # Errors
+///
+/// The `io::Error` the removal failed with, `NotFound` when nothing is
+/// there.
+pub fn remove_directory(path: &Path) -> io::Result<()> {
+    fs::remove_dir(path)
+}
+
+/// An exclusive advisory lock on a file, held for as long as this value
+/// lives. Any other handle is refused it, in this process or another, and
+/// the operating system releases it when the process holding it dies.
+#[derive(Debug)]
+pub struct LockedFile(File);
+
+impl Drop for LockedFile {
+    /// Windows releases the lock of a closed handle in its own time, so it
+    /// is released here first; the close that follows releases it anyway.
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+/// Takes the exclusive lock of the file at `path`, creating the file
+/// owner-only if it is absent; `None` when another handle holds it. The
+/// lock is the file's whole content, so nothing reads or writes the file
+/// itself: Windows refuses that to every other handle while it is held.
+///
+/// # Errors
+///
+/// The `io::Error` the open or the lock failed with.
+pub fn try_lock_file(path: &Path) -> io::Result<Option<LockedFile>> {
+    let mut options = OpenOptions::new();
+
+    options.read(true).write(true).create(true).truncate(false);
+    owner_only(&mut options);
+
+    let file = options.open(path)?;
+
+    match file.try_lock() {
+        Ok(()) => Ok(Some(LockedFile(file))),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(error)) => Err(error),
+    }
 }
 
 /// Creates the file at `path`, owner-only, with `content`, unless anything
@@ -212,27 +419,57 @@ fn create_owner_only(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
 
     options.write(true).create_new(true);
-    // Windows has no mode bits: a file takes its directory's ACL, which in
-    // the user's profile admits the user alone.
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-
+    owner_only(&mut options);
     options.open(path)
 }
 
-fn temporary_sibling(path: &Path) -> io::Result<PathBuf> {
-    let name = path.file_name().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "a file to replace needs a name",
-        )
-    })?;
+/// Windows has no mode bits: a file takes its directory's ACL, which in the
+/// user's profile admits the user alone.
+fn owner_only(options: &mut OpenOptions) {
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(options, 0o600);
+    #[cfg(not(unix))]
+    let _ = options;
+}
+
+fn temporary_name(target: &OsStr) -> OsString {
     let mut temporary = OsString::from(".");
 
-    temporary.push(name);
-    temporary.push(format!(".{}.{}.tmp", process::id(), Uuid::new_v4()));
+    temporary.push(target);
+    temporary.push(format!(".{}.tmp", Uuid::new_v4()));
+    temporary
+}
 
-    Ok(path.with_file_name(temporary))
+/// The name of the file that [`write_file_atomically`] was replacing through
+/// a temporary named `entry`; `None` when `entry` is no such temporary.
+#[must_use]
+pub fn temporary_target(entry: &OsStr) -> Option<&str> {
+    let inner = entry.to_str()?.strip_prefix('.')?.strip_suffix(".tmp")?;
+    let (target, id) = inner.rsplit_once('.')?;
+
+    Uuid::try_parse(id).ok().map(|_| target)
+}
+
+fn remove_abandoned_temporaries(path: &Path, name: &OsStr) -> io::Result<()> {
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let abandoned = entry.file_type()?.is_file()
+            && temporary_target(&entry.file_name()).is_some_and(|target| *name == *target);
+
+        if abandoned {
+            match fs::remove_file(entry.path()) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn write_then_rename(
@@ -414,6 +651,92 @@ mod tests {
 
         assert!(write_file_atomically(&path, b"new\n").is_err());
         assert_eq!(names_in(&root), ["config.json"]);
+    }
+
+    #[test]
+    fn an_atomic_write_removes_its_files_abandoned_temporaries_and_nothing_else() {
+        let (_directory, root) = temp_root();
+        let path = root.join("sessions.jsonl");
+        let abandoned = format!(".sessions.jsonl.{}.tmp", Uuid::new_v4());
+        let kept = [
+            format!(".config.json.{}.tmp", Uuid::new_v4()),
+            ".sessions.jsonl.not-a-uuid.tmp".to_owned(),
+            format!("sessions.jsonl.{}.tmp", Uuid::new_v4()),
+        ];
+
+        for name in std::iter::once(&abandoned).chain(&kept) {
+            fs::write(root.join(name), "residue").unwrap();
+        }
+
+        write_file_atomically(&path, b"{}\n").unwrap();
+
+        let mut names = names_in(&root);
+        let mut expected: Vec<String> = kept.to_vec();
+
+        names.sort();
+        expected.push("sessions.jsonl".to_owned());
+        expected.sort();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn an_append_cuts_what_a_crash_left_after_the_last_line_and_creates_the_file_owner_only() {
+        let (_directory, root) = temp_root();
+        let path = root.join("raw-events.jsonl");
+
+        append_line(&path, b"first").unwrap();
+        #[cfg(unix)]
+        assert_eq!(mode_of(&path), 0o600);
+
+        fs::write(&path, "first\nsecond\nthi").unwrap();
+        append_line(&path, b"third").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first\nsecond\nthird\n");
+
+        fs::write(&path, format!("first\n{}", "x".repeat(100 * 1_024))).unwrap();
+        append_line(&path, b"after a long cut").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "first\nafter a long cut\n"
+        );
+
+        fs::write(&path, "torn").unwrap();
+        append_line(&path, "\u{1f600}".as_bytes()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "\u{1f600}\n");
+
+        assert_eq!(
+            append_line(&path, b"two\nlines").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "\u{1f600}\n");
+    }
+
+    #[test]
+    fn a_stamp_changes_with_what_is_written_and_is_none_where_nothing_is() {
+        let (_directory, root) = temp_root();
+        let path = root.join("raw-events.jsonl");
+
+        assert_eq!(file_stamp(&path).unwrap(), None);
+        append_line(&path, b"one").unwrap();
+
+        let before = file_stamp(&path).unwrap();
+
+        assert_eq!(file_stamp(&path).unwrap(), before);
+        append_line(&path, b"two").unwrap();
+        assert_ne!(file_stamp(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn a_locked_file_is_refused_to_every_other_handle_until_it_is_dropped() {
+        let (_directory, root) = temp_root();
+        let path = root.join("a.lock");
+        let held = try_lock_file(&path).unwrap().unwrap();
+
+        assert!(try_lock_file(&path).unwrap().is_none());
+        #[cfg(unix)]
+        assert_eq!(mode_of(&path), 0o600);
+
+        drop(held);
+        assert!(try_lock_file(&path).unwrap().is_some());
     }
 
     #[test]

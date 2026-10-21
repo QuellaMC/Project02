@@ -11,7 +11,8 @@ use crate::fs::read_text_lossy;
 /// looks for it.
 pub const DEFAULT_HOME: &str = ".project02";
 
-const DAEMON_RECORD_FILE: &str = "daemon.json";
+/// The daemon record's name in its home.
+pub const DAEMON_RECORD_FILE: &str = "daemon.json";
 
 /// The daemon's record on its home, `<home>/daemon.json`, written whole and
 /// owner-only by the daemon that holds the home's lease and by nothing else.

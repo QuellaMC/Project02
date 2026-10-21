@@ -18,8 +18,9 @@ pub use id::{
     SessionId,
 };
 pub use message::{
-    CharacterProfile, ParseSpeakerNameError, ParseUserLineError, ParseVisibleTextError,
-    SpeakerName, UserLine, VisibleMessage, VisibleMessageRole, VisibleText,
+    CharacterProfile, ClientStamp, ParseClientStampError, ParseSpeakerNameError,
+    ParseUserLineError, ParseVisibleTextError, SpeakerName, UserLine, VisibleMessage,
+    VisibleMessageRole, VisibleText,
 };
 pub use selection::{SelectCharacterError, select_character};
 pub use session::{AppendMessageError, Session};

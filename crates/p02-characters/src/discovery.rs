@@ -14,7 +14,7 @@ const BUNDLED: [(&str, &str); 1] = [(
 )];
 
 /// Where a home keeps the packages its person added, a folder each.
-const HOME_PACKAGES: &str = "characters";
+pub const HOME_PACKAGES: &str = "characters";
 
 const DESCRIPTOR: &str = "project02.character.json";
 
