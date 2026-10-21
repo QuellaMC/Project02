@@ -71,7 +71,8 @@ tokio's blocking pool.
   one whose package left the roster, who is then no character to reach.
   Passes never overlap: a request while one runs marks one more after it,
   so the newest roster has the last word. A settings change is announced
-  at once and acted on behind its answer.
+  and then acted on, on a task of its own, so a caller that stops waiting
+  leaves neither undone.
 - **History.** A conversation's committed messages as one scrollback
   across her segments, newest page first and chronological within it, the
   cursor `v1:<segment>:<index>` naming where the next page ends; a limit is

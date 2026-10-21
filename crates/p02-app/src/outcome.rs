@@ -375,9 +375,9 @@ fn started_state<S: Serializer>(
     }
 }
 
-/// A background failure the conversation never sees: a segment rotation
-/// that failed, which the next turn plans again, or a closed segment's end
-/// hooks that did not finish.
+/// A background failure the conversation never sees: the plugins' work
+/// after a turn's commit, a segment rotation that failed, which the next
+/// turn plans again, or a closed segment's end hooks that did not finish.
 #[derive(Clone, Debug, Serialize)]
 pub struct MaintenanceFailure {
     pub at: Timestamp,

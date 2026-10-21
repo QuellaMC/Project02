@@ -18,7 +18,9 @@ use p02_contracts::{PluginKind, RoleModelAdapter, TurnIdentity};
 use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerName, Timestamp};
 use p02_plugins::{PluginHost, Turn};
 use p02_role_model::{NvidiaSettings, select_adapter};
-use p02_runtime::{Character, Conversation, Delivery, Progress, Rotation, Submission};
+use p02_runtime::{
+    Character, CompletedTurn, Conversation, Delivery, Progress, Rotation, Submission,
+};
 use p02_shared::Identifier;
 use p02_store::{RuntimeRejection, StorageError};
 use serde::{Serialize, Serializer};
@@ -633,22 +635,32 @@ impl Actor {
                 },
                 false,
             ),
-            Delivery::Completed { turn, rotation } => {
-                let failed = match rotation {
-                    Some(Rotation::Failed { message, .. }) => Some(message),
-                    Some(Rotation::Rotated { end_failure, .. }) => end_failure,
-                    None => None,
-                };
+            Delivery::Completed {
+                turn:
+                    CompletedTurn {
+                        messages,
+                        post_commit_failures,
+                    },
+                rotation,
+            } => {
+                let failures: Vec<String> = post_commit_failures
+                    .into_iter()
+                    .chain(match rotation {
+                        Some(Rotation::Failed { message, .. }) => Some(message),
+                        Some(Rotation::Rotated { end_failure, .. }) => end_failure,
+                        None => None,
+                    })
+                    .collect();
 
-                if let Some(message) = failed {
-                    self.note_maintenance(message);
+                if !failures.is_empty() {
+                    self.note_maintenance(failures.join("; "));
                 }
 
                 (
                     TurnOutcome::Completed {
                         character_id,
                         conversation_id: conversation,
-                        messages: turn.messages.into_iter().map(Into::into).collect(),
+                        messages: messages.into_iter().map(Into::into).collect(),
                     },
                     false,
                 )

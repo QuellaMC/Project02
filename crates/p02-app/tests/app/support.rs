@@ -17,10 +17,10 @@ use p02_app::{
     TurnOutcome,
 };
 use p02_contracts::{
-    Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext, HookReport, HookStatus,
-    InputEnvelope, Invocation, Manifest, PluginError, PreparedEffect, ProvidedTool, RawOutput,
-    ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall, ToolCallOutcome, ToolInputContract,
-    ToolPreparation,
+    CommittedTurn, Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
+    HookReport, HookStatus, InputEnvelope, Invocation, Manifest, PluginError, PreparedEffect,
+    ProvidedTool, RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
+    ToolCallOutcome, ToolInputContract, ToolPreparation,
 };
 use p02_plugins::list;
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
@@ -406,12 +406,14 @@ impl RoleModelAdapter for Model {
 }
 
 /// A plugin whose parts a test scripts: a gate its factory is built
-/// behind, an approval-gated tool, and settings fields.
+/// behind, an approval-gated tool, settings fields, and work after every
+/// committed turn that fails.
 pub(crate) struct Toy {
     id: &'static str,
     gate: Option<Arc<Gate>>,
     gated_tool: Option<&'static str>,
     fields: Vec<Value>,
+    failing_after_turns: bool,
 }
 
 impl Toy {
@@ -421,7 +423,14 @@ impl Toy {
             gate: None,
             gated_tool: None,
             fields: Vec::new(),
+            failing_after_turns: false,
         }
+    }
+
+    /// Fails its work after every committed turn: "The diary is full."
+    pub(crate) fn failing_after_turns(mut self) -> Self {
+        self.failing_after_turns = true;
+        self
     }
 
     pub(crate) fn built_behind(mut self, gate: &Arc<Gate>) -> Self {
@@ -449,11 +458,16 @@ impl Toy {
     }
 
     pub(crate) fn plugin(self) -> Plugin {
-        let declared: Vec<&str> = if self.gated_tool.is_some() {
-            vec!["on_shutdown", "tool_provider", "handle_tool_call"]
-        } else {
-            vec!["on_shutdown"]
-        };
+        let mut declared = vec!["on_shutdown"];
+
+        if self.gated_tool.is_some() {
+            declared.extend(["tool_provider", "handle_tool_call"]);
+        }
+
+        if self.failing_after_turns {
+            declared.push("after_turn_committed");
+        }
+
         let manifest = Manifest::from_value(&json!({
             "id": self.id,
             "displayName": self.id,
@@ -507,9 +521,10 @@ impl Toy {
     }
 }
 
-/// What a toy runs as: an end that always completes, and an
-/// approval-gated tool, if it offers one, whose call shows the note it
-/// would save and saves it on a yes.
+/// What a toy runs as: an end that always completes, an approval-gated
+/// tool, if it offers one, whose call shows the note it would save and
+/// saves it on a yes, and work after a committed turn, if it declares any,
+/// that fails.
 #[derive(Debug)]
 struct Notes {
     tools: Vec<ProvidedTool>,
@@ -531,6 +546,14 @@ impl RuntimePlugin for Notes {
             effect: Box::new(Save),
             evidence: Vec::new(),
         })
+    }
+
+    async fn after_turn_committed(
+        &self,
+        _turn: &CommittedTurn,
+        _context: &HookContext,
+    ) -> Result<HookReport, PluginError> {
+        Err(PluginError::new("The diary is full."))
     }
 
     async fn on_shutdown(&self, _context: &HookContext) -> Result<HookReport, PluginError> {
