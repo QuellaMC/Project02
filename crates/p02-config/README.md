@@ -21,11 +21,12 @@ outcome are the wire's own types.
   document unusable: every target that reads it is refused until a person
   or a change repairs it. An unknown key in a
   section's stanza, a stanza or config that is no object, or a value its
-  field refuses is an error of that section alone. The store admits the
-  home and her data directory before either is read, so a linked document
-  is refused as any linked control file is. A document is written indented
-  by two spaces with a trailing newline, owner-only and whole, its keys in
-  the order they were written.
+  field refuses is an error of that section alone. A finding about what a
+  document holds names that document: one in her overlay names her. The
+  store admits the home and her data directory before either is read, so a
+  linked document is refused as any linked control file is. A document is
+  written indented by two spaces with a trailing newline, owner-only and
+  whole, its keys in the order they were written.
 - **The host's fields** are declared once, as a plugin's are, in the order
   the settings page shows them: the name a person goes by (`You` unless
   set; trimmed, one line of at most 128 characters), the model provider
@@ -58,15 +59,18 @@ outcome are the wire's own types.
   its default, or a memory provider the settings do not choose, never
   runs, so its settings are not judged. What a character runs on is one
   value: the host's values, and each plugin that runs by her settings with
-  the values they give it, secrets in the clear, for the plugin host to
-  resolve against its manifest. Two equal ones run the same
-  character, so she is rebuilt exactly when hers differ from those she was
-  built from: a home value she overrides, a switched-off plugin's settings
-  or a connector's rebuild no one, and a re-keyed secret does.
-- **Fingerprints.** A target's is `sha256:` over the canonical JSON of the
-  documents its files hold, and for a character whose they are; a
-  section's, over its stanzas in them. A secret, and a value under a name
-  shaped like a credential's, counts by its presence and never its value.
+  its values in effect, a default among them, secrets in the clear, for
+  the plugin host to resolve against its manifest. Two equal ones run the
+  same character, so she is rebuilt exactly when hers differ from those
+  she was built from: a home value she overrides, a switched-off plugin's
+  settings or a connector's rebuild no one, and a re-keyed secret does.
+- **Fingerprints.** A target's is `sha256:` over the canonical JSON of its
+  documents as its settings are read from them, her package's settings
+  merged in while they are pending, and for a character whose they are; a
+  section's, over its stanzas in them. Her start writes only what was
+  already read, so it leaves her fingerprint as it was. A secret, and a
+  value under a name shaped like a credential's, counts by its presence
+  and never its value.
 - **The one transaction.** A change sets or unsets a host field, switches
   a section or leaves it to the document beneath, or sets or unsets a
   section's field, in the target's own document alone. Its own rules are
@@ -79,7 +83,10 @@ outcome are the wire's own types.
   valid and leave the section it changes without an error over the
   documents beside it. Only then is anything written. Her first change
   makes her data directory, as her first start does, and a refused change
-  makes none. A new home is given a document naming its version alone,
+  makes none. Her package's settings her view merges in are settled first,
+  as her start settles them, and the change is written last, so a failure
+  between the two leaves her settings as shown, under the same
+  fingerprint. A new home is given a document naming its version alone,
   and a file already there stays as it is. The answer is `applied` with
   the new fingerprint, `refused`
   as a `conflict`, `invalid` or `unknown_character`, or `failed`, with a

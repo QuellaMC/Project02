@@ -565,6 +565,53 @@ fn a_change_to_a_home_that_cannot_be_written_fails_and_the_fingerprint_stays() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_change_that_fails_after_her_packages_settings_are_settled_leaves_them_as_shown_and_a_retry_applies()
+ {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use p02_store::CharacterData;
+
+    use crate::support::id;
+
+    let world = World::new();
+    let locks = world.root().join("character-data/mira/.locks");
+    let tokens = json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096});
+    let mode = |mode| {
+        std::fs::set_permissions(&locks, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+
+    CharacterData::ensure(&world.home, &id("mira")).unwrap();
+
+    let read = fingerprint(&world.view(&of("mira")));
+
+    mode(0o000);
+
+    // Permissions do not bind root, who records her package's version anyway.
+    let bound = std::fs::write(locks.join("probe"), "").is_err();
+    let outcome = world.change_bound(&of("mira"), &read, tokens.clone());
+
+    mode(0o755);
+
+    if bound {
+        assert!(
+            matches!(outcome, ChangeOutcome::Failed { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap())
+                .unwrap(),
+            document(json!({"plugins": {"character-state": {"enabled": true}}}))
+        );
+        assert_eq!(fingerprint(&world.view(&of("mira"))), read);
+        assert!(matches!(
+            world.change_bound(&of("mira"), &read, tokens),
+            ChangeOutcome::Applied { .. }
+        ));
+    }
+}
+
 /// config.lock-order: a home write and a character write racing each other serialize, each character's ending in conflict when the home's write landed first, instead of deadlocking
 #[test]
 fn a_home_write_and_character_writes_racing_each_other_serialize_without_deadlock() {

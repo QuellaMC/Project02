@@ -330,7 +330,10 @@ impl Stanza {
 }
 
 /// The keys of `object` outside `known`, in code-point order.
-fn unknown<'a>(object: &'a Map<String, Value>, known: &[&str]) -> impl Iterator<Item = &'a String> {
+pub(crate) fn unknown<'a>(
+    object: &'a Map<String, Value>,
+    known: &[&str],
+) -> impl Iterator<Item = &'a String> {
     let mut keys: Vec<&String> = object
         .keys()
         .filter(|key| !known.contains(&key.as_str()))

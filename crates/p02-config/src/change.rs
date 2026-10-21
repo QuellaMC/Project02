@@ -509,10 +509,8 @@ fn commit(
         ));
     }
 
-    let mut after = loaded.with_own(made);
-
     if let Some(declared) = edit.section() {
-        let judged = Resolution::new(sections, after.layers(), Vec::new());
+        let judged = Resolution::new(sections, loaded.layers_with(&made), Vec::new());
         let error = judged
             .section(declared.namespace(), declared.id().as_str())
             .and_then(|section| section.diagnostics.iter().find(|found| found.is_error()));
@@ -531,11 +529,11 @@ fn commit(
         });
     }
 
-    after.write(home)?;
+    let fingerprint = target_fingerprint(sections, &loaded.layers_with(&made));
 
-    Ok(ChangeOutcome::Applied {
-        fingerprint: target_fingerprint(sections, &after.layers()),
-    })
+    loaded.write(home, &made)?;
+
+    Ok(ChangeOutcome::Applied { fingerprint })
 }
 
 /// A target's documents as a change finds them.
@@ -606,21 +604,32 @@ impl Loaded {
             .map_or(&self.home, |overlay| &overlay.read)
     }
 
-    fn with_own(mut self, made: Document) -> Self {
-        match &mut self.overlay {
-            Some(overlay) => overlay.read = made,
-            None => self.home = made,
+    /// The documents as they read once `made` takes the place of the
+    /// target's own.
+    fn layers_with(&self, made: &Document) -> Layers {
+        let mut layers = self.layers();
+
+        match &mut layers.overlay {
+            Some(overlay) => overlay.read = made.clone(),
+            None => layers.home = made.clone(),
         }
 
-        self
+        layers
     }
 
-    /// Writes the document the change made: the home's, or her overlay, as
-    /// her start would settle it.
-    fn write(&mut self, home: &Home) -> Result<(), StorageError> {
-        match &mut self.overlay {
-            Some(overlay) => settle(home, overlay).map(drop),
-            None => write(&self.home_path, self.home.raw()),
+    /// Writes `made` in place of the target's own document. Her package's
+    /// settings her view merges in are settled first, as her start settles
+    /// them, and the change is written last: a failure or a crash between
+    /// the writes leaves her settings as her view showed them, under the
+    /// same fingerprint, rather than her change over a merge her start
+    /// would make again.
+    fn write(self, home: &Home, made: &Document) -> Result<(), StorageError> {
+        match self.overlay {
+            Some(mut overlay) => {
+                settle(home, &mut overlay)?;
+                write(&overlay.path, made.raw())
+            }
+            None => write(&self.home_path, made.raw()),
         }
     }
 
