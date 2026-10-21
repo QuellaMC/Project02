@@ -34,25 +34,26 @@ tokio's blocking pool.
   package's settings into her overlay, chooses her model, holds her to the
   plugins her package requires, a recommended one missing only warning,
   and to one memory provider, and builds her plugins with her confirmer. A
-  start sent while one is in flight is answered when it settles, and one
-  that failed stays failed until the next start or settings change. Her
-  thread with the person is opened the first time a client opens it or a
-  line comes for it, and opened again after a reload or a recovery, so no
-  client reopens it. A turn the runtime itself fails leaves her failed and
-  earns one restart: the lines queued behind it are refused, her thread is
-  closed and her plugins shut down, and she starts again. A reload happens
-  between turns, when her package or her settings differ from those she
-  was built from; lines sent meanwhile wait and land on her thread opened
-  again. Her stop cancels her parked confirmations first, closes her
-  thread, its end hooks run, and shuts her plugins down, saying what
-  failed of that.
+  start sent while one is in flight, a boot or a reload, joins it and is
+  answered when it settles, and one that failed stays failed until the
+  next start or settings change. Her thread with the person is opened the
+  first time a client opens it or a line comes for it, and opened again
+  after a reload or a recovery, so no client reopens it. A turn the
+  runtime itself fails leaves her failed and earns one restart: the lines
+  queued behind it are refused, her thread is closed and her plugins shut
+  down, and she starts again. A reload happens between turns, when her
+  package or her settings differ from those she was built from; lines sent
+  meanwhile wait and land on her thread opened again. Her stop cancels her
+  parked confirmations first, closes her thread, its end hooks run, and
+  shuts her plugins down, saying what failed of that.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her
   stop, and its settlement is announced once. An answer at or past the
-  deadline settles it cancelled, whatever the timer has done: the client
-  never judges the deadline. A question raised once her stop began settles
-  cancelled at once, unannounced.
+  deadline it was shown settles it cancelled, whatever the timer, on a
+  clock of its own, has done: the client never judges the deadline. A
+  question raised once her stop began settles cancelled at once,
+  unannounced.
 - **Submissions.** One turn per conversation and client message id within
   a run: a repeat while it runs joins it and one after it gets its outcome,
   an id reused for another line is refused, and a conversation remembers

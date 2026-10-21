@@ -185,10 +185,23 @@ impl CharacterHandle {
         self.health.borrow().state == CharacterState::Stopped || self.health.has_changed().is_err()
     }
 
-    /// Answered once her start settles: the one in flight, or a new one when
-    /// she has failed.
+    /// Answered once her start settles. One in flight, a boot or a reload,
+    /// is joined, so a failure it ends in is answered and not tried again;
+    /// otherwise she is asked, and boots again when she has failed.
     pub(crate) async fn start(&self) {
-        let _ = self.ask(Command::Start).await;
+        let assembling = |health: &CharacterHealth| {
+            matches!(
+                health.state,
+                CharacterState::Starting | CharacterState::Reloading
+            )
+        };
+        let mut health = self.health.clone();
+
+        if assembling(&health.borrow()) {
+            let _ = health.wait_for(|health| !assembling(health)).await;
+        } else {
+            let _ = self.ask(Command::Start).await;
+        }
     }
 
     pub(crate) async fn open(&self) -> OpenOutcome {
