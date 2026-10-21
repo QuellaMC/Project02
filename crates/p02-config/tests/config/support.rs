@@ -339,21 +339,24 @@ pub(crate) fn findings(diagnostics: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The names of the files under `root`, as a person listing it sees them.
+/// The names of the files under `root`, as a person listing it sees them,
+/// spelled with `/` on every platform; a link is listed, never followed.
 pub(crate) fn tree(root: &Path) -> Vec<String> {
     let mut names = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
 
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(&directory).unwrap() {
-            let path = entry.unwrap().path();
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
 
-            names.push(path.strip_prefix(root).unwrap().display().to_string());
-
-            if path.is_dir() && !path.is_symlink() {
-                pending.push(path);
-            }
+        if entry.file_type().unwrap().is_dir() {
+            names.extend(
+                tree(&entry.path())
+                    .into_iter()
+                    .map(|inner| format!("{name}/{inner}")),
+            );
         }
+
+        names.push(name);
     }
 
     names.sort();
