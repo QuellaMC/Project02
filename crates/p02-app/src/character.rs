@@ -28,6 +28,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinError;
 use tokio_util::sync::CancellationToken;
 
+use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::daemon::World;
 use crate::outcome::{
@@ -854,8 +855,9 @@ fn interrupted(error: &JoinError) -> String {
 /// settings, which must load and switch her on before anything is written
 /// for her, her package's settings merged into her overlay, her model, the
 /// plugins her package expects and her memory provider judged, and her
-/// host built with `broker` to ask the person.
-fn assemble(world: &World, id: &Identifier, broker: Arc<Broker>) -> Result<Assembled, String> {
+/// host built with `broker` to ask the person and her settings for its own
+/// plugin to read and change.
+fn assemble(world: &Arc<World>, id: &Identifier, broker: Arc<Broker>) -> Result<Assembled, String> {
     let discovery = discover(world.home.root());
     let definition = discovery
         .find(id.as_str())
@@ -893,6 +895,10 @@ fn assemble(world: &World, id: &Identifier, broker: Arc<Broker>) -> Result<Assem
             },
         )
         .confirmer(broker)
+        .config_control(Arc::new(CharacterConfig::new(
+            Arc::clone(world),
+            id.clone(),
+        )))
         .activate()
         .map_err(|error| sentence(&error))?;
 
@@ -1038,7 +1044,7 @@ fn memory_provider(world: &World, settings: &CharacterSettings) -> Result<(), St
 }
 
 /// Why her settings cannot be resolved, naming what does not load.
-fn unresolved(id: &Identifier, error: ReadSettingsError) -> String {
+pub(crate) fn unresolved(id: &Identifier, error: ReadSettingsError) -> String {
     match error {
         ReadSettingsError::Unloadable { diagnostics } => {
             format!(

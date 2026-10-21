@@ -7,8 +7,13 @@
 
 mod activation;
 mod before_call;
+mod character_memory;
+mod character_state;
+mod demo_config;
 mod health;
+mod home;
 mod lifecycle;
+mod management;
 mod mem0;
 mod session_history;
 mod storage;

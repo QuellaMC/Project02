@@ -1,20 +1,42 @@
-//! The plugins compiled into the daemon: each package's manifest, read once
-//! from the descriptor the repository keeps for both daemons, beside the
-//! factory that builds it.
+//! The plugins compiled into the daemon: each one's manifest, read once
+//! from its descriptor, beside the factory that builds it. A package's
+//! descriptor is the one the repository keeps for both daemons; the host's
+//! own plugin, which has no package, keeps its own beside its code.
 
 use std::sync::LazyLock;
 
 use p02_contracts::{Manifest, ManifestError, PluginFactory};
 use serde_json::Value;
 
-use crate::{mem0, session_history};
+use crate::{character_memory, character_state, demo_config, management, mem0, session_history};
 
-/// Each package by the folder its descriptor is authored in, in id order.
-const PACKAGES: [(&str, &str, PluginFactory); 2] = [
+/// Each plugin by its id, with its descriptor and its factory, in id
+/// order.
+const PLUGINS: [(&str, &str, PluginFactory); 6] = [
+    (
+        "character-memory",
+        include_str!("../../../src/plugins/packages/character-memory/project02.plugin.json"),
+        character_memory::create,
+    ),
+    (
+        "character-state",
+        include_str!("../../../src/plugins/packages/character-state/project02.plugin.json"),
+        character_state::create,
+    ),
+    (
+        "demo-config",
+        include_str!("../../../src/plugins/packages/demo-config/project02.plugin.json"),
+        demo_config::create,
+    ),
     (
         "mem0",
         include_str!("../../../src/plugins/packages/mem0/project02.plugin.json"),
         mem0::create,
+    ),
+    (
+        management::PLUGIN_ID,
+        include_str!("management/project02.plugin.json"),
+        management::create,
     ),
     (
         "session-history",
@@ -25,26 +47,26 @@ const PACKAGES: [(&str, &str, PluginFactory); 2] = [
 
 type Listed = Vec<(Manifest, PluginFactory)>;
 
-static PLUGINS: LazyLock<Result<Listed, BundledManifestError>> = LazyLock::new(|| {
-    PACKAGES
+static LISTED: LazyLock<Result<Listed, BundledManifestError>> = LazyLock::new(|| {
+    PLUGINS
         .iter()
-        .map(|&(package, descriptor, factory)| Ok((manifest(package, descriptor)?, factory)))
+        .map(|&(plugin, descriptor, factory)| Ok((manifest(plugin, descriptor)?, factory)))
         .collect()
 });
 
-/// Why a package compiled into the daemon has no manifest it can run: a
+/// Why a plugin compiled into the daemon has no manifest it can run: a
 /// build that must not ship.
 #[derive(Debug, thiserror::Error)]
 pub enum BundledManifestError {
-    #[error("the descriptor of plugin package \"{package}\" is no JSON")]
+    #[error("the descriptor of plugin \"{plugin}\" is no JSON")]
     Descriptor {
-        package: &'static str,
+        plugin: &'static str,
         #[source]
         source: serde_json::Error,
     },
-    #[error("the manifest of plugin package \"{package}\" is refused")]
+    #[error("the manifest of plugin \"{plugin}\" is refused")]
     Manifest {
-        package: &'static str,
+        plugin: &'static str,
         #[source]
         source: ManifestError,
     },
@@ -56,19 +78,19 @@ pub enum BundledManifestError {
 ///
 /// # Errors
 ///
-/// [`BundledManifestError`] for the first package whose manifest does not
+/// [`BundledManifestError`] for the first plugin whose manifest does not
 /// parse, at every call, so a build holding one fails at its first use.
 pub fn plugins() -> Result<&'static [(Manifest, PluginFactory)], &'static BundledManifestError> {
-    PLUGINS.as_deref()
+    LISTED.as_deref()
 }
 
-/// The manifest a package's descriptor carries in its `manifest` member.
-fn manifest(package: &'static str, descriptor: &str) -> Result<Manifest, BundledManifestError> {
+/// The manifest a descriptor carries in its `manifest` member.
+fn manifest(plugin: &'static str, descriptor: &str) -> Result<Manifest, BundledManifestError> {
     let descriptor: Value = serde_json::from_str(descriptor)
-        .map_err(|source| BundledManifestError::Descriptor { package, source })?;
+        .map_err(|source| BundledManifestError::Descriptor { plugin, source })?;
 
     Manifest::from_value(&descriptor["manifest"])
-        .map_err(|source| BundledManifestError::Manifest { package, source })
+        .map_err(|source| BundledManifestError::Manifest { plugin, source })
 }
 
 #[cfg(test)]
@@ -76,14 +98,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_listed_package_carries_a_manifest_of_its_own_id() {
-        let ids: Vec<&str> = plugins()
+    fn the_list_holds_every_plugin_under_its_own_id_on_by_its_manifest() {
+        let listed: Vec<(&str, bool)> = plugins()
             .unwrap()
             .iter()
-            .map(|(manifest, _)| manifest.id().as_str())
+            .map(|(manifest, _)| {
+                (
+                    manifest.id().as_str(),
+                    manifest.activation().default_enabled(),
+                )
+            })
             .collect();
-        let packages: Vec<&str> = PACKAGES.iter().map(|(package, ..)| *package).collect();
 
-        assert_eq!(ids, packages);
+        assert_eq!(
+            listed,
+            [
+                ("character-memory", true),
+                ("character-state", false),
+                ("demo-config", false),
+                ("mem0", false),
+                ("runtime.plugin", true),
+                ("session-history", true),
+            ]
+        );
     }
 }

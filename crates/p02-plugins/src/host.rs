@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, OnceLock, PoisonError, RwLock, Weak};
 
 use p02_contracts::{
     CharacterStorage, DatabaseOpener, Declaration, DuplicateToolError, FactoryInput,
@@ -11,14 +11,16 @@ use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::boundary::{RecordLabelsError, within_label_allowance};
+use crate::config_control::ConfigControl;
 use crate::confirmation::Confirmer;
 use crate::lifecycle::{HookPhaseReport, Lifecycle};
+use crate::management;
 use crate::policy;
 use crate::turn::Turn;
 
 /// Builds an instance of a plugin from its manifest and resolved config: a
 /// plugin's `create`, or any function of its shape.
-type Factory =
+pub(crate) type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
 
 /// Runs the plugins one character enables, in the order they were given:
@@ -35,6 +37,7 @@ pub struct PluginHostBuilder {
     storage: Arc<dyn CharacterStorage>,
     plugins: Vec<Setup>,
     confirmer: Option<Arc<dyn Confirmer>>,
+    config_control: Option<Arc<dyn ConfigControl>>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -47,8 +50,7 @@ struct Setup {
 
 pub(crate) struct Core {
     pub(crate) slots: Vec<Slot>,
-    /// Every tool of every enabled plugin, by which a call is routed.
-    tools: PluginToolDefinitions,
+    /// The tools the model is offered, by which a call is routed.
     offered: PluginToolDefinitions,
     pub(crate) confirmer: Option<Arc<dyn Confirmer>>,
 }
@@ -59,8 +61,8 @@ pub(crate) struct Core {
 pub(crate) struct Slot {
     pub(crate) manifest: Manifest,
     factory: Box<Factory>,
-    /// The tools checked at activation, which the model is offered; a
-    /// rebuilt instance must provide the same.
+    /// The tools checked at activation; a rebuilt instance must provide
+    /// the same.
     tools: Vec<ProvidedTool>,
     live: RwLock<Arc<dyn RuntimePlugin>>,
     pub(crate) capabilities: Capabilities,
@@ -72,6 +74,19 @@ pub(crate) struct Capabilities {
     pub(crate) session_history: Option<Arc<dyn SessionHistoryFeed>>,
     pub(crate) databases: Option<Arc<dyn DatabaseOpener>>,
 }
+
+/// A call the host routes: the plugin that offers the tool, the tool, and,
+/// for a tool that asks first, who asks the person.
+pub(crate) struct Route<'a> {
+    pub(crate) slot: &'a Slot,
+    pub(crate) tool: &'a ProvidedTool,
+    pub(crate) asking: Option<&'a dyn Confirmer>,
+}
+
+/// The host its own plugin manages, once the host is built. It is held
+/// weakly, since the host holds the plugin.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct HostLink(Arc<OnceLock<Weak<Core>>>);
 
 /// Why a set of plugins was refused at activation.
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +147,7 @@ impl PluginHost {
             storage,
             plugins: Vec::new(),
             confirmer: None,
+            config_control: None,
         }
     }
 
@@ -143,7 +159,7 @@ impl PluginHost {
     /// The plugin tools the model is offered, each name once.
     #[must_use]
     pub fn tool_definitions(&self) -> &PluginToolDefinitions {
-        &self.core.offered
+        self.core.offered()
     }
 
     /// Builds the plugin again, as activation did, from `authored`, the
@@ -161,26 +177,7 @@ impl PluginHost {
         plugin_id: &Identifier,
         authored: &Map<String, Value>,
     ) -> Result<(), ReloadError> {
-        let slot = self
-            .core
-            .slots
-            .iter()
-            .find(|slot| slot.manifest.id() == plugin_id)
-            .ok_or_else(|| ReloadError::NotEnabled(plugin_id.clone()))?;
-        let registration = build(&slot.manifest, authored, &slot.factory).map_err(|source| {
-            ReloadError::Build {
-                plugin_id: plugin_id.clone(),
-                source,
-            }
-        })?;
-
-        if registration.tools() != slot.tools.as_slice() {
-            return Err(ReloadError::ToolsChanged(plugin_id.clone()));
-        }
-
-        *slot.live.write().unwrap_or_else(PoisonError::into_inner) =
-            Arc::clone(registration.plugin());
-        Ok(())
+        self.core.reload(plugin_id, authored)
     }
 
     /// Ends every plugin: each `onShutdown` runs only reading, its store
@@ -199,7 +196,9 @@ impl PluginHost {
 impl PluginHostBuilder {
     /// Enables a plugin, to be built from `manifest` and `authored`, the
     /// values its character's settings give it by field name. Its hooks run
-    /// after those of every plugin added before it.
+    /// after those of every plugin added before it. The host's own plugin,
+    /// `runtime.plugin`, the host builds itself, linked to it, whatever
+    /// factory comes with it.
     #[must_use]
     pub fn plugin(
         mut self,
@@ -225,6 +224,14 @@ impl PluginHostBuilder {
         self
     }
 
+    /// Who reads and changes the settings of the character the host serves,
+    /// for the config tools of the host's own plugin.
+    #[must_use]
+    pub fn config_control(mut self, control: Arc<dyn ConfigControl>) -> Self {
+        self.config_control = Some(control);
+        self
+    }
+
     /// Builds every plugin and holds the set to the host's rules: one
     /// instance per plugin, each matching its manifest and with labels its
     /// records can carry, and each tool name offered to the model by one
@@ -236,6 +243,7 @@ impl PluginHostBuilder {
     /// labels than a record has room for, or that cannot be built, or the
     /// first tool name two plugins provide.
     pub fn activate(self) -> Result<PluginHost, ActivationError> {
+        let host = HostLink::default();
         let mut slots: Vec<Slot> = Vec::with_capacity(self.plugins.len());
         let mut definitions = Vec::new();
 
@@ -258,6 +266,11 @@ impl PluginHostBuilder {
                 },
             )?;
 
+            let factory = if plugin_id.as_str() == management::PLUGIN_ID {
+                management::factory(&host, self.config_control.clone())
+            } else {
+                factory
+            };
             let registration =
                 build(&manifest, &authored, &factory).map_err(|source| ActivationError::Build {
                     plugin_id: plugin_id.clone(),
@@ -284,16 +297,14 @@ impl PluginHostBuilder {
 
         let tools =
             PluginToolDefinitions::new(definitions).map_err(ActivationError::DuplicateTool)?;
-        let offered = policy::tools::offered(&tools, self.confirmer.is_some());
+        let core = Arc::new(Core {
+            slots,
+            offered: policy::tools::offered(&tools, self.confirmer.is_some()),
+            confirmer: self.confirmer,
+        });
 
-        Ok(PluginHost {
-            core: Arc::new(Core {
-                slots,
-                tools,
-                offered,
-                confirmer: self.confirmer,
-            }),
-        })
+        host.attach(&core);
+        Ok(PluginHost { core })
     }
 }
 
@@ -318,15 +329,68 @@ impl Core {
             .filter(move |slot| slot.manifest.declares(declaration))
     }
 
-    /// The enabled plugin that provides the tool, and the tool.
-    pub(crate) fn route(&self, tool_name: &str) -> Option<(&Slot, &ProvidedTool)> {
-        let definition = self.tools.get(tool_name)?;
+    pub(crate) fn offered(&self) -> &PluginToolDefinitions {
+        &self.offered
+    }
+
+    /// The tools the model is offered of plugin `plugin_id`.
+    pub(crate) fn offered_by<'a>(
+        &'a self,
+        plugin_id: &'a Identifier,
+    ) -> impl Iterator<Item = &'a ProvidedTool> {
+        self.offered
+            .definitions()
+            .iter()
+            .filter(move |definition| &definition.plugin_id == plugin_id)
+            .map(|definition| &definition.tool)
+    }
+
+    /// Where a call of `tool_name` goes. A tool the model is not offered
+    /// goes nowhere, whichever plugin provides it, as the turn never
+    /// declared it.
+    pub(crate) fn route(&self, tool_name: &str) -> Option<Route<'_>> {
+        let definition = self.offered.get(tool_name)?;
         let slot = self
             .slots
             .iter()
             .find(|slot| slot.manifest.id() == &definition.plugin_id)?;
+        let asking = if definition.tool.is_approval_gated() {
+            Some(self.confirmer.as_deref()?)
+        } else {
+            None
+        };
 
-        Some((slot, &definition.tool))
+        Some(Route {
+            slot,
+            tool: &definition.tool,
+            asking,
+        })
+    }
+
+    pub(crate) fn reload(
+        &self,
+        plugin_id: &Identifier,
+        authored: &Map<String, Value>,
+    ) -> Result<(), ReloadError> {
+        let slot = self
+            .slots
+            .iter()
+            .find(|slot| slot.manifest.id() == plugin_id)
+            .ok_or_else(|| ReloadError::NotEnabled(plugin_id.clone()))?;
+        let registration = build(&slot.manifest, authored, &slot.factory).map_err(|source| {
+            ReloadError::Build {
+                plugin_id: plugin_id.clone(),
+                source,
+            }
+        })?;
+
+        if registration.tools() != slot.tools.as_slice() {
+            return Err(ReloadError::ToolsChanged(plugin_id.clone()));
+        }
+
+        *slot.live.write().unwrap_or_else(PoisonError::into_inner) =
+            Arc::clone(registration.plugin());
+        Ok(())
     }
 }
 
@@ -350,6 +414,21 @@ impl Capabilities {
             session_history: grants.session_history.then(|| storage.session_history()),
             databases: grants.databases.then(|| storage.databases(plugin_id)),
         }
+    }
+}
+
+impl HostLink {
+    fn attach(&self, core: &Arc<Core>) {
+        // A link is attached once, by the activation that made it.
+        let _ = self.0.set(Arc::downgrade(core));
+    }
+
+    /// The host, while it serves.
+    pub(crate) fn core(&self) -> Result<Arc<Core>, PluginError> {
+        self.0
+            .get()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| PluginError::new("the plugin host this plugin manages has stopped"))
     }
 }
 
@@ -377,6 +456,7 @@ impl fmt::Debug for PluginHostBuilder {
             )
             .field("storage", &self.storage)
             .field("confirmer", &self.confirmer)
+            .field("config_control", &self.config_control)
             .finish()
     }
 }

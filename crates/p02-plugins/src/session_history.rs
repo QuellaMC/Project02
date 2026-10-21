@@ -22,6 +22,7 @@ use p02_shared::Identifier;
 use serde_json::Value;
 
 use self::index::{IndexError, Scope, SessionIndex};
+use crate::package::{blocking, rejected};
 
 const GUIDANCE: &str = "When they bring up an earlier conversation, or the answer may sit \
      further back than you can see (including earlier in this one), look it up with \
@@ -124,9 +125,7 @@ impl RuntimePlugin for SessionHistoryPlugin {
             })
             .unwrap_or_default();
         let index = Arc::clone(&self.index);
-        let answered = tokio::task::spawn_blocking(move || reach.answer(&index, request, &unseen))
-            .await
-            .map_err(|error| PluginError::with_source("the session index job failed", error))?;
+        let answered = blocking(move || reach.answer(&index, request, &unseen)).await?;
 
         Ok(match answered {
             Ok(answer) => ToolCallOutcome::Accepted {
@@ -158,13 +157,12 @@ impl RuntimePlugin for SessionHistoryPlugin {
 
         let session = context.turn().session_id.clone();
         let index = Arc::clone(&self.index);
-        let caught_up = tokio::task::spawn_blocking(move || {
+        let caught_up = blocking(move || {
             reach.indexed(&index, |index, history| {
                 index.catch_up(history, Some(&session)).map(drop)
             })
         })
-        .await
-        .map_err(|error| PluginError::with_source("the session index job failed", error))?;
+        .await?;
 
         // The catch-up only saves the next search the work: a failure here
         // is the next search's to report.
@@ -365,16 +363,4 @@ fn refusal(error: IndexError) -> ToolCallOutcome {
     };
 
     rejected(reason, message, "Rejected a session-history request.")
-}
-
-fn rejected(reason: &str, message: String, summary: &str) -> ToolCallOutcome {
-    ToolCallOutcome::Rejected {
-        reason: reason.to_owned(),
-        message,
-        evidence: vec![EvidenceNote::new(
-            EvidenceKind::ToolInvocation,
-            EvidenceStatus::Rejected,
-            summary,
-        )],
-    }
 }

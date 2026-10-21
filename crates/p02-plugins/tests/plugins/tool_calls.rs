@@ -426,7 +426,7 @@ fn settings_host(
     builder.activate().unwrap()
 }
 
-/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and no database and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared
+/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and no database and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared, a call of it refused `tool_not_declared` as any tool the turn never offered
 #[tokio::test(start_paused = true)]
 async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes() {
     let storage = Storage::new();
@@ -505,7 +505,8 @@ async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes(
     };
 
     assert!(unasked.tool_definitions().get("settings.update").is_none());
-    assert_eq!(reason(&refused), Some("tool_not_routable"));
+    assert_eq!(reason(&refused), Some("tool_not_declared"));
+    assert_eq!(refused.evidence, [], "no plugin answered it");
     assert_eq!(
         settings.prepared_with.lock().unwrap().as_slice(),
         [unable_to_write.clone(), unable_to_write],

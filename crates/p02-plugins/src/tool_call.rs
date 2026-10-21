@@ -17,8 +17,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::boundary::{described, quoted, within_answer_limits};
-use crate::confirmation::{ConfirmationDecision, ConfirmationRequest};
-use crate::host::{Core, PluginHost, Slot};
+use crate::confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
+use crate::host::{Core, PluginHost, Route, Slot};
 use crate::invoke::{FailureKind, HookFailure, Invocation};
 use crate::turn::Turn;
 
@@ -93,7 +93,7 @@ impl Core {
     /// A call the host cannot route runs alone.
     fn concurrency(&self, call: &ProposedToolCall) -> ToolConcurrency {
         self.route(call.tool_name.as_str())
-            .map_or(ToolConcurrency::Exclusive, |(_, tool)| tool.concurrency())
+            .map_or(ToolConcurrency::Exclusive, |route| route.tool.concurrency())
     }
 
     async fn tool_call(&self, proposed: ProposedToolCall, turn: &Turn) -> ToolCallReport {
@@ -102,7 +102,7 @@ impl Core {
             tool_name,
             input,
         } = proposed;
-        let Some((slot, tool)) = self.route(tool_name.as_str()) else {
+        let Some(Route { slot, tool, asking }) = self.route(tool_name.as_str()) else {
             return ToolCallReport {
                 result: ToolCallResult::Rejected {
                     reason: "tool_not_declared".to_owned(),
@@ -126,8 +126,8 @@ impl Core {
             }
         };
 
-        if tool.is_approval_gated() {
-            return self.approval_gated_call(slot, tool, call, turn).await;
+        if let Some(confirmer) = asking {
+            return slot.approval_gated_call(confirmer, tool, call, turn).await;
         }
 
         let plugin = slot.live();
@@ -139,40 +139,29 @@ impl Core {
 
         slot.tool_answer(turn, tool, answered)
     }
+}
 
-    /// Prepares an approval-gated call, shows the person what it would do,
-    /// and applies its effect, under a budget of its own, only on their
-    /// yes; a tool nobody can be asked about is never prepared. The
-    /// preparation and the effect each answer through the output boundary
-    /// on their own, and the host's records come on top: the call records
-    /// the preparation, then the person's answer, then the effect.
+impl Slot {
+    /// Prepares an approval-gated call, shows the person what it would do
+    /// through `confirmer`, and applies its effect, under a budget of its
+    /// own, only on their yes. The preparation and the effect each answer
+    /// through the output boundary on their own, and the host's records
+    /// come on top: the call records the preparation, then the person's
+    /// answer, then the effect.
     async fn approval_gated_call(
         &self,
-        slot: &Slot,
+        confirmer: &dyn Confirmer,
         tool: &ProvidedTool,
         call: ToolCall,
         turn: &Turn,
     ) -> ToolCallReport {
-        let plugin_id = slot.manifest.id();
-        let Some(confirmer) = &self.confirmer else {
-            return slot.refusal(
-                turn,
-                "tool_not_routable",
-                &format!(
-                    "Plugin \"{plugin_id}\" tool \"{}\" requires an unavailable confirmation \
-                     handler.",
-                    tool.name()
-                ),
-                EvidenceStatus::Rejected,
-                PolicyOutcome::DisallowedToolCall,
-            );
-        };
+        let plugin_id = self.manifest.id();
         let call_id = call.call_id().clone();
         let Prepared {
             preview,
             effect,
             mut evidence,
-        } = match slot.prepare(tool, call, turn).await {
+        } = match self.prepare(tool, call, turn).await {
             Ok(prepared) => prepared,
             Err(unasked) => return unasked,
         };
@@ -189,7 +178,7 @@ impl Core {
             () = turn.cancellation().cancelled() => ConfirmationDecision::Cancelled,
         };
         let refused = |reason, message: String| {
-            slot.refusal(
+            self.refusal(
                 turn,
                 reason,
                 &message,
@@ -199,7 +188,7 @@ impl Core {
         };
         let decided = match decision {
             ConfirmationDecision::Approved => {
-                evidence.push(slot.record(
+                evidence.push(self.record(
                     turn,
                     EvidenceKind::Policy,
                     EvidenceStatus::Accepted,
@@ -210,13 +199,13 @@ impl Core {
                     Some(PolicyOutcome::UserApproved),
                 ));
 
-                let applied = slot
+                let applied = self
                     .invoke(Hook::HandleToolCall, turn, move |context| async move {
                         effect.apply(&context).await
                     })
                     .await;
 
-                slot.tool_answer(turn, tool, applied)
+                self.tool_answer(turn, tool, applied)
             }
             ConfirmationDecision::Denied => refused(
                 "plugin_config_approval_denied",
@@ -240,9 +229,7 @@ impl Core {
             evidence,
         }
     }
-}
 
-impl Slot {
     /// Prepares an approval-gated call only reading, its store read-only and
     /// no database open to it: what the person is to be asked about, or the
     /// report of a call that ends unasked.

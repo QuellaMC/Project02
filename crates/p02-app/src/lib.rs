@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod character;
+mod config_control;
 mod confirmation;
 mod daemon;
 mod history;
