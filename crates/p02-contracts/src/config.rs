@@ -143,6 +143,12 @@ impl ConfigField {
             return false;
         }
 
+        self.of_its_type(value)
+    }
+
+    /// Whether `value` is of this field's value type, whatever else it
+    /// must be.
+    pub(crate) fn of_its_type(&self, value: &Value) -> bool {
         match self.value_type {
             None => true,
             Some(ConfigValueType::String | ConfigValueType::Path | ConfigValueType::Enum) => {
