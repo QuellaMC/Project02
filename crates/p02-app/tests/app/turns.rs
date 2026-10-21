@@ -9,7 +9,8 @@ use p02_app::{Event, TurnOutcome};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, World, id, line, make_read_only, open, restore, said, settle, wire, write,
+    Ear, Gate, Round, Toy, World, id, line, make_read_only, open, restore, said, settle, wire,
+    write,
 };
 
 /// A daemon on a home with the bundled Mira starts her on its first
@@ -310,6 +311,37 @@ async fn a_repeated_submission_gets_its_turns_outcome_and_runs_nothing() {
     assert_eq!(world.model.asked(), 2);
 }
 
+/// The plugins' work after a turn's commit that fails leaves the turn
+/// completed and her ready, and is told on the stream and in her summary.
+#[tokio::test(start_paused = true)]
+async fn the_plugins_work_failing_after_a_turn_is_maintenance() {
+    let world = World::new();
+    let daemon = world
+        .daemon(vec![Toy::new("diary").failing_after_turns().plugin()])
+        .await;
+
+    daemon.reconcile().await;
+
+    let conversation = open(&daemon).await;
+    let mut ear = Ear::on(&daemon);
+    let outcome = daemon
+        .deliver(line(&conversation, "Remember tea.", "tea"))
+        .await;
+    let failure = wire(
+        &ear.until(|event| matches!(event, Event::MaintenanceFailed { .. }))
+            .await,
+    );
+    let summary = &wire(&daemon.health().await)["characters"][0];
+
+    assert_eq!(said(&outcome), ["Remember tea.", "Hello."]);
+    assert_eq!(
+        failure["message"],
+        "afterTurnCommitted plugin hook failed: The diary is full."
+    );
+    assert_eq!(summary["state"], "ready");
+    assert_eq!(summary["maintenance"]["message"], failure["message"]);
+}
+
 /// A segment rotation that fails behind a completed turn leaves the turn
 /// completed and her ready, and is told on the stream and in her summary,
 /// which a stop and a start clear.
@@ -371,10 +403,10 @@ async fn a_rotation_that_fails_is_maintenance_a_stop_and_a_start_clear() {
     assert_eq!(ear.states("mira"), []);
 
     world.settings(json!({"project02": {"enabled": false, "contextWindowTokens": 80}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     daemon.reconcile().await;
     world.settings(json!({"project02": {"contextWindowTokens": 80}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     daemon.reconcile().await;
 
     let summary = &wire(&daemon.health().await)["characters"][0];

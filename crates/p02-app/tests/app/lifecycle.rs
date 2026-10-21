@@ -47,7 +47,7 @@ async fn without_a_provider_every_character_fails_until_one_is_chosen() {
     assert!(message.contains(NO_PROVIDER), "{message}");
 
     world.settings(json!({"project02": {"roleModelProvider": "nvidia"}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     daemon.reconcile().await;
 
     let states: Vec<_> = wire(&daemon.health().await)["characters"]
@@ -84,7 +84,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     ));
 
     world.settings(json!({}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     assert_eq!(daemon.reconcile().await.starting, [id("mira")]);
 
     let conversation = open(&daemon).await;
@@ -107,7 +107,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     ear.until(|event| matches!(event, Event::ConfirmationRequested(_)))
         .await;
     world.settings(json!({"project02": {"enabled": false}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
 
     let plan = daemon.reconcile().await;
     let settled = ear
@@ -142,7 +142,7 @@ async fn a_change_switching_her_off_during_her_boot_ends_with_her_stopped() {
 
     world.assembly.reached().await;
     world.settings(json!({"project02": {"enabled": false}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     world.assembly.open();
     boot.await.unwrap();
     daemon.reconcile().await;
@@ -255,12 +255,12 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     let mut ear = Ear::on(&daemon);
 
     world.settings(json!({"connectors": {"telegram": {"config": {"mirror": false}}}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     assert_eq!(daemon.reconcile().await.reloading, []);
 
     world.assembly.shut();
     world.settings(json!({"plugins": {"tone": {"config": {"tone": "warm"}}}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
 
     let pass = tokio::spawn({
         let daemon = daemon.clone();
@@ -304,7 +304,7 @@ async fn a_stop_during_her_reload_wins() {
 
     world.assembly.shut();
     world.settings(json!({"plugins": {"tone": {"config": {"tone": "warm"}}}}));
-    daemon.settings_changed().await;
+    daemon.settings_changed();
     world.assembly.reached().await;
 
     let stop = begun(daemon.stop()).await;
@@ -435,8 +435,8 @@ async fn a_connector_is_present_while_any_of_its_streams_is() {
         _ => None,
     };
 
-    let first = daemon.connector_present(telegram).await;
-    let second = daemon.connector_present(telegram).await;
+    let first = daemon.connector_present(telegram);
+    let second = daemon.connector_present(telegram);
 
     drop(first);
     settle().await;

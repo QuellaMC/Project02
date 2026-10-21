@@ -228,6 +228,17 @@ pub struct Presence {
     runtime: tokio::runtime::Handle,
 }
 
+impl Presence {
+    /// Health as it now stands, read and sent to every surface on a task
+    /// of its own.
+    fn announce(&self) {
+        let daemon = self.daemon.clone();
+
+        self.runtime
+            .spawn(async move { daemon.health_changed().await });
+    }
+}
+
 impl Drop for Presence {
     fn drop(&mut self) {
         let last = {
@@ -239,10 +250,7 @@ impl Drop for Presence {
         };
 
         if last {
-            let daemon = self.daemon.clone();
-
-            self.runtime
-                .spawn(async move { daemon.health_changed().await });
+            self.announce();
         }
     }
 }
@@ -539,36 +547,40 @@ impl Daemon {
     }
 
     /// What the gateway calls once a settings change landed: the roster as
-    /// it now stands goes out at once, to every surface, and a reconcile
-    /// pass acts on it behind the answer.
-    pub async fn settings_changed(&self) {
-        self.health_changed().await;
-
+    /// it now stands goes out to every surface, and then a reconcile pass
+    /// acts on it, both on a task of their own, so a caller that stops
+    /// waiting leaves neither undone.
+    pub fn settings_changed(&self) {
         let daemon = self.clone();
 
-        tokio::spawn(async move { daemon.reconcile().await });
+        tokio::spawn(async move {
+            daemon.health_changed().await;
+            daemon.reconcile().await;
+        });
     }
 
-    /// Counts a stream of `connector` present until the presence is let go;
-    /// health changes when the count crosses zero.
-    pub async fn connector_present(&self, connector: &Connector) -> Presence {
+    /// Counts a stream of `connector` present from now until the presence
+    /// is let go; health changes when the count crosses zero, and goes out
+    /// to every surface on a task of its own.
+    pub fn connector_present(&self, connector: &Connector) -> Presence {
+        let presence = Presence {
+            daemon: self.clone(),
+            connector: connector.id().clone(),
+            runtime: tokio::runtime::Handle::current(),
+        };
         let first = {
-            let mut presence = self.inner.presence();
-            let count = presence.entry(connector.id().clone()).or_default();
+            let mut counts = self.inner.presence();
+            let count = counts.entry(connector.id().clone()).or_default();
 
             *count += 1;
             *count == 1
         };
 
         if first {
-            self.health_changed().await;
+            presence.announce();
         }
 
-        Presence {
-            daemon: self.clone(),
-            connector: connector.id().clone(),
-            runtime: tokio::runtime::Handle::current(),
-        }
+        presence
     }
 
     /// Stops every character, for good: no start follows. A boot, a reload
