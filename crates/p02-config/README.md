@@ -18,9 +18,9 @@ outcome are the wire's own types.
   no document, so nothing is taken from it and nothing is written over it.
   Another version, an unknown key at the top or under `project02`, a host
   value its field refuses, or a namespace that is no object leaves the
-  document unusable: every target that reads it is refused until a person
-  or a change repairs it. An unknown key in a
-  section's stanza, a stanza or config that is no object, or a value its
+  document unusable: every view and every change of a target that reads
+  it is refused, saying why, until a person repairs it. An unknown key in
+  a section's stanza, a stanza or config that is no object, or a value its
   field refuses is an error of that section alone. A finding about what a
   document holds names that document: one in her overlay names her. The
   store admits the home and her data directory before either is read, so a

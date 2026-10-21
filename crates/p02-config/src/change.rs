@@ -458,11 +458,10 @@ fn edit(
     }
 }
 
-/// The change, made under the locks: the documents must load, the
-/// target's own only as far as its file holds an object a change may
-/// repair; the fingerprint must still be the one read; and the document
-/// made must be valid, and leave the section it changes without an error
-/// over the documents beside it.
+/// The change, made under the locks: the documents must load; the
+/// fingerprint must still be the one read; and the document made must be
+/// valid, and leave the section it changes without an error over the
+/// documents beside it.
 fn commit(
     home: &Home,
     sections: &Sections,
@@ -544,42 +543,30 @@ struct Loaded {
 }
 
 impl Loaded {
-    /// The home's document, which a change may repair while its file holds
-    /// an object.
+    /// The home's document, which must load, as its view must.
     fn home(written: Written) -> Result<Self, String> {
         Ok(Self {
-            home: repairable(written.read)
-                .map_err(|message| format!("The home's settings failed to load: {message}"))?,
+            home: loads(written.read, "The home's settings")?,
             home_path: written.path,
             overlay: None,
         })
     }
 
-    /// The home's document, which must load for a change to her settings to
-    /// be judged over it, and her overlay, which a change may repair, as her
-    /// view shows it: with her package's settings merged in while they are
-    /// still to be.
+    /// The home's document and her overlay, which must load, as her view
+    /// must, her overlay as her view shows it: with her package's settings
+    /// merged in while they are still to be.
     fn character(
         sections: &Sections,
         written: Written,
         character: &CharacterDefinition,
         overlay: WrittenOverlay,
     ) -> Result<Self, String> {
-        let home = written.read.usable().map_err(|diagnostics| {
-            let reason = diagnostics
-                .first()
-                .map(|diagnostic| diagnostic.message().to_owned())
-                .unwrap_or_default();
-
-            format!("The home's settings failed to load: {reason}")
-        })?;
+        let home = loads(written.read, "The home's settings")?;
         let absent = matches!(overlay.read, Read::Absent);
-        let document = repairable(overlay.read).map_err(|message| {
-            format!(
-                "The settings of \"{}\" failed to load: {message}",
-                character.profile.id
-            )
-        })?;
+        let document = loads(
+            overlay.read,
+            &format!("The settings of \"{}\"", character.profile.id),
+        )?;
         let (merged, _) = merged_overlay(
             sections,
             character,
@@ -643,13 +630,16 @@ impl Loaded {
     }
 }
 
-/// The document a change starts from: an absent file's empty one, or what
-/// the file holds, though invalid, so a change can repair it; a file that
-/// holds no document is refused with what keeps it from loading.
-fn repairable(read: Read) -> Result<Document, String> {
-    match read {
-        Read::Absent => Ok(Document::empty()),
-        Read::Document(document) => Ok(document),
-        Read::Unreadable(diagnostic) => Err(diagnostic.message().to_owned()),
-    }
+/// The document a change starts from, `read` as its file was found: a
+/// document that does not load is refused, as its view is, with the first
+/// thing that keeps it from loading, and is left for a person to repair.
+fn loads(read: Read, settings: &str) -> Result<Document, String> {
+    read.usable().map_err(|diagnostics| {
+        let reason = diagnostics
+            .first()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .unwrap_or_default();
+
+        format!("{settings} failed to load: {reason}")
+    })
 }
