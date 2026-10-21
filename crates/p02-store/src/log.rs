@@ -2,6 +2,11 @@
 //! line, appended and never rewritten. Reading it replays every committed
 //! line through the gate; writing it takes the session's writer lease,
 //! which one writer holds at a time.
+//!
+//! A read that must have the whole session fails at the first line the gate
+//! refuses. One that reads on past damage, as plugins read history, skips
+//! each refused line instead: a refused record changes nothing, so the lines
+//! after it are judged as if it were not there, by the same gate.
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -47,6 +52,21 @@ pub struct SessionWriter {
 struct Cached {
     stamp: Option<FileStamp>,
     replay: SessionReplay,
+}
+
+/// A log as the gate judged it: what the gate took, and each committed line,
+/// where it ends and the record of it the gate took, if it took one.
+#[derive(Debug)]
+pub(crate) struct JudgedLog {
+    replay: SessionReplay,
+    lines: Vec<(usize, Option<usize>)>,
+}
+
+/// What a read does at a committed line the gate refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnDamage {
+    Fail,
+    Skip,
 }
 
 impl CharacterData {
@@ -105,7 +125,17 @@ impl SessionLog {
     /// record that does not follow the ones before it.
     pub fn read(&self) -> Result<SessionReplay, StorageError> {
         self.data.session(&self.session)?;
-        Ok(self.load()?.replay)
+        Ok(self.load(OnDamage::Fail)?.1.replay)
+    }
+
+    /// The log read on past its damage, each line the gate refuses skipped.
+    ///
+    /// # Errors
+    ///
+    /// An error of [`SessionLog::read`] but for damage.
+    pub(crate) fn read_leniently(&self) -> Result<JudgedLog, StorageError> {
+        self.data.session(&self.session)?;
+        Ok(self.load(OnDamage::Skip)?.1)
     }
 
     /// The session's writer: its lease, refused at once while another
@@ -121,7 +151,7 @@ impl SessionLog {
             &Resource::SessionWriter(&self.session),
         )])?;
 
-        match self.data.session(&self.session).and_then(|_| self.load()) {
+        match self.data.session(&self.session).and_then(|_| self.cached()) {
             Ok(cached) => Ok(SessionWriter {
                 log: self,
                 lease,
@@ -142,7 +172,16 @@ impl SessionLog {
         self.directory().join(RAW_EVENTS_FILE)
     }
 
-    fn load(&self) -> Result<Cached, StorageError> {
+    fn cached(&self) -> Result<Cached, StorageError> {
+        let (stamp, judged) = self.load(OnDamage::Fail)?;
+
+        Ok(Cached {
+            stamp,
+            replay: judged.replay,
+        })
+    }
+
+    fn load(&self, on_damage: OnDamage) -> Result<(Option<FileStamp>, JudgedLog), StorageError> {
         let directory = self.directory();
 
         match describe_entry(&directory) {
@@ -179,37 +218,65 @@ impl SessionLog {
 
         let (stamp, content) = read_coherently(&path, || read_lines(&path))?;
 
-        Ok(Cached {
-            stamp,
-            replay: self.replay(&path, &content)?,
-        })
+        Ok((stamp, self.replay(&path, &content, on_damage)?))
     }
 
-    fn replay(&self, path: &Path, content: &[u8]) -> Result<SessionReplay, StorageError> {
-        let mut replay = SessionReplay::new(Session::new(
-            self.session.clone(),
-            self.character.clone(),
-            self.user_name.clone(),
-        ));
+    fn replay(
+        &self,
+        path: &Path,
+        content: &[u8],
+        on_damage: OnDamage,
+    ) -> Result<JudgedLog, StorageError> {
+        let mut judged = JudgedLog {
+            replay: SessionReplay::new(Session::new(
+                self.session.clone(),
+                self.character.clone(),
+                self.user_name.clone(),
+            )),
+            lines: Vec::new(),
+        };
+        let mut end = 0;
 
         for (line, bytes) in committed_lines(content) {
-            let record =
-                LogRecord::from_line(bytes).map_err(|source| StorageError::MalformedRecord {
-                    path: path.to_path_buf(),
-                    line,
-                    source,
-                })?;
+            end += bytes.len() + 1;
 
-            replay
-                .apply(record)
-                .map_err(|source| StorageError::BrokenLog {
+            let taken = judged.replay.records().len();
+            let applied = LogRecord::from_line(bytes)
+                .map_err(|source| StorageError::MalformedRecord {
                     path: path.to_path_buf(),
                     line,
                     source,
-                })?;
+                })
+                .and_then(|record| {
+                    judged
+                        .replay
+                        .apply(record)
+                        .map_err(|source| StorageError::BrokenLog {
+                            path: path.to_path_buf(),
+                            line,
+                            source,
+                        })
+                });
+
+            match (applied, on_damage) {
+                (Ok(()), _) => judged.lines.push((end, Some(taken))),
+                (Err(_), OnDamage::Skip) => judged.lines.push((end, None)),
+                (Err(error), OnDamage::Fail) => return Err(error),
+            }
         }
 
-        Ok(replay)
+        Ok(judged)
+    }
+}
+
+impl JudgedLog {
+    /// Each committed line, oldest first: where it ends, just past its
+    /// newline, and the record of it the gate took, none when it refused it.
+    pub(crate) fn lines(&self) -> impl Iterator<Item = (usize, Option<&LogRecord>)> {
+        // A taken line's index is the count of records before it was taken.
+        self.lines
+            .iter()
+            .map(|(end, taken)| (*end, taken.map(|index| &self.replay.records()[index])))
     }
 }
 
@@ -290,7 +357,7 @@ impl SessionWriter {
 
         match self.cache.take() {
             Some(cached) if cached.stamp == current => Ok(self.cache.insert(cached)),
-            _ => Ok(self.cache.insert(self.log.load()?)),
+            _ => Ok(self.cache.insert(self.log.cached()?)),
         }
     }
 }

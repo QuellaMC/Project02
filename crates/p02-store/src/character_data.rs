@@ -1,7 +1,7 @@
 //! A character's data directory, `<home>/character-data/<id>/`: her
 //! sessions and their catalog, the record of the lines her conversations
-//! took, her locks, her settings overlay. Its marker names her; nothing in it
-//! is read or written for anyone else.
+//! took, her plugins' data, her locks, her settings overlay. Its marker
+//! names her; nothing in it is read or written for anyone else.
 
 use std::path::{Path, PathBuf};
 
@@ -12,8 +12,8 @@ use p02_shared::{Identifier, PathEntry, create_directories, describe_entry, list
 use crate::error::StorageError;
 use crate::home::{Home, check_real};
 use crate::layout::{
-    CONFIG_FILE, EntryKind, LOCKS_DIRECTORY, SCHEMA_FILE, SESSION_CATALOG_FILE, SESSIONS_DIRECTORY,
-    TAKEN_LINES_DIRECTORY,
+    CONFIG_FILE, EntryKind, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY, SCHEMA_FILE,
+    SESSION_CATALOG_FILE, SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
 };
 use crate::marker::{self, Marker, Scope};
 use p02_shared::temporary_target;
@@ -132,6 +132,10 @@ impl CharacterData {
         Ok(())
     }
 
+    pub(crate) fn home(&self) -> &Home {
+        &self.home
+    }
+
     pub(crate) fn locks_root(&self) -> PathBuf {
         self.root.join(LOCKS_DIRECTORY)
     }
@@ -146,6 +150,22 @@ impl CharacterData {
 
     pub(crate) fn taken_lines_root(&self) -> PathBuf {
         self.root.join(TAKEN_LINES_DIRECTORY)
+    }
+
+    /// Where a plugin's own data lives in hers, `plugin-data/<plugin>/`.
+    pub(crate) fn plugin_root(&self, plugin: &Identifier) -> PathBuf {
+        self.root.join(PLUGIN_DATA_DIRECTORY).join(plugin.as_str())
+    }
+
+    /// [`CharacterData::plugin_root`], once it and the directory above it
+    /// are known to be real directories, or not there yet: a link would
+    /// carry the plugin's data outside hers.
+    pub(crate) fn checked_plugin_root(&self, plugin: &Identifier) -> Result<PathBuf, StorageError> {
+        let root = self.plugin_root(plugin);
+
+        check_real(&self.root.join(PLUGIN_DATA_DIRECTORY), EntryKind::Directory)?;
+        check_real(&root, EntryKind::Directory)?;
+        Ok(root)
     }
 
     fn of_marker(
@@ -212,6 +232,7 @@ fn adoptable_marker(home: &Home, root: &Path) -> Result<Option<Marker>, StorageE
         (LOCKS_DIRECTORY, EntryKind::Directory),
         (SESSIONS_DIRECTORY, EntryKind::Directory),
         (TAKEN_LINES_DIRECTORY, EntryKind::Directory),
+        (PLUGIN_DATA_DIRECTORY, EntryKind::Directory),
         (SESSION_CATALOG_FILE, EntryKind::File),
         (CONFIG_FILE, EntryKind::File),
     ] {

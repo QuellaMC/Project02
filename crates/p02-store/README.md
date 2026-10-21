@@ -1,10 +1,12 @@
 # p02-store
 
 Everything the daemon keeps under a home, at storage schema version 15,
-and the one gate a session's log is read and written through. It depends
-on p02-characters, p02-contracts, p02-core and p02-shared, and reaches the
-disk only through the fs seam of p02-shared. Its work is synchronous: the
-runtime runs it on a blocking thread, where a lock's wait blocks.
+the one gate a session's log is read and written through, and the storage
+a character's plugins reach. It depends on p02-characters, p02-contracts,
+p02-core and p02-shared, reaches the disk only through the fs seam of
+p02-shared, and opens every database of the daemon through rusqlite. Its
+work is synchronous: the runtime runs it on a blocking thread, where a
+lock's wait blocks.
 
 - **The layout.** A home holds its marker `schema.json`, its settings
   `config.json`, the daemon's record, its `.locks`, the character packages
@@ -13,8 +15,9 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   character: her marker, her overlay `config.json`, her `.locks`, her
   sessions catalog `sessions.jsonl`, a directory per session
   `sessions/<conversation>.<segment>/` holding its log `raw-events.jsonl`,
-  and the record of each conversation's taken lines,
-  `taken-lines/<conversation>.json`. Every name is spelled once.
+  the record of each conversation's taken lines,
+  `taken-lines/<conversation>.json`, and each plugin's own data,
+  `plugin-data/<plugin>/`. Every name is spelled once.
 - **Markers.** Nothing below a home or a character's data directory is read
   or written until its marker vouches for it: version 15, what it marks,
   and for character data the character it belongs to and the version of
@@ -29,10 +32,12 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   for.
 - **Files.** A file is replaced whole, under the lock that guards it, so a
   temporary found beside it is a dead writer's and goes before the write.
-  Logs are appended to, never rewritten and never flushed: a line counts
-  once its newline is on disk, text after the last newline is an append a
-  crash cut short and is no line, and the next append cuts it. Files are
-  made owner-only.
+  Logs are appended to and never rewritten: a line counts once its
+  newline is on disk, text after the last newline is an append a crash cut
+  short and is no line, and the next append cuts it. A session's log is
+  not flushed: a line a crash of the machine loses is lost as its call
+  would have been. A plugin's log is, since its ledger counts each line
+  once it has landed. Files are made owner-only.
 - **Locks.** The operating system's advisory lock on
   `<locks root>/<sha256 of the key>.lock`, which the kernel releases when
   its holder dies, so no lock is ever stale and none is reclaimed. Lock
@@ -44,10 +49,12 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   `conversation-writer:<id>`, `session-writer:<id>`); a short guarded write
   is waited for while it changes hands, and given up after ten seconds
   without a change (`conversations-catalog`, `storage-schema`,
-  `session-catalog`). A lock that cannot be had is reported
-  `storage_busy`, a session's writer `session_busy`. Locks taken together
-  are taken in the order of their files and released in reverse. A holder
-  passes its lease along rather than taking it again.
+  `session-catalog`); a plugin's files, which a hook holds for its own
+  short work, after two, and never past the deadline of the hook that
+  asks (`plugin:<root of its files>`). A lock that cannot be had is
+  reported `storage_busy`, a session's writer `session_busy`. Locks taken
+  together are taken in the order of their files and released in reverse.
+  A holder passes its lease along rather than taking it again.
 - **Records.** A session's log holds one record per line: the event it
   belongs to, its kind, and exactly the fields its kind has, in the order
   they are written. A model round records what it was shown and what it
@@ -107,3 +114,52 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   its directory back, and a directory without its record is a make a crash
   interrupted. A conversation's taken lines are read leniently and written
   whole by the holder of the conversation; the segments stay their truth.
+- **The history feed.** A character's plugins read her committed
+  conversations through it: the sessions her catalog lists, read as every
+  reader reads the catalog, and each session's visible messages from a
+  cursor, a batch of whole lines about as large as asked at a time. A
+  cursor is the place just past a line; one that is no line's end in the
+  log as it is now, which only ever grows, is a cursor of a log that
+  shrank or was replaced, and its reader starts again from the top. The
+  feed reads a log through the gate as every reader does, but reads past
+  its damage: a line the gate refuses is counted and skipped, and since a
+  refused record changes nothing, the lines after it are judged as if it
+  were not there. So a damaged older segment costs the plugins only what
+  it lost, while every reader that must have the session whole still fails
+  at it.
+- **Plugin files.** A plugin's own files, documents (`.json`) replaced
+  whole and logs (`.jsonl`) appended to, every value held to the JSON
+  limits, written or read. A path a plugin names is segments of ASCII
+  letters, digits, `.`, `_` and `-`, each beginning with a letter or a
+  digit, the last ending in `.json` or `.jsonl`: none leaves the store or
+  names what the store keeps beside the plugin's files, a file's name says
+  its kind, and an entry on the way that is no real directory or file is
+  refused. One lessee holds a plugin's files at a time, in this process or
+  another. The store's ledger, `.plugin-store.json`, counts the writes it
+  committed, the revision its plugin reads, and journals the one in
+  flight: what file it is, the digest of what it found there and what it
+  makes of it. A write is journaled, made and flushed, checked and
+  committed; one that fails and leaves its file unfinished is taken back,
+  and one a crash cut short is finished by the next lease, made where it
+  never reached its file, kept where it landed, completed where its line
+  was cut short. A file that is neither what the write found nor what it
+  made is damage, refused and left as it is. A log's torn or blank tail is
+  no line, and its next append cuts it; a damaged line before it is
+  damage.
+- **Databases.** A plugin's databases lie beside its files,
+  `<name>.sqlite`, and this crate alone opens a database: `clippy.toml`
+  refuses it everywhere else. Each is made owner-only, waits two seconds
+  for a lock another connection holds, keeps a write-ahead log synced at
+  its checkpoints, enforces foreign keys, and holds its plugin's schema
+  version as `user_version`; an empty one is initialized in one
+  transaction that keeps every other writer out. A database is a view its
+  plugin builds again, so one at another version, or one SQLite itself
+  finds damaged, is deleted with its `-wal` and `-shm`, those first, and
+  made anew; one another program holds, and every other failure, is
+  reported and left as it is.
+- **What plugins reach.** A character's data is her plugins' storage: the
+  history feed, and each plugin's files and databases, each handle made
+  without touching the disk, so a capability nobody uses touches no file.
+- **The daemon's record.** `daemon.json`, pretty-printed with a trailing
+  newline, owner-only and replaced whole, is written only by the holder of
+  the home's `daemon` lease, which every other daemon is refused at once.

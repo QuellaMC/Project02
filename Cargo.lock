@@ -1178,6 +1178,7 @@ dependencies = [
  "p02-contracts",
  "p02-core",
  "p02-shared",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

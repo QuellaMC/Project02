@@ -3,10 +3,12 @@
 //! vouches for it, and nothing at all is written for one that is refused.
 
 use std::collections::BTreeMap;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::Path;
 
 use p02_characters::CharacterVersion;
 use p02_core::ConversationId;
+use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
 use p02_store::{CharacterData, StorageError};
 use serde_json::{Value, json};
 
@@ -313,6 +315,7 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
         "character-data/mira/sessions.jsonl",
         "character-data/mira/config.json",
         "character-data/mira/.locks",
+        "character-data/mira/plugin-data",
         "session",
         "conversation",
     ];
@@ -328,6 +331,7 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
 
         world.first_segment(world.conversation.id()).unwrap();
         std::fs::create_dir_all(world.data.root().join("taken-lines")).unwrap();
+        std::fs::create_dir_all(world.data.root().join("plugin-data")).unwrap();
         std::fs::write(world.data.root().join("config.json"), "{}").unwrap();
 
         let elsewhere = tempfile::TempDir::new().unwrap();
@@ -354,4 +358,48 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
         assert_eq!(refused.code(), "missing_file", "{path}: {refused}");
         assert_eq!(snapshot(elsewhere.path()), before, "{path}");
     }
+}
+
+#[test]
+fn the_daemon_record_is_written_whole_and_owner_only_by_the_one_daemon_holding_the_home() {
+    let world = World::new();
+    let path = world.root().join("daemon.json");
+    let abandoned = world
+        .root()
+        .join(format!(".daemon.json.{}.tmp", uuid::Uuid::new_v4()));
+    let record = DaemonRecord {
+        protocol_version: 7,
+        token: DaemonToken::new("abc").unwrap(),
+        port: NonZeroU16::new(4310).unwrap(),
+        running: Some(DaemonRun {
+            pid: NonZeroU32::new(4242).unwrap(),
+            started_at: "2026-10-21T09:00:00.000Z".to_owned(),
+        }),
+    };
+    let daemon = world.home.daemon_lease().unwrap();
+
+    std::fs::write(&abandoned, "{\"protocolVersion\":7,").unwrap();
+    assert_eq!(
+        world.home.daemon_lease().unwrap_err().code(),
+        "storage_busy"
+    );
+    daemon.write_record(&record).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n  \"protocolVersion\": 7,\n  \"token\": \"abc\",\n  \"port\": 4310,\n  \
+         \"running\": {\n    \"pid\": 4242,\n    \"startedAt\": \"2026-10-21T09:00:00.000Z\"\n  \
+         }\n}\n"
+    );
+    assert_eq!(read_daemon_record(world.root()).unwrap(), Some(record));
+    assert!(!abandoned.exists());
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&path).unwrap().permissions())
+            & 0o777,
+        0o600
+    );
+
+    daemon.release();
+    world.home.daemon_lease().unwrap().release();
 }

@@ -127,6 +127,17 @@ pub fn append_line(path: &Path, line: &[u8]) -> io::Result<()> {
     file.write_all(&bytes)
 }
 
+/// Flushes what was written to the file at `path` to disk, so it outlasts a
+/// crash of the machine, not only of the process: for a write whose record
+/// of having happened is flushed after it.
+///
+/// # Errors
+///
+/// The `io::Error` the open or the flush failed with.
+pub fn sync_file(path: &Path) -> io::Result<()> {
+    OpenOptions::new().write(true).open(path)?.sync_data()
+}
+
 /// How many bytes of `file` its last newline ends, read back from the end.
 fn whole_lines_length(file: &mut File) -> io::Result<u64> {
     const CHUNK: usize = 64 * 1_024;

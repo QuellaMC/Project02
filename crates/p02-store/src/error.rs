@@ -2,10 +2,12 @@ use std::io;
 use std::path::PathBuf;
 
 use p02_core::{ConversationId, ParseConversationError, SessionId};
-use p02_shared::Identifier;
+use p02_shared::{BoundJsonError, Identifier};
 
+use crate::database::OpenDatabaseError;
 use crate::layout::EntryKind;
 use crate::marker::{MarkerProblem, SCHEMA_VERSION, Scope};
+use crate::plugin_files::{FileKind, ValueProblem};
 use crate::record::RecordError;
 use crate::replay::ReplayError;
 
@@ -128,6 +130,53 @@ pub enum StorageError {
     },
     #[error("a conversation cannot be made between these participants")]
     InvalidParticipants(#[source] ParseConversationError),
+    #[error(
+        "\"{path}\" is no path of a plugin's store: segments of letters, digits, '.', '_' and \
+         '-', each beginning with a letter or a digit, the last ending in .json or .jsonl"
+    )]
+    UnsafeStorePath { path: String },
+    #[error("\"{path}\" names a {found}, not a {expected}")]
+    WrongFileKind {
+        path: String,
+        found: FileKind,
+        expected: FileKind,
+    },
+    #[error("the value for \"{path}\" is not within the JSON limits")]
+    StoreValueLimits {
+        path: String,
+        #[source]
+        source: BoundJsonError,
+    },
+    #[error("{} is no JSON document within the JSON limits", .path.display())]
+    MalformedDocument {
+        path: PathBuf,
+        #[source]
+        source: ValueProblem,
+    },
+    #[error("line {line} of {} is no JSON value within the JSON limits", .path.display())]
+    MalformedLine {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: ValueProblem,
+    },
+    #[error("the ledger {} of a plugin's store is malformed", .path.display())]
+    MalformedLedger {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "{} is neither what the write its store journaled found there nor what it wrote",
+        .path.display()
+    )]
+    InterruptedWriteConflict { path: PathBuf },
+    #[error("could not open database {}", .path.display())]
+    Database {
+        path: PathBuf,
+        #[source]
+        source: OpenDatabaseError,
+    },
     #[error("could not read {}", .path.display())]
     Read {
         path: PathBuf,
@@ -175,7 +224,13 @@ impl StorageError {
             | Self::MalformedConversation { .. }
             | Self::MisplacedConversation { .. }
             | Self::Refused(_)
-            | Self::InvalidParticipants(_) => "malformed_record",
+            | Self::InvalidParticipants(_)
+            | Self::MalformedDocument { .. }
+            | Self::MalformedLine { .. }
+            | Self::MalformedLedger { .. }
+            | Self::InterruptedWriteConflict { .. } => "malformed_record",
+            Self::UnsafeStorePath { .. } | Self::WrongFileKind { .. } => "invalid_store_path",
+            Self::StoreValueLimits { .. } => "invalid_store_value",
             Self::ConcurrentWrite { .. } => "concurrent_write",
             Self::Busy {
                 code: BusyCode::Session,
@@ -190,7 +245,7 @@ impl StorageError {
             Self::SessionNotEmpty(_) => "session_not_empty",
             Self::ConversationNotFound(_) => "conversation_not_found",
             Self::Read { .. } => "read_failed",
-            Self::Write { .. } => "write_failed",
+            Self::Write { .. } | Self::Database { .. } => "write_failed",
         }
     }
 

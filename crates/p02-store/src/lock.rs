@@ -6,7 +6,6 @@
 //! says who holds it, for a person, and for a waiter to tell the holder
 //! changed; whether a lock is held is never read from it.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
@@ -18,9 +17,9 @@ use p02_shared::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
+use crate::digest::sha256_hex;
 use crate::error::{BusyCode, StorageError};
 
 /// What a lock guards. Each has its root, the home's locks or the
@@ -40,6 +39,9 @@ pub(crate) enum Resource<'a> {
     SessionCatalog,
     /// A session's log, which one writer appends to.
     SessionWriter(&'a SessionId),
+    /// A plugin's files in a character's data, at their root, which one
+    /// lessee reads and writes at a time.
+    PluginFiles(&'a Path),
 }
 
 impl Resource<'_> {
@@ -51,18 +53,22 @@ impl Resource<'_> {
             Self::StorageSchema => "storage-schema".to_owned(),
             Self::SessionCatalog => "session-catalog".to_owned(),
             Self::SessionWriter(id) => format!("session-writer:{id}"),
+            Self::PluginFiles(root) => format!("plugin:{}", root.display()),
         }
     }
 
     /// How long a waiter waits while the holder makes no progress: a lease
     /// held for as long as a daemon or a conversation lasts is refused at
-    /// once, a short guarded write is waited out.
+    /// once, a short guarded write is waited out, and a plugin's files,
+    /// which a hook holds for its own short work, are waited for briefly,
+    /// since the hook that waits has a deadline of its own.
     fn stall_budget(&self) -> Duration {
         match self {
             Self::Daemon | Self::ConversationWriter(_) | Self::SessionWriter(_) => Duration::ZERO,
             Self::ConversationsCatalog | Self::StorageSchema | Self::SessionCatalog => {
                 Duration::from_secs(10)
             }
+            Self::PluginFiles(_) => Duration::from_secs(2),
         }
     }
 
@@ -106,6 +112,25 @@ impl Lease {
 /// takers of the same locks never wait on each other; each lock gets its own
 /// stall budget. On any failure the locks already taken are released.
 pub(crate) fn acquire(targets: &[(&Path, &Resource<'_>)]) -> Result<Lease, StorageError> {
+    take_all(targets, None)
+}
+
+/// Takes the one lock of `resource` under `root` as [`acquire`] does, but
+/// gives up at `deadline` if its stall budget has not run out first, and
+/// never takes it once `deadline` has passed: the work it guards would
+/// land after its caller stopped waiting for it.
+pub(crate) fn acquire_before(
+    root: &Path,
+    resource: &Resource<'_>,
+    deadline: Instant,
+) -> Result<Lease, StorageError> {
+    take_all(&[(root, resource)], Some(deadline))
+}
+
+fn take_all(
+    targets: &[(&Path, &Resource<'_>)],
+    deadline: Option<Instant>,
+) -> Result<Lease, StorageError> {
     let mut locks: Vec<Lock> = targets
         .iter()
         .map(|(root, resource)| Lock::new(root, resource))
@@ -117,7 +142,7 @@ pub(crate) fn acquire(targets: &[(&Path, &Resource<'_>)]) -> Result<Lease, Stora
     let mut lease = Lease { held: Vec::new() };
 
     for lock in locks {
-        match lock.take() {
+        match lock.take(deadline) {
             Ok(held) => lease.held.push(held),
             Err(error) => {
                 lease.release();
@@ -165,13 +190,7 @@ struct Stamp<'a> {
 impl Lock {
     fn new(root: &Path, resource: &Resource<'_>) -> Self {
         let key = resource.key();
-        let name = Sha256::digest(key.as_bytes())
-            .iter()
-            .fold(String::new(), |mut name, byte| {
-                // Writing to a String cannot fail.
-                let _ = write!(name, "{byte:02x}");
-                name
-            });
+        let name = sha256_hex(key.as_bytes());
 
         Self {
             root: root.to_path_buf(),
@@ -185,13 +204,17 @@ impl Lock {
 
     /// The budget measures a stall, not a queue: it starts again whenever
     /// the lock changes hands while this taker waits.
-    fn take(self) -> Result<Held, StorageError> {
+    fn take(self, deadline: Option<Instant>) -> Result<Held, StorageError> {
         create_directories(&self.root).map_err(StorageError::write(&self.root))?;
 
         let mut holder = self.holder();
         let mut stalled_since = Instant::now();
 
         loop {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Err(self.refused());
+            }
+
             if let Some(lock) =
                 try_lock_file(&self.file).map_err(StorageError::write(&self.file))?
             {
@@ -212,13 +235,23 @@ impl Lock {
             let stalled = stalled_since.elapsed();
 
             if stalled >= self.budget {
-                return Err(StorageError::Busy {
-                    resource: self.key,
-                    code: self.busy,
-                });
+                return Err(self.refused());
             }
 
-            thread::sleep(retry_delay().min(self.budget.saturating_sub(stalled)));
+            let mut wait = retry_delay().min(self.budget.saturating_sub(stalled));
+
+            if let Some(deadline) = deadline {
+                wait = wait.min(deadline.saturating_duration_since(Instant::now()));
+            }
+
+            thread::sleep(wait);
+        }
+    }
+
+    fn refused(self) -> StorageError {
+        StorageError::Busy {
+            resource: self.key,
+            code: self.busy,
         }
     }
 
@@ -264,17 +297,12 @@ fn retry_delay() -> Duration {
     reason = "a test writes and reads the locks' files as another process or a crash would"
 )]
 mod tests {
-    use std::io::{BufRead as _, BufReader, Write as _};
-    use std::process::{Child, Command, Stdio};
+    use std::process::Child;
 
     use p02_shared::{DanglingLinks, canonical_path, temporary_target, write_file_atomically};
 
     use super::*;
-
-    /// What the holder process takes: its locks root, and the key.
-    const HOLD: &str = "P02_STORE_TEST_HOLD";
-    /// What the holder says once it holds the lock.
-    const HELD: &str = "P02_STORE_TEST_HELD";
+    use crate::test_process;
 
     fn temp_root() -> (tempfile::TempDir, PathBuf) {
         let directory = tempfile::tempdir().unwrap();
@@ -299,10 +327,10 @@ mod tests {
     /// parent closes its input, or kills it.
     #[test]
     fn a_lock_holder_for_another_process() {
-        let Ok(hold) = std::env::var(HOLD) else {
+        let Some(brief) = test_process::brief() else {
             return;
         };
-        let (root, key) = hold.split_once('\n').unwrap();
+        let (root, key) = brief.split_once('\n').unwrap();
         let session = session();
         let lease = acquire(&[(Path::new(root), &resource_named(key, &session))]).unwrap();
 
@@ -313,36 +341,15 @@ mod tests {
             "half a catal",
         )
         .unwrap();
-        // On a line of its own: the test runner may have begun one.
-        println!("\n{HELD}");
-        std::io::stdout().flush().unwrap();
-        std::io::stdin().read_line(&mut String::new()).unwrap();
+        test_process::ready_then_wait();
         lease.release();
     }
 
     fn holder(root: &Path, key: &str) -> Child {
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "lock::tests::a_lock_holder_for_another_process",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env(HOLD, format!("{}\n{key}", root.display()))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-
-        assert!(
-            lines.any(|line| line.unwrap() == HELD),
-            "the holder said nothing"
-        );
-        // The holder writes on until it exits, and a closed pipe would fail it.
-        std::thread::spawn(move || lines.for_each(drop));
-        child
+        test_process::spawn(
+            "lock::tests::a_lock_holder_for_another_process",
+            &format!("{}\n{key}", root.display()),
+        )
     }
 
     fn stamps_in(root: &Path) -> Vec<String> {
@@ -361,6 +368,8 @@ mod tests {
         let (_directory, root) = temp_root();
         let conversation = ConversationId::new("conv_a").unwrap();
         let session = session();
+        let plugin = root.join("plugin-data").join("character-state");
+        let plugin_key = format!("plugin:{}", plugin.display());
         let instant = Duration::ZERO;
         let waited = Duration::from_secs(10);
 
@@ -395,6 +404,12 @@ mod tests {
                 "session-writer:conv_a.1",
                 instant,
                 BusyCode::Session,
+            ),
+            (
+                Resource::PluginFiles(&plugin),
+                plugin_key.as_str(),
+                Duration::from_secs(2),
+                BusyCode::Storage,
             ),
         ] {
             let lock = Lock::new(&root, &resource);
@@ -493,7 +508,7 @@ mod tests {
             let mut lock = Lock::new(root, &Resource::SessionCatalog);
 
             lock.budget = budget;
-            lock.take()
+            lock.take(None)
         };
         let held = acquire(&[(&root, &Resource::SessionCatalog)]).unwrap();
         let stamp = Lock::new(&root, &Resource::SessionCatalog).stamp;

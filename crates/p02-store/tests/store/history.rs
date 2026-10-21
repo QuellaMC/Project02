@@ -15,7 +15,8 @@ use serde_json::json;
 
 use crate::support::{Script, World, answer, id, mira, sam};
 
-fn written(world: &World, segment: u64, records: &[LogRecord]) {
+/// Appends `records` to segment `segment`'s log, as its writer does.
+pub(crate) fn written(world: &World, segment: u64, records: &[LogRecord]) {
     let mut writer = world.log(segment).writer().unwrap();
 
     for record in records {
