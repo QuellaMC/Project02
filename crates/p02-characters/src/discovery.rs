@@ -81,6 +81,104 @@ impl PackageProblem {
     }
 }
 
+/// Why no published character answers to an id.
+#[derive(Debug, thiserror::Error)]
+pub enum FindCharacterError<'a> {
+    /// No package was meant to be her.
+    #[error("character \"{id}\" was not found; the characters are {}", listed(.published))]
+    NotFound {
+        id: String,
+        /// Every character published, in id order.
+        published: Vec<&'a Identifier>,
+    },
+    /// A package meant to be her was not published, or the folder that
+    /// might hold her could not be read.
+    #[error("character \"{id}\" cannot be used: {}", described(.problems))]
+    Unpublished {
+        id: String,
+        problems: Vec<&'a PackageDiagnostic>,
+    },
+}
+
+fn listed(ids: &[&Identifier]) -> String {
+    if ids.is_empty() {
+        return "none".to_owned();
+    }
+
+    ids.iter()
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn described(problems: &[&PackageDiagnostic]) -> String {
+    problems
+        .iter()
+        .map(|diagnostic| {
+            let location = match &diagnostic.location {
+                PackageLocation::Bundled => "the bundled packages".to_owned(),
+                PackageLocation::Home(path) => path.display().to_string(),
+            };
+
+            format!(
+                "{} ({} at {location})",
+                diagnostic.problem,
+                diagnostic.problem.code()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+impl Discovery {
+    /// The character published as `id`, unless a package meant to be her
+    /// was not published, or the folder that might hold one could not be
+    /// read: a person who asks for her is told why, rather than handed a
+    /// character discovery could not vouch for.
+    ///
+    /// # Errors
+    ///
+    /// [`FindCharacterError`] saying why there is no such character.
+    pub fn find(&self, id: &str) -> Result<&CharacterDefinition, FindCharacterError<'_>> {
+        let problems: Vec<&PackageDiagnostic> = self
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.concerns(id))
+            .collect();
+        let published = self
+            .characters
+            .iter()
+            .find(|character| character.profile.id.as_str() == id);
+
+        match published {
+            Some(character) if problems.is_empty() => Ok(character),
+            None if problems.is_empty() => Err(FindCharacterError::NotFound {
+                id: id.to_owned(),
+                published: self
+                    .characters
+                    .iter()
+                    .map(|character| &character.profile.id)
+                    .collect(),
+            }),
+            _ => Err(FindCharacterError::Unpublished {
+                id: id.to_owned(),
+                problems,
+            }),
+        }
+    }
+}
+
+impl PackageDiagnostic {
+    /// Whether the diagnostic stands between a person and character `id`:
+    /// her folder's, a package claiming her id from another folder, or a
+    /// home packages folder that could not be listed.
+    fn concerns(&self, id: &str) -> bool {
+        self.folder.is_none()
+            || self.folder.as_deref() == Some(id)
+            || matches!(&self.problem, PackageProblem::IdMismatch { claimed } if claimed.as_str() == id)
+    }
+}
+
 fn duplicated(ids: &[Identifier]) -> String {
     let quoted = ids
         .iter()
@@ -588,6 +686,37 @@ mod tests {
                     "invalid_descriptor"
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn a_character_asked_for_is_found_or_refused_saying_why() {
+        let home = Home::new();
+
+        home.package("zeta", "zeta", "Zeta")
+            .write("characters/broken/project02.character.json", b"{not json")
+            .package("misfiled", "nova", "Nova");
+
+        let discovery = discover(&home.root);
+        let refusal = |id| discovery.find(id).unwrap_err().to_string();
+
+        assert_eq!(discovery.find("zeta").unwrap().profile.id.as_str(), "zeta");
+        assert_eq!(
+            refusal("ghost"),
+            "character \"ghost\" was not found; the characters are mira, zeta"
+        );
+        assert!(refusal("broken").contains("(invalid_descriptor at "));
+        assert!(refusal("nova").contains("(package_id_mismatch at "));
+
+        let unlisted = Home::new();
+
+        unlisted.write("characters", b"not a folder");
+        assert!(
+            discover(&unlisted.root)
+                .find("mira")
+                .unwrap_err()
+                .to_string()
+                .contains("package_source_unavailable")
         );
     }
 

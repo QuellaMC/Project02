@@ -42,6 +42,10 @@ pub(crate) enum Resource<'a> {
     /// A plugin's files in a character's data, at their root, which one
     /// lessee reads and writes at a time.
     PluginFiles(&'a Path),
+    /// A settings document, at its path, which its writer holds while it
+    /// reads and replaces it; how long a waiter waits is its caller's to
+    /// say, since a person saving a setting is waiting on the answer.
+    SettingsDocument { path: &'a Path, wait: Duration },
 }
 
 impl Resource<'_> {
@@ -54,6 +58,9 @@ impl Resource<'_> {
             Self::SessionCatalog => "session-catalog".to_owned(),
             Self::SessionWriter(id) => format!("session-writer:{id}"),
             Self::PluginFiles(root) => format!("plugin:{}", root.display()),
+            Self::SettingsDocument { path, .. } => {
+                format!("runtime-control-file:{}", path.display())
+            }
         }
     }
 
@@ -69,6 +76,7 @@ impl Resource<'_> {
                 Duration::from_secs(10)
             }
             Self::PluginFiles(_) => Duration::from_secs(2),
+            Self::SettingsDocument { wait, .. } => *wait,
         }
     }
 
@@ -370,6 +378,8 @@ mod tests {
         let session = session();
         let plugin = root.join("plugin-data").join("character-state");
         let plugin_key = format!("plugin:{}", plugin.display());
+        let settings = root.join("config.json");
+        let settings_key = format!("runtime-control-file:{}", settings.display());
         let instant = Duration::ZERO;
         let waited = Duration::from_secs(10);
 
@@ -409,6 +419,15 @@ mod tests {
                 Resource::PluginFiles(&plugin),
                 plugin_key.as_str(),
                 Duration::from_secs(2),
+                BusyCode::Storage,
+            ),
+            (
+                Resource::SettingsDocument {
+                    path: &settings,
+                    wait: Duration::from_millis(500),
+                },
+                settings_key.as_str(),
+                Duration::from_millis(500),
                 BusyCode::Storage,
             ),
         ] {

@@ -39,7 +39,10 @@ p02-shared, and the runtime reaches plugins and providers only through it.
   reasoning a model leaks into a reply, whole or as it streams. The tool
   calls a round replays and the exchange it had with its provider are kept
   with every credential-named value redacted.
-- **Config.** A plugin's config section declares its fields, one judge
-  decides whether a value fits a field, and a factory receives what its
-  section resolves to: each field's authored value when the field accepts
-  it, or else its default, with every required field set.
+- **Config.** A plugin's config section declares its fields, and a
+  section declared in code, as the host's settings and the connectors'
+  are, meets the same rules. One judge decides whether a value fits a
+  field, a secret's being a string that is not blank, and a factory
+  receives what its section resolves to: each field's authored value when
+  the field accepts it, or else its default, with every required field
+  set.

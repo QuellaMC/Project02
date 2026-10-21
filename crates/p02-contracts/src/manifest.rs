@@ -318,6 +318,23 @@ impl Manifest {
     }
 }
 
+impl ConfigSection {
+    /// Validates a config section declared outside a manifest, as the
+    /// host's own settings and the connectors' are, by the rules a
+    /// manifest's `config` meets.
+    ///
+    /// # Errors
+    ///
+    /// [`ManifestError`] for the first rule `value` breaks.
+    pub fn from_value(value: &Value) -> Result<Self, ManifestError> {
+        config_section(&Fields::of(
+            value,
+            "config".to_owned(),
+            &["scope", "fields"],
+        )?)
+    }
+}
+
 impl TryFrom<Value> for Manifest {
     type Error = ManifestError;
 

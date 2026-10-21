@@ -30,7 +30,7 @@ pub use daemon::DaemonLease;
 pub use database::OpenDatabaseError;
 pub use error::{BusyCode, StorageError};
 pub use history::ConversationHistory;
-pub use home::Home;
+pub use home::{Home, SettingsDocument};
 pub use layout::EntryKind;
 pub use lock::Lease;
 pub use log::{SessionLog, SessionWriter};

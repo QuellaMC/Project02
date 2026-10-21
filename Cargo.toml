@@ -19,6 +19,7 @@ p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
 p02-memory = { path = "crates/p02-memory" }
 p02-shared = { path = "crates/p02-shared" }
+p02-store = { path = "crates/p02-store" }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }

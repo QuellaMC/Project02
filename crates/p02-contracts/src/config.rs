@@ -125,11 +125,16 @@ impl ConfigField {
         &self.redaction_labels
     }
 
-    /// Whether `value` is one this field holds: of its value type, and one
-    /// of its allowed values when it lists them. A manifest's default and
-    /// every authored value meet this one judge.
+    /// Whether `value` is one this field holds: of its value type, one of
+    /// its allowed values when it lists them, and, for a secret, a string
+    /// that is not blank, since removing a credential is unsetting it. A
+    /// manifest's default and every authored value meet this one judge.
     #[must_use]
     pub fn accepts(&self, value: &Value) -> bool {
+        if self.secret && value.as_str().is_none_or(|text| text.trim().is_empty()) {
+            return false;
+        }
+
         if let Some(allowed) = &self.allowed_values
             && !value
                 .as_str()
@@ -218,6 +223,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::manifest::ManifestError;
 
     fn field(value_type: Option<ConfigValueType>, allowed: Option<&[&str]>) -> ConfigField {
         ConfigField {
@@ -273,6 +279,60 @@ mod tests {
                 field.value_type
             );
         }
+    }
+
+    #[test]
+    fn a_secret_accepts_only_a_string_that_is_not_blank() {
+        let mut key = field(None, None);
+
+        key.secret = true;
+
+        assert!(key.accepts(&json!("  sk-as typed  ")));
+
+        for refused in [
+            json!(""),
+            json!("   "),
+            json!(42),
+            json!({"$env": "API_KEY"}),
+        ] {
+            assert!(!key.accepts(&refused), "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_section_declared_in_code_meets_the_rules_of_a_manifest() {
+        let declared = ConfigSection::from_value(&json!({
+            "scope": "global_with_character_overrides",
+            "fields": [{
+                "name": "botToken",
+                "description": "A bot.",
+                "required": false,
+                "secret": true,
+                "scope": "character_only",
+                "valueType": "string",
+                "redactionLabels": ["secret"],
+            }],
+        }))
+        .unwrap();
+
+        assert_eq!(
+            declared.field("botToken").and_then(ConfigField::scope),
+            Some(ConfigScope::CharacterOnly)
+        );
+        assert!(matches!(
+            ConfigSection::from_value(&json!({
+                "scope": "character_only",
+                "fields": [{
+                    "name": "botToken",
+                    "description": "A bot.",
+                    "required": false,
+                    "secret": true,
+                    "scope": "global_only",
+                    "redactionLabels": [],
+                }],
+            })),
+            Err(ManifestError::FieldScopeWidens { .. })
+        ));
     }
 
     #[test]

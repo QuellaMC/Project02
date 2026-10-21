@@ -38,7 +38,7 @@ impl CharacterData {
     /// [`CharacterData::open`] and [`Home::check`] refuse them, or when a
     /// write fails.
     pub fn ensure(home: &Home, character: &Identifier) -> Result<Self, StorageError> {
-        let root = data_root(home, character);
+        let root = home.data_root(character);
 
         home.check()?;
 
@@ -75,7 +75,7 @@ impl CharacterData {
     /// holding more than control files, a control entry that is not a real
     /// file or directory, or a marker of another schema version.
     pub fn open(home: &Home, character: &Identifier) -> Result<Option<Self>, StorageError> {
-        let root = data_root(home, character);
+        let root = home.data_root(character);
 
         home.check()?;
         adoptable_marker(home, &root)?
@@ -198,10 +198,6 @@ impl CharacterData {
             }),
         }
     }
-}
-
-fn data_root(home: &Home, character: &Identifier) -> PathBuf {
-    home.character_data_root().join(character.as_str())
 }
 
 /// The marker of the data directory at `root` once the directory is known

@@ -22,7 +22,10 @@ p02-shared.
   no other package has that id or one differing from it only by case,
   since the two would share one data directory. The characters come in id
   order, and every package left unpublished has a diagnostic saying why
-  and where.
+  and where. A character asked for by id is one discovery published, or a
+  refusal saying why: no package is meant to be her, a package meant to
+  be her was not published, or the folder that might hold her could not
+  be read.
 - **The bundled packages** are read from `src/characters/packages/` when
   the crate builds: the TypeScript daemon reads the same files until it is
   retired, so the two keep one source until then.

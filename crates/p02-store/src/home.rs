@@ -3,11 +3,12 @@
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use p02_characters::HOME_PACKAGES;
 use p02_core::Timestamp;
 use p02_shared::{
-    DAEMON_RECORD_FILE, PathEntry, create_directories, describe_entry, list_directory,
+    DAEMON_RECORD_FILE, Identifier, PathEntry, create_directories, describe_entry, list_directory,
     temporary_target,
 };
 
@@ -17,7 +18,7 @@ use crate::layout::{
     CHARACTER_DATA_DIRECTORY, CONFIG_FILE, CONVERSATIONS_DIRECTORY, EntryKind, LOCKS_DIRECTORY,
     SCHEMA_FILE,
 };
-use crate::lock::{Resource, acquire};
+use crate::lock::{Lease, Resource, acquire};
 use crate::marker::{self, Marker, Scope};
 
 /// A home, spelled from its canonical root: every path below it is made
@@ -25,6 +26,14 @@ use crate::marker::{self, Marker, Scope};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Home {
     root: PathBuf,
+}
+
+/// One of a home's settings documents: its own `config.json`, or the
+/// overlay `config.json` in a character's data directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsDocument<'a> {
+    Home,
+    Overlay(&'a Identifier),
 }
 
 impl Home {
@@ -49,6 +58,52 @@ impl Home {
 
     pub(crate) fn conversations_root(&self) -> PathBuf {
         self.root.join(CONVERSATIONS_DIRECTORY)
+    }
+
+    pub(crate) fn data_root(&self, character: &Identifier) -> PathBuf {
+        self.character_data_root().join(character.as_str())
+    }
+
+    /// Where `document` is, whether or not it exists yet.
+    #[must_use]
+    pub fn settings_path(&self, document: SettingsDocument<'_>) -> PathBuf {
+        match document {
+            SettingsDocument::Home => self.root.join(CONFIG_FILE),
+            SettingsDocument::Overlay(character) => self.data_root(character).join(CONFIG_FILE),
+        }
+    }
+
+    /// Holds `documents` for their holder to read and replace: every writer
+    /// of a settings document holds its lock, and one that reads a document
+    /// to write another holds both. The locks live in the home's own
+    /// `.locks`, so a character's overlay is held before her data directory
+    /// exists. A lock another holds is waited for while it changes hands,
+    /// and given up after `wait` without a change.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Busy`] when a lock is not had in time, or
+    /// [`StorageError::Write`] when the lock file cannot be made.
+    pub fn lock_settings(
+        &self,
+        documents: &[SettingsDocument<'_>],
+        wait: Duration,
+    ) -> Result<Lease, StorageError> {
+        let paths: Vec<PathBuf> = documents
+            .iter()
+            .map(|document| self.settings_path(*document))
+            .collect();
+        let resources: Vec<Resource<'_>> = paths
+            .iter()
+            .map(|path| Resource::SettingsDocument { path, wait })
+            .collect();
+        let root = self.locks_root();
+        let targets: Vec<(&Path, &Resource<'_>)> = resources
+            .iter()
+            .map(|resource| (root.as_path(), resource))
+            .collect();
+
+        acquire(&targets)
     }
 
     /// Refuses, writing nothing, a folder that is no home and could not be

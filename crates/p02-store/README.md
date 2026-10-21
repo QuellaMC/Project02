@@ -51,7 +51,10 @@ lock's wait blocks.
   without a change (`conversations-catalog`, `storage-schema`,
   `session-catalog`); a plugin's files, which a hook holds for its own
   short work, after two, and never past the deadline of the hook that
-  asks (`plugin:<root of its files>`). A lock that cannot be had is
+  asks (`plugin:<root of its files>`); a settings document, which its
+  writer holds while it reads and replaces it, as long as its caller
+  waits (`runtime-control-file:<its path>`), the home's and each
+  character's in the home's `.locks`. A lock that cannot be had is
   reported `storage_busy`, a session's writer `session_busy`. Locks taken
   together are taken in the order of their files and released in reverse.
   A holder passes its lease along rather than taking it again.
