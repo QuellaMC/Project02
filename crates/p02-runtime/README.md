@@ -43,7 +43,10 @@ only on tokio's blocking pool, where a lock's wait blocks.
 - **Failure.** When the runtime itself fails, a store write or a record
   the gate refuses, the turn is fatal and its caller restarts the
   character. The turn first records its own rejection, if it still can,
-  naming what it committed, so the log reads back whole.
+  naming what it committed, so the log reads back whole. A delivery its
+  caller drops before it ends is fatal the same way, with nothing
+  recorded: the thread opened again closes the turn it left open with its
+  next line.
 - **The day.** The day the model is told it is comes from the turn's
   moment in the machine's time zone, which no setting could know better; a
   zone that cannot be read is taken as UTC.
