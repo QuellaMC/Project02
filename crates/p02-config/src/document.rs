@@ -42,6 +42,15 @@ impl Read {
             }
         };
 
+        Self::bytes(&bytes)
+    }
+
+    /// The document `bytes` hold, judged as a document's file is when it
+    /// is read: no heavier than a document may weigh, JSON, an object, and
+    /// within the JSON limits. A document made in memory is judged by this
+    /// same rule before it is written, so nothing is written that would
+    /// not be read back.
+    pub(crate) fn bytes(bytes: &[u8]) -> Self {
         if bytes.len() > MAX_BYTES {
             return Self::Unreadable(Diagnostic::error(
                 Code::LimitExceeded,
@@ -49,7 +58,7 @@ impl Read {
             ));
         }
 
-        let value: Value = match serde_json::from_slice(&bytes) {
+        let value: Value = match serde_json::from_slice(bytes) {
             Ok(value) => value,
             Err(error) => {
                 return Self::Unreadable(Diagnostic::error(
@@ -105,7 +114,8 @@ pub(crate) struct Document {
 #[derive(Clone, Debug)]
 pub(crate) struct Stanza {
     /// The switch as authored, whatever it holds: one that is not a
-    /// boolean is still a switch, refused where it is the nearest.
+    /// boolean is still a switch, refused, and judged where it is the
+    /// nearest, as a field's value is.
     pub(crate) enabled: Option<Value>,
     pub(crate) config: Option<Map<String, Value>>,
     pub(crate) problems: Vec<Diagnostic>,
@@ -121,7 +131,7 @@ impl Document {
         Self::parse(raw)
     }
 
-    pub(crate) fn parse(raw: Map<String, Value>) -> Self {
+    fn parse(raw: Map<String, Value>) -> Self {
         let mut problems = Vec::new();
 
         for key in unknown(&raw, &TOP_LEVEL) {
@@ -172,10 +182,6 @@ impl Document {
 
     pub(crate) fn raw(&self) -> &Map<String, Value> {
         &self.raw
-    }
-
-    pub(crate) fn problems(&self) -> &[Diagnostic] {
-        &self.problems
     }
 
     /// The value the document gives host field `name`, when it is one the
@@ -297,17 +303,6 @@ impl Stanza {
             })
             .collect();
         let enabled = entries.get("enabled").cloned();
-
-        if enabled
-            .as_ref()
-            .is_some_and(|enabled| !enabled.is_boolean())
-        {
-            problems.push(problem(
-                Code::BooleanInvalid,
-                format!("{path}.enabled must be a boolean."),
-                format!("{path}.enabled"),
-            ));
-        }
         let config = match entries.get("config") {
             None => None,
             Some(Value::Object(config)) => Some(config.clone()),

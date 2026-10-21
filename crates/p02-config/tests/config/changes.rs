@@ -325,6 +325,29 @@ fn a_host_value_its_rule_refuses_is_refused_and_the_refusal_never_repeats_it() {
 }
 
 #[test]
+fn a_change_that_would_leave_a_document_its_reader_refuses_is_refused_and_writes_nothing() {
+    let world = World::new();
+    let long = "x".repeat(17 * 1_024);
+    let outcome = world.change(
+        &home(),
+        json!({
+            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
+            "field": "signoff", "value": long,
+        }),
+    );
+
+    assert_eq!(
+        refusal(&outcome),
+        Some(ChangeRefusal::Invalid),
+        "{outcome:?}"
+    );
+    assert!(format!("{outcome:?}").contains("limit"), "{outcome:?}");
+    assert!(!format!("{outcome:?}").contains(&long));
+    assert!(!world.home_document().exists());
+    assert_eq!(world.view(&home())["status"], "ok");
+}
+
+#[test]
 fn a_change_its_own_rules_refuse_is_refused_and_makes_no_data_directory() {
     let world = World::new();
 
