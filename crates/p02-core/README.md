@@ -8,7 +8,8 @@ identities of each. It depends on p02-shared alone.
   the person and characters, each under the name they had when it began:
   two at least, each listed once, kept in one order whatever order they
   came in, so its set of kinds and ids alone tells which thread it is.
-  The person is the speaker `local-user` in every conversation. A
+  The person is the speaker `local-user` in every conversation, and goes
+  by `You` until they choose a name, which the prompt reads as none. A
   conversation id is a token without a `.`, and each of its sessions is
   `<conversation id>.<segment>`, numbered from 1.
 - **Sessions.** A session is one character's part in one segment of a
@@ -29,7 +30,8 @@ identities of each. It depends on p02-shared alone.
 - **Identities.** A runtime event is named by an `EventIdentity`, its
   event and trace ids and the canonical UTC time it was created at, in
   the one spelling `toISOString` gives: `2026-06-15T00:00:00.000Z`. A
-  moment is minted in one place, from the clock, to the millisecond.
+  moment is minted in one place, from the clock, to the millisecond, and
+  an event in one place, `evt_` and `trace_` each with a random UUID.
 - **Selection.** When the person does not say which character to talk
   to, it is the one character enabled; none, or several, is refused,
   naming them.

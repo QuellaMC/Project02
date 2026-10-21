@@ -18,6 +18,9 @@ p02-characters = { path = "crates/p02-characters" }
 p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
 p02-memory = { path = "crates/p02-memory" }
+p02-plugins = { path = "crates/p02-plugins" }
+p02-role-model = { path = "crates/p02-role-model" }
+p02-runtime = { path = "crates/p02-runtime" }
 p02-shared = { path = "crates/p02-shared" }
 p02-store = { path = "crates/p02-store" }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }

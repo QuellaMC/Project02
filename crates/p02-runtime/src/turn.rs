@@ -1,0 +1,856 @@
+//! One line through the turn: its records in the order the store's gate
+//! admits them, the plugins' hooks around the model's rounds, and what the
+//! turn announces as it goes.
+
+use std::error::Error;
+use std::num::NonZeroU32;
+
+use async_trait::async_trait;
+use jiff::tz::TimeZone;
+use p02_contracts::{
+    BlankContextTextError, CharacterDecision, CommittedTurn, ConversationToolCall,
+    ConversationTurn, DecisionContext, DecisionRejectionReason, Evidence, EvidenceStatus,
+    ModelToolCall, ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
+};
+use p02_core::{
+    ClientStamp, EventIdentity, MessageId, ParseUserLineError, Participant, SpeakerName, Timestamp,
+    UserLine, VisibleMessage, VisibleText,
+};
+use p02_plugins::{
+    BeforeCallOutcome, HealthCheck, HookPhaseReport, PhaseStatus, PluginHost, PreparedContext,
+    ProposedToolCall,
+};
+use p02_role_model::{
+    CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
+    TurnOutcome, TurnSink, run_turn, select_history_window, today_note,
+};
+use p02_shared::{BoundJsonError, Identifier};
+use p02_store::{
+    AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
+    PayloadSummary, RecordBody, RecordError, RoundRecord, RoundSnapshot, RuntimeRejection,
+    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence,
+    TurnRejected, TurnRejection, TurnStatus,
+};
+use tokio::sync::Mutex;
+use tokio::task::JoinError;
+
+use crate::conversation::{Cast, Disk, Mind, Submission, on_disk};
+
+/// What a turn announces, in order. A message is announced once its record
+/// is on disk, so the stream never says more than the log; a draft, a reply
+/// the model is still writing, is the one exception and says so by its
+/// kind, and every draft ends exactly once, in the reply that names it or
+/// in its withdrawal.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Progress {
+    /// The person's line, committed, with the stamps its client put on it.
+    UserMessage {
+        message: VisibleMessage,
+        source: Option<ClientStamp>,
+        client_message_id: Option<ClientStamp>,
+    },
+    /// A reply, committed in place of its draft.
+    VisibleReply {
+        message: VisibleMessage,
+        draft: DraftId,
+    },
+    /// The next piece of a draft.
+    ReplyDelta { draft: DraftId, text: String },
+    /// A draft that ended unsaid.
+    ReplyWithdrawn { draft: DraftId },
+    /// A round's tool calls, recorded as started, in the model's order.
+    ToolCallsRequested {
+        round: NonZeroU32,
+        tool_names: Vec<Identifier>,
+    },
+    /// A call of the round came back, as its plugin answered or as the
+    /// refusal of it.
+    ToolCallCompleted {
+        round: NonZeroU32,
+        tool_name: Identifier,
+        accepted: bool,
+    },
+}
+
+/// A turn that completed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletedTurn {
+    /// What it committed, the person's line first, in the order said.
+    pub messages: Vec<VisibleMessage>,
+    /// What failed once the turn was durable, which could change nothing
+    /// about it: the plugins' work after the commit, or its record.
+    pub post_commit_failures: Vec<String>,
+}
+
+/// A turn that ended refused, the person's line kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectedTurn {
+    /// The reason its record names, but at the health gate, where the
+    /// record names the refused commit and this the plugin's
+    /// `plugin_health_rejected`.
+    pub reason: &'static str,
+    pub message: String,
+}
+
+/// Why the runtime failed a turn itself.
+#[derive(Debug, thiserror::Error)]
+pub enum RunTurnError {
+    #[error("the session's storage failed")]
+    Storage(#[from] StorageError),
+    #[error("the turn made a record its log cannot hold")]
+    Record(#[from] RecordError),
+    #[error("a tool call is past the JSON limits")]
+    ToolCall(#[from] BoundJsonError),
+    #[error("the earlier conversation's summary is blank")]
+    Summary(#[from] BlankContextTextError),
+    #[error("work on the disk did not finish")]
+    Interrupted(#[source] JoinError),
+    #[error("the conversation lost its hold on the disk to an earlier failure")]
+    StateLost,
+}
+
+/// How a turn ended, for the thread to say.
+pub(crate) enum Ended {
+    InputRejected { message: String },
+    Completed(CompletedTurn),
+    Rejected(RejectedTurn),
+    Failed(RunTurnError),
+}
+
+/// The sentence a turn the runtime failed records.
+const RUNTIME_FAILURE: &str = "The runtime failed before the turn could complete.";
+
+type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
+
+/// Takes `submission` through the turn under `identity`, on the thread's
+/// `disk`.
+pub(crate) async fn run(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    submission: Submission<'_>,
+    cast: &Cast,
+    mind: Mind<'_>,
+    listener: &Listener<'_>,
+) -> Ended {
+    let line = match UserLine::new(submission.line) {
+        Ok(line) => line,
+        Err(error) => return refuse(disk, identity, submission.line, error).await,
+    };
+    let begun = match begin(disk, identity, &submission, line).await {
+        Ok(begun) => begun,
+        Err(error) => return failed(disk, identity, Vec::new(), Vec::new(), error).await,
+    };
+
+    listener(Progress::UserMessage {
+        message: begun.message.clone(),
+        source: submission.source,
+        client_message_id: submission.client_message_id,
+    });
+
+    let window = select_history_window(&begun.history.turns, mind.context_window);
+    let mut turn = OpenTurn {
+        identity: identity.clone(),
+        line: begun.message.text.clone(),
+        day: begun.day,
+        cast,
+        host: mind.host,
+        listener,
+        hooks: p02_plugins::Turn::new(TurnIdentity {
+            session_id: begun.message.id.session_id().clone(),
+            event: identity.clone(),
+            character: cast.character.clone(),
+        }),
+        window: window
+            .iter()
+            .flat_map(ConversationTurn::visible_messages)
+            .map(|message| message.id.clone())
+            .collect(),
+        prepared: Vec::new(),
+        ledger: Mutex::new(Ledger {
+            disk: disk.take(),
+            committed: vec![begun.message],
+            finished: Vec::new(),
+            calls: Vec::new(),
+        }),
+    };
+    let ended = turn
+        .drive(mind, begun.history.summary.as_deref(), window)
+        .await;
+
+    *disk = turn.ledger.into_inner().disk;
+    ended
+}
+
+/// The person as the prompt speaks of them: by their name, or as no one in
+/// particular while they go by the default.
+pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
+    if name.as_str() == Participant::DEFAULT_LOCAL_USER_NAME {
+        Person::Unnamed
+    } else {
+        Person::Named(name)
+    }
+}
+
+/// What failed in a phase of hooks that completed with failures: each
+/// failed record's summary.
+pub(crate) fn failures(report: &HookPhaseReport) -> Vec<String> {
+    if report.status == PhaseStatus::Completed {
+        return Vec::new();
+    }
+
+    report
+        .evidence
+        .iter()
+        .filter(|evidence| evidence.status() == EvidenceStatus::Failed)
+        .map(|evidence| evidence.summary().to_owned())
+        .collect()
+}
+
+/// An error and the causes under it, as one sentence: what broke, then why.
+pub(crate) fn described(error: &dyn Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+
+    text
+}
+
+/// What the person is told of a text that is no line, which their client
+/// shows as it stands.
+fn refusal(error: ParseUserLineError) -> &'static str {
+    match error {
+        ParseUserLineError::Blank => "Provide exactly one non-empty message.",
+        ParseUserLineError::Multiline => "Provide exactly one non-empty single-line message.",
+    }
+}
+
+/// Records a text that is no line as its event, taken as no line, and the
+/// runtime's refusal of it.
+async fn refuse(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    raw: &str,
+    error: ParseUserLineError,
+) -> Ended {
+    let message = refusal(error).to_owned();
+    let refused = {
+        let (identity, raw, message) = (identity.clone(), raw.to_owned(), message.clone());
+
+        on_disk(disk, move |disk| {
+            disk.append(
+                &identity,
+                RecordBody::EventReceived(EventReceived {
+                    payload_summary: PayloadSummary {
+                        raw_input: raw,
+                        normalized_current_user_message: None,
+                    },
+                }),
+            )?;
+            disk.append(
+                &identity,
+                RecordBody::TurnRejected(TurnRejected::new(
+                    TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
+                    message,
+                )?),
+            )
+        })
+        .await
+    };
+
+    match refused {
+        Ok(()) => Ended::InputRejected { message },
+        Err(error) => failed(disk, identity, Vec::new(), Vec::new(), error).await,
+    }
+}
+
+/// The turn as far as its line: the history its model is shown, read before
+/// the line is committed, the line as committed, and the day it is where
+/// the person is.
+struct Begun {
+    history: ConversationHistory,
+    message: VisibleMessage,
+    day: Option<CalendarDay>,
+}
+
+/// Records the event, reads the history, then commits the person's line,
+/// and reads the machine's time zone, all on the disk's side.
+async fn begin(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    submission: &Submission<'_>,
+    line: UserLine,
+) -> Result<Begun, RunTurnError> {
+    let identity = identity.clone();
+    let raw = submission.line.to_owned();
+    let source = submission.source.clone();
+    let client_message_id = submission.client_message_id.clone();
+
+    on_disk(disk, move |disk| {
+        disk.append(
+            &identity,
+            RecordBody::EventReceived(EventReceived {
+                payload_summary: PayloadSummary {
+                    raw_input: raw,
+                    normalized_current_user_message: Some(line.clone().into()),
+                },
+            }),
+        )?;
+
+        let replay = disk.writer.replay()?;
+        let history = replay.history();
+        let message = replay.session().user_message(line);
+        let mut commit = MessageCommitted::user(message.clone())?;
+
+        if let Some(stamp) = source {
+            commit = commit.with_source(stamp)?;
+        }
+
+        if let Some(stamp) = client_message_id {
+            commit = commit.with_client_message_id(stamp)?;
+        }
+
+        disk.append(&identity, RecordBody::MessageCommitted(commit))?;
+        Ok(Begun {
+            history,
+            message,
+            day: calendar_day(identity.created_at()),
+        })
+    })
+    .await
+}
+
+/// The turn failed: its rejection is recorded if it still can be, naming
+/// what it committed and finished, so the log reads back whole with the
+/// person's line and every shown reply anchored. The failure reported is
+/// the turn's, so the record's own is not.
+async fn failed(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    committed: Vec<MessageId>,
+    finished: Vec<ToolCallId>,
+    error: RunTurnError,
+) -> Ended {
+    let identity = identity.clone();
+    let _ = on_disk(disk, move |disk| {
+        let mut rejected = TurnRejected::new(
+            TurnRejection::Runtime(RuntimeRejection::RuntimeFailure),
+            RUNTIME_FAILURE.to_owned(),
+        )?;
+
+        rejected.visible_message_ids = committed;
+        rejected.tool_call_ids = finished;
+        disk.append(&identity, RecordBody::TurnRejected(rejected))
+    })
+    .await;
+
+    Ended::Failed(error)
+}
+
+/// The day it is where the person is at `moment`, by the machine's time
+/// zone, which no setting could know better and which is read from the
+/// machine's files; a zone that cannot be read is taken as UTC.
+fn calendar_day(moment: &Timestamp) -> Option<CalendarDay> {
+    let date = moment
+        .as_str()
+        .parse::<jiff::Timestamp>()
+        .ok()?
+        .to_zoned(TimeZone::system())
+        .date();
+
+    CalendarDay::new(
+        u16::try_from(date.year()).ok()?,
+        u8::try_from(date.month()).ok()?,
+        u8::try_from(date.day()).ok()?,
+    )
+    .ok()
+}
+
+/// A turn from its committed line to its end: the sink of its model's
+/// rounds, the hooks' view of it, and what it has committed so far.
+struct OpenTurn<'a> {
+    identity: EventIdentity,
+    line: VisibleText,
+    /// The day the model is told it is, first of its notes.
+    day: Option<CalendarDay>,
+    cast: &'a Cast,
+    host: &'a PluginHost,
+    listener: &'a Listener<'a>,
+    /// The turn as its hooks are shown it, without its text: each phase is
+    /// shown a clone with the text as it stands then, which shares its
+    /// cancellation.
+    hooks: p02_plugins::Turn,
+    /// The visible messages of the history window the model replays.
+    window: Vec<MessageId>,
+    /// What the before-call phase recorded, which every reply carries.
+    prepared: Vec<Evidence>,
+    ledger: Mutex<Ledger>,
+}
+
+/// What the turn has done so far, and the disk it does it on.
+struct Ledger {
+    disk: Option<Disk>,
+    committed: Vec<VisibleMessage>,
+    finished: Vec<ToolCallId>,
+    /// What the tool calls recorded, in the order they finished.
+    calls: Vec<Evidence>,
+}
+
+impl OpenTurn<'_> {
+    /// The turn to its end, or, when the runtime fails it, to the record of
+    /// that failure.
+    async fn drive(
+        &mut self,
+        mind: Mind<'_>,
+        summary: Option<&str>,
+        window: &[ConversationTurn],
+    ) -> Ended {
+        match self.answer(mind, summary, window).await {
+            Ok(ended) => ended,
+            Err(error) => {
+                let ledger = self.ledger.get_mut();
+                let committed = ids(&ledger.committed);
+                let finished = ledger.finished.clone();
+
+                failed(&mut ledger.disk, &self.identity, committed, finished, error).await
+            }
+        }
+    }
+
+    /// The plugins prepare the model's call or refuse the turn; the model's
+    /// rounds run to their end; the health gate judges a reply; and the
+    /// record that ends the turn lands, before the work after its commit.
+    async fn answer(
+        &mut self,
+        mind: Mind<'_>,
+        summary: Option<&str>,
+        window: &[ConversationTurn],
+    ) -> Result<Ended, RunTurnError> {
+        let prepared = match self.host.before_role_model_call(&self.shown().await).await {
+            BeforeCallOutcome::Prepared(prepared) => prepared,
+            BeforeCallOutcome::Rejected(rejection) => {
+                let refused =
+                    TurnRejection::Runtime(RuntimeRejection::PluginBeforeRoleModelCallRejected);
+
+                self.reject(refused, rejection.message.clone(), rejection.evidence, None)
+                    .await?;
+                return Ok(Ended::Rejected(RejectedTurn {
+                    reason: refused.reason(),
+                    message: rejection.message,
+                }));
+            }
+        };
+        let PreparedContext {
+            runtime_notes,
+            context_items,
+            curated_sections,
+            evidence,
+        } = prepared;
+        let notes = self
+            .day
+            .map(today_note)
+            .into_iter()
+            .chain(runtime_notes)
+            .collect();
+        let mut context = DecisionContext::new(
+            self.hooks.identity().session_id.clone(),
+            self.cast.character.clone(),
+        )
+        .with_runtime_notes(notes)
+        .with_plugin_context(context_items, curated_sections);
+
+        if let Some(summary) = summary {
+            context = context.with_summary(summary)?;
+        }
+
+        self.prepared = evidence;
+
+        let outcome = run_turn(
+            mind.adapter,
+            &*self,
+            TurnInput {
+                event: self.identity.clone(),
+                user_message: self.line.clone(),
+                context,
+                plugin_tools: self.host.tool_definitions().clone(),
+                history: window,
+                persona: &self.cast.persona,
+                person: person(&self.cast.person),
+            },
+        )
+        .await?;
+        let check = self.host.health(&self.shown().await).await;
+
+        match outcome {
+            TurnOutcome::Refused { round, rejection } => {
+                let refused = TurnRejection::Judged {
+                    round,
+                    reason: rejection.reason,
+                };
+                let message = rejection
+                    .details
+                    .unwrap_or_else(|| rejection.reason.as_str().to_owned());
+
+                self.reject_judged(refused, message.clone(), check).await?;
+                Ok(Ended::Rejected(RejectedTurn {
+                    reason: refused.reason(),
+                    message,
+                }))
+            }
+            TurnOutcome::Replied { round, decision } => match check.rejection.clone() {
+                None => self.complete(round, &decision, check).await,
+                Some(rejection) => {
+                    let refused = TurnRejection::Judged {
+                        round,
+                        reason: DecisionRejectionReason::CommitValidationFailure,
+                    };
+
+                    self.reject_judged(refused, rejection.message.clone(), check)
+                        .await?;
+                    Ok(Ended::Rejected(RejectedTurn {
+                        reason: rejection.reason(),
+                        message: rejection.message,
+                    }))
+                }
+            },
+        }
+    }
+
+    /// The turn as a phase of hooks is shown it now: the person's line, and
+    /// the visible messages in the model's sight, the window's and every one
+    /// committed so far.
+    async fn shown(&self) -> p02_plugins::Turn {
+        let ledger = self.ledger.lock().await;
+        let recent = self
+            .window
+            .iter()
+            .cloned()
+            .chain(ledger.committed.iter().map(|message| message.id.clone()))
+            .collect();
+
+        self.hooks.clone().with_text(TurnText {
+            current_user_message: self.line.clone(),
+            recent_visible_message_ids: recent,
+        })
+    }
+
+    async fn append(&self, body: RecordBody) -> Result<(), RunTurnError> {
+        let identity = self.identity.clone();
+        let mut ledger = self.ledger.lock().await;
+
+        on_disk(&mut ledger.disk, move |disk| disk.append(&identity, body)).await
+    }
+
+    /// Ends the turn rejected as `rejection` says, naming what it committed
+    /// and finished.
+    async fn reject(
+        &self,
+        rejection: TurnRejection,
+        message: String,
+        evidence: Vec<Evidence>,
+        turn_evidence: Option<TurnEvidence>,
+    ) -> Result<(), RunTurnError> {
+        let mut rejected = TurnRejected::new(rejection, message)?;
+
+        {
+            let ledger = self.ledger.lock().await;
+
+            rejected.visible_message_ids = ids(&ledger.committed);
+            rejected.tool_call_ids = ledger.finished.clone();
+        }
+
+        rejected.runtime_plugin_evidence = evidence;
+        rejected.runtime_plugin_turn_evidence = turn_evidence;
+        self.append(RecordBody::TurnRejected(rejected)).await
+    }
+
+    /// Ends the turn rejected on the round it judged, with all the turn's
+    /// evidence and the health it found.
+    async fn reject_judged(
+        &self,
+        rejection: TurnRejection,
+        message: String,
+        check: HealthCheck,
+    ) -> Result<(), RunTurnError> {
+        let (evidence, turn_evidence) = self.evidence(check).await;
+
+        self.reject(rejection, message, evidence, Some(turn_evidence))
+            .await
+    }
+
+    /// The turn's evidence, the before-call phase's, the tool calls' and
+    /// the health gate's, in that order, and the health it found.
+    async fn evidence(&self, check: HealthCheck) -> (Vec<Evidence>, TurnEvidence) {
+        let ledger = self.ledger.lock().await;
+        let evidence = self
+            .prepared
+            .iter()
+            .chain(&ledger.calls)
+            .cloned()
+            .chain(check.evidence)
+            .collect();
+
+        (
+            evidence,
+            TurnEvidence {
+                health: check.snapshots,
+            },
+        )
+    }
+
+    /// Ends the turn completed on round `round`, anchoring the last reply it
+    /// said, then runs the plugins' work after the commit.
+    async fn complete(
+        &self,
+        round: NonZeroU32,
+        decision: &CharacterDecision,
+        check: HealthCheck,
+    ) -> Result<Ended, RunTurnError> {
+        let accepted_reply = decision
+            .tool_calls()
+            .iter()
+            .rev()
+            .find_map(|call| match call {
+                ModelToolCall::VisibleReply { text } => Some(text.clone()),
+                ModelToolCall::Plugin { .. } => None,
+            });
+        let (evidence, turn_evidence) = self.evidence(check).await;
+        let (messages, finished) = {
+            let ledger = self.ledger.lock().await;
+
+            (ledger.committed.clone(), ledger.finished.clone())
+        };
+
+        self.append(RecordBody::TurnCompleted(TurnCompleted {
+            status: TurnStatus::Completed,
+            visible_message_ids: ids(&messages),
+            tool_call_ids: finished,
+            judgement: Some(Judgement {
+                round,
+                accepted_reply,
+            }),
+            runtime_plugin_evidence: evidence,
+            runtime_plugin_turn_evidence: Some(turn_evidence),
+        }))
+        .await?;
+
+        let post_commit_failures = self.after_commit(&messages).await;
+
+        Ok(Ended::Completed(CompletedTurn {
+            messages,
+            post_commit_failures,
+        }))
+    }
+
+    /// The plugins' work once the turn is durable, which can change nothing
+    /// about it: what they record lands as a record of its own, and what
+    /// failed is reported.
+    async fn after_commit(&self, messages: &[VisibleMessage]) -> Vec<String> {
+        let committed =
+            CommittedTurn::new(self.identity.created_at().clone()).with_messages(messages.to_vec());
+        let report = self
+            .host
+            .after_turn_committed(&self.shown().await, &committed)
+            .await;
+        let mut failed = failures(&report);
+
+        if report.status == PhaseStatus::CompletedWithFailures || !report.evidence.is_empty() {
+            let status = match report.status {
+                PhaseStatus::Completed => TurnStatus::Completed,
+                PhaseStatus::CompletedWithFailures => TurnStatus::CompletedWithFailures,
+            };
+
+            if let Err(error) = self
+                .append(RecordBody::AfterTurnCommitted(AfterTurnCommitted {
+                    status,
+                    runtime_plugin_evidence: report.evidence,
+                }))
+                .await
+            {
+                failed.push(described(&error));
+            }
+        }
+
+        failed
+    }
+
+    /// Records a call that came back, and what it recorded.
+    async fn finish(
+        &self,
+        call: ToolCallFinished,
+        evidence: Vec<Evidence>,
+    ) -> Result<(), RunTurnError> {
+        let identity = self.identity.clone();
+        let id = call.tool_call_id().clone();
+        let mut ledger = self.ledger.lock().await;
+
+        on_disk(&mut ledger.disk, move |disk| {
+            disk.append(&identity, RecordBody::ToolCallFinished(call))
+        })
+        .await?;
+        ledger.finished.push(id);
+        ledger.calls.extend(evidence);
+        Ok(())
+    }
+
+    /// A call of a tool the turn offered is the host's to run; any other
+    /// was refused unasked.
+    fn dispatch(&self, call: &RoutedToolCall) -> ToolDispatch {
+        if self
+            .host
+            .tool_definitions()
+            .get(call.tool_name().as_str())
+            .is_some()
+        {
+            ToolDispatch::Host
+        } else {
+            ToolDispatch::Undeclared
+        }
+    }
+}
+
+#[async_trait]
+impl TurnSink for OpenTurn<'_> {
+    type Error = RunTurnError;
+
+    async fn record_round(&self, round: &ModelRound) -> Result<(), RunTurnError> {
+        let raw_output_text = match &round.output.answer {
+            ProviderAnswer::Text(raw) => Some(raw.clone()),
+            ProviderAnswer::Failed { .. } => None,
+        };
+        let record = RoundRecord::new(
+            round.round,
+            RoundSnapshot {
+                input_envelope: round.envelope.clone(),
+                raw_output_text,
+                character_ref: self.cast.character_ref.clone(),
+                prompt_size: round.prompt_size.clone(),
+                provider_metadata: round.output.provider_metadata.clone(),
+                provider_exchange: round.output.provider_exchange.clone(),
+            },
+            round.result.clone(),
+        )?;
+
+        self.append(RecordBody::ModelRound(Box::new(record))).await
+    }
+
+    async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, RunTurnError> {
+        let identity = self.identity.clone();
+        let text = reply.text.clone();
+        let round = reply.draft.round();
+        let evidence = self.prepared.clone();
+        let mut ledger = self.ledger.lock().await;
+        let message = on_disk(&mut ledger.disk, move |disk| {
+            let message = disk.writer.replay()?.session().character_message(text);
+
+            disk.append(
+                &identity,
+                RecordBody::MessageCommitted(MessageCommitted::character(
+                    message.clone(),
+                    round,
+                    evidence,
+                )?),
+            )?;
+            Ok(message)
+        })
+        .await?;
+
+        ledger.committed.push(message.clone());
+        drop(ledger);
+        (self.listener)(Progress::VisibleReply {
+            message: message.clone(),
+            draft: reply.draft,
+        });
+        Ok(message)
+    }
+
+    async fn run_tool_calls(
+        &self,
+        round: NonZeroU32,
+        calls: Vec<RoutedToolCall>,
+    ) -> Result<Vec<ConversationToolCall>, RunTurnError> {
+        let started = calls
+            .iter()
+            .map(|call| {
+                ToolCallStarted::new(
+                    round,
+                    call.call_id().clone(),
+                    call.tool_name().clone(),
+                    call.plugin_id().clone(),
+                    call.input().clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        {
+            let identity = self.identity.clone();
+            let records = started.clone();
+            let mut ledger = self.ledger.lock().await;
+
+            on_disk(&mut ledger.disk, move |disk| {
+                records
+                    .into_iter()
+                    .try_for_each(|call| disk.append(&identity, RecordBody::ToolCallStarted(call)))
+            })
+            .await?;
+        }
+
+        (self.listener)(Progress::ToolCallsRequested {
+            round,
+            tool_names: calls.iter().map(|call| call.tool_name().clone()).collect(),
+        });
+
+        let proposed = calls
+            .iter()
+            .map(|call| ProposedToolCall {
+                call_id: call.call_id().clone(),
+                tool_name: call.tool_name().clone(),
+                input: call.input().clone(),
+            })
+            .collect();
+        let reports = self
+            .host
+            .handle_tool_calls(proposed, &self.shown().await)
+            .await;
+        let mut finished = Vec::with_capacity(calls.len());
+
+        for ((call, started), report) in calls.into_iter().zip(&started).zip(reports) {
+            let dispatch = self.dispatch(&call);
+            let accepted = matches!(report.result, ToolCallResult::Accepted { .. });
+
+            self.finish(
+                ToolCallFinished::new(
+                    started,
+                    dispatch,
+                    report.result.clone(),
+                    report.evidence.clone(),
+                )?,
+                report.evidence,
+            )
+            .await?;
+            (self.listener)(Progress::ToolCallCompleted {
+                round,
+                tool_name: call.tool_name().clone(),
+                accepted,
+            });
+            finished.push(call.finish(report.result)?);
+        }
+
+        Ok(finished)
+    }
+
+    fn draft(&self, event: DraftEvent) {
+        (self.listener)(match event {
+            DraftEvent::Delta { draft, text } => Progress::ReplyDelta { draft, text },
+            DraftEvent::Withdrawn { draft } => Progress::ReplyWithdrawn { draft },
+        });
+    }
+}
+
+fn ids(messages: &[VisibleMessage]) -> Vec<MessageId> {
+    messages.iter().map(|message| message.id.clone()).collect()
+}

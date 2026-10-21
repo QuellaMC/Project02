@@ -20,10 +20,10 @@ use p02_core::{
 };
 use p02_shared::{Credentials, DanglingLinks, Fingerprint, Identifier, canonical_path};
 use p02_store::{
-    CharacterData, CharacterRef, EventNormalized, EventReceived, Home, Judgement, LogRecord,
-    MessageCommitted, PayloadSummary, RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection,
-    SessionEntry, SessionLog, StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch,
-    TurnCompleted, TurnEvidence, TurnRejected, TurnRejection, TurnStatus,
+    CharacterData, CharacterRef, EventReceived, Home, Judgement, LogRecord, MessageCommitted,
+    PayloadSummary, RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionEntry,
+    SessionLog, StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted,
+    TurnEvidence, TurnRejected, TurnRejection, TurnStatus,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -261,7 +261,6 @@ impl Script {
                 },
             }),
         );
-        self.push(&identity, RecordBody::EventNormalized(EventNormalized {}));
 
         TurnScript {
             script: self,

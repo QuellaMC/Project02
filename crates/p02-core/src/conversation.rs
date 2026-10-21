@@ -16,6 +16,10 @@ pub struct Participant {
 }
 
 impl Participant {
+    /// The name the person goes by until they choose one: what the settings
+    /// default to, and what the prompt reads as no name at all.
+    pub const DEFAULT_LOCAL_USER_NAME: &'static str = "You";
+
     /// The person, who is the speaker `local-user` in every conversation.
     #[must_use]
     pub fn local_user(display_name: SpeakerName) -> Self {
