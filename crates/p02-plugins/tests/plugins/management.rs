@@ -7,7 +7,7 @@ use p02_shared::read_file;
 use p02_store::SettingsDocument;
 use serde_json::{Value, json};
 
-use crate::home::{MiraHome, Person};
+use crate::home::{MiraHome, Person, rewrite};
 use crate::support::{call, turn};
 
 async fn ask(host: &PluginHost, tool: &str, input: Value) -> ToolCallReport {
@@ -196,6 +196,39 @@ async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_
             .contains(secret)
     );
     assert_eq!(reason(&blank), Some("plugin_config_inspect_invalid"));
+}
+
+#[tokio::test]
+async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
+    let home = MiraHome::new();
+    let host = home.mira(Person::approving());
+
+    rewrite(&home.path(SettingsDocument::Home), "{");
+
+    let running = ask(&host, "runtime.plugin.list", json!({})).await;
+    let everything = ask(&host, "runtime.plugin.list", json!({"scope": "all"})).await;
+    let read = ask(
+        &host,
+        "runtime.plugin.config",
+        json!({"pluginId": "demo-config"}),
+    )
+    .await;
+
+    assert_eq!(
+        listed(&running).len(),
+        4,
+        "what the host runs it lists without them"
+    );
+
+    for refused in [everything, read] {
+        assert_eq!(
+            refused.result,
+            ToolCallResult::Rejected {
+                reason: "handler_failed".to_owned(),
+                message: "a settings document does not load".to_owned(),
+            }
+        );
+    }
 }
 
 #[tokio::test]

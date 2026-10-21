@@ -1,5 +1,6 @@
 use std::fmt;
 
+use p02_contracts::PluginError;
 use p02_shared::{Fingerprint, Identifier};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -118,4 +119,11 @@ pub enum ActivationStatus {
 #[error("{sentence}")]
 pub struct ReadConfigError {
     pub sentence: String,
+}
+
+/// A tool that needs her settings and cannot read them fails, saying why.
+impl From<ReadConfigError> for PluginError {
+    fn from(error: ReadConfigError) -> Self {
+        Self::new(error.sentence)
+    }
 }

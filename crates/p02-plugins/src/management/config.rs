@@ -361,9 +361,7 @@ async fn settings(
     control: Arc<dyn ConfigControl>,
     plugin: Identifier,
 ) -> Result<PluginSettings, PluginError> {
-    blocking(move || control.inspect(&plugin))
-        .await?
-        .map_err(|error| PluginError::new(error.to_string()))
+    Ok(blocking(move || control.inspect(&plugin)).await??)
 }
 
 /// The plugin this build has under the id `text`.
