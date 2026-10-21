@@ -3,9 +3,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use p02_contracts::{ConversationToolCall, DecisionResult, ToolCallOutcome, ToolCallResult};
+use p02_contracts::{
+    ConversationToolCall, DecisionResult, HealthReport, HealthStatus, ToolCallOutcome,
+    ToolCallResult,
+};
 use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
-use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch};
+use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch, TurnRejected};
 use serde_json::json;
 
 use crate::support::{Chat, Round, Toy, calling, reply, stamp, told};
@@ -158,10 +161,15 @@ async fn a_text_that_is_no_line_is_refused_and_the_next_line_completes() {
 
 /// A turn whose provider gives nothing usable, or whose model's last
 /// allowed answer is still malformed, ends rejected for its round's own
-/// reason, the round recorded and the person's line kept.
+/// reason, the round recorded and the person's line kept, without waiting
+/// on the plugins' health, which could not change it.
 #[tokio::test]
 async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keeps_the_line() {
-    let mut chat = Chat::new(&[]);
+    let vitals = Toy::new("vitals").health(HealthReport {
+        status: HealthStatus::Ok,
+        summary: "Vitals steady.".to_owned(),
+    });
+    let mut chat = Chat::new(&[Arc::new(vitals)]);
 
     chat.model
         .script([Round::fails("The provider answered 503.")]);
@@ -191,6 +199,14 @@ async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keep
         panic!("the last round was refused");
     };
 
+    let rejections: Vec<&TurnRejected> = records
+        .iter()
+        .filter_map(|record| match record.body() {
+            RecordBody::TurnRejected(rejected) => Some(rejected),
+            _ => None,
+        })
+        .collect();
+
     assert_eq!(turn.reason, "malformed_output");
     assert_eq!(Some(&turn.message), rejection.details.as_ref());
     assert_eq!(rounds.len(), 1 + 100);
@@ -202,6 +218,13 @@ async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keep
         2
     );
     assert_eq!(records.last().unwrap().kind(), REJECTED);
+    assert_eq!(rejections.len(), 2);
+    assert!(
+        rejections
+            .iter()
+            .all(|rejected| rejected.runtime_plugin_turn_evidence.is_none()),
+        "{rejections:?}"
+    );
 }
 
 /// A round of tool calls starts each in the model's order, finishes each as

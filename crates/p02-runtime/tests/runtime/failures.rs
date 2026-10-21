@@ -11,47 +11,53 @@ use serde_json::json;
 
 use crate::support::{Chat, Round, Toy, id, make_read_only, reply, restore};
 
-/// stream.draft-never-a-message: a reply whose write fails was only ever a draft: it is withdrawn and never announced as a message, the turn fails, and the log holds the person's line alone, in a turn still open
+/// stream.draft-never-a-message: a reply whose write fails was only ever a draft: it is withdrawn and never announced as a message, the turn fails, and the log never holds it, its turn left open
 #[tokio::test]
 async fn a_reply_whose_write_fails_was_only_a_draft() {
     let mut chat = Chat::new(&[]);
     let log = chat.log(1);
     let writable = Mutex::new(None);
 
-    chat.model
-        .script([Round::says(reply(&["noted"])).drafting(0, &["no", "ted"])]);
+    chat.model.script([
+        Round::says(reply(&["Let me look.", "Found it."])).drafting(1, &["Fou", "nd it."])
+    ]);
 
-    // The log refuses writes from the reply's first piece on, so its round's
-    // record, the first write the reply waits on, is the one that fails.
+    // A reply's record follows its round's with nothing between them, so the
+    // log refuses writes from the announcement of the reply before it on.
     let delivery = chat
         .say_hearing("hello there", "hello", |progress| {
-            if let Progress::ReplyDelta { .. } = progress {
-                writable
-                    .lock()
-                    .unwrap()
-                    .get_or_insert_with(|| make_read_only(&log));
+            if let Progress::VisibleReply { .. } = progress {
+                *writable.lock().unwrap() = Some(make_read_only(&log));
             }
         })
         .await;
 
     restore(&log, writable.into_inner().unwrap().unwrap());
 
+    let committed: Vec<String> = chat
+        .records(1)
+        .iter()
+        .filter_map(|record| match record.body() {
+            RecordBody::MessageCommitted(commit) => Some(commit.message().text.to_string()),
+            _ => None,
+        })
+        .collect();
+
     assert!(matches!(delivery, Delivery::Failed { .. }), "{delivery:?}");
     assert_eq!(
         chat.heard.take(),
         [
             "user_message hello there",
-            "reply_delta 1.0 no",
-            "reply_delta 1.0 ted",
-            "reply_withdrawn 1.0",
+            "reply_delta 1.1 Fou",
+            "reply_delta 1.1 nd it.",
+            "visible_reply 1.0 Let me look.",
+            "reply_withdrawn 1.1",
         ]
     );
+    assert_eq!(committed, ["hello there", "Let me look."]);
     assert_eq!(
-        chat.kinds(1),
-        [
-            RecordKind::RuntimeEventReceived,
-            RecordKind::VisibleMessageCommitted
-        ]
+        chat.kinds(1).last(),
+        Some(&RecordKind::VisibleMessageCommitted)
     );
 }
 
@@ -73,7 +79,7 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     let writable = Mutex::new(None);
 
     chat.model.script([
-        Round::says(reply(&["Let me look.", "Found it."])).drafting(1, &["Found", " it."]),
+        Round::says(reply(&["Let me look.", "Found it."])).drafting(1, &["Fou", "nd it."]),
         Round::says(reply(&["Again."])),
     ]);
 

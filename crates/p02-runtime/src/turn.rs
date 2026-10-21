@@ -422,8 +422,9 @@ impl OpenTurn<'_> {
     }
 
     /// The plugins prepare the model's call or refuse the turn; the model's
-    /// rounds run to their end; the health gate judges a reply; and the
-    /// record that ends the turn lands, before the work after its commit.
+    /// rounds run to their end; the health gate judges a reply that would
+    /// commit, never a turn already refused; and the record that ends the
+    /// turn lands, before the work after its commit.
     async fn answer(
         &mut self,
         mind: Mind<'_>,
@@ -483,7 +484,6 @@ impl OpenTurn<'_> {
             },
         )
         .await?;
-        let check = self.host.health(&self.shown().await).await;
 
         match outcome {
             TurnOutcome::Refused { round, rejection } => {
@@ -494,29 +494,38 @@ impl OpenTurn<'_> {
                 let message = rejection
                     .details
                     .unwrap_or_else(|| rejection.reason.as_str().to_owned());
+                let evidence = self.recorded().await;
 
-                self.reject_judged(refused, message.clone(), check).await?;
+                self.reject(refused, message.clone(), evidence, None)
+                    .await?;
                 Ok(Ended::Rejected(RejectedTurn {
                     reason: refused.reason(),
                     message,
                 }))
             }
-            TurnOutcome::Replied { round, decision } => match check.rejection.clone() {
-                None => self.complete(round, &decision, check).await,
-                Some(rejection) => {
-                    let refused = TurnRejection::Judged {
-                        round,
-                        reason: DecisionRejectionReason::CommitValidationFailure,
-                    };
+            TurnOutcome::Replied { round, decision } => {
+                let check = self.host.health(&self.shown().await).await;
+                let Some(rejection) = check.rejection.clone() else {
+                    return self.complete(round, &decision, check).await;
+                };
+                let refused = TurnRejection::Judged {
+                    round,
+                    reason: DecisionRejectionReason::CommitValidationFailure,
+                };
+                let (evidence, turn_evidence) = self.evidence(check).await;
 
-                    self.reject_judged(refused, rejection.message.clone(), check)
-                        .await?;
-                    Ok(Ended::Rejected(RejectedTurn {
-                        reason: rejection.reason(),
-                        message: rejection.message,
-                    }))
-                }
-            },
+                self.reject(
+                    refused,
+                    rejection.message.clone(),
+                    evidence,
+                    Some(turn_evidence),
+                )
+                .await?;
+                Ok(Ended::Rejected(RejectedTurn {
+                    reason: rejection.reason(),
+                    message: rejection.message,
+                }))
+            }
         }
     }
 
@@ -568,32 +577,20 @@ impl OpenTurn<'_> {
         self.append(RecordBody::TurnRejected(rejected)).await
     }
 
-    /// Ends the turn rejected on the round it judged, with all the turn's
-    /// evidence and the health it found.
-    async fn reject_judged(
-        &self,
-        rejection: TurnRejection,
-        message: String,
-        check: HealthCheck,
-    ) -> Result<(), RunTurnError> {
-        let (evidence, turn_evidence) = self.evidence(check).await;
+    /// What the turn's phases recorded so far: the before-call phase's,
+    /// then the tool calls', in the order they finished.
+    async fn recorded(&self) -> Vec<Evidence> {
+        let ledger = self.ledger.lock().await;
 
-        self.reject(rejection, message, evidence, Some(turn_evidence))
-            .await
+        self.prepared.iter().chain(&ledger.calls).cloned().collect()
     }
 
-    /// The turn's evidence, the before-call phase's, the tool calls' and
-    /// the health gate's, in that order, and the health it found.
+    /// The turn's evidence once the health gate judged its reply, its
+    /// phases' and then the gate's, and the health the gate found.
     async fn evidence(&self, check: HealthCheck) -> (Vec<Evidence>, TurnEvidence) {
-        let ledger = self.ledger.lock().await;
-        let evidence = self
-            .prepared
-            .iter()
-            .chain(&ledger.calls)
-            .cloned()
-            .chain(check.evidence)
-            .collect();
+        let mut evidence = self.recorded().await;
 
+        evidence.extend(check.evidence);
         (
             evidence,
             TurnEvidence {
