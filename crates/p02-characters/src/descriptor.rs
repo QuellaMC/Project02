@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use p02_core::{CharacterProfile, SpeakerName};
-use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json};
+use p02_shared::{BoundJsonError, Credentials, Fingerprint, Identifier, JsonLimits, bound_json};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 const FORMAT: &str = "project02.character.v1";
 
@@ -24,6 +24,28 @@ pub struct CharacterDefinition {
     pub persona: Persona,
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
+}
+
+/// Which content of a character a model round ran: her package's version
+/// and the fingerprint of her persona, recorded with every round.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CharacterRef {
+    pub version: CharacterVersion,
+    pub persona_fingerprint: Fingerprint,
+}
+
+impl CharacterDefinition {
+    /// The content of hers a round runs, as every round records it.
+    #[must_use]
+    pub fn character_ref(&self) -> CharacterRef {
+        CharacterRef {
+            version: self.version.clone(),
+            persona_fingerprint: Fingerprint::new(
+                &json!({"persona": {"system": self.persona.sections()}}),
+            ),
+        }
+    }
 }
 
 /// A character's persona: 1 to 16 sections in order, each of 1 to 4,000

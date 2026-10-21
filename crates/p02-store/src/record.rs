@@ -22,7 +22,7 @@ pub use commit::MessageCommitted;
 pub use continuation::{
     ContinuedFrom, MAX_SUMMARY_CHARS, SessionContinuation, Summarizer, SummaryProvider,
 };
-pub use round::{CharacterRef, RoundRecord, RoundSnapshot};
+pub use round::{RoundRecord, RoundSnapshot};
 pub use terminal::{
     AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnEvidence, TurnRejected,
     TurnRejection, TurnStatus,

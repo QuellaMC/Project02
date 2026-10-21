@@ -2,6 +2,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// A conversation: an ASCII letter or digit, then up to 55 ASCII letters,
 /// digits, `_` or `-`. It holds no `.`, which is what parts it from the
@@ -21,6 +22,13 @@ pub struct ParseConversationIdError;
 
 impl ConversationId {
     const MAX_LEN: usize = 56;
+
+    /// A new conversation's id, `conv_` and a random UUID: the one way an
+    /// id is minted.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self(format!("conv_{}", Uuid::new_v4()))
+    }
 
     /// # Errors
     ///
@@ -242,6 +250,15 @@ mod tests {
         ] {
             assert_eq!(ConversationId::new(text).is_ok(), accepted, "{text}");
         }
+    }
+
+    #[test]
+    fn a_minted_conversation_id_is_a_new_id_in_its_pattern() {
+        let minted = ConversationId::mint();
+
+        assert_eq!(ConversationId::new(minted.as_str()), Ok(minted.clone()));
+        assert!(minted.as_str().starts_with("conv_"), "{minted}");
+        assert_ne!(minted, ConversationId::mint());
     }
 
     #[test]

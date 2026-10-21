@@ -4,7 +4,7 @@
 
 use std::num::{NonZeroU32, NonZeroU64};
 
-use p02_characters::Persona;
+use p02_characters::{CharacterRef, Persona};
 use p02_contracts::{ConversationTurn, RoleModelAdapter, TurnIdentity};
 use p02_core::{
     CharacterProfile, ClientStamp, ConversationId, EventIdentity, MessageId, Participant,
@@ -12,7 +12,7 @@ use p02_core::{
 };
 use p02_plugins::PluginHost;
 use p02_store::{
-    CharacterData, CharacterRef, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
+    CharacterData, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
     SessionContinuation, SessionContinued, SessionLog, SessionWriter, StorageError, Summarizer,
     TakenLines,
 };
@@ -598,7 +598,7 @@ async fn end(host: &PluginHost, session: &SessionId, character: &CharacterProfil
         character: character.clone(),
     });
 
-    turn::failures(&host.session_end(&turn).await)
+    host.session_end(&turn).await.failures()
 }
 
 fn joined(failures: &[String]) -> Option<String> {

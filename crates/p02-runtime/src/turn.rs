@@ -9,16 +9,15 @@ use async_trait::async_trait;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     BlankContextTextError, CharacterDecision, CommittedTurn, ConversationToolCall,
-    ConversationTurn, DecisionContext, DecisionRejectionReason, Evidence, EvidenceStatus,
-    ModelToolCall, ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
+    ConversationTurn, DecisionContext, DecisionRejectionReason, Evidence, ModelToolCall,
+    ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
     ClientStamp, EventIdentity, MessageId, ParseUserLineError, Participant, SpeakerName, Timestamp,
     UserLine, VisibleMessage, VisibleText,
 };
 use p02_plugins::{
-    BeforeCallOutcome, HealthCheck, HookPhaseReport, PhaseStatus, PluginHost, PreparedContext,
-    ProposedToolCall,
+    BeforeCallOutcome, HealthCheck, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall,
 };
 use p02_role_model::{
     CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
@@ -189,21 +188,6 @@ pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
     } else {
         Person::Named(name)
     }
-}
-
-/// What failed in a phase of hooks that completed with failures: each
-/// failed record's summary.
-pub(crate) fn failures(report: &HookPhaseReport) -> Vec<String> {
-    if report.status == PhaseStatus::Completed {
-        return Vec::new();
-    }
-
-    report
-        .evidence
-        .iter()
-        .filter(|evidence| evidence.status() == EvidenceStatus::Failed)
-        .map(|evidence| evidence.summary().to_owned())
-        .collect()
 }
 
 /// An error and the causes under it, as one sentence: what broke, then why.
@@ -653,7 +637,7 @@ impl OpenTurn<'_> {
             .host
             .after_turn_committed(&self.shown().await, &committed)
             .await;
-        let mut failed = failures(&report);
+        let mut failed = report.failures();
 
         if report.status == PhaseStatus::CompletedWithFailures || !report.evidence.is_empty() {
             let status = match report.status {

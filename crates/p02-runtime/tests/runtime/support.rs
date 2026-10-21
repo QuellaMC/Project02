@@ -19,8 +19,8 @@ use p02_contracts::{
 use p02_core::{ClientStamp, ConversationId, SessionId, SpeakerName};
 use p02_plugins::PluginHost;
 use p02_runtime::{Character, Conversation, Delivery, Progress, Submission};
-use p02_shared::{DanglingLinks, Fingerprint, Identifier, canonical_path};
-use p02_store::{CharacterData, CharacterRef, Home, LogRecord, RecordKind};
+use p02_shared::{DanglingLinks, Identifier, canonical_path};
+use p02_store::{CharacterData, Home, LogRecord, RecordKind};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -45,12 +45,7 @@ pub(crate) fn mira() -> Character {
         .unwrap();
 
     Character {
-        character_ref: CharacterRef {
-            version: definition.version,
-            persona_fingerprint: Fingerprint::new(
-                &json!({"persona": {"system": definition.persona.sections()}}),
-            ),
-        },
+        character_ref: definition.character_ref(),
         profile: definition.profile,
         persona: definition.persona,
     }

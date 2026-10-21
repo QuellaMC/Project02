@@ -124,6 +124,31 @@ impl Timestamp {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The moment in milliseconds since the Unix epoch, as a client's clock
+    /// reads a deadline.
+    #[must_use]
+    pub fn unix_millis(&self) -> i64 {
+        let digits = self.0.as_bytes();
+        let number = |from: usize, to: usize| {
+            digits[from..to]
+                .iter()
+                .fold(0_i64, |value, digit| value * 10 + i64::from(digit - b'0'))
+        };
+        let (month, day) = (number(5, 7), number(8, 10));
+        // Days since 1970-01-01 in the proleptic Gregorian calendar, counted
+        // in years that begin in March, so a leap day ends its year.
+        let year = number(0, 4) - i64::from(month <= 2);
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+        let days = era * 146_097 + year_of_era * 365 + year_of_era / 4 - year_of_era / 100
+            + day_of_year
+            - 719_468;
+        let seconds = ((days * 24 + number(11, 13)) * 60 + number(14, 16)) * 60 + number(17, 19);
+
+        seconds * 1000 + number(20, 23)
+    }
 }
 
 fn is_canonical_timestamp(text: &[u8]) -> bool {
@@ -283,6 +308,26 @@ mod tests {
             ("2026-06-15T23:59:60.000Z", false),
         ] {
             assert_eq!(Timestamp::new(text).is_ok(), accepted, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_timestamp_reads_as_the_milliseconds_since_the_epoch() {
+        for text in [
+            "1970-01-01T00:00:00.000Z",
+            "1969-12-31T23:59:59.999Z",
+            "2000-02-29T12:34:56.789Z",
+            "2026-06-15T00:00:00.000Z",
+            "2100-03-01T00:00:00.001Z",
+            "0001-01-01T00:00:00.000Z",
+        ] {
+            let expected = text.parse::<jiff::Timestamp>().unwrap().as_millisecond();
+
+            assert_eq!(
+                Timestamp::new(text).unwrap().unix_millis(),
+                expected,
+                "{text}"
+            );
         }
     }
 

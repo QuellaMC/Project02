@@ -5,8 +5,8 @@ mod descriptor;
 mod discovery;
 
 pub use descriptor::{
-    CharacterDefinition, CharacterVersion, DescriptorPart, ParseCharacterVersionError,
-    ParseDescriptorError, Persona, PluginExpectations, PluginList,
+    CharacterDefinition, CharacterRef, CharacterVersion, DescriptorPart,
+    ParseCharacterVersionError, ParseDescriptorError, Persona, PluginExpectations, PluginList,
 };
 pub use discovery::{
     Discovery, FindCharacterError, HOME_PACKAGES, PackageDiagnostic, PackageLocation,

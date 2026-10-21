@@ -13,7 +13,9 @@ p02-shared.
   lengths counted in characters; a refusal names the first rule it breaks
   and is reported under the code of the part that breaks it. Whether her
   plugins are installed, and whether their values fit, is judged against
-  the installed plugins when she starts.
+  the installed plugins when she starts. Which content of hers a model
+  round ran, recorded with every round, is her package's version and the
+  fingerprint of her persona.
 - **Discovery.** The bundled packages are compiled into the daemon, and a
   person adds a character by putting her folder in `<home>/characters/`.
   That folder may be a link; a package folder in it may not, nor a

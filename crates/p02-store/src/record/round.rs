@@ -1,11 +1,11 @@
 use std::num::NonZeroU32;
 
-use p02_characters::CharacterVersion;
+use p02_characters::CharacterRef;
 use p02_contracts::{
     DecisionRejectionReason, DecisionResult, InputEnvelope, PromptSize, ProviderExchange,
     ProviderMetadata,
 };
-use p02_shared::{Credentials, Fingerprint, redact_credentials};
+use p02_shared::{Credentials, redact_credentials};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -36,15 +36,6 @@ pub struct RoundSnapshot {
     pub provider_metadata: Option<ProviderMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_exchange: Option<ProviderExchange>,
-}
-
-/// Which content of the character a round ran: her package's version and
-/// the fingerprint of her persona.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CharacterRef {
-    pub version: CharacterVersion,
-    pub persona_fingerprint: Fingerprint,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

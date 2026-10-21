@@ -1,7 +1,6 @@
 //! A character's storage for the host to serve, toy plugins, and turns.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -18,7 +17,7 @@ use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
-use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, Turn};
+use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, Turn, list};
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
@@ -786,20 +785,18 @@ impl Gate {
     }
 }
 
-/// The repository's bundled descriptors keep their manifests where the
-/// TypeScript daemon reads them; the manifest inside each is the one the
-/// host is given.
+/// The manifest the daemon's list holds for plugin `id`, edited as a test
+/// needs it.
 pub(crate) fn bundled_manifest(id: &str, edit: impl FnOnce(&mut Map<String, Value>)) -> Manifest {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/plugins/packages")
-        .join(id)
-        .join("project02.plugin.json");
-    let descriptor: Value =
-        serde_json::from_str(&p02_shared::read_text_lossy(&path).unwrap()).unwrap();
-    let Value::Object(mut manifest) = descriptor["manifest"].clone() else {
-        panic!("{id}'s descriptor holds a manifest");
+    let (manifest, _) = list::plugins()
+        .unwrap()
+        .iter()
+        .find(|(manifest, _)| manifest.id().as_str() == id)
+        .unwrap();
+    let Value::Object(mut fields) = serde_json::to_value(manifest).unwrap() else {
+        panic!("a manifest is an object");
     };
 
-    edit(&mut manifest);
-    Manifest::from_value(&Value::Object(manifest)).unwrap()
+    edit(&mut fields);
+    Manifest::from_value(&Value::Object(fields)).unwrap()
 }
