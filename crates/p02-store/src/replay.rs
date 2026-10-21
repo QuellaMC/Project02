@@ -117,7 +117,7 @@ pub enum ReplayError {
     #[error(
         "a rejection repeats the refusal of the round it judged, or names a refusal of the \
          runtime itself: a commit refused after a round that would have completed the turn, or \
-         a budget spent on a round still asking for a tool"
+         a budget spent on a round still asking for a tool before any of it was taken up"
     )]
     RejectionDisagrees,
     #[error(
@@ -623,7 +623,11 @@ fn check_rejected(turn: &Turn, rejected: &TurnRejected) -> Result<(), ReplayErro
             DecisionRejectionReason::CommitValidationFailure => {
                 !executable(decision.tool_calls()) && judged.taken_up()
             }
-            DecisionRejectionReason::ToolRoundsExhausted => executable(decision.tool_calls()),
+            DecisionRejectionReason::ToolRoundsExhausted => {
+                executable(decision.tool_calls())
+                    && judged.replies_said == 0
+                    && judged.calls_started == 0
+            }
             _ => false,
         },
     };

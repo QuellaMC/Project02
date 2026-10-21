@@ -81,9 +81,9 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   every reply that round said, and anchors the last; a rejection that judges
   a round repeats that round's refusal or is the runtime's own, a commit
   refused after a round that would have completed the turn or a budget spent
-  on a round still asking for a tool, and one that judges none comes where
-  its reason stops a turn: a line refused before it is committed, a plugin's
-  refusal before any round.
+  on a round still asking for a tool before any of it was taken up, and one
+  that judges none comes where its reason stops a turn: a line refused
+  before it is committed, a plugin's refusal before any round.
 - **History.** The one projection of a log into the turns its model is
   shown: a turn once it committed the person's line, a round of tool calls
   once a call it started came back, a continued session's carried turns

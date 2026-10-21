@@ -136,8 +136,6 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                 .turn(&line)
                 .user(&client)
                 .round(Some(answer(&[], &["tired"], None)))
-                .start_calls()
-                .finish_calls()
                 .rejected_by_its_round(),
             _ => {
                 let replies = random.sentences(3);
