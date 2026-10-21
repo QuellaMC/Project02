@@ -465,6 +465,7 @@ fn a_change_on_her_screen_is_written_into_her_overlay_alone_secrets_too() {
         serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap()).unwrap(),
         json!({
             "version": "project02.config.v2",
+            "plugins": {"character-state": {"enabled": true}},
             "project02": {"userDisplayName": "Sam", "nvidiaApiKey": "nvapi-mira"},
             "connectors": {"telegram": {"config": {"botToken": "987654:mira"}}},
         })

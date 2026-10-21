@@ -21,7 +21,7 @@ fn start(world: &World, character: &str) -> Result<CharacterData, MaterializeErr
 }
 
 #[test]
-fn her_first_start_writes_only_her_packages_settings_switching_on_what_it_requires() {
+fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_has() {
     let world = World::new();
 
     world
@@ -30,7 +30,10 @@ fn her_first_start_writes_only_her_packages_settings_switching_on_what_it_requir
         ))
         .package(
             "nova",
-            &json!({"required": ["demo-config"], "config": {"demo-config": {"tone": "warm"}}}),
+            &json!({
+                "required": ["demo-config", "ghost"],
+                "config": {"demo-config": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
+            }),
             "1.0.0",
         );
 
@@ -111,8 +114,41 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
 }
 
 #[test]
+fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start_merges_them() {
+    let world = World::new();
+    let demo = |kind: &str| json!({"kind": kind, "namespace": "plugins", "id": "demo-config"});
+    let mut tone = demo("section_field_unset");
+
+    tone["field"] = json!("tone");
+    world
+        .package(
+            "nova",
+            &json!({
+                "recommended": ["demo-config"],
+                "config": {"demo-config": {"tone": "warm", "signoff": "Yours."}},
+            }),
+            "1.0.0",
+        )
+        .save(&of("nova"), tone)
+        .save(&of("nova"), demo("section_enabled"));
+
+    let data = start(&world, "nova").unwrap();
+
+    assert_eq!(
+        data.package_version()
+            .map(p02_characters::CharacterVersion::as_str),
+        Some("1.0.0")
+    );
+    assert_eq!(
+        overlay_of(&world, "nova"),
+        document(json!({"plugins": {"demo-config": {"config": {"signoff": "Yours."}}}}))
+    );
+}
+
+#[test]
 fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
     let world = World::new();
+    let hers = document(json!({"plugins": {"demo-config": {"enabled": true, "config": "warm"}}}));
 
     world
         .package(
@@ -120,17 +156,11 @@ fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
             &json!({"config": {"demo-config": {"tone": "warm"}}}),
             "1.0.0",
         )
-        .write_overlay(
-            "nova",
-            &document(json!({"plugins": {"demo-config": {"config": "warm"}}})),
-        );
+        .write_overlay("nova", &hers);
 
     start(&world, "nova").unwrap();
 
-    assert_eq!(
-        overlay_of(&world, "nova"),
-        document(json!({"plugins": {"demo-config": {"config": "warm"}}}))
-    );
+    assert_eq!(overlay_of(&world, "nova"), hers);
 
     let resolution =
         Resolution::character(&world.home, &world.sections, &world.character("nova")).unwrap();

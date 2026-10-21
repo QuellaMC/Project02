@@ -6,11 +6,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use p02_shared::{Identifier, write_file_atomically};
-use p02_store::{Home, SettingsDocument, StorageError};
+use p02_store::{CharacterData, Home, SettingsDocument, StorageError};
 use serde_json::{Map, Value};
 
 use crate::document::encode;
-use crate::resolve::{Written, WrittenOverlay};
+use crate::resolve::{Overlay, Written, WrittenOverlay};
 
 /// Runs `work` on the home's document, holding its lock, and releases the
 /// lock whatever `work` comes to. A lock another writer holds is waited for
@@ -67,4 +67,27 @@ pub(crate) fn write(path: &Path, document: &Map<String, Value>) -> Result<(), St
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Makes her overlay's file hold what her settings are read from, under
+/// the locks of [`with_character`]: her data directory made first, as her
+/// first start makes it; the file replaced unless it holds that already;
+/// and then the version of her package whose settings it now holds
+/// recorded, so a crash between the two merges again what is still
+/// missing.
+pub(crate) fn settle(home: &Home, overlay: &mut Overlay) -> Result<CharacterData, StorageError> {
+    let mut data = CharacterData::ensure(home, &overlay.character)?;
+
+    if overlay.read.raw() != overlay.written.raw() {
+        write(&overlay.path, overlay.read.raw())?;
+        overlay.written = overlay.read.clone();
+    }
+
+    if let Some(version) = overlay.merges.take()
+        && data.package_version() != Some(&version)
+    {
+        data.record_package_version(version)?;
+    }
+
+    Ok(data)
 }

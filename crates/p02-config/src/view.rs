@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::fmt;
 use std::num::NonZeroU64;
 
 use p02_characters::Discovery;
@@ -276,7 +277,7 @@ fn effective_view(field: &Field<'_>) -> EffectiveView {
 
 fn activation(section: &Section<'_>) -> SectionActivation {
     let declared = section.declared.reasons();
-    let (status, reasons) = match section.status() {
+    let (status, reasons) = match section.status {
         Status::Active(reason) => (
             ActivationStatus::Active,
             declared
@@ -329,10 +330,22 @@ pub enum ConnectorRefusal {
 /// A connector's section for one target: its activation, and each field
 /// that has a value it takes for that target, the home's fields reaching
 /// every character's entry.
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct ConnectorEntry {
     activation: SectionActivation,
     values: Map<String, Value>,
+}
+
+/// Names the fields with a value only: the values are its tokens, in the
+/// clear.
+impl fmt::Debug for ConnectorEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectorEntry")
+            .field("activation", &self.activation)
+            .field("values", &self.values.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize)]

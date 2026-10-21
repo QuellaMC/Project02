@@ -104,7 +104,9 @@ pub(crate) struct Document {
 /// problems of its shape.
 #[derive(Clone, Debug)]
 pub(crate) struct Stanza {
-    pub(crate) enabled: Option<bool>,
+    /// The switch as authored, whatever it holds: one that is not a
+    /// boolean is still a switch, refused where it is the nearest.
+    pub(crate) enabled: Option<Value>,
     pub(crate) config: Option<Map<String, Value>>,
     pub(crate) problems: Vec<Diagnostic>,
 }
@@ -294,18 +296,18 @@ impl Stanza {
                 )
             })
             .collect();
-        let enabled = match entries.get("enabled") {
-            None => None,
-            Some(Value::Bool(enabled)) => Some(*enabled),
-            Some(_) => {
-                problems.push(problem(
-                    Code::BooleanInvalid,
-                    format!("{path}.enabled must be a boolean."),
-                    format!("{path}.enabled"),
-                ));
-                None
-            }
-        };
+        let enabled = entries.get("enabled").cloned();
+
+        if enabled
+            .as_ref()
+            .is_some_and(|enabled| !enabled.is_boolean())
+        {
+            problems.push(problem(
+                Code::BooleanInvalid,
+                format!("{path}.enabled must be a boolean."),
+                format!("{path}.enabled"),
+            ));
+        }
         let config = match entries.get("config") {
             None => None,
             Some(Value::Object(config)) => Some(config.clone()),

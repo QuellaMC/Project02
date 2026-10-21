@@ -219,17 +219,28 @@ fn a_section_this_build_lacks_warns_for_its_id_unless_the_nearest_switch_turns_i
 }
 
 #[test]
-fn the_settings_of_a_section_switched_off_are_never_judged() {
+fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switch_blocks_it() {
     let world = World::new();
-    let misspelled = json!({"enabled": false, "config": {"nope": 1, "tone": "shouty"}});
+    let misspelled = json!({"nope": 1, "tone": "shouty"});
+    let demo = |target: &p02_config::ConfigTarget| {
+        let view = world.view(target);
 
-    world.write_home(&document(json!({"plugins": {"demo-config": misspelled}})));
+        (
+            findings(&view["diagnostics"]),
+            section(&view, "plugins", "demo-config").unwrap()["activation"]["reasons"].clone(),
+        )
+    };
 
-    assert_eq!(world.view(&home())["diagnostics"], json!([]));
-    assert_eq!(
-        section(&world.view(&home()), "plugins", "demo-config").unwrap()["activation"]["status"],
-        "disabled"
-    );
+    for (stanza, reason) in [
+        (json!({"config": misspelled}), "not_enabled"),
+        (
+            json!({"enabled": false, "config": misspelled}),
+            "disabled_by_config",
+        ),
+    ] {
+        world.write_home(&document(json!({"plugins": {"demo-config": stanza}})));
+        assert_eq!(demo(&home()), (Vec::new(), json!([reason])), "{stanza}");
+    }
 
     world.write_overlay(
         "mira",
@@ -237,7 +248,7 @@ fn the_settings_of_a_section_switched_off_are_never_judged() {
     );
 
     assert_eq!(
-        findings(&world.view(&of("mira"))["diagnostics"]),
+        demo(&of("mira")).0,
         [
             (
                 "runtime_config_unknown_plugin_config_field".to_owned(),
@@ -249,10 +260,25 @@ fn the_settings_of_a_section_switched_off_are_never_judged() {
             ),
         ]
     );
+
+    world.write_home(&document(
+        json!({"plugins": {"demo-config": {"enabled": "yes"}}}),
+    ));
+
+    assert_eq!(
+        demo(&home()),
+        (
+            vec![(
+                "runtime_config_boolean_invalid".to_owned(),
+                "plugins.demo-config.enabled".to_owned()
+            )],
+            json!(["blocked_by_config_errors"])
+        )
+    );
 }
 
 #[test]
-fn a_memory_provider_the_settings_do_not_choose_is_never_judged() {
+fn a_memory_provider_the_settings_do_not_choose_never_runs_and_is_never_judged() {
     let world = World::new();
     let mem0 = json!({"enabled": true, "config": {"backend": "cloud"}});
 
@@ -260,7 +286,25 @@ fn a_memory_provider_the_settings_do_not_choose_is_never_judged() {
         "project02": {"defaultMemoryProvider": "another"},
         "plugins": {"mem0": mem0},
     })));
-    assert_eq!(world.view(&home())["diagnostics"], json!([]));
+
+    let view = world.view(&home());
+
+    assert_eq!(view["diagnostics"], json!([]));
+    assert_eq!(
+        section(&view, "plugins", "mem0").unwrap()["activation"],
+        json!({
+            "enabled": false,
+            "status": "disabled",
+            "reasons": ["not_selected_as_default_memory_provider"],
+        })
+    );
+    assert!(
+        world
+            .resolve(&of("mira"))
+            .settings()
+            .plugins()
+            .all(|(id, _)| id.as_str() != "mem0")
+    );
 
     world.write_home(&document(json!({
         "project02": {"defaultMemoryProvider": "mem0"},
