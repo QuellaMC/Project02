@@ -98,11 +98,12 @@ runtime runs it on a blocking thread, where a lock's wait blocks.
   listing but not a read of another session. The catalog and the directories
   are read as they were at one moment, as a log is, so a session made or
   discarded while they are read is never taken for damage. A conversation's
-  first segment is made once, and each next one only from the newest; only
-  the newest, when it never took a record, is discarded, by its writer
-  alone, so nothing is appended while it goes and the segments left run
-  unbroken. Sessions and conversations list oldest first, in code-point
-  order. A conversation is made once per set of participants, as `conv_` and
-  a random UUID, and a directory without its record is a make a crash
+  first segment is made once, and each next one only from the newest, both
+  by the conversation's holder alone; only the newest, when it never took a
+  record, is discarded, by its writer alone, so nothing is appended while it
+  goes and the segments left run unbroken. Sessions and conversations list
+  oldest first, in code-point order. A conversation is made once per set of
+  participants, as `conv_` and a random UUID, a make whose write fails takes
+  its directory back, and a directory without its record is a make a crash
   interrupted. A conversation's taken lines are read leniently and written
   whole by the holder of the conversation; the segments stay their truth.
