@@ -1062,6 +1062,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "p02-role-model"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "futures-util",
+ "p02-characters",
+ "p02-contracts",
+ "p02-core",
+ "p02-shared",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "p02-shared"
 version = "0.0.0"
 dependencies = [

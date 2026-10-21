@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use crate::role_model::chat::{ChatCompletionTool, ChatMessage};
 use crate::role_model::decision::InputEnvelope;
 use crate::role_model::exchange::{ProviderExchange, ProviderMetadata, ProviderName};
+use crate::role_model::history::ConversationTurn;
 
 /// A model provider. The runtime chooses one by its settings when it
 /// starts, so it is held as `dyn RoleModelAdapter`; the trait's methods are
@@ -30,6 +31,7 @@ pub trait RoleModelAdapter: Send + Sync + fmt::Debug {
 pub struct Invocation<'a> {
     messages: &'a [ChatMessage],
     tools: &'a [ChatCompletionTool],
+    history: &'a [ConversationTurn],
     reply_listener: Option<&'a (dyn Fn(ReplyDelta) + Send + Sync)>,
 }
 
@@ -42,8 +44,17 @@ impl<'a> Invocation<'a> {
         Self {
             messages,
             tools,
+            history: &[],
             reply_listener: None,
         }
+    }
+
+    /// The earlier turns the messages replay, as turns: what a provider
+    /// with no model reads the conversation from.
+    #[must_use]
+    pub fn with_history(mut self, history: &'a [ConversationTurn]) -> Self {
+        self.history = history;
+        self
     }
 
     /// Lets `listener` hear each piece of the reply as the model writes it:
@@ -65,6 +76,11 @@ impl<'a> Invocation<'a> {
         self.tools
     }
 
+    #[must_use]
+    pub fn history(&self) -> &'a [ConversationTurn] {
+        self.history
+    }
+
     /// Passes a piece of the reply to whoever listens.
     pub fn hear(&self, delta: ReplyDelta) {
         if let Some(listener) = self.reply_listener {
@@ -79,6 +95,7 @@ impl fmt::Debug for Invocation<'_> {
             .debug_struct("Invocation")
             .field("messages", &self.messages)
             .field("tools", &self.tools)
+            .field("history", &self.history)
             .field("listened", &self.reply_listener.is_some())
             .finish()
     }

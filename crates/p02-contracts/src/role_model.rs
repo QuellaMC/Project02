@@ -31,6 +31,6 @@ pub use history::{
 pub use prompt_size::{FrameSize, PromptSize, PromptSizeError};
 pub use reasoning::{ReasoningFilter, ReasoningLeakError, scrub_reasoning_blocks};
 pub use tools::{
-    DuplicateToolError, ModelToolCall, ModelToolDefinition, ParseModelToolCallError,
-    PluginToolDefinition, PluginToolDefinitions, VISIBLE_REPLY,
+    DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,
+    ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, VISIBLE_REPLY,
 };
