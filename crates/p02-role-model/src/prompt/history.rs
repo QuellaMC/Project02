@@ -118,15 +118,21 @@ fn turn_tokens(turn: &ConversationTurn) -> u64 {
 }
 
 /// The newest whole turns that fit half the context window, oldest first;
-/// the other half is for the prompt around them and the reply. A turn is
-/// never split, and the first that does not fit ends the window, so what
-/// the model sees is always recent and unbroken.
+/// the other half is for the prompt around them and the reply.
 #[must_use]
 pub fn select_history_window(
     turns: &[ConversationTurn],
     context_window_tokens: NonZeroU64,
 ) -> &[ConversationTurn] {
-    let budget = context_window_tokens.get() / 2;
+    newest_turns_within(turns, context_window_tokens.get() / 2)
+}
+
+/// The newest whole turns that cost at most `budget` tokens by the
+/// runtime's one estimate, oldest first. A turn is never split, and the
+/// first that does not fit ends the run, so what is chosen is always recent
+/// and unbroken.
+#[must_use]
+pub fn newest_turns_within(turns: &[ConversationTurn], budget: u64) -> &[ConversationTurn] {
     let mut used = 0;
     let mut start = turns.len();
 

@@ -19,7 +19,9 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   exceptions: characters counted as code points, tool payloads spelled by
   `serde_json`, and the parser's rejection wording.
 - **The history window** is the newest whole earlier turns that fit half
-  the context window, at four characters a token.
+  the context window, at four characters a token; the same measure picks
+  the newest turns within any budget, as a continuation picks what it
+  carries.
 - **The rounds.** A round is judged by the decision parser and recorded
   before anything it decided happens. A refused round goes back to the
   model as part of its next round and counts like any other; a provider

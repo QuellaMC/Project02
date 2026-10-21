@@ -1,6 +1,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The event a runtime record answers to.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -203,6 +204,17 @@ struct UncheckedEventIdentity {
 }
 
 impl EventIdentity {
+    /// A new event, made now: `evt_` and `trace_`, each with a random UUID,
+    /// and the moment it is. The one way an event is minted.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self {
+            event_id: EventId(format!("evt_{}", Uuid::new_v4())),
+            trace_id: TraceId(format!("trace_{}", Uuid::new_v4())),
+            created_at: Timestamp::now(),
+        }
+    }
+
     /// # Errors
     ///
     /// [`ParseEventIdentityError`] when the event id and the trace id are
@@ -281,6 +293,22 @@ mod tests {
 
         assert_eq!(Timestamp::new(earlier.as_str()), Ok(earlier.clone()));
         assert!(earlier <= later, "{earlier} then {later}");
+    }
+
+    #[test]
+    fn a_minted_identity_is_a_new_event_and_trace() {
+        let minted = EventIdentity::mint();
+        let again = EventIdentity::mint();
+        let uuid_of = |text: &str, prefix: &str| {
+            Uuid::try_parse(text.strip_prefix(prefix).unwrap())
+                .unwrap()
+                .get_version_num()
+        };
+
+        assert_eq!(uuid_of(minted.event_id().as_str(), "evt_"), 4);
+        assert_eq!(uuid_of(minted.trace_id().as_str(), "trace_"), 4);
+        assert_ne!(minted.event_id(), again.event_id());
+        assert_ne!(minted.trace_id(), again.trace_id());
     }
 
     #[test]

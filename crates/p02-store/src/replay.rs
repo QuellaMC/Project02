@@ -313,8 +313,7 @@ impl SessionReplay {
             }
             RecordBody::TurnCompleted(completed) => check_completed(turn, completed)?,
             RecordBody::TurnRejected(rejected) => check_rejected(turn, rejected)?,
-            RecordBody::EventNormalized(_)
-            | RecordBody::EventReceived(_)
+            RecordBody::EventReceived(_)
             | RecordBody::AfterTurnCommitted(_)
             | RecordBody::SessionContinued(_) => {}
         }
@@ -478,7 +477,6 @@ impl SessionReplay {
             RecordBody::TurnCompleted(_) => self.end(index, End::Completed),
             RecordBody::TurnRejected(_) => self.end(index, End::Rejected),
             RecordBody::EventReceived(_)
-            | RecordBody::EventNormalized(_)
             | RecordBody::AfterTurnCommitted(_)
             | RecordBody::SessionContinued(_) => {}
         }

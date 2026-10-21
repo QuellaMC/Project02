@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use p02_contracts::{
     ConfigField, ConfigScope, ConfigSection, ConfigValueType, Manifest, PluginKind,
 };
-use p02_core::SpeakerName;
+use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl, Identifier};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -319,7 +319,7 @@ fn host_declaration() -> Value {
                 "required": false,
                 "secret": false,
                 "valueType": "string",
-                "defaultValue": "You",
+                "defaultValue": Participant::DEFAULT_LOCAL_USER_NAME,
                 "redactionLabels": [],
             },
             {

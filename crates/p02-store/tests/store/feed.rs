@@ -160,7 +160,7 @@ fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
     let mut lines: Vec<String> = script.records.iter().map(LogRecord::to_line).collect();
     let second = lines.len() / 3;
 
-    lines[second + 3] = r#"{"eventId": "evt_torn"}"#.to_owned();
+    lines[second + 2] = r#"{"eventId": "evt_torn"}"#.to_owned();
     lines.insert(second, "not-json".to_owned());
     std::fs::write(
         world.path_of(&world.segment(1)),

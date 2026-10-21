@@ -42,8 +42,6 @@ pub struct LogRecord {
 pub enum RecordBody {
     /// The event of a turn came in: the first record of every turn.
     EventReceived(EventReceived),
-    /// The event's text was taken as the person's line.
-    EventNormalized(EventNormalized),
     ModelRound(Box<RoundRecord>),
     ToolCallStarted(ToolCallStarted),
     ToolCallFinished(ToolCallFinished),
@@ -62,7 +60,6 @@ pub enum RecordBody {
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
     RuntimeEventReceived,
-    RuntimeEventNormalized,
     RoleModelRound,
     ToolCallStarted,
     ToolCallFinished,
@@ -89,10 +86,6 @@ pub struct PayloadSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normalized_current_user_message: Option<VisibleText>,
 }
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EventNormalized {}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -272,7 +265,6 @@ impl RecordBody {
     pub fn kind(&self) -> RecordKind {
         match self {
             Self::EventReceived(_) => RecordKind::RuntimeEventReceived,
-            Self::EventNormalized(_) => RecordKind::RuntimeEventNormalized,
             Self::ModelRound(_) => RecordKind::RoleModelRound,
             Self::ToolCallStarted(_) => RecordKind::ToolCallStarted,
             Self::ToolCallFinished(_) => RecordKind::ToolCallFinished,
@@ -294,7 +286,6 @@ impl RecordBody {
             Self::AfterTurnCommitted(after) => &after.runtime_plugin_evidence,
             Self::TurnRejected(rejected) => &rejected.runtime_plugin_evidence,
             Self::EventReceived(_)
-            | Self::EventNormalized(_)
             | Self::ModelRound(_)
             | Self::ToolCallStarted(_)
             | Self::SessionContinued(_) => &[],
@@ -305,9 +296,6 @@ impl RecordBody {
         Ok(match kind {
             RecordKind::RuntimeEventReceived => {
                 Self::EventReceived(serde_json::from_value(fields)?)
-            }
-            RecordKind::RuntimeEventNormalized => {
-                Self::EventNormalized(serde_json::from_value(fields)?)
             }
             RecordKind::RoleModelRound => Self::ModelRound(serde_json::from_value(fields)?),
             RecordKind::ToolCallStarted => Self::ToolCallStarted(serde_json::from_value(fields)?),

@@ -1,0 +1,26 @@
+[package]
+name = "p02-runtime"
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+jiff = { workspace = true, features = ["tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
+p02-characters.workspace = true
+p02-contracts.workspace = true
+p02-core.workspace = true
+p02-plugins.workspace = true
+p02-role-model.workspace = true
+p02-shared.workspace = true
+p02-store.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+
+[lints]
+workspace = true
