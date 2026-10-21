@@ -9,5 +9,6 @@ pub use descriptor::{
     ParseDescriptorError, Persona, PluginExpectations, PluginList,
 };
 pub use discovery::{
-    Discovery, HOME_PACKAGES, PackageDiagnostic, PackageLocation, PackageProblem, discover,
+    Discovery, FindCharacterError, HOME_PACKAGES, PackageDiagnostic, PackageLocation,
+    PackageProblem, discover,
 };

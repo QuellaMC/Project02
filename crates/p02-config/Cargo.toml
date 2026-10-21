@@ -1,0 +1,21 @@
+[package]
+name = "p02-config"
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+p02-characters.workspace = true
+p02-contracts.workspace = true
+p02-core.workspace = true
+p02-shared = { workspace = true, features = ["http"] }
+p02-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
