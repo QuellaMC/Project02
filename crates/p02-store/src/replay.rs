@@ -116,7 +116,8 @@ pub enum ReplayError {
     AnchorNotSaid,
     #[error(
         "a rejection repeats the refusal of the round it judged, or names a refusal of the \
-         runtime itself"
+         runtime itself: a commit refused after a round that would have completed the turn, or \
+         a budget spent on a round still asking for a tool"
     )]
     RejectionDisagrees,
     #[error(
@@ -612,16 +613,19 @@ fn check_rejected(turn: &Turn, rejected: &TurnRejected) -> Result<(), ReplayErro
         TurnRejection::Judged { round, reason } => (round, reason),
         TurnRejection::Runtime(rejection) => return check_in_time(turn, rejection),
     };
-    let agrees = match &last_round(turn, round)?.result {
+    let judged = last_round(turn, round)?;
+    let agrees = match &judged.result {
         DecisionResult::Rejected { rejection } => {
             rejection.reason == reason
                 && rejection.details.as_deref().unwrap_or(reason.as_str()) == rejected.message()
         }
-        DecisionResult::Accepted { decision } => {
-            reason == DecisionRejectionReason::CommitValidationFailure
-                || (reason == DecisionRejectionReason::ToolRoundsExhausted
-                    && executable(decision.tool_calls()))
-        }
+        DecisionResult::Accepted { decision } => match reason {
+            DecisionRejectionReason::CommitValidationFailure => {
+                !executable(decision.tool_calls()) && judged.taken_up()
+            }
+            DecisionRejectionReason::ToolRoundsExhausted => executable(decision.tool_calls()),
+            _ => false,
+        },
     };
 
     if agrees {

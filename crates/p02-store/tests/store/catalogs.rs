@@ -274,6 +274,22 @@ fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions()
     assert_eq!(world.data.session(first.session_id()).unwrap(), first);
     assert_eq!(world.log(1).read().unwrap().records().len(), 2);
 
+    std::fs::write(&catalog, format!("{rows}{rows}")).unwrap();
+
+    for refused in [
+        world.data.sessions().map(drop).unwrap_err(),
+        world
+            .data
+            .session(first.session_id())
+            .map(drop)
+            .unwrap_err(),
+    ] {
+        assert!(
+            matches!(refused, StorageError::RepeatedCatalogRow { line: 2, .. }),
+            "{refused}"
+        );
+    }
+
     std::fs::remove_file(&catalog).unwrap();
 
     for refused in [

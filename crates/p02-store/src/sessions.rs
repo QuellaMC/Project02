@@ -206,6 +206,14 @@ impl CharacterData {
                 .is_some_and(|named| named == id.to_string());
 
             if names_it {
+                if found.is_some() {
+                    return Err(StorageError::RepeatedCatalogRow {
+                        path: path.to_path_buf(),
+                        line,
+                        session: id.clone(),
+                    });
+                }
+
                 found = Some(decode_row(path, line, bytes)?);
             }
         }
@@ -233,8 +241,15 @@ impl CharacterData {
 
         for (line, bytes) in committed_lines(&content) {
             let entry = decode_row(path, line, bytes)?;
+            let session = entry.session_id.clone();
 
-            catalog.insert(entry.session_id.clone(), entry);
+            if catalog.insert(session.clone(), entry).is_some() {
+                return Err(StorageError::RepeatedCatalogRow {
+                    path: path.to_path_buf(),
+                    line,
+                    session,
+                });
+            }
         }
 
         let sessions_root = self.sessions_root();
