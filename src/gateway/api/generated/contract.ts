@@ -180,7 +180,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: number, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 7, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -201,7 +201,7 @@ export type GatewayMessage = { conversationId: Short, senderId: Short, text: Tex
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: number, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 7, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -277,14 +277,18 @@ export type Operation = { "kind": "set", path: string, value: JsonValue, } | { "
 export type Origin = { "scope": "character", characterId: Identifier, path: string, };
 
 /**
+ * Where a package comes from: compiled in, or added by the person.
+ */
+export type PackageProvenance = "bundled" | "operator";
+
+/**
  * A package discovery could not publish, and why, where.
  */
-export type PackageReport = { severity: string, code: string, message: string, path: string, 
+export type PackageReport = { 
 /**
- * `bundled` for a package compiled in, `operator` for one the person
- * added.
+ * Always an error: the package is not in the roster.
  */
-provenance: string, 
+severity: Severity, code: string, message: string, path: string, provenance: PackageProvenance, 
 /**
  * The folder the package was found in.
  */
@@ -475,6 +479,11 @@ export type Text = string;
 export type Timestamp = string;
 
 /**
+ * How a call of a round came back: as its plugin answered, or refused.
+ */
+export type ToolCallStatus = "accepted" | "rejected";
+
+/**
  * The submission a turn runs for, which any surface can tell as its own.
  */
 export type TurnIdentity = { conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, };
@@ -495,7 +504,7 @@ export type TurnProgress = { "kind": "user_message", messageId: MessageId, speak
 /**
  * The draft this message replaces.
  */
-draftId: string, } | { "kind": "reply_delta", draftId: string, text: string, } | { "kind": "reply_withdrawn", draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: string, toolName: Identifier, };
+draftId: string, } | { "kind": "reply_delta", draftId: string, text: string, } | { "kind": "reply_withdrawn", draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, toolName: Identifier, };
 
 /**
  * How a delivery ended, as the frame announcing it says: the status of

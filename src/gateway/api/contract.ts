@@ -1,10 +1,11 @@
-import type {TurnOutcome} from './generated/contract.ts';
+import type {GatewayHealth, TurnOutcome} from './generated/contract.ts';
 
 /**
- * Bumped when a client could no longer read what the daemon says. Health
+ * The protocol this client speaks, the one the daemon's types declare:
+ * bumped there, it does not compile here until this follows. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion = 7;
+export const gatewayProtocolVersion: GatewayHealth['protocolVersion'] = 7;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be

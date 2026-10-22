@@ -2,11 +2,12 @@
 //! the field names and the vocabulary the page, the clients and the
 //! conformance suite read.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use p02_characters::{PackageDiagnostic, PackageLocation, PackageProblem};
-use p02_config::Diagnostic;
+use p02_config::{Diagnostic, Severity};
 use p02_contracts::vocabulary;
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessage,
@@ -15,8 +16,8 @@ use p02_core::{
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::StorageError;
-use schemars::JsonSchema;
-use serde::Serialize;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
@@ -26,6 +27,45 @@ use crate::confirmation::{Answer, ConfirmationId};
 /// The protocol a client reads, which health carries so that an old client
 /// meets a clear message rather than a mystery.
 pub const PROTOCOL_VERSION: u32 = 7;
+
+/// [`PROTOCOL_VERSION`] as health and a stream's first frame carry it: the
+/// one value either can say, which the contract declares as that number,
+/// so a client whose own version is another does not compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProtocolVersion;
+
+impl Serialize for ProtocolVersion {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(PROTOCOL_VERSION)
+    }
+}
+
+impl JsonSchema for ProtocolVersion {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "ProtocolVersion".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"const": PROTOCOL_VERSION})
+    }
+}
+
+impl TS for ProtocolVersion {
+    type WithoutGenerics = Self;
+    type OptionInnerType = Self;
+
+    fn name(_: &ts_rs::Config) -> String {
+        PROTOCOL_VERSION.to_string()
+    }
+
+    fn inline(config: &ts_rs::Config) -> String {
+        Self::name(config)
+    }
+}
 
 /// What became of a delivered line.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
@@ -400,7 +440,7 @@ pub struct MaintenanceFailure {
 #[ts(rename = "GatewayHealth")]
 #[schemars(rename = "GatewayHealth")]
 pub struct Health {
-    pub protocol_version: u32,
+    pub protocol_version: ProtocolVersion,
     pub home_root: String,
     /// What the home's settings document says of itself.
     pub config: ConfigHealth,
@@ -425,13 +465,12 @@ pub struct PackagesHealth {
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct PackageReport {
-    pub severity: &'static str,
+    /// Always an error: the package is not in the roster.
+    pub severity: Severity,
     pub code: &'static str,
     pub message: String,
     pub path: String,
-    /// `bundled` for a package compiled in, `operator` for one the person
-    /// added.
-    pub provenance: &'static str,
+    pub provenance: PackageProvenance,
     /// The folder the package was found in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub character_id: Option<String>,
@@ -443,12 +482,14 @@ pub struct PackageReport {
 impl From<&PackageDiagnostic> for PackageReport {
     fn from(diagnostic: &PackageDiagnostic) -> Self {
         let (path, provenance) = match &diagnostic.location {
-            PackageLocation::Bundled => ("bundled".to_owned(), "bundled"),
-            PackageLocation::Home(path) => (path.display().to_string(), "operator"),
+            PackageLocation::Bundled => ("bundled".to_owned(), PackageProvenance::Bundled),
+            PackageLocation::Home(path) => {
+                (path.display().to_string(), PackageProvenance::Operator)
+            }
         };
 
         Self {
-            severity: "error",
+            severity: Severity::Error,
             code: diagnostic.problem.code(),
             // As a refused start embeds it, so the one reads in the other.
             message: diagnostic.problem.to_string(),
@@ -461,6 +502,14 @@ impl From<&PackageDiagnostic> for PackageReport {
             },
         }
     }
+}
+
+/// Where a package comes from: compiled in, or added by the person.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageProvenance {
+    Bundled,
+    Operator,
 }
 
 /// Whether a process of a built-in connector is on the event stream now.
@@ -718,9 +767,17 @@ pub enum TurnProgress {
     },
     ToolCallCompleted {
         round: NonZeroU32,
-        status: &'static str,
+        status: ToolCallStatus,
         tool_name: Identifier,
     },
+}
+
+/// How a call of a round came back: as its plugin answered, or refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+    Accepted,
+    Rejected,
 }
 
 impl From<Progress> for TurnProgress {
@@ -761,7 +818,11 @@ impl From<Progress> for TurnProgress {
                 accepted,
             } => Self::ToolCallCompleted {
                 round,
-                status: if accepted { "accepted" } else { "rejected" },
+                status: if accepted {
+                    ToolCallStatus::Accepted
+                } else {
+                    ToolCallStatus::Rejected
+                },
                 tool_name,
             },
         }
