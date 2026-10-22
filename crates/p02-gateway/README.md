@@ -65,7 +65,9 @@ Nothing here prints, reads an environment variable or parses a flag.
   it present from before its first frame until its end.
 - **The contract.** Every type a route answers, a route reads or a frame
   carries derives ts-rs's `TS` and schemars' `JsonSchema` beside serde, in
-  the crate that owns it, its TypeScript name the one the clients know.
+  the crate that owns it, its TypeScript name the one the clients know;
+  the protocol version, a constant no derive spells, implements both by
+  hand as that one number.
   A test of this crate, `cargo test -p p02-gateway contract`, walks them
   from the wire's roots and writes `src/gateway/api/generated/contract.ts`,
   the declarations the page, the client and the connector compile against,

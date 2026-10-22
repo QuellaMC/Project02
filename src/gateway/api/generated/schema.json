@@ -901,9 +901,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
+          "const": 7
         },
         "homeRoot": {
           "type": "string"
@@ -972,9 +970,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
+          "const": 7
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -1414,11 +1410,20 @@
         }
       ]
     },
+    "PackageProvenance": {
+      "type": "string",
+      "enum": [
+        "bundled",
+        "operator"
+      ],
+      "description": "Where a package comes from: compiled in, or added by the person."
+    },
     "PackageReport": {
       "type": "object",
       "properties": {
         "severity": {
-          "type": "string"
+          "$ref": "#/$defs/Severity",
+          "description": "Always an error: the package is not in the roster."
         },
         "code": {
           "type": "string"
@@ -1430,8 +1435,7 @@
           "type": "string"
         },
         "provenance": {
-          "type": "string",
-          "description": "`bundled` for a package compiled in, `operator` for one the person\nadded."
+          "$ref": "#/$defs/PackageProvenance"
         },
         "characterId": {
           "type": "string",
@@ -2079,6 +2083,14 @@
       "type": "string",
       "description": "A moment, in the one spelling every record uses: UTC to the\nmillisecond, `2026-06-15T00:00:00.000Z`. Text order is time order."
     },
+    "ToolCallStatus": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "rejected"
+      ],
+      "description": "How a call of a round came back: as its plugin answered, or refused."
+    },
     "TurnIdentity": {
       "type": "object",
       "properties": {
@@ -2354,7 +2366,7 @@
               "minimum": 1
             },
             "status": {
-              "type": "string"
+              "$ref": "#/$defs/ToolCallStatus"
             },
             "toolName": {
               "$ref": "#/$defs/Identifier"

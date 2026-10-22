@@ -6,21 +6,23 @@
 
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashSet};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use p02_app::{
     Answer, CancelReason, CharacterState, CharacterSummary, ConfigHealth, ConfirmationAnswer,
     ConfirmationId, ConfirmationQuestion, ConnectorPresence, Event, Health, HistoryMessage,
-    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal, PROTOCOL_VERSION,
-    PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal,
-    PairingRequest, PairingSubject, PendingConfirmation, RosterState, RunningDraft, RunningTurn,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress,
+    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal,
+    PackageProvenance, PackageReport, PackagesHealth, PairingAnswer, PairingDecision,
+    PairingOutcome, PairingRefusal, PairingRequest, PairingSubject, PendingConfirmation,
+    ProtocolVersion, RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome,
+    StartRefusal, StorageFailure, ToolCallStatus, TurnMessage, TurnOutcome, TurnProgress,
     TurnRefusal, TurnStamp, TurnStatus,
 };
 use p02_characters::discover;
 use p02_config::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, ConfigView, ConnectorConfigView,
-    ConnectorRefusal, Sections, ViewRefusal,
+    ConnectorRefusal, Sections, Severity, ViewRefusal,
 };
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
@@ -325,7 +327,7 @@ fn written() -> Vec<(&'static str, Value)> {
         message: "A segment did not close.".to_owned(),
     };
     let health = Health {
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: ProtocolVersion,
         home_root: "/home/person/.project02".to_owned(),
         config: ConfigHealth {
             diagnostics: match &diagnosed {
@@ -335,11 +337,11 @@ fn written() -> Vec<(&'static str, Value)> {
         },
         packages: PackagesHealth {
             diagnostics: vec![PackageReport {
-                severity: "error",
+                severity: Severity::Error,
                 code: "package_id_mismatch",
                 message: "The package's id is not its folder's.".to_owned(),
                 path: "/home/person/.project02/characters/nova".to_owned(),
-                provenance: "operator",
+                provenance: PackageProvenance::Operator,
                 character_id: Some("nova".to_owned()),
                 claimed_character_id: Some(id("vega")),
             }],
@@ -396,6 +398,15 @@ fn written() -> Vec<(&'static str, Value)> {
                 text: text.clone(),
                 source: Some(stamp("web")),
                 client_message_id: None,
+            },
+        },
+        Event::TurnProgress {
+            character_id: id("mira"),
+            conversation_id: conversation.clone(),
+            progress: TurnProgress::ToolCallCompleted {
+                round: NonZeroU32::MIN,
+                status: ToolCallStatus::Rejected,
+                tool_name: id("notes.add"),
             },
         },
         Event::TurnCompleted {
@@ -560,7 +571,7 @@ fn written() -> Vec<(&'static str, Value)> {
         value(
             "GatewayReady",
             &Ready {
-                protocol_version: PROTOCOL_VERSION,
+                protocol_version: ProtocolVersion,
                 health,
                 confirmations: vec![pending],
                 pairings: vec![request],

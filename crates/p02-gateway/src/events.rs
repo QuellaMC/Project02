@@ -16,7 +16,7 @@ use axum::http::header::CONTENT_TYPE;
 use axum::response::{IntoResponse, Response};
 use hyper::body::Frame;
 use p02_app::{
-    Daemon, Event, Health, PROTOCOL_VERSION, PairingRequest, PendingConfirmation, Presence,
+    Daemon, Event, Health, PairingRequest, PendingConfirmation, Presence, ProtocolVersion,
     RunningTurn, RunningTurns,
 };
 use p02_config::Connector;
@@ -106,7 +106,7 @@ pub(crate) enum Unopened {
 #[ts(rename = "GatewayReady")]
 #[schemars(rename = "GatewayReady")]
 pub(crate) struct Ready {
-    pub(crate) protocol_version: u32,
+    pub(crate) protocol_version: ProtocolVersion,
     pub(crate) health: Health,
     pub(crate) confirmations: Vec<PendingConfirmation>,
     pub(crate) pairings: Vec<PairingRequest>,
@@ -243,7 +243,7 @@ impl Streams {
 
             if hub.changed <= read_after {
                 let ready = Ready {
-                    protocol_version: PROTOCOL_VERSION,
+                    protocol_version: ProtocolVersion,
                     health,
                     confirmations,
                     pairings,

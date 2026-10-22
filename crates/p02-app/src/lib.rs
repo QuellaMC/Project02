@@ -18,9 +18,10 @@ pub use history::HistoryPage;
 pub use outcome::{
     CancelReason, CharacterSummary, ConfigHealth, ConfirmationAnswer, ConfirmationQuestion,
     ConnectorPresence, Event, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
-    MaintenanceFailure, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
-    PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingSubject,
-    PendingConfirmation, ReconcilePlan, RosterState, RunningDraft, RunningTurn, RunningTurns,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress,
-    TurnRefusal, TurnStamp, TurnStatus,
+    MaintenanceFailure, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageProvenance,
+    PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal,
+    PairingRequest, PairingSubject, PendingConfirmation, ProtocolVersion, ReconcilePlan,
+    RosterState, RunningDraft, RunningTurn, RunningTurns, Settlement, StartOutcome, StartRefusal,
+    StorageFailure, ToolCallStatus, TurnMessage, TurnOutcome, TurnProgress, TurnRefusal, TurnStamp,
+    TurnStatus,
 };

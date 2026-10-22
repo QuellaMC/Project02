@@ -27,8 +27,8 @@ use crate::confirmation::Answer;
 use crate::history::{self, HistoryPage};
 use crate::outcome::{
     CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
-    HistoryOutcome, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
-    PendingConfirmation, ReconcilePlan, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal,
+    HistoryOutcome, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PendingConfirmation,
+    ProtocolVersion, ReconcilePlan, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal,
     TurnStamp,
 };
 use crate::pairing::Pairings;
@@ -367,7 +367,7 @@ impl Daemon {
         let roster = Roster::read(&self.inner.world);
 
         Health {
-            protocol_version: PROTOCOL_VERSION,
+            protocol_version: ProtocolVersion,
             home_root: self.inner.world.home.root().display().to_string(),
             config: ConfigHealth {
                 diagnostics: roster.home_diagnostics.clone(),
