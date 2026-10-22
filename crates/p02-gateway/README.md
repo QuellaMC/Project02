@@ -27,7 +27,7 @@ Nothing here prints, reads an environment variable or parses a flag.
   64 KiB, `413 payload_too_large`: a route that takes no body reads
   none. Every answer of the API is never cached, and every refusal of
   the transport is the one envelope `{"error":{"code","message"}}`. A
-  body is read as JSON, each of its strings within 16,384 characters,
+  body is read as JSON, each string value within 16,384 characters,
   the longest text a request carries, a line; then as its route's
   shape, which judges itself as it is read, so nothing validates it
   twice: no unknown field, the stamps as stamps, a line's text not

@@ -20,7 +20,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::Console;
-use crate::serve::failed;
+use crate::serve::{address_line, failed};
 use crate::switches::Switches;
 
 /// Between two tries of the lease.
@@ -36,7 +36,7 @@ pub(crate) enum HandedOver {
 /// What the holder said to one question.
 enum Asked {
     Running {
-        address: String,
+        line: String,
         pid: Option<NonZeroU32>,
     },
     /// Why it is not taken as running here, the rest of a sentence.
@@ -64,12 +64,12 @@ pub(crate) async fn hand_over(
 
     loop {
         let why = match ask(&client, home, record.as_ref(), switches.probe, stop).await {
-            Asked::Running { address, pid } => {
+            Asked::Running { line, pid } => {
                 console.say(&match pid {
                     Some(pid) => format!("Already running on this home (pid {pid})."),
                     None => "Already running on this home.".to_owned(),
                 });
-                console.say(&format!("PROJECT02_GATEWAY={address}"));
+                console.say(&line);
                 return HandedOver::Ended(ExitCode::SUCCESS);
             }
             Asked::Silent(why) => why,
@@ -157,7 +157,7 @@ async fn ask(
 
             match served {
                 Some(served) if served == home.root().display().to_string() => Asked::Running {
-                    address: format!("{origin}#token={}", record.token.as_str()),
+                    line: address_line(record.port, &record.token),
                     pid: record.running.as_ref().map(|run| run.pid),
                 },
                 Some(served) => Asked::Silent(format!("the one at {origin} serves {served}")),
