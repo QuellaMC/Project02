@@ -77,7 +77,9 @@ fn stanza<'a>(document: &'a mut Map<String, Value>, path: &[&str]) -> &'a mut Ma
 }
 
 /// Valid settings: every value one its field takes, set where its scope
-/// lets it be set, and unknown sections the generator expects warnings of.
+/// lets it be set, and unknown sections the generator expects warnings of;
+/// valid for Mira too, who runs the memory plugin her settings choose and
+/// the plugin her package requires.
 fn generate(random: &mut Random) -> Generated {
     let mut home = document(json!({})).as_object().unwrap().clone();
     let mut overlay = home.clone();
@@ -85,6 +87,15 @@ fn generate(random: &mut Random) -> Generated {
 
     settings(random, &mut home);
     settings(random, &mut overlay);
+
+    if [&home, &overlay]
+        .iter()
+        .any(|document| document["project02"].get("defaultMemoryProvider").is_some())
+    {
+        for document in [&mut home, &mut overlay] {
+            stanza(document, &["plugins", "mem0"]).insert("enabled".to_owned(), json!(true));
+        }
+    }
 
     if random.chance(50) {
         let telegram = stanza(&mut home, &["connectors", "telegram", "config"]);
@@ -103,7 +114,7 @@ fn generate(random: &mut Random) -> Generated {
 
     if random.chance(50) {
         stanza(&mut overlay, &["plugins", "character-state"])
-            .insert("enabled".to_owned(), json!(random.chance(50)));
+            .insert("enabled".to_owned(), json!(true));
     }
 
     if random.chance(40) {
@@ -564,7 +575,7 @@ fn every_generated_home_reads_back_with_exactly_the_findings_planted_in_it() {
                 }
 
                 assert_eq!(found(&world.resolve(&mira)), expected, "seed {seed}");
-                assert_blocks_only_its_section(&world, &mira, *code, path, seed);
+                assert_blocks_as_it_stops_her(&world, &mira, *code, path, seed);
             }
             Planted::LinkedOverlay => {
                 assert_eq!(found(&world.resolve(&home())), shared, "seed {seed}");
@@ -597,9 +608,11 @@ fn every_generated_home_reads_back_with_exactly_the_findings_planted_in_it() {
     }
 }
 
-/// An error blocks the section it names and no other; a warning blocks
-/// nothing.
-fn assert_blocks_only_its_section(
+/// What a finding in her settings blocks in her view: an error about what
+/// she runs stops her, so no plugin of hers but the host's own is active
+/// and the one in error is blocked; a connector's error blocks that
+/// connector alone; a warning blocks nothing.
+fn assert_blocks_as_it_stops_her(
     world: &World,
     target: &p02_config::ConfigTarget,
     code: Code,
@@ -607,24 +620,49 @@ fn assert_blocks_only_its_section(
     seed: u64,
 ) {
     let view = world.view(target);
-    let blocked: Vec<String> = view["sections"]
+    let sections: Vec<(String, &str)> = view["sections"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|section| section["activation"]["status"] == "blocked")
         .map(|section| {
-            format!(
-                "{}.{}",
-                section["namespace"].as_str().unwrap(),
-                section["id"].as_str().unwrap()
+            (
+                format!(
+                    "{}.{}",
+                    section["namespace"].as_str().unwrap(),
+                    section["id"].as_str().unwrap()
+                ),
+                section["activation"]["status"].as_str().unwrap(),
             )
         })
         .collect();
-    let expected: Vec<String> = if code == Code::AuthoredOutsideScope {
-        Vec::new()
-    } else {
-        vec![path.split('.').take(2).collect::<Vec<_>>().join(".")]
+    let named = |status: &str| -> Vec<&str> {
+        sections
+            .iter()
+            .filter(|(_, found)| *found == status)
+            .map(|(section, _)| section.as_str())
+            .collect()
     };
+    let in_error = path.split('.').take(2).collect::<Vec<_>>().join(".");
 
-    assert_eq!(blocked, expected, "seed {seed}: {view}");
+    if code == Code::AuthoredOutsideScope {
+        assert_eq!(named("blocked"), Vec::<&str>::new(), "seed {seed}: {view}");
+    } else if in_error.starts_with("connectors.") {
+        assert_eq!(named("blocked"), [in_error.as_str()], "seed {seed}: {view}");
+    } else {
+        let active_plugins: Vec<&str> = named("active")
+            .into_iter()
+            .filter(|section| section.starts_with("plugins."))
+            .collect();
+
+        assert!(
+            named("blocked").contains(&in_error.as_str()),
+            "seed {seed}: {view}"
+        );
+        assert!(
+            active_plugins
+                .iter()
+                .all(|section| *section == "plugins.runtime.plugin"),
+            "seed {seed}: {view}"
+        );
+    }
 }

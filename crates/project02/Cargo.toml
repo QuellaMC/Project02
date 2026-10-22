@@ -1,0 +1,25 @@
+[package]
+name = "project02"
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "project02"
+
+[dependencies]
+p02-app.workspace = true
+p02-config.workspace = true
+p02-gateway.workspace = true
+p02-plugins.workspace = true
+p02-role-model.workspace = true
+p02-shared = { workspace = true, features = ["http"] }
+p02-store.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util.workspace = true
+
+[lints]
+workspace = true

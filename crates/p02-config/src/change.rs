@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, Discovery};
 use p02_contracts::ConfigField;
-use p02_shared::Fingerprint;
+use p02_shared::{Fingerprint, error_sentence, sentence};
 use p02_store::{Home, StorageError};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
@@ -22,7 +22,6 @@ use crate::document::{Document, Read, encode};
 use crate::materialize::merged_overlay;
 use crate::resolve::{Layers, Overlay, Resolution, Written, WrittenOverlay, target_fingerprint};
 use crate::transaction::{settle, with_character, with_home, write};
-use crate::view::{chain, sentence};
 
 /// Whose settings a view reads or a change writes: the home's, or one
 /// character's.
@@ -216,7 +215,7 @@ pub fn apply_change(
     };
 
     committed.unwrap_or_else(|error| ChangeOutcome::Failed {
-        message: sentence(&chain(&error)),
+        message: error_sentence(&error),
     })
 }
 

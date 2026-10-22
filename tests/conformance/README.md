@@ -73,15 +73,19 @@ writes its settings into the home's `config.json` before the start.
 `python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal
 through its `pty` module (`harness/terminal.py`).
 
-Against another build of the daemon and the connector, this suite and
-the browser suite, which starts `serve` through the same harness:
+Against another build of the daemon, this suite and the browser suite,
+which starts `serve` through the same harness. The Rust build,
+`crates/project02`, has `serve` so far, so the TypeScript `inspect` and
+connector stand in for the rest; its page is built into the binary, so
+the page is built first:
 
 ```sh
-PROJECT02_SERVE_CMD='path/to/project02 serve' \
-PROJECT02_INSPECT_CMD='path/to/project02 inspect' \
-PROJECT02_CONNECTOR_CMD='path/to/project02 telegram' \
+pnpm build:web && cargo build -p project02
+PROJECT02_SERVE_CMD='target/debug/project02 serve' \
+PROJECT02_INSPECT_CMD='node src/cli/inspect/main.ts' \
+PROJECT02_CONNECTOR_CMD='node src/frontends/telegram/main.ts' \
   pnpm exec vitest run --project conformance
-PROJECT02_SERVE_CMD='path/to/project02 serve' pnpm test:browser
+PROJECT02_SERVE_CMD='target/debug/project02 serve' pnpm test:browser
 ```
 
 To compare two builds rather than prove one, `tests/differential` drives

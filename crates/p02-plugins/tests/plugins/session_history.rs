@@ -8,7 +8,9 @@ use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 use crate::storage::Storage;
-use crate::support::{Enable, Gate, Scripted, Spec, bundled_manifest, call, turn, turn_in};
+use crate::support::{
+    Enable, Gate, Scripted, Spec, bundled_manifest, call, run_round, turn, turn_in,
+};
 
 const INDEX: &str = "session-index";
 
@@ -27,7 +29,7 @@ fn history_host(storage: &Arc<Storage>, timeout_ms: u64) -> PluginHost {
 }
 
 async fn ask(host: &PluginHost, tool: &str, input: Value, turn: &Turn) -> ToolCallReport {
-    host.handle_tool_calls(vec![call("c1", tool, input)], turn)
+    run_round(host, vec![call("c1", tool, input)], turn)
         .await
         .remove(0)
 }
@@ -139,15 +141,15 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
         ("აბგ", &["chat.9"]),
         ("τελος", &["chat.10"]),
     ];
-    let reports = host
-        .handle_tool_calls(
-            cases
-                .iter()
-                .map(|(query, _)| call("c1", "sessions.search", json!({"query": query})))
-                .collect(),
-            &now,
-        )
-        .await;
+    let reports = run_round(
+        &host,
+        cases
+            .iter()
+            .map(|(query, _)| call("c1", "sessions.search", json!({"query": query})))
+            .collect(),
+        &now,
+    )
+    .await;
     let results: Vec<&Value> = reports.iter().map(output).collect();
 
     assert_eq!(

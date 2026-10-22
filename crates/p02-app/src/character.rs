@@ -11,17 +11,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
-    CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution,
+    CharacterSettings, Diagnostic, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
 };
-use p02_contracts::{PluginKind, RoleModelAdapter, TurnIdentity};
+use p02_contracts::{RoleModelAdapter, TurnIdentity};
 use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerName, Timestamp};
 use p02_plugins::{PluginHost, Turn};
 use p02_role_model::{NvidiaSettings, select_adapter};
 use p02_runtime::{
     Character, CompletedTurn, Conversation, Delivery, Progress, Rotation, Submission,
 };
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_sentence};
 use p02_store::{RuntimeRejection, StorageError};
 use serde::{Serialize, Serializer};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -33,7 +33,7 @@ use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World};
 use crate::outcome::{
     Event, MaintenanceFailure, OpenOutcome, OpenRefusal, StorageFailure, TurnOutcome, TurnRefusal,
-    TurnStamp, sentence,
+    TurnStamp,
 };
 
 /// The sentence a character without a model gives, which the settings
@@ -82,8 +82,8 @@ pub(crate) struct CharacterHealth {
 }
 
 /// What a character was built from, her package and her settings: what a
-/// later reconcile compares with what she would be built from now, to
-/// decide a reload.
+/// later reconcile compares, her plugins as her host serves them, with
+/// what she would be built from now, to decide a reload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Built {
     pub(crate) definition: CharacterDefinition,
@@ -376,14 +376,7 @@ impl Actor {
                 let opened = self.open().await;
                 let _ = reply.send(opened);
             }
-            Command::Deliver(request, reply) => {
-                let (outcome, fatal) = self.turn(request).await;
-                let _ = reply.send(outcome);
-
-                if fatal {
-                    self.recover().await;
-                }
-            }
+            Command::Deliver(request, reply) => self.deliver(request, reply).await,
             Command::Reconcile(now, reply) => {
                 let reconciled = match self.state() {
                     CharacterState::Failed => {
@@ -391,7 +384,9 @@ impl Actor {
                         Reconciled::Started
                     }
                     CharacterState::Ready
-                        if self.parts.as_ref().map(|parts| &parts.built) != now.as_deref() =>
+                        if self.parts.as_ref().is_some_and(|parts| {
+                            !runs(&parts.built, &parts.host, now.as_deref())
+                        }) =>
                     {
                         self.reload().await;
                         Reconciled::Reloaded
@@ -400,6 +395,108 @@ impl Actor {
                 };
                 let _ = reply.send(reconciled);
             }
+        }
+    }
+
+    /// Takes a line through her thread while she still hears what she is
+    /// asked: a start is answered at once, since she runs, and so is an open
+    /// of her thread once it is open; a reconcile that would build her from
+    /// something else says she is reloading at once, and the reload follows
+    /// the turn, before her next line; a line waits its turn, in the order
+    /// it came. A turn the runtime fails leaves her failed, and she recovers
+    /// behind it.
+    async fn deliver(&mut self, request: Request, reply: oneshot::Sender<TurnOutcome>) {
+        let mut parts = match self.parts.take() {
+            Some(parts) if self.state() == CharacterState::Ready => parts,
+            unready => {
+                self.parts = unready;
+
+                let _ = reply.send(TurnOutcome::refused(
+                    TurnRefusal::CharacterUnavailable,
+                    not_ready(&self.id, &self.health.borrow()),
+                ));
+                return;
+            }
+        };
+        let mut reload = None;
+        let taken = {
+            let Parts {
+                character,
+                person,
+                context_window,
+                adapter,
+                host,
+                built,
+                thread,
+            } = &mut parts;
+            let opened = thread.as_ref().map(|thread| OpenOutcome::Opened {
+                conversation_id: thread.id().clone(),
+                character_id: self.id.clone(),
+                user_participant_id: Participant::local_user_id().clone(),
+            });
+            let mut turn = std::pin::pin!(take_line(
+                &self.world,
+                &self.id,
+                &self.broker,
+                TurnParts {
+                    thread,
+                    character,
+                    person,
+                    adapter: adapter.as_ref(),
+                    host,
+                    context_window: *context_window,
+                },
+                request,
+            ));
+
+            loop {
+                tokio::select! {
+                    biased;
+                    taken = &mut turn => break taken,
+                    Some(command) = self.commands.recv() => match command {
+                        Command::Start(answer) => {
+                            let _ = answer.send(());
+                        }
+                        Command::Open(answer) => match &opened {
+                            Some(opened) => {
+                                let _ = answer.send(opened.clone());
+                            }
+                            // The turn opens her thread: it is answered after.
+                            None => self.deferred.push_back(Command::Open(answer)),
+                        },
+                        Command::Reconcile(now, answer)
+                            if reload.is_none() && !runs(built, host, now.as_deref()) =>
+                        {
+                            self.publish(Change::Reloading);
+                            reload = Some(answer);
+                        }
+                        Command::Reconcile(_, answer) => {
+                            let _ = answer.send(Reconciled::Unchanged);
+                        }
+                        line @ Command::Deliver(..) => self.deferred.push_back(line),
+                    },
+                }
+            }
+        };
+
+        self.parts = Some(parts);
+
+        let (outcome, fatal) = match taken {
+            Ok((delivery, conversation, committed)) => {
+                self.answered(delivery, conversation, committed)
+            }
+            Err(refused) => (refused, false),
+        };
+        let _ = reply.send(outcome);
+
+        if fatal {
+            self.recover().await;
+        } else if reload.is_some() {
+            self.rebuild().await;
+        }
+
+        if let Some(answer) = reload {
+            let _ = answer.send(Reconciled::Reloaded);
         }
     }
 
@@ -512,91 +609,6 @@ impl Actor {
         }
     }
 
-    /// Takes a line through her thread, and whether the runtime failed the
-    /// turn: then she is failed, and recovers behind it.
-    async fn turn(&mut self, request: Request) -> (TurnOutcome, bool) {
-        let state = self.state();
-        let refused = |reason, message| (TurnOutcome::refused(reason, message), false);
-        let (CharacterState::Ready, Some(parts)) = (state, self.parts.as_mut()) else {
-            return refused(
-                TurnRefusal::CharacterUnavailable,
-                not_ready(&self.id, &self.health.borrow()),
-            );
-        };
-        let Request { stamp, text } = request;
-        let Parts {
-            character,
-            person,
-            context_window,
-            adapter,
-            host,
-            thread,
-            ..
-        } = parts;
-        let conversation = stamp.conversation_id.clone();
-        let thread = match hold(&self.world, thread, character, person).await {
-            Ok(thread) => thread,
-            Err(unheld) => {
-                let message = match unheld {
-                    Unheld::Storage(error) => sentence(&error),
-                    Unheld::Interrupted(error) => interrupted(&error),
-                };
-
-                return (
-                    TurnOutcome::Failed {
-                        character_id: self.id.clone(),
-                        conversation_id: conversation,
-                        message,
-                        committed: false,
-                    },
-                    false,
-                );
-            }
-        };
-
-        if *thread.id() != conversation {
-            return refused(
-                TurnRefusal::UnknownConversation,
-                format!(
-                    "Character \"{}\" holds no open conversation \"{conversation}\".",
-                    self.id
-                ),
-            );
-        }
-
-        let committed = AtomicBool::new(false);
-        let listener = |progress: Progress| {
-            if matches!(progress, Progress::UserMessage { .. }) {
-                committed.store(true, Ordering::Relaxed);
-            }
-
-            self.world.events.emit(Event::TurnProgress {
-                character_id: self.id.clone(),
-                conversation_id: conversation.clone(),
-                progress: progress.into(),
-            });
-        };
-
-        self.broker.running(Some(stamp.clone()));
-
-        let delivery = thread
-            .deliver(
-                Submission {
-                    line: &text,
-                    source: Some(stamp.source),
-                    client_message_id: Some(stamp.client_message_id),
-                },
-                adapter.as_ref(),
-                host,
-                *context_window,
-                &listener,
-            )
-            .await;
-
-        self.broker.running(None);
-        self.answered(delivery, conversation, committed.into_inner())
-    }
-
     /// What `delivery` on `conversation` comes to, and whether the runtime
     /// failed the turn; `committed` says whether the line was heard
     /// committed.
@@ -674,7 +686,7 @@ impl Actor {
                 )
             }
             Delivery::Failed { error, .. } => {
-                let message = sentence(&error);
+                let message = error_sentence(&error);
 
                 self.publish(Change::Failed(message.clone()));
                 (
@@ -694,7 +706,13 @@ impl Actor {
     /// refused first, as she is failed, then her thread is closed and her
     /// host shut down, then she starts. A stop read meanwhile wins.
     async fn recover(&mut self) {
+        let mut queued: Vec<Command> = self.deferred.drain(..).collect();
+
         while let Ok(command) = self.commands.try_recv() {
+            queued.push(command);
+        }
+
+        for command in queued {
             match command {
                 Command::Deliver(_, reply) => {
                     let _ = reply.send(TurnOutcome::refused(
@@ -825,6 +843,93 @@ impl Actor {
     }
 }
 
+/// Whether she runs what she would be built from now, `now`, which is none
+/// when her settings cannot be resolved: her package, her host's values,
+/// and each plugin as her host serves it, one her own plugin rebuilt live
+/// serving the values it was rebuilt from.
+fn runs(built: &Built, host: &PluginHost, now: Option<&Built>) -> bool {
+    now.is_some_and(|now| {
+        built.definition == now.definition
+            && built.settings.host() == now.settings.host()
+            && host.serves(now.settings.plugins())
+    })
+}
+
+/// What a turn runs on: her thread, opened the first time it is needed,
+/// and the parts she answers with.
+struct TurnParts<'p> {
+    thread: &'p mut Option<Conversation>,
+    character: &'p Character,
+    person: &'p SpeakerName,
+    adapter: &'p dyn RoleModelAdapter,
+    host: &'p PluginHost,
+    context_window: NonZeroU64,
+}
+
+/// Takes `request` through her thread: what the runtime made of it, on
+/// which conversation, and whether the line was heard committed; or what a
+/// line her thread cannot take comes to.
+async fn take_line(
+    world: &World,
+    id: &Identifier,
+    broker: &Broker,
+    parts: TurnParts<'_>,
+    request: Request,
+) -> Result<(Delivery, ConversationId, bool), TurnOutcome> {
+    let Request { stamp, text } = request;
+    let conversation = stamp.conversation_id.clone();
+    let thread = hold(world, parts.thread, parts.character, parts.person)
+        .await
+        .map_err(|unheld| TurnOutcome::Failed {
+            character_id: id.clone(),
+            conversation_id: conversation.clone(),
+            message: match unheld {
+                Unheld::Storage(error) => error_sentence(&error),
+                Unheld::Interrupted(error) => interrupted(&error),
+            },
+            committed: false,
+        })?;
+
+    if *thread.id() != conversation {
+        return Err(TurnOutcome::refused(
+            TurnRefusal::UnknownConversation,
+            format!("Character \"{id}\" holds no open conversation \"{conversation}\"."),
+        ));
+    }
+
+    let committed = AtomicBool::new(false);
+    let listener = |progress: Progress| {
+        if matches!(progress, Progress::UserMessage { .. }) {
+            committed.store(true, Ordering::Relaxed);
+        }
+
+        world.events.emit(Event::TurnProgress {
+            character_id: id.clone(),
+            conversation_id: conversation.clone(),
+            progress: progress.into(),
+        });
+    };
+
+    broker.running(Some(stamp.clone()));
+
+    let delivery = thread
+        .deliver(
+            Submission {
+                line: &text,
+                source: Some(stamp.source),
+                client_message_id: Some(stamp.client_message_id),
+            },
+            parts.adapter,
+            parts.host,
+            parts.context_window,
+            &listener,
+        )
+        .await;
+
+    broker.running(None);
+    Ok((delivery, conversation, committed.into_inner()))
+}
+
 /// Why her thread could not be held.
 enum Unheld {
     Storage(StorageError),
@@ -855,15 +960,15 @@ async fn hold<'t>(
 }
 
 fn interrupted(error: &JoinError) -> String {
-    format!("Work on the disk did not finish: {}", sentence(error))
+    format!("Work on the disk did not finish: {}", error_sentence(error))
 }
 
 /// Assembles character `id` from what the disk holds now: her package, her
 /// settings, which must load and switch her on before anything is written
-/// for her, her package's settings merged into her overlay, her model, the
-/// plugins her package expects and her memory provider judged, and her
-/// host built with `broker` to ask the person and her settings for its own
-/// plugin to read and change, through `daemon`.
+/// for her, her package's settings merged into her overlay, nothing in her
+/// settings stopping her, her model, and her host built with `broker` to
+/// ask the person and her settings for its own plugin to read and change,
+/// through `daemon`.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -873,7 +978,7 @@ fn assemble(
     let discovery = discover(world.home.root());
     let definition = discovery
         .find(id.as_str())
-        .map_err(|error| sentence(&error))?;
+        .map_err(|error| error_sentence(&error))?;
     let resolution = Resolution::character(&world.home, &world.sections, definition)
         .map_err(|error| unresolved(id, error))?;
     let settings = resolution.settings();
@@ -892,11 +997,14 @@ fn assemble(
         world.durations.settings_lock,
     )
     .map_err(|error| unmaterialized(id, error))?;
+    let stopping: Vec<&str> = resolution.stopping().map(Diagnostic::message).collect();
+
+    if !stopping.is_empty() {
+        return Err(stopping.join(" "));
+    }
+
     let adapter = model(world, settings.host())?;
-    let warning = expected_plugins(world, definition, &settings, &resolution)?;
-
-    memory_provider(world, &settings)?;
-
+    let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let host = settings
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
@@ -913,9 +1021,10 @@ fn assemble(
             id.clone(),
         )))
         .activate()
-        .map_err(|error| sentence(&error))?;
+        .map_err(|error| error_sentence(&error))?;
 
     Ok(Assembled {
+        warning: (!cautions.is_empty()).then(|| cautions.join(" ")),
         parts: Parts {
             character: Character {
                 profile: definition.profile.clone(),
@@ -932,7 +1041,6 @@ fn assemble(
             },
             thread: None,
         },
-        warning,
     })
 }
 
@@ -955,104 +1063,7 @@ fn model(world: &World, host: &HostSettings) -> Result<Arc<dyn RoleModelAdapter>
     match select_adapter(None, nvidia.as_ref(), world.durations.model_silence) {
         Ok(Some(adapter)) => Ok(adapter),
         Ok(None) => Err(NO_PROVIDER.to_owned()),
-        Err(error) => Err(sentence(&error)),
-    }
-}
-
-/// Her package's expectations judged against the plugins she runs: a
-/// required plugin she does not run blocks her, and a recommended one only
-/// warns, in what her start says.
-fn expected_plugins(
-    world: &World,
-    definition: &CharacterDefinition,
-    settings: &CharacterSettings,
-    resolution: &Resolution<'_>,
-) -> Result<Option<String>, String> {
-    let id = &definition.profile.id;
-    let expectations = &definition.plugins;
-
-    if let Some((plugin, problem)) = expectations
-        .required()
-        .iter()
-        .find_map(|plugin| Some((plugin, unrun(world, settings, resolution, plugin)?)))
-    {
-        return Err(format!(
-            "Character \"{id}\" requires plugin \"{plugin}\", {problem}"
-        ));
-    }
-
-    let warnings: Vec<String> = expectations
-        .recommended()
-        .iter()
-        .filter(|plugin| !expectations.required().contains(plugin))
-        .filter_map(|plugin| {
-            let problem = unrun(world, settings, resolution, plugin)?;
-
-            Some(format!(
-                "Character \"{id}\" recommends plugin \"{plugin}\", {problem}"
-            ))
-        })
-        .collect();
-
-    Ok((!warnings.is_empty()).then(|| warnings.join(" ")))
-}
-
-/// Why `plugin` does not run for her, as the rest of a sentence; none when
-/// it runs.
-fn unrun(
-    world: &World,
-    settings: &CharacterSettings,
-    resolution: &Resolution<'_>,
-    plugin: &Identifier,
-) -> Option<String> {
-    if settings.plugins().any(|(running, _)| running == plugin) {
-        return None;
-    }
-
-    if world.plugin(plugin).is_none() {
-        return Some("which this build does not have.".to_owned());
-    }
-
-    Some(
-        match resolution.diagnostics().iter().find(|diagnostic| {
-            diagnostic.severity() == p02_config::Severity::Error
-                && diagnostic.concerns(p02_config::Namespace::Plugins, plugin.as_str())
-        }) {
-            Some(diagnostic) => format!("which her settings block: {}", diagnostic.message()),
-            None => "which her settings switch off. Switch it on in her settings.".to_owned(),
-        },
-    )
-}
-
-/// The memory she keeps, which fails closed: the provider her settings
-/// choose must be a memory plugin she runs, and when none is chosen she
-/// runs one at most.
-fn memory_provider(world: &World, settings: &CharacterSettings) -> Result<(), String> {
-    let running: Vec<&Identifier> = settings
-        .plugins()
-        .map(|(plugin, _)| plugin)
-        .filter(|plugin| {
-            world
-                .plugin(plugin)
-                .is_some_and(|plugin| plugin.manifest().kind() == PluginKind::MemoryProvider)
-        })
-        .collect();
-
-    match &settings.host().default_memory_provider {
-        Some(chosen) if !running.iter().any(|plugin| plugin.as_str() == chosen) => Err(format!(
-            "The memory provider \"{chosen}\" her settings choose is not a memory plugin they \
-             switch on. Switch it on, or choose another in project02.defaultMemoryProvider."
-        )),
-        None if running.len() > 1 => Err(format!(
-            "Her settings switch on more than one memory plugin ({}) and choose none. Choose \
-             one in project02.defaultMemoryProvider.",
-            running
-                .iter()
-                .map(|plugin| plugin.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        _ => Ok(()),
+        Err(error) => Err(error_sentence(&error)),
     }
 }
 
@@ -1065,7 +1076,7 @@ pub(crate) fn unresolved(id: &Identifier, error: ReadSettingsError) -> String {
                 messages(&diagnostics)
             )
         }
-        other => sentence(&other),
+        other => error_sentence(&other),
     }
 }
 
@@ -1080,14 +1091,14 @@ fn unmaterialized(id: &Identifier, error: MaterializeError) -> String {
             "Character \"{id}\"'s settings do not load: {}",
             messages(&diagnostics)
         ),
-        MaterializeError::Storage(error) => sentence(&error),
+        MaterializeError::Storage(error) => error_sentence(&error),
     }
 }
 
-fn messages(diagnostics: &[p02_config::Diagnostic]) -> String {
+fn messages(diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .iter()
-        .map(p02_config::Diagnostic::message)
+        .map(Diagnostic::message)
         .collect::<Vec<_>>()
         .join(" ")
 }

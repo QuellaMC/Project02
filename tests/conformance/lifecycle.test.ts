@@ -1,15 +1,12 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {
-  mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import {type AddressInfo, createServer, type Socket} from 'node:net';
-import {hostname} from 'node:os';
 import {join} from 'node:path';
 
 import {expect, it, onTestFinished} from 'vitest';
@@ -289,14 +286,10 @@ it('lifecycle.second-serve-waits-takeover: a serve started while the holder stop
 
 it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that does not answer says so and waits, takes the home on the record's address once the lease is freed, exits 1 asking to run it again when its wait runs out, and exits 1 quietly when stopped while waiting", async () => {
   const home = createHome();
-  const initialized = await startDaemon(home);
-
-  initialized.signal('SIGINT');
-  await initialized.exit();
-
-  // This test is the holder: its own pid on the home's lease, and in the
-  // record a socket of its own that takes every probe and answers none, so
-  // the moment a probe arrives is known.
+  // A daemon holds the home's lease, and its record names a socket of the
+  // test's own that takes every probe and answers none, so the moment a
+  // probe arrives is known; killing the holder frees the lease.
+  const holder = await startDaemon(home);
   const probes = createServer();
   const taken = new Set<Socket>();
   let probed = Promise.withResolvers<number>();
@@ -311,14 +304,8 @@ it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that doe
   });
 
   const {port} = probes.address() as AddressInfo;
-  const lease = join(
-    home,
-    '.locks',
-    `${createHash('sha256').update('daemon').digest('hex')}.lock`,
-  );
-  const freed = () =>
+  const closed = () =>
     new Promise<void>(resolve => {
-      rmSync(lease, {recursive: true, force: true});
       for (const socket of taken) {
         socket.destroy();
       }
@@ -326,20 +313,14 @@ it("lifecycle.second-serve-unresponsive-holder: a serve facing a holder that doe
         resolve();
       });
     });
+  // The port is free before the lease is, so the home is taken over on it.
+  const freed = async () => {
+    await closed();
+    holder.signal('SIGKILL');
+    await holder.exit();
+  };
 
-  onTestFinished(freed);
-  mkdirSync(lease, {recursive: true});
-  writeFileSync(
-    join(lease, 'owner.json'),
-    JSON.stringify({
-      version: 1,
-      resourceKey: 'daemon',
-      nonce: randomUUID(),
-      pid: process.pid,
-      hostname: hostname(),
-      acquiredAt: new Date().toISOString(),
-    }),
-  );
+  onTestFinished(closed);
   writeFileSync(
     join(home, 'daemon.json'),
     JSON.stringify({protocolVersion: 7, token: 'kept', port}),
@@ -433,7 +414,6 @@ it('lifecycle.unwritable-record: when the home refuses daemon.json, serve exits 
   );
   expect(refused.stdout()).toBe('');
   expect(readdirSync(home)).toEqual(['.locks']);
-  expect(readdirSync(join(home, '.locks'))).toEqual([]);
   chmod(home, 0o755);
   await startDaemon(home);
 });

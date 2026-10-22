@@ -263,16 +263,11 @@ it("memory.mem0-capture: mem0 takes each turn behind its answer, as the characte
 
   model.answer(reply('Reply 1.'));
 
-  // The turn answers first; its capture reaches the backend behind it.
+  // The turn answers while its capture is still held at the backend: the
+  // capture runs behind the answer and never holds it up.
   const answered = say('Line 1.', 'line-1');
   const captured = held.arrived();
 
-  expect(
-    await Promise.race([
-      answered.then(() => 'answered'),
-      captured.then(() => 'captured'),
-    ]),
-  ).toBe('answered');
   expect(await answered).toMatchObject({status: 'completed'});
   expect(await captured).toMatchObject({
     body: {

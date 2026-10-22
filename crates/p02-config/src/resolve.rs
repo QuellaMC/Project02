@@ -15,6 +15,7 @@ use p02_shared::{BaseUrl, Fingerprint, Identifier};
 use p02_store::{CharacterData, Home, SettingsDocument, StorageError};
 use serde_json::{Map, Value, json};
 
+use crate::activation;
 use crate::change::ConfigTarget;
 use crate::conceal::{conceal_document, conceal_stanza};
 use crate::declaration::{
@@ -341,8 +342,7 @@ impl<'s> Resolution<'s> {
             absent,
             overlay.package_version.as_ref(),
         );
-
-        Ok(Self::new(
+        let mut resolution = Self::new(
             sections,
             Layers {
                 home_path: written.path,
@@ -351,7 +351,17 @@ impl<'s> Resolution<'s> {
                 overlay: Some(merged),
             },
             package_problems,
-        ))
+        );
+        let chosen = resolution.chosen_memory().map(str::to_owned);
+
+        activation::judge(
+            sections,
+            character,
+            chosen.as_deref(),
+            &mut resolution.resolved,
+            &mut resolution.diagnostics,
+        );
+        Ok(resolution)
     }
 
     pub(crate) fn new(
@@ -386,23 +396,10 @@ impl<'s> Resolution<'s> {
                 }
             })
             .collect();
-        let chosen_memory = host
-            .iter()
-            .find(|field| field.declaration.name().as_str() == "defaultMemoryProvider")
-            .and_then(|field| field.effective.value())
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let chosen_memory = memory_choice(&host);
         let resolved: Vec<Section<'s>> = sections
             .declared()
-            .map(|declared| {
-                section(
-                    sections,
-                    declared,
-                    &target,
-                    &layers,
-                    chosen_memory.as_deref(),
-                )
-            })
+            .map(|declared| section(sections, declared, &target, &layers, chosen_memory))
             .collect();
         let mut all = unknown_sections(sections, &layers);
 
@@ -432,11 +429,37 @@ impl<'s> Resolution<'s> {
     }
 
     /// Every finding about the target's settings: sections named that this
-    /// build lacks, what is wrong with each section, and with her package's
-    /// settings when they cannot be merged.
+    /// build lacks, what is wrong with each section, with her package's
+    /// settings when they cannot be merged, and with what they make of her
+    /// plugins.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    /// What stops a character on these settings: every error about what she
+    /// runs. While one stands she runs none of her plugins, and her start is
+    /// refused saying why.
+    pub fn stopping(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.stops_character())
+    }
+
+    /// What a character's start warns of: the plugins her package recommends
+    /// that she does not run.
+    pub fn cautions(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.diagnostics.iter().filter(|diagnostic| {
+            matches!(
+                diagnostic.code(),
+                Code::CharacterRecommendedPluginMissing | Code::CharacterRecommendedPluginDisabled
+            )
+        })
+    }
+
+    /// The memory provider the settings choose, when they choose one.
+    fn chosen_memory(&self) -> Option<&str> {
+        memory_choice(&self.host)
     }
 
     /// What a character runs on by these settings: the host's values, and
@@ -608,6 +631,14 @@ impl fmt::Debug for CharacterSettings {
             )
             .finish()
     }
+}
+
+/// The memory provider `host`'s values choose, when they choose one.
+fn memory_choice<'h>(host: &'h [Field<'_>]) -> Option<&'h str> {
+    host.iter()
+        .find(|field| field.declaration.name().as_str() == "defaultMemoryProvider")
+        .and_then(|field| field.effective.value())
+        .and_then(Value::as_str)
 }
 
 /// The value the nearest of `layers` holds, judged by `accepts`, else the

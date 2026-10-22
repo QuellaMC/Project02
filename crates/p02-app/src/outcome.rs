@@ -3,7 +3,6 @@
 //! conformance suite read.
 
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::num::NonZeroU32;
 
 use p02_characters::{PackageDiagnostic, PackageLocation, PackageProblem};
@@ -13,7 +12,7 @@ use p02_core::{
     VisibleMessageRole, VisibleText,
 };
 use p02_runtime::Progress;
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_sentence};
 use p02_store::StorageError;
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -174,7 +173,7 @@ impl StorageFailure {
     pub(crate) fn of(error: &StorageError) -> Self {
         Self {
             code: error.code(),
-            message: sentence(error),
+            message: error_sentence(error),
         }
     }
 }
@@ -826,29 +825,4 @@ impl RunningTurns {
     pub fn turns(&self) -> Vec<RunningTurn> {
         self.0.values().cloned().collect()
     }
-}
-
-/// `error` and each cause beneath it, as one sentence a person reads: what
-/// broke, then why.
-pub(crate) fn sentence(error: &dyn Error) -> String {
-    let mut text = error.to_string();
-    let mut cause = error.source();
-
-    while let Some(error) = cause {
-        text.push_str(": ");
-        text.push_str(&error.to_string());
-        cause = error.source();
-    }
-
-    let mut characters = text.chars();
-    let mut sentence: String = characters
-        .next()
-        .map(|first| first.to_uppercase().chain(characters).collect())
-        .unwrap_or_default();
-
-    if !sentence.ends_with(['.', '!', '?']) {
-        sentence.push('.');
-    }
-
-    sentence
 }

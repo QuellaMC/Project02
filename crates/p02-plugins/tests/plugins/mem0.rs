@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::storage::Storage;
 use crate::stub::{Answer, Stub, embedding};
-use crate::support::{bundled_manifest, call, id};
+use crate::support::{bundled_manifest, call, id, run_round};
 
 const SERVER_KEY: &str = "m0sk_server-secret";
 const PLATFORM_KEY: &str = "platform-secret";
@@ -140,7 +140,7 @@ async fn capture(
 }
 
 async fn ask(host: &PluginHost, tool: &str, input: Value, turn: &Turn) -> ToolCallReport {
-    host.handle_tool_calls(vec![call("c1", tool, input)], turn)
+    run_round(host, vec![call("c1", tool, input)], turn)
         .await
         .remove(0)
 }

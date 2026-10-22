@@ -9,8 +9,8 @@ use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{CharacterSettings, Diagnostic, ReadSettingsError, Resolution};
 use p02_shared::Identifier;
 
-use crate::character::{Built, Reconciled};
-use crate::daemon::{Daemon, World};
+use crate::character::{Built, CharacterHandle, Reconciled};
+use crate::daemon::{Actor, Daemon, World};
 use crate::outcome::ReconcilePlan;
 
 /// The installed roster as the disk says it is now: what discovery found,
@@ -97,11 +97,14 @@ impl std::fmt::Debug for Passes {
 impl Reconciler {
     /// Runs `pass` as a task of its own, again for as long as requests come
     /// while it runs, and answers with what every run set in motion; a
-    /// request while it runs joins it.
+    /// request while it runs joins it. The first pass is made at the
+    /// request, so it judges what runs at that moment, and each after it as
+    /// it begins.
     pub(crate) fn reconcile(
         self: &Arc<Self>,
         pass: impl Fn() -> BoxFuture<'static, ReconcilePlan> + Send + Sync + 'static,
     ) -> Shared<BoxFuture<'static, ReconcilePlan>> {
+        let first = pass();
         let mut passes = self.passes();
 
         if let Some(running) = passes.running.clone() {
@@ -111,20 +114,13 @@ impl Reconciler {
 
         let reconciler = Arc::clone(self);
         let task = tokio::spawn(async move {
-            let mut plan = ReconcilePlan::default();
+            let mut plan = first.await;
 
-            loop {
+            while reconciler.more() {
                 plan.merge(pass().await);
-
-                let mut passes = reconciler.passes();
-
-                if !passes.again {
-                    passes.running = None;
-                    return plan;
-                }
-
-                passes.again = false;
             }
+
+            plan
         });
         let reconciler = Arc::clone(self);
         let running = async move {
@@ -140,6 +136,20 @@ impl Reconciler {
 
         passes.running = Some(running.clone());
         running
+    }
+
+    /// Whether a request came while the last pass ran, which one more pass
+    /// answers; when none came the run ends, under the lock a request
+    /// takes, so none falls between.
+    fn more(&self) -> bool {
+        let mut passes = self.passes();
+        let again = std::mem::take(&mut passes.again);
+
+        if !again {
+            passes.running = None;
+        }
+
+        again
     }
 
     /// Answered once no pass runs.
@@ -165,17 +175,34 @@ enum Did {
 }
 
 impl Daemon {
-    /// One pass of the rule: an enabled character who runs nothing starts,
-    /// one who failed starts again, one who is ready and would be built from
-    /// another package or other settings now reloads, and a disabled one who
-    /// still runs stops, as does one whose package left the roster.
-    pub(crate) async fn pass(&self) -> ReconcilePlan {
+    /// One pass of the rule over the characters running now, against the
+    /// roster as the pass reads it: an enabled character who runs nothing
+    /// starts, one who failed starts again, one who is ready and would be
+    /// built from another package or other settings now reloads, and a
+    /// disabled one who runs stops, as does one whose package left the
+    /// roster. One started after now, by a client, is the next pass's to
+    /// judge.
+    pub(crate) fn pass(&self) -> BoxFuture<'static, ReconcilePlan> {
+        let running: Vec<Arc<CharacterHandle>> = self
+            .handles()
+            .into_iter()
+            .filter(|handle| !handle.ended())
+            .collect();
+        let daemon = self.clone();
+
+        Box::pin(async move { daemon.judge(running).await })
+    }
+
+    async fn judge(&self, running: Vec<Arc<CharacterHandle>>) -> ReconcilePlan {
         let roster = self.roster().await;
         let mut work: Vec<BoxFuture<'_, Did>> = Vec::new();
 
         for (definition, settings) in roster.characters() {
             let id = definition.profile.id.clone();
-            let running = self.live(&id);
+            let running = running
+                .iter()
+                .find(|handle| *handle.id() == id && !handle.ended())
+                .cloned();
 
             if settings.is_none_or(|settings| settings.host().enabled) {
                 let now = settings.map(|settings| Built {
@@ -185,10 +212,14 @@ impl Daemon {
 
                 work.push(Box::pin(async move {
                     let Some(handle) = running else {
-                        return if self.begin(&id).await {
-                            Did::Started(id)
-                        } else {
-                            Did::Nothing
+                        // One a client started since the pass was asked
+                        // for is the client's.
+                        return match self.actor(&id).await {
+                            Some(Actor::Built(handle)) => {
+                                handle.start().await;
+                                Did::Started(id)
+                            }
+                            Some(Actor::Running(_)) | None => Did::Nothing,
                         };
                     };
 
@@ -206,7 +237,7 @@ impl Daemon {
             }
         }
 
-        for handle in self.handles() {
+        for handle in running {
             let left = !roster
                 .characters()
                 .any(|(definition, _)| definition.profile.id == *handle.id());

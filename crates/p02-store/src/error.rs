@@ -30,6 +30,12 @@ pub enum StorageError {
     #[error("{} is {}, not {}", .path.display(), .found.article(), .found.other().article())]
     WrongScope { path: PathBuf, found: Scope },
     #[error(
+        "{} lies inside the character data at {}, not a Project02 home",
+        .path.display(),
+        .data.display()
+    )]
+    InsideCharacterData { path: PathBuf, data: PathBuf },
+    #[error(
         "character data directory {} holds history for character \"{holds}\" but character \
          \"{requested}\" was requested: select \"{holds}\", or start fresh data for \
          \"{requested}\"",
@@ -57,6 +63,8 @@ pub enum StorageError {
     NoMarker { path: PathBuf },
     #[error("session directory {} is missing", .path.display())]
     MissingSessionDirectory { path: PathBuf },
+    #[error("session log {} is missing, though a later segment continues it", .path.display())]
+    MissingLog { path: PathBuf },
     #[error(
         "sessions catalog {} is missing or empty while session directories hold evidence",
         .path.display()
@@ -205,7 +213,9 @@ impl StorageError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
-            Self::MalformedMarker { .. } | Self::WrongScope { .. } => "malformed_schema_marker",
+            Self::MalformedMarker { .. }
+            | Self::WrongScope { .. }
+            | Self::InsideCharacterData { .. } => "malformed_schema_marker",
             Self::CharacterMismatch { .. } | Self::NotAParticipant { .. } => {
                 "character_identity_mismatch"
             }
@@ -214,6 +224,7 @@ impl StorageError {
             | Self::NotReal { .. }
             | Self::NoMarker { .. }
             | Self::MissingSessionDirectory { .. }
+            | Self::MissingLog { .. }
             | Self::MissingCatalog { .. }
             | Self::UncataloguedSession { .. } => "missing_file",
             Self::UnsupportedEntry { .. }

@@ -9,7 +9,7 @@ use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport, Turn};
 use serde_json::{Value, json};
 
 use crate::home::{MiraHome, text_of};
-use crate::support::{call, id, turn, turn_in};
+use crate::support::{call, id, run_round, turn, turn_in};
 
 const PLUGIN: &str = "character-memory";
 
@@ -18,7 +18,8 @@ fn memory_host(home: &MiraHome) -> PluginHost {
 }
 
 async fn update(host: &PluginHost, operations: Value) -> ToolCallReport {
-    host.handle_tool_calls(
+    run_round(
+        host,
         vec![call(
             "m1",
             "memory.update",

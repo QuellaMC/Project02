@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ use p02_app::{
 use p02_config::Connector;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -54,15 +54,24 @@ struct Shared {
     /// This run's id, under which every frame is numbered: an id of
     /// another run names frames this one never held.
     run: String,
+    /// Held only for steps that never wait, so nothing that holds it waits
+    /// on anything that wants it.
     hub: Mutex<Hub>,
     writers: TaskTracker,
     closing: CancellationToken,
 }
 
-#[derive(Default)]
 struct Hub {
+    /// The one subscription, taken from only while the hub is held and
+    /// each event framed in the same step, so every event is framed once,
+    /// in the order it was announced.
+    events: mpsc::UnboundedReceiver<Event>,
     tail: Tail,
     turns: RunningTurns,
+    /// The number of the newest frame that changed what `ready` reads of
+    /// the daemon: every event but a turn's, whose turns the hub folds
+    /// itself.
+    changed: u64,
     open: Vec<mpsc::UnboundedSender<Bytes>>,
     closed: bool,
 }
@@ -103,26 +112,32 @@ struct Ready {
 impl Streams {
     /// The streams of `daemon`, subscribed to its events from now on.
     pub(crate) fn new(daemon: Daemon) -> Self {
-        let events = daemon.events();
+        let hub = Hub {
+            events: daemon.events(),
+            tail: Tail::default(),
+            turns: RunningTurns::default(),
+            changed: 0,
+            open: Vec::new(),
+            closed: false,
+        };
         let shared = Arc::new(Shared {
             daemon,
             run: format!("{:016x}", rand::random::<u64>()),
-            hub: Mutex::default(),
+            hub: Mutex::new(hub),
             writers: TaskTracker::new(),
             closing: CancellationToken::new(),
         });
 
-        shared.writers.spawn(pump(Arc::clone(&shared), events));
+        shared.writers.spawn(pump(Arc::clone(&shared)));
         Self(shared)
     }
 
     /// A stream from now on, in one step with its first frames, so no
     /// event lands between: `resumed` and exactly the frames after the
     /// id the client last applied, when the tail still holds them; else
-    /// `ready`, the snapshot as of the newest frame. A connector's stream
-    /// counts it present from before its first frame until the stream
-    /// ends. `link` closes its connection when the client stops taking
-    /// what it is sent.
+    /// `ready`. A connector's stream counts it present from before its
+    /// first frame until the stream ends. `link` closes its connection
+    /// when the client stops taking what it is sent.
     pub(crate) async fn open(
         &self,
         last_event_id: Option<&str>,
@@ -130,31 +145,40 @@ impl Streams {
         link: CancellationToken,
     ) -> Result<Response, Unopened> {
         let shared = &self.0;
-        let mut hub = shared.hub.lock().await;
+        let presence = {
+            let hub = shared.hub();
 
-        if hub.closed {
-            return Err(Unopened::Stopping);
-        }
+            if hub.closed {
+                return Err(Unopened::Stopping);
+            }
 
-        let presence = connector.map(|connector| shared.daemon.connector_present(connector));
-        let first =
+            let presence = connector.map(|connector| shared.daemon.connector_present(connector));
+
             if let Some(missed) = last_event_id.and_then(|id| hub.tail.after(&shared.run, id)) {
-                std::iter::once(Bytes::from_static(RESUMED))
+                let first = std::iter::once(Bytes::from_static(RESUMED))
                     .chain(missed)
-                    .collect()
-            } else {
-                let ready = Ready {
-                    protocol_version: PROTOCOL_VERSION,
-                    health: shared.daemon.health().await,
-                    confirmations: shared.daemon.pending_confirmations(),
-                    pairings: shared.daemon.pending_pairings(),
-                    turns: hub.turns.turns(),
-                };
-                let id = format!("{}-{}", shared.run, hub.tail.latest);
-                let data = serde_json::to_string(&ready).map_err(Unopened::Unformatted)?;
+                    .collect();
 
-                vec![frame(Some(&id), "ready", &data)]
-            };
+                return Ok(self.join(hub, first, presence, link));
+            }
+
+            presence
+        };
+        let (ready, hub) = self.ready().await?;
+
+        Ok(self.join(hub, vec![ready], presence, link))
+    }
+
+    /// The stream that goes on from `first` with every frame `hub` numbers
+    /// after them, joined in the step that holds it.
+    fn join(
+        &self,
+        mut hub: MutexGuard<'_, Hub>,
+        first: Vec<Bytes>,
+        presence: Option<Presence>,
+        link: CancellationToken,
+    ) -> Response {
+        let shared = &self.0;
         let (queue, queued) = mpsc::unbounded_channel();
         let (body, taken) = mpsc::channel(1);
         let durations = shared.daemon.durations();
@@ -178,11 +202,55 @@ impl Streams {
         ));
         drop(hub);
 
-        Ok((
+        (
             [(CONTENT_TYPE, "text/event-stream")],
             Body::new(Frames(taken)),
         )
-            .into_response())
+            .into_response()
+    }
+
+    /// The `ready` frame of a stream that opens now, with the hub held
+    /// from the step that numbered it, so the stream goes on from that
+    /// frame: the daemon's health and the confirmations and pairings
+    /// waiting, read with the hub let go and read again while anything
+    /// they show changed under the read, so they hold exactly what the
+    /// frames before it told, and the turns running with their drafts as
+    /// of that frame.
+    async fn ready(&self) -> Result<(Bytes, MutexGuard<'_, Hub>), Unopened> {
+        let shared = &self.0;
+
+        loop {
+            let read_after = {
+                let mut hub = shared.hub();
+
+                hub.catch_up(&shared.run);
+                hub.tail.latest
+            };
+            let health = shared.daemon.health().await;
+            let confirmations = shared.daemon.pending_confirmations();
+            let pairings = shared.daemon.pending_pairings();
+            let mut hub = shared.hub();
+
+            if hub.closed {
+                return Err(Unopened::Stopping);
+            }
+
+            hub.catch_up(&shared.run);
+
+            if hub.changed <= read_after {
+                let ready = Ready {
+                    protocol_version: PROTOCOL_VERSION,
+                    health,
+                    confirmations,
+                    pairings,
+                    turns: hub.turns.turns(),
+                };
+                let id = format!("{}-{}", shared.run, hub.tail.latest);
+                let data = serde_json::to_string(&ready).map_err(Unopened::Unformatted)?;
+
+                return Ok((frame(Some(&id), "ready", &data), hub));
+            }
+        }
     }
 
     /// Ends every stream once everything announced before the close is
@@ -206,36 +274,64 @@ impl fmt::Debug for Streams {
     }
 }
 
+impl Shared {
+    fn hub(&self) -> MutexGuard<'_, Hub> {
+        self.hub.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 /// Takes every event as it is announced into the streams, until the close:
 /// then what was announced before it is numbered and handed out, and the
 /// streams end.
-async fn pump(shared: Arc<Shared>, mut events: mpsc::UnboundedReceiver<Event>) {
+async fn pump(shared: Arc<Shared>) {
     loop {
-        let event = tokio::select! {
+        let framed = std::future::poll_fn(|context| shared.hub().frame_next(&shared.run, context));
+
+        tokio::select! {
+            biased;
             () = shared.closing.cancelled() => break,
-            event = events.recv() => match event {
-                Some(event) => event,
-                None => break,
+            more = framed => if !more {
+                break;
             },
-        };
-
-        shared.hub.lock().await.publish(&shared.run, &event);
+        }
     }
 
-    let mut hub = shared.hub.lock().await;
+    let mut hub = shared.hub();
 
-    while let Ok(event) = events.try_recv() {
-        hub.publish(&shared.run, &event);
-    }
-
+    hub.catch_up(&shared.run);
     hub.closed = true;
     hub.open.clear();
 }
 
 impl Hub {
+    /// Frames the next event once one is announced; false once none can
+    /// be.
+    fn frame_next(&mut self, run: &str, context: &mut Context<'_>) -> Poll<bool> {
+        self.events.poll_recv(context).map(|event| {
+            event.is_some_and(|event| {
+                self.publish(run, &event);
+                true
+            })
+        })
+    }
+
+    /// Frames every event announced so far.
+    fn catch_up(&mut self, run: &str) {
+        while let Ok(event) = self.events.try_recv() {
+            self.publish(run, &event);
+        }
+    }
+
     fn publish(&mut self, run: &str, event: &Event) {
         self.turns.fold(event);
         self.tail.latest += 1;
+
+        if !matches!(
+            event,
+            Event::TurnProgress { .. } | Event::TurnCompleted { .. }
+        ) {
+            self.changed = self.tail.latest;
+        }
 
         if let Ok(frame) = numbered(run, self.tail.latest, event) {
             self.tail.keep(self.tail.latest, frame.clone());

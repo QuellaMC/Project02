@@ -36,6 +36,9 @@ crate graph: it depends on no crate of this workspace.
   `Debug` prints, and the client builder every caller starts from, with
   TLS through the ring provider and no redirect or environment proxy
   followed.
+- **Sentences.** Every error displays itself as a lowercase fragment with
+  its cause beneath it; what a person is told of one is the fragments
+  joined into one sentence, what broke and then why.
 - **Identifiers**, **credential-shaped key names**, and the **server-sent
   event splitter** the gateway client and the model provider read streams
   with.

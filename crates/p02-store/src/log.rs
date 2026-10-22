@@ -206,7 +206,20 @@ impl SessionLog {
         let path = self.path();
 
         match describe_entry(&path) {
-            PathEntry::Absent | PathEntry::File => {}
+            PathEntry::File => {}
+            // A log is made by its first record, so only the newest segment
+            // is without one: a segment a later one continues took records,
+            // and one whose log is gone lost them.
+            PathEntry::Absent => {
+                let newest = self
+                    .data
+                    .latest_segment(self.session.conversation_id())?
+                    .is_none_or(|entry| *entry.session_id() == self.session);
+
+                if !newest && on_damage == OnDamage::Fail {
+                    return Err(StorageError::MissingLog { path });
+                }
+            }
             PathEntry::Unreadable(source) => return Err(StorageError::Read { path, source }),
             PathEntry::Directory | PathEntry::Link | PathEntry::Other => {
                 return Err(StorageError::NotReal {

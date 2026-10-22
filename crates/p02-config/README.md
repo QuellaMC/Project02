@@ -57,13 +57,20 @@ outcome are the wire's own types.
   past it, and a section's switch is a value as any other: one that is no
   boolean blocks its section. A section that is off, by a document or by
   its default, or a memory provider the settings do not choose, never
-  runs, so its settings are not judged. What a character runs on is one
-  value: the host's values, and each plugin that runs by her settings with
-  its values in effect, a default among them, secrets in the clear, for
-  the plugin host to resolve against its manifest. Two equal ones run the
-  same character, so she is rebuilt exactly when hers differ from those
-  she was built from: a home value she overrides, a switched-off plugin's
-  settings or a connector's rebuild no one, and a re-keyed secret does.
+  runs, so its settings are not judged. What a character's settings make
+  of her plugins is judged with them: the memory provider they choose
+  must be a memory plugin she runs, and when they choose none she runs
+  one at most; a plugin her package requires that she does not run is an
+  error, one it recommends a warning; and an error about anything she
+  runs, a connector's aside, stops her: none of her plugins but the
+  host's own runs, and her start is refused saying why. What a character
+  runs on is one value: the host's values, and each plugin that runs by
+  her settings with its values in effect, a default among them, secrets
+  in the clear, for the plugin host to resolve against its manifest. Two
+  equal ones run the same character, so she is rebuilt exactly when hers
+  differ from those she was built from: a home value she overrides, a
+  switched-off plugin's settings or a connector's rebuild no one, and a
+  re-keyed secret does.
 - **Fingerprints.** A target's is `sha256:` over the canonical JSON of its
   documents as its settings are read from them, her package's settings
   merged in while they are pending, and for a character whose they are; a

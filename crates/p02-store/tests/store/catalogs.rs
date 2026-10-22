@@ -10,7 +10,7 @@ use p02_core::{ClientStamp, ConversationId, MessageId, Participant, SpeakerName}
 use p02_store::{StorageError, TakenLines};
 use serde_json::{Value, json};
 
-use crate::support::{Script, World, id, lines_of, sam};
+use crate::support::{Script, World, answer, id, lines_of, sam};
 
 fn ids(sessions: &[p02_store::SessionEntry]) -> Vec<String> {
     sessions
@@ -140,11 +140,27 @@ fn segments_are_made_in_order_and_only_the_newest_goes_on_or_is_discarded() {
     let world = World::new();
     let conversation = world.conversation.id();
     let first = world.first_segment(conversation).unwrap();
+    let mut script = Script::new(world.segment(1));
 
     assert_eq!(
         world.first_segment(conversation).unwrap_err().code(),
         "session_already_exists"
     );
+
+    script
+        .turn("Hello?")
+        .user("hello")
+        .round(Some(answer(&["Hi."], &[], None)))
+        .replies()
+        .completed();
+
+    let mut writer = world.log(1).writer().unwrap();
+
+    for record in &script.records {
+        writer.append(record.clone()).unwrap();
+    }
+
+    writer.release();
 
     let second = world.next_segment(first.session_id()).unwrap();
 

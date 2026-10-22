@@ -15,7 +15,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::home::{MiraHome, bundled, delete, rewrite, text_of};
-use crate::support::{call, id, tool, turn};
+use crate::support::{call, id, run_round, tool, turn};
 
 const PLUGIN: &str = "character-state";
 
@@ -24,9 +24,13 @@ fn state_host(home: &MiraHome) -> PluginHost {
 }
 
 async fn patch(host: &PluginHost, call_id: &str, input: Value) -> ToolCallReport {
-    host.handle_tool_calls(vec![call(call_id, "character_state.patch", input)], &turn())
-        .await
-        .remove(0)
+    run_round(
+        host,
+        vec![call(call_id, "character_state.patch", input)],
+        &turn(),
+    )
+    .await
+    .remove(0)
 }
 
 fn output(report: &ToolCallReport) -> &Value {

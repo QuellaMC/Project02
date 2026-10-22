@@ -38,7 +38,8 @@ the character's storage grants through the contracts.
   and what the person is shown of a call, have every credential-named
   value redacted. A breach fails the plugin; nothing is cut to fit.
 - **Tools.** A round's calls run in the model's order: consecutive shared
-  calls overlap, an exclusive one runs alone, none overtakes another. A
+  calls overlap, an exclusive one runs alone, none overtakes another, and
+  each call's report is handed on the moment it is made. A
   proposed call is made a call only through its tool's contract, so no
   plugin sees an input the contract refuses. A tool that asks first
   prepares each call only reading, as an ending plugin does: a call it

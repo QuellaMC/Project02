@@ -20,11 +20,11 @@ use tokio::time::Instant;
 use crate::storage::Storage;
 use crate::support::{
     Enable, Scripted, Seen, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note,
-    tool, turn,
+    run_round, tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
-    host.handle_tool_calls(vec![call], turn).await.remove(0)
+    run_round(host, vec![call], turn).await.remove(0)
 }
 
 fn reason(report: &ToolCallReport) -> Option<&str> {
@@ -46,18 +46,18 @@ async fn a_round_runs_shared_calls_together_and_exclusive_ones_alone_in_order() 
     let slow = Arc::new(SlowTools::new());
     let host = host_of(vec![(Spec::tools("toy"), Arc::clone(&slow) as _)]);
     let started = Instant::now();
-    let reports = host
-        .handle_tool_calls(
-            vec![
-                call("r1", "toy.read", json!({})),
-                call("r2", "toy.read", json!({})),
-                call("w3", "toy.write", json!({})),
-                call("w4", "toy.write", json!({})),
-                call("r5", "toy.read", json!({})),
-            ],
-            &turn(),
-        )
-        .await;
+    let reports = run_round(
+        &host,
+        vec![
+            call("r1", "toy.read", json!({})),
+            call("r2", "toy.read", json!({})),
+            call("w3", "toy.write", json!({})),
+            call("w4", "toy.write", json!({})),
+            call("r5", "toy.read", json!({})),
+        ],
+        &turn(),
+    )
+    .await;
     let log = slow.log();
     let at = |entry: &str| log.iter().position(|line| line == entry).unwrap();
 

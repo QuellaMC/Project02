@@ -31,7 +31,8 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
         .package(
             "nova",
             &json!({
-                "required": ["demo-config", "ghost"],
+                "required": ["demo-config"],
+                "recommended": ["ghost"],
                 "config": {"demo-config": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
             }),
             "1.0.0",

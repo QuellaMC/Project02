@@ -8,10 +8,10 @@ use p02_store::SettingsDocument;
 use serde_json::{Value, json};
 
 use crate::home::{MiraHome, Person, rewrite};
-use crate::support::{call, turn};
+use crate::support::{call, run_round, turn};
 
 async fn ask(host: &PluginHost, tool: &str, input: Value) -> ToolCallReport {
-    host.handle_tool_calls(vec![call("c1", tool, input)], &turn())
+    run_round(host, vec![call("c1", tool, input)], &turn())
         .await
         .remove(0)
 }
@@ -81,17 +81,14 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
     )
     .await;
     let runs = |id: &str| (id.to_owned(), true, "active".to_owned());
+    let not = |id: &str, status: &str| (id.to_owned(), false, status.to_owned());
 
     assert_eq!(
         listed(&running),
-        [
-            runs("character-memory"),
-            runs("character-state"),
-            runs("runtime.plugin"),
-            runs("session-history"),
-        ]
+        [runs("runtime.plugin")],
+        "a setting in error stops her: no plugin of hers runs"
     );
-    let own = &output(&running)["plugins"][2];
+    let own = &output(&running)["plugins"][0];
     let tools: Vec<(&str, &str, bool)> = own["providedTools"]
         .as_array()
         .unwrap()
@@ -127,15 +124,19 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
         "a text is cut to what a listing keeps"
     );
     assert_eq!(
-        listed(&everything)[4..],
+        listed(&everything),
         [
-            ("demo-config".to_owned(), false, "blocked".to_owned()),
-            ("mem0".to_owned(), false, "disabled".to_owned()),
+            runs("runtime.plugin"),
+            not("character-memory", "blocked"),
+            not("character-state", "blocked"),
+            not("demo-config", "blocked"),
+            not("mem0", "disabled"),
+            not("session-history", "blocked"),
         ],
         "a plugin her settings block is listed blocked"
     );
     assert_eq!(
-        output(&everything)["plugins"][4]["grantedAccess"],
+        output(&everything)["plugins"][3]["grantedAccess"],
         json!({})
     );
     assert_eq!(output(&everything)["truncated"], false);
@@ -248,7 +249,7 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
     assert_eq!(
         person.asked()[0].preview,
         *json!({
-            "pluginId": "demo-config",
+            "targetPluginId": "demo-config",
             "fieldName": "tone",
             "operation": "set",
             "before": {"configured": false},

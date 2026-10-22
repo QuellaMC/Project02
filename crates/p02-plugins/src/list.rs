@@ -34,7 +34,7 @@ const PLUGINS: [(&str, &str, PluginFactory); 6] = [
         mem0::create,
     ),
     (
-        management::PLUGIN_ID,
+        p02_contracts::HOST_PLUGIN,
         include_str!("management/project02.plugin.json"),
         management::create,
     ),
