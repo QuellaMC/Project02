@@ -150,6 +150,7 @@ mod tests {
         })
     }
 
+    /// model.tool-schema-open-union: a tool whose schema holds an open object or array union, or open items, is not sent strict, while one closed at every level is
     #[test]
     fn only_a_schema_closed_at_every_level_is_sent_strict() {
         let closed = json!({

@@ -38,10 +38,23 @@ type Section = {
   readonly fields: readonly Field[];
 };
 
+type Diagnostic = {
+  readonly severity: string;
+  readonly code: string;
+  readonly path?: string;
+  readonly namespace?: string;
+  readonly id?: string;
+};
+
 type View = {
   readonly fingerprint: string;
+  readonly diagnostics: readonly Diagnostic[];
   readonly project02: readonly Field[];
   readonly sections: readonly Section[];
+};
+
+type Health = {
+  readonly config: {readonly diagnostics: readonly Diagnostic[]};
 };
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
@@ -52,6 +65,10 @@ async function viewOf(
   target: Parameters<Wire['configView']>[0],
 ): Promise<View> {
   return (await wire.configView(target)) as View;
+}
+
+async function healthOf(wire: Wire): Promise<Health> {
+  return (await wire.health()) as Health;
 }
 
 function hostField(view: View, name: string): Field | undefined {
@@ -1045,6 +1062,107 @@ it("config.unknown-field-diagnostic: a hand-edited unknown field is an error at 
         .map(({id}) => id),
       path,
     ).toEqual(['runtime.plugin']);
+  }
+});
+
+it('config.unknown-section-warning: a section naming a plugin or a connector this version lacks warns runtime_config_unknown_plugin or runtime_config_unknown_connector for that id, in health and in the views, unless the nearest document switching it switches it off', async () => {
+  const wire = wireOf(
+    await startDaemon(
+      createHome({
+        'config.json': configJson({
+          plugins: {ghost: {enabled: true}, spirit: {enabled: false}},
+          connectors: {discord: {}, slack: {enabled: false}},
+        }),
+        'character-data': {
+          mira: {
+            'config.json': configJson({plugins: {ghost: {enabled: false}}}),
+          },
+        },
+      }),
+      fixedReplies,
+    ),
+  );
+  const unknown = (diagnostics: readonly Diagnostic[]) =>
+    diagnostics
+      .filter(({code}) => code.startsWith('runtime_config_unknown_'))
+      .map(({severity, code, path, namespace, id}) => ({
+        severity,
+        code,
+        path,
+        namespace,
+        id,
+      }));
+  const ghost = {
+    severity: 'warning',
+    code: 'runtime_config_unknown_plugin',
+    path: 'plugins.ghost',
+    namespace: 'plugins',
+    id: 'ghost',
+  };
+  const discord = {
+    severity: 'warning',
+    code: 'runtime_config_unknown_connector',
+    path: 'connectors.discord',
+    namespace: 'connectors',
+    id: 'discord',
+  };
+
+  expect(unknown((await healthOf(wire)).config.diagnostics)).toEqual([
+    ghost,
+    discord,
+  ]);
+  expect(unknown((await viewOf(wire, {scope: 'global'})).diagnostics)).toEqual([
+    ghost,
+    discord,
+  ]);
+  expect(unknown((await viewOf(wire, mira)).diagnostics)).toEqual([discord]);
+});
+
+it("config.disabled-plugin-not-validated: a switched-off plugin's settings are not judged: a misspelled field and a value outside its allowed ones raise no diagnostic, in health or in a view, and stop no character", async () => {
+  const wire = wireOf(
+    await startDaemon(
+      createHome({
+        'config.json': configJson({
+          plugins: {
+            'demo-config': {
+              enabled: false,
+              config: {nope: true, tone: 'shouty'},
+            },
+          },
+        }),
+      }),
+      fixedReplies,
+    ),
+  );
+
+  expect(await wire.start('mira')).toMatchObject({
+    character: {state: 'ready'},
+  });
+  expect((await healthOf(wire)).config.diagnostics).toEqual([]);
+  expect((await viewOf(wire, {scope: 'global'})).diagnostics).toEqual([]);
+  expect((await viewOf(wire, mira)).diagnostics).toEqual([]);
+});
+
+it('config.load-diagnostics: a config.json that cannot be read, is not JSON or is of another version is told apart in health as runtime_config_read_failed, runtime_config_malformed_json or runtime_config_version_unsupported', async () => {
+  for (const [code, document] of [
+    ['runtime_config_read_failed', configJson({})],
+    ['runtime_config_malformed_json', '{not json'],
+    [
+      'runtime_config_version_unsupported',
+      JSON.stringify({version: 'project02.config.v1'}),
+    ],
+  ] as const) {
+    const home = createHome({'config.json': document});
+
+    if (code === 'runtime_config_read_failed') {
+      chmod(join(home, 'config.json'), 0o000);
+    }
+
+    const wire = wireOf(await startDaemon(home, fixedReplies));
+
+    expect((await healthOf(wire)).config.diagnostics, code).toEqual([
+      expect.objectContaining({severity: 'error', code}),
+    ]);
   }
 });
 

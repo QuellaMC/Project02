@@ -866,6 +866,7 @@ async fn a_queued_platform_add_is_never_claimed_as_stored() {
     );
 }
 
+/// memory.mem0-add-abandoned: an add mem0 abandons at its deadline, the backend still silent, fails saying whether it completed is unknown, since the write may have landed
 #[tokio::test]
 async fn an_add_abandoned_at_the_deadline_warns_that_it_may_have_landed() {
     let mem0 = Stub::mem0().await;

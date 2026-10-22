@@ -166,6 +166,51 @@ it("storage.per-character-isolation: each character's segments and their writers
   ).toEqual([]);
 });
 
+it("storage.conversation-record: a conversation's record names its participants, the character before the person, and the next open finds it again whatever order they were written in", async () => {
+  const home = createHome();
+  const first = await startDaemon(home, fixedReplies);
+  const firstWire = wireOf(first);
+
+  await firstWire.start('mira');
+
+  const {conversationId} = await conversationOf(firstWire, 'mira');
+  const record = join(
+    home,
+    'conversations',
+    conversationId,
+    'conversation.json',
+  );
+  const written = JSON.parse(readFileSync(record, 'utf8')) as {
+    readonly participants: readonly {
+      readonly kind: string;
+      readonly id: string;
+    }[];
+  };
+
+  expect(written.participants.map(({kind, id}) => [kind, id])).toEqual([
+    ['character', 'mira'],
+    ['user', 'local-user'],
+  ]);
+  first.signal('SIGINT');
+  await first.exit();
+  writeFileSync(
+    record,
+    JSON.stringify({
+      ...written,
+      participants: [...written.participants].reverse(),
+    }),
+  );
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  await wire.start('mira');
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'opened',
+    conversationId,
+  });
+  expect(readdirSync(join(home, 'conversations'))).toEqual([conversationId]);
+});
+
 it('storage.session-segments: a conversation is segments .1, .2, ... made in order and only the newest goes on, and its first segment is never made again over the records it holds', async () => {
   const home = createHome({'config.json': rotatingEveryTurn});
   const first = await startDaemon(home, fixedReplies);

@@ -11,6 +11,7 @@ import {
   createHome,
   sessionRecords,
 } from './harness/home.ts';
+import {startMem0Server} from './harness/mem0-server.ts';
 import {
   calling,
   completion,
@@ -205,6 +206,54 @@ it('model.visible-reply: visible_reply is offered when no plugin offers a tool a
       }
     ).tools.map(tool => tool.function.name),
   ).toEqual(['visible_reply']);
+});
+
+it('model.tool-schema-strict: a tool whose schema strict mode can hold whole, each object it types closed to the properties it lists, is sent strict, and one holding a combinator or a keyword strict mode cannot hold, a pattern or a length, is not', async () => {
+  const model = await startModelServer();
+  const mem0 = await startMem0Server();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({
+          'config.json': configJson({
+            project02: model.settings,
+            plugins: {
+              mem0: {
+                enabled: true,
+                config: {backend: 'server', baseUrl: mem0.baseUrl},
+              },
+            },
+          }),
+        }),
+      ),
+    ),
+    'mira',
+  );
+
+  model.answer(reply('Hello.'));
+  await say('Hello?', 'hello');
+  expect(
+    Object.fromEntries(
+      (
+        model.requests[0]?.body as {
+          readonly tools: readonly {
+            readonly function: {readonly name: string; readonly strict?: true};
+          }[];
+        }
+      ).tools.map(({function: tool}) => [tool.name, tool.strict === true]),
+    ),
+  ).toEqual({
+    visible_reply: true,
+    runtime_plugin_list: true,
+    runtime_plugin_config: true,
+    runtime_plugin_config_update: true,
+    character_state_patch: true,
+    mem0_search: true,
+    mem0_add: true,
+    memory_update: false,
+    sessions_search: false,
+    sessions_read: false,
+  });
 });
 
 it('model.history-window: the replayed history is the newest whole turns that fit half the context window, oldest first and contiguous, so a newest turn too big for it leaves it empty', async () => {

@@ -1147,6 +1147,7 @@ mod tests {
         }
     }
 
+    /// plugins.tool-input-rules: a tool input its contract refuses is named by the field and the rule it breaks for every keyword a contract may hold, among them property names, a const, a type union and a field whose name needs a JSON-pointer escape, which no bundled tool's contract holds
     #[test]
     #[expect(
         clippy::too_many_lines,

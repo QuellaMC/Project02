@@ -9,8 +9,8 @@ use p02_app::{Event, TurnOutcome};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, Toy, World, change, home, id, line, make_read_only, open, restore, said,
-    settle, wire, write,
+    Ear, Gate, Round, Toy, World, id, line, make_read_only, open, restore, said, settle, wire,
+    write,
 };
 
 /// A daemon on a home with the bundled Mira starts her on its first
@@ -341,85 +341,4 @@ async fn the_plugins_work_failing_after_a_turn_is_maintenance() {
     );
     assert_eq!(summary["state"], "ready");
     assert_eq!(summary["maintenance"]["message"], failure["message"]);
-}
-
-/// A segment rotation that fails behind a completed turn leaves the turn
-/// completed and her ready, and is told on the stream and in her summary,
-/// which a stop and a start clear.
-#[tokio::test(start_paused = true)]
-async fn a_rotation_that_fails_is_maintenance_a_stop_and_a_start_clear() {
-    let world = World::new();
-
-    world.settings(json!({"project02": {"contextWindowTokens": 80}}));
-
-    let daemon = world.daemon(Vec::new()).await;
-
-    daemon.reconcile().await;
-
-    let conversation = open(&daemon).await;
-    let say = |n: u32| {
-        world.model.script([Round::says(&[&format!("Reply {n}.")])]);
-        daemon.deliver(line(
-            &conversation,
-            &format!("Line {n}."),
-            &format!("line-{n}"),
-        ))
-    };
-
-    say(1).await;
-    say(2).await;
-
-    let data = world.path("character-data/mira");
-    let catalog = data.join("sessions.jsonl");
-    let mut ear = Ear::on(&daemon);
-    // A rename replaces a read-only file on Unix, where the folder that
-    // holds the catalog decides; Windows refuses to replace one.
-    let catalog_writable = make_read_only(&catalog);
-    let data_writable = make_read_only(&data);
-    let third = say(3).await;
-
-    restore(&data, data_writable);
-    restore(&catalog, catalog_writable);
-
-    let failure = ear
-        .until(|event| matches!(event, Event::MaintenanceFailed { .. }))
-        .await;
-    let summary = &wire(&daemon.health().await)["characters"][0];
-
-    let failure = wire(&failure);
-
-    assert_eq!(said(&third), ["Line 3.", "Reply 3."]);
-    assert_eq!(summary["state"], "ready");
-    assert_eq!(
-        summary["maintenance"],
-        json!({"at": failure["at"], "message": failure["message"]})
-    );
-    assert!(
-        failure["message"]
-            .as_str()
-            .unwrap()
-            .contains("could not write"),
-        "{failure}"
-    );
-    assert_eq!(ear.states("mira"), []);
-
-    change(
-        &daemon,
-        home(),
-        json!({"kind": "set", "path": "project02.enabled", "value": false}),
-    )
-    .await;
-    daemon.reconcile().await;
-    change(
-        &daemon,
-        home(),
-        json!({"kind": "unset", "path": "project02.enabled"}),
-    )
-    .await;
-    daemon.reconcile().await;
-
-    let summary = &wire(&daemon.health().await)["characters"][0];
-
-    assert_eq!(summary["state"], "ready");
-    assert_eq!(summary.get("maintenance"), None);
 }

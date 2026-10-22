@@ -1,5 +1,7 @@
-import {writeFileSync} from 'node:fs';
+import {readdirSync, statSync, writeFileSync} from 'node:fs';
+import {createServer} from 'node:http';
 import {join} from 'node:path';
+import {text} from 'node:stream/consumers';
 
 import {expect, it} from 'vitest';
 
@@ -20,6 +22,8 @@ import {
   type ModelRequest,
   type ModelServer,
 } from './harness/model-server.ts';
+import {servedOnLoopback} from './harness/server.ts';
+import {observed} from './harness/wait.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 /** A home's config.json: Mira on the model server, her mem0 on the stub backend with these settings. */
@@ -483,3 +487,344 @@ it('memory.mem0-search-tool: mem0.search answers the model with at most five ite
     },
   ]);
 });
+
+it('memory.mem0-add-tool: mem0.add stores an explicit memory, its text cut to 600 characters, answers the rows it stored as a list of at most 32, fails an add that stored nothing and one the backend failed, and answers a platform receipt as queued, never as stored', async () => {
+  const model = await startModelServer();
+  const mem0 = await startMem0Server();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({
+          'config.json': mem0Config(model, mem0, {backend: 'server'}),
+        }),
+      ),
+    ),
+    'mira',
+  );
+  const adding = (words: string) => calling(['mem0_add', {text: words}]);
+
+  mem0.answer(
+    '/memories',
+    {
+      status: 200,
+      body: {
+        results: Array.from({length: 40}, (_, at) => ({
+          id: `mem-${String(at)}`,
+        })),
+      },
+    },
+    {status: 200, body: {results: []}},
+    {status: 500},
+  );
+  model.answer(
+    adding('z'.repeat(700)),
+    adding('Sam likes tea.'),
+    adding('Sam likes coffee.'),
+    reply('Kept what I could.'),
+  );
+  await say('Keep these.', 'keep');
+
+  const [stored, nothing, failed] = toolResults(model.requests.at(-1));
+
+  expect(
+    mem0.requests.find(request => request.path === '/memories'),
+  ).toMatchObject({
+    body: {
+      messages: [{role: 'user', content: `${'z'.repeat(597)}...`}],
+      infer: false,
+    },
+  });
+  expect(stored).toMatchObject({
+    status: 'accepted',
+    output: {
+      id: 'mem-0',
+      sourceReferences: Array.from({length: 32}, (_, at) => ({
+        kind: 'memory',
+        id: `mem-${String(at)}`,
+      })),
+    },
+  });
+  expect([nothing, failed]).toEqual([
+    expect.objectContaining({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'mem0 add failed: the backend created no memory for it.',
+    }),
+    expect.objectContaining({
+      status: 'rejected',
+      reason: 'handler_failed',
+      message: 'mem0 add failed: HTTP 500.',
+    }),
+  ]);
+
+  const platform = await startMem0Server();
+  const sayToPlatform = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({
+          'config.json': mem0Config(model, platform, {
+            backend: 'platform',
+            apiKey: 'platform-key',
+          }),
+        }),
+      ),
+    ),
+    'mira',
+  );
+
+  platform.answer('/v3/memories/add/', {
+    status: 200,
+    body: {event_id: 'evt-queued', status: 'PENDING'},
+  });
+  model.answer(adding('The harbor is quiet.'), reply('Queued.'));
+  await sayToPlatform('Keep that.', 'queued');
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
+    status: 'accepted',
+    output: {
+      queued: true,
+      sourceReferences: [{kind: 'external_contract', id: 'evt-queued'}],
+    },
+  });
+});
+
+it("memory.mem0-health: mem0's health, as each completed turn records it, names what its settings lack and a malformed baseUrl without echoing it, pings the backend, and stays degraded once a capture did not complete, its summary of at most 160 characters leading with the loss", async () => {
+  const model = await startModelServer();
+  const mem0 = await startMem0Server();
+  const healthOf = (home: string) =>
+    sessionRecords(home, 'mira', 'runtime_turn_completed').map(record =>
+      (
+        record['runtimePluginTurnEvidence'] as {
+          readonly health: readonly {
+            readonly pluginId: string;
+            readonly status: string;
+            readonly summary: string;
+          }[];
+        }
+      ).health.find(health => health.pluginId === 'mem0'),
+    );
+  const afterATurn = async (settings: Readonly<Record<string, string>>) => {
+    const home = createHome({
+      'config.json': configJson({
+        project02: model.settings,
+        plugins: {mem0: {enabled: true, config: settings}},
+      }),
+    });
+    const say = await converse(wireOf(await startDaemon(home)), 'mira');
+
+    model.answer(reply('Hello.'));
+    await say('Hello?', 'hello');
+
+    return healthOf(home).at(-1);
+  };
+  const rule =
+    'an absolute http:// or https:// address with no embedded credentials, query, or fragment';
+  const malformed = await afterATurn({
+    backend: 'server',
+    baseUrl: 'https://operator:hunter2@mem0.example',
+  });
+
+  expect(await afterATurn({backend: 'server'})).toMatchObject({
+    status: 'unavailable',
+    summary: 'Mem0 server backend needs the baseUrl config field.',
+  });
+  expect(await afterATurn({backend: 'platform'})).toMatchObject({
+    status: 'unavailable',
+    summary:
+      'Mem0 platform backend needs the apiKey config field (MEM0_API_KEY).',
+  });
+  expect(await afterATurn({backend: 'oss'})).toMatchObject({
+    status: 'unavailable',
+    summary: expect.stringContaining('MEM0_OSS_LLM_API_KEY') as string,
+  });
+  expect(malformed).toMatchObject({
+    status: 'unavailable',
+    summary: `Mem0 baseUrl must be ${rule}.`,
+  });
+  expect(JSON.stringify(malformed)).not.toContain('hunter2');
+  expect(
+    await afterATurn({backend: 'server', baseUrl: mem0.baseUrl}),
+  ).toMatchObject({status: 'ok', summary: 'Mem0 server reachable.'});
+  expect(mem0.requests).toContainEqual(
+    expect.objectContaining({method: 'GET', path: '/'}),
+  );
+
+  // Captures run one at a time, so one reaching the backend says the one
+  // before it settled.
+  const home = createHome({
+    'config.json': mem0Config(model, mem0, {backend: 'server'}),
+  });
+  const say = await converse(wireOf(await startDaemon(home)), 'mira');
+  const lost =
+    '1 capture(s) did not complete; most recent: mem0 add failed: HTTP 500.';
+
+  mem0.answer('/memories', {status: 500});
+
+  const second = mem0.hold('/memories');
+  const third = mem0.hold('/memories');
+  const turn = async (n: number) => {
+    model.answer(reply(`Reply ${String(n)}.`));
+    await say(`Line ${String(n)}.`, `line-${String(n)}`);
+  };
+
+  await turn(1);
+  await turn(2);
+  await second.arrived();
+  await turn(3);
+  second.release({status: 200, body: {results: [{id: 'mem-2'}]}});
+  await third.arrived();
+  await turn(4);
+
+  for (const health of healthOf(home).slice(2)) {
+    expect(health).toMatchObject({status: 'degraded'});
+    expect(health?.summary.startsWith(lost), health?.summary).toBe(true);
+    expect(health?.summary.length).toBeLessThanOrEqual(160);
+  }
+});
+
+it('memory.mem0-embedded: the embedded engine claims readiness only once its model and its embedder have both answered, creates its database owner-only, and writes nothing outside the home', async () => {
+  const model = await startModelServer();
+  const engine = await startEngineServer('Sam likes tea.');
+  const outside = createHome();
+  const home = createHome({
+    'config.json': configJson({
+      project02: model.settings,
+      plugins: {
+        mem0: {
+          enabled: true,
+          config: {
+            backend: 'oss',
+            ossLlmBaseUrl: `${engine.baseUrl}/v1`,
+            ossLlmModel: 'extractor',
+            ossEmbedderModel: 'embedder',
+          },
+        },
+      },
+    }),
+  });
+  const daemon = await startDaemon(home, {HOME: outside});
+  const say = await converse(wireOf(daemon), 'mira');
+  const turn = async (n: number) => {
+    model.answer(reply(`Reply ${String(n)}.`));
+    await say(`I like tea, ${String(n)}.`, `tea-${String(n)}`);
+  };
+  const health = () =>
+    sessionRecords(home, 'mira', 'runtime_turn_completed').map(
+      record =>
+        (
+          record['runtimePluginTurnEvidence'] as {
+            readonly health: readonly {
+              readonly pluginId: string;
+              readonly status: string;
+              readonly summary: string;
+            }[];
+          }
+        ).health.find(entry => entry.pluginId === 'mem0') ?? {},
+    );
+
+  await turn(1);
+  await turn(2);
+  // Captures run one at a time: the second one's extraction says the first
+  // one's model and embedder have answered.
+  await engine.extracted(2);
+  await turn(3);
+  expect(health()).toMatchObject([
+    {
+      status: 'degraded',
+      summary:
+        'Mem0 engine loaded; its model and embedder are contacted on first capture or recall.',
+    },
+    {},
+    {
+      status: 'ok',
+      summary: expect.stringContaining(
+        'its model and embedder have answered.',
+      ) as string,
+    },
+  ]);
+
+  expectOwnerOnly(join(home, 'character-data', 'mira', 'plugin-data', 'mem0'));
+  daemon.signal('SIGINT');
+  await daemon.exit();
+  expectOwnerOnly(join(home, 'character-data', 'mira', 'plugin-data', 'mem0'));
+  expect(readdirSync(outside)).toEqual([]);
+});
+
+/** Every file under the directory, of which there is one at least, readable by its owner alone. */
+function expectOwnerOnly(directory: string): void {
+  const files = readdirSync(directory, {recursive: true, withFileTypes: true})
+    .filter(entry => entry.isFile())
+    .map(entry => join(entry.parentPath, entry.name));
+
+  expect(files).not.toEqual([]);
+
+  for (const file of files) {
+    expect(statSync(file).mode & 0o777, file).toBe(0o600);
+  }
+}
+
+/**
+ * An OpenAI-wire model and embedder on loopback for the embedded engine:
+ * every extraction finds `memory`, and every text embeds as the counts of
+ * its letters.
+ */
+async function startEngineServer(memory: string) {
+  const paths = observed<string>();
+  const server = createServer((request, response) => {
+    void text(request).then(body => {
+      const path = request.url ?? '';
+      const answer = path.endsWith('/embeddings')
+        ? {
+            data: [
+              {
+                embedding: letterCounts(
+                  (JSON.parse(body) as {readonly input: string}).input,
+                ),
+              },
+            ],
+          }
+        : {
+            choices: [
+              {
+                index: 0,
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: JSON.stringify({memory: [{id: '0', text: memory}]}),
+                },
+              },
+            ],
+          };
+
+      paths.add(path);
+      response
+        .writeHead(200, {'content-type': 'application/json'})
+        .end(JSON.stringify(answer));
+    });
+  });
+  const port = await servedOnLoopback(server);
+
+  return {
+    baseUrl: `http://127.0.0.1:${String(port)}`,
+    /** Settles once the model was asked for `count` extractions. */
+    extracted: (count: number) =>
+      paths.until(`${String(count)} extractions`, asked =>
+        asked.filter(path => path.endsWith('/chat/completions')).length >= count
+          ? true
+          : undefined,
+      ),
+  };
+}
+
+/** A text as the counts of its letters, a to z, and of everything else. */
+function letterCounts(words: string): number[] {
+  const counts = Array.from({length: 27}, () => 0);
+
+  for (const character of words.toLowerCase()) {
+    const letter = 'abcdefghijklmnopqrstuvwxyz'.indexOf(character);
+    const at = letter === -1 ? 26 : letter;
+
+    counts[at] = (counts[at] ?? 0) + 1;
+  }
+
+  return counts;
+}

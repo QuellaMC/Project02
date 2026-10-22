@@ -362,6 +362,62 @@ it('characters.display-name-rename: a character renamed under the same id keeps 
   });
 });
 
+it("characters.overlay-materialization: at her first start her package's plugin settings are written into her overlay and nothing more, beside an edit made on her screen before it, and her data directory's marker records the package's version; an overlay whose plugin config is no object fails her start naming its path", async () => {
+  const shipped = {
+    plugins: {
+      recommended: ['demo-config'],
+      config: {'demo-config': {tone: 'warm'}},
+    },
+  };
+  const home = createHome({
+    'config.json': configJson({project02: {enabled: false}}),
+    characters: {
+      nova: {
+        'project02.character.json': characterJson('nova', 'Nova', shipped),
+      },
+      vega: {
+        'project02.character.json': characterJson('vega', 'Vega', shipped),
+      },
+    },
+    'character-data': {
+      vega: {
+        'config.json': configJson({
+          project02: {enabled: true},
+          plugins: {'demo-config': {config: 'warm'}},
+        }),
+      },
+    },
+  });
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  await saveConfig(
+    wire,
+    {scope: 'character', characterId: 'nova'},
+    {kind: 'set', path: 'project02.enabled', value: true},
+  );
+  expect(await wire.start('nova')).toMatchObject({
+    character: {state: 'ready'},
+  });
+  expect(JSON.parse(overlayOf(home, 'nova'))).toEqual({
+    version: 'project02.config.v2',
+    project02: {enabled: true},
+    plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+  });
+  expect(
+    JSON.parse(
+      readFileSync(join(characterData(home, 'nova'), 'schema.json'), 'utf8'),
+    ),
+  ).toMatchObject({materializedCharacterPackageVersion: '1.0.0'});
+  expect(await wire.start('vega')).toMatchObject({
+    character: {
+      state: 'failed',
+      diagnostic: expect.stringContaining(
+        'plugins.demo-config.config',
+      ) as string,
+    },
+  });
+});
+
 it('characters.required-plugins: a required plugin is switched on in her overlay above a home that switched it off, one missing or switched off in her overlay fails her, and a missing recommended one only warns', async () => {
   const home = createHome({
     'config.json': configJson({plugins: {'demo-config': {enabled: false}}}),

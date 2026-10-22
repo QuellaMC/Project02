@@ -1,6 +1,7 @@
 import {
   appendFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -17,6 +18,7 @@ import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionLog, snapshot} from './harness/home.ts';
 import {
   calling,
+  messagesOf,
   reply,
   startModelServer,
   toolResults,
@@ -294,6 +296,139 @@ it('storage.catalog-torn-tail: a sessions catalog a crash cut off in its last ro
   }
 });
 
+it('storage.crash-residue-tolerated: residue an interrupted operation left is passed over: a session directory nothing names, a conversation directory without its record, a cataloged continuation that holds no record, which is let go so that the segment before it takes the next line, and an uncataloged segment holding only a torn line, which the next rotation takes with the torn bytes gone', async () => {
+  const {home, conversationId, segment} = await threeSegments();
+  const catalog = join(home, 'character-data', 'mira', 'sessions.jsonl');
+
+  mkdirSync(join(home, 'character-data', 'mira', 'sessions', 'conv_orphan.1'));
+  mkdirSync(join(home, 'conversations', 'conv_unfinished'));
+  // The rotation into the third segment was cut off before its first record.
+  rmSync(join(segment(3), 'raw-events.jsonl'));
+
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+
+  await wire.start('mira');
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'opened',
+    conversationId,
+  });
+  await expect(wire.history('conv_unfinished')).resolves.toMatchObject({
+    status: 'refused',
+    reason: 'unknown_conversation',
+  });
+  await expect(
+    lineOn(wire, conversationId, 'Three.', 'three'),
+  ).resolves.toMatchObject({
+    status: 'completed',
+    messages: [{messageId: `${conversationId}.2:message-3`}, {}],
+  });
+  expect(readFileSync(catalog, 'utf8')).not.toContain(`${conversationId}.3`);
+  daemon.signal('SIGINT');
+  await daemon.exit();
+  writeFileSync(join(home, 'config.json'), rotatingEveryTurn);
+  mkdirSync(segment(3));
+  writeFileSync(
+    join(segment(3), 'raw-events.jsonl'),
+    '{"eventId":"evt_torn","kin',
+  );
+
+  const rotating = wireOf(await startDaemon(home, fixedReplies));
+
+  await rotating.start('mira');
+  await expect(
+    lineOn(rotating, conversationId, 'Four.', 'four'),
+  ).resolves.toMatchObject({status: 'completed'});
+  expect(sessionLog(home, 'mira', `${conversationId}.3`)).toMatchObject([
+    {kind: 'session_continued'},
+  ]);
+  expect(readFileSync(catalog, 'utf8')).toContain(`${conversationId}.3`);
+});
+
+it('storage.damaged-record: damage is reported, never read as a shorter history: a segment the catalog names that the disk lacks, or a catalog gone or empty while segment directories hold records, fails the open, history and turns missing_file, and a committed catalog row that is no session row fails them malformed_record naming its line, the catalog left as it was', async () => {
+  const {home: stopped, conversationId} = await threeSegments();
+  const data = join('character-data', 'mira');
+  const catalog = join(data, 'sessions.jsonl');
+  const [one = '', two = '', three = ''] = readFileSync(
+    join(stopped, catalog),
+    'utf8',
+  )
+    .trimEnd()
+    .split('\n');
+  const damages = [
+    [
+      'missing_file',
+      'is missing',
+      (home: string) => {
+        rmSync(join(home, data, 'sessions', `${conversationId}.1`), {
+          recursive: true,
+        });
+      },
+    ],
+    [
+      'missing_file',
+      'is missing or empty',
+      (home: string) => {
+        rmSync(join(home, catalog));
+      },
+    ],
+    [
+      'missing_file',
+      'is missing or empty',
+      (home: string) => {
+        writeFileSync(join(home, catalog), '');
+      },
+    ],
+    [
+      'malformed_record',
+      'Line 2 of sessions catalog',
+      (home: string) => {
+        writeFileSync(
+          join(home, catalog),
+          `${one}\n{"session": "lost"}\n${two}\n${three}\n`,
+        );
+      },
+    ],
+  ] as const;
+
+  for (const [code, said, damage] of damages) {
+    const home = createHome();
+
+    cpSync(stopped, home, {recursive: true});
+    damage(home);
+
+    const catalogOf = () =>
+      existsSync(join(home, catalog))
+        ? readFileSync(join(home, catalog), 'utf8')
+        : undefined;
+    const left = catalogOf();
+    const daemon = await startDaemon(home, fixedReplies);
+    const wire = wireOf(daemon);
+    const failed = {
+      status: 'failed',
+      code,
+      message: expect.stringContaining(said) as string,
+    };
+
+    await wire.start('mira');
+    await expect(wire.open('mira'), said).resolves.toMatchObject(failed);
+    await expect(wire.history(conversationId), said).resolves.toMatchObject(
+      failed,
+    );
+    await expect(
+      lineOn(wire, conversationId, 'Three.', `three-${code}`),
+      said,
+    ).resolves.toMatchObject({
+      status: 'failed',
+      committed: false,
+      message: expect.stringContaining(said) as string,
+    });
+    daemon.signal('SIGINT');
+    await daemon.exit();
+    expect(catalogOf(), said).toBe(left);
+  }
+});
+
 it('storage.damaged-segment-tolerance: a damaged line in an older segment lets the character start and chat while the history page reaching it fails malformed_record, and without the taken-lines record a damaged line in the segment before the current one fails the open', async () => {
   const {home, conversationId, segment} = await threeSegments();
   const takenLines = join(
@@ -336,6 +471,118 @@ it('storage.damaged-segment-tolerance: a damaged line in an older segment lets t
     status: 'failed',
     code: 'malformed_record',
   });
+});
+
+it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never read as empty or folded around: a line of character-state's log that is no patch it wrote, met as the log is folded once its checkpoint is gone, an event whose states disagree with its patch, or a checkpoint value out of range rejects the turn before the model is asked and writes nothing, and a memory document that is no document leaves the curated memory out of the prompt while memory.update is refused and the document stays as it was", async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const plugins = join(home, 'character-data', 'mira', 'plugin-data');
+  const state = join(plugins, 'character-state');
+  const events = join(state, 'events.jsonl');
+  const checkpoint = join(state, 'checkpoint.json');
+  const memory = join(plugins, 'character-memory', 'memory.json');
+  const run = async (line: string, id: string) => {
+    const daemon = await startDaemon(home);
+    const say = await converse(wireOf(daemon), 'mira');
+    const outcome = await say(line, id);
+
+    daemon.signal('SIGINT');
+    await daemon.exit();
+
+    return outcome;
+  };
+
+  model.answer(
+    calling(['character_state_patch', {mood: 'curious'}]),
+    calling(['character_state_patch', {energy: 'high'}]),
+    calling([
+      'memory_update',
+      {operations: [{action: 'add', target: 'notes', text: 'Likes tea.'}]},
+    ]),
+    reply('Noted.'),
+  );
+  await run('Remember tea.', 'setup');
+
+  const [first = '', second = ''] = readFileSync(events, 'utf8')
+    .trimEnd()
+    .split('\n');
+  const kept = readFileSync(checkpoint, 'utf8');
+  const disagreeing = JSON.parse(first) as {
+    readonly after: Record<string, string>;
+  };
+  const outOfRange = JSON.parse(kept) as {
+    readonly current: {readonly current: Record<string, string>};
+  };
+  const damages = [
+    [
+      'a line that is no patch',
+      `${first}\n{"note": "hand-written"}\n${second}\n`,
+      undefined,
+    ],
+    [
+      'states that disagree with the patch',
+      `${JSON.stringify({...disagreeing, after: {...disagreeing.after, mood: 'tired'}})}\n${second}\n`,
+      undefined,
+    ],
+    [
+      'a checkpoint value out of range',
+      `${first}\n${second}\n`,
+      JSON.stringify({
+        ...outOfRange,
+        current: {current: {...outOfRange.current.current, mood: 'angry'}},
+      }),
+    ],
+  ] as const;
+
+  for (const [index, [damage, log, damagedCheckpoint]] of damages.entries()) {
+    writeFileSync(events, log);
+    rmSync(checkpoint, {force: true});
+
+    if (damagedCheckpoint !== undefined) {
+      writeFileSync(checkpoint, damagedCheckpoint);
+    }
+
+    const asked = model.requests.length;
+    const left = snapshot(state);
+
+    expect(
+      await run('How are you?', `damaged-${String(index)}`),
+      damage,
+    ).toMatchObject({
+      status: 'rejected',
+      reason: 'plugin_before_role_model_call_rejected',
+    });
+    expect(model.requests, damage).toHaveLength(asked);
+    expect(snapshot(state), damage).toEqual(left);
+  }
+
+  writeFileSync(events, `${first}\n${second}\n`);
+  writeFileSync(checkpoint, kept);
+  writeFileSync(memory, '{"notes": [');
+  model.answer(
+    calling([
+      'memory_update',
+      {operations: [{action: 'add', target: 'notes', text: 'Likes coffee.'}]},
+    ]),
+    reply('Hm.'),
+  );
+  expect(await run('Remember coffee.', 'coffee')).toMatchObject({
+    status: 'completed',
+  });
+  expect(
+    messagesOf(model.requests.at(-2)).filter(
+      message =>
+        message.role === 'system' &&
+        message.content?.includes('Likes tea.') === true,
+    ),
+  ).toEqual([]);
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
+    status: 'rejected',
+    reason: 'handler_failed',
+  });
+  expect(readFileSync(memory, 'utf8')).toBe('{"notes": [');
 });
 
 it('storage.symlink-guards: storage behind a symbolic link is refused, never followed: the character-data, conversations, character data, sessions and taken-lines directories, a segment or conversation directory, the catalog, the overlay and a plugin store, nothing written where the link points', async () => {

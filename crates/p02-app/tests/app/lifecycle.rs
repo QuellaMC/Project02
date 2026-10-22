@@ -209,8 +209,7 @@ async fn a_change_switching_her_off_during_her_boot_ends_with_her_stopped() {
     );
 }
 
-/// A stop that comes while she boots overtakes the boot: she ends stopped
-/// without ever being ready, and no start follows the stop.
+/// lifecycle.stop-during-boot: A stop that comes while a character boots overtakes the boot: she ends stopped without ever being ready, and every start after it is refused `gateway_stopped`.
 #[tokio::test(start_paused = true)]
 async fn a_stop_during_her_boot_wins_and_no_start_follows() {
     let world = World::new();

@@ -308,6 +308,7 @@ async fn model_input_needs_model_input_write() {
     );
 }
 
+/// plugins.trusted-frame: only a plugin granted `trusted_context` write puts runtime notes and curated sections in the trusted frame, whole and within its caps; its other items, and every item of another plugin, ride the person's turn
 #[tokio::test(start_paused = true)]
 async fn the_trusted_frame_takes_only_cleared_plugins_and_whole_entries_within_its_caps() {
     let trusted = json!({"model_input": "write", "trusted_context": "write"});
@@ -331,6 +332,13 @@ async fn the_trusted_frame_takes_only_cleared_plugins_and_whole_entries_within_i
         (
             Spec::new("uncleared"),
             answering(ContextItemKind::RuntimeNote, 1),
+        ),
+        (
+            Spec {
+                access: trusted.clone(),
+                ..Spec::new("resourceful")
+            },
+            answering(ContextItemKind::Resource, 1),
         ),
         (
             Spec {
@@ -364,8 +372,14 @@ async fn the_trusted_frame_takes_only_cleared_plugins_and_whole_entries_within_i
             .collect::<Vec<_>>(),
         [Some("cleared")]
     );
-    assert_eq!(prepared.context_items.len(), 1);
-    assert_eq!(prepared.context_items[0].plugin_id().as_str(), "uncleared");
+    assert_eq!(
+        prepared
+            .context_items
+            .iter()
+            .map(|item| item.plugin_id().as_str())
+            .collect::<Vec<_>>(),
+        ["uncleared", "resourceful"]
+    );
     assert_eq!(
         prepared
             .curated_sections

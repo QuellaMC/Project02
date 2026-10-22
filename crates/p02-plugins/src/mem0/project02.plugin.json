@@ -123,16 +123,6 @@
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
-        },
-        {
-          "name": "ossEmbedderDims",
-          "description": "Embedded engine only: embedding vector width; unset is derived from the model name (nomic 768, mxbai 1024, text-embedding-3-small 1536, text-embedding-3-large 3072; otherwise 1536). Must match the embedding model.",
-          "required": false,
-          "secret": false,
-          "valueType": "number",
-          "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
         }
       ]
     },
