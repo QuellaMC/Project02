@@ -80,9 +80,7 @@ fn memory_provider(
                     ),
                 )
                 .in_section(Namespace::Plugins, chosen),
-                // A plugin this build lacks: she runs without memory, since
-                // the memory plugins it has are not the one chosen.
-                None => Diagnostic::warning(
+                None => Diagnostic::error(
                     Code::DefaultMemoryProviderUnavailable,
                     format!(
                         "The memory provider \"{chosen}\" her settings choose is no plugin this \

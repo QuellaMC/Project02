@@ -560,16 +560,28 @@ it('plugins.demo-config-directives: switched on, demo-config adds one style dire
   ]);
 });
 
-it('plugins.memory-provider-selection: a default memory provider naming one that is not on is default_memory_provider_unavailable, and naming a plugin of another kind default_memory_provider_not_memory_provider, each blocking her plugins and leaving the one named off', async () => {
-  for (const [named, code] of [
-    ['mem0', 'default_memory_provider_unavailable'],
-    ['demo-config', 'default_memory_provider_not_memory_provider'],
+it('plugins.memory-provider-selection: a default memory provider naming one that is not on, or one this build lacks while another is on, is default_memory_provider_unavailable, and naming a plugin of another kind default_memory_provider_not_memory_provider, each blocking her plugins and leaving off the plugin it names or displaces', async () => {
+  for (const [named, code, plugins, off] of [
+    ['mem0', 'default_memory_provider_unavailable', {}, 'mem0'],
+    [
+      'demo-config',
+      'default_memory_provider_not_memory_provider',
+      {},
+      'demo-config',
+    ],
+    [
+      'mem00',
+      'default_memory_provider_unavailable',
+      {mem0: {enabled: true}},
+      'mem0',
+    ],
   ] as const) {
     const wire = wireOf(
       await startDaemon(
         createHome({
           'config.json': configJson({
             project02: {defaultMemoryProvider: named},
+            plugins,
           }),
         }),
         fixedReplies,
@@ -602,7 +614,7 @@ it('plugins.memory-provider-selection: a default memory provider naming one that
     expect(status('session-history'), named).toMatchObject({
       status: 'blocked',
     });
-    expect(status(named), named).toMatchObject({
+    expect(status(off), named).toMatchObject({
       enabled: false,
       status: 'disabled',
     });
