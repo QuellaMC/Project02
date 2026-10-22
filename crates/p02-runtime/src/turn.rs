@@ -166,17 +166,17 @@ pub(crate) async fn run(
             .flat_map(ConversationTurn::visible_messages)
             .map(|message| message.id.clone())
             .collect(),
-        prepared: Vec::new(),
+        summary: begun.history.summary,
         ledger: Mutex::new(Ledger {
             disk: disk.take(),
             committed: vec![begun.message],
             finished: Vec::new(),
+            prepared: Vec::new(),
+            rebuilds: 0,
             calls: Vec::new(),
         }),
     };
-    let ended = turn
-        .drive(mind, begun.history.summary.as_deref(), window)
-        .await;
+    let ended = turn.drive(mind, window).await;
 
     *disk = turn.ledger.into_inner().disk;
     ended
@@ -372,8 +372,9 @@ struct OpenTurn<'a> {
     hooks: p02_plugins::Turn,
     /// The visible messages of the history window the model replays.
     window: Vec<MessageId>,
-    /// What the before-call phase recorded, which every reply carries.
-    prepared: Vec<Evidence>,
+    /// What the conversation's earlier segments came to, shown ahead of
+    /// the turns it replays.
+    summary: Option<String>,
     ledger: Mutex<Ledger>,
 }
 
@@ -382,20 +383,26 @@ struct Ledger {
     disk: Option<Disk>,
     committed: Vec<VisibleMessage>,
     finished: Vec<ToolCallId>,
+    /// What preparing the model's call recorded, which every reply after
+    /// it carries.
+    prepared: Vec<Evidence>,
+    /// The host's rebuilds when the model's call was last prepared.
+    rebuilds: u64,
     /// What the tool calls recorded, in the order they finished.
     calls: Vec<Evidence>,
+}
+
+/// What the plugins made of the model's call.
+enum Preparation {
+    Prepared(DecisionContext),
+    Refused(p02_plugins::TurnRejection),
 }
 
 impl OpenTurn<'_> {
     /// The turn to its end, or, when the runtime fails it, to the record of
     /// that failure.
-    async fn drive(
-        &mut self,
-        mind: Mind<'_>,
-        summary: Option<&str>,
-        window: &[ConversationTurn],
-    ) -> Ended {
-        match self.answer(mind, summary, window).await {
+    async fn drive(&mut self, mind: Mind<'_>, window: &[ConversationTurn]) -> Ended {
+        match self.answer(mind, window).await {
             Ok(ended) => ended,
             Err(error) => {
                 let ledger = self.ledger.get_mut();
@@ -414,12 +421,11 @@ impl OpenTurn<'_> {
     async fn answer(
         &mut self,
         mind: Mind<'_>,
-        summary: Option<&str>,
         window: &[ConversationTurn],
     ) -> Result<Ended, RunTurnError> {
-        let prepared = match self.host.before_role_model_call(&self.shown().await).await {
-            BeforeCallOutcome::Prepared(prepared) => prepared,
-            BeforeCallOutcome::Rejected(rejection) => {
+        let context = match self.prepare().await? {
+            Preparation::Prepared(context) => context,
+            Preparation::Refused(rejection) => {
                 let refused =
                     TurnRejection::Runtime(RuntimeRejection::PluginBeforeRoleModelCallRejected);
 
@@ -431,31 +437,6 @@ impl OpenTurn<'_> {
                 }));
             }
         };
-        let PreparedContext {
-            runtime_notes,
-            context_items,
-            curated_sections,
-            evidence,
-        } = prepared;
-        let notes = self
-            .day
-            .map(today_note)
-            .into_iter()
-            .chain(runtime_notes)
-            .collect();
-        let mut context = DecisionContext::new(
-            self.hooks.identity().session_id.clone(),
-            self.cast.character.clone(),
-        )
-        .with_runtime_notes(notes)
-        .with_plugin_context(context_items, curated_sections);
-
-        if let Some(summary) = summary {
-            context = context.with_summary(summary)?;
-        }
-
-        self.prepared = evidence;
-
         let outcome = run_turn(
             mind.adapter,
             &*self,
@@ -515,6 +496,46 @@ impl OpenTurn<'_> {
         }
     }
 
+    /// The model's call as the plugins prepare it now, the day first of its
+    /// notes and the summary ahead of the replayed turns, what they recorded
+    /// kept for the replies to carry; or the refusal of a plugin whose
+    /// failure refuses the turn.
+    async fn prepare(&self) -> Result<Preparation, RunTurnError> {
+        let rebuilds = self.host.rebuilds();
+        let outcome = self.host.before_role_model_call(&self.shown().await).await;
+
+        self.ledger.lock().await.rebuilds = rebuilds;
+
+        let PreparedContext {
+            runtime_notes,
+            context_items,
+            curated_sections,
+            evidence,
+        } = match outcome {
+            BeforeCallOutcome::Prepared(prepared) => prepared,
+            BeforeCallOutcome::Rejected(rejection) => return Ok(Preparation::Refused(rejection)),
+        };
+        let notes = self
+            .day
+            .map(today_note)
+            .into_iter()
+            .chain(runtime_notes)
+            .collect();
+        let mut context = DecisionContext::new(
+            self.hooks.identity().session_id.clone(),
+            self.cast.character.clone(),
+        )
+        .with_runtime_notes(notes)
+        .with_plugin_context(context_items, curated_sections);
+
+        if let Some(summary) = &self.summary {
+            context = context.with_summary(summary)?;
+        }
+
+        self.ledger.lock().await.prepared.extend(evidence);
+        Ok(Preparation::Prepared(context))
+    }
+
     /// The turn as a phase of hooks is shown it now: the person's line, and
     /// the visible messages in the model's sight, the window's and every one
     /// committed so far.
@@ -568,7 +589,12 @@ impl OpenTurn<'_> {
     async fn recorded(&self) -> Vec<Evidence> {
         let ledger = self.ledger.lock().await;
 
-        self.prepared.iter().chain(&ledger.calls).cloned().collect()
+        ledger
+            .prepared
+            .iter()
+            .chain(&ledger.calls)
+            .cloned()
+            .collect()
     }
 
     /// The turn's evidence once the health gate judged its reply, its
@@ -725,8 +751,8 @@ impl TurnSink for OpenTurn<'_> {
         let identity = self.identity.clone();
         let text = reply.text.clone();
         let round = reply.draft.round();
-        let evidence = self.prepared.clone();
         let mut ledger = self.ledger.lock().await;
+        let evidence = ledger.prepared.clone();
         let message = on_disk(&mut ledger.disk, move |disk| {
             let message = disk.writer.replay()?.session().character_message(text);
 
@@ -833,6 +859,25 @@ impl TurnSink for OpenTurn<'_> {
         }
 
         Ok(finished)
+    }
+
+    /// The model's call prepared again once a call rebuilt one of the
+    /// plugins that prepared it, so the rounds after show what the plugin
+    /// now says. A plugin refuses a turn only before its first round, so a
+    /// refusal now leaves the call prepared as it was, and its records go
+    /// with what the replies carry.
+    async fn prepared_again(&self) -> Result<Option<DecisionContext>, RunTurnError> {
+        if self.host.rebuilds() == self.ledger.lock().await.rebuilds {
+            return Ok(None);
+        }
+
+        match self.prepare().await? {
+            Preparation::Prepared(context) => Ok(Some(context)),
+            Preparation::Refused(rejection) => {
+                self.ledger.lock().await.prepared.extend(rejection.evidence);
+                Ok(None)
+            }
+        }
     }
 
     fn draft(&self, event: DraftEvent) {

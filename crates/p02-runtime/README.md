@@ -28,15 +28,17 @@ only on tokio's blocking pool, where a lock's wait blocks.
 - **The turn.** Its records land in the order the store's gate admits
   them: the event as it came in; the person's line, committed once the
   history the model is shown was read; the plugins' preparation of the
-  model's call, which may refuse the turn and keeps the line; each model
-  round, recorded before anything it decided happens, each reply committed
-  in the round's order and each tool call started in the model's and
-  finished as it finishes, so a call that finished outlasts a crash before
-  the rest, while the model reads the results in its own order; the health
-  gate, which may refuse a reply already shown and keeps it; and the
-  record that ends the turn, before the plugins' work after its commit,
-  which can change nothing about it. A text that is no line is refused
-  with its event, and nothing is committed.
+  model's call, which may refuse the turn and keeps the line, and which is
+  made again for the rounds after a call rebuilt one of the plugins live,
+  a refusal then leaving it as it was; each model round, recorded before
+  anything it decided happens, each reply committed in the round's order
+  and each tool call started in the model's and finished as it finishes,
+  so a call that finished outlasts a crash before the rest, while the
+  model reads the results in its own order; the health gate, which may
+  refuse a reply already shown and keeps it; and the record that ends the
+  turn, before the plugins' work after its commit, which can change
+  nothing about it. A text that is no line is refused with its event, and
+  nothing is committed.
 - **What the turn says.** The person's line, each reply, the pieces of a
   reply the model is still writing and their withdrawal, and the tool
   calls requested and each completed as it finishes, in order, on the

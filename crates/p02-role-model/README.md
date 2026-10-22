@@ -32,7 +32,9 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   draft, and what a round drafted and did not commit is withdrawn before
   the round moves on. Tool calls get the runtime's ids and run through the
   plugin host, which decides which may overlap; the model's note beside its
-  calls stays on the decision and is never a message.
+  calls stays on the decision and is never a message. A round of calls that
+  changed what prepared the turn, a plugin rebuilt live, has the rounds
+  after it shown the turn as the sink prepares it again.
 - **NVIDIA.** A round is a streamed chat completion: the request body as
   the prompt fixtures record it, the tools under names the provider takes,
   the stream reassembled whatever bytes it is cut into, and a reply drafted

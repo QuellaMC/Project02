@@ -71,6 +71,47 @@ function progressOf(frames: readonly Frame[]): {readonly kind: string}[] {
     );
 }
 
+it('model.provider-request: each round offers visible_reply first and then the tools of the plugins she runs, in the order the host runs them, each with its description', async () => {
+  const model = await startModelServer();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({'config.json': configJson({project02: model.settings})}),
+      ),
+    ),
+    'mira',
+  );
+
+  model.answer(reply('Hello.'));
+  await say('Hello?', 'hello');
+
+  const offered = (
+    model.requests[0]?.body as {
+      readonly tools: readonly {
+        readonly function: {
+          readonly name: string;
+          readonly description: string;
+        };
+      }[];
+    }
+  ).tools.map(tool => tool.function);
+
+  expect(offered.map(tool => tool.name)).toEqual([
+    'visible_reply',
+    'runtime_plugin_list',
+    'runtime_plugin_config',
+    'runtime_plugin_config_update',
+    'memory_update',
+    'character_state_patch',
+    'sessions_search',
+    'sessions_read',
+  ]);
+
+  for (const tool of offered) {
+    expect(tool.description, tool.name).toMatch(/\S/u);
+  }
+});
+
 it('model.provider-request-body: a round asks the model for a streamed completion with usage, automatic and parallel tool calls, and thinking on', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
@@ -289,6 +330,44 @@ it('model.provider-plain-content-reply: plain assistant content that finishes wi
     status: 'completed',
     messages: [{}, {text: words}],
   });
+});
+
+it('model.provider-tool-calls: a tool call is replayed to the model with the arguments the runtime parsed from it, as compact JSON, whatever spacing the model wrote them in, in its own turn and the next', async () => {
+  const model = await startModelServer();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({'config.json': configJson({project02: model.settings})}),
+      ),
+    ),
+    'mira',
+  );
+  const replayed = (request: ModelRequest | undefined) =>
+    messagesOf(request)
+      .flatMap(message => message.tool_calls ?? [])
+      .map(call => call.function.arguments);
+
+  model.answer(
+    {
+      chunks: [
+        ...toolCall({
+          index: 0,
+          id: 'native_call',
+          name: 'runtime_plugin_config',
+          arguments: '{ "pluginId" : "character-memory" }',
+        }),
+        finish('tool_calls'),
+      ],
+    },
+    reply('Checked.'),
+    reply('Still here.'),
+  );
+  await say('Check your memory plugin.', 'check');
+  await say('And now?', 'now');
+  expect(model.requests.slice(1).map(replayed)).toEqual([
+    ['{"pluginId":"character-memory"}'],
+    ['{"pluginId":"character-memory"}'],
+  ]);
 });
 
 it('model.provider-streaming: an answer cut anywhere, inside a frame or a character, reads back whole: content, tool calls by their index, the finish reason and usage, while reasoning chunks and comments are ignored', async () => {
@@ -593,6 +672,76 @@ it('model.provider-empty-content: empty content, or tool arguments that are no J
     model.requests.slice(1).map(request => messagesOf(request).at(-1)?.role),
   ).toEqual(['system', 'system']);
   expect(recordsOf(home, 'tool_call_started')).toEqual([]);
+});
+
+it("model.reasoning-blocks: a leaked think or reasoning block is scrubbed from the reply before anything shows it, whole in plain content or split across the pieces of a streamed visible_reply: never drafted, committed, read back or replayed to the model; an unterminated one is the parser's refusal, handed back to the model, not a provider error", async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: model.settings})}),
+  );
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const events = await openEvents(daemon);
+  const leaked = '<think>a secret plan</think>Hello there.';
+  const args = JSON.stringify({text: leaked});
+
+  model.answer(
+    {
+      chunks: [
+        ...content('<reasoning>a secret plan</reasoning>Plain hello.'),
+        finish('stop'),
+      ],
+    },
+    {
+      chunks: [
+        ...visibleReply(
+          leaked,
+          args.indexOf('ink>'),
+          args.indexOf('cret'),
+          args.indexOf('/think') + 3,
+        ),
+        finish('tool_calls'),
+      ],
+    },
+    {
+      chunks: [...visibleReply('<think>still thinking'), finish('tool_calls')],
+    },
+    reply('Recovered.'),
+  );
+  expect(await say('Plain?', 'plain')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Plain hello.'}],
+  });
+  expect(await say('Split?', 'split')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Hello there.'}],
+  });
+  expect(await say('Unfinished?', 'unfinished')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Recovered.'}],
+  });
+  await events.next(frameOf('turn_completed', {clientMessageId: 'unfinished'}));
+  expect(
+    events.frames
+      .filter(frameOf('turn_progress', {progress: {kind: 'reply_delta'}}))
+      .map(
+        frame =>
+          (JSON.parse(frame.data ?? '') as {progress: {text: string}}).progress
+            .text,
+      )
+      .join(''),
+  ).toBe('Hello there.');
+  expect(JSON.stringify(await wire.history(conversationId))).not.toContain(
+    'secret',
+  );
+  expect(JSON.stringify(messagesOf(model.requests[2]))).not.toContain('secret');
+  expect(messagesOf(model.requests[3]).at(-1)).toMatchObject({
+    role: 'system',
+    content: expect.stringContaining(
+      'visible_reply text contains an unterminated reasoning block.',
+    ) as string,
+  });
 });
 
 it('model.provider-large-prompt: a prompt as large as the window admits, its history past 64 KiB, is sent whole and recorded with its round', async () => {

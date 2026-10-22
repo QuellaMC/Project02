@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(mem0.kind(), PluginKind::MemoryProvider);
         assert!(!mem0.first_party());
-        assert_eq!(mem0.config().fields().len(), 11);
+        assert_eq!(mem0.config().fields().len(), 10);
         assert_eq!(
             mem0.config().field("backend").unwrap().default_value(),
             Some(&json!("platform"))

@@ -503,6 +503,33 @@ it('inspect.usage-errors: inspect refuses --init with exit 1, saying it does not
   expect(readdirSync(home)).toEqual([]);
 });
 
+it('inspect.unknown-character: inspect --character naming no installed character exits 1 naming the installed ones, one whose package is broken exits 1 naming its diagnostic and its path, an id no character could have is refused saying what an id is, and none of them creates anything', async () => {
+  const home = createHome({
+    characters: {
+      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+      nova: {'project02.character.json': '{not json'},
+    },
+  });
+  const before = snapshot(home);
+  const stderrOf = async (id: string) =>
+    (await refused(inspect(['--store', home, '--character', id]))).stderr();
+
+  expect(await stderrOf('zed')).toContain(
+    'Error: Character "zed" was not found; the characters are mira, zeta.',
+  );
+  expect(await stderrOf('nova')).toMatch(
+    /Error: Character "nova" cannot be used: .*\(invalid_descriptor at .*project02\.character\.json\)/u,
+  );
+
+  for (const id of ['../bad', '9bad']) {
+    expect(await stderrOf(id), id).toBe(
+      'Error: --character must start with a letter and use only letters, numbers, dots, underscores, or hyphens.\n',
+    );
+  }
+
+  expect(snapshot(home)).toEqual(before);
+});
+
 it('inspect.character-selection: without --character inspect reports on the one character switched on and refuses when none is or several are, naming them; an explicit --character wins even for a character switched off', async () => {
   const zeta = {
     zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},

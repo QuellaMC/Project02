@@ -553,9 +553,10 @@ fn answer_by(deadline: Instant) -> Instant {
 mod tests {
     use super::*;
 
-    /// The host keeps 160 characters of a summary: a warning that trailed
-    /// the readiness would be cut to "whe...", and a cut warning invites
-    /// the retry that stores a memory twice.
+    /// memory.mem0-health-unknown-outcome: a capture that outlives its minute is counted lost with its outcome unknown, and mem0's health leads with that warning, so the 160 characters of its summary never cut it
+    ///
+    /// A warning that trailed the readiness would be cut to "whe...", and a
+    /// cut warning invites the retry that stores a memory twice.
     #[tokio::test(start_paused = true)]
     async fn health_leads_with_the_unknown_outcome_of_a_capture_that_outlived_its_bound() {
         let captures = Captures::default();

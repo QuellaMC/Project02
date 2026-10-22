@@ -22,6 +22,16 @@ type Section = {
   readonly activation: {readonly status: string};
 };
 
+/** A plugin as runtime_plugin_list lists it. */
+type Listed = {
+  readonly id: string;
+  readonly activationStatus: string;
+  readonly requestedAccess: object;
+  readonly grantedAccess: object;
+  readonly registeredLifecycleHooks: readonly string[];
+  readonly providedTools: readonly {readonly name: string}[];
+};
+
 const mira = {scope: 'character', characterId: 'mira'} as const;
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
@@ -123,6 +133,69 @@ it('plugins.default-catalog: a fresh home offers character-memory, character-sta
     ...bundled,
     'character-state': 'disabled',
   });
+});
+
+it('plugins.plugin-list-tool: runtime_plugin_list lists runtime.plugin and the plugins she runs, each active with the access it was granted, its hooks and exactly the tools the model is offered of it, and with scope all every other plugin of the build after them, off, with no access, hooks or tools', async () => {
+  const model = await startModelServer();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({
+          'config.json': configJson({
+            project02: model.settings,
+            plugins: {'demo-config': {enabled: true}},
+          }),
+        }),
+      ),
+    ),
+    'mira',
+  );
+
+  model.answer(
+    calling(
+      ['runtime_plugin_list', {}],
+      ['runtime_plugin_list', {scope: 'all'}],
+    ),
+    reply('Listed.'),
+  );
+  await say('What plugins do you have?', 'list');
+
+  const [running, all] = toolResults(model.requests.at(-1)).map(
+    result =>
+      (result as {readonly output: {readonly plugins: readonly Listed[]}})
+        .output.plugins,
+  );
+  const offered = toolNames(model.requests[0]);
+
+  expect(running?.map(plugin => [plugin.id, plugin.activationStatus])).toEqual([
+    ['runtime.plugin', 'active'],
+    ['character-memory', 'active'],
+    ['character-state', 'active'],
+    ['demo-config', 'active'],
+    ['session-history', 'active'],
+  ]);
+
+  for (const plugin of running ?? []) {
+    expect(plugin.grantedAccess, plugin.id).toEqual(plugin.requestedAccess);
+    expect(plugin.registeredLifecycleHooks, plugin.id).not.toEqual([]);
+  }
+
+  expect(
+    running?.flatMap(plugin =>
+      plugin.providedTools.map(tool => tool.name.replaceAll('.', '_')),
+    ),
+  ).toEqual(offered.filter(name => name !== 'visible_reply'));
+  expect(all?.slice(0, running?.length)).toEqual(running);
+  expect(all?.slice(running?.length)).toMatchObject([
+    {
+      id: 'mem0',
+      enabled: false,
+      activationStatus: 'disabled',
+      grantedAccess: {},
+      registeredLifecycleHooks: [],
+      providedTools: [],
+    },
+  ]);
 });
 
 it('plugins.tool-exposure: with runtime.plugin switched off, the model is offered none of the management tools', async () => {
@@ -485,6 +558,73 @@ it('plugins.config-tools-conflict: an update approved after her settings changed
     reason: 'plugin_config_fingerprint_conflict',
   });
   expect(demoConfigOverlay(home)).toEqual({signoff: 'Yours.'});
+});
+
+it('plugins.config-tools-live-apply: an approved update of a live field is applied at once, the plugin rebuilt inside the call, so the model is told it applies now and the round after it already shows the new value; with the plugin switched off the update is written and the model told it applies at the next launch, and why', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({
+      project02: model.settings,
+      plugins: {'demo-config': {enabled: true}},
+    }),
+  });
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const events = await openEvents(daemon);
+  const toneOf = (request: ModelRequest | undefined) =>
+    systemLines(request).filter(line => line.includes(' tone'));
+  const update = async (value: string) =>
+    calling([
+      'runtime_plugin_config_update',
+      {
+        pluginId: 'demo-config',
+        fieldName: 'tone',
+        operation: 'set',
+        value,
+        expectedFingerprint: await fingerprintOf(wire),
+      },
+    ]);
+  const approved = async (line: string, id: string) => {
+    const turn = say(line, id);
+
+    await wire.answer(
+      confirmationId(await events.next(frameOf('confirmation_requested'))),
+      'approved',
+    );
+    expect(await turn, id).toMatchObject({status: 'completed'});
+
+    return toolResults(model.requests.at(-1)).at(-1);
+  };
+
+  model.answer(await update('formal'), reply('Very well.'));
+  expect(await approved('Be formal.', 'formal')).toMatchObject({
+    output: {status: 'applied', appliesTo: 'now'},
+  });
+  expect(model.requests.slice(-2).map(toneOf)).toEqual([
+    [expect.stringContaining('neutral tone') as string],
+    [expect.stringContaining('formal tone') as string],
+  ]);
+
+  await saveConfig(wire, mira, {
+    kind: 'section_enabled',
+    namespace: 'plugins',
+    id: 'demo-config',
+    enabled: false,
+  });
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
+  );
+  model.answer(await update('warm'), reply('Noted.'));
+  expect(await approved('Be warm.', 'warm')).toMatchObject({
+    output: {
+      status: 'applied',
+      appliesTo: 'next_launch',
+      appliesToNote:
+        'Applies at the next launch instead of live: her settings do not run the plugin.',
+    },
+  });
+  expect(demoConfigOverlay(home)).toEqual({tone: 'warm'});
 });
 
 it('plugins.demo-config-fields: demo-config is bundled and off by default; its tone and signoff the model may change, its operatorNote not, and its apiKey is a secret', async () => {

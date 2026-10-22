@@ -1,8 +1,10 @@
+import {join} from 'node:path';
+
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
 import {type Frame, frameOf, framesOf, openEvents} from './harness/events.ts';
-import {configJson, createHome} from './harness/home.ts';
+import {chmod, configJson, createHome} from './harness/home.ts';
 import {
   finish,
   reply,
@@ -13,7 +15,7 @@ import {
   type Answer,
 } from './harness/model-server.ts';
 import {bearer, exchange} from './harness/http.ts';
-import {conversationOf, converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
@@ -702,4 +704,66 @@ it('stream.connector-presence: a stream opened with ?connector= holds its connec
   second.hangUp();
   await watching.next(frameOf('health_changed', telegram(false)));
   expect(watching.frames.filter(frameOf('health_changed'))).toHaveLength(2);
+});
+
+it('stream.maintenance-failed: a segment rotation that fails behind a completed turn leaves the turn completed and the character ready, is told on the stream as maintenance_failed and in her health entry, and switching her off and on clears it', async () => {
+  const home = createHome({
+    'config.json': configJson({project02: {contextWindowTokens: 1}}),
+  });
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const data = join(home, 'character-data', 'mira');
+  const summary = async () =>
+    (
+      (await wire.health()) as {
+        readonly characters: readonly Record<string, unknown>[];
+      }
+    ).characters[0];
+
+  // The first rotation makes all the next one needs but a new catalog,
+  // which her data directory, taking no new file, then refuses.
+  await say('One.', 'one');
+
+  const events = await openEvents(daemon);
+  let failure: unknown;
+
+  chmod(data, 0o555);
+
+  try {
+    expect(await say('Two.', 'two')).toMatchObject({status: 'completed'});
+    failure = dataOf(
+      await events.next(frameOf('maintenance_failed', {characterId: 'mira'})),
+    );
+  } finally {
+    chmod(data, 0o755);
+  }
+
+  const {at, message} = failure as {
+    readonly at: string;
+    readonly message: string;
+  };
+
+  expect(message).toContain('sessions.jsonl');
+  expect(await summary()).toMatchObject({
+    state: 'ready',
+    maintenance: {at, message},
+  });
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {kind: 'set', path: 'project02.enabled', value: false},
+  );
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'stopped'}),
+  );
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {kind: 'unset', path: 'project02.enabled'},
+  );
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
+  );
+  expect(await summary()).not.toHaveProperty('maintenance');
 });

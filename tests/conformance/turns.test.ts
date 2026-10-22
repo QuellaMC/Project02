@@ -753,6 +753,42 @@ it('turns.route-unopened-conversation: after a restart a turn on a conversation 
   });
 });
 
+it('turns.conversation-unreadable: a turn on a conversation whose record cannot be read is refused conversation_unreadable, naming the conversation', async () => {
+  const home = createHome();
+  const earlier = await startDaemon(home, fixedReplies);
+  const earlierWire = wireOf(earlier);
+
+  await earlierWire.start('mira');
+
+  const {conversationId, userParticipantId} = await conversationOf(
+    earlierWire,
+    'mira',
+  );
+
+  await stop(earlier);
+  writeFileSync(
+    join(home, 'conversations', conversationId, 'conversation.json'),
+    '{"id": "torn',
+  );
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+
+  await wire.start('mira');
+  await expect(
+    wire.turn({
+      conversationId,
+      senderId: userParticipantId,
+      text: 'Still there?',
+      source: 'web',
+      clientMessageId: 'still',
+    }),
+  ).resolves.toMatchObject({
+    status: 'refused',
+    reason: 'conversation_unreadable',
+    message: expect.stringContaining(conversationId) as string,
+  });
+});
+
 it('turns.history-paging: history reads a conversation across its segments as one scrollback, newest page first and chronological within it, back to the start by the earlier cursor, and a short one whole without a limit', async () => {
   const wire = wireOf(
     await startDaemon(

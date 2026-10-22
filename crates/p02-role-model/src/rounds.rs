@@ -142,6 +142,13 @@ pub trait TurnSink: Send + Sync {
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, Self::Error>;
 
+    /// What the rounds after a round of tool calls are shown in place of
+    /// the turn's context, when a call changed what prepared it; none
+    /// while nothing did, as for a sink whose plugins never change.
+    async fn prepared_again(&self) -> Result<Option<DecisionContext>, Self::Error> {
+        Ok(None)
+    }
+
     /// Hears a draft, which is never awaited: the model writes on
     /// meanwhile.
     fn draft(&self, event: DraftEvent);
@@ -311,6 +318,11 @@ impl Turn<'_> {
             interim_replies,
             tool_calls,
         });
+
+        if let Some(context) = sink.prepared_again().await? {
+            self.envelope.decision_context =
+                context.with_history_window(HistoryWindow::of(self.history));
+        }
 
         Ok(None)
     }

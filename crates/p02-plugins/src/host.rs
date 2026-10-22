@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, PoisonError, RwLock, Weak};
 
 use p02_contracts::{
@@ -53,6 +54,8 @@ pub(crate) struct Core {
     /// The tools the model is offered, by which a call is routed.
     offered: PluginToolDefinitions,
     pub(crate) confirmer: Option<Arc<dyn Confirmer>>,
+    /// How many times a plugin was rebuilt live.
+    rebuilds: AtomicU64,
 }
 
 /// One enabled plugin: its manifest, how to build it again, the tools it
@@ -193,6 +196,13 @@ impl PluginHost {
         }
 
         named == self.core.slots.len()
+    }
+
+    /// How many times one of the host's plugins has been rebuilt live: what
+    /// prepared a turn at one count no longer all serves at another.
+    #[must_use]
+    pub fn rebuilds(&self) -> u64 {
+        self.core.rebuilds.load(Ordering::Acquire)
     }
 
     /// Builds the plugin again, as activation did, from `authored`, the
@@ -337,6 +347,7 @@ impl PluginHostBuilder {
             slots,
             offered: policy::tools::offered(&tools, self.confirmer.is_some()),
             confirmer: self.confirmer,
+            rebuilds: AtomicU64::new(0),
         });
 
         host.attach(&core);
@@ -428,6 +439,7 @@ impl Core {
             plugin: Arc::clone(registration.plugin()),
             authored: authored.clone(),
         };
+        self.rebuilds.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 }

@@ -274,7 +274,7 @@
     </p>
 
     <ul>
-      <li><code>runtime.plugin.list</code> with <code>scope: "all"</code> includes cold disabled or blocked plugins without constructing their code or exposing their tools.</li>
+      <li><code>runtime.plugin.list</code> lists the host's own plugin and the plugins she runs, each with the access it was granted, its hooks and the tools the model is offered of it; with <code>scope: "all"</code> every other plugin of the build follows, switched off, with no access, hooks or tools.</li>
       <li><code>runtime.plugin.config</code> returns one installed plugin's manifest field metadata, redacted authored/effective values, exact host activation state and reasons, diagnostics, and authored fingerprint.</li>
       <li><code>runtime.plugin.config.update</code> applies one exact set or unset operation to one agent-mutable field once the person approves it.</li>
     </ul>
@@ -286,11 +286,10 @@
     </p>
 
     <p>
-      Listing is always available when <code>runtime.plugin</code> is active and remains independent
-      from config validity. If activation has config errors, the host retains only an immutable
-      inventory snapshot, so blocked plugins remain discoverable while config inspection and update
-      stay unavailable. Config inspection is added when valid config-control state exists; the update
-      tool is added only when the configured host also has a confirmation handler. The host validates
+      Listing and inspection are available whenever <code>runtime.plugin</code> runs. A settings
+      error about a plugin she runs stops her before any turn, so no list is ever answered while
+      her plugins are blocked. The update tool is offered only when the host has a confirmation
+      handler. The host validates
       the proposal before prompting, shows a redacted exact preview, and accepts only a one-shot user
       approval within the existing five-minute deadline. Missing, denied, cancelled, timed-out, or
       stale approval fails closed. The plugin manifest declares the maximum
@@ -298,10 +297,11 @@
       per-tool <code>runtime_read</code> classification and only config update requires confirmation.
       An approved change is written at once, inside the tool call. A field declared
       <code>reloadRequired: false</code> takes effect right away: the host rebuilds the plugin from
-      the freshly authored config and swaps the instance before the tool answers. Any other field
-      takes effect at the next launch, and so does a live field of a plugin that already took a
-      restart-only change in this process, since rebuilding it would apply that change early. The
-      tool result tells the model which happened as <code>appliesTo</code>.
+      the freshly authored config and swaps the instance before the tool answers, and the rounds
+      after it in the same turn already see the new value. A restart-only field, a live field of a
+      plugin her settings do not run, or one its plugin cannot be rebuilt with, is written and takes
+      effect at the next launch. The tool result tells the model which happened as
+      <code>appliesTo</code>, and why.
     </p>
 
     <p>
