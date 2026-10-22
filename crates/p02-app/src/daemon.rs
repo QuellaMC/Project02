@@ -606,7 +606,7 @@ impl Daemon {
     pub async fn apply_change(&self, change: ConfigChange) -> ChangeOutcome {
         let daemon = self.clone();
 
-        blocking(move || daemon.change_settings(&change)).await
+        blocking(move || daemon.change_settings(&change, || {})).await
     }
 
     /// What connector `connector` runs on, for the home and for each
@@ -628,11 +628,18 @@ impl Daemon {
 
     /// The one way the settings change, a client's change and a
     /// character's own plugin's alike: made as p02-config makes every
-    /// change, under the documents' locks; once it lands, health as it now
+    /// change, under the documents' locks; once it lands, `settled` makes
+    /// true what the change carries beyond the documents, a plugin
+    /// rebuilt live on the values they now hold, so that nothing judges
+    /// her against them before she runs them; then health as it now
     /// stands goes out to every surface before the answer does, and a
     /// reconcile pass acts on it behind the answer, on a task of its own,
     /// so the characters running come to match it. It waits on the disk.
-    pub(crate) fn change_settings(&self, change: &ConfigChange) -> ChangeOutcome {
+    pub(crate) fn change_settings(
+        &self,
+        change: &ConfigChange,
+        settled: impl FnOnce(),
+    ) -> ChangeOutcome {
         let world = &self.inner.world;
         let outcome = apply_change(
             &world.home,
@@ -643,6 +650,7 @@ impl Daemon {
         );
 
         if matches!(outcome, ChangeOutcome::Applied { .. }) {
+            settled();
             self.announce_health();
             tokio::spawn(self.reconcile());
         }

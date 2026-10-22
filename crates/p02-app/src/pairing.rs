@@ -225,7 +225,7 @@ impl Daemon {
             (approved.connector, approved.request.clone())
         };
         let written = admit(self.world(), connector, &request.subject, |change| {
-            self.change_settings(change)
+            self.change_settings(change, || {})
         });
         let mut waiting = self.pairings().waiting();
         let index = waiting

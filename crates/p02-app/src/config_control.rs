@@ -10,7 +10,7 @@ use p02_config::{
 };
 use p02_plugins::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError,
+    ReadConfigError, Rebuild,
 };
 use p02_shared::{Identifier, error_sentence};
 use serde_json::{Map, Value};
@@ -66,7 +66,7 @@ impl ConfigControl for CharacterConfig {
         })?
     }
 
-    fn change(&self, change: &FieldChange) -> FieldChangeOutcome {
+    fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
         let FieldChange {
             plugin,
             field,
@@ -92,21 +92,33 @@ impl ConfigControl for CharacterConfig {
                 message: "The daemon is stopped.".to_owned(),
             };
         };
-        let outcome = daemon.change_settings(&ConfigChange {
-            target: ConfigTarget::Character {
-                character_id: self.character.to_string(),
+        let mut rebuild_outcome = None;
+        let outcome = daemon.change_settings(
+            &ConfigChange {
+                target: ConfigTarget::Character {
+                    character_id: self.character.to_string(),
+                },
+                expected_fingerprint: expected_fingerprint.clone(),
+                operation,
             },
-            expected_fingerprint: expected_fingerprint.clone(),
-            operation,
-        });
+            || {
+                // Her plugin runs what her settings now say before the
+                // change is announced and judged, so the pass that follows
+                // finds nothing of hers to reload.
+                if let Some(rebuild) = rebuild {
+                    rebuild_outcome = match self.read(|resolution| running(resolution, plugin)) {
+                        Ok(Some(values)) => Some(rebuild(&values)),
+                        Ok(None) => None,
+                        Err(error) => Some(Err(error.sentence)),
+                    };
+                }
+            },
+        );
 
         match outcome {
             ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied {
                 fingerprint,
-                running: self
-                    .read(|resolution| running(resolution, plugin))
-                    .ok()
-                    .flatten(),
+                rebuilt: rebuild_outcome,
             },
             ChangeOutcome::Refused {
                 reason: ChangeRefusal::Conflict,

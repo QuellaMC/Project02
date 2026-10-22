@@ -16,7 +16,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use crate::boundary::described;
-use crate::config_control::{ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings};
+use crate::config_control::{
+    ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, Rebuild,
+};
 use crate::host::HostLink;
 use crate::package::{blocking, rejected};
 
@@ -250,22 +252,32 @@ impl Request {
         if self.value.is_some() { "set" } else { "unset" }
     }
 
-    /// Writes the change, and rebuilds its plugin live when its field
-    /// takes effect so and the host runs it. A change written is told as
-    /// applied, live or at the next launch, whatever keeps it from being
-    /// live.
+    /// Writes the change, its plugin rebuilt live as part of it when its
+    /// field takes effect so and the host runs it. A change written is
+    /// told as applied, live or at the next launch, whatever keeps it from
+    /// being live.
     fn apply(self, control: &dyn ConfigControl, host: &HostLink) -> ToolCallOutcome {
-        let outcome = control.change(&FieldChange {
-            plugin: self.plugin.clone(),
-            field: self.field.name().clone(),
-            value: self.value.clone(),
-            expected_fingerprint: self.expected_fingerprint.clone(),
-        });
-        let (fingerprint, running) = match outcome {
+        let live = !self.field.reload_required();
+        let mut rebuild_live = |values: &Map<String, Value>| -> Result<(), String> {
+            host.core()
+                .map_err(|stopped| stopped.to_string())?
+                .reload(&self.plugin, values)
+                .map_err(|error| described(&error))
+        };
+        let outcome = control.change(
+            &FieldChange {
+                plugin: self.plugin.clone(),
+                field: self.field.name().clone(),
+                value: self.value.clone(),
+                expected_fingerprint: self.expected_fingerprint.clone(),
+            },
+            live.then_some(&mut rebuild_live as Rebuild<'_>),
+        );
+        let (fingerprint, rebuilt) = match outcome {
             FieldChangeOutcome::Applied {
                 fingerprint,
-                running,
-            } => (fingerprint, running),
+                rebuilt,
+            } => (fingerprint, rebuilt),
             FieldChangeOutcome::Conflict => {
                 return rejected(CONFLICT, CONFLICT_SENTENCE.to_owned(), CONFLICT_SENTENCE);
             }
@@ -276,18 +288,13 @@ impl Request {
                 return rejected(UPDATE_FAILED, message.clone(), &message);
             }
         };
-        let waiting = if self.field.reload_required() {
-            Some("the field takes effect only when the plugin is built at launch".to_owned())
-        } else if let Some(values) = running {
-            match host.core() {
-                Ok(core) => core
-                    .reload(&self.plugin, &values)
-                    .err()
-                    .map(|error| described(&error)),
-                Err(stopped) => Some(stopped.to_string()),
+        let waiting = match rebuilt {
+            Some(Ok(())) => None,
+            Some(Err(why)) => Some(why),
+            None if live => Some("her settings do not run the plugin".to_owned()),
+            None => {
+                Some("the field takes effect only when the plugin is built at launch".to_owned())
             }
-        } else {
-            Some("her settings do not run the plugin".to_owned())
         };
         let mut output = Map::from_iter([
             ("status".to_owned(), Value::from("applied")),

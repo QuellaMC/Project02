@@ -26,7 +26,7 @@ pub use before_call::{BeforeCallOutcome, PreparedContext, TurnRejection};
 pub use boundary::RecordLabelsError;
 pub use config_control::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError,
+    ReadConfigError, Rebuild,
 };
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 pub use health::{HealthCheck, HealthRejection};

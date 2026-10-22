@@ -16,7 +16,7 @@ use p02_config::{
 use p02_contracts::{Manifest, PluginFactory};
 use p02_plugins::{
     ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, list,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, Rebuild, list,
 };
 use p02_shared::{
     DanglingLinks, Identifier, canonical_path, create_directories, read_file, remove_file,
@@ -307,7 +307,7 @@ impl ConfigControl for MiraSettings {
         })
     }
 
-    fn change(&self, change: &FieldChange) -> FieldChangeOutcome {
+    fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
         let (id, field) = (change.plugin.to_string(), change.field.to_string());
         let operation = match &change.value {
             Some(value) => Operation::SectionFieldSet {
@@ -337,9 +337,8 @@ impl ConfigControl for MiraSettings {
         );
 
         match outcome {
-            ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied {
-                fingerprint,
-                running: self
+            ChangeOutcome::Applied { fingerprint } => {
+                let running = self
                     .read(|resolution| {
                         resolution
                             .settings()
@@ -347,8 +346,16 @@ impl ConfigControl for MiraSettings {
                             .find(|(running, _)| *running == &change.plugin)
                             .map(|(_, values)| values.clone())
                     })
-                    .unwrap(),
-            },
+                    .unwrap();
+
+                FieldChangeOutcome::Applied {
+                    fingerprint,
+                    rebuilt: match (rebuild, running) {
+                        (Some(rebuild), Some(values)) => Some(rebuild(&values)),
+                        _ => None,
+                    },
+                }
+            }
             ChangeOutcome::Refused {
                 reason: ChangeRefusal::Conflict,
                 ..

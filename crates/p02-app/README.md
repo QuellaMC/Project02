@@ -74,11 +74,12 @@ tokio's blocking pool.
   every change, under the documents' locks; once it lands, health goes
   out to every surface before the answer does, and a reconcile pass acts
   on it behind the answer, on a task of its own, so a caller that stops
-  waiting leaves nothing undone. A plugin that a change her own plugin
-  made rebuilt live serves the rest of her turn on the values it was
-  rebuilt from, so she runs what her settings now say and the pass
-  reloads nothing; a change it could not apply live reloads her once
-  the turn ends.
+  waiting leaves nothing undone. A change her own plugin makes rebuilds
+  its plugin live as part of the change, before the change is announced
+  and judged, so she runs what her settings now say by the time the pass
+  looks and it reloads nothing, and the rebuilt plugin serves the rest
+  of her turn; a change it could not apply live reloads her once the
+  turn ends.
 - **Reconcile.** One rule for boot and for every settings change: an
   enabled character who runs nothing starts, one who failed starts again,
   one who is ready and runs other than what her package and her settings
