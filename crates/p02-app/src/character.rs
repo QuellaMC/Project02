@@ -622,7 +622,9 @@ impl Actor {
                 TurnOutcome::Rejected {
                     character_id,
                     conversation_id: conversation,
-                    reason: RuntimeRejection::InputValidationRejected.as_str(),
+                    reason: RuntimeRejection::InputValidationRejected
+                        .as_str()
+                        .to_owned(),
                     message,
                     committed: false,
                 },
@@ -632,7 +634,7 @@ impl Actor {
                 TurnOutcome::Rejected {
                     character_id,
                     conversation_id: conversation,
-                    reason: turn.reason,
+                    reason: turn.reason.to_owned(),
                     message: turn.message,
                     committed: true,
                 },

@@ -15,15 +15,14 @@ Schema, which the conformance suite holds every answer and every frame
 to, so a shape a client and the daemon disagree on is a compile error
 here or a schema failure there. Neither file is edited by hand, and
 `pnpm check:rust` fails when either is stale. `api/running-turns.ts` is
-the one fold that says what a running turn is; the page and the connector
-fold their frames with it.
+the one fold that says what a running turn is, as p02-app's `RunningTurns`
+says it for the daemon and the Telegram connector; the page folds its
+frames with it.
 
 `client/` is the reference client, one module for Node and for a browser
-tab — the web page and the Telegram connector use it; it calls each route
-from a table of its own, typed by the contract, splits the event stream
-into frames, and speaks the platform's fetch unless its caller hands it
-another, as the connector hands it one over `node:http` without Node's
-five-minute bound, each request under a signal of its own. It may import
+tab, which the web page uses; it calls each route from a table of its
+own, typed by the contract, splits the event stream into frames, and
+speaks the platform's fetch, each request under a signal of its own. It may import
 only `api/`, itself, and `shared`, types included (arch rule
 `clients-see-only-the-wire`), so no client grows a private path into the
 daemon.

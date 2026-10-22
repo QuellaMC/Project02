@@ -264,7 +264,7 @@ it("connectors.telegram-draft-from-snapshot: a bot started mid-reply shows the r
 
   relay.away();
   await run.printed(
-    `Telegram connector: waiting for the daemon on ${relay.home}; run pnpm serve.`,
+    `Telegram connector: waiting for the daemon on ${relay.home}; run project02 serve.`,
   );
   second.write([then]);
   await drafted(events, ' then');
@@ -397,7 +397,7 @@ it('connectors.telegram-settings-before-frames: settings changed while the conne
 
   relay.away();
   await run.printed(
-    `Telegram connector: waiting for the daemon on ${relay.home}; run pnpm serve.`,
+    `Telegram connector: waiting for the daemon on ${relay.home}; run project02 serve.`,
   );
   await saveConfig(wire, {scope: 'global'}, pairing(alice));
 
@@ -494,7 +494,7 @@ it('connectors.telegram-held-messages: a message that arrives while a change is 
   await staleRead.answered();
   relay.away();
   await run.printed(
-    `Telegram connector: waiting for the daemon on ${relay.home}; run pnpm serve.`,
+    `Telegram connector: waiting for the daemon on ${relay.home}; run project02 serve.`,
   );
   await saveConfig(wire, {scope: 'global'}, pairing(alice, dave));
   telegram.push(miraBot.token, messageFrom(carol, 1, 'Carol here.'));

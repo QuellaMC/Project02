@@ -1,13 +1,14 @@
-//! The switches a test harness sets in serve's environment: read once at
-//! start, and never settings, so neither `config.json` nor the settings
-//! page knows them. A value serve cannot use refuses the start rather than
-//! doing nothing, before anything is bound or written.
+//! The switches a test harness sets in a command's environment: read once
+//! at start, and never settings, so neither `config.json` nor the settings
+//! page knows them. A value the command cannot use refuses the start rather
+//! than doing nothing, before anything is bound or written.
 
 use std::ffi::OsStr;
 use std::time::Duration;
 
 use p02_app::Durations;
 use p02_role_model::TestProvider;
+use p02_shared::{BASE_URL_RULE, BaseUrl};
 
 /// Runs every character on the test provider, whatever her settings
 /// choose.
@@ -17,8 +18,11 @@ pub(crate) const TEST_PROVIDER: &str = "PROJECT02_TEST_PROVIDER";
 /// `key=milliseconds` pairs separated by commas.
 pub(crate) const TEST_DURATIONS: &str = "PROJECT02_TEST_DURATIONS";
 
+/// Names the Bot API the connector reaches in Telegram's place.
+pub(crate) const TEST_TELEGRAM_API: &str = "PROJECT02_TEST_TELEGRAM_API";
+
 /// The waits serve reads, in the order a refusal lists them.
-const KEYS: [&str; 7] = [
+const SERVE_KEYS: [&str; 7] = [
     "confirmation",
     "pairing",
     "silence",
@@ -27,6 +31,9 @@ const KEYS: [&str; 7] = [
     "hold",
     "probe",
 ];
+
+/// The one wait the connector reads: between two edits of a draft.
+const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
 /// through, the daemon's waits, and the two a second serve keeps itself.
@@ -40,16 +47,22 @@ pub(crate) struct Switches {
     pub(crate) probe: Duration,
 }
 
-/// A switch serve cannot use, and why.
+/// A switch the command cannot use, and why.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub(crate) struct SwitchError(String);
 
-/// The switches as the environment sets them: the test provider's value
-/// and the durations', each none when unset. A key named twice, one serve
-/// does not read (the connector's `edit` among them) or a value that is no
-/// whole number of milliseconds above 0 is refused, then a test provider
-/// other than `deterministic`.
+/// What the switches make of the connector: the Bot API it reaches, and how
+/// long a draft waits between two edits, each its own unless set.
+#[derive(Debug)]
+pub(crate) struct TelegramSwitches {
+    pub(crate) telegram: Option<BaseUrl>,
+    pub(crate) draft_edits: Option<Duration>,
+}
+
+/// Serve's switches as the environment sets them: the test provider's
+/// value and the durations', each none when unset. The durations are read
+/// first, then a test provider other than `deterministic` is refused.
 pub(crate) fn read(
     provider: Option<&OsStr>,
     durations: Option<&OsStr>,
@@ -61,40 +74,15 @@ pub(crate) fn read(
         probe: Duration::from_secs(5),
     };
 
-    if let Some(pairs) = durations {
-        let mut given: Vec<String> = Vec::new();
-
-        for pair in pairs.to_string_lossy().split(',') {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-
-            if !KEYS.contains(&key) {
-                return Err(refused(&format!(
-                    "unknown key \"{key}\"; the keys here are {}.",
-                    KEYS.join(", ")
-                )));
-            }
-
-            if given.iter().any(|seen| seen == key) {
-                return Err(refused(&format!("key \"{key}\" is given twice.")));
-            }
-
-            let wait = milliseconds(value).ok_or_else(|| {
-                refused(&format!(
-                    "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
-                ))
-            })?;
-
-            match key {
-                "confirmation" => switches.durations.confirmation = wait,
-                "pairing" => switches.durations.pairing = wait,
-                "silence" => switches.durations.model_silence = Some(wait),
-                "heartbeat" => switches.durations.heartbeat = wait,
-                "grace" => switches.durations.grace = wait,
-                "hold" => switches.hold = wait,
-                _ => switches.probe = wait,
-            }
-
-            given.push(key.to_owned());
+    for (key, wait) in waits(durations, &SERVE_KEYS)? {
+        match key {
+            "confirmation" => switches.durations.confirmation = wait,
+            "pairing" => switches.durations.pairing = wait,
+            "silence" => switches.durations.model_silence = Some(wait),
+            "heartbeat" => switches.durations.heartbeat = wait,
+            "grace" => switches.durations.grace = wait,
+            "hold" => switches.hold = wait,
+            _ => switches.probe = wait,
         }
     }
 
@@ -112,6 +100,69 @@ pub(crate) fn read(
     }
 
     Ok(switches)
+}
+
+/// The connector's switches as the environment sets them: the durations',
+/// then the Bot API's address, an absolute http or https one with no
+/// credentials, query or fragment.
+pub(crate) fn telegram(
+    durations: Option<&OsStr>,
+    api: Option<&OsStr>,
+) -> Result<TelegramSwitches, SwitchError> {
+    let draft_edits = waits(durations, &TELEGRAM_KEYS)?
+        .into_iter()
+        .map(|(_, wait)| wait)
+        .next();
+    let telegram = api
+        .map(|api| {
+            api.to_str()
+                .and_then(|api| BaseUrl::parse(api).ok())
+                .ok_or_else(|| SwitchError(format!("{TEST_TELEGRAM_API} must be {BASE_URL_RULE}.")))
+        })
+        .transpose()?;
+
+    Ok(TelegramSwitches {
+        telegram,
+        draft_edits,
+    })
+}
+
+/// The waits `pairs` sets among the command's `keys`, as `key=milliseconds`
+/// pairs separated by commas: a key named twice, one the command does not
+/// read, or a value that is no whole number of milliseconds above 0 is
+/// refused.
+fn waits(
+    pairs: Option<&OsStr>,
+    keys: &[&'static str],
+) -> Result<Vec<(&'static str, Duration)>, SwitchError> {
+    let mut given: Vec<(&'static str, Duration)> = Vec::new();
+    let Some(pairs) = pairs else {
+        return Ok(given);
+    };
+
+    for pair in pairs.to_string_lossy().split(',') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let Some(key) = keys.iter().copied().find(|known| *known == key) else {
+            return Err(refused(&format!(
+                "unknown key \"{key}\"; the keys here are {}.",
+                keys.join(", ")
+            )));
+        };
+
+        if given.iter().any(|(seen, _)| *seen == key) {
+            return Err(refused(&format!("key \"{key}\" is given twice.")));
+        }
+
+        let wait = milliseconds(value).ok_or_else(|| {
+            refused(&format!(
+                "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
+            ))
+        })?;
+
+        given.push((key, wait));
+    }
+
+    Ok(given)
 }
 
 /// `value` as a wait: digits, the first of them not 0.

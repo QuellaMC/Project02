@@ -401,7 +401,7 @@ it('connectors.telegram-held-while-daemon-down: a line written while the daemon 
   first.signal('SIGINT');
   await first.exit();
   await run.printed(
-    `Telegram connector: waiting for the daemon on ${home}; run pnpm serve.`,
+    `Telegram connector: waiting for the daemon on ${home}; run project02 serve.`,
   );
   telegram.push(miraBot.token, messageFrom(alice, 2, 'Anyone there?'));
 

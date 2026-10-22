@@ -12,7 +12,8 @@ use p02_core::Timestamp;
 use p02_plugins::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use p02_shared::Identifier;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
@@ -49,6 +50,16 @@ impl fmt::Display for ConfirmationId {
 impl Serialize for ConfirmationId {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for ConfirmationId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+
+        Uuid::parse_str(&text)
+            .map(Self)
+            .map_err(|_| D::Error::custom("a confirmation id is a UUID"))
     }
 }
 

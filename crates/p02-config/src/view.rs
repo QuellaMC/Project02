@@ -11,7 +11,7 @@ use p02_core::SpeakerName;
 use p02_shared::{Fingerprint, Identifier, error_sentence, sentence};
 use p02_store::Home;
 use schemars::JsonSchema;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
@@ -128,7 +128,7 @@ pub struct SectionView {
 }
 
 /// Whether a section runs, as its settings decide it, and why.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(rename = "RuntimeConfigSectionActivationShape")]
 #[schemars(rename = "RuntimeConfigSectionActivationShape")]
 pub struct SectionActivation {
@@ -137,7 +137,7 @@ pub struct SectionActivation {
     reasons: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationStatus {
     Active,
@@ -348,7 +348,7 @@ fn activation(section: &Section<'_>) -> SectionActivation {
 /// its section's activation and, while that is active, the values in
 /// effect for it, secrets in the clear. The home's switch is a default,
 /// not a master switch: each entry is judged by its own.
-#[derive(Debug, Serialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConnectorConfigView {
     #[serde(rename_all = "camelCase")]
@@ -363,7 +363,7 @@ pub enum ConnectorConfigView {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectorRefusal {
     UnknownConnector,
@@ -373,7 +373,7 @@ pub enum ConnectorRefusal {
 /// A connector's section for one target: its activation, and each field
 /// that has a value it takes for that target, the home's fields reaching
 /// every character's entry.
-#[derive(Serialize, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, JsonSchema, TS)]
 #[ts(rename = "ConnectorConfigEntry")]
 #[schemars(rename = "ConnectorConfigEntry")]
 pub struct ConnectorEntry {
@@ -393,12 +393,33 @@ impl fmt::Debug for ConnectorEntry {
     }
 }
 
-#[derive(Debug, Serialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterConnectorEntry {
     character_id: Identifier,
     #[serde(flatten)]
     entry: ConnectorEntry,
+}
+
+impl ConnectorEntry {
+    /// The values in effect, while the section is active: an entry that is
+    /// not runs nothing, whatever it holds.
+    #[must_use]
+    pub fn values(&self) -> Option<&Map<String, Value>> {
+        (self.activation.status == ActivationStatus::Active).then_some(&self.values)
+    }
+}
+
+impl CharacterConnectorEntry {
+    #[must_use]
+    pub fn character_id(&self) -> &Identifier {
+        &self.character_id
+    }
+
+    #[must_use]
+    pub fn entry(&self) -> &ConnectorEntry {
+        &self.entry
+    }
 }
 
 impl ConnectorConfigView {

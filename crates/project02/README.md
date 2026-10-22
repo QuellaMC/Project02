@@ -1,14 +1,15 @@
 # project02
 
 The binary a person runs: the daemon, `project02 serve [--store <dir>]
-[--init]`, and a report on a home, `project02 inspect [--store <dir>]
+[--init]`, a report on a home, `project02 inspect [--store <dir>]
 [--character <id>] [--sessions | --session <id> | --conversations |
---conversation <id>]`. It depends on p02-app, p02-characters,
-p02-config, p02-contracts, p02-core, p02-gateway, p02-plugins,
-p02-role-model, p02-shared and p02-store, and holds what none of them
-decides: where the home is, the switches of a test harness, the plugins
-compiled in, the signals that stop it, and what it prints. `telegram`
-comes in a later step; any other command is a usage error.
+--conversation <id>]`, and the Telegram connector beside the daemon,
+`project02 telegram [--store <dir>]`. It depends on p02-app,
+p02-characters, p02-config, p02-contracts, p02-core, p02-gateway,
+p02-plugins, p02-role-model, p02-shared, p02-store and p02-telegram, and
+holds what none of them decides: where the home is, the switches of a
+test harness, the plugins compiled in, the signals that stop it, and what
+it prints. Any other command is a usage error.
 
 - **The command line.** `serve` owns two flags, each at most once:
   `--store <dir>`, the home, else `.project02` in the working directory,
@@ -40,8 +41,8 @@ comes in a later step; any other command is a usage error.
   behind the address. While it serves, a character's failure and a
   failure of her work behind the conversation are said on stderr as
   `<character>: <message>`.
-- **The stop** is the first SIGINT, SIGTERM or SIGHUP, or on Windows the
-  first of the console's events. It says `Stopping; finishing what is in
+- **The stop**, for serve and the connector alike, is the first SIGINT,
+  SIGTERM or SIGHUP, or on Windows the first of the console's events. It says `Stopping; finishing what is in
   flight.`, closes the server in its order, then releases the claim, so
   the record keeps the address without the run, and the lease goes last.
   A second signal of any kind ends the process at once, the lease left to
@@ -85,3 +86,15 @@ comes in a later step; any other command is a usage error.
   its files unreadable or not what a store holds, is `Error: Local runtime
   store could not be read.`; every other refusal says what the store
   found, with exit code 1 and nothing on stdout.
+- **The connector** is p02-telegram's, following the daemon the record of
+  its home names: `--store` as serve takes it, its one flag, anything else
+  refused as `Unknown telegram option: <arg>.`; `connected to …` and its
+  bots' lines on stdout, its trouble on stderr. Its switches are read by
+  serve's reader: `PROJECT02_TEST_DURATIONS` with the one key `edit`, the
+  shortest wait between two edits of a draft, any other refused, serve's
+  among them; and `PROJECT02_TEST_TELEGRAM_API`, an absolute http or
+  https address with no credentials, query or fragment, the Bot API it
+  reaches in Telegram's place. A refusal says why on stderr, with exit
+  code 1 and nothing on stdout. The first stop ends every bot and exits
+  0 with nothing more said; the second exits 1 at once; and a daemon of
+  another protocol ends it with exit code 1.

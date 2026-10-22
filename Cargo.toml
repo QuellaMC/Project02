@@ -30,6 +30,7 @@ p02-role-model = { path = "crates/p02-role-model" }
 p02-runtime = { path = "crates/p02-runtime" }
 p02-shared = { path = "crates/p02-shared" }
 p02-store = { path = "crates/p02-store" }
+p02-telegram = { path = "crates/p02-telegram" }
 rand = "0.10.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }

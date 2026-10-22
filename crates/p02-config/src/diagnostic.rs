@@ -6,14 +6,14 @@ use std::path::Path;
 use p02_contracts::vocabulary;
 use p02_shared::Identifier;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::declaration::Namespace;
 
 /// How much a finding weighs: an error stops what it concerns, a warning
 /// only says so.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Warning,
@@ -64,7 +64,7 @@ vocabulary! {
 /// person that never repeats a value, the place in the document, what it
 /// concerns, the settings as a whole or one section, and, for a finding in
 /// a character's overlay, whose.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "RuntimeConfigDiagnostic", optional_fields)]
 #[schemars(rename = "RuntimeConfigDiagnostic")]
@@ -80,7 +80,7 @@ pub struct Diagnostic {
     origin: Option<Origin>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 #[ts(optional_fields)]
 enum Concerns {
@@ -93,7 +93,7 @@ enum Concerns {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 enum Origin {
     Character {

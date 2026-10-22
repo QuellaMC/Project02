@@ -22,8 +22,8 @@ use p02_config::{ConfigChange, ConfigTarget, Connector, connectors};
 use p02_core::ClientStamp;
 use p02_shared::DaemonToken;
 use schemars::JsonSchema;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq as _;
@@ -152,30 +152,36 @@ pub(crate) fn router(app: App) -> Router {
 pub(crate) struct Link(pub(crate) CancellationToken);
 
 /// A transport refusal: its status, and the envelope's code and sentence.
-#[derive(Serialize, JsonSchema, TS)]
-pub(crate) struct Refusal {
+#[derive(Serialize, Deserialize, JsonSchema, TS)]
+pub struct Refusal {
     #[serde(skip)]
     status: StatusCode,
-    code: &'static str,
+    code: String,
     message: String,
 }
 
 /// The one shape every transport refusal takes; a verb's outcome never
 /// uses it.
-#[derive(Serialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[ts(rename = "GatewayErrorBody")]
 #[schemars(rename = "GatewayErrorBody")]
-pub(crate) struct ErrorBody {
-    pub(crate) error: Refusal,
+pub struct ErrorBody {
+    pub error: Refusal,
 }
 
 impl Refusal {
     pub(crate) fn new(status: StatusCode, code: &'static str, message: String) -> Self {
         Self {
             status,
-            code,
+            code: code.to_owned(),
             message,
         }
+    }
+
+    /// The sentence a client relays.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
     }
 
     fn stopping() -> Self {
@@ -281,8 +287,8 @@ async fn open(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    match read::<OpenRequest>("The open request", &headers, body) {
-        Ok(OpenRequest { character_id }) => {
+    match read::<OpenConversationBody>("The open request", &headers, body) {
+        Ok(OpenConversationBody { character_id }) => {
             answer(&app.0.daemon.open_conversation(&character_id.0).await)
         }
         Err(refusal) => refusal.into_response(),
@@ -294,7 +300,7 @@ async fn turn(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    match read::<TurnRequest>("The message", &headers, body) {
+    match read::<GatewayMessage>("The message", &headers, body) {
         Ok(line) => answer(
             &app.0
                 .daemon
@@ -343,8 +349,8 @@ async fn answer_confirmation(
         Err(rejection) => return unread_path(&rejection),
     };
 
-    match read::<Decided>("The answer", &headers, body) {
-        Ok(Decided { decision }) => answer(&app.0.daemon.answer_confirmation(&id, decision)),
+    match read::<AnswerBody>("The answer", &headers, body) {
+        Ok(AnswerBody { decision }) => answer(&app.0.daemon.answer_confirmation(&id, decision)),
         Err(refusal) => refusal.into_response(),
     }
 }
@@ -400,8 +406,8 @@ async fn request_pairing(
         Err(rejection) => return unread_path(&rejection),
     };
 
-    match read::<PairingRequest>("The pairing request", &headers, body) {
-        Ok(PairingRequest { subject }) => answer(
+    match read::<PairingRequestBody>("The pairing request", &headers, body) {
+        Ok(PairingRequestBody { subject }) => answer(
             &app.0
                 .daemon
                 .request_pairing(&connector, subject.id, &subject.label.0)
@@ -426,8 +432,8 @@ async fn settle_pairing(
         Err(rejection) => return unread_path(&rejection),
     };
 
-    match read::<Decided>("The answer", &headers, body) {
-        Ok(Decided { decision }) => answer(&app.0.daemon.settle_pairing(&code, decision).await),
+    match read::<AnswerBody>("The answer", &headers, body) {
+        Ok(AnswerBody { decision }) => answer(&app.0.daemon.settle_pairing(&code, decision).await),
         Err(refusal) => refusal.into_response(),
     }
 }
@@ -623,91 +629,102 @@ fn is_api(path: &str) -> bool {
 
 /// A string of 1 to 128 characters, as an id is on the wire, and the name
 /// an account goes by.
-#[derive(JsonSchema, TS)]
-pub(crate) struct Short(String);
+#[derive(Debug, Serialize, JsonSchema, TS)]
+pub struct Short(String);
 
-impl<'de> serde::Deserialize<'de> for Short {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
+/// Why a text is not a [`Short`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("an id or a name is 1 to 128 characters")]
+pub struct ParseShortError;
 
+impl Short {
+    /// # Errors
+    ///
+    /// [`ParseShortError`] when `text` is empty or longer than 128
+    /// characters.
+    pub fn new(text: &str) -> Result<Self, ParseShortError> {
         if (1..=NAME_LIMIT).contains(&text.chars().count()) {
-            Ok(Self(text))
+            Ok(Self(text.to_owned()))
         } else {
-            Err(serde::de::Error::custom(
-                "an id or a name is 1 to 128 characters",
-            ))
+            Err(ParseShortError)
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Short {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
 }
 
 /// A line's text: at least one character, and as long as any text of a
 /// body may be.
-#[derive(JsonSchema, TS)]
-pub(crate) struct Text(String);
+#[derive(Debug, Serialize, JsonSchema, TS)]
+pub struct Text(String);
 
-impl<'de> serde::Deserialize<'de> for Text {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
+/// Why a text is not a [`Text`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a line's text is at least one character")]
+pub struct ParseTextError;
 
+impl Text {
+    /// # Errors
+    ///
+    /// [`ParseTextError`] when `text` is empty.
+    pub fn new(text: &str) -> Result<Self, ParseTextError> {
         if text.is_empty() {
-            Err(serde::de::Error::custom(
-                "a line's text is at least one character",
-            ))
+            Err(ParseTextError)
         } else {
-            Ok(Self(text))
+            Ok(Self(text.to_owned()))
         }
     }
 }
 
+impl<'de> Deserialize<'de> for Text {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 /// The character whose thread with the person to open.
-#[derive(serde::Deserialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(rename = "OpenConversationBody")]
-#[schemars(rename = "OpenConversationBody")]
-pub(crate) struct OpenRequest {
-    character_id: Short,
+pub struct OpenConversationBody {
+    pub character_id: Short,
 }
 
 /// A line from one participant into one conversation, with the two stamps
 /// its client puts on it: which surface carried it, and the id a repeat of
 /// the same submission reuses.
-#[derive(serde::Deserialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(rename = "GatewayMessage")]
-#[schemars(rename = "GatewayMessage")]
-pub(crate) struct TurnRequest {
-    conversation_id: Short,
-    sender_id: Short,
-    text: Text,
-    source: ClientStamp,
-    client_message_id: ClientStamp,
+pub struct GatewayMessage {
+    pub conversation_id: Short,
+    pub sender_id: Short,
+    pub text: Text,
+    pub source: ClientStamp,
+    pub client_message_id: ClientStamp,
 }
 
 /// The person's answer, to a confirmation or a pairing request alike.
-#[derive(serde::Deserialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "AnswerBody")]
-#[schemars(rename = "AnswerBody")]
-pub(crate) struct Decided {
-    decision: Answer,
+pub struct AnswerBody {
+    pub decision: Answer,
 }
 
 /// The account a connector asks the person to let in.
-#[derive(serde::Deserialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "PairingRequestBody")]
-#[schemars(rename = "PairingRequestBody")]
-pub(crate) struct PairingRequest {
-    subject: Subject,
+pub struct PairingRequestBody {
+    pub subject: PairingSubjectBody,
 }
 
 /// The account a pairing is for: its id a stamp, and its name within the
 /// bound of a name a person goes by, which the daemon judges further.
-#[derive(serde::Deserialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "PairingSubjectBody")]
-#[schemars(rename = "PairingSubjectBody")]
-pub(crate) struct Subject {
-    id: ClientStamp,
-    label: Short,
+pub struct PairingSubjectBody {
+    pub id: ClientStamp,
+    pub label: Short,
 }

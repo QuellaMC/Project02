@@ -10,5 +10,10 @@ mod page;
 mod server;
 
 pub use discovery::{Claim, ClaimOutcome};
+pub use events::Ready;
+pub use http::{
+    AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody,
+    PairingSubjectBody, ParseShortError, ParseTextError, Refusal, Short, Text,
+};
 pub use page::Page;
 pub use server::{BindServerError, Server};

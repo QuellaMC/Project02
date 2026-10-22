@@ -25,7 +25,6 @@ import {
   type StartOutcome,
   type TurnOutcome,
 } from '../api/index.ts';
-import {describeFetchFailure} from '../../shared/fetch-failure.ts';
 import {createSseFrameSplitter} from './sse.ts';
 
 /**
@@ -38,19 +37,12 @@ export type HistoryPage = {
   readonly limit?: string | number;
 };
 
-export type GatewayClientOptions = (
+export type GatewayClientOptions =
   | {
       /** The line `serve` prints: `http://127.0.0.1:<port>/#token=<token>`. */
       readonly url: string;
     }
-  | {readonly baseUrl: string; readonly token: string}
-) & {
-  /**
-   * The platform's fetch unless one is handed in; a Node client that parks
-   * turns on confirmations hands one without Node's five-minute bound.
-   */
-  readonly fetch?: typeof fetch;
-};
+  | {readonly baseUrl: string; readonly token: string};
 
 /** Cancels a verb's request: its socket is destroyed and the call rejects. */
 export type GatewayCallOptions = {
@@ -105,9 +97,8 @@ export type GatewayClient = {
     options?: GatewayCallOptions,
   ): Promise<OpenOutcome>;
   /**
-   * Waits for the turn and is never retried. The fetch sets the only
-   * bound — a browser's has none, Node's gives a response five minutes —
-   * unless the caller's signal ends the wait; the turn runs on without it.
+   * Waits for the turn, however long, and is never retried, unless the
+   * caller's signal ends the wait; the turn runs on without it.
    */
   deliver(
     message: GatewayMessage,
@@ -195,7 +186,7 @@ export function createGatewayClient(
   options: GatewayClientOptions,
 ): GatewayClient {
   const {baseUrl, token} = resolveOptions(options);
-  const guardedFetch = createGuardedFetch(options.fetch ?? fetch);
+  const guardedFetch = createGuardedFetch(fetch);
   const headers = {authorization: `Bearer ${token}`};
   const route = createRoutes(baseUrl, headers, guardedFetch);
 
@@ -725,6 +716,17 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 /** The caller's own abort, whenever in the exchange it lands. */
 function abortedRequest(): GatewayClientError {
   return new GatewayClientError(0, 'aborted', 'The request was aborted.');
+}
+
+/** The platform's fetch says `fetch failed` and keeps the reason in `cause`. */
+function describeFetchFailure(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  return error.cause instanceof Error
+    ? `${error.message}: ${error.cause.message}`
+    : error.message;
 }
 
 /**

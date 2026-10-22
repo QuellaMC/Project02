@@ -25,22 +25,13 @@ export default {
       to: {circular: true},
     },
     {
-      name: 'shared-is-leaf',
-      comment:
-        'Rule 2 — src/shared is a leaf: generic utilities only, no imports ' +
-        'from any other src module. Green (zero baseline entries).',
-      severity: 'error',
-      from: {path: '^src/shared/'},
-      to: {path: '^src/', pathNot: ['^src/shared/']},
-    },
-    {
       name: 'clients-see-only-the-wire',
       comment:
         'src/gateway/client and every frontend under src/frontends are ' +
         'clients of the wire: they may import only gateway/api (the ' +
         'contract the Rust types generate, which value-imports nothing), ' +
-        'gateway/client, shared and one another — type-only imports ' +
-        'included — so whatever a client does, it does over the wire. ' +
+        'gateway/client and one another — type-only imports included — ' +
+        'so whatever a client does, it does over the wire. ' +
         'Green (zero baseline entries).',
       severity: 'error',
       from: {path: ['^src/gateway/client/', '^src/frontends/']},
@@ -49,7 +40,6 @@ export default {
         pathNot: [
           '^src/gateway/client/',
           '^src/gateway/api/',
-          '^src/shared/',
           '^src/frontends/',
         ],
       },
@@ -57,9 +47,9 @@ export default {
     {
       name: 'nothing-imports-frontends',
       comment:
-        'src/frontends holds the clients of the wire — the web page, the ' +
-        'Telegram connector; nothing else imports one, so no frontend is ' +
-        'privileged over another. Green (zero baseline entries).',
+        'src/frontends holds the clients of the wire — the web page; ' +
+        'nothing else imports one, so no frontend is privileged over ' +
+        'another. Green (zero baseline entries).',
       severity: 'error',
       from: {path: '^src/', pathNot: ['^src/frontends/']},
       to: {path: '^src/frontends/'},
@@ -68,9 +58,8 @@ export default {
       name: 'no-deep-cross-module-imports',
       comment:
         'Rule 5 — an import that crosses a top-level module boundary must ' +
-        "land on that module's public index.ts (first- or second-level), " +
-        'or a src/shared file. Intra-module deep imports stay free. Green ' +
-        '(zero baseline entries).',
+        "land on that module's public index.ts (first- or second-level). " +
+        'Intra-module deep imports stay free. Green (zero baseline entries).',
       severity: 'error',
       from: {path: '^src/([^/]+)/'},
       to: {
@@ -79,7 +68,6 @@ export default {
           '^src/$1/',
           '^src/[^/]+/index\\.ts$',
           '^src/[^/]+/[^/]+/index\\.ts$',
-          '^src/shared/[^/]+\\.ts$',
         ],
       },
     },

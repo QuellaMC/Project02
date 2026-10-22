@@ -151,7 +151,9 @@ pub struct SpeakerName(String);
 pub struct ParseSpeakerNameError;
 
 impl SpeakerName {
-    const MAX_CHARS: usize = 128;
+    /// The longest name, in characters: a client that names someone, such
+    /// as an account asking to pair, cuts the name to it.
+    pub const MAX_CHARS: usize = 128;
 
     /// # Errors
     ///

@@ -21,7 +21,7 @@ use p02_app::{
 };
 use p02_config::Connector;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -101,16 +101,16 @@ pub(crate) enum Unopened {
 
 /// The first frame of a stream that cannot be caught up: the state every
 /// later frame moves on from.
-#[derive(Serialize, JsonSchema, TS)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "GatewayReady")]
 #[schemars(rename = "GatewayReady")]
-pub(crate) struct Ready {
-    pub(crate) protocol_version: ProtocolVersion,
-    pub(crate) health: Health,
-    pub(crate) confirmations: Vec<PendingConfirmation>,
-    pub(crate) pairings: Vec<PairingRequest>,
-    pub(crate) turns: Vec<RunningTurn>,
+pub struct Ready {
+    pub protocol_version: ProtocolVersion,
+    pub health: Health,
+    pub confirmations: Vec<PendingConfirmation>,
+    pub pairings: Vec<PairingRequest>,
+    pub turns: Vec<RunningTurn>,
 }
 
 impl Streams {

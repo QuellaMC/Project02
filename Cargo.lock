@@ -1364,6 +1364,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "p02-telegram"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "p02-app",
+ "p02-config",
+ "p02-core",
+ "p02-gateway",
+ "p02-shared",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1451,6 +1469,7 @@ dependencies = [
  "p02-role-model",
  "p02-shared",
  "p02-store",
+ "p02-telegram",
  "reqwest",
  "serde",
  "serde_json",

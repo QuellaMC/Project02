@@ -17,7 +17,8 @@ use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::StorageError;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
-use serde::{Serialize, Serializer};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
@@ -37,6 +38,21 @@ pub struct ProtocolVersion;
 impl Serialize for ProtocolVersion {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_u32(PROTOCOL_VERSION)
+    }
+}
+
+/// Reads the one number it is: another version is another wire.
+impl<'de> Deserialize<'de> for ProtocolVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let version = u32::deserialize(deserializer)?;
+
+        if version == PROTOCOL_VERSION {
+            Ok(Self)
+        } else {
+            Err(D::Error::custom(format!(
+                "protocol {version} is not protocol {PROTOCOL_VERSION}"
+            )))
+        }
     }
 }
 
@@ -68,7 +84,7 @@ impl TS for ProtocolVersion {
 }
 
 /// What became of a delivered line.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
@@ -86,7 +102,7 @@ pub enum TurnOutcome {
     Rejected {
         character_id: Identifier,
         conversation_id: ConversationId,
-        reason: &'static str,
+        reason: String,
         message: String,
         committed: bool,
     },
@@ -139,7 +155,7 @@ vocabulary! {
 }
 
 /// A committed message as a client renders it.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "GatewayVisibleMessage")]
 #[schemars(rename = "GatewayVisibleMessage")]
@@ -162,7 +178,7 @@ impl From<VisibleMessage> for TurnMessage {
 }
 
 /// What came of opening a character's thread with the person.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
@@ -182,7 +198,7 @@ pub enum OpenOutcome {
     Failed(StorageFailure),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenRefusal {
     UnknownCharacter,
@@ -191,16 +207,16 @@ pub enum OpenRefusal {
 
 /// An ordinary failure of the home's storage, a full disk, a permission or
 /// a damaged record, which the person is told and which is no bug.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct StorageFailure {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }
 
 impl StorageFailure {
     pub(crate) fn of(error: &StorageError) -> Self {
         Self {
-            code: error.code(),
+            code: error.code().to_owned(),
             message: error_sentence(error),
         }
     }
@@ -284,7 +300,7 @@ pub struct HistoryMessage {
 /// What an answer to a parked confirmation came to. `expired`: the deadline
 /// had passed, so the confirmation was settled cancelled instead; the
 /// client is never the judge of the deadline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(rename = "AnswerOutcome")]
 #[schemars(rename = "AnswerOutcome")]
@@ -295,7 +311,7 @@ pub enum ConfirmationAnswer {
 }
 
 /// The submission a turn runs for, which any surface can tell as its own.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "TurnIdentity")]
 #[schemars(rename = "TurnIdentity")]
@@ -306,7 +322,7 @@ pub struct TurnStamp {
 }
 
 /// A parked confirmation, as the stream announced it and the list shows it.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct PendingConfirmation {
@@ -322,7 +338,7 @@ pub struct PendingConfirmation {
 
 /// What the person is asked about: the plugin and tool whose call it is,
 /// what the tool says it does, and what the call would do.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmationQuestion {
     pub plugin_id: Identifier,
@@ -333,7 +349,7 @@ pub struct ConfirmationQuestion {
 
 /// How a confirmation ended: with the person's answer, or cancelled and
 /// why.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 #[ts(rename = "ConfirmationSettlement")]
 #[schemars(rename = "ConfirmationSettlement")]
@@ -343,7 +359,7 @@ pub enum Settlement {
     Cancelled { reason: CancelReason },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename = "ConfirmationCancelReason")]
 #[schemars(rename = "ConfirmationCancelReason")]
@@ -381,7 +397,7 @@ impl ReconcilePlan {
 }
 
 /// One installed character, as health reports her.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct CharacterSummary {
@@ -399,7 +415,7 @@ pub struct CharacterSummary {
 
 /// Where an installed character stands as health reports her: her
 /// runtime's state, or `not_started` until the daemon built it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum RosterState {
     NotStarted,
@@ -428,14 +444,14 @@ impl From<Option<CharacterState>> for RosterState {
 /// A background failure the conversation never sees: the plugins' work
 /// after a turn's commit, a segment rotation that failed, which the next
 /// turn plans again, or a closed segment's end hooks that did not finish.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct MaintenanceFailure {
     pub at: Timestamp,
     pub message: String,
 }
 
 /// The daemon's whole state in one read.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "GatewayHealth")]
 #[schemars(rename = "GatewayHealth")]
@@ -450,24 +466,24 @@ pub struct Health {
     pub connectors: Vec<ConnectorPresence>,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ConfigHealth {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PackagesHealth {
     pub diagnostics: Vec<PackageReport>,
 }
 
 /// A package discovery could not publish, and why, where.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
 pub struct PackageReport {
     /// Always an error: the package is not in the roster.
     pub severity: Severity,
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
     pub path: String,
     pub provenance: PackageProvenance,
@@ -490,7 +506,7 @@ impl From<&PackageDiagnostic> for PackageReport {
 
         Self {
             severity: Severity::Error,
-            code: diagnostic.problem.code(),
+            code: diagnostic.problem.code().to_owned(),
             // As a refused start embeds it, so the one reads in the other.
             message: diagnostic.problem.to_string(),
             path,
@@ -505,7 +521,7 @@ impl From<&PackageDiagnostic> for PackageReport {
 }
 
 /// Where a package comes from: compiled in, or added by the person.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PackageProvenance {
     Bundled,
@@ -513,7 +529,7 @@ pub enum PackageProvenance {
 }
 
 /// Whether a process of a built-in connector is on the event stream now.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ConnectorPresence {
     pub id: Identifier,
     pub connected: bool,
@@ -521,7 +537,7 @@ pub struct ConnectorPresence {
 
 /// A turn in progress, as the stream has told it so far: the submission it
 /// runs for, its character, and each open draft's text.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningTurn {
     pub character_id: Identifier,
@@ -532,7 +548,7 @@ pub struct RunningTurn {
 }
 
 /// One open draft: the reply's text so far under its id.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningDraft {
     pub draft_id: String,
@@ -541,7 +557,7 @@ pub struct RunningDraft {
 
 /// An account a connector asks to let in, waiting for the person's answer
 /// under a code any surface shows and answers by, until it expires.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingRequest {
     pub connector_id: Identifier,
@@ -555,7 +571,7 @@ pub struct PairingRequest {
 
 /// The account a pairing is for: the connector's own id for it, and the
 /// name the person sees.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PairingSubject {
     pub id: ClientStamp,
     pub label: SpeakerName,
@@ -563,7 +579,7 @@ pub struct PairingSubject {
 
 /// What came of a connector's request to let an account in. `paired`: the
 /// home lets it in already, so nothing is asked.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
@@ -582,7 +598,7 @@ pub enum PairingOutcome {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingRefusal {
     UnknownConnector,
@@ -594,7 +610,7 @@ pub enum PairingRefusal {
 /// passed, so the request was settled expired instead, as a confirmation
 /// is; `failed`: the approval could not be written, and the request waits
 /// on.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 #[ts(rename = "PairingSettleOutcome")]
 #[schemars(rename = "PairingSettleOutcome")]
@@ -607,7 +623,7 @@ pub enum PairingAnswer {
 
 /// How a pairing request ended: with the person's answer, or at its
 /// deadline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PairingDecision {
     Approved,
@@ -616,7 +632,7 @@ pub enum PairingDecision {
 }
 
 /// What every surface hears.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -642,7 +658,7 @@ pub enum Event {
         status: TurnStatus,
         committed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<&'static str>,
+        reason: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
@@ -692,10 +708,14 @@ impl Event {
             TurnOutcome::Completed { .. } => (TurnStatus::Completed, None, None),
             TurnOutcome::Rejected {
                 reason, message, ..
-            } => (TurnStatus::Rejected, Some(*reason), Some(message.clone())),
+            } => (
+                TurnStatus::Rejected,
+                Some(reason.clone()),
+                Some(message.clone()),
+            ),
             TurnOutcome::Refused { reason, message } => (
                 TurnStatus::Refused,
-                Some(reason.as_str()),
+                Some(reason.as_str().to_owned()),
                 Some(message.clone()),
             ),
             TurnOutcome::Failed { message, .. } => {
@@ -718,7 +738,7 @@ impl Event {
 
 /// How a delivery ended, as the frame announcing it says: the status of
 /// its outcome.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Completed,
@@ -728,7 +748,7 @@ pub enum TurnStatus {
 }
 
 /// What a turn says as it goes, in order.
-#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -773,7 +793,7 @@ pub enum TurnProgress {
 }
 
 /// How a call of a round came back: as its plugin answered, or refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallStatus {
     Accepted,
@@ -837,8 +857,20 @@ impl From<Progress> for TurnProgress {
 /// completes while the turn ahead of it still runs. A conversation runs one
 /// turn at a time. The one definition of a running turn: what a surface
 /// that had heard every event would hold.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RunningTurns(BTreeMap<ConversationId, RunningTurn>);
+
+/// The turns a snapshot carries, from which a surface folds on.
+impl FromIterator<RunningTurn> for RunningTurns {
+    fn from_iter<I: IntoIterator<Item = RunningTurn>>(turns: I) -> Self {
+        Self(
+            turns
+                .into_iter()
+                .map(|turn| (turn.conversation_id.clone(), turn))
+                .collect(),
+        )
+    }
+}
 
 impl RunningTurns {
     pub fn fold(&mut self, event: &Event) {
@@ -921,5 +953,11 @@ impl RunningTurns {
     #[must_use]
     pub fn turns(&self) -> Vec<RunningTurn> {
         self.0.values().cloned().collect()
+    }
+
+    /// The turn running in `conversation`, if one is.
+    #[must_use]
+    pub fn get(&self, conversation: &ConversationId) -> Option<&RunningTurn> {
+        self.0.get(conversation)
     }
 }

@@ -6,7 +6,9 @@ mod flags;
 mod handover;
 mod inspect;
 mod serve;
+mod stop;
 mod switches;
+mod telegram;
 
 use std::env;
 use std::ffi::OsString;
@@ -31,6 +33,7 @@ fn main() -> ExitCode {
     match flags::read(&args) {
         Ok(Command::Serve(flags)) => serve(flags, &mut console),
         Ok(Command::Inspect(flags)) => inspect::run(flags, &mut console),
+        Ok(Command::Telegram(flags)) => telegram::run(flags, &mut console),
         Err(usage) => console.failed(&usage),
     }
 }

@@ -63,13 +63,12 @@ whitespace and run from the repository root: `target/debug/project02 serve`
 when unset. `PROJECT02_INSPECT_CMD` is the one that runs `inspect`, read
 the same way: `target/debug/project02 inspect` when unset, and
 `PROJECT02_CONNECTOR_CMD` the one that starts the Telegram connector:
-`node src/frontends/telegram/main.ts` when unset. A test adds its own
+`target/debug/project02 telegram` when unset. A test adds its own
 arguments, and the switches of `crates/project02/README.md` it needs:
 `PROJECT02_TEST_PROVIDER=deterministic` for the fixed-reply voice,
-`PROJECT02_TEST_DURATIONS` for shortened waits. The connector takes the
-two of `src/frontends/README.md`: `PROJECT02_TEST_TELEGRAM_API`, naming
-the test's Bot API, and `edit` in `PROJECT02_TEST_DURATIONS` for its
-draft edits. A test that needs the model server or the mem0 server
+`PROJECT02_TEST_DURATIONS` for shortened waits. The connector takes two:
+`PROJECT02_TEST_TELEGRAM_API`, naming the test's Bot API, and `edit` in
+`PROJECT02_TEST_DURATIONS` for its draft edits. A test that needs the model server or the mem0 server
 writes its settings into the home's `config.json` before the start.
 
 `python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal
@@ -77,8 +76,7 @@ through its `pty` module (`harness/terminal.py`).
 
 `pnpm test:conformance` builds the page, then the binary, which embeds
 the page as it finds it, and runs the suite; the browser suite starts
-`serve` through the same harness. The connector stays a program of its
-own until it joins the binary.
+`serve` through the same harness.
 
 Every answer the wire client reads and every frame the stream reader reads
 is held to the contract's schema, `src/gateway/api/generated/schema.json`,

@@ -338,13 +338,9 @@
             <td>
               <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
               until the turn ends — a turn waiting on a confirmation can take
-              minutes. A browser's fetch waits without limit; Node's gives a
-              response five minutes. The reference client uses the platform's
-              fetch unless its <code>fetch</code> option hands it another; a
-              Node client that parks turns on confirmations needs one without
-              that bound, and the Telegram connector brings it:
-              <code>src/frontends/telegram/node-fetch.ts</code>, a fetch over
-              <code>node:http</code> with no timeout.
+              minutes. A browser's fetch waits without limit, and so does the
+              Telegram connector, whose HTTP client gives the call no
+              timeout.
             </td>
           </tr>
           <tr>
@@ -809,14 +805,16 @@ data: {…}</code></pre>
       </p>
 
       <p>
-        Telegram is the first connector, run as <code>pnpm telegram</code>. A
-        line it carries is stamped <code>telegram:&lt;bot username&gt;</code>,
-        with <code>&lt;bot id&gt;.&lt;chat id&gt;.&lt;message id&gt;</code> as its
+        Telegram is the first connector, run as
+        <code>project02 telegram</code>. A line it carries is stamped
+        <code>telegram:&lt;bot username&gt;</code>, with
+        <code>&lt;bot id&gt;.&lt;chat id&gt;.&lt;message id&gt;</code> as its
         <code>clientMessageId</code>, so the same message carried again joins
         its turn. It answers private chats only, keeps nothing between runs —
         each starts from the record, its <code>ready</code> and its config
         read — and paces a draft by editing its message in each chat at most
-        every 1.5 seconds. <code>src/frontends/README.md</code> has the rest.
+        every 1.5 seconds. <code>crates/p02-telegram/README.md</code> has the
+        rest.
       </p>
 
       <h2>The sync rule</h2>
