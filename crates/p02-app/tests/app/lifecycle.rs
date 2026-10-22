@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
 use p02_app::{
-    Answer, ConfirmationAnswer, Event, OpenOutcome, ReconcilePlan, StartOutcome, TurnOutcome,
+    Answer, ConfirmationAnswer, Event, OpenOutcome, ReconcilePlan, RosterState, StartOutcome,
+    TurnOutcome,
 };
 use p02_config::{ConfigTarget, connectors};
 use p02_shared::{PathEntry, describe_entry};
@@ -155,7 +156,7 @@ async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
     };
 
     assert_eq!(pass.await, ReconcilePlan::default());
-    assert_eq!(character.state, Some(Failed));
+    assert_eq!(character.state, RosterState::Failed);
     assert!(
         character
             .diagnostic
@@ -268,7 +269,7 @@ async fn a_start_during_her_start_joins_it_and_answers_once_she_is_ready() {
             panic!("{started:?}");
         };
 
-        assert_eq!(character.state, Some(Ready));
+        assert_eq!(character.state, RosterState::Ready);
     }
 
     ear.reached("mira", Ready).await;
@@ -289,7 +290,7 @@ async fn a_start_whose_boot_fails_starts_her_once() {
 
     settle().await;
     ear.drain();
-    assert_eq!(character.state, Some(Failed));
+    assert_eq!(character.state, RosterState::Failed);
     assert_eq!(ear.states("mira"), [Starting, Failed]);
 }
 

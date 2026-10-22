@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::output::{PluginContextItem, PluginCuratedSection};
 use crate::role_model::history::{HistoryWindow, ToolRound};
 use crate::role_model::tools::{ModelToolCall, ModelToolDefinition, PluginToolDefinitions};
-use crate::vocabulary::vocabulary;
+use crate::vocabulary;
 
 /// The version of the decision contract every accepted decision carries.
 pub const DECISION_CONTRACT_VERSION: &str = "mvp-006.tool_calls.v1";

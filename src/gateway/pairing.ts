@@ -6,6 +6,7 @@ import {
   type RuntimeConfigValue,
 } from '../runtime/config/index.ts';
 import type {
+  Answer,
   ConfigChange,
   ConfigChangeOutcome,
   GatewayEvent,
@@ -14,7 +15,7 @@ import type {
   PairingRequestOutcome,
   PairingSettleOutcome,
   PairingSubject,
-} from './api/contract.ts';
+} from './api/index.ts';
 
 /** The owner's choice: a request nobody answers within the hour expires. */
 const pairingTtlMs = 60 * 60 * 1000;
@@ -52,7 +53,7 @@ export type PairingSeam = {
   readonly pending: () => readonly PairingRequest[];
   readonly settle: (
     code: string,
-    decision: PairingDecision,
+    decision: Answer,
   ) => Promise<PairingSettleOutcome>;
   readonly stop: () => void;
 };
@@ -188,7 +189,7 @@ export function createPairingSeam(seams: {
 
   async function settle(
     code: string,
-    decision: PairingDecision,
+    decision: Answer,
   ): Promise<PairingSettleOutcome> {
     const entry = waiting.get(code);
 
@@ -266,10 +267,7 @@ export function createPairingSeam(seams: {
   }
 
   /** Off the list and the clock, and on the stream, so every surface hears how it ended. */
-  function settleAs(
-    entry: Waiting,
-    decision: PairingDecision | 'expired',
-  ): void {
+  function settleAs(entry: Waiting, decision: PairingDecision): void {
     waiting.delete(entry.request.code);
     clearTimeout(entry.timer);
     seams.emit(settlement(entry.request, decision));
@@ -296,7 +294,7 @@ function admission(
 
 function settlement(
   request: PairingRequest,
-  decision: PairingDecision | 'expired',
+  decision: PairingDecision,
 ): GatewayEvent {
   return Object.freeze({
     kind: 'pairing_settled' as const,

@@ -8,10 +8,7 @@ import {
   isJsonBoundaryObject,
   ownJsonRecordValue,
 } from '../shared/json-boundary.ts';
-import type {
-  ConnectorConfigEntry,
-  ConnectorConfigView,
-} from './api/contract.ts';
+import type {ConnectorConfigEntry, ConnectorConfigView} from './api/index.ts';
 import {resolveScope, sectionViewOf, type ScopeResolution} from './config.ts';
 import type {AllowlistReading} from './pairing.ts';
 

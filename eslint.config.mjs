@@ -2,6 +2,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
+  // Generated from the Rust wire types; neither written nor styled by hand.
+  {ignores: ['src/gateway/api/generated/']},
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {

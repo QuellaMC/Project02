@@ -5,7 +5,11 @@
  * reference client, without the daemon behind them.
  */
 export * from './api/index.ts';
-export {createGateway, type CreateGatewayOptions} from './gateway.ts';
+export {
+  createGateway,
+  type CreateGatewayOptions,
+  type Gateway,
+} from './gateway.ts';
 export {
   claimDaemonHome,
   type DaemonClaim,
@@ -16,8 +20,11 @@ export {
   type GatewayServer,
   type GatewayServerOptions,
 } from './http/server.ts';
+export type {ReconcilePlan} from './reconcile.ts';
 export {
   createLocalCharacterRuntime,
+  type GatewayEventListener,
   type LocalCharacterRuntime,
   type LocalCharacterRuntimeOptions,
+  type Unsubscribe,
 } from './runtime/character-runtime.ts';

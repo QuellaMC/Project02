@@ -1,8 +1,10 @@
 use std::fmt::{self, Write as _};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
+use ts_rs::TS;
 
 /// `value` as compact JSON with every object's keys in code-point order, so
 /// two values that differ only in key order have one text. Strings and
@@ -18,7 +20,7 @@ pub fn canonical_json(value: &Value) -> String {
 
 /// A value's identity, comparable without the value: `sha256:` and the
 /// lowercase hex SHA-256 of its [`canonical_json`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(try_from = "String")]
 pub struct Fingerprint(String);
 

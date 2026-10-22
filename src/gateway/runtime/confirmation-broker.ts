@@ -5,12 +5,12 @@ import type {
   RuntimePluginToolConfirmationRequest,
 } from '../../plugins/index.ts';
 import type {
-  ConfirmationAnswerStatus,
+  Answer,
+  AnswerOutcome,
   ConfirmationSettlement,
-  GatewayConfirmationDecision,
   GatewayEvent,
   TurnIdentity,
-} from '../api/contract.ts';
+} from '../api/index.ts';
 
 type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
 
@@ -39,10 +39,7 @@ export type ConfirmationBroker = {
    * reports `expired` — the deadline is enforced here, never trusted to the
    * client or to the host's timer having fired first.
    */
-  answer(
-    id: string,
-    decision: GatewayConfirmationDecision,
-  ): ConfirmationAnswerStatus;
+  answer(id: string, decision: Answer): AnswerOutcome['status'];
   /** Cancel every parked request, and settle later ones at once. */
   cancelAll(): void;
   /** Re-arm after a cancelAll, so a fresh boot parks confirmations again. */

@@ -16,26 +16,35 @@ import type {RoleModelAdapter} from '../role-model/index.ts';
 import {builtInConnectors} from '../runtime/config/index.ts';
 import {
   gatewayProtocolVersion,
+  type Answer,
   type AnswerOutcome,
-  type CharacterRuntimeHealth,
   type CharacterSummary,
-  type Gateway,
-  type GatewayConfirmationDecision,
+  type ConfigChange,
+  type ConfigChangeOutcome,
+  type ConfigTarget,
+  type ConfigView,
+  type ConnectorConfigView,
   type GatewayEvent,
-  type GatewayEventListener,
   type GatewayHealth,
   type GatewayMessage,
+  type HistoryOutcome,
   type OpenOutcome,
+  type PairingRequest,
+  type PairingRequestOutcome,
+  type PairingSettleOutcome,
+  type PairingSubject,
   type PendingConfirmation,
-  type ReconcilePlan,
   type StartOutcome,
   turnCommittedTheLine,
   type TurnOutcome,
-  type Unsubscribe,
-} from './api/contract.ts';
+} from './api/index.ts';
+import type {HistoryPage} from './client/index.ts';
 import {
   createLocalCharacterRuntime,
+  type CharacterRuntimeHealth,
+  type GatewayEventListener,
   type LocalCharacterRuntime,
+  type Unsubscribe,
 } from './runtime/character-runtime.ts';
 import {applyConfigChange, readConfigView} from './config.ts';
 import {
@@ -48,7 +57,11 @@ import {
 } from './conversations.ts';
 import {readConversationHistory} from './history.ts';
 import {createPairingSeam} from './pairing.ts';
-import {createReconciler, type Reconciler} from './reconcile.ts';
+import {
+  createReconciler,
+  type ReconcilePlan,
+  type Reconciler,
+} from './reconcile.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
@@ -65,6 +78,52 @@ export type CreateGatewayOptions = Project02HomeOptions & {
   readonly pairingTtlMs?: number | undefined;
   /** How long every character's configured provider may stay silent; tests shorten it. */
   readonly roleModelRequestTimeoutMs?: number | undefined;
+};
+
+/**
+ * The façade the daemon holds, and the whole of what its socket exposes.
+ * Every verb answers a client-reachable condition with an outcome; a throw
+ * is a bug. Every verb but reconcile, stop and connectorPresent serializes
+ * over HTTP unchanged; those three are the daemon's own: its lifecycle, and
+ * the presence a connector's event stream holds while it is open.
+ */
+export type Gateway = {
+  health(): GatewayHealth;
+  /** Reads the committed log, so an offline character's thread is readable too. */
+  history(conversationId: string, page?: HistoryPage): Promise<HistoryOutcome>;
+  openDirectConversation(characterId: string): Promise<OpenOutcome>;
+  deliver(message: GatewayMessage): Promise<TurnOutcome>;
+  /** What is parked right now; a client that missed the event reads this. */
+  pendingConfirmations(): readonly PendingConfirmation[];
+  answerConfirmation(id: string, decision: Answer): AnswerOutcome;
+  events(listener: GatewayEventListener): Unsubscribe;
+  startCharacter(characterId: string): Promise<StartOutcome>;
+  configView(target: ConfigTarget): ConfigView;
+  /** Writes through the one control transaction; reconcile applies it behind the answer. */
+  applyConfigChange(change: ConfigChange): Promise<ConfigChangeOutcome>;
+  /** A connector reads it again on every `ready` and every `health_changed`. */
+  connectorConfig(connectorId: string): ConnectorConfigView;
+  /**
+   * Asks the owner to let in an account a connector does not know: the
+   * request already waiting for it, or a new one under a fresh code.
+   */
+  requestPairing(
+    connectorId: string,
+    subject: PairingSubject,
+  ): PairingRequestOutcome;
+  /** What waits for the owner's answer right now. */
+  pendingPairings(): readonly PairingRequest[];
+  /** An approval writes the account into the connector's allowlist in the home's document. */
+  settlePairing(code: string, decision: Answer): Promise<PairingSettleOutcome>;
+  /**
+   * Counts a connector's process as on the stream: its event stream
+   * registers here while it is open, and the release is what the stream's
+   * end calls.
+   */
+  connectorPresent(connectorId: string): Unsubscribe;
+  /** Makes the running set match the config: at boot, and after any change. */
+  reconcile(): Promise<ReconcilePlan>;
+  stop(): Promise<void>;
 };
 
 type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
@@ -381,7 +440,7 @@ function pendingConfirmationsAcross(
 function answerConfirmationAcross(
   runtimes: Runtimes,
   id: string,
-  decision: GatewayConfirmationDecision,
+  decision: Answer,
 ): AnswerOutcome {
   for (const runtime of runtimes.values()) {
     const status = runtime.answerConfirmation(id, decision);
@@ -637,7 +696,13 @@ function readHealth(
   return Object.freeze({
     protocolVersion: gatewayProtocolVersion,
     homeRoot: home.runtimeLocation.homeRoot,
-    config: Object.freeze({diagnostics: home.loadedConfig.diagnostics}),
+    // This daemon types a diagnostic's code as its own spelling, wider
+    // than the contract's; the conformance suite's schema holds every
+    // health it answers to the contract's.
+    config: Object.freeze({
+      diagnostics: home.loadedConfig
+        .diagnostics as GatewayHealth['config']['diagnostics'],
+    }),
     packages: Object.freeze({diagnostics: roster.diagnostics}),
     characters: Object.freeze(
       roster.characters.map(character =>

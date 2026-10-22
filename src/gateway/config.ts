@@ -53,7 +53,7 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
-} from './api/contract.ts';
+} from './api/index.ts';
 
 /**
  * How long a write waits for a file another writer holds. The lock's own
@@ -324,6 +324,9 @@ function resolveCharacterScope(
 function viewOf(resolution: ScopeResolution): ConfigView {
   const {layeredConfig, targetScope, fingerprint} = resolution;
 
+  // This daemon types a diagnostic's code and a field's value type as its
+  // own spellings, wider than the contract's; the conformance suite's
+  // schema holds every view it answers to the contract's.
   return Object.freeze({
     status: 'ok' as const,
     fingerprint,
@@ -350,7 +353,7 @@ function viewOf(resolution: ScopeResolution): ConfigView {
           ),
       ),
     ),
-  });
+  }) as ConfigView;
 }
 
 /** A section as the target's screen shows it, and as a connector's read judges it. */

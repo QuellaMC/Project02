@@ -10,8 +10,10 @@ use p02_characters::{CharacterDefinition, Discovery};
 use p02_contracts::ConfigField;
 use p02_shared::{Fingerprint, error_sentence, sentence};
 use p02_store::{Home, StorageError};
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
+use ts_rs::TS;
 
 use crate::declaration::{
     Declared, HostField, Namespace, Sections, Target, expectation, host_field, host_fields,
@@ -25,7 +27,7 @@ use crate::transaction::{settle, with_character, with_home, write};
 
 /// Whose settings a view reads or a change writes: the home's, or one
 /// character's.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigTarget {
     Global,
@@ -36,7 +38,7 @@ pub enum ConfigTarget {
 }
 
 /// One change to one document, bound to the fingerprint its author read.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigChange {
     pub target: ConfigTarget,
@@ -48,7 +50,7 @@ pub struct ConfigChange {
 /// `project02.<name>`; switches a section on or off, or leaves it to the
 /// document beneath when `enabled` is absent; or sets or unsets one field
 /// of a section.
-#[derive(Clone, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Set {
@@ -62,6 +64,8 @@ pub enum Operation {
         namespace: Namespace,
         id: String,
         #[serde(default, deserialize_with = "given_switch")]
+        #[schemars(with = "bool")]
+        #[ts(optional)]
         enabled: Option<bool>,
     },
     SectionFieldSet {
@@ -132,8 +136,10 @@ impl fmt::Debug for Operation {
 /// the fingerprint it now has; `Refused` is the change itself, and
 /// `Failed` a write that could not be made, either leaving every document
 /// as it was.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(rename = "ConfigChangeOutcome")]
+#[schemars(rename = "ConfigChangeOutcome")]
 pub enum ChangeOutcome {
     Applied {
         fingerprint: Fingerprint,
@@ -148,7 +154,7 @@ pub enum ChangeOutcome {
 }
 
 /// Why a change was refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeRefusal {
     /// The documents changed after its author read them.

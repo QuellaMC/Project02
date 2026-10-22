@@ -67,6 +67,16 @@ Nothing here prints, reads an environment variable or parses a flag.
   not, as Windows and Linux would otherwise have it, after megabytes. A
   connector's stream counts it present from before its first frame until
   its end.
+- **The contract.** Every type a route answers, a route reads or a frame
+  carries derives ts-rs's `TS` and schemars' `JsonSchema` beside serde, in
+  the crate that owns it, its TypeScript name the one the clients know.
+  A test of this crate, `cargo test -p p02-gateway contract`, walks them
+  from the wire's roots and writes `src/gateway/api/generated/contract.ts`,
+  the declarations the page, the client and the connector compile against,
+  and `schema.json`, the schema the conformance suite holds every answer
+  and frame to, both generated files the repository's formatter and
+  linter leave alone; another test holds one value of each type, as
+  serde writes it or a route reads it, to its schema.
 - **The stop.** New API requests answer 503 at once; the daemon stops,
   its turns draining with the socket and the streams open, so an accepted
   turn still receives its answer and the stream its reply; then each

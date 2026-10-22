@@ -10,9 +10,11 @@ p02-contracts.workspace = true
 p02-core.workspace = true
 p02-shared = { workspace = true, features = ["http"] }
 p02-store.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+ts-rs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

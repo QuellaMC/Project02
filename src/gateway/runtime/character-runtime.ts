@@ -32,11 +32,10 @@ import {
 import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 import type {
-  CharacterRuntime,
-  CharacterRuntimeHealth,
+  Answer,
+  AnswerOutcome,
   CharacterRuntimeState,
   GatewayEvent,
-  GatewayEventListener,
   GatewayMessage,
   GatewayRefusalReason,
   MaintenanceFailure,
@@ -44,12 +43,47 @@ import type {
   PendingConfirmation,
   TurnIdentity,
   TurnOutcome,
-  Unsubscribe,
-} from '../api/contract.ts';
+} from '../api/index.ts';
 import {
   createConfirmationBroker,
   type ConfirmationBroker,
 } from './confirmation-broker.ts';
+
+export type GatewayEventListener = (event: GatewayEvent) => void;
+
+export type Unsubscribe = () => void;
+
+export type CharacterRuntimeHealth = {
+  readonly characterId: string;
+  readonly state: CharacterRuntimeState;
+  readonly openConversationIds: readonly string[];
+  /** Why the runtime is failed, when it is. */
+  readonly failure?: string;
+  readonly maintenance?: MaintenanceFailure;
+};
+
+/**
+ * One enabled character behind the gateway: its plugin host, model adapter,
+ * open conversations, and FIFO turn queue. Constructed and held by the
+ * registry behind the Gateway façade; nothing of it crosses the socket.
+ */
+export type CharacterRuntime = {
+  readonly characterId: string;
+  start(): Promise<void>;
+  /** Waits for the in-flight turn, runs session end, releases everything. */
+  stop(): Promise<void>;
+  /** Fresh start after a fatal turn; the registry calls it once per failure. */
+  reactivate(): Promise<void>;
+  /** Assembles afresh from the config on disk, once accepted turns have run. */
+  reload(): Promise<void>;
+  /** Whether the character would assemble differently now than it did. */
+  assemblyDrifted(): boolean;
+  deliver(message: GatewayMessage): Promise<TurnOutcome>;
+  pendingConfirmations(): readonly PendingConfirmation[];
+  answerConfirmation(id: string, decision: Answer): AnswerOutcome['status'];
+  health(): CharacterRuntimeHealth;
+  events(listener: GatewayEventListener): Unsubscribe;
+};
 
 export type LocalCharacterRuntimeOptions = {
   /** Loaded fresh per assembly, so config fixes reach retries. */

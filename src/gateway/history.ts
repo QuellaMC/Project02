@@ -4,11 +4,8 @@ import {
   LocalRuntimeStorageContractError,
   readCommittedConversationMessages,
 } from '../runtime/storage/index.ts';
-import type {
-  HistoryMessage,
-  HistoryOutcome,
-  HistoryPage,
-} from './api/contract.ts';
+import type {HistoryMessage, HistoryOutcome} from './api/index.ts';
+import type {HistoryPage} from './client/index.ts';
 import {characterOfConversation} from './conversations.ts';
 
 type CommittedMessage = ReturnType<

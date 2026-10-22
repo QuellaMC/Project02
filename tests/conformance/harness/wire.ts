@@ -1,3 +1,4 @@
+import {checkAnswer, type Answer} from './schema.ts';
 import type {Address} from './daemon.ts';
 import {failure, within} from './wait.ts';
 
@@ -16,11 +17,17 @@ export type Wire = ReturnType<typeof wireOf>;
 
 /**
  * The verbs of docs/wiki/gateway-api.html, one method each, answering the
- * outcome as the daemon sent it. A status other than 200 is a failure that
- * names it: a domain outcome always comes with a 200.
+ * outcome as the daemon sent it, held to the contract's definition of it.
+ * A status other than 200 is a failure that names it: a domain outcome
+ * always comes with a 200.
  */
 export function wireOf(daemon: Address) {
-  const call = (method: 'GET' | 'POST', path: string, body?: unknown) =>
+  const call = (
+    method: 'GET' | 'POST',
+    path: string,
+    answer: Answer,
+    body?: unknown,
+  ) =>
     within(
       `${method} ${path}`,
       (async (): Promise<unknown> => {
@@ -34,6 +41,8 @@ export function wireOf(daemon: Address) {
         });
         const text = await response.text();
 
+        checkAnswer(`${method} ${path}`, answer, response.status, text);
+
         if (response.status !== 200) {
           throw failure(
             `${method} ${path} answered ${String(response.status)}: ${text}`,
@@ -46,11 +55,15 @@ export function wireOf(daemon: Address) {
   const segment = encodeURIComponent;
 
   return {
-    health: () => call('GET', '/api/health'),
+    health: () => call('GET', '/api/health', 'GatewayHealth'),
     start: (characterId: string) =>
-      call('POST', `/api/characters/${segment(characterId)}/start`),
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/start`,
+        'StartOutcome',
+      ),
     open: async (characterId: string) =>
-      (await call('POST', '/api/conversations/open', {
+      (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,
       })) as OpenOutcome,
     turn: (message: {
@@ -59,7 +72,7 @@ export function wireOf(daemon: Address) {
       readonly text: string;
       readonly source: string;
       readonly clientMessageId: string;
-    }) => call('POST', '/api/turns', message),
+    }) => call('POST', '/api/turns', 'TurnOutcome', message),
     history: (
       conversationId: string,
       page: {readonly before?: string; readonly limit?: number} = {},
@@ -67,28 +80,46 @@ export function wireOf(daemon: Address) {
       call(
         'GET',
         `/api/conversations/${segment(conversationId)}/messages${query(page)}`,
+        'HistoryOutcome',
       ),
-    pending: () => call('GET', '/api/confirmations'),
+    pending: () =>
+      call('GET', '/api/confirmations', {listOf: 'PendingConfirmation'}),
     answer: (confirmationId: string, decision: Decision) =>
-      call('POST', `/api/confirmations/${segment(confirmationId)}`, {decision}),
+      call(
+        'POST',
+        `/api/confirmations/${segment(confirmationId)}`,
+        'AnswerOutcome',
+        {decision},
+      ),
     configView: (
       target:
         | {readonly scope: 'global'}
         | {readonly scope: 'character'; readonly characterId: string},
-    ) => call('GET', `/api/config${query(target)}`),
-    configChange: (change: object) => call('POST', '/api/config', change),
+    ) => call('GET', `/api/config${query(target)}`, 'ConfigView'),
+    configChange: (change: object) =>
+      call('POST', '/api/config', 'ConfigChangeOutcome', change),
     connectorConfig: (connectorId: string) =>
-      call('GET', `/api/connectors/${segment(connectorId)}/config`),
+      call(
+        'GET',
+        `/api/connectors/${segment(connectorId)}/config`,
+        'ConnectorConfigView',
+      ),
     pairingRequest: (
       connectorId: string,
       subject: {readonly id: string; readonly label: string},
     ) =>
-      call('POST', `/api/connectors/${segment(connectorId)}/pairing`, {
-        subject,
-      }),
-    pendingPairings: () => call('GET', '/api/pairing'),
+      call(
+        'POST',
+        `/api/connectors/${segment(connectorId)}/pairing`,
+        'PairingRequestOutcome',
+        {subject},
+      ),
+    pendingPairings: () =>
+      call('GET', '/api/pairing', {listOf: 'PairingRequest'}),
     pairingAnswer: (code: string, decision: Decision) =>
-      call('POST', `/api/pairing/${segment(code)}`, {decision}),
+      call('POST', `/api/pairing/${segment(code)}`, 'PairingSettleOutcome', {
+        decision,
+      }),
   };
 }
 

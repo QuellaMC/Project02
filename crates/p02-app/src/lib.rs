@@ -20,7 +20,7 @@ pub use outcome::{
     ConnectorPresence, Event, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
     MaintenanceFailure, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
     PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingSubject,
-    PendingConfirmation, ReconcilePlan, RunningDraft, RunningTurn, RunningTurns, Settlement,
-    StartOutcome, StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress,
-    TurnRefusal, TurnStamp,
+    PendingConfirmation, ReconcilePlan, RosterState, RunningDraft, RunningTurn, RunningTurns,
+    Settlement, StartOutcome, StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress,
+    TurnRefusal, TurnStamp, TurnStatus,
 };

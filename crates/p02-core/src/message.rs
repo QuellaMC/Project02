@@ -2,7 +2,9 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use p02_shared::Identifier;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::id::MessageId;
 
@@ -15,7 +17,7 @@ const LINE_BREAKS: [char; 4] = ['\r', '\n', '\u{2028}', '\u{2029}'];
 
 /// Text as a person sees it: line endings are `\n`, neither end is blank
 /// space, and something is left.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(try_from = "String")]
 pub struct VisibleText(String);
 
@@ -139,7 +141,7 @@ impl fmt::Display for UserLine {
 /// The name a speaker goes by on a message: one line of at most 128
 /// characters, without blank space at either end. It is set before a
 /// colon in chat, which is why a line break is refused.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(try_from = "String")]
 pub struct SpeakerName(String);
 
@@ -192,7 +194,9 @@ impl fmt::Display for SpeakerName {
 /// the id it submitted the line under, which a repeat of the line reuses. An
 /// ASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`
 /// or `-`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(try_from = "String")]
 pub struct ClientStamp(String);
 
@@ -248,7 +252,9 @@ impl fmt::Display for ClientStamp {
 /// Which side of a conversation someone speaks for: a character, or the
 /// person. A visible message carries its speaker's, and the two order as
 /// they are spelled, characters first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum VisibleMessageRole {
     Character,

@@ -1,3 +1,4 @@
+import {checkFrame} from './schema.ts';
 import type {Address} from './daemon.ts';
 import {onTestFinished} from './runner.ts';
 import {attachEvidence, failure, within} from './wait.ts';
@@ -55,6 +56,8 @@ export async function openEvents(
   const frames: Frame[] = [];
   let arrival = Promise.withResolvers<undefined>();
   let over = false;
+  /** A frame the contract does not describe, which fails the test whether or not it looks again. */
+  let mismatch: Error | undefined;
   const wake = (): void => {
     arrival.resolve(undefined);
     arrival = Promise.withResolvers();
@@ -74,9 +77,24 @@ export async function openEvents(
         return;
       }
 
-      parser.feed(value);
+      try {
+        parser.feed(value);
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          mismatch = error;
+        }
+
+        throw error;
+      }
     }
   })();
+
+  onTestFinished(() => {
+    if (mismatch !== undefined) {
+      throw mismatch;
+    }
+  });
+
   let taken = 0;
   const end = (): void => {
     over = true;
@@ -107,6 +125,10 @@ export async function openEvents(
               taken = index + 1;
 
               return frame;
+            }
+
+            if (mismatch !== undefined) {
+              throw mismatch;
             }
 
             if (over) {
@@ -153,11 +175,6 @@ function holds(value: unknown, pattern: unknown): boolean {
   );
 }
 
-/**
- * Lines end in LF, CRLF or CR, and a blank one ends a frame. A CR held back
- * as the possible first half of a CRLF is a line's end once the stream
- * ends; a line the stream ends in the middle of is not a line.
- */
 /** The frames of a stream's whole text, as the live stream would have parsed them. */
 export function framesOf(text: string): Frame[] {
   const frames: Frame[] = [];
@@ -169,6 +186,12 @@ export function framesOf(text: string): Frame[] {
   return frames;
 }
 
+/**
+ * Lines end in LF, CRLF or CR, and a blank one ends a frame. A CR held back
+ * as the possible first half of a CRLF is a line's end once the stream
+ * ends; a line the stream ends in the middle of is not a line. A frame that
+ * carries data is held to the contract before it is handed on.
+ */
 function createFrameParser(emit: (frame: Frame) => void): {
   readonly feed: (text: string) => void;
   readonly end: () => void;
@@ -192,6 +215,10 @@ function createFrameParser(emit: (frame: Frame) => void): {
       rest = rest.slice(end.index + end[0].length);
 
       if (line === '') {
+        if (fields.data !== undefined) {
+          checkFrame(fields.event, fields.data);
+        }
+
         if (Object.keys(fields).length > 0) {
           emit(fields);
         }

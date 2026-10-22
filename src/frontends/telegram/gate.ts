@@ -30,7 +30,7 @@ const sentences = {
     (kind === 'management'
       ? 'Approve it on the web page.'
       : 'Approve it on the web page, or send it to the management bot.'),
-  settled: (decision: PairingDecision | 'expired', name: string): string =>
+  settled: (decision: PairingDecision, name: string): string =>
     ({
       approved: `Paired. ${name} is listening.`,
       denied: 'The owner declined.',

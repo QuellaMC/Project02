@@ -4,7 +4,8 @@ import {bearerAuth} from 'hono/bearer-auth';
 import {bodyLimit} from 'hono/body-limit';
 import {HTTPException} from 'hono/http-exception';
 
-import {gatewayLoopbackHostnames, type Gateway} from '../api/contract.ts';
+import {gatewayLoopbackHostnames} from '../api/index.ts';
+import type {Gateway} from '../gateway.ts';
 import {createApiRouter, errorBody} from './api.ts';
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
@@ -119,8 +120,6 @@ export function createGatewayApp(options: CreateGatewayAppOptions) {
 
   return routes;
 }
-
-export type GatewayApp = ReturnType<typeof createGatewayApp>;
 
 /**
  * The DNS-rebinding defence: a page on another origin cannot name this

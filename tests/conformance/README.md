@@ -11,9 +11,11 @@ any other build of them.
 
 ## Rules
 
-- Nothing is imported from `src/` or `tests/support/`. Reading them to
-  learn the wire is expected; the suite keeps its own small client so a
-  client bug and a daemon bug stay apart.
+- Nothing is imported from `src/` or `tests/support/` but the contract's
+  schema, `src/gateway/api/generated/schema.json`, which the Rust types
+  the socket carries generate. Reading them to learn the wire is
+  expected; the suite keeps its own small client so a client bug and a
+  daemon bug stay apart.
 - A test's title is its row id in `inventory.csv`, a colon, a space, then
   the behavior as a sentence:
   `lifecycle.address-line: serve prints its address as its first stdout line once it answers there`.
@@ -40,8 +42,9 @@ any other build of them.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `harness/home.ts`            | A canonical temp home, empty for `serve --init` or seeded with the files a test names; a session log's records, the records of one kind across a character's sessions, and every file under a directory.                                                                                               |
 | `harness/daemon.ts`          | Spawns `serve`, `inspect` or the Telegram connector in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code. A start of `serve` or `inspect` may name its command, so one process can start two builds.                                                 |
-| `harness/wire.ts`            | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON.                                                                                                                                                                                                                    |
-| `harness/events.ts`          | The event stream: frames as they came, awaited by predicate, resumed by `Last-Event-ID`.                                                                                                                                                                                                               |
+| `harness/wire.ts`            | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON, held to the contract.                                                                                                                                                                                              |
+| `harness/events.ts`          | The event stream: frames as they came, each held to the contract, awaited by predicate, resumed by `Last-Event-ID`.                                                                                                                                                                                    |
+| `harness/schema.ts`          | The contract: an answer by its status, its route's outcome under 200 and the error envelope otherwise, and a frame by its event, `ready`, `resumed` or the event of that kind, held to the schema; a mismatch fails its test.                                                                          |
 | `harness/http.ts`            | One request exactly as the test writes it, nothing added: the answer's status, headers and body as it comes, and a client that stops reading or hangs up.                                                                                                                                              |
 | `harness/socket.ts`          | A bare TCP connection, for a request stopped halfway or an answer left unread.                                                                                                                                                                                                                         |
 | `harness/model-server.ts`    | An OpenAI-compatible model on loopback that answers as the test scripts it, streams at the test's pace, holds a request open on demand and keeps every request, with what each showed the model.                                                                                                       |
@@ -87,6 +90,13 @@ PROJECT02_CONNECTOR_CMD='node src/frontends/telegram/main.ts' \
   pnpm exec vitest run --project conformance
 PROJECT02_SERVE_CMD='target/debug/project02 serve' pnpm test:browser
 ```
+
+Every answer the wire client reads and every frame the stream reader reads
+is held to the contract's schema, `src/gateway/api/generated/schema.json`,
+which the Rust types the socket carries generate, so every row proves the
+contract against whichever build it runs. After a change to those types,
+`cargo test -p p02-gateway contract` writes the schema again, and the
+TypeScript declarations beside it.
 
 To compare two builds rather than prove one, `tests/differential` drives
 one scenario through a reference and a candidate and compares what each

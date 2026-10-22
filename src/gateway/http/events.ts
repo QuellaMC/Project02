@@ -6,10 +6,10 @@ import {streamSSE, type SSEStreamingApi} from 'hono/streaming';
 
 import {
   gatewayProtocolVersion,
-  type Gateway,
   type GatewayReady,
   type RunningTurn,
-} from '../api/contract.ts';
+} from '../api/index.ts';
+import type {Gateway} from '../gateway.ts';
 import {foldRunningTurns, type RunningTurns} from '../api/running-turns.ts';
 import type {ApiEnv} from './env.ts';
 

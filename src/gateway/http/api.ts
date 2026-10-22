@@ -2,12 +2,9 @@ import {Hono, type Context, type MiddlewareHandler} from 'hono';
 import {validator} from 'hono/validator';
 
 import {builtInConnectors} from '../../runtime/config/index.ts';
-import type {
-  ConfigTarget,
-  Gateway,
-  GatewayErrorBody,
-  HistoryPage,
-} from '../api/contract.ts';
+import type {ConfigTarget, GatewayErrorBody} from '../api/index.ts';
+import type {HistoryPage} from '../client/index.ts';
+import type {Gateway} from '../gateway.ts';
 import type {ApiEnv} from './env.ts';
 import type {EventStreams} from './events.ts';
 import {

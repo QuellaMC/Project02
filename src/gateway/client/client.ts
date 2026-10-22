@@ -1,8 +1,8 @@
-import {hc} from 'hono/client';
-
 import {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
+  type Answer,
+  type AnswerBody,
   type AnswerOutcome,
   type ConfigChange,
   type ConfigChangeOutcome,
@@ -10,28 +10,36 @@ import {
   type ConfigView,
   type ConnectorConfigView,
   type GatewayReady,
-  type GatewayConfirmationDecision,
   type GatewayEvent,
   type GatewayHealth,
   type GatewayMessage,
   type HistoryOutcome,
-  type HistoryPage,
+  type OpenConversationBody,
   type OpenOutcome,
-  type PairingDecision,
   type PairingRequest,
+  type PairingRequestBody,
   type PairingRequestOutcome,
   type PairingSettleOutcome,
   type PairingSubject,
   type PendingConfirmation,
   type StartOutcome,
   type TurnOutcome,
-} from '../api/contract.ts';
-import type {GatewayApp} from '../http/app.ts';
+} from '../api/index.ts';
 import {describeFetchFailure} from '../../shared/fetch-failure.ts';
 import {createSseFrameSplitter} from '../../shared/sse.ts';
 
 /** Where a client finds the daemon: the line `serve` prints, exported. */
 export const gatewayUrlEnvVarName = 'PROJECT02_GATEWAY';
+
+/**
+ * Which page of a conversation's scrollback to read: the cursor a previous
+ * page returned, for the messages before it, and how many, 1 to 500, 100
+ * unless given. The query carries both as text, which the daemon judges.
+ */
+export type HistoryPage = {
+  readonly before?: string;
+  readonly limit?: string | number;
+};
 
 export type GatewayClientOptions = (
   | {
@@ -118,7 +126,7 @@ export type GatewayClient = {
   ): Promise<readonly PendingConfirmation[]>;
   answerConfirmation(
     id: string,
-    decision: GatewayConfirmationDecision,
+    decision: Answer,
     options?: GatewayCallOptions,
   ): Promise<AnswerOutcome>;
   configView(
@@ -143,7 +151,7 @@ export type GatewayClient = {
   ): Promise<readonly PairingRequest[]>;
   settlePairing(
     code: string,
-    decision: PairingDecision,
+    decision: Answer,
     options?: GatewayCallOptions,
   ): Promise<PairingSettleOutcome>;
   /**
@@ -192,125 +200,82 @@ export function createGatewayClient(
   const {baseUrl, token} = resolveOptions(options);
   const guardedFetch = createGuardedFetch(options.fetch ?? fetch);
   const headers = {authorization: `Bearer ${token}`};
-  const api = hc<GatewayApp>(baseUrl, {
-    headers,
-    fetch: guardedFetch,
-  }).api;
+  const route = createRoutes(baseUrl, headers, guardedFetch);
 
+  // The routes of protocol 7, one per verb: each its method and path, the
+  // body the daemon reads and the outcome it answers under 200.
   const client: GatewayClient = {
     baseUrl,
     async health(callOptions) {
-      const health = await readOutcome<GatewayHealth>(
-        await api.health.$get(undefined, requestInit(callOptions)),
-        callOptions,
-      );
+      const health = await route.get<GatewayHealth>('/api/health', callOptions);
 
       // Typed as this build's version; another daemon build answers here.
       assertProtocol(health);
 
       return health;
     },
-    startCharacter: async (characterId, callOptions) =>
-      readOutcome<StartOutcome>(
-        await api.characters[':id'].start.$post(
-          {param: {id: characterId}},
-          requestInit(callOptions),
-        ),
+    startCharacter: (characterId, callOptions) =>
+      route.post<StartOutcome>(
+        `/api/characters/${characterId}/start`,
+        undefined,
         callOptions,
       ),
-    openDirectConversation: async (characterId, callOptions) =>
-      readOutcome<OpenOutcome>(
-        await api.conversations.open.$post(
-          {json: {characterId}},
-          requestInit(callOptions),
-        ),
+    openDirectConversation: (characterId, callOptions) =>
+      route.post<OpenOutcome>(
+        '/api/conversations/open',
+        {characterId} satisfies OpenConversationBody,
         callOptions,
       ),
-    deliver: async (message, callOptions) =>
-      readOutcome<TurnOutcome>(
-        await api.turns.$post({json: message}, requestInit(callOptions)),
+    deliver: (message, callOptions) =>
+      route.post<TurnOutcome>('/api/turns', message, callOptions),
+    history: (conversationId, page = {}, callOptions) =>
+      route.get<HistoryOutcome>(
+        `/api/conversations/${conversationId}/messages${query({
+          before: page.before,
+          limit: page.limit === undefined ? undefined : String(page.limit),
+        })}`,
         callOptions,
       ),
-    history: async (conversationId, page = {}, callOptions) =>
-      readOutcome<HistoryOutcome>(
-        await api.conversations[':id'].messages.$get(
-          {
-            param: {id: conversationId},
-            query: {
-              ...(page.before === undefined ? {} : {before: page.before}),
-              ...(page.limit === undefined ? {} : {limit: String(page.limit)}),
-            },
-          },
-          requestInit(callOptions),
-        ),
+    pendingConfirmations: callOptions =>
+      route.get<PendingConfirmation[]>('/api/confirmations', callOptions),
+    answerConfirmation: (id, decision, callOptions) =>
+      route.post<AnswerOutcome>(
+        `/api/confirmations/${id}`,
+        {decision} satisfies AnswerBody,
         callOptions,
       ),
-    pendingConfirmations: async callOptions =>
-      readOutcome<readonly PendingConfirmation[]>(
-        await api.confirmations.$get(undefined, requestInit(callOptions)),
+    configView: (target, callOptions) =>
+      route.get<ConfigView>(
+        `/api/config${query(
+          target.scope === 'global'
+            ? {scope: 'global'}
+            : {scope: 'character', characterId: target.characterId},
+        )}`,
         callOptions,
       ),
-    answerConfirmation: async (id, decision, callOptions) =>
-      readOutcome<AnswerOutcome>(
-        await api.confirmations[':id'].$post(
-          {param: {id}, json: {decision}},
-          requestInit(callOptions),
-        ),
+    applyConfigChange: (change, callOptions) =>
+      route.post<ConfigChangeOutcome>('/api/config', change, callOptions),
+    connectorConfig: (connectorId, callOptions) =>
+      route.get<ConnectorConfigView>(
+        `/api/connectors/${connectorId}/config`,
         callOptions,
       ),
-    configView: async (target, callOptions) =>
-      readOutcome<ConfigView>(
-        await api.config.$get(
-          {
-            query:
-              target.scope === 'global'
-                ? {scope: 'global'}
-                : {scope: 'character', characterId: target.characterId},
-          },
-          requestInit(callOptions),
-        ),
+    requestPairing: (connectorId, subject, callOptions) =>
+      route.post<PairingRequestOutcome>(
+        `/api/connectors/${connectorId}/pairing`,
+        {subject} satisfies PairingRequestBody,
         callOptions,
       ),
-    applyConfigChange: async (change, callOptions) =>
-      readOutcome<ConfigChangeOutcome>(
-        await api.config.$post({json: change}, requestInit(callOptions)),
-        callOptions,
-      ),
-    connectorConfig: async (connectorId, callOptions) =>
-      readOutcome<ConnectorConfigView>(
-        await api.connectors[':id'].config.$get(
-          {param: {id: connectorId}},
-          requestInit(callOptions),
-        ),
-        callOptions,
-      ),
-    requestPairing: async (connectorId, subject, callOptions) =>
-      readOutcome<PairingRequestOutcome>(
-        await api.connectors[':id'].pairing.$post(
-          {param: {id: connectorId}, json: {subject}},
-          requestInit(callOptions),
-        ),
-        callOptions,
-      ),
-    pendingPairings: async callOptions =>
-      readOutcome<readonly PairingRequest[]>(
-        await api.pairing.$get(undefined, requestInit(callOptions)),
-        callOptions,
-      ),
-    settlePairing: async (code, decision, callOptions) =>
-      readOutcome<PairingSettleOutcome>(
-        await api.pairing[':code'].$post(
-          {param: {code}, json: {decision}},
-          requestInit(callOptions),
-        ),
+    pendingPairings: callOptions =>
+      route.get<PairingRequest[]>('/api/pairing', callOptions),
+    settlePairing: (code, decision, callOptions) =>
+      route.post<PairingSettleOutcome>(
+        `/api/pairing/${code}`,
+        {decision} satisfies AnswerBody,
         callOptions,
       ),
     async events(listener, eventsOptions) {
       const {signal, connector} = eventsOptions;
-      const query =
-        connector === undefined
-          ? ''
-          : `?connector=${encodeURIComponent(connector)}`;
       const aborted = (): boolean => signal.aborted;
       const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
       let reconnected = false;
@@ -321,13 +286,16 @@ export function createGatewayClient(
 
       while (!aborted()) {
         try {
-          const response = await guardedFetch(`${baseUrl}/api/events${query}`, {
-            headers:
-              cursor.lastEventId === undefined
-                ? headers
-                : {...headers, 'last-event-id': cursor.lastEventId},
-            signal,
-          });
+          const response = await guardedFetch(
+            `${baseUrl}/api/events${query({connector})}`,
+            {
+              headers:
+                cursor.lastEventId === undefined
+                  ? headers
+                  : {...headers, 'last-event-id': cursor.lastEventId},
+              signal,
+            },
+          );
 
           await rejectUnlessOk(response);
           await followStream(
@@ -379,26 +347,66 @@ export function createGatewayClient(
   return client;
 }
 
-function requestInit(
-  options: GatewayCallOptions | undefined,
-): {init: RequestInit} | undefined {
-  return options?.signal === undefined
-    ? undefined
-    : {init: {signal: options.signal}};
+/**
+ * A verb's request, and its answer read: a 200 is the route's outcome as
+ * the contract declares it, which the daemon's own types generate, and
+ * anything else the envelope of a transport refusal. That is the one trust
+ * this client places in the wire, and it lives here alone; the conformance
+ * suite holds every daemon's answers to the same declarations.
+ */
+function createRoutes(
+  baseUrl: string,
+  headers: Readonly<Record<string, string>>,
+  transport: typeof fetch,
+): {
+  get<Outcome>(path: string, options?: GatewayCallOptions): Promise<Outcome>;
+  post<Outcome>(
+    path: string,
+    body: object | undefined,
+    options?: GatewayCallOptions,
+  ): Promise<Outcome>;
+} {
+  const send = async (
+    method: 'GET' | 'POST',
+    path: string,
+    body: object | undefined,
+    options: GatewayCallOptions | undefined,
+  ): Promise<unknown> => {
+    const response = await transport(`${baseUrl}${path}`, {
+      method,
+      headers:
+        body === undefined
+          ? headers
+          : {...headers, 'content-type': 'application/json'},
+      ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+      ...(options?.signal === undefined ? {} : {signal: options.signal}),
+    });
+
+    await rejectUnlessOk(response);
+
+    return readJson(response, options?.signal);
+  };
+
+  return {
+    get: async <Outcome>(path: string, options?: GatewayCallOptions) =>
+      (await send('GET', path, undefined, options)) as Outcome,
+    post: async <Outcome>(
+      path: string,
+      body: object | undefined,
+      options?: GatewayCallOptions,
+    ) => (await send('POST', path, body, options)) as Outcome,
+  };
 }
 
-/**
- * The daemon is this codebase: each route answers with its verb's outcome,
- * typed on the server by the façade. That is the one trust this client
- * places in the wire, and it lives here alone.
- */
-async function readOutcome<T>(
-  response: Response,
-  options?: GatewayCallOptions,
-): Promise<T> {
-  await rejectUnlessOk(response);
+/** The query of the parameters given, none when none is. */
+function query(
+  parameters: Readonly<Record<string, string | undefined>>,
+): string {
+  const given = Object.entries(parameters).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
 
-  return (await readJson(response, options?.signal)) as T;
+  return given.length === 0 ? '' : `?${new URLSearchParams(given).toString()}`;
 }
 
 /**

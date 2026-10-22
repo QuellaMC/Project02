@@ -3,106 +3,60 @@
 
 use std::path::Path;
 
+use p02_contracts::vocabulary;
 use p02_shared::Identifier;
-use serde::{Serialize, Serializer};
+use schemars::JsonSchema;
+use serde::Serialize;
+use ts_rs::TS;
 
 use crate::declaration::Namespace;
 
 /// How much a finding weighs: an error stops what it concerns, a warning
 /// only says so.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Warning,
     Error,
 }
 
-/// What a finding is, in the one spelling clients read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Code {
-    ReadFailed,
-    MalformedJson,
-    NotObject,
-    LimitExceeded,
-    VersionUnsupported,
-    UnknownTopLevelField,
-    Project02NotObject,
-    UnknownProject02Field,
-    PluginsNotObject,
-    ConnectorsNotObject,
-    UnknownPlugin,
-    UnknownConnector,
-    PluginNotObject,
-    UnknownPluginWrapperField,
-    BooleanInvalid,
-    PluginConfigNotObject,
-    UnknownPluginConfigField,
-    StringInvalid,
-    RoleModelProviderInvalid,
-    SecretValueInvalid,
-    NvidiaBaseUrlInvalid,
-    ContextWindowTokensInvalid,
-    ValueTypeInvalid,
-    RequiredValueMissing,
-    RequiredSecretMissing,
-    AuthoredOutsideScope,
-    CharacterPackagePluginConfigInvalid,
-    DefaultMemoryProviderUnavailable,
-    DefaultMemoryProviderNotMemoryProvider,
-    AmbiguousMemoryProviderSelection,
-    CharacterRequiredPluginMissing,
-    CharacterRequiredPluginDisabled,
-    CharacterRecommendedPluginMissing,
-    CharacterRecommendedPluginDisabled,
-}
-
-impl Code {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadFailed => "runtime_config_read_failed",
-            Self::MalformedJson => "runtime_config_malformed_json",
-            Self::NotObject => "runtime_config_not_object",
-            Self::LimitExceeded => "runtime_config_limit_exceeded",
-            Self::VersionUnsupported => "runtime_config_version_unsupported",
-            Self::UnknownTopLevelField => "runtime_config_unknown_top_level_field",
-            Self::Project02NotObject => "runtime_config_project02_not_object",
-            Self::UnknownProject02Field => "runtime_config_unknown_project02_field",
-            Self::PluginsNotObject => "runtime_config_plugins_not_object",
-            Self::ConnectorsNotObject => "runtime_config_connectors_not_object",
-            Self::UnknownPlugin => "runtime_config_unknown_plugin",
-            Self::UnknownConnector => "runtime_config_unknown_connector",
-            Self::PluginNotObject => "runtime_config_plugin_not_object",
-            Self::UnknownPluginWrapperField => "runtime_config_unknown_plugin_wrapper_field",
-            Self::BooleanInvalid => "runtime_config_boolean_invalid",
-            Self::PluginConfigNotObject => "runtime_config_plugin_config_not_object",
-            Self::UnknownPluginConfigField => "runtime_config_unknown_plugin_config_field",
-            Self::StringInvalid => "runtime_config_string_invalid",
-            Self::RoleModelProviderInvalid => "runtime_config_role_model_provider_invalid",
-            Self::SecretValueInvalid => "runtime_config_secret_value_invalid",
-            Self::NvidiaBaseUrlInvalid => "runtime_config_nvidia_base_url_invalid",
-            Self::ContextWindowTokensInvalid => "runtime_config_context_window_tokens_invalid",
-            Self::ValueTypeInvalid => "runtime_config_value_type_invalid",
-            Self::RequiredValueMissing => "runtime_config_required_value_missing",
-            Self::RequiredSecretMissing => "runtime_config_required_secret_missing",
-            Self::AuthoredOutsideScope => "runtime_config_authored_outside_scope",
-            Self::CharacterPackagePluginConfigInvalid => "character_package_plugin_config_invalid",
-            Self::DefaultMemoryProviderUnavailable => "default_memory_provider_unavailable",
-            Self::DefaultMemoryProviderNotMemoryProvider => {
-                "default_memory_provider_not_memory_provider"
-            }
-            Self::AmbiguousMemoryProviderSelection => "ambiguous_memory_provider_selection",
-            Self::CharacterRequiredPluginMissing => "character_required_plugin_missing",
-            Self::CharacterRequiredPluginDisabled => "character_required_plugin_disabled",
-            Self::CharacterRecommendedPluginMissing => "character_recommended_plugin_missing",
-            Self::CharacterRecommendedPluginDisabled => "character_recommended_plugin_disabled",
-        }
-    }
-}
-
-impl Serialize for Code {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
+vocabulary! {
+    /// What a finding is, in the one spelling clients read.
+    Code {
+        ReadFailed = "runtime_config_read_failed",
+        MalformedJson = "runtime_config_malformed_json",
+        NotObject = "runtime_config_not_object",
+        LimitExceeded = "runtime_config_limit_exceeded",
+        VersionUnsupported = "runtime_config_version_unsupported",
+        UnknownTopLevelField = "runtime_config_unknown_top_level_field",
+        Project02NotObject = "runtime_config_project02_not_object",
+        UnknownProject02Field = "runtime_config_unknown_project02_field",
+        PluginsNotObject = "runtime_config_plugins_not_object",
+        ConnectorsNotObject = "runtime_config_connectors_not_object",
+        UnknownPlugin = "runtime_config_unknown_plugin",
+        UnknownConnector = "runtime_config_unknown_connector",
+        PluginNotObject = "runtime_config_plugin_not_object",
+        UnknownPluginWrapperField = "runtime_config_unknown_plugin_wrapper_field",
+        BooleanInvalid = "runtime_config_boolean_invalid",
+        PluginConfigNotObject = "runtime_config_plugin_config_not_object",
+        UnknownPluginConfigField = "runtime_config_unknown_plugin_config_field",
+        StringInvalid = "runtime_config_string_invalid",
+        RoleModelProviderInvalid = "runtime_config_role_model_provider_invalid",
+        SecretValueInvalid = "runtime_config_secret_value_invalid",
+        NvidiaBaseUrlInvalid = "runtime_config_nvidia_base_url_invalid",
+        ContextWindowTokensInvalid = "runtime_config_context_window_tokens_invalid",
+        ValueTypeInvalid = "runtime_config_value_type_invalid",
+        RequiredValueMissing = "runtime_config_required_value_missing",
+        RequiredSecretMissing = "runtime_config_required_secret_missing",
+        AuthoredOutsideScope = "runtime_config_authored_outside_scope",
+        CharacterPackagePluginConfigInvalid = "character_package_plugin_config_invalid",
+        DefaultMemoryProviderUnavailable = "default_memory_provider_unavailable",
+        DefaultMemoryProviderNotMemoryProvider = "default_memory_provider_not_memory_provider",
+        AmbiguousMemoryProviderSelection = "ambiguous_memory_provider_selection",
+        CharacterRequiredPluginMissing = "character_required_plugin_missing",
+        CharacterRequiredPluginDisabled = "character_required_plugin_disabled",
+        CharacterRecommendedPluginMissing = "character_recommended_plugin_missing",
+        CharacterRecommendedPluginDisabled = "character_recommended_plugin_disabled",
     }
 }
 
@@ -110,8 +64,10 @@ impl Serialize for Code {
 /// person that never repeats a value, the place in the document, what it
 /// concerns, the settings as a whole or one section, and, for a finding in
 /// a character's overlay, whose.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename = "RuntimeConfigDiagnostic", optional_fields)]
+#[schemars(rename = "RuntimeConfigDiagnostic")]
 pub struct Diagnostic {
     severity: Severity,
     code: Code,
@@ -124,8 +80,9 @@ pub struct Diagnostic {
     origin: Option<Origin>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case")]
+#[ts(optional_fields)]
 enum Concerns {
     Global,
     Section {
@@ -136,7 +93,7 @@ enum Concerns {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 enum Origin {
     Character {

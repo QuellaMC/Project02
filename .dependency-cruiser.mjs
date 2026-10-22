@@ -154,12 +154,11 @@ export default {
       name: 'clients-see-only-the-wire',
       comment:
         'src/gateway/client and every frontend under src/frontends are ' +
-        'clients of the wire: they may value-import only gateway/api (the ' +
+        'clients of the wire: they may import only gateway/api (the ' +
         'contract, which value-imports nothing), gateway/client, core, and ' +
-        'shared — never the façade, the runtimes, app, or the HTTP server ' +
-        '— so no client grows a private path into the daemon. The Hono ' +
-        'app type the client derives its calls from is imported type-only. ' +
-        'Green (zero baseline entries).',
+        'shared — never the façade, the runtimes, app, or the HTTP server, ' +
+        'type-only imports included — so no client grows a private path ' +
+        'into the daemon. Green (zero baseline entries).',
       severity: 'error',
       from: {path: ['^src/gateway/client/', '^src/frontends/']},
       to: {
@@ -171,7 +170,6 @@ export default {
           '^src/shared/',
           '^src/frontends/',
         ],
-        dependencyTypesNot: ['type-only'],
       },
     },
     {
@@ -250,13 +248,21 @@ export default {
         'tests/conformance is the suite the TypeScript daemon and the Rust ' +
         'one must both pass, so it reaches a daemon only from outside: its ' +
         'process, its address, its files. It may import Node built-ins, ' +
-        'vitest and its own files — never src or tests/support, type-only ' +
-        'imports included. Green (zero baseline entries).',
+        'vitest, ajv, its own files and the contract schema the Rust types ' +
+        'generate, which it holds every answer and frame to — never other ' +
+        'src or tests/support, type-only imports included. Green (zero ' +
+        'baseline entries).',
       severity: 'error',
       from: {path: '^tests/conformance/'},
       to: {
-        // Unanchored: pnpm nests the package under node_modules/.pnpm/.
-        pathNot: ['^tests/conformance/', '^vitest$', 'node_modules/vitest/'],
+        // Unanchored: pnpm nests the packages under node_modules/.pnpm/.
+        pathNot: [
+          '^tests/conformance/',
+          '^src/gateway/api/generated/schema\\.json$',
+          '^vitest$',
+          'node_modules/vitest/',
+          'node_modules/ajv/',
+        ],
         dependencyTypesNot: ['core'],
       },
     },

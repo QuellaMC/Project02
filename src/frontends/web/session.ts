@@ -4,16 +4,12 @@
  * page reads the store, never the client. The address is the page's own,
  * so this runs only in a browser: the browser suite is its cover.
  */
-import {
-  turnCommittedTheLine,
-  type GatewayConfirmationDecision,
-  type HistoryPage,
-  type PairingDecision,
-} from '../../gateway/api/index.ts';
+import {turnCommittedTheLine, type Answer} from '../../gateway/api/index.ts';
 import {
   createGatewayClient,
   GatewayClientError,
   type GatewayClient,
+  type HistoryPage,
 } from '../../gateway/client/index.ts';
 import {
   createSettingsVerbs,
@@ -51,14 +47,8 @@ export type Session = SettingsVerbs & {
   /** Sends the composer's line. */
   readonly send: () => Promise<void>;
   readonly loadEarlier: () => Promise<void>;
-  readonly answer: (
-    id: string,
-    decision: GatewayConfirmationDecision,
-  ) => Promise<void>;
-  readonly settlePairing: (
-    code: string,
-    decision: PairingDecision,
-  ) => Promise<void>;
+  readonly answer: (id: string, decision: Answer) => Promise<void>;
+  readonly settlePairing: (code: string, decision: Answer) => Promise<void>;
   readonly start: (characterId: string) => Promise<void>;
 };
 

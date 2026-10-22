@@ -8,16 +8,15 @@
  */
 import {
   foldRunningTurns,
+  type AnswerOutcome,
   type CharacterSummary,
   type ConfigTarget,
   type ConfigView,
-  type ConfirmationAnswerStatus,
   type ConfirmationCancelReason,
   type GatewayEvent,
   type GatewayHealth,
   type GatewayReady,
   type HistoryOutcome,
-  type HistoryPage,
   type OpenOutcome,
   type PairingRequest,
   type PairingSettleOutcome,
@@ -25,6 +24,7 @@ import {
   type RunningTurns,
   type TurnOutcome,
 } from '../../gateway/api/index.ts';
+import type {HistoryPage} from '../../gateway/client/index.ts';
 
 export type Connection =
   | {readonly status: 'connecting'}
@@ -540,7 +540,7 @@ export function forgetWritten(state: WebState): WebState {
 export function confirmationGone(
   state: WebState,
   id: string,
-  outcome: ConfirmationAnswerStatus,
+  outcome: AnswerOutcome['status'],
 ): WebState {
   const card = state.confirmations.find(pending => pending.id === id);
 
