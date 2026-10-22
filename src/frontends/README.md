@@ -3,12 +3,12 @@
 Every platform a person talks to a character on is a client of the
 daemon's wire and nothing more: the web page here, and the Telegram
 connector, which is the binary's `project02 telegram`
-(`crates/p02-telegram`). A frontend imports only the contract
-(`gateway/api`), the reference client (`gateway/client`), and `shared`
-(arch rule `clients-see-only-the-wire`), and nothing else imports a
-frontend (`nothing-imports-frontends`): whatever a frontend cannot do
-through the API, nobody can. Each platform here is one directory with its
-own entry and tests.
+(`crates/p02-telegram`). A frontend imports only the contract,
+`gateway/api`, and the reference client, `gateway/client` (arch rule
+`clients-see-only-the-wire`), and nothing else imports a frontend
+(`nothing-imports-frontends`): whatever a frontend cannot do through the
+API, nobody can. Each platform here is one directory with its own entry
+and tests.
 
 ## web
 

@@ -12,7 +12,7 @@ use p02_telegram::{Ended, Lines, Options};
 use crate::flags::TelegramFlags;
 use crate::stop::listen_for_stop;
 use crate::switches::{self, TEST_DURATIONS, TEST_TELEGRAM_API};
-use crate::{Console, home_of};
+use crate::{Console, home_of, on_runtime};
 
 /// Runs the connector until the stop: exit code 0, or 1 when its switches
 /// refuse the start, or when it could not go on, which it says on stderr.
@@ -41,23 +41,16 @@ pub(crate) fn run(flags: TelegramFlags, console: &mut Console) -> ExitCode {
         options.draft_edits = draft_edits;
     }
 
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => return console.failed(&error),
-    };
-    let ended = runtime.block_on(async {
+    let ended = on_runtime(async {
         let stop = listen_for_stop()?;
 
         io::Result::Ok(p02_telegram::run(options, Arc::new(Terminal), stop).await)
     });
 
     match ended {
-        Ok(Ended::Stopped) => ExitCode::SUCCESS,
-        Ok(Ended::Failed) => ExitCode::FAILURE,
-        Err(error) => console.failed(&error),
+        Ok(Ok(Ended::Stopped)) => ExitCode::SUCCESS,
+        Ok(Ok(Ended::Failed)) => ExitCode::FAILURE,
+        Ok(Err(error)) | Err(error) => console.failed(&error),
     }
 }
 

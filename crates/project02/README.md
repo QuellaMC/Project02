@@ -42,10 +42,11 @@ it prints. Any other command is a usage error.
   failure of her work behind the conversation are said on stderr as
   `<character>: <message>`.
 - **The stop**, for serve and the connector alike, is the first SIGINT,
-  SIGTERM or SIGHUP, or on Windows the first of the console's events. It says `Stopping; finishing what is in
-  flight.`, closes the server in its order, then releases the claim, so
-  the record keeps the address without the run, and the lease goes last.
-  A second signal of any kind ends the process at once, the lease left to
+  SIGTERM or SIGHUP, or on Windows the first of the console's events, and
+  a second of any kind ends the process at once with exit code 1. Serve's
+  says `Stopping; finishing what is in flight.`, closes the server in its
+  order, then releases the claim, so the record keeps the address without
+  the run, and the lease goes last; a second signal leaves the lease to
   the kernel and the record naming the run, as after a crash. The exit
   code is 0; 1 when a character's failure was said during the stop, and
   when serve fails before it serves, which says `Error: <why>` on stderr
@@ -95,6 +96,6 @@ it prints. Any other command is a usage error.
   among them; and `PROJECT02_TEST_TELEGRAM_API`, an absolute http or
   https address with no credentials, query or fragment, the Bot API it
   reaches in Telegram's place. A refusal says why on stderr, with exit
-  code 1 and nothing on stdout. The first stop ends every bot and exits
-  0 with nothing more said; the second exits 1 at once; and a daemon of
-  another protocol ends it with exit code 1.
+  code 1 and nothing on stdout. The first stop ends every bot, each saying
+  on stdout that it stopped, and exits 0 with nothing on stderr; a daemon
+  of another protocol ends it with exit code 1.

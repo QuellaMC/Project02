@@ -22,8 +22,8 @@ frames with it.
 `client/` is the reference client, one module for Node and for a browser
 tab, which the web page uses; it calls each route from a table of its
 own, typed by the contract, splits the event stream into frames, and
-speaks the platform's fetch, each request under a signal of its own. It may import
-only `api/`, itself, and `shared`, types included (arch rule
+speaks the platform's fetch, each request under a signal of its own. It
+may import only `api/` and itself, types included (arch rule
 `clients-see-only-the-wire`), so no client grows a private path into the
 daemon.
 

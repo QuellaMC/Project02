@@ -13,6 +13,7 @@ mod telegram;
 use std::env;
 use std::ffi::OsString;
 use std::fmt::Display;
+use std::future::Future;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,19 +48,24 @@ fn serve(flags: ServeFlags, console: &mut Console) -> ExitCode {
         Ok(switches) => switches,
         Err(refused) => return console.failed(&refused),
     };
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => return console.failed(&error),
-    };
-    let code = runtime.block_on(serve::run(flags, switches, console));
 
-    // Whatever still runs on the blocking pool is nothing the stop waited
-    // for, so the exit does not wait for it either.
+    match on_runtime(serve::run(flags, switches, console)) {
+        Ok(code) => code,
+        Err(error) => console.failed(&error),
+    }
+}
+
+/// Runs `work` to its end on a runtime of its own. Whatever then still runs
+/// on the blocking pool, such as a name lookup, is nothing the command
+/// waited for, so the exit does not wait for it either.
+pub(crate) fn on_runtime<T>(work: impl Future<Output = T>) -> io::Result<T> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let output = runtime.block_on(work);
+
     runtime.shutdown_background();
-    code
+    Ok(output)
 }
 
 /// The home `store` names, or `.project02` in the working directory, bound
