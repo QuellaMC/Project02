@@ -21,10 +21,11 @@ switches and the signals, and prints the lines it is handed.
   the newest read's answer is applied, and a read that fails is said once
   and tried again, backing off from a second to thirty. Every read holds
   the bots until it lands, and so does a lost stream, until a read begun
-  after the loss lands: no update is handled, no write to a paired
-  account made, and the frames since are kept and handed on in order
-  once it does, a `ready`'s snapshot first. The snapshot is kept moved on
-  by every frame, for a bot that catches up.
+  after the loss lands: no update is handled, no frame applied, not even
+  one a bot was handed before, no write to a paired account made, and the
+  frames since are kept and handed on in order once it does, a `ready`'s
+  snapshot first. The snapshot is kept moved on by every frame, for a bot
+  that catches up.
 - **The bots.** One per token, by the daemon's judgment of each entry: the
   home's management bot while its entry is active and holds
   `managementBotToken`, then each character's while hers is active and

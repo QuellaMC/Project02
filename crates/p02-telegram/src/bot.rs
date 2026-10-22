@@ -550,13 +550,14 @@ struct Intake {
     latest: watch::Receiver<Option<Latest>>,
 }
 
-/// Runs a bot's rules until the stop. Only an owner of the token's polls
-/// reads frames, so two connectors on one token do not both answer: the
-/// rules drop them from the 409 that says another program took the polls,
-/// a settings read in doubt or not, and once the polls are theirs again
-/// catch up from the latest snapshot, skipping every frame it already
-/// holds. The catching up, and every update, wait while a settings read
-/// is in doubt.
+/// Runs a bot's rules until the stop. They act only while no settings
+/// read is in doubt, on a frame, an update, an answer or a wait of their
+/// own, so nothing is shown or judged by settings a change may have left
+/// behind; meanwhile they follow only the token's polls. Only an owner of
+/// those reads frames, so two connectors on one token do not both answer:
+/// the rules drop them from the 409 that says another program took the
+/// polls, and once the polls are theirs again catch up from the latest
+/// snapshot, skipping every frame it already holds.
 async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
     let Intake {
         mut frames,
@@ -592,7 +593,7 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                     rules.install(&mut chat, &newest.snapshot);
                 }
             }
-            Some(message) = frames.recv() => match message {
+            Some(message) = frames.recv(), if free => match message {
                 Inbox::Install { seq, snapshot } if caught_up && seq > seen => {
                     seen = seq;
                     rules.install(&mut chat, &snapshot);
@@ -607,12 +608,12 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 rules.update(&mut chat, update).await;
                 let _ = handed.send(());
             }
-            Some(done) = chat.work.join_next(), if !chat.work.is_empty() => {
+            Some(done) = chat.work.join_next(), if free && !chat.work.is_empty() => {
                 if let Ok(done) = done {
                     rules.done(&mut chat, done);
                 }
             }
-            () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
+            () = sleep_until(due.unwrap_or_else(Instant::now)), if free && due.is_some() => {
                 rules.at_due(&mut chat);
             }
         }
@@ -623,8 +624,10 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use p02_app::{ConfirmationId, ConfirmationQuestion, PendingConfirmation, RunningTurns};
-    use p02_shared::Identifier;
+    use p02_app::{
+        ConfirmationId, ConfirmationQuestion, PendingConfirmation, RunningTurns, Settlement,
+    };
+    use p02_shared::{BaseUrl, Identifier};
     use serde_json::{Map, json};
 
     use super::*;
@@ -724,5 +727,127 @@ mod tests {
         stop.cancel();
         bots.close();
         bots.wait().await;
+    }
+
+    /// What a bot's rules were handed: the snapshots they installed and the
+    /// frames they applied.
+    #[derive(Debug, Default)]
+    struct Handed {
+        installed: usize,
+        applied: usize,
+    }
+
+    /// Rules that only count what they are handed.
+    #[derive(Debug)]
+    struct Counting(Arc<watch::Sender<Handed>>);
+
+    impl Rules for Counting {
+        fn update(&mut self, _chat: &mut Chat, _update: Update) -> impl Future<Output = ()> + Send {
+            std::future::ready(())
+        }
+
+        fn install(&mut self, _chat: &mut Chat, _snapshot: &Snapshot) {
+            self.0.send_modify(|handed| handed.installed += 1);
+        }
+
+        fn frame(&mut self, _chat: &mut Chat, _event: &Event) {
+            self.0.send_modify(|handed| handed.applied += 1);
+        }
+
+        fn done(&mut self, _chat: &mut Chat, _done: Done) {}
+    }
+
+    /// connectors.telegram-frames-wait-for-read: A frame already handed to a bot is applied only once a settings read begun since has landed, so nothing of it is shown or judged by settings that read may change.
+    #[tokio::test(start_paused = true)]
+    async fn a_frame_handed_on_waits_for_a_settings_read_begun_since() {
+        let stop = CancellationToken::new();
+        let tasks = TaskTracker::new();
+        let api = BotApi::new(
+            Telegram::new(BaseUrl::parse("http://127.0.0.1:9").unwrap()).unwrap(),
+            BotToken::new("123456:home"),
+        );
+        let (_settings, settings) = watch::channel(Arc::new(BotSettings {
+            owner: Owner::Management {
+                names: BTreeMap::new(),
+            },
+            paired: BTreeSet::new(),
+        }));
+        let (reading, held) = watch::channel(false);
+        let (_claim, claimed) = watch::channel(true);
+        let (_daemon, daemon) = watch::channel(None);
+        let (_latest, latest) = watch::channel(Some(Latest {
+            seq: 0,
+            snapshot: Snapshot {
+                confirmations: Vec::new(),
+                pairings: Vec::new(),
+                turns: RunningTurns::default(),
+            },
+        }));
+        let (inbox, frames) = mpsc::unbounded_channel();
+        let (_polled, polls) = mpsc::unbounded_channel();
+        let heard = Arc::new(Heard::default());
+        let handed = Arc::new(watch::Sender::new(Handed::default()));
+        let chat = Chat {
+            api: api.clone(),
+            id: 123_456,
+            username: "home_bot".to_owned(),
+            settings: settings.clone(),
+            daemon,
+            outbox: Outbox::start(
+                api,
+                settings,
+                held.clone(),
+                Duration::from_millis(1_500),
+                heard.clone(),
+                stop.clone(),
+                &tasks,
+            ),
+            lines: heard,
+            stop: stop.clone(),
+            work: JoinSet::new(),
+        };
+
+        tasks.spawn(follow(
+            Counting(Arc::clone(&handed)),
+            chat,
+            Intake {
+                frames,
+                polls,
+                claimed,
+                held,
+                latest,
+            },
+        ));
+        handed
+            .subscribe()
+            .wait_for(|handed| handed.installed == 1)
+            .await
+            .unwrap();
+
+        // A frame handed on, and a read begun before the bot gets to it.
+        inbox
+            .send(Inbox::Frame {
+                seq: 1,
+                event: Arc::new(Event::ConfirmationSettled {
+                    character_id: Identifier::new("mira").unwrap(),
+                    id: ConfirmationId::mint(),
+                    settlement: Settlement::Denied,
+                }),
+            })
+            .unwrap();
+        reading.send_replace(true);
+        sleep(Duration::from_secs(1)).await;
+        assert_eq!(handed.borrow().applied, 0);
+
+        // The read lands.
+        reading.send_replace(false);
+        handed
+            .subscribe()
+            .wait_for(|handed| handed.applied == 1)
+            .await
+            .unwrap();
+        stop.cancel();
+        tasks.close();
+        tasks.wait().await;
     }
 }
