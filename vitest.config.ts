@@ -37,9 +37,7 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       // The page's session and its components run only in a browser; the
       // browser suite is their cover. Everything else the page owns —
-      // its store, every rule a tab follows — is covered here. The
-      // connector's entry runs in the processes the conformance suite
-      // spawns, out of coverage's sight; that suite is its cover.
+      // its store, every rule a tab follows — is covered here.
       exclude: [
         'src/frontends/web/session.ts',
         'src/frontends/web/settings-session.ts',
@@ -47,7 +45,6 @@ export default defineConfig({
         'src/frontends/web/app.tsx',
         'src/frontends/web/thread.tsx',
         'src/frontends/web/settings.tsx',
-        'src/frontends/telegram/main.ts',
       ],
       reporter: ['text', 'json-summary'],
       thresholds: {

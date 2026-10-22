@@ -70,11 +70,13 @@ Nothing here prints, reads an environment variable or parses a flag.
   hand as that one number.
   A test of this crate, `cargo test -p p02-gateway contract`, walks them
   from the wire's roots and writes `src/gateway/api/generated/contract.ts`,
-  the declarations the page, the client and the connector compile against,
-  and `schema.json`, the schema the conformance suite holds every answer
-  and frame to, both generated files the repository's formatter and
-  linter leave alone; another test holds one value of each type, as
-  serde writes it or a route reads it, to its schema.
+  the declarations the page and the client compile against, and
+  `schema.json`, the schema the conformance suite holds every answer and
+  frame to, both generated files the repository's formatter and linter
+  leave alone; another test holds one value of each type, as serde writes
+  it or a route reads it, to its schema, and one of each a client reads
+  to reading back as it was written. The Telegram connector reads the
+  same types, and writes the bodies a route reads.
 - **The stop.** New API requests answer 503 at once; the daemon stops,
   its turns draining with the socket and the streams open, so an accepted
   turn still receives its answer and the stream its reply; then each

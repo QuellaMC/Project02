@@ -1,7 +1,8 @@
-//! The command line, `project02 serve [--store <dir>] [--init]` or
-//! `project02 inspect [--store <dir>] [--character <id>] [<report>]`, read
-//! by hand: a parser would bring a help flag and sentences of its own,
-//! where a person who mistypes is owed these.
+//! The command line, `project02 serve [--store <dir>] [--init]`,
+//! `project02 inspect [--store <dir>] [--character <id>] [<report>]` or
+//! `project02 telegram [--store <dir>]`, read by hand: a parser would bring
+//! a help flag and sentences of its own, where a person who mistypes is
+//! owed these.
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
@@ -9,15 +10,17 @@ use std::path::PathBuf;
 use p02_core::{ConversationId, SessionId};
 use p02_shared::Identifier;
 
-const USAGE: &str = "The commands are: project02 serve [--store <dir>] [--init], and project02 \
+const USAGE: &str = "The commands are: project02 serve [--store <dir>] [--init], project02 \
                      inspect [--store <dir>] [--character <id>] [--sessions | --session <id> | \
-                     --conversations | --conversation <id>].";
+                     --conversations | --conversation <id>], and project02 telegram [--store \
+                     <dir>].";
 
 /// What the person asked the binary to do.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
     Serve(ServeFlags),
     Inspect(InspectFlags),
+    Telegram(TelegramFlags),
 }
 
 /// What `serve` is asked: the home's directory as the person named it,
@@ -36,6 +39,13 @@ pub(crate) struct InspectFlags {
     pub(crate) store: Option<PathBuf>,
     pub(crate) character: Option<Identifier>,
     pub(crate) report: Report,
+}
+
+/// What `telegram` is asked: the home whose daemon it follows, as `serve`
+/// takes it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct TelegramFlags {
+    pub(crate) store: Option<PathBuf>,
 }
 
 /// Which report `inspect` prints beside the settings.
@@ -63,6 +73,9 @@ pub(crate) fn read(args: &[OsString]) -> Result<Command, UsageError> {
         Some((command, flags)) if command == "serve" => serve_flags(flags).map(Command::Serve),
         Some((command, flags)) if command == "inspect" => {
             inspect_flags(flags).map(Command::Inspect)
+        }
+        Some((command, flags)) if command == "telegram" => {
+            telegram_flags(flags).map(Command::Telegram)
         }
         Some((command, _)) => Err(UsageError(format!(
             "Unknown command: {}. {USAGE}",
@@ -136,6 +149,24 @@ fn inspect_flags(args: &[OsString]) -> Result<InspectFlags, UsageError> {
                     arg.to_string_lossy()
                 )));
             }
+        }
+    }
+
+    Ok(flags)
+}
+
+fn telegram_flags(args: &[OsString]) -> Result<TelegramFlags, UsageError> {
+    let mut flags = TelegramFlags::default();
+    let mut args = args.iter();
+
+    while let Some(arg) = args.next() {
+        if arg == "--store" {
+            flags.store = Some(store(flags.store.is_some(), args.next())?);
+        } else {
+            return Err(UsageError(format!(
+                "Unknown telegram option: {}.",
+                arg.to_string_lossy()
+            )));
         }
     }
 
@@ -283,6 +314,22 @@ mod tests {
     }
 
     #[test]
+    fn telegram_takes_a_store() {
+        for (words, store) in [
+            (&["telegram"][..], None),
+            (&["telegram", "--store", "home"], Some("home")),
+        ] {
+            assert_eq!(
+                read(&line(words)),
+                Ok(Command::Telegram(TelegramFlags {
+                    store: store.map(PathBuf::from),
+                })),
+                "{words:?}"
+            );
+        }
+    }
+
+    #[test]
     #[expect(
         clippy::too_many_lines,
         reason = "one table of every refusal, read top to bottom"
@@ -388,6 +435,18 @@ mod tests {
             (
                 &["inspect", "--all"],
                 "Unknown inspect option: --all.".to_owned(),
+            ),
+            (
+                &["telegram", "--init"],
+                "Unknown telegram option: --init.".to_owned(),
+            ),
+            (
+                &["telegram", "--store"],
+                "--store requires a value.".to_owned(),
+            ),
+            (
+                &["telegram", "--store", "a", "--store", "b"],
+                "--store can only be provided once.".to_owned(),
             ),
         ] {
             assert_eq!(read(&line(words)), Err(UsageError(said)), "{words:?}");

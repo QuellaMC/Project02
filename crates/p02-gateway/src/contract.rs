@@ -36,7 +36,9 @@ use serde_json::{Map, Value, json};
 use ts_rs::{Config, TS, TypeVisitor};
 
 use crate::events::Ready;
-use crate::http::{self, Decided, ErrorBody, OpenRequest, Refusal, TurnRequest};
+use crate::http::{
+    AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
+};
 
 const REGENERATE: &str = "cargo test -p p02-gateway contract";
 
@@ -68,10 +70,10 @@ fn walk(wire: &mut impl Wire) {
     // Only ever flattened into the frame that settles a confirmation, and
     // named by the clients that read it.
     wire.written::<Settlement>();
-    wire.read::<OpenRequest>();
-    wire.read::<TurnRequest>();
-    wire.read::<Decided>();
-    wire.read::<http::PairingRequest>();
+    wire.read::<OpenConversationBody>();
+    wire.read::<GatewayMessage>();
+    wire.read::<AnswerBody>();
+    wire.read::<PairingRequestBody>();
     wire.read::<ConfigChange>();
     wire.read::<ConfigTarget>();
 }
@@ -269,6 +271,19 @@ fn value(name: &'static str, value: &impl serde::Serialize) -> (&'static str, Va
     (name, serde_json::to_value(value).unwrap())
 }
 
+/// A value of a type a client reads, which reads back as what was written.
+fn read_back<T: serde::Serialize + serde::de::DeserializeOwned>(
+    name: &'static str,
+    value: &T,
+) -> (&'static str, Value) {
+    let written = serde_json::to_value(value).unwrap();
+    let read: T = serde_json::from_value(written.clone())
+        .unwrap_or_else(|error| panic!("{name} does not read back {written}: {error}"));
+
+    assert_eq!(serde_json::to_value(read).unwrap(), written, "{name}");
+    (name, written)
+}
+
 /// A body of each type a route reads, which the type reads.
 fn read() -> Vec<(&'static str, Value)> {
     fn reads<T: serde::de::DeserializeOwned>(
@@ -283,8 +298,8 @@ fn read() -> Vec<(&'static str, Value)> {
     }
 
     vec![
-        reads::<OpenRequest>("OpenConversationBody", json!({"characterId": "mira"})),
-        reads::<TurnRequest>(
+        reads::<OpenConversationBody>("OpenConversationBody", json!({"characterId": "mira"})),
+        reads::<GatewayMessage>(
             "GatewayMessage",
             json!({
                 "conversationId": "conv_1",
@@ -294,8 +309,8 @@ fn read() -> Vec<(&'static str, Value)> {
                 "clientMessageId": "line-1",
             }),
         ),
-        reads::<Decided>("AnswerBody", json!({"decision": "approved"})),
-        reads::<http::PairingRequest>(
+        reads::<AnswerBody>("AnswerBody", json!({"decision": "approved"})),
+        reads::<PairingRequestBody>(
             "PairingRequestBody",
             json!({"subject": {"id": "381940562", "label": "Alice (@alice)"}}),
         ),
@@ -311,7 +326,7 @@ fn read() -> Vec<(&'static str, Value)> {
 }
 
 /// A value of each type the daemon writes, every flattened and newtype
-/// variant of an event among them.
+/// variant of an event among them, those a client reads read back.
 #[expect(clippy::too_many_lines, reason = "one value of every wire type")]
 fn written() -> Vec<(&'static str, Value)> {
     let id = |text: &str| Identifier::new(text).unwrap();
@@ -338,7 +353,7 @@ fn written() -> Vec<(&'static str, Value)> {
         packages: PackagesHealth {
             diagnostics: vec![PackageReport {
                 severity: Severity::Error,
-                code: "package_id_mismatch",
+                code: "package_id_mismatch".to_owned(),
                 message: "The package's id is not its folder's.".to_owned(),
                 path: "/home/person/.project02/characters/nova".to_owned(),
                 provenance: PackageProvenance::Operator,
@@ -416,7 +431,7 @@ fn written() -> Vec<(&'static str, Value)> {
             client_message_id: stamp("line-1"),
             status: TurnStatus::Rejected,
             committed: true,
-            reason: Some("malformed_output"),
+            reason: Some("malformed_output".to_owned()),
             message: None,
         },
         Event::ConfirmationRequested(pending.clone()),
@@ -446,7 +461,7 @@ fn written() -> Vec<(&'static str, Value)> {
     ];
 
     let mut written = vec![
-        value("GatewayHealth", &health),
+        read_back("GatewayHealth", &health),
         value(
             "StartOutcome",
             &StartOutcome::Refused {
@@ -454,14 +469,14 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "The daemon is stopping.".to_owned(),
             },
         ),
-        value(
+        read_back(
             "OpenOutcome",
             &OpenOutcome::Refused {
                 reason: OpenRefusal::CharacterUnavailable,
                 message: "Mira is not ready.".to_owned(),
             },
         ),
-        value(
+        read_back(
             "TurnOutcome",
             &TurnOutcome::Completed {
                 character_id: id("mira"),
@@ -474,7 +489,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 }],
             },
         ),
-        value(
+        read_back(
             "TurnOutcome",
             &TurnOutcome::Refused {
                 reason: TurnRefusal::DuplicateSubmission,
@@ -509,12 +524,12 @@ fn written() -> Vec<(&'static str, Value)> {
         value(
             "HistoryOutcome",
             &HistoryOutcome::Failed(StorageFailure {
-                code: "write_failed",
+                code: "write_failed".to_owned(),
                 message: "The disk is full.".to_owned(),
             }),
         ),
-        value("PendingConfirmation", &pending),
-        value("AnswerOutcome", &ConfirmationAnswer::Expired),
+        read_back("PendingConfirmation", &pending),
+        read_back("AnswerOutcome", &ConfirmationAnswer::Expired),
         value("ConfigView", &diagnosed),
         value("ConfigView", &overlaid),
         value(
@@ -531,34 +546,34 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "Someone else saved first.".to_owned(),
             },
         ),
-        value("ConnectorConfigView", &connector),
-        value(
+        read_back("ConnectorConfigView", &connector),
+        read_back(
             "ConnectorConfigView",
             &ConnectorConfigView::Refused {
                 reason: ConnectorRefusal::UnknownConnector,
                 message: "Unknown connector \"discord\".".to_owned(),
             },
         ),
-        value(
+        read_back(
             "PairingRequestOutcome",
             &PairingOutcome::Pending {
                 request: request.clone(),
             },
         ),
-        value(
+        read_back(
             "PairingRequestOutcome",
             &PairingOutcome::Refused {
                 reason: PairingRefusal::InvalidSubject,
                 message: "A label is one line.".to_owned(),
             },
         ),
-        value(
+        read_back(
             "PairingSettleOutcome",
             &PairingAnswer::Settled {
                 decision: Answer::Denied,
             },
         ),
-        value(
+        read_back(
             "GatewayErrorBody",
             &ErrorBody {
                 error: Refusal::new(
@@ -568,7 +583,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 ),
             },
         ),
-        value(
+        read_back(
             "GatewayReady",
             &Ready {
                 protocol_version: ProtocolVersion,
@@ -589,7 +604,7 @@ fn written() -> Vec<(&'static str, Value)> {
         ),
     ];
 
-    written.extend(events.iter().map(|event| value("GatewayEvent", event)));
+    written.extend(events.iter().map(|event| read_back("GatewayEvent", event)));
     written
 }
 

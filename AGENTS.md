@@ -169,10 +169,7 @@ is a useful sentence; silently writing a second copy is not.
 Architecture gates enforced by `pnpm arch:check`:
 
 - A client — `src/frontends`, `src/gateway/client` — imports only the wire's
-  contract (`src/gateway/api`), the reference client, and `src/shared`.
-- `src/shared` is a leaf, and additions need a reviewed `consumers.json` entry
-  naming the modules that really import the file — at least two, unless the
-  file is internal plumbing other `src/shared` files import.
+  contract (`src/gateway/api`) and the reference client.
 - Cross-module imports land on barrels (`src/<module>/index.ts`), not deep paths.
 - Pre-existing violations live in `.dependency-cruiser-known-violations.json`,
   which may only shrink. Regenerate with `pnpm arch:baseline` in the same PR

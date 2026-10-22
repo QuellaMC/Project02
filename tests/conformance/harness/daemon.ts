@@ -8,8 +8,7 @@ import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 /** A program's command line, run from the repository root. */
 type Command = readonly string[];
 
-// The daemon's commands are the binary `pnpm build` makes; the connector
-// is a program of its own until it joins the binary.
+// Every command is the binary `pnpm build` makes.
 const serveCommand = commandOf(
   'PROJECT02_SERVE_CMD',
   'target/debug/project02 serve',
@@ -20,7 +19,7 @@ const inspectCommand = commandOf(
 );
 const connectorCommand = commandOf(
   'PROJECT02_CONNECTOR_CMD',
-  'node src/frontends/telegram/main.ts',
+  'target/debug/project02 telegram',
 );
 /** serve on a pseudo-terminal, through python3's pty module. */
 const terminalCommand = [
