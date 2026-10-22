@@ -10,8 +10,8 @@ use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Round, Toy, World, a_while, begun, change, home, id, line, make_read_only, open, restore,
-    said, settle, wire,
+    Ear, Gate, Round, Toy, World, a_while, begun, change, home, id, line, make_read_only, open,
+    restore, said, settle, wire,
 };
 
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
@@ -376,6 +376,49 @@ async fn a_change_her_own_plugin_makes_is_announced_and_rebuilds_her_after_her_t
     ear.reached("mira", Reloading).await;
     ear.reached("mira", Ready).await;
     assert_eq!(daemon.reconcile().await.reloading, []);
+}
+
+/// A stop answers only once everything it ended is announced: the turn in
+/// flight, finished, and her last state are on the events by then, so a
+/// surface that reads them after the stop misses nothing.
+#[tokio::test(start_paused = true)]
+async fn a_stop_answers_after_what_it_ended_was_announced() {
+    let world = World::new();
+    let daemon = world.daemon(Vec::new()).await;
+
+    daemon.reconcile().await;
+
+    let conversation = open(&daemon).await;
+    let gate = Arc::new(Gate::default());
+    let mut ear = Ear::on(&daemon);
+
+    gate.shut();
+    world
+        .model
+        .script([Round::says(&["Still here."]).held(&gate)]);
+
+    let turn = tokio::spawn({
+        let daemon = daemon.clone();
+        let line = line(&conversation, "Still there?", "in-flight");
+
+        async move { daemon.deliver(line).await }
+    });
+
+    gate.reached().await;
+
+    let stop = begun(daemon.stop()).await;
+
+    gate.open();
+    stop.await;
+    ear.drain();
+
+    assert_eq!(said(&turn.await.unwrap()), ["Still there?", "Still here."]);
+    assert!(
+        ear.kinds().iter().any(|kind| kind == "turn_completed"),
+        "{:?}",
+        ear.kinds()
+    );
+    assert_eq!(ear.states("mira"), [Stopping, Stopped]);
 }
 
 /// lifecycle.stop-during-reload: A stop issued during a character's reload wins (reloading, stopping, stopped).

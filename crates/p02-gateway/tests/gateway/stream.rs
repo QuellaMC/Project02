@@ -452,8 +452,16 @@ async fn a_client_that_stops_reading_is_dropped_within_the_grace() {
         .script([Round::says("Done.").drafting(&[piece.as_str(); 128])]);
 
     let said = Instant::now();
+    let turn = tokio::spawn({
+        let request = gateway
+            .authorized(Method::POST, "/api/turns")
+            .json(&Gateway::line(&conversation, "Talk a lot.", "long"));
 
-    gateway.say(&conversation, "Talk a lot.", "long").await;
+        async move { Answer::of(request).await }
+    });
+
+    // The watching client keeps taking its frames meanwhile, as a client
+    // that reads does; only the stalled one is gone.
     watching
         .event_where("health_changed", |event| {
             telegram_connected(event) == Some(false)
@@ -464,6 +472,7 @@ async fn a_client_that_stops_reading_is_dropped_within_the_grace() {
 
     assert!(dropped >= grace, "{dropped:?}");
     assert!(dropped < Duration::from_secs(30), "{dropped:?}");
+    assert_eq!(turn.await.unwrap().json()["status"], "completed");
     stalled.ended().await;
     assert!(!String::from_utf8_lossy(&stalled.raw).contains("event: turn_completed"));
 }

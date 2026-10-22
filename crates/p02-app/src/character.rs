@@ -419,16 +419,18 @@ impl Actor {
             Change::Stopped { failures } => (CharacterState::Stopped, None, failures),
         };
 
-        // The watch first, so a surface that reads health after it hears
-        // the event has the change already, never the other way round.
+        // The change is made and announced before anyone reading her
+        // health sees it or anyone waiting on it wakes: a surface that
+        // reads health after the event has the change, and a stop that
+        // waits for her last state finds it announced.
         self.health.send_modify(|health| {
             health.state = state;
             health.diagnostic = diagnostic;
-        });
-        self.world.events.emit(Event::StateChanged {
-            character_id: self.id.clone(),
-            state,
-            message,
+            self.world.events.emit(Event::StateChanged {
+                character_id: self.id.clone(),
+                state,
+                message,
+            });
         });
     }
 

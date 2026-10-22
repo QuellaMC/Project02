@@ -7,12 +7,13 @@ use reqwest::{Method, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpSocket;
 
-use crate::support::{Answer, Gate, Gateway, PATIENCE, Round, World, waits};
+use crate::support::{Answer, Gate, Gateway, PATIENCE, Round, World, data, waits};
 
 /// A stop lets the turn in flight finish, its answer and its frames, and
-/// only then ends the streams, each once every frame queued for it is
-/// written, a client far behind that keeps taking them included; a stream
-/// asked for meanwhile is refused at once.
+/// only then ends the streams, each once everything the stop announced,
+/// her last state after the turn's completion, and every frame queued for
+/// it are written, a client far behind that keeps taking them included; a
+/// stream asked for meanwhile is refused at once.
 #[tokio::test]
 async fn a_stop_drains_the_turn_in_flight_then_ends_each_stream_whole() {
     let world = World::new();
@@ -104,6 +105,20 @@ async fn a_stop_drains_the_turn_in_flight_then_ends_each_stream_whole() {
 
     assert_eq!(completed["status"], "completed");
     assert_eq!(numbered(&lagging.frames), numbered(&keeping_up.frames));
+
+    let at = |kind: &str, wanted: &dyn Fn(&serde_json::Value) -> bool| {
+        keeping_up
+            .frames
+            .iter()
+            .position(|frame| frame.event.as_deref() == Some(kind) && wanted(&data(frame)))
+    };
+    let completed_at = at("turn_completed", &|event| {
+        event["clientMessageId"] == "in-flight"
+    });
+    let stopped_at = at("state_changed", &|event| event["state"] == "stopped");
+
+    assert!(completed_at < stopped_at, "{completed_at:?} {stopped_at:?}");
+    assert!(stopped_at.is_some());
 }
 
 /// A stop gives a client that stopped reading a large answer the grace,
