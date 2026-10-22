@@ -32,7 +32,8 @@ use crate::page::Page;
 
 /// A message is a few KiB; a body past this is not a message.
 const BODY_LIMIT: usize = 64 * 1024;
-/// Bounded well above any line a person types, well below the body cap.
+/// Bounded well above any line a person types, in characters, so a line
+/// in any script is held to the same length, and well below the body cap.
 const TEXT_LIMIT: usize = 16 * 1024;
 /// The bound of an id, and of the name a person goes by.
 const NAME_LIMIT: usize = 128;
@@ -602,18 +603,18 @@ impl<'de> serde::Deserialize<'de> for Short {
     }
 }
 
-/// A line's text: 1 to 16 KiB of UTF-8.
+/// A line's text: 1 to 16384 characters.
 struct Text(String);
 
 impl<'de> serde::Deserialize<'de> for Text {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
 
-        if (1..=TEXT_LIMIT).contains(&text.len()) {
+        if (1..=TEXT_LIMIT).contains(&text.chars().count()) {
             Ok(Self(text))
         } else {
             Err(serde::de::Error::custom(
-                "a line's text is 1 to 16384 bytes of UTF-8",
+                "a line's text is 1 to 16384 characters",
             ))
         }
     }

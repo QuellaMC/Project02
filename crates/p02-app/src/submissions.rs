@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared};
 use p02_core::{ClientStamp, ConversationId};
+use tokio_util::task::TaskTracker;
 
 use crate::outcome::{TurnOutcome, TurnRefusal};
 
@@ -29,6 +30,8 @@ pub(crate) struct Line {
 #[derive(Debug, Default)]
 pub(crate) struct Ledger {
     conversations: Mutex<HashMap<ConversationId, Vec<Submission>>>,
+    /// The turns begun, each until it ended and announced how.
+    turns: TaskTracker,
 }
 
 /// A submission's turn, which every repeat of it joins, oldest first.
@@ -88,7 +91,7 @@ impl Ledger {
             id: id.clone(),
             committed: false,
         };
-        let task = tokio::spawn(async move {
+        let task = self.turns.spawn(async move {
             let mut settling = settling;
             let outcome = turn.await;
 
@@ -106,6 +109,13 @@ impl Ledger {
             settled: false,
         });
         outcome.boxed()
+    }
+
+    /// Answered once every turn begun has ended and announced how it
+    /// ended, so that nothing a stop ended is left unannounced.
+    pub(crate) async fn settled(&self) {
+        self.turns.close();
+        self.turns.wait().await;
     }
 
     fn conversations(&self) -> std::sync::MutexGuard<'_, HashMap<ConversationId, Vec<Submission>>> {

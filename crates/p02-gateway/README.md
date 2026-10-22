@@ -28,8 +28,8 @@ Nothing here prints, reads an environment variable or parses a flag.
   refusal of the transport is the one envelope
   `{"error":{"code","message"}}`. A body is read as JSON of its route's
   shape, which judges itself as it is read, so nothing validates it
-  twice: no unknown field, the stamps as stamps, a line's text within 16
-  KiB, an id or a name within 128 characters; anything else is `400
+  twice: no unknown field, the stamps as stamps, a line's text within
+  16,384 characters, an id or a name within 128 characters; anything else is `400
   invalid_request`, saying where. Each route answers its verb's outcome
   verbatim under 200: the status describes the transport, and `status` in
   the body what happened. An unknown route of the API, `/api` itself
@@ -59,7 +59,8 @@ Nothing here prints, reads an environment variable or parses a flag.
 - **The stop.** New API requests answer 503 at once; the daemon stops,
   its turns draining with the socket and the streams open, so an accepted
   turn still receives its answer and the stream its reply; then each
-  stream ends once the frames queued for it are written; an answer still
+  stream ends once everything announced before the stop reached it and
+  the frames queued for it are written; an answer still
   being written gets the grace to finish, while a request that never fully
   arrived is waited for not at all; and only then does the listener close
   and whatever remains is cut.

@@ -680,8 +680,9 @@ impl Daemon {
     }
 
     /// Stops every character, for good: no start follows. A boot, a reload
-    /// or a recovery in flight is overtaken, a turn in flight finishes, and
-    /// the reconcile pass in flight is waited for.
+    /// or a recovery in flight is overtaken, a turn in flight finishes and
+    /// is announced, and the reconcile pass in flight is waited for; once
+    /// it answers, everything the stop ended has been announced.
     pub async fn stop(&self) {
         self.inner.pairings.stop();
 
@@ -698,6 +699,7 @@ impl Daemon {
 
         self.inner.reconciler.settled().await;
         join_all(handles.iter().map(|handle| handle.stopped())).await;
+        self.inner.ledger.settled().await;
     }
 
     pub(crate) fn downgrade(&self) -> WeakDaemon {

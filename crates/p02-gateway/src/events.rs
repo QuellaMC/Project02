@@ -112,7 +112,7 @@ impl Streams {
             closing: CancellationToken::new(),
         });
 
-        tokio::spawn(pump(Arc::clone(&shared), events));
+        shared.writers.spawn(pump(Arc::clone(&shared), events));
         Self(shared)
     }
 
@@ -185,18 +185,12 @@ impl Streams {
             .into_response())
     }
 
-    /// Ends every stream once the frames already queued for it are
-    /// written, a client that does not take one within the grace dropped
-    /// on the way, and refuses every stream asked for after; answered once
-    /// every stream ended.
+    /// Ends every stream once everything announced before the close is
+    /// handed to it and the frames queued for it are written, a client
+    /// that does not take one within the grace dropped on the way, and
+    /// refuses every stream asked for after; answered once every stream
+    /// ended.
     pub(crate) async fn close(&self) {
-        {
-            let mut hub = self.0.hub.lock().await;
-
-            hub.closed = true;
-            hub.open.clear();
-        }
-
         self.0.closing.cancel();
         self.0.writers.close();
         self.0.writers.wait().await;
@@ -212,24 +206,30 @@ impl fmt::Debug for Streams {
     }
 }
 
-/// Takes every event as it is announced into the streams.
+/// Takes every event as it is announced into the streams, until the close:
+/// then what was announced before it is numbered and handed out, and the
+/// streams end.
 async fn pump(shared: Arc<Shared>, mut events: mpsc::UnboundedReceiver<Event>) {
     loop {
         let event = tokio::select! {
-            () = shared.closing.cancelled() => return,
+            () = shared.closing.cancelled() => break,
             event = events.recv() => match event {
                 Some(event) => event,
-                None => return,
+                None => break,
             },
         };
-        let mut hub = shared.hub.lock().await;
 
-        if hub.closed {
-            return;
-        }
+        shared.hub.lock().await.publish(&shared.run, &event);
+    }
 
+    let mut hub = shared.hub.lock().await;
+
+    while let Ok(event) = events.try_recv() {
         hub.publish(&shared.run, &event);
     }
+
+    hub.closed = true;
+    hub.open.clear();
 }
 
 impl Hub {
