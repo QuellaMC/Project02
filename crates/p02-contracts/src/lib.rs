@@ -62,6 +62,6 @@ pub use tool::{
 pub use vocabulary::{
     AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,
     CONTRACT_VERSION, ConfigScope, ConfigValueType, ContextItemKind, Declaration, EvidenceKind,
-    EvidenceStatus, HEALTH_REJECTION, HandleToolCallFailure, HealthFailure, HealthStatus,
-    PluginKind, PolicyOutcome, SourceKind, ToolConcurrency, ValidationFailureReason,
+    EvidenceStatus, HEALTH_REJECTION, HOST_PLUGIN, HandleToolCallFailure, HealthFailure,
+    HealthStatus, PluginKind, PolicyOutcome, SourceKind, ToolConcurrency, ValidationFailureReason,
 };

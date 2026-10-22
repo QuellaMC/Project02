@@ -9,6 +9,7 @@ mod http;
 mod identifier;
 mod json_boundary;
 mod redaction;
+mod sentence;
 mod sse;
 
 pub use canonical_json::{Fingerprint, ParseFingerprintError, canonical_json};
@@ -33,4 +34,5 @@ pub use json_boundary::{
     BoundJsonError, Credentials, JsonLimits, bound_json, bound_json_object, redact_credentials,
 };
 pub use redaction::is_credential_key;
+pub use sentence::{error_sentence, sentence};
 pub use sse::{SseFrame, SseFrameSplitter};

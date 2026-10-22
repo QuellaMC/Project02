@@ -955,6 +955,10 @@ it("config.retired-shapes-refused: a config.json still carrying project02.storeR
     await startDaemon(home, {NVIDIA_API_KEY: 'nvapi-from-environment'}),
   );
 
+  // Her boot settles first: a start sent while it runs joins it, and it
+  // read the home before the documents written below.
+  await wire.start('mira');
+
   for (const [project02, field, code] of [
     [
       {storeRoot: elsewhere},

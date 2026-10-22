@@ -1,8 +1,9 @@
 //! The socket's rules and its routes. Every `/api` request passes, in
 //! order, the stopping check, the loopback check and the bearer token, and
-//! its body the cap as it is read; each route answers its verb's outcome verbatim under 200, the
-//! status describing the transport and the body what happened; and every
-//! transport refusal is the one envelope `{"error":{"code","message"}}`.
+//! its body the cap as it is read; each route answers its verb's outcome
+//! verbatim under 200, the status describing the transport and the body
+//! what happened; and every transport refusal is the one envelope
+//! `{"error":{"code","message"}}`.
 
 use std::fmt;
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use p02_core::ClientStamp;
 use p02_shared::DaemonToken;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde_json::json;
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq as _;
 use tokio_util::sync::CancellationToken;
@@ -32,8 +33,9 @@ use crate::page::Page;
 
 /// A message is a few KiB; a body past this is not a message.
 const BODY_LIMIT: usize = 64 * 1024;
-/// Bounded well above any line a person types, in characters, so a line
-/// in any script is held to the same length, and well below the body cap.
+/// The longest text a request carries, a line, in characters, so a line
+/// in any script is held to the same length: well above any line a person
+/// types, and well below the body cap.
 const TEXT_LIMIT: usize = 16 * 1024;
 /// The bound of an id, and of the name a person goes by.
 const NAME_LIMIT: usize = 128;
@@ -475,8 +477,9 @@ fn internal(error: &serde_json::Error) -> Response {
 }
 
 /// The body of a request as `T`, `subject` naming the request in what a
-/// refusal says: read within the cap, sent as JSON, and of `T`'s shape,
-/// which `T` judges as it is read, so nothing validates it twice.
+/// refusal says: read within the cap, sent as JSON, each of its strings
+/// within the bound of a text, and of `T`'s shape, which `T` judges as it
+/// is read, so nothing validates it twice.
 fn read<T: DeserializeOwned>(
     subject: &str,
     headers: &HeaderMap,
@@ -495,8 +498,16 @@ fn read<T: DeserializeOwned>(
         )));
     }
 
-    let mut json = serde_json::Deserializer::from_slice(&body);
-    let read = serde_path_to_error::deserialize(&mut json).map_err(|error| {
+    let json: Value = serde_json::from_slice(&body)
+        .map_err(|error| Refusal::invalid(format!("{subject}: {error}.")))?;
+
+    if let Some(path) = overlong(&json) {
+        return Err(Refusal::invalid(format!(
+            "{subject}{path} exceeds {TEXT_LIMIT} characters."
+        )));
+    }
+
+    serde_path_to_error::deserialize(json).map_err(|error| {
         let path = error.path().to_string();
         let place = if path == "." {
             subject.to_owned()
@@ -505,11 +516,24 @@ fn read<T: DeserializeOwned>(
         };
 
         Refusal::invalid(format!("{place}: {}.", error.into_inner()))
-    })?;
+    })
+}
 
-    json.end()
-        .map_err(|error| Refusal::invalid(format!("{subject}: {error}.")))?;
-    Ok(read)
+/// Where `json` first holds a string longer than any text a request
+/// carries, as a refusal names the place: `.key` into an object, `[index]`
+/// into an array, and nothing for `json` itself.
+fn overlong(json: &Value) -> Option<String> {
+    match json {
+        Value::String(text) => (text.chars().count() > TEXT_LIMIT).then(String::new),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .find_map(|(index, item)| overlong(item).map(|path| format!("[{index}]{path}"))),
+        Value::Object(fields) => fields
+            .iter()
+            .find_map(|(key, field)| overlong(field).map(|path| format!(".{key}{path}"))),
+        Value::Null | Value::Bool(_) | Value::Number(_) => None,
+    }
 }
 
 /// Whether the body is declared JSON: `application/json`, or a type of it
@@ -603,19 +627,20 @@ impl<'de> serde::Deserialize<'de> for Short {
     }
 }
 
-/// A line's text: 1 to 16384 characters.
+/// A line's text: at least one character, and as long as any text of a
+/// body may be.
 struct Text(String);
 
 impl<'de> serde::Deserialize<'de> for Text {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
 
-        if (1..=TEXT_LIMIT).contains(&text.chars().count()) {
-            Ok(Self(text))
-        } else {
+        if text.is_empty() {
             Err(serde::de::Error::custom(
-                "a line's text is 1 to 16384 characters",
+                "a line's text is at least one character",
             ))
+        } else {
+            Ok(Self(text))
         }
     }
 }

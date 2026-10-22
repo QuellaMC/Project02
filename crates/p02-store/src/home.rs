@@ -107,18 +107,22 @@ impl Home {
     }
 
     /// Refuses, writing nothing, a folder that is no home and could not be
-    /// made one: one marked as something else; one with no marker holding
-    /// history, or anything else a home does not hold before its marker; or
-    /// one whose control entries are not the real files and directories a
-    /// home's state lives in, since a link would carry that state outside
-    /// it. Every way into a home asks this first.
+    /// made one: one marked as something else; one with no marker that lies
+    /// inside a character's data, or holds history or anything else a home
+    /// does not hold before its marker; or one whose control entries are not
+    /// the real files and directories a home's state lives in, since a link
+    /// would carry that state outside it. Every way into a home asks this
+    /// first.
     ///
     /// # Errors
     ///
     /// [`StorageError`] naming the first refusal.
     pub fn check(&self) -> Result<(), StorageError> {
         match marker::read(&self.root)? {
-            None => self.check_unmarked(),
+            None => {
+                self.check_outside_character_data()?;
+                self.check_unmarked()
+            }
             Some(Marker::Home { .. }) => self.check_control_entries(),
             Some(Marker::CharacterData { .. }) => Err(StorageError::WrongScope {
                 path: self.root.clone(),
@@ -171,6 +175,33 @@ impl Home {
         Ok(DaemonLease::new(self.clone(), lease))
     }
 
+    /// A folder inside a character's data is hers, whatever it holds: the
+    /// nearest marker above it says so, hers, or a home's whose character
+    /// data it lies in. A path that merely runs through a folder named
+    /// `character-data` is no such folder.
+    fn check_outside_character_data(&self) -> Result<(), StorageError> {
+        for above in self.root.ancestors().skip(1) {
+            let data = match marker::read(above) {
+                Ok(Some(Marker::CharacterData { .. })) => above.to_path_buf(),
+                Ok(Some(Marker::Home { .. })) => above.join(CHARACTER_DATA_DIRECTORY),
+                // A folder above that is no store, or whose marker cannot be
+                // read, says nothing of this one.
+                Ok(None) | Err(_) => continue,
+            };
+
+            return if self.root.starts_with(&data) {
+                Err(StorageError::InsideCharacterData {
+                    path: self.root.clone(),
+                    data,
+                })
+            } else {
+                Ok(())
+            };
+        }
+
+        Ok(())
+    }
+
     fn check_unmarked(&self) -> Result<(), StorageError> {
         let entries = match list_directory(&self.root) {
             Ok(entries) => entries,
@@ -197,9 +228,11 @@ impl Home {
 
     /// What a home holds before its marker is written: its settings, the
     /// daemon's record, its locks, the character packages its person added,
-    /// which may be linked in, the directories its history goes in while
-    /// they are still empty, and what a writer of a control file left when
-    /// it died.
+    /// which may be linked in, its characters' data, each of whose
+    /// directories is vouched for by a marker of its own and judged when she
+    /// is reached, so that damage there fails her alone, the directory its
+    /// conversations go in while it is still empty, and what a writer of a
+    /// control file left when it died.
     fn belongs_before_its_marker(
         &self,
         name: &OsStr,
@@ -210,8 +243,8 @@ impl Home {
         };
 
         Ok(match name {
-            LOCKS_DIRECTORY => matches!(entry, PathEntry::Directory),
-            CHARACTER_DATA_DIRECTORY | CONVERSATIONS_DIRECTORY => {
+            LOCKS_DIRECTORY | CHARACTER_DATA_DIRECTORY => matches!(entry, PathEntry::Directory),
+            CONVERSATIONS_DIRECTORY => {
                 let path = self.root.join(name);
 
                 matches!(entry, PathEntry::Directory)

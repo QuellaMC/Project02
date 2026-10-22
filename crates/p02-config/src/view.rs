@@ -3,14 +3,13 @@
 //! read carries a secret, since a token is what a connector exists to use.
 
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU64;
 
 use p02_characters::Discovery;
 use p02_contracts::ConfigValueType;
 use p02_core::SpeakerName;
-use p02_shared::{Fingerprint, Identifier};
+use p02_shared::{Fingerprint, Identifier, error_sentence, sentence};
 use p02_store::Home;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -179,7 +178,7 @@ impl ReadSettingsError {
     pub fn sentence(&self) -> String {
         match self {
             Self::UnknownCharacter(reason) => sentence(reason),
-            Self::Storage(error) => sentence(&chain(error)),
+            Self::Storage(error) => error_sentence(error),
             Self::Unloadable { diagnostics } => diagnostics
                 .first()
                 .map(|diagnostic| diagnostic.message().to_owned())
@@ -578,33 +577,4 @@ impl Resolution<'_> {
                 .collect(),
         }
     }
-}
-
-/// `fragment`, an error's lowercase words, as a sentence a person reads.
-pub(crate) fn sentence(fragment: &str) -> String {
-    let mut characters = fragment.chars();
-    let mut sentence: String = characters
-        .next()
-        .map(|first| first.to_uppercase().chain(characters).collect())
-        .unwrap_or_default();
-
-    if !sentence.ends_with(['.', '!', '?']) {
-        sentence.push('.');
-    }
-
-    sentence
-}
-
-/// `error` and each error beneath it, as one fragment.
-pub(crate) fn chain(error: &dyn Error) -> String {
-    let mut words = error.to_string();
-    let mut source = error.source();
-
-    while let Some(cause) = source {
-        words.push_str(": ");
-        words.push_str(&cause.to_string());
-        source = cause.source();
-    }
-
-    words
 }

@@ -6,6 +6,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::StreamExt as _;
 use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, Confirmation, ContextItem, ContextItemKind,
     EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HealthReport, HealthStatus,
@@ -17,7 +18,7 @@ use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
-use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, Turn, list};
+use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, ToolCallReport, Turn, list};
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
@@ -56,6 +57,19 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
     })
     .with_privacy_labels(vec![RedactionLabel::new("turn").unwrap()])
     .unwrap()
+}
+
+/// One model round's tool calls through `host`, the reports in call order.
+pub(crate) async fn run_round(
+    host: &PluginHost,
+    calls: Vec<ProposedToolCall>,
+    turn: &Turn,
+) -> Vec<ToolCallReport> {
+    let mut landed: Vec<(usize, ToolCallReport)> =
+        host.handle_tool_calls(calls, turn).collect().await;
+
+    landed.sort_by_key(|(index, _)| *index);
+    landed.into_iter().map(|(_, report)| report).collect()
 }
 
 pub(crate) fn call(call_id: &str, tool: &str, input: Value) -> ProposedToolCall {

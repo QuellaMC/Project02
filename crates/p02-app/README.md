@@ -31,9 +31,9 @@ tokio's blocking pool.
   in flight finishes, and from then on she publishes only `stopping` and
   `stopped`. Her start reads her package, her settings, which must load
   and switch her on before anything is written for her, merges her
-  package's settings into her overlay, chooses her model, holds her to the
-  plugins her package requires, a recommended one missing only warning,
-  and to one memory provider, and builds her plugins with her confirmer. A
+  package's settings into her overlay, is refused while anything in her
+  settings stops her, a plugin her package recommends missing only
+  warning, chooses her model, and builds her plugins with her confirmer. A
   start sent while one is in flight, a boot or a reload, joins it and is
   answered when it settles, and one that failed stays failed until the
   next start or settings change. Her thread with the person is opened the
@@ -41,9 +41,11 @@ tokio's blocking pool.
   after a reload or a recovery, so no client reopens it. A turn the
   runtime itself fails leaves her failed and earns one restart: the lines
   queued behind it are refused, her thread is closed and her plugins shut
-  down, and she starts again. A reload happens between turns, when her
-  package or her settings differ from those she was built from; lines sent
-  meanwhile wait and land on her thread opened again. Her stop cancels her
+  down, and she starts again. She hears what she is asked while a turn
+  runs, so a reload is said the moment her package or her settings come
+  to differ from those she was built from; it happens once no turn runs,
+  before her next line, and lines sent meanwhile wait and land on her
+  thread opened again. Her stop cancels her
   parked confirmations first, closes her thread, its end hooks run, and
   shuts her plugins down, saying what failed of that. Her
   host is handed her settings, which its own plugin reads and changes in
@@ -73,15 +75,19 @@ tokio's blocking pool.
   out to every surface before the answer does, and a reconcile pass acts
   on it behind the answer, on a task of its own, so a caller that stops
   waiting leaves nothing undone. A plugin that a change her own plugin
-  made rebuilt live serves the rest of her turn, and once the turn ends
-  the pass rebuilds her from the settings she now runs on.
+  made rebuilt live serves the rest of her turn on the values it was
+  rebuilt from, so she runs what her settings now say and the pass
+  reloads nothing; a change it could not apply live reloads her once
+  the turn ends.
 - **Reconcile.** One rule for boot and for every settings change: an
   enabled character who runs nothing starts, one who failed starts again,
-  one who is ready and would be built from another package or other
-  settings now reloads, and a disabled one who still runs stops, as does
-  one whose package left the roster, who is then no character to reach.
-  Passes never overlap: a request while one runs marks one more after it,
-  so the newest roster has the last word.
+  one who is ready and runs other than what her package and her settings
+  now say reloads, and a disabled one who still runs stops, as does one
+  whose package left the roster, who is then no character to reach. A
+  pass judges the characters running when it was asked for: one a client
+  starts while it runs is the client's. Passes never overlap: a request
+  while one runs marks one more after it, so the newest roster has the
+  last word.
 - **Pairing.** An account a connector does not know waits for the
   person's answer under a six-digit code, drawn at random and unlike any
   waiting, until its deadline, an hour unless a test harness shortens it;

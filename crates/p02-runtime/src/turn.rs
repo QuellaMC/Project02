@@ -6,6 +6,7 @@ use std::error::Error;
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
+use futures_util::StreamExt as _;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     BlankContextTextError, CharacterDecision, CommittedTurn, ConversationToolCall,
@@ -18,6 +19,7 @@ use p02_core::{
 };
 use p02_plugins::{
     BeforeCallOutcome, HealthCheck, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall,
+    ToolCallReport,
 };
 use p02_role_model::{
     CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
@@ -793,31 +795,40 @@ impl TurnSink for OpenTurn<'_> {
                 input: call.input().clone(),
             })
             .collect();
-        let reports = self
-            .host
-            .handle_tool_calls(proposed, &self.shown().await)
-            .await;
-        let mut finished = Vec::with_capacity(calls.len());
+        let shown = self.shown().await;
+        let mut landing = std::pin::pin!(self.host.handle_tool_calls(proposed, &shown));
+        let mut landed: Vec<(usize, ToolCallReport)> = Vec::with_capacity(calls.len());
 
-        for ((call, started), report) in calls.into_iter().zip(&started).zip(reports) {
-            let dispatch = self.dispatch(&call);
-            let accepted = matches!(report.result, ToolCallResult::Accepted { .. });
+        // Each call is recorded and told finished as it finishes, a quick
+        // one before a slow one called ahead of it, so what finished
+        // outlasts a crash that comes before the rest.
+        while let Some((index, report)) = landing.next().await {
+            let call = &calls[index];
 
             self.finish(
                 ToolCallFinished::new(
-                    started,
-                    dispatch,
+                    &started[index],
+                    self.dispatch(call),
                     report.result.clone(),
                     report.evidence.clone(),
                 )?,
-                report.evidence,
+                report.evidence.clone(),
             )
             .await?;
             (self.listener)(Progress::ToolCallCompleted {
                 round,
                 tool_name: call.tool_name().clone(),
-                accepted,
+                accepted: matches!(report.result, ToolCallResult::Accepted { .. }),
             });
+            landed.push((index, report));
+        }
+
+        // The model reads the results in the order it called for them.
+        landed.sort_by_key(|(index, _)| *index);
+
+        let mut finished = Vec::with_capacity(calls.len());
+
+        for (call, (_, report)) in calls.into_iter().zip(landed) {
             finished.push(call.finish(report.result)?);
         }
 

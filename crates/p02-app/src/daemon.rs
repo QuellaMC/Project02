@@ -18,7 +18,7 @@ use p02_config::{
 };
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
 use p02_core::{ClientStamp, Conversation, ConversationId, Participant, VisibleMessageRole};
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_sentence};
 use p02_store::{Home, StorageError};
 use tokio::sync::mpsc;
 
@@ -29,7 +29,7 @@ use crate::outcome::{
     CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
     HistoryOutcome, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
     PendingConfirmation, ReconcilePlan, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal,
-    TurnStamp, sentence,
+    TurnStamp,
 };
 use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
@@ -534,7 +534,7 @@ impl Daemon {
             discover(world.home.root())
                 .find(&wanted)
                 .cloned()
-                .map_err(|error| sentence(&error))
+                .map_err(|error| error_sentence(&error))
         })
         .await;
         let definition = match found {
@@ -567,24 +567,22 @@ impl Daemon {
         }
     }
 
-    /// Makes the running characters match the settings. A request while a
-    /// pass runs joins it and marks one more pass after it, so the newest
-    /// roster has the last word; passes never overlap.
-    pub async fn reconcile(&self) -> ReconcilePlan {
+    /// Makes the characters running at the call match the settings, and
+    /// answers with what that set in motion: the pass runs on a task of its
+    /// own whether or not the answer is awaited. A request while a pass runs
+    /// joins it and marks one more pass after it, so the newest roster has
+    /// the last word; passes never overlap.
+    pub fn reconcile(&self) -> impl Future<Output = ReconcilePlan> + Send + 'static {
         if self.inner.characters().stopped {
-            return ReconcilePlan::default();
+            return std::future::ready(ReconcilePlan::default()).boxed();
         }
 
         let daemon = self.clone();
 
         self.inner
             .reconciler
-            .reconcile(move || {
-                let daemon = daemon.clone();
-
-                Box::pin(async move { daemon.pass().await })
-            })
-            .await
+            .reconcile(move || daemon.pass())
+            .boxed()
     }
 
     /// The settings of `target` as its settings screen shows them.
@@ -646,10 +644,7 @@ impl Daemon {
 
         if matches!(outcome, ChangeOutcome::Applied { .. }) {
             self.announce_health();
-
-            let daemon = self.clone();
-
-            tokio::spawn(async move { daemon.reconcile().await });
+            tokio::spawn(self.reconcile());
         }
 
         outcome
@@ -731,9 +726,9 @@ impl Daemon {
 
     /// Starts `id` on her actor, built now unless one runs: answered once
     /// her start settles; false once the daemon stopped.
-    pub(crate) async fn begin(&self, id: &Identifier) -> bool {
-        match self.running(id).await {
-            Some(handle) => {
+    async fn begin(&self, id: &Identifier) -> bool {
+        match self.actor(id).await {
+            Some(Actor::Running(handle) | Actor::Built(handle)) => {
                 handle.start().await;
                 true
             }
@@ -744,7 +739,7 @@ impl Daemon {
     /// Her actor, built now unless one runs; one whose stop is under way is
     /// waited for first, so that one actor at a time holds what is hers.
     /// None once the daemon stopped.
-    async fn running(&self, id: &Identifier) -> Option<Arc<CharacterHandle>> {
+    pub(crate) async fn actor(&self, id: &Identifier) -> Option<Actor> {
         loop {
             let stopping = {
                 let mut characters = self.inner.characters();
@@ -754,13 +749,15 @@ impl Daemon {
                 }
 
                 match characters.handles.get(id) {
-                    Some(handle) if !handle.ended() => return Some(Arc::clone(handle)),
+                    Some(handle) if !handle.ended() => {
+                        return Some(Actor::Running(Arc::clone(handle)));
+                    }
                     Some(handle) if !handle.gone() => Arc::clone(handle),
                     _ => {
                         let handle = Arc::new(CharacterHandle::spawn(self, id.clone()));
 
                         characters.handles.insert(id.clone(), Arc::clone(&handle));
-                        return Some(handle);
+                        return Some(Actor::Built(handle));
                     }
                 }
             };
@@ -920,7 +917,10 @@ impl Daemon {
             Err(error) => {
                 return Err(TurnOutcome::refused(
                     TurnRefusal::ConversationUnreadable,
-                    format!("Conversation \"{id}\" cannot be read: {}", sentence(&error)),
+                    format!(
+                        "Conversation \"{id}\" cannot be read: {}",
+                        error_sentence(&error)
+                    ),
                 ));
             }
         };
@@ -928,6 +928,13 @@ impl Daemon {
         routes.insert(id.clone(), character.clone());
         Ok((id, character))
     }
+}
+
+/// A character's actor as the daemon found it: one that ran already, or one
+/// built now, whose boot is under way.
+pub(crate) enum Actor {
+    Running(Arc<CharacterHandle>),
+    Built(Arc<CharacterHandle>),
 }
 
 /// Why a character takes nothing now, in a sentence.

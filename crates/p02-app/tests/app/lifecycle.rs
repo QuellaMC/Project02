@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
-use p02_app::{Answer, ConfirmationAnswer, Event, OpenOutcome, StartOutcome, TurnOutcome};
+use p02_app::{
+    Answer, ConfirmationAnswer, Event, OpenOutcome, ReconcilePlan, StartOutcome, TurnOutcome,
+};
 use p02_config::{ConfigTarget, connectors};
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
@@ -134,6 +136,36 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     assert_eq!(
         wire(&daemon.health().await)["characters"][0]["state"],
         "stopped"
+    );
+}
+
+/// A pass judges the characters running when it was asked for: a client's
+/// start of a character switched off, while the pass runs, is the
+/// client's, and fails her saying she is switched off.
+#[tokio::test]
+async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
+    let world = World::new();
+
+    world.settings(json!({"project02": {"enabled": false}}));
+
+    let daemon = world.daemon(Vec::new()).await;
+    let pass = daemon.reconcile();
+    let StartOutcome::Settled { character } = daemon.start_character("mira").await else {
+        panic!("her start runs");
+    };
+
+    assert_eq!(pass.await, ReconcilePlan::default());
+    assert_eq!(character.state, Some(Failed));
+    assert!(
+        character
+            .diagnostic
+            .as_deref()
+            .is_some_and(|diagnostic| diagnostic.contains("is disabled")),
+        "{character:?}"
+    );
+    assert_eq!(
+        wire(&daemon.health().await)["characters"][0]["state"],
+        "failed"
     );
 }
 
@@ -321,12 +353,75 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     assert_eq!(ear.states("mira"), [Reloading, Ready]);
 }
 
-/// A change her own plugin makes is the daemon's one change of settings:
-/// health goes out before the call's answer, and once her turn ends the
-/// reconciler rebuilds her from the settings she now runs on, after which
-/// nothing differs.
+/// A change that would build her from something else while her turn runs
+/// says she is reloading at once; the turn finishes first, then the reload,
+/// and a line sent meanwhile lands on her thread after it.
 #[tokio::test(start_paused = true)]
-async fn a_change_her_own_plugin_makes_is_announced_and_rebuilds_her_after_her_turn() {
+async fn a_reload_decided_during_her_turn_is_said_at_once_and_follows_the_turn() {
+    let world = World::new();
+    let daemon = world
+        .daemon(vec![Toy::new("tone").setting("tone").plugin()])
+        .await;
+
+    daemon.reconcile().await;
+
+    let conversation = open(&daemon).await;
+    let gate = Arc::new(Gate::default());
+
+    gate.shut();
+    world.model.script([Round::says(&["First."]).held(&gate)]);
+
+    let mut ear = Ear::on(&daemon);
+    let first = tokio::spawn({
+        let daemon = daemon.clone();
+        let line = line(&conversation, "First?", "first");
+
+        async move { daemon.deliver(line).await }
+    });
+
+    gate.reached().await;
+    change(&daemon, home(), warm()).await;
+    ear.reached("mira", Reloading).await;
+
+    let second = tokio::spawn({
+        let daemon = daemon.clone();
+        let line = line(&conversation, "Second?", "second");
+
+        async move { daemon.deliver(line).await }
+    });
+
+    settle().await;
+    assert!(!first.is_finished());
+    gate.open();
+    assert_eq!(said(&first.await.unwrap()), ["First?", "First."]);
+    assert_eq!(daemon.reconcile().await.reloading, [id("mira")]);
+    assert_eq!(said(&second.await.unwrap()), ["Second?", "Hello."]);
+    ear.until(|event| {
+        matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == "second")
+    })
+    .await;
+
+    let order: Vec<String> = ear
+        .heard
+        .iter()
+        .filter_map(|event| match event {
+            Event::StateChanged { state, .. } => Some(wire(state).as_str()?.to_owned()),
+            Event::TurnCompleted {
+                client_message_id, ..
+            } => Some(client_message_id.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(order, ["reloading", "first", "ready", "second"]);
+}
+
+/// A change her own plugin makes is the daemon's one change of settings:
+/// health goes out before the call's answer, and the plugin it changes,
+/// rebuilt live, already runs what her settings now say, so nothing
+/// reloads her.
+#[tokio::test(start_paused = true)]
+async fn a_change_her_own_plugin_makes_is_announced_and_reloads_nothing_it_applied_live() {
     let world = World::new();
 
     world.settings(json!({"plugins": {"demo-config": {"enabled": true}}}));
@@ -373,8 +468,8 @@ async fn a_change_her_own_plugin_makes_is_announced_and_rebuilds_her_after_her_t
     ear.until(|event| matches!(event, Event::HealthChanged { .. }))
         .await;
     assert_eq!(said(&turn.await.unwrap()), ["Be warmer.", "Warmer now."]);
-    ear.reached("mira", Reloading).await;
-    ear.reached("mira", Ready).await;
+    ear.drain();
+    assert_eq!(ear.states("mira"), []);
     assert_eq!(daemon.reconcile().await.reloading, []);
 }
 

@@ -3,9 +3,9 @@ use std::sync::{Arc, OnceLock, PoisonError, RwLock, Weak};
 
 use p02_contracts::{
     CharacterStorage, DatabaseOpener, Declaration, DuplicateToolError, FactoryInput,
-    FileStoreBackend, Manifest, MissingConfigValueError, PluginError, PluginToolDefinition,
-    PluginToolDefinitions, ProvidedTool, Registration, RegistrationError, RuntimePlugin,
-    SessionHistoryFeed, StoreAccess,
+    FileStoreBackend, HOST_PLUGIN, Manifest, MissingConfigValueError, PluginError,
+    PluginToolDefinition, PluginToolDefinitions, ProvidedTool, Registration, RegistrationError,
+    RuntimePlugin, SessionHistoryFeed, StoreAccess,
 };
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
@@ -64,8 +64,14 @@ pub(crate) struct Slot {
     /// The tools checked at activation; a rebuilt instance must provide
     /// the same.
     tools: Vec<ProvidedTool>,
-    live: RwLock<Arc<dyn RuntimePlugin>>,
+    live: RwLock<Serving>,
     pub(crate) capabilities: Capabilities,
+}
+
+/// The instance serving now, and the values it was built from.
+struct Serving {
+    plugin: Arc<dyn RuntimePlugin>,
+    authored: Map<String, Value>,
 }
 
 pub(crate) struct Capabilities {
@@ -160,6 +166,33 @@ impl PluginHost {
     #[must_use]
     pub fn tool_definitions(&self) -> &PluginToolDefinitions {
         self.core.offered()
+    }
+
+    /// Whether the host serves exactly `plugins`, each built from the values
+    /// given beside it: a plugin rebuilt live serves the values it was
+    /// rebuilt from.
+    pub fn serves<'p>(
+        &self,
+        plugins: impl IntoIterator<Item = (&'p Identifier, &'p Map<String, Value>)>,
+    ) -> bool {
+        let mut named = 0;
+
+        for (plugin_id, authored) in plugins {
+            named += 1;
+
+            let served = self
+                .core
+                .slots
+                .iter()
+                .find(|slot| slot.manifest.id() == plugin_id)
+                .is_some_and(|slot| slot.serves(authored));
+
+            if !served {
+                return false;
+            }
+        }
+
+        named == self.core.slots.len()
     }
 
     /// Builds the plugin again, as activation did, from `authored`, the
@@ -266,7 +299,7 @@ impl PluginHostBuilder {
                 },
             )?;
 
-            let factory = if plugin_id.as_str() == management::PLUGIN_ID {
+            let factory = if plugin_id.as_str() == HOST_PLUGIN {
                 management::factory(&host, self.config_control.clone())
             } else {
                 factory
@@ -291,7 +324,10 @@ impl PluginHostBuilder {
                 manifest,
                 factory,
                 tools: registration.tools().to_vec(),
-                live: RwLock::new(Arc::clone(registration.plugin())),
+                live: RwLock::new(Serving {
+                    plugin: Arc::clone(registration.plugin()),
+                    authored,
+                }),
             });
         }
 
@@ -388,8 +424,10 @@ impl Core {
             return Err(ReloadError::ToolsChanged(plugin_id.clone()));
         }
 
-        *slot.live.write().unwrap_or_else(PoisonError::into_inner) =
-            Arc::clone(registration.plugin());
+        *slot.live.write().unwrap_or_else(PoisonError::into_inner) = Serving {
+            plugin: Arc::clone(registration.plugin()),
+            authored: authored.clone(),
+        };
         Ok(())
     }
 }
@@ -397,7 +435,21 @@ impl Core {
 impl Slot {
     /// The instance serving now.
     pub(crate) fn live(&self) -> Arc<dyn RuntimePlugin> {
-        Arc::clone(&self.live.read().unwrap_or_else(PoisonError::into_inner))
+        Arc::clone(
+            &self
+                .live
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .plugin,
+        )
+    }
+
+    fn serves(&self, authored: &Map<String, Value>) -> bool {
+        self.live
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .authored
+            == *authored
     }
 }
 

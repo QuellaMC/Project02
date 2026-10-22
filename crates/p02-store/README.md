@@ -25,11 +25,14 @@ lock's wait blocks.
   overlay. A marker of any other version is refused, saying which, and is
   never converted; a data directory marked for another character is
   refused, naming her. A directory with no marker is made one only while
-  it holds nothing but control state, never history or anything foreign,
-  and nothing at all is written for one that is refused, not even the
-  home's marker. Control entries must be real files and directories: a
-  link would carry their state outside the directory its marker vouches
-  for.
+  it holds nothing but control state, never history or anything foreign;
+  a home's character data counts among its control state, since each
+  character's directory is vouched for by its own marker and judged when
+  she is reached, so that damage there fails her alone. No home is made
+  inside a character's data, and nothing at all is written for a
+  directory that is refused, not even the home's marker. Control entries
+  must be real files and directories: a link would carry their state
+  outside the directory its marker vouches for.
 - **Files.** A file is replaced whole, under the lock that guards it, so a
   temporary found beside it is a dead writer's and goes before the write.
   Logs are appended to and never rewritten: a line counts once its
@@ -103,7 +106,10 @@ lock's wait blocks.
   rewritten whole under its lock, beside a directory per session; the two
   agree, so a directory holding evidence the catalog does not list is a
   session lost and never read past, while a directory an interrupted start
-  or discard left, empty or holding only a torn line, is no session. A
+  or discard left, empty or holding only a torn line, is no session. A log
+  is made by its segment's first record, so only the newest segment of a
+  conversation is without one: a segment another continues whose log is
+  gone lost its records, and a read that must have it whole refuses it. A
   catalog row cut by a crash is no row; a damaged or repeated row fails a
   listing but not a read of another session. The catalog and the directories
   are read as they were at one moment, as a log is, so a session made or

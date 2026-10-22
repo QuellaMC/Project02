@@ -12,12 +12,11 @@ use p02_plugins::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
     ReadConfigError,
 };
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_sentence};
 use serde_json::{Map, Value};
 
 use crate::character::unresolved;
 use crate::daemon::{WeakDaemon, World};
-use crate::outcome::sentence;
 
 #[derive(Debug)]
 pub(crate) struct CharacterConfig {
@@ -40,7 +39,7 @@ impl CharacterConfig {
         let discovery = discover(self.world.home.root());
         let definition = discovery
             .find(self.character.as_str())
-            .map_err(|error| unreadable(sentence(&error)))?;
+            .map_err(|error| unreadable(error_sentence(&error)))?;
         let resolution = Resolution::character(&self.world.home, &self.world.sections, definition)
             .map_err(|error| unreadable(unresolved(&self.character, error)))?;
 

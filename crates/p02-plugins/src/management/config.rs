@@ -100,7 +100,10 @@ pub(super) async fn prepare(
 
     Ok(ToolPreparation::Prepared {
         preview: Map::from_iter([
-            ("pluginId".to_owned(), Value::from(request.plugin.as_str())),
+            (
+                "targetPluginId".to_owned(),
+                Value::from(request.plugin.as_str()),
+            ),
             ("fieldName".to_owned(), Value::from(field.as_str())),
             ("operation".to_owned(), Value::from(request.operation())),
             ("before".to_owned(), before),

@@ -45,6 +45,10 @@ pub(crate) use vocabulary;
 /// The plugin contract version every manifest names.
 pub const CONTRACT_VERSION: &str = "mvp-008.runtime_plugin.v2";
 
+/// The host's own plugin, which manages the others: it lists them, and
+/// shows and changes their settings. Its tools are named after it.
+pub const HOST_PLUGIN: &str = "runtime.plugin";
+
 /// The reason a turn records when a plugin's `beforeRoleModelCall` rejects it.
 pub const BEFORE_ROLE_MODEL_CALL_REJECTION: &str = "plugin_before_role_model_call_rejected";
 

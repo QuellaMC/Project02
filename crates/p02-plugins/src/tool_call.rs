@@ -6,7 +6,7 @@
 //! every failure is a rejected result the model reads, and the plugin's
 //! `handleToolCall` policy decides only how that is recorded.
 
-use futures_util::future::join_all;
+use futures_util::stream::{self, FuturesUnordered, Stream, StreamExt as _};
 use p02_contracts::{
     Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, HandleToolCallFailure, Hook,
     PolicyOutcome, PreparedEffect, ProvidedTool, ToolCall, ToolCallId, ToolCallOutcome,
@@ -60,32 +60,38 @@ struct Prepared {
 }
 
 impl PluginHost {
-    /// Runs one model round's tool calls. Admission follows the model's
-    /// order: consecutive shared calls overlap, an exclusive call runs
-    /// alone, and no call overtakes an earlier one, so an exclusive call is
-    /// never starved. The reports come back in call order.
-    pub async fn handle_tool_calls(
-        &self,
+    /// Runs one model round's tool calls, handing on each call's report,
+    /// by its place in `calls`, the moment it is made. Admission follows the
+    /// model's order: consecutive shared calls overlap, an exclusive call
+    /// runs alone, and no call overtakes an earlier one, so an exclusive
+    /// call is never starved.
+    pub fn handle_tool_calls<'h>(
+        &'h self,
         calls: Vec<ProposedToolCall>,
-        turn: &Turn,
-    ) -> Vec<ToolCallReport> {
+        turn: &'h Turn,
+    ) -> impl Stream<Item = (usize, ToolCallReport)> + Send + 'h {
         let core = self.core();
-        let mut reports = Vec::with_capacity(calls.len());
-        let mut shared = Vec::new();
+        let mut batches: Vec<(ToolConcurrency, Vec<(usize, ProposedToolCall)>)> = Vec::new();
 
-        for call in calls {
-            if core.concurrency(&call) == ToolConcurrency::Shared {
-                shared.push(call);
-            } else {
-                reports.extend(
-                    join_all(shared.drain(..).map(|call| core.tool_call(call, turn))).await,
-                );
-                reports.push(core.tool_call(call, turn).await);
+        for (index, call) in calls.into_iter().enumerate() {
+            let concurrency = core.concurrency(&call);
+
+            match batches.last_mut() {
+                Some((ToolConcurrency::Shared, batch))
+                    if concurrency == ToolConcurrency::Shared =>
+                {
+                    batch.push((index, call));
+                }
+                _ => batches.push((concurrency, vec![(index, call)])),
             }
         }
 
-        reports.extend(join_all(shared.into_iter().map(|call| core.tool_call(call, turn))).await);
-        reports
+        stream::iter(batches).flat_map(move |(_, batch)| {
+            batch
+                .into_iter()
+                .map(|(index, call)| async move { (index, core.tool_call(call, turn).await) })
+                .collect::<FuturesUnordered<_>>()
+        })
     }
 }
 

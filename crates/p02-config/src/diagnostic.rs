@@ -47,6 +47,13 @@ pub enum Code {
     RequiredSecretMissing,
     AuthoredOutsideScope,
     CharacterPackagePluginConfigInvalid,
+    DefaultMemoryProviderUnavailable,
+    DefaultMemoryProviderNotMemoryProvider,
+    AmbiguousMemoryProviderSelection,
+    CharacterRequiredPluginMissing,
+    CharacterRequiredPluginDisabled,
+    CharacterRecommendedPluginMissing,
+    CharacterRecommendedPluginDisabled,
 }
 
 impl Code {
@@ -80,6 +87,15 @@ impl Code {
             Self::RequiredSecretMissing => "runtime_config_required_secret_missing",
             Self::AuthoredOutsideScope => "runtime_config_authored_outside_scope",
             Self::CharacterPackagePluginConfigInvalid => "character_package_plugin_config_invalid",
+            Self::DefaultMemoryProviderUnavailable => "default_memory_provider_unavailable",
+            Self::DefaultMemoryProviderNotMemoryProvider => {
+                "default_memory_provider_not_memory_provider"
+            }
+            Self::AmbiguousMemoryProviderSelection => "ambiguous_memory_provider_selection",
+            Self::CharacterRequiredPluginMissing => "character_required_plugin_missing",
+            Self::CharacterRequiredPluginDisabled => "character_required_plugin_disabled",
+            Self::CharacterRecommendedPluginMissing => "character_recommended_plugin_missing",
+            Self::CharacterRecommendedPluginDisabled => "character_recommended_plugin_disabled",
         }
     }
 }
@@ -214,6 +230,20 @@ impl Diagnostic {
 
     pub(crate) fn is_error(&self) -> bool {
         self.severity == Severity::Error
+    }
+
+    /// Whether the finding stops the character whose settings hold it: an
+    /// error about anything she runs, which a connector, a process of its
+    /// own, is not.
+    pub(crate) fn stops_character(&self) -> bool {
+        self.is_error()
+            && !matches!(
+                self.concerns,
+                Concerns::Section {
+                    namespace: Namespace::Connectors,
+                    ..
+                }
+            )
     }
 
     /// Whether the finding concerns the section `id` of `namespace`.

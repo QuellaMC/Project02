@@ -249,14 +249,13 @@ fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left
     assert_eq!(snapshot(world.root()), copied);
 }
 
-/// What a home holds before its marker, its history directories still
+/// What a home holds before its marker, its conversations directory still
 /// empty among it, is no reason to refuse it; history, or anything else,
 /// is, whichever way in is asked.
 #[test]
 fn an_unmarked_home_holding_history_or_more_than_a_home_holds_is_refused_and_left_as_it_was() {
     for (entry, held) in [
         ("notes.txt", "notes.txt"),
-        ("character-data", "character-data/mira/schema.json"),
         ("conversations", "conversations/conv_a/conversation.json"),
     ] {
         let (_directory, home) = World::empty();
@@ -300,6 +299,74 @@ fn an_unmarked_home_holding_history_or_more_than_a_home_holds_is_refused_and_lef
 
         assert_eq!(snapshot(home.root()), before, "{entry}");
     }
+}
+
+/// Before its marker a home holds its characters' data whatever is in it:
+/// each character's directory is judged by its own marker when she is
+/// reached, so one that is damaged refuses her alone, and the home with the
+/// others is adopted.
+#[test]
+fn an_unmarked_home_adopts_its_character_data_each_directory_judged_as_hers() {
+    let (_directory, home) = World::empty();
+    let data = home.root().join("character-data");
+    let zeta = p02_shared::Identifier::new("zeta").unwrap();
+
+    std::fs::create_dir_all(data.join("mira")).unwrap();
+    std::fs::write(data.join("mira").join("config.json"), "{}").unwrap();
+    std::fs::create_dir_all(data.join("zeta")).unwrap();
+    std::fs::write(data.join("zeta").join("schema.json"), "not json").unwrap();
+    home.check().unwrap();
+
+    let refused = CharacterData::ensure(&home, &zeta).unwrap_err();
+
+    assert_eq!(refused.code(), "malformed_schema_marker");
+    assert!(!home.root().join("schema.json").exists());
+    assert_eq!(
+        CharacterData::ensure(&home, &mira().id)
+            .unwrap()
+            .character(),
+        &mira().id
+    );
+    assert!(home.root().join("schema.json").exists());
+}
+
+/// No home is made inside a character's data: below a directory marked as
+/// hers, or below a home's character data, whatever lies between; a home
+/// whose path merely runs through a folder named so is a home.
+#[test]
+fn a_folder_inside_character_data_is_refused_as_a_home_and_nothing_is_written() {
+    let world = World::new();
+    let inside = [
+        world.data.root().join("inner"),
+        world.data.root().join("inner").join("deeper"),
+        world.root().join("character-data").join("zeta"),
+        world.root().join("character-data"),
+    ];
+
+    for path in &inside {
+        let before = snapshot(world.root());
+        let refused = p02_store::Home::new(path.clone()).ensure().unwrap_err();
+
+        assert_eq!(
+            refused.code(),
+            "malformed_schema_marker",
+            "{}",
+            path.display()
+        );
+        assert!(
+            refused
+                .to_string()
+                .contains("lies inside the character data at"),
+            "{refused}"
+        );
+        assert_eq!(snapshot(world.root()), before, "{}", path.display());
+    }
+
+    let (_directory, unmarked) = World::empty();
+    let named = unmarked.root().join("character-data").join("home");
+
+    p02_store::Home::new(named.clone()).ensure().unwrap();
+    assert!(named.join("schema.json").exists());
 }
 
 /// Each entry, moved elsewhere and linked back, is refused before anything

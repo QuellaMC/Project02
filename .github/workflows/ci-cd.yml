@@ -115,6 +115,68 @@ jobs:
       - name: Run the scenario through the reference and the candidate
         run: pnpm test:differential
 
+  rust-conformance:
+    name: rust-conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo's registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-conformance-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-conformance-${{ runner.os }}-
+
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Chromium for the browser suite
+        run: pnpm exec playwright install --with-deps chromium
+
+      # The page is built into the binary, so it is built first.
+      - name: Build the page
+        run: pnpm build:web
+
+      - name: Build the binary
+        run: cargo build -p project02 --locked
+
+      - name: Run the conformance suite against the binary
+        run: pnpm exec vitest run --project conformance
+        env:
+          PROJECT02_SERVE_CMD: target/debug/project02 serve
+          PROJECT02_INSPECT_CMD: node src/cli/inspect/main.ts
+          PROJECT02_CONNECTOR_CMD: node src/frontends/telegram/main.ts
+
+      - name: Run the browser suite against the binary
+        run: pnpm test:browser
+        env:
+          PROJECT02_SERVE_CMD: target/debug/project02 serve
+
   pull-request-gate:
     name: pull-request-gate
     runs-on: ubuntu-latest

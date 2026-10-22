@@ -27,18 +27,19 @@ Nothing here prints, reads an environment variable or parses a flag.
   64 KiB, `413 payload_too_large`: a route that takes no body reads
   none. Every answer of the API is never cached, and every refusal of
   the transport is the one envelope `{"error":{"code","message"}}`. A
-  body is read as JSON of its route's shape, which judges itself as it
-  is read, so nothing validates it twice: no unknown field, the stamps
-  as stamps, a line's text within 16,384 characters, an id or a name
-  within 128 characters; anything else is `400 invalid_request`, saying
-  where. A change of settings is read as p02-config's own change, whose
-  character, fields and fingerprint are judged against the home: one the
-  home does not hold is the change's own refusal, not the transport's.
-  Each route answers its verb's outcome verbatim under 200: the status
-  describes the transport, and `status` in the body what happened. An
-  unknown route of the API, `/api` itself included, is a 404 behind the
-  same rules. No CORS header is sent, and a token is taken from no
-  cookie and no query.
+  body is read as JSON, each of its strings within 16,384 characters,
+  the longest text a request carries, a line; then as its route's
+  shape, which judges itself as it is read, so nothing validates it
+  twice: no unknown field, the stamps as stamps, a line's text not
+  empty, an id or a name within 128 characters; anything else is `400
+  invalid_request`, saying where. A change of settings is read as
+  p02-config's own change, whose character, fields and fingerprint are
+  judged against the home: one the home does not hold is the change's
+  own refusal, not the transport's. Each route answers its verb's
+  outcome verbatim under 200: the status describes the transport, and
+  `status` in the body what happened. An unknown route of the API,
+  `/api` itself included, is a 404 behind the same rules. No CORS header
+  is sent, and a token is taken from no cookie and no query.
 - **The page.** Its files are built into the binary from `dist/web` as
   `pnpm build:web` left it when the binary was built, public and never
   cached; a path that names nothing the page holds meets the daemon's own
@@ -52,9 +53,11 @@ Nothing here prints, reads an environment variable or parses a flag.
   opens in a step of its own with its first frames: `resumed` and exactly
   the frames after the id the client last applied, when the tail still
   holds them; else `ready`, the snapshot of health and the confirmations
-  and pairings waiting, read as it opens, and of the turns running with
-  their drafts exactly as of the frame it goes on from, so no draft is
-  told twice. An idle stream says `: ping` each heartbeat.
+  and pairings waiting, read as it opens and read again while anything
+  they show changed under the read, and of the turns running with their
+  drafts, all exactly as of the frame it goes on from, so nothing it
+  shows is told again and nothing after it is missed. An idle stream
+  says `: ping` each heartbeat.
   A stream's frames are written one at a time, each once the one before
   it was taken: a client that has not taken one within the grace is gone,
   its connection closed and nothing more queued for it, however long its
