@@ -193,14 +193,18 @@ impl Diagnostic {
     /// error about anything she runs, which a connector, a process of its
     /// own, is not.
     pub(crate) fn stops_character(&self) -> bool {
-        self.is_error()
-            && !matches!(
-                self.concerns,
-                Concerns::Section {
-                    namespace: Namespace::Connectors,
-                    ..
-                }
-            )
+        self.is_error() && !self.about_connector()
+    }
+
+    /// Whether the finding concerns a connector's section.
+    pub(crate) fn about_connector(&self) -> bool {
+        matches!(
+            self.concerns,
+            Concerns::Section {
+                namespace: Namespace::Connectors,
+                ..
+            }
+        )
     }
 
     /// Whether the finding concerns the section `id` of `namespace`.

@@ -169,8 +169,17 @@ jobs:
         run: pnpm exec vitest run --project conformance
         env:
           PROJECT02_SERVE_CMD: target/debug/project02 serve
-          PROJECT02_INSPECT_CMD: node src/cli/inspect/main.ts
+          PROJECT02_INSPECT_CMD: target/debug/project02 inspect
           PROJECT02_CONNECTOR_CMD: node src/frontends/telegram/main.ts
+
+      # Its result stands apart from the suite's, so a row the suite fails
+      # does not keep it from running.
+      - name: Run the differential run with the binary as the candidate
+        if: ${{ !cancelled() }}
+        run: pnpm test:differential
+        env:
+          PROJECT02_CANDIDATE_SERVE_CMD: target/debug/project02 serve
+          PROJECT02_CANDIDATE_INSPECT_CMD: target/debug/project02 inspect
 
       - name: Run the browser suite against the binary
         run: pnpm test:browser

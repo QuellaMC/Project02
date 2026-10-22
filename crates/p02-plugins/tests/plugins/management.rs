@@ -249,12 +249,13 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
     assert_eq!(
         person.asked()[0].preview,
         *json!({
+            "kind": "runtime_plugin_config_change",
             "targetPluginId": "demo-config",
             "fieldName": "tone",
             "operation": "set",
+            "expectedFingerprint": read,
             "before": {"configured": false},
             "after": {"configured": true, "value": "formal"},
-            "expectedFingerprint": read,
         })
         .as_object()
         .unwrap()

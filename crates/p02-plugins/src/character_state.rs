@@ -159,7 +159,7 @@ impl RuntimePlugin for CharacterStatePlugin {
             Ok(folded.state)
         })
         .await?;
-        let note = Identifier::new("character-state.current")
+        let note = Identifier::new("current")
             .map_err(|error| PluginError::with_source("the state note needs an id", error))?;
 
         Ok(BeforeRoleModelCallOutput {

@@ -520,7 +520,7 @@ describe('runtime config loading and resolution', () => {
     ).toEqual({
       enabled: false,
       status: 'blocked',
-      reasons: ['runtime_config_error:runtime_config_value_type_invalid'],
+      reasons: ['blocked_by_config_errors'],
     });
   });
 

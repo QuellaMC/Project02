@@ -60,7 +60,9 @@ only on tokio's blocking pool, where a lock's wait blocks.
   twentieth of the window at four characters a token, 1,000 characters at
   least and 6,000 at most. A provider that cannot, a failure, or a blank
   answer leaves a mechanical summary of how many turns went by, when, what
-  the person last said there and which tools were used. The continuation
+  the person last said there and which tools were used. Both speak of the
+  person by the name the conversation recorded for them, as the transcript
+  they condense names them. The continuation
   record is the commit point: a failure before it lands discards the new
   segment, or leaves it empty for the next open to discard, and the thread
   stays where it was, to plan again after the next turn; after it the old

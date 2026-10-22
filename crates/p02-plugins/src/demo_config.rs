@@ -60,7 +60,7 @@ impl RuntimePlugin for DemoConfigPlugin {
         &self,
         _context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let style = Identifier::new("demo-config.style")
+        let style = Identifier::new("style")
             .map_err(|error| PluginError::with_source("the style note needs an id", error))?;
 
         Ok(BeforeRoleModelCallOutput {

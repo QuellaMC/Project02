@@ -10,9 +10,15 @@ use serde_json::Value;
 
 use crate::{character_memory, character_state, demo_config, management, mem0, session_history};
 
-/// Each plugin by its id, with its descriptor and its factory, in id
-/// order.
+/// Each plugin by its id, with its descriptor and its factory: the host's
+/// own first, then the packages in id order. Whatever lists or runs them
+/// keeps this order, the model's tools among them.
 const PLUGINS: [(&str, &str, PluginFactory); 6] = [
+    (
+        p02_contracts::HOST_PLUGIN,
+        include_str!("management/project02.plugin.json"),
+        management::create,
+    ),
     (
         "character-memory",
         include_str!("../../../src/plugins/packages/character-memory/project02.plugin.json"),
@@ -32,11 +38,6 @@ const PLUGINS: [(&str, &str, PluginFactory); 6] = [
         "mem0",
         include_str!("../../../src/plugins/packages/mem0/project02.plugin.json"),
         mem0::create,
-    ),
-    (
-        p02_contracts::HOST_PLUGIN,
-        include_str!("management/project02.plugin.json"),
-        management::create,
     ),
     (
         "session-history",
@@ -72,9 +73,9 @@ pub enum BundledManifestError {
     },
 }
 
-/// The plugins compiled into the daemon, in id order: what a home's
-/// settings are judged against, and what a character's plugins are built
-/// from.
+/// The plugins compiled into the daemon, the host's own first and then the
+/// packages in id order: what a home's settings are judged against, and
+/// what a character's plugins are built from.
 ///
 /// # Errors
 ///
@@ -113,11 +114,11 @@ mod tests {
         assert_eq!(
             listed,
             [
+                ("runtime.plugin", true),
                 ("character-memory", true),
                 ("character-state", false),
                 ("demo-config", false),
                 ("mem0", false),
-                ("runtime.plugin", true),
                 ("session-history", true),
             ]
         );

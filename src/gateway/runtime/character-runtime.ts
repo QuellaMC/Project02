@@ -10,6 +10,7 @@ import {
 } from '../../app/index.ts';
 import type {CharacterProfile} from '../../core/index.ts';
 import {
+  createRuntimePluginConfigControlBinding,
   installedRuntimePluginCatalogEntry,
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
@@ -103,6 +104,8 @@ export type LocalCharacterRuntimeOptions = {
   readonly toolConfirmationTimeoutMs?: number | undefined;
   /** Handed to the configured provider's adapter. */
   readonly roleModelRequestTimeoutMs?: number | undefined;
+  /** Called each time her own plugin has changed her settings, which every surface hears of as of any change. */
+  readonly settingsChanged?: () => void;
 };
 
 export type LocalCharacterRuntime = CharacterRuntime & {
@@ -601,7 +604,10 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
 
   try {
     configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: startup.activationPlan,
+      activationPlan:
+        options.settingsChanged === undefined
+          ? startup.activationPlan
+          : sayingChanges(startup.activationPlan, options.settingsChanged),
       toolConfirmationHandler: context.broker.handler,
       toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
     });
@@ -619,6 +625,33 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   }
 
   return {...shared, host: configured.host, ownsHost: true};
+}
+
+/** The plan, its settings control saying each change her own plugin applies through it. */
+function sayingChanges(
+  plan: PreparedProject02PluginActivationPlan,
+  changed: () => void,
+): PreparedProject02PluginActivationPlan {
+  const {control, target} = plan.pluginConfigControl.configControl;
+
+  return Object.freeze({
+    ...plan,
+    pluginConfigControl: Object.freeze({
+      ...plan.pluginConfigControl,
+      configControl: createRuntimePluginConfigControlBinding({
+        control: Object.freeze({
+          ...control,
+          applyOperation: request => {
+            const applied = control.applyOperation(request);
+
+            changed();
+            return applied;
+          },
+        }),
+        target,
+      }),
+    }),
+  });
 }
 
 async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {

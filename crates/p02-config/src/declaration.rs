@@ -2,7 +2,6 @@
 //! as its manifest declares it and each connector's as this build declares
 //! it, and from which document a scope lets each target take a value.
 
-use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
@@ -537,29 +536,38 @@ pub fn connectors() -> &'static [Connector] {
 }
 
 /// The sections a home's settings are judged against: the plugins this
-/// build compiles in, one per id, and its connectors.
+/// build compiles in, one per id, in the order it lists them, the order
+/// her plugins run and are reported in, and its connectors.
 #[derive(Debug, Default)]
 pub struct Sections {
-    plugins: BTreeMap<Identifier, Manifest>,
+    plugins: Vec<Manifest>,
 }
 
 impl Sections {
     /// The sections of `plugins` and of every connector. A later manifest
-    /// of an id stands for it: a section has one declaration.
+    /// of an id stands for it, in its place: a section has one declaration.
     #[must_use]
     pub fn new(plugins: impl IntoIterator<Item = Manifest>) -> Self {
-        Self {
-            plugins: plugins
-                .into_iter()
-                .map(|manifest| (manifest.id().clone(), manifest))
-                .collect(),
+        let mut listed: Vec<Manifest> = Vec::new();
+
+        for manifest in plugins {
+            match listed
+                .iter_mut()
+                .find(|earlier| earlier.id() == manifest.id())
+            {
+                Some(earlier) => *earlier = manifest,
+                None => listed.push(manifest),
+            }
         }
+
+        Self { plugins: listed }
     }
 
-    /// Every section, the plugins' in id order and then the connectors'.
+    /// Every section, the plugins' in the order listed and then the
+    /// connectors'.
     pub(crate) fn declared(&self) -> impl Iterator<Item = Declared<'_>> {
         self.plugins
-            .values()
+            .iter()
             .map(Declared::Plugin)
             .chain(connectors().iter().map(Declared::Connector))
     }
