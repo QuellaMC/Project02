@@ -46,6 +46,14 @@ pub(crate) enum Inbox {
     },
 }
 
+/// Whether a bot may act now: no settings read is in doubt, and the
+/// token's polls are its own, as its poll last found.
+#[derive(Clone, Debug)]
+pub(crate) struct Leave {
+    pub(crate) held: watch::Receiver<bool>,
+    pub(crate) claimed: watch::Receiver<bool>,
+}
+
 /// What a bot is started with.
 #[derive(Debug)]
 pub(crate) struct Start {
@@ -161,10 +169,11 @@ async fn run(api: BotApi, parts: Parts) {
     let tasks = TaskTracker::new();
     let (polled, polls) = mpsc::unbounded_channel();
     let (claim, claimed) = watch::channel(false);
+    let leave = Leave { held, claimed };
     let outbox = Outbox::start(
         api.clone(),
         settings.clone(),
-        held.clone(),
+        leave.clone(),
         draft_edits,
         Arc::clone(&lines),
         quiet.clone(),
@@ -184,8 +193,7 @@ async fn run(api: BotApi, parts: Parts) {
     let intake = Intake {
         frames,
         polls,
-        claimed,
-        held,
+        leave,
         latest,
     };
 
@@ -544,9 +552,7 @@ pub(crate) trait Rules: Send {
 struct Intake {
     frames: mpsc::UnboundedReceiver<Inbox>,
     polls: mpsc::UnboundedReceiver<Polled>,
-    /// Whether the token's polls are this bot's, as its poll last found.
-    claimed: watch::Receiver<bool>,
-    held: watch::Receiver<bool>,
+    leave: Leave,
     latest: watch::Receiver<Option<Latest>>,
 }
 
@@ -562,8 +568,10 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
     let Intake {
         mut frames,
         mut polls,
-        mut claimed,
-        mut held,
+        leave: Leave {
+            mut held,
+            mut claimed,
+        },
         latest,
     } = intake;
     let mut caught_up = false;
@@ -633,16 +641,34 @@ mod tests {
     use super::*;
     use crate::stand_in::{Heard, StandIn};
 
-    /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once, writes nothing for the 30 s it waits, not even the frames a settings read held back, and once its polls are its own again catches up from the snapshot and says it gets its messages again.
+    /// A confirmation of Mira's waiting for the person's answer.
+    fn parked(summary: &str) -> PendingConfirmation {
+        PendingConfirmation {
+            character_id: Identifier::new("mira").unwrap(),
+            id: ConfirmationId::mint(),
+            request: ConfirmationQuestion {
+                plugin_id: Identifier::new("demo-config").unwrap(),
+                tool_name: Identifier::new("runtime_plugin_config_update").unwrap(),
+                summary: summary.to_owned(),
+                preview: Map::new(),
+            },
+            deadline_at: 0,
+            turn: None,
+        }
+    }
+
+    /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once and writes nothing for the 30 s it waits, neither a call it had under way nor the frames a settings read held back; once its polls are its own again it catches up from the snapshot and says it gets its messages again.
     #[tokio::test(start_paused = true)]
     async fn a_bot_outpolled_waits_writing_nothing_then_catches_up_from_the_snapshot() {
         let telegram = StandIn::start().await;
         let conflict = telegram.conflict_next_poll();
         let heard = Arc::new(Heard::default());
+        let waited = parked("Set tone to pirate.");
+        let raised = parked("Set tone to formal.");
         let (latest, latest_read) = watch::channel(Some(Latest {
             seq: 0,
             snapshot: Snapshot {
-                confirmations: Vec::new(),
+                confirmations: vec![waited.clone()],
                 pairings: Vec::new(),
                 turns: RunningTurns::default(),
             },
@@ -651,6 +677,10 @@ mod tests {
         let (_daemon, daemon) = watch::channel(None);
         let stop = CancellationToken::new();
         let bots = TaskTracker::new();
+
+        // The card for what waits is under way, Telegram asking it to wait.
+        telegram.ask_to_wait("sendMessage", 0, 10);
+
         let bot = Bot::start(
             Start {
                 telegram: Telegram::new(telegram.base()).unwrap(),
@@ -676,52 +706,46 @@ mod tests {
         // The other program polls the token while a settings read is in
         // doubt: Telegram ends the bot's poll.
         telegram.called("getUpdates", 1).await;
+        telegram.called("sendMessage", 1).await;
         reading.send_replace(true);
         conflict.send(()).unwrap();
         heard.reported(waiting).await;
 
         let lost = Instant::now();
-        let pending = PendingConfirmation {
-            character_id: Identifier::new("mira").unwrap(),
-            id: ConfirmationId::mint(),
-            request: ConfirmationQuestion {
-                plugin_id: Identifier::new("demo-config").unwrap(),
-                tool_name: Identifier::new("runtime_plugin_config_update").unwrap(),
-                summary: "Set tone to pirate.".to_owned(),
-                preview: Map::new(),
-            },
-            deadline_at: 0,
-            turn: None,
-        };
 
         // Raised meanwhile, and handed on as the read lands: the snapshot
         // has it, the chat does not.
         latest.send_modify(|latest| {
             if let Some(latest) = latest {
                 latest.seq = 1;
-                latest.snapshot.confirmations.push(pending.clone());
+                latest.snapshot.confirmations.push(raised.clone());
             }
         });
         bot.send(Inbox::Frame {
             seq: 1,
-            event: Arc::new(Event::ConfirmationRequested(pending.clone())),
+            event: Arc::new(Event::ConfirmationRequested(raised.clone())),
         });
         reading.send_replace(false);
 
         // The other program stopped: the bot's next poll is answered.
-        let cards = telegram.called("sendMessage", 1).await;
+        let sent = telegram.called("sendMessage", 3).await;
         let polls = telegram.calls("getUpdates");
-
-        heard.reported(back).await;
-        assert_eq!(polls[1].at - lost, CONFLICT_PAUSE);
-        assert_eq!(cards.len(), 1);
-        assert!(cards[0].at >= polls[1].at);
-        assert_eq!(
-            cards[0].body["reply_markup"],
+        let buttons = |pending: &PendingConfirmation| {
             json!({"inline_keyboard": [[
                 {"text": "Approve", "callback_data": format!("c:{}:a", pending.id)},
                 {"text": "Deny", "callback_data": format!("c:{}:d", pending.id)},
             ]]})
+        };
+
+        heard.reported(back).await;
+        assert_eq!(polls[1].at - lost, CONFLICT_PAUSE);
+        assert_eq!(sent.len(), 3);
+        assert!(sent[1..].iter().all(|card| card.at >= polls[1].at));
+        assert_eq!(
+            sent.iter()
+                .map(|card| card.body["reply_markup"].clone())
+                .collect::<Vec<_>>(),
+            [buttons(&waited), buttons(&waited), buttons(&raised)]
         );
         assert_eq!(heard.reports(), [waiting, back]);
         stop.cancel();
@@ -796,7 +820,10 @@ mod tests {
             outbox: Outbox::start(
                 api,
                 settings,
-                held.clone(),
+                Leave {
+                    held: held.clone(),
+                    claimed: claimed.clone(),
+                },
                 Duration::from_millis(1_500),
                 heard.clone(),
                 stop.clone(),
@@ -813,8 +840,7 @@ mod tests {
             Intake {
                 frames,
                 polls,
-                claimed,
-                held,
+                leave: Leave { held, claimed },
                 latest,
             },
         ));

@@ -1,7 +1,8 @@
 //! Telegram's Bot API on loopback for this crate's own tests, made with
 //! the production stack: every call kept with the moment it came, by the
 //! clock the test runs on, and answered as Telegram answers it, but for a
-//! poll the test ends with a 409 and a call it has refused.
+//! poll the test ends with a 409 and a call it has refused or asked to
+//! wait.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -35,8 +36,8 @@ struct Shared {
     /// newer poll ends it.
     conflict: Mutex<Option<oneshot::Receiver<()>>>,
     /// Calls to refuse: the method, how many more of its calls go through
-    /// first, and Telegram's code and description.
-    refusals: Mutex<VecDeque<(String, usize, i64, String)>>,
+    /// first, and the envelope Telegram answers it with.
+    refusals: Mutex<VecDeque<(String, usize, Value)>>,
 }
 
 pub(crate) struct StandIn {
@@ -75,12 +76,34 @@ impl StandIn {
 
     /// The call of `method` after `through` more of them is refused.
     pub(crate) fn refuse(&self, method: &str, through: usize, code: i64, description: &str) {
-        self.shared.refusals.lock().unwrap().push_back((
-            method.to_owned(),
+        self.refuse_with(
+            method,
             through,
-            code,
-            description.to_owned(),
-        ));
+            json!({"ok": false, "error_code": code, "description": description}),
+        );
+    }
+
+    /// The call of `method` after `through` more of them is asked to wait
+    /// `seconds` before it is made again.
+    pub(crate) fn ask_to_wait(&self, method: &str, through: usize, seconds: u64) {
+        self.refuse_with(
+            method,
+            through,
+            json!({
+                "ok": false,
+                "error_code": 429,
+                "description": format!("Too Many Requests: retry after {seconds}"),
+                "parameters": {"retry_after": seconds},
+            }),
+        );
+    }
+
+    fn refuse_with(&self, method: &str, through: usize, answer: Value) {
+        self.shared
+            .refusals
+            .lock()
+            .unwrap()
+            .push_back((method.to_owned(), through, answer));
     }
 
     pub(crate) fn calls(&self, method: &str) -> Vec<Call> {
@@ -112,9 +135,7 @@ async fn answer(State(shared): State<Arc<Shared>>, uri: Uri, body: Bytes) -> Res
         let mut refusals = shared.refusals.lock().unwrap();
 
         match refusals.iter().position(|refusal| refusal.0 == method) {
-            Some(at) if refusals[at].1 == 0 => refusals
-                .remove(at)
-                .map(|(_, _, code, description)| (code, description)),
+            Some(at) if refusals[at].1 == 0 => refusals.remove(at).map(|(_, _, answer)| answer),
             Some(at) => {
                 refusals[at].1 -= 1;
                 None
@@ -131,8 +152,8 @@ async fn answer(State(shared): State<Arc<Shared>>, uri: Uri, body: Bytes) -> Res
         });
     });
 
-    if let Some((code, description)) = refused {
-        return envelope(&json!({"ok": false, "error_code": code, "description": description}));
+    if let Some(answer) = refused {
+        return envelope(&answer);
     }
 
     match method.as_str() {

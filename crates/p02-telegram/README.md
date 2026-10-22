@@ -60,10 +60,11 @@ switches and the signals, and prints the lines it is handed.
   pairing request to the daemon and told its code; nothing it sends is
   carried, and it is told how its request ended.
 - **The outbox** makes a bot's calls to Telegram one at a time, in the
-  order decided, each write to a paired account's chat made only while
-  the account is paired, checked as its turn comes; a text longer than
-  Telegram's 4096 goes in as many messages as it takes, counted in UTF-16
-  units, stopping at one that could not be sent.
+  order decided, none while another program's polls hold the token, and
+  each write to a paired account's chat only while the account is
+  paired, both checked as its turn comes; a text longer than Telegram's
+  4096 goes in as many messages as it takes, counted in UTF-16 units,
+  stopping at one that could not be sent.
 - **The stop** cancels every bot, dropping each call in flight, so the
   daemon sees a delivery and a pairing request given up while its turn
   runs on, and answers once every bot has ended.

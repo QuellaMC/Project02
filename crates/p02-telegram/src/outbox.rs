@@ -1,11 +1,11 @@
 //! What a bot writes in its chats. Its calls to Telegram go one at a time
 //! in the order they were decided, so no edit overtakes a commit nor a
-//! reply the line shown before it, and none once the bot has stopped; one
-//! Telegram asks to wait on is made again after the pause. A write to a
-//! paired account's chat waits while the settings are in doubt and is made
-//! only while the account is paired, checked as the call's turn comes. A
-//! chat that answers 403 never opened the bot, and is skipped until it
-//! writes.
+//! reply the line shown before it, and none once the bot has stopped, nor
+//! while another program's polls hold the token; one Telegram asks to wait
+//! on is made again after the pause. A write to a paired account's chat
+//! waits while the settings are in doubt and is made only while the
+//! account is paired, each checked as the call's turn comes. A chat that
+//! answers 403 never opened the bot, and is skipped until it writes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::Lines;
-use crate::bot::capitalized;
+use crate::bot::{Leave, capitalized};
 use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
@@ -135,7 +135,7 @@ impl Outbox {
     pub(crate) fn start(
         api: BotApi,
         settings: watch::Receiver<Arc<BotSettings>>,
-        held: watch::Receiver<bool>,
+        leave: Leave,
         draft_edits: Duration,
         lines: Arc<dyn Lines>,
         stop: CancellationToken,
@@ -143,6 +143,7 @@ impl Outbox {
     ) -> Self {
         let (commands, taken) = mpsc::unbounded_channel();
         let read = Arc::clone(&settings.borrow());
+        let Leave { held, claimed } = leave;
 
         tracker.spawn(
             Writer {
@@ -150,6 +151,7 @@ impl Outbox {
                 settings,
                 read,
                 held,
+                claimed,
                 draft_edits,
                 lines,
                 stop,
@@ -313,6 +315,7 @@ struct Writer {
     /// read supersedes them.
     read: Arc<BotSettings>,
     held: watch::Receiver<bool>,
+    claimed: watch::Receiver<bool>,
     draft_edits: Duration,
     lines: Arc<dyn Lines>,
     stop: CancellationToken,
@@ -684,9 +687,11 @@ impl Writer {
     }
 
     /// The call, made again after each pause Telegram asks for, the outbox
-    /// waiting with it; a call to a paired account's chat, `to`, waits
-    /// while the settings are in doubt and is not made, nor made again,
-    /// once the account is paired no longer. None for one not made.
+    /// waiting with it, and not made, nor made again, while another
+    /// program's polls hold the token; a call to a paired account's chat,
+    /// `to`, waits while the settings are in doubt and is not made, nor
+    /// made again, once the account is paired no longer. None for one not
+    /// made.
     async fn patiently<T, F>(
         &mut self,
         to: Option<i64>,
@@ -706,6 +711,10 @@ impl Writer {
                 if !self.paired().contains(&chat) {
                     return None;
                 }
+            }
+
+            if !*self.claimed.borrow() {
+                return None;
             }
 
             let outcome = tokio::select! {
@@ -776,6 +785,7 @@ mod tests {
             paired: BTreeSet::from(["4242".to_owned()]),
         }));
         let (_held, held) = watch::channel(false);
+        let (_claim, claimed) = watch::channel(true);
         let stop = CancellationToken::new();
         let tasks = TaskTracker::new();
         let outbox = Outbox::start(
@@ -784,7 +794,7 @@ mod tests {
                 BotToken::new("987654:mira"),
             ),
             settings,
-            held,
+            Leave { held, claimed },
             Duration::from_millis(1_500),
             heard.clone(),
             stop.clone(),
