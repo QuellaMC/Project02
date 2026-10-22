@@ -28,8 +28,9 @@ crate graph: it depends on no crate of this workspace.
   overflows them, and can redact the values of credential-named keys.
 - **The daemon record**, `<home>/daemon.json`, which the daemon writes and
   its clients read to find it: its shape, its token, minted from 32 random
-  bytes spelled base64url, and its port rules, and its reader; and the
-  default home, `.project02`.
+  bytes spelled base64url and held to what the address's fragment and a
+  bearer header both carry as themselves, and its port rules, and its
+  reader; and the default home, `.project02`.
 - **HTTP**, behind the `http` feature for the crates that call services:
   a service's base URL, held to one rule a refusal can state without
   echoing the value, its endpoints below it, a credential as a header no

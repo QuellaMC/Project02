@@ -477,7 +477,7 @@ fn internal(error: &serde_json::Error) -> Response {
 }
 
 /// The body of a request as `T`, `subject` naming the request in what a
-/// refusal says: read within the cap, sent as JSON, each of its strings
+/// refusal says: read within the cap, sent as JSON, each string value
 /// within the bound of a text, and of `T`'s shape, which `T` judges as it
 /// is read, so nothing validates it twice.
 fn read<T: DeserializeOwned>(
@@ -519,9 +519,9 @@ fn read<T: DeserializeOwned>(
     })
 }
 
-/// Where `json` first holds a string longer than any text a request
-/// carries, as a refusal names the place: `.key` into an object, `[index]`
-/// into an array, and nothing for `json` itself.
+/// Where `json` first holds a string value longer than any text a
+/// request carries, as a refusal names the place: `.key` into an object,
+/// `[index]` into an array, and nothing for `json` itself.
 fn overlong(json: &Value) -> Option<String> {
     match json {
         Value::String(text) => (text.chars().count() > TEXT_LIMIT).then(String::new),

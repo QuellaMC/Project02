@@ -44,23 +44,28 @@ pub struct DaemonRun {
 }
 
 /// The bearer token a client presents to the daemon: minted once per home,
-/// one line of printable ASCII. Its `Debug` never shows it.
+/// and held to the characters that both the address's fragment and a
+/// bearer header carry as themselves, RFC 3986's unreserved ones, since the
+/// page reads it from the one and presents it in the other. Its `Debug`
+/// never shows it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
 pub struct DaemonToken(String);
 
 /// Why a text is not a [`DaemonToken`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("not a daemon token: one line of printable ASCII")]
+#[error("not a daemon token, which holds only ASCII letters, digits, '-', '.', '_' and '~'")]
 pub struct ParseDaemonTokenError;
 
 impl DaemonToken {
     /// # Errors
     ///
     /// [`ParseDaemonTokenError`] when `value` is empty or holds anything but
-    /// printable ASCII, a space included.
+    /// ASCII letters, digits, `-`, `.`, `_` and `~`.
     pub fn new(value: &str) -> Result<Self, ParseDaemonTokenError> {
-        if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_graphic()) {
+        let unreserved = |byte: u8| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte);
+
+        if !value.is_empty() && value.bytes().all(unreserved) {
             Ok(Self(value.to_owned()))
         } else {
             Err(ParseDaemonTokenError)
@@ -68,7 +73,7 @@ impl DaemonToken {
     }
 
     /// The token a home is minted from 32 bytes a secure generator drew,
-    /// spelled base64url without padding, which is printable ASCII.
+    /// spelled base64url without padding, whose letters are all unreserved.
     #[must_use]
     pub fn from_random(random: [u8; 32]) -> Self {
         Self(URL_SAFE_NO_PAD.encode(random))
@@ -169,6 +174,7 @@ mod tests {
             r#"{"protocolVersion": 7, "token": "abc", "port": 43"#,
             r#"{"protocolVersion": 7, "port": 4310}"#,
             r#"{"protocolVersion": 7, "token": "two words", "port": 4310}"#,
+            r#"{"protocolVersion": 7, "token": "a+b&c=%41", "port": 4310}"#,
             r#"{"protocolVersion": 7, "token": "abc", "port": 0}"#,
             r#"{"protocolVersion": 7, "token": "abc", "port": 65536}"#,
             r#"{"protocolVersion":7,"token":"abc","port":4310,"running":{"pid":0,"startedAt":"2026-10-17T09:00:00.000Z"}}"#,
@@ -176,6 +182,16 @@ mod tests {
             write_file_atomically(&path, body.as_bytes()).unwrap();
             refused_naming_the_file();
         }
+    }
+
+    /// Bytes whose base64 spells the two letters base64url spells
+    /// otherwise, so a mint that lost the `url` would show here.
+    #[test]
+    fn a_minted_token_is_one_the_address_and_the_header_carry_as_themselves() {
+        let minted = DaemonToken::from_random([0xfb; 32]);
+
+        assert!(minted.as_str().contains(['-', '_']));
+        assert_eq!(DaemonToken::new(minted.as_str()), Ok(minted));
     }
 
     #[test]

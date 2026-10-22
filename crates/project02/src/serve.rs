@@ -5,6 +5,7 @@
 
 use std::error::Error;
 use std::io;
+use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -12,7 +13,9 @@ use p02_app::{Daemon, DaemonSettings, Event, Health, Plugin};
 use p02_config::Severity;
 use p02_gateway::{Claim, ClaimOutcome, Page, Server};
 use p02_role_model::select_adapter;
-use p02_shared::{DEFAULT_HOME, DanglingLinks, ResolvePathError, canonical_path, error_sentence};
+use p02_shared::{
+    DEFAULT_HOME, DaemonToken, DanglingLinks, ResolvePathError, canonical_path, error_sentence,
+};
 use p02_store::{Home, StorageError};
 use tokio_util::sync::CancellationToken;
 
@@ -92,6 +95,16 @@ pub(crate) fn failed(console: &mut Console, error: &(dyn Error + 'static)) -> Ex
     }
 }
 
+/// The line a client finds a daemon by, its address with the token in the
+/// fragment: what serve prints once it can answer there, and what a second
+/// serve hands back of the daemon that holds the home.
+pub(crate) fn address_line(port: NonZeroU16, token: &DaemonToken) -> String {
+    format!(
+        "PROJECT02_GATEWAY=http://127.0.0.1:{port}/#token={}",
+        token.as_str()
+    )
+}
+
 /// The home `store` names, or `.project02` in the working directory, bound
 /// to its real path, so a link that later points elsewhere cannot move a
 /// running home.
@@ -160,11 +173,7 @@ async fn serve(
         ));
     }
 
-    console.say(&format!(
-        "PROJECT02_GATEWAY=http://127.0.0.1:{}/#token={}",
-        server.port(),
-        claim.token().as_str()
-    ));
+    console.say(&address_line(server.port(), claim.token()));
     report_startup_problems(&daemon.health().await, console);
 
     loop {
