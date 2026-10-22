@@ -5,7 +5,7 @@ import {expect, it} from 'vitest';
 
 import {connector, startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Events} from './harness/events.ts';
-import {configJson, createHome} from './harness/home.ts';
+import {chmod, configJson, createHome} from './harness/home.ts';
 import {calling, reply, startModelServer} from './harness/model-server.ts';
 import {startRelay} from './harness/relay.ts';
 import {
@@ -442,4 +442,65 @@ it("connectors.telegram-management-bot: the management bot shows every confirmat
   );
   telegram.push(homeBot.token, messageFrom(erin, 2, '/pending'));
   await telegram.shows(homeBot.token, erin.id, 'Nothing waits for you.');
+});
+
+it("connectors.telegram-toast-cut: a press whose answer would run past the 200 characters Telegram takes is answered with it cut within them, an ellipsis marking the cut, as the daemon's sentence for a pairing approval the home could not write runs past them when it names a long path", async () => {
+  // Two folders deep enough that the sentence naming the home's settings
+  // document runs past what a toast holds.
+  const [outer, inner] = ['o'.repeat(100), 'i'.repeat(100)];
+  const home = join(
+    createHome({
+      [outer]: {
+        [inner]: {
+          'config.json': configJson({
+            connectors: {
+              telegram: {
+                config: {
+                  pairedUsers: {[String(alice.id)]: alice.first_name},
+                  managementBotToken: homeBot.token,
+                },
+              },
+            },
+          }),
+        },
+      },
+    }),
+    outer,
+    inner,
+  );
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const fromBob = (
+    (await wire.pairingRequest('telegram', {
+      id: String(bob.id),
+      label: 'Bob (@bob)',
+    })) as {readonly request: Asked}
+  ).request;
+  const telegram = await startTelegramServer([homeBot]);
+  const run = connector(['--store', home], telegram.env);
+
+  await run.printed('Telegram: management bot @home_bot is on.');
+
+  const [card] = await cardsSent(telegram, homeBot, alice, 1);
+
+  chmod(home, 0o500);
+
+  try {
+    const failed = (await wire.pairingAnswer(fromBob.code, 'approved')) as {
+      readonly status: string;
+      readonly message: string;
+    };
+
+    expect(failed.status).toBe('failed');
+    expect(failed.message.length).toBeGreaterThan(200);
+
+    const approve = pressOn(alice, card?.messageId ?? 0, `p:${fromBob.code}:a`);
+
+    telegram.push(homeBot.token, approve);
+    expect((await toast(telegram, homeBot, approve)).body['text']).toBe(
+      `${failed.message.slice(0, 199)}…`,
+    );
+  } finally {
+    chmod(home, 0o700);
+  }
 });

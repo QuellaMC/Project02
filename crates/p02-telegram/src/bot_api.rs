@@ -1,7 +1,7 @@
 //! Telegram's Bot API as the connector calls it: the eight methods it
-//! uses, each answer read leniently out of Telegram's envelope, and
-//! whatever Telegram or the network does handed back as an outcome, never
-//! an error.
+//! uses and the lengths of text it takes, each answer read leniently out
+//! of Telegram's envelope, and whatever Telegram or the network does
+//! handed back as an outcome, never an error.
 
 use std::fmt;
 use std::sync::Arc;
@@ -20,6 +20,42 @@ const POLL_WAIT: Duration = Duration::from_secs(50);
 /// How long past its own wait a call may go unanswered before it ends: a
 /// poll Telegram never answers still ends, and so does every other call.
 const ANSWER_BOUND: Duration = Duration::from_secs(10);
+
+/// Telegram's longest message, in the UTF-16 units it counts.
+pub(crate) const MAX_MESSAGE: usize = 4096;
+
+/// Telegram's longest answer to a press, in the same units.
+const MAX_TOAST: usize = 200;
+
+/// A text's length as Telegram counts it.
+pub(crate) fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
+}
+
+/// The text within `limit` with `ending` whole: a text past it is cut,
+/// never inside a character, with an ellipsis, to make room.
+pub(crate) fn within(limit: usize, text: &str, ending: &str) -> String {
+    let room = limit - utf16_len(ending);
+
+    if utf16_len(text) <= room {
+        return format!("{text}{ending}");
+    }
+
+    let mut cut = String::new();
+    let mut length = 0;
+
+    for character in text.chars() {
+        length += character.len_utf16();
+
+        if length > room - 1 {
+            break;
+        }
+
+        cut.push(character);
+    }
+
+    format!("{cut}…{ending}")
+}
 
 /// A bot's token. It rides in the URL of every call the bot makes and in
 /// nothing a person reads, so its `Debug` never shows it.
@@ -329,17 +365,20 @@ impl BotApi {
         .map(drop)
     }
 
-    /// Answers a press, with a toast when there is one.
+    /// Answers a press, with a toast when there is one, cut to what
+    /// Telegram takes, since a toast may relay the daemon's own sentence.
     pub(crate) async fn answer_callback_query(
         &self,
         id: &str,
         text: Option<&str>,
     ) -> Result<(), Failure> {
+        let text = text.map(|text| within(MAX_TOAST, text, ""));
+
         self.call::<IgnoredAny>(
             "answerCallbackQuery",
             &AnswerCallbackQuery {
                 callback_query_id: id,
-                text,
+                text: text.as_deref(),
             },
             Duration::ZERO,
         )

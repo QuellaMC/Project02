@@ -19,17 +19,9 @@ use tokio_util::task::TaskTracker;
 
 use crate::Lines;
 use crate::bot::capitalized;
-use crate::bot_api::{BotApi, Failure, Keyboard, Message};
+use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
-
-/// Telegram's longest message, in the UTF-16 units it counts.
-pub(crate) const MAX_MESSAGE: usize = 4096;
-
-/// A text's length as Telegram counts it.
-pub(crate) fn utf16_len(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
-}
 
 /// The messages a text takes, in order, none cutting a character.
 fn pieces(text: &str) -> Vec<String> {

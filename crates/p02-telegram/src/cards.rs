@@ -1,6 +1,7 @@
 //! The cards: messages with Approve and Deny that end. A card is one
-//! message, its buttons on it; once what it asks about is settled, each of
-//! its messages is revised to its text and how it ended, buttons gone.
+//! message, its buttons on it, so a text past Telegram's longest is cut to
+//! fit; once what it asks about is settled, each of its messages is revised
+//! to its text and how it ended, buttons gone.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -12,8 +13,7 @@ use p02_app::{
 };
 
 use crate::bot::{Chat, DAEMON_DOWN};
-use crate::bot_api::{Button, Keyboard};
-use crate::outbox::{MAX_MESSAGE, utf16_len};
+use crate::bot_api::{Button, Keyboard, MAX_MESSAGE, within};
 
 /// How a card ends when the bot missed the word: the snapshot it came back
 /// to no longer carries what it asked about.
@@ -189,32 +189,6 @@ pub(crate) fn minutes_left(deadline_ms: i64) -> String {
     )
 }
 
-/// The text as one message with `ending` whole, as a card with buttons
-/// must be: a text past Telegram's longest is cut, with an ellipsis, to
-/// make room.
-pub(crate) fn one_message(text: &str, ending: &str) -> String {
-    let room = MAX_MESSAGE - utf16_len(ending);
-
-    if utf16_len(text) <= room {
-        return format!("{text}{ending}");
-    }
-
-    let mut cut = String::new();
-    let mut length = 0;
-
-    for character in text.chars() {
-        length += character.len_utf16();
-
-        if length > room - 1 {
-            break;
-        }
-
-        cut.push(character);
-    }
-
-    format!("{cut}…{ending}")
-}
-
 /// One card: what it says, the chats it went to, and its message in each
 /// it reached.
 #[derive(Debug)]
@@ -293,7 +267,7 @@ impl Cards {
         let data = |answer: char| format!("{}:{key}:{answer}", self.kind.letter());
 
         Some((
-            one_message(&card.text.render(false), ""),
+            within(MAX_MESSAGE, &card.text.render(false), ""),
             Keyboard::row(vec![
                 Button::new("Approve", data('a')),
                 Button::new("Deny", data('d')),
@@ -321,7 +295,11 @@ impl Cards {
             return Vec::new();
         };
         let card = self.cards.remove(index);
-        let ended = one_message(&card.text.render(true), &format!(" · {ending}"));
+        let ended = within(
+            MAX_MESSAGE,
+            &card.text.render(true),
+            &format!(" · {ending}"),
+        );
 
         card.messages
             .into_iter()

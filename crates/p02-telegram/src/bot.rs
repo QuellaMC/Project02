@@ -160,6 +160,7 @@ async fn run(api: BotApi, parts: Parts) {
     let quiet = stop.child_token();
     let tasks = TaskTracker::new();
     let (polled, polls) = mpsc::unbounded_channel();
+    let (claim, claimed) = watch::channel(false);
     let outbox = Outbox::start(
         api.clone(),
         settings.clone(),
@@ -183,6 +184,7 @@ async fn run(api: BotApi, parts: Parts) {
     let intake = Intake {
         frames,
         polls,
+        claimed,
         held,
         latest,
     };
@@ -196,6 +198,7 @@ async fn run(api: BotApi, parts: Parts) {
     let ended = poll(
         &api,
         &polled,
+        &claim,
         &settings,
         lines.as_ref(),
         &mut problems,
@@ -309,16 +312,9 @@ impl Problems {
     }
 }
 
-/// What a poll hands the bot's rules.
-#[derive(Debug)]
-enum Polled {
-    /// The token's updates are this bot's from this poll on, until a 409
-    /// says another program took them: its rules catch up.
-    Owning,
-    Lost,
-    /// An update, handed on once its rules have handled it.
-    Update(Box<Update>, oneshot::Sender<()>),
-}
+/// An update a poll hands the bot's rules, with the word they send back
+/// once they have handled it, which the poll waits for.
+type Polled = (Update, oneshot::Sender<()>);
 
 #[derive(Debug, PartialEq, Eq)]
 enum PollEnd {
@@ -327,13 +323,16 @@ enum PollEnd {
 }
 
 /// Long-polls until the stop or the token refused, handing each update on
-/// in order and asking past a batch only once all of it was handed on. A
-/// webhook left on the token is removed; another program's polls are
-/// waited out; a pause Telegram asks for is kept; anything else is
-/// Telegram out of reach, backed off from.
+/// in order and asking past a batch only once all of it was handed on.
+/// The token's polls are this bot's, `claim` says, from each poll it
+/// sends, since Telegram hands them to the newest, until a 409 says
+/// another program's took them. A webhook left on the token is removed;
+/// another program's polls are waited out; a pause Telegram asks for is
+/// kept; anything else is Telegram out of reach, backed off from.
 async fn poll(
     api: &BotApi,
     rules: &mpsc::UnboundedSender<Polled>,
+    claim: &watch::Sender<bool>,
     settings: &watch::Receiver<Arc<BotSettings>>,
     lines: &dyn Lines,
     problems: &mut Problems,
@@ -341,12 +340,10 @@ async fn poll(
 ) -> PollEnd {
     let mut offset = 0_i64;
     let mut failures = 0;
-    let mut owning = false;
 
     loop {
-        if !owning {
-            owning = true;
-            let _ = rules.send(Polled::Owning);
+        if !*claim.borrow() {
+            claim.send_replace(true);
         }
 
         let outcome = tokio::select! {
@@ -366,10 +363,7 @@ async fn poll(
                     if update.message.is_some() || update.callback_query.is_some() {
                         let (handed, on) = oneshot::channel();
 
-                        if rules
-                            .send(Polled::Update(Box::new(update), handed))
-                            .is_err()
-                        {
+                        if rules.send((update, handed)).is_err() {
                             return PollEnd::Stopped;
                         }
 
@@ -410,8 +404,7 @@ async fn poll(
                     &bot,
                     lines,
                 );
-                owning = false;
-                let _ = rules.send(Polled::Lost);
+                claim.send_replace(false);
                 CONFLICT_PAUSE
             }
             Err(failure) => failure.retry_after().unwrap_or_else(|| {
@@ -551,65 +544,69 @@ pub(crate) trait Rules: Send {
 struct Intake {
     frames: mpsc::UnboundedReceiver<Inbox>,
     polls: mpsc::UnboundedReceiver<Polled>,
+    /// Whether the token's polls are this bot's, as its poll last found.
+    claimed: watch::Receiver<bool>,
     held: watch::Receiver<bool>,
     latest: watch::Receiver<Option<Latest>>,
 }
 
 /// Runs a bot's rules until the stop. Only an owner of the token's polls
-/// reads frames, so two connectors on one token do not both answer; it
-/// catches up from the latest snapshot whenever its polls are its own
-/// again, and skips every frame that snapshot already holds. An update is
-/// handled only while no settings read is in doubt.
+/// reads frames, so two connectors on one token do not both answer: the
+/// rules drop them from the 409 that says another program took the polls,
+/// a settings read in doubt or not, and once the polls are theirs again
+/// catch up from the latest snapshot, skipping every frame it already
+/// holds. The catching up, and every update, wait while a settings read
+/// is in doubt.
 async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
     let Intake {
         mut frames,
         mut polls,
+        mut claimed,
         mut held,
         latest,
     } = intake;
-    let mut owning = false;
+    let mut caught_up = false;
     let mut seen = 0;
 
     rules.started(&mut chat);
 
     loop {
         let free = !*held.borrow_and_update();
+        let ours = *claimed.borrow_and_update();
         let due = rules.due();
+
+        caught_up &= ours;
 
         tokio::select! {
             biased;
             () = chat.stop.cancelled() => return,
-            Some(message) = frames.recv() => {
-                match message {
-                    Inbox::Install { seq, snapshot } if owning && seq > seen => {
-                        seen = seq;
-                        rules.install(&mut chat, &snapshot);
-                    }
-                    Inbox::Frame { seq, event } if owning && seq > seen => {
-                        seen = seq;
-                        rules.frame(&mut chat, &event);
-                    }
-                    _ => {}
+            Ok(()) = claimed.changed() => {}
+            Ok(()) = held.changed() => {}
+            () = std::future::ready(()), if free && ours && !caught_up => {
+                caught_up = true;
+
+                let newest = latest.borrow().clone();
+
+                if let Some(newest) = newest {
+                    seen = newest.seq;
+                    rules.install(&mut chat, &newest.snapshot);
                 }
             }
-            Ok(()) = held.changed() => {}
-            Some(polled) = polls.recv(), if free => match polled {
-                Polled::Owning => {
-                    owning = true;
-
-                    let caught_up = latest.borrow().clone();
-
-                    if let Some(caught_up) = caught_up {
-                        seen = caught_up.seq;
-                        rules.install(&mut chat, &caught_up.snapshot);
-                    }
+            Some(message) = frames.recv() => match message {
+                Inbox::Install { seq, snapshot } if caught_up && seq > seen => {
+                    seen = seq;
+                    rules.install(&mut chat, &snapshot);
                 }
-                Polled::Lost => owning = false,
-                Polled::Update(update, handed) => {
-                    rules.update(&mut chat, *update).await;
-                    let _ = handed.send(());
+                Inbox::Frame { seq, event } if caught_up && seq > seen => {
+                    seen = seq;
+                    rules.frame(&mut chat, &event);
                 }
+                _ => {}
             },
+            Some((update, handed)) = polls.recv(), if free => {
+                rules.update(&mut chat, update).await;
+                let _ = handed.send(());
+            }
             Some(done) = chat.work.join_next(), if !chat.work.is_empty() => {
                 if let Ok(done) = done {
                     rules.done(&mut chat, done);
@@ -633,7 +630,7 @@ mod tests {
     use super::*;
     use crate::stand_in::{Heard, StandIn};
 
-    /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once, writes nothing for the 30 s it waits, and once its polls are its own again catches up from the snapshot and says it gets its messages again.
+    /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once, writes nothing for the 30 s it waits, not even the frames a settings read held back, and once its polls are its own again catches up from the snapshot and says it gets its messages again.
     #[tokio::test(start_paused = true)]
     async fn a_bot_outpolled_waits_writing_nothing_then_catches_up_from_the_snapshot() {
         let telegram = StandIn::start().await;
@@ -647,7 +644,7 @@ mod tests {
                 turns: RunningTurns::default(),
             },
         }));
-        let (_held, held) = watch::channel(false);
+        let (reading, held) = watch::channel(false);
         let (_daemon, daemon) = watch::channel(None);
         let stop = CancellationToken::new();
         let bots = TaskTracker::new();
@@ -673,8 +670,10 @@ mod tests {
         let waiting = "Another program is polling the management bot (409); this one waits.";
         let back = "Telegram: the management bot gets its messages again.";
 
-        // The other program polls the token: Telegram ends the bot's poll.
+        // The other program polls the token while a settings read is in
+        // doubt: Telegram ends the bot's poll.
         telegram.called("getUpdates", 1).await;
+        reading.send_replace(true);
         conflict.send(()).unwrap();
         heard.reported(waiting).await;
 
@@ -692,7 +691,8 @@ mod tests {
             turn: None,
         };
 
-        // Raised while the bot waits: the snapshot has it, the chat does not.
+        // Raised meanwhile, and handed on as the read lands: the snapshot
+        // has it, the chat does not.
         latest.send_modify(|latest| {
             if let Some(latest) = latest {
                 latest.seq = 1;
@@ -703,6 +703,7 @@ mod tests {
             seq: 1,
             event: Arc::new(Event::ConfirmationRequested(pending.clone())),
         });
+        reading.send_replace(false);
 
         // The other program stopped: the bot's next poll is answered.
         let cards = telegram.called("sendMessage", 1).await;
