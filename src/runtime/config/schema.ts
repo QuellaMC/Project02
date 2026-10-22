@@ -79,7 +79,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     invalidValueMessage: 'Project02 nvidiaApiKey must be a non-empty string.',
     required: false,
     secret: true,
-    valueType: 'secret',
+    valueType: 'string',
     redactionLabels: Object.freeze(['secret']),
     agentMutable: false,
     reloadRequired: true,

@@ -12,11 +12,11 @@ import type {
   ConfigTarget,
   ConfigView,
   GatewayHealth,
+  JsonValue,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
-  RuntimeConfigValue,
 } from '../../gateway/api/index.ts';
 import {noticed, type SettingsPage, type WebState} from './store.ts';
 
@@ -422,7 +422,7 @@ export function readableName(name: string): string {
  */
 export function valueText(
   field: RuntimeConfigFieldInspectShape,
-  value: RuntimeConfigValue | undefined,
+  value: JsonValue | undefined,
 ): string {
   if (value === undefined) {
     return '';
@@ -446,7 +446,7 @@ function readsJson(field: RuntimeConfigFieldInspectShape): boolean {
 function valueOf(
   field: RuntimeConfigFieldInspectShape,
   text: string,
-): RuntimeConfigValue {
+): JsonValue {
   if (field.secret) {
     return text;
   }
@@ -466,9 +466,9 @@ function valueOf(
   return readsJson(field) ? parsedOrText(text) : text;
 }
 
-function parsedOrText(text: string): RuntimeConfigValue {
+function parsedOrText(text: string): JsonValue {
   try {
-    return JSON.parse(text) as RuntimeConfigValue;
+    return JSON.parse(text) as JsonValue;
   } catch {
     return text;
   }

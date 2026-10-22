@@ -7,12 +7,11 @@ import {
 import {runtimeConfigSectionNamespaces} from '../../runtime/config/index.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import type {
+  Answer,
   ConfigChange,
-  GatewayConfirmationDecision,
   GatewayMessage,
-  PairingDecision,
   PairingSubject,
-} from '../api/contract.ts';
+} from '../api/index.ts';
 
 export type OpenConversationBody = {
   readonly characterId: string;
@@ -20,7 +19,7 @@ export type OpenConversationBody = {
 
 /** One shape answers a confirmation and a pairing request alike. */
 export type AnswerBody = {
-  readonly decision: GatewayConfirmationDecision | PairingDecision;
+  readonly decision: Answer;
 };
 
 export type PairingRequestBody = {

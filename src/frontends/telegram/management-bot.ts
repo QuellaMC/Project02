@@ -1,7 +1,7 @@
 import type {
+  Answer,
   GatewayEvent,
   GatewayReady,
-  PairingDecision,
   PairingRequest,
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
@@ -182,7 +182,7 @@ function showPending(chat: Chat, chatId: number): void {
 async function settle(
   bot: BotContext,
   code: string,
-  decision: PairingDecision,
+  decision: Answer,
   unknown: string,
 ): Promise<string> {
   // The code goes into the daemon's URL path, which the client does not encode.

@@ -1,6 +1,8 @@
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// The event a runtime record answers to.
@@ -84,7 +86,9 @@ impl fmt::Display for TraceId {
 
 /// A moment, in the one spelling every record uses: UTC to the
 /// millisecond, `2026-06-15T00:00:00.000Z`. Text order is time order.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(try_from = "String")]
 pub struct Timestamp(String);
 

@@ -2,7 +2,7 @@ import {Server, type IncomingMessage, type ServerResponse} from 'node:http';
 
 import {createAdaptorServer, type ServerType} from '@hono/node-server';
 
-import type {Gateway} from '../api/contract.ts';
+import type {Gateway} from '../gateway.ts';
 import {createGatewayApp} from './app.ts';
 import {
   clientGraceMs,

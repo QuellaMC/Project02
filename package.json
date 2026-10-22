@@ -41,7 +41,7 @@
     "test:differential": "vitest run --project=differential",
     "test:watch": "vitest --project=!differential",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage && pnpm test:browser",
-    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && cargo deny check"
+    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- src/gateway/api/generated && cargo deny check"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",

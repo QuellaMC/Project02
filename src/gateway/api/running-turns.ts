@@ -1,4 +1,8 @@
-import type {GatewayEvent, RunningDraft, RunningTurn} from './contract.ts';
+import type {
+  GatewayEvent,
+  RunningDraft,
+  RunningTurn,
+} from './generated/contract.ts';
 
 /** Conversation id → the turn running there; a conversation runs one turn at a time. */
 export type RunningTurns = ReadonlyMap<string, RunningTurn>;

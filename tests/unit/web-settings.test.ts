@@ -29,10 +29,10 @@ import type {
   ConfigTarget,
   ConfigView,
   GatewayHealth,
+  JsonValue,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
-  RuntimeConfigValue,
 } from '../../src/gateway/api/index.ts';
 
 const home: ConfigTarget = {scope: 'global'};
@@ -60,7 +60,7 @@ function field(
 /** A field nothing has set, carrying its declared default. */
 function defaulted(
   name: string,
-  value: RuntimeConfigValue,
+  value: JsonValue,
   shape: Partial<RuntimeConfigFieldInspectShape> = {},
 ): RuntimeConfigFieldInspectShape {
   return field(name, {
@@ -94,7 +94,7 @@ function view(fingerprint = 'f1'): OkView {
         valueType: 'enum',
         allowedValues: ['nvidia'],
       }),
-      field('nvidiaApiKey', {secret: true, valueType: 'secret'}),
+      field('nvidiaApiKey', {secret: true, valueType: 'string'}),
       field('contextWindowTokens', {valueType: 'number'}),
       defaulted('enabled', true, {valueType: 'boolean'}),
     ],
@@ -511,7 +511,7 @@ describe('web settings', () => {
       enabledSource: 'default',
       activation: {enabled: true, status: 'active', reasons: []},
       fields: [
-        field('botToken', {secret: true, valueType: 'secret'}),
+        field('botToken', {secret: true, valueType: 'string'}),
         defaulted('mirror', true, {valueType: 'boolean'}),
       ],
       diagnostics: [],

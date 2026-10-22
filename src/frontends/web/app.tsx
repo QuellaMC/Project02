@@ -1,9 +1,8 @@
 import {useState, useSyncExternalStore} from 'react';
 
 import type {
+  Answer,
   CharacterSummary,
-  GatewayConfirmationDecision,
-  PairingDecision,
   PairingRequest,
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
@@ -227,7 +226,7 @@ function ConfirmationCard({
 }: {
   readonly pending: PendingConfirmation;
   readonly characterName: string;
-  readonly onAnswer: (decision: GatewayConfirmationDecision) => Promise<void>;
+  readonly onAnswer: (decision: Answer) => Promise<void>;
 }) {
   const raisedOn =
     pending.turn === undefined || pending.turn.source === webSource
@@ -257,7 +256,7 @@ function PairingCard({
   onSettle,
 }: {
   readonly request: PairingRequest;
-  readonly onSettle: (decision: PairingDecision) => Promise<void>;
+  readonly onSettle: (decision: Answer) => Promise<void>;
 }) {
   return (
     <div className="card" role="group" aria-label="Pairing">

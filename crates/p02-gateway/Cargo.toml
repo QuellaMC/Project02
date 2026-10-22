@@ -16,6 +16,7 @@ p02-shared.workspace = true
 p02-store.workspace = true
 rand.workspace = true
 rust-embed.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_path_to_error.workspace = true
@@ -25,9 +26,12 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tower-service.workspace = true
+ts-rs.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
+jsonschema.workspace = true
+p02-characters.workspace = true
 p02-contracts.workspace = true
 p02-plugins.workspace = true
 p02-role-model.workspace = true

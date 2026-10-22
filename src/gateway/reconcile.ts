@@ -1,14 +1,19 @@
 import type {Project02CharacterListing} from '../app/index.ts';
-import type {CharacterRuntimeState, ReconcilePlan} from './api/contract.ts';
+import type {RosterState} from './api/index.ts';
+
+/** What one reconcile pass set in motion; the outcomes arrive as states. */
+export type ReconcilePlan = {
+  readonly starting: readonly string[];
+  readonly stopping: readonly string[];
+  readonly reloading: readonly string[];
+};
 
 export type ReconcileSeams = {
   /** The installed roster as config says it is now. */
   readonly roster: () => readonly Project02CharacterListing[];
   /** Every character a runtime was ever built for, whatever its state. */
   readonly running: () => readonly string[];
-  readonly stateOf: (
-    characterId: string,
-  ) => CharacterRuntimeState | 'not_started';
+  readonly stateOf: (characterId: string) => RosterState;
   readonly start: (characterId: string) => Promise<unknown>;
   readonly stop: (characterId: string) => Promise<void>;
   /** Whether a ready character would assemble differently now. */
@@ -127,7 +132,7 @@ export function createReconciler(seams: ReconcileSeams): Reconciler {
   }
 }
 
-function holdsResources(state: CharacterRuntimeState | 'not_started'): boolean {
+function holdsResources(state: RosterState): boolean {
   return (
     state === 'ready' ||
     state === 'starting' ||

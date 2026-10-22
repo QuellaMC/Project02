@@ -11,8 +11,10 @@ use p02_contracts::ConfigValueType;
 use p02_core::SpeakerName;
 use p02_shared::{Fingerprint, Identifier, error_sentence, sentence};
 use p02_store::Home;
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::{Map, Value};
+use ts_rs::TS;
 
 use crate::change::ConfigTarget;
 use crate::conceal::conceal;
@@ -24,7 +26,7 @@ use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, S
 /// the diagnostics, and the host's fields and every section the target may
 /// set, all in one field shape. A target whose settings cannot be resolved
 /// is refused with the reason, never shown as blank fields.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfigView {
     Ok {
@@ -39,7 +41,7 @@ pub enum ConfigView {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewRefusal {
     UnknownCharacter,
@@ -49,8 +51,10 @@ pub enum ViewRefusal {
 /// One field as a screen shows it: its declaration, what the target's own
 /// document holds for it, and the value in effect with where it comes
 /// from, a secret's as `[redacted]`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename = "RuntimeConfigFieldInspectShape", optional_fields)]
+#[schemars(rename = "RuntimeConfigFieldInspectShape")]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "each flag is one key of the field's shape on the wire"
@@ -72,7 +76,8 @@ pub struct FieldView {
 }
 
 /// What the target's own document holds for a field.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
 pub struct Authored {
     configured: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,7 +87,8 @@ pub struct Authored {
 /// The value in effect: authored in a document, `config`; the declared
 /// default, `default`; or none, `missing`. A refused value is in effect
 /// unresolved, its value shown unless it is a secret's.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
 pub struct EffectiveView {
     name: Identifier,
     secret: bool,
@@ -92,7 +98,7 @@ pub struct EffectiveView {
     value: Option<Value>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ValueSource {
     Config,
@@ -101,8 +107,10 @@ pub enum ValueSource {
 }
 
 /// One section as a screen shows it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename = "RuntimeConfigSectionInspectShape")]
+#[schemars(rename = "RuntimeConfigSectionInspectShape")]
 pub struct SectionView {
     namespace: Namespace,
     id: Identifier,
@@ -119,14 +127,16 @@ pub struct SectionView {
 }
 
 /// Whether a section runs, as its settings decide it, and why.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(rename = "RuntimeConfigSectionActivationShape")]
+#[schemars(rename = "RuntimeConfigSectionActivationShape")]
 pub struct SectionActivation {
     enabled: bool,
     status: ActivationStatus,
     reasons: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivationStatus {
     Active,
@@ -331,7 +341,7 @@ fn activation(section: &Section<'_>) -> SectionActivation {
 /// its section's activation and, while that is active, the values in
 /// effect for it, secrets in the clear. The home's switch is a default,
 /// not a master switch: each entry is judged by its own.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConnectorConfigView {
     #[serde(rename_all = "camelCase")]
@@ -346,7 +356,7 @@ pub enum ConnectorConfigView {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectorRefusal {
     UnknownConnector,
@@ -356,7 +366,9 @@ pub enum ConnectorRefusal {
 /// A connector's section for one target: its activation, and each field
 /// that has a value it takes for that target, the home's fields reaching
 /// every character's entry.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema, TS)]
+#[ts(rename = "ConnectorConfigEntry")]
+#[schemars(rename = "ConnectorConfigEntry")]
 pub struct ConnectorEntry {
     activation: SectionActivation,
     values: Map<String, Value>,
@@ -374,7 +386,7 @@ impl fmt::Debug for ConnectorEntry {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterConnectorEntry {
     character_id: Identifier,

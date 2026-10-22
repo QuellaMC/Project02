@@ -14,7 +14,7 @@ use p02_config::{
     CharacterSettings, Diagnostic, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
 };
-use p02_contracts::{RoleModelAdapter, TurnIdentity};
+use p02_contracts::{RoleModelAdapter, TurnIdentity, vocabulary};
 use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerName, Timestamp};
 use p02_plugins::{PluginHost, Turn};
 use p02_role_model::{NvidiaSettings, select_adapter};
@@ -23,7 +23,6 @@ use p02_runtime::{
 };
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{RuntimeRejection, StorageError};
-use serde::{Serialize, Serializer};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinError;
 use tokio_util::sync::CancellationToken;
@@ -40,34 +39,18 @@ use crate::outcome::{
 /// page answers.
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
 
-/// Where a character's runtime stands. `reloading` is a pause: a delivery
-/// sent meanwhile waits for it and lands on the same thread.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CharacterState {
-    Starting,
-    Ready,
-    Reloading,
-    Stopping,
-    Stopped,
-    Failed,
-}
-
-impl CharacterState {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Ready => "ready",
-            Self::Reloading => "reloading",
-            Self::Stopping => "stopping",
-            Self::Stopped => "stopped",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-impl Serialize for CharacterState {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
+vocabulary! {
+    /// Where a character's runtime stands. `reloading` is a pause: a
+    /// delivery sent meanwhile waits for it and lands on the same thread.
+    #[ts(rename = "CharacterRuntimeState")]
+    #[schemars(rename = "CharacterRuntimeState")]
+    CharacterState {
+        Starting = "starting",
+        Ready = "ready",
+        Reloading = "reloading",
+        Stopping = "stopping",
+        Stopped = "stopped",
+        Failed = "failed",
     }
 }
 

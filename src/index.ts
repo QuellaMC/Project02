@@ -20,6 +20,7 @@ export {
 export {
   createGateway,
   gatewayProtocolVersion,
+  type Answer,
   type AnswerOutcome,
   type CharacterRuntimeState,
   type CharacterSummary,
@@ -29,7 +30,6 @@ export {
   type ConfigView,
   type CreateGatewayOptions,
   type Gateway,
-  type GatewayConfirmationDecision,
   type GatewayErrorBody,
   type GatewayEvent,
   type GatewayEventListener,
@@ -39,7 +39,6 @@ export {
   type GatewayVisibleMessage,
   type HistoryMessage,
   type HistoryOutcome,
-  type HistoryPage,
   type MaintenanceFailure,
   type OpenOutcome,
   type PendingConfirmation,
@@ -49,3 +48,4 @@ export {
   type TurnOutcome,
   type Unsubscribe,
 } from './gateway/index.ts';
+export type {HistoryPage} from './gateway/client/index.ts';

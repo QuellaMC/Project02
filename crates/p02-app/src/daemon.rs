@@ -794,7 +794,7 @@ impl Daemon {
             id: definition.profile.id.clone(),
             display_name: definition.profile.display_name.clone(),
             enabled,
-            state: health.as_ref().map(|health| health.state),
+            state: health.as_ref().map(|health| health.state).into(),
             diagnostic: health.as_ref().and_then(|health| health.diagnostic.clone()),
             maintenance: health.and_then(|health| health.maintenance),
         }

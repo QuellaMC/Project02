@@ -50,8 +50,10 @@
         behind one gateway and speaks HTTP plus server-sent events on a loopback
         port. Every surface — the web page, a messaging
         connector — is a client of this API and nothing else, so what one
-        surface sends, every surface sees. The contract's types live in
-        <code>src/gateway/api/contract.ts</code>; this page is the wire.
+        surface sends, every surface sees. The contract's types are generated
+        from the Rust types the socket carries into
+        <code>src/gateway/api/generated/</code>, as TypeScript declarations
+        and as a JSON Schema; this page is the wire.
       </p>
 
       <p class="rule">

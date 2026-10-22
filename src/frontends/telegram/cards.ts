@@ -1,7 +1,6 @@
 import type {
+  Answer,
   ConfirmationSettlement,
-  GatewayConfirmationDecision,
-  PairingDecision,
   PendingConfirmation,
 } from '../../gateway/api/index.ts';
 import type {InlineKeyboard, TelegramCallbackQuery} from './bot-api.ts';
@@ -27,7 +26,7 @@ type CardKind = keyof typeof letters;
 type Press = {
   readonly kind: CardKind;
   readonly key: string;
-  readonly decision: GatewayConfirmationDecision;
+  readonly decision: Answer;
 };
 
 /** How an answer went, as a toast or a reply says it. */
@@ -192,7 +191,7 @@ export async function readPress(
     readonly outbox: Outbox;
   },
   query: TelegramCallbackQuery,
-  settlePairing?: (code: string, decision: PairingDecision) => Promise<string>,
+  settlePairing?: (code: string, decision: Answer) => Promise<string>,
 ): Promise<void> {
   const {from} = query;
   const press = pressOf(query.data);
@@ -213,7 +212,7 @@ export async function readPress(
 async function confirm(
   bot: BotContext,
   id: string,
-  decision: GatewayConfirmationDecision,
+  decision: Answer,
 ): Promise<string> {
   try {
     const {status} = await bot

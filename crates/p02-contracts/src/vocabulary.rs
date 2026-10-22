@@ -1,15 +1,17 @@
 /// A closed vocabulary of the contract: each value beside its one spelling,
-/// which the wire, the records and the messages share.
+/// which the wire, the records and the messages share. A crate that spells
+/// one depends on serde, schemars and ts-rs, which describe it as it does.
+#[macro_export]
 macro_rules! vocabulary {
     (
         $(#[$meta:meta])*
         $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $text:literal,)+ }
     ) => {
-        $(#[$meta])*
         #[derive(
             Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
-            serde::Serialize, serde::Deserialize,
+            serde::Serialize, serde::Deserialize, schemars::JsonSchema, ts_rs::TS,
         )]
+        $(#[$meta])*
         pub enum $name {
             $($(#[$variant_meta])* #[serde(rename = $text)] $variant,)+
         }
@@ -39,8 +41,6 @@ macro_rules! vocabulary {
         }
     };
 }
-
-pub(crate) use vocabulary;
 
 /// The plugin contract version every manifest names.
 pub const CONTRACT_VERSION: &str = "mvp-008.runtime_plugin.v2";

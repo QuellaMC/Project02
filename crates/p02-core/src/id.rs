@@ -1,14 +1,18 @@
 use std::fmt;
 use std::num::NonZeroU64;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// A conversation: an ASCII letter or digit, then up to 55 ASCII letters,
 /// digits, `_` or `-`. It holds no `.`, which is what parts it from the
 /// segment number in the id of each of its sessions, and its length leaves
 /// that id room for the segment within the 64 characters a tool admits.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(try_from = "String")]
 pub struct ConversationId(String);
 
@@ -142,8 +146,9 @@ impl fmt::Display for SessionId {
 /// A message's place in its session: `<session id>:message-<n>`, numbered
 /// from 1. Numbers climb but may skip, so a message's number is its order,
 /// not a count.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(try_from = "String", into = "String")]
+#[ts(as = "String")]
 pub struct MessageId {
     session_id: SessionId,
     number: NonZeroU64,

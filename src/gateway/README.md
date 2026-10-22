@@ -4,11 +4,18 @@ The daemon composition layer: everything one character _is_ at runtime,
 held behind one message-shaped boundary, the one façade the daemon holds,
 and the socket every client talks to.
 
-`api/` carries the contract — the `Gateway` façade, the per-character
-`CharacterRuntime` interface, and the message/event/outcome shapes that
-serialize over HTTP — behind its own barrel, which is what a client
-imports. `gateway.ts` implements the façade by composing
-existing seams only: `app` builds each character's pieces, the
+`api/` carries the contract behind its own barrel, which is what a client
+imports: every shape that crosses the socket, declared by
+`api/generated/contract.ts`, and the protocol's version, its loopback
+hosts and whether a turn committed its line. The Rust types the socket
+carries are the contract's one source: `cargo test -p p02-gateway
+contract` writes the declarations from them, and `api/generated/schema.json`
+beside them, the same shapes as a JSON Schema, which the conformance suite
+holds every answer and every frame to, so a shape the two daemons disagree
+on is a compile error here or a schema failure there. Neither file is
+edited by hand, and `pnpm check:rust` fails when either is stale.
+`gateway.ts` implements the façade, `Gateway`, over one
+`CharacterRuntime` per character, by composing existing seams only: `app` builds each character's pieces, the
 conversation driver opens threads and delivers turns, and the plugin host
 confirms tools through its handler seam — the gateway adds lifecycle,
 ordering, routing, and idempotency, never a second way to construct or
@@ -59,11 +66,13 @@ stream. `api/running-turns.ts` is the one fold that says what
 a running turn is; the daemon builds the snapshot's turns with it and the
 page folds its frames with it. `client/` is the reference client, one
 module for Node and for a browser tab — the web page and the Telegram
-connector use it; it speaks the platform's fetch unless its caller hands
+connector use it; it calls each route from a table of its own, typed by
+the contract, and speaks the platform's fetch unless its caller hands
 it another, as the connector hands it one over `node:http` without Node's
-five-minute bound, each request under a signal of its own. It may value-import only `api/`, itself, `core`, and
-`shared` (arch rule `clients-see-only-the-wire`), so no client grows a
-private path into the daemon.
+five-minute bound, each request under a signal of its own. It may import
+only `api/`, itself, `core`, and `shared`, types included (arch rule
+`clients-see-only-the-wire`), so no client grows a private path into the
+daemon.
 
 Four wire rules, stated once in `docs/wiki/gateway-api.html`: status codes
 describe the transport and domain outcomes are 200; the stream is a hint

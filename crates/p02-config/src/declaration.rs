@@ -11,8 +11,10 @@ use p02_contracts::{
 };
 use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl, Identifier};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use ts_rs::TS;
 
 use crate::diagnostic::Code;
 
@@ -21,8 +23,12 @@ pub(crate) const VERSION: &str = "project02.config.v2";
 
 /// The two stanzas of a document that hold declared sections by id. A
 /// plugin and a connector may share an id: their sections never meet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename = "RuntimeConfigSectionNamespace")]
+#[schemars(rename = "RuntimeConfigSectionNamespace")]
 pub enum Namespace {
     Plugins,
     Connectors,
@@ -42,7 +48,7 @@ impl Namespace {
 
 /// Where a value in effect comes from: its field's declared default, the
 /// home's settings, or the character's own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     Default,

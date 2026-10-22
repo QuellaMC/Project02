@@ -11,10 +11,12 @@ use async_trait::async_trait;
 use p02_core::Timestamp;
 use p02_plugins::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use p02_shared::Identifier;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
+use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::daemon::Events;
@@ -25,8 +27,18 @@ use crate::outcome::{
 
 /// A parked confirmation's id: a fresh UUID, unique across the daemon, by
 /// which any surface answers it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, TS)]
+#[schemars(with = "String")]
+#[ts(as = "String")]
 pub struct ConfirmationId(Uuid);
+
+impl ConfirmationId {
+    /// A fresh id: the one way one is minted.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
 
 impl fmt::Display for ConfirmationId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -41,7 +53,7 @@ impl Serialize for ConfirmationId {
 }
 
 /// The person's answer to a parked confirmation or a pairing request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     Approved,
@@ -175,7 +187,7 @@ impl Confirmer for Broker {
             return ConfirmationDecision::Cancelled;
         }
 
-        let id = ConfirmationId(Uuid::new_v4());
+        let id = ConfirmationId::mint();
         let deadline = Instant::now() + self.wait;
         let wait = i64::try_from(self.wait.as_millis()).unwrap_or(i64::MAX);
         let pending = PendingConfirmation {

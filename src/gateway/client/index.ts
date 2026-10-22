@@ -6,4 +6,5 @@ export {
   type GatewayClient,
   type GatewayClientOptions,
   type GatewayEventsOptions,
+  type HistoryPage,
 } from './client.ts';

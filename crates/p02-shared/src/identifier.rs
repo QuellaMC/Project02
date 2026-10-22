@@ -1,10 +1,14 @@
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// A Project02 identifier: an ASCII letter, then up to 127 ASCII letters,
 /// digits, `.`, `_` or `-`. Characters, plugins and tools are named by one.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(try_from = "String")]
 pub struct Identifier(String);
 

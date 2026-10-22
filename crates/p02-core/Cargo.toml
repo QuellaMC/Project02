@@ -7,8 +7,10 @@ rust-version.workspace = true
 [dependencies]
 jiff.workspace = true
 p02-shared.workspace = true
+schemars.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+ts-rs.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

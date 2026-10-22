@@ -1,4 +1,4 @@
-import type {GatewayMessage, TurnOutcome} from './api/contract.ts';
+import type {GatewayMessage, TurnOutcome} from './api/index.ts';
 
 type Submission = {
   /** What the id was first used for; the same id must mean the same line. */

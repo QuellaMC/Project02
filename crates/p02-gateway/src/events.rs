@@ -20,11 +20,13 @@ use p02_app::{
     RunningTurn, RunningTurns,
 };
 use p02_config::Connector;
+use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+use ts_rs::TS;
 
 /// How much of the stream is kept for a client that comes back, in UTF-8
 /// bytes of formatted frames: minutes of a busy stream, since a reply is a
@@ -99,14 +101,16 @@ pub(crate) enum Unopened {
 
 /// The first frame of a stream that cannot be caught up: the state every
 /// later frame moves on from.
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-struct Ready {
-    protocol_version: u32,
-    health: Health,
-    confirmations: Vec<PendingConfirmation>,
-    pairings: Vec<PairingRequest>,
-    turns: Vec<RunningTurn>,
+#[ts(rename = "GatewayReady")]
+#[schemars(rename = "GatewayReady")]
+pub(crate) struct Ready {
+    pub(crate) protocol_version: u32,
+    pub(crate) health: Health,
+    pub(crate) confirmations: Vec<PendingConfirmation>,
+    pub(crate) pairings: Vec<PairingRequest>,
+    pub(crate) turns: Vec<RunningTurn>,
 }
 
 impl Streams {

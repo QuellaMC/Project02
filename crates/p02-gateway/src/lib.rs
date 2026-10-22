@@ -1,6 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod contract;
 mod discovery;
 mod events;
 mod http;
