@@ -199,6 +199,9 @@ test("page.pairing-card: a pairing request a connector asked for shows a Pairing
   const notices = page.locator('main > .notice');
 
   await page.goto(daemon.url);
+  // Her thread opens itself, which writes into the home: it is open before
+  // the home refuses the approval's write.
+  await expect(composerFor(page)).toBeVisible();
 
   const forAlice = (await wire.pairingRequest('telegram', alice)) as Asked;
   const card = cards.filter({hasText: alice.label});
