@@ -20,8 +20,11 @@ pub trait ConfigControl: Send + Sync + fmt::Debug {
 
     /// Sets or unsets one field of a plugin's section in her own settings,
     /// never the home's, while her settings still have the fingerprint
-    /// the change presents.
-    fn change(&self, change: &FieldChange) -> FieldChangeOutcome;
+    /// the change presents; once it is written, `rebuild`, when given, is
+    /// called with the values her settings now give the plugin while they
+    /// run it, before the change is told to anything that judges her
+    /// against her settings, so she runs what they say by then.
+    fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome;
 
     /// How her settings decide each plugin this build has.
     ///
@@ -53,6 +56,11 @@ pub struct FieldChange {
     pub expected_fingerprint: String,
 }
 
+/// The rebuild of its plugin a change asks for once it is written, given
+/// the values her settings now give the plugin, secrets in the clear;
+/// an error says why the plugin could not be rebuilt.
+pub type Rebuild<'r> = &'r mut dyn FnMut(&Map<String, Value>) -> Result<(), String>;
+
 /// What came of a change. Every outcome but `Applied` left her settings
 /// as they were.
 #[derive(Clone, PartialEq)]
@@ -60,10 +68,10 @@ pub enum FieldChangeOutcome {
     Applied {
         /// The fingerprint her settings have now.
         fingerprint: Fingerprint,
-        /// The values her settings now give the plugin, secrets in the
-        /// clear, for the host to build it with; none when they do not
-        /// run it.
-        running: Option<Map<String, Value>>,
+        /// What the rebuild asked for came to; none when none was asked,
+        /// or when her settings do not run the plugin, so nothing was
+        /// rebuilt.
+        rebuilt: Option<Result<(), String>>,
     },
     /// Her settings changed after the change was read from them.
     Conflict,
@@ -79,16 +87,11 @@ impl fmt::Debug for FieldChangeOutcome {
         match self {
             Self::Applied {
                 fingerprint,
-                running,
+                rebuilt,
             } => formatter
                 .debug_struct("Applied")
                 .field("fingerprint", fingerprint)
-                .field(
-                    "running",
-                    &running
-                        .as_ref()
-                        .map(|values| values.keys().collect::<Vec<_>>()),
-                )
+                .field("rebuilt", rebuilt)
                 .finish(),
             Self::Conflict => formatter.write_str("Conflict"),
             Self::Refused { message } => formatter

@@ -73,7 +73,8 @@ the character's storage grants through the contracts.
   redacted, and changes one field of them a plugin lets the model change,
   bound to the fingerprint the model read: prepared without writing,
   shown to the person, and written to her own settings, never the home's,
-  only on her yes, the plugin then rebuilt live when its field allows.
+  only on her yes, the plugin rebuilt live as part of the change when
+  its field allows.
   Without her settings it offers its list alone.
 - **Session history.** The first plugin compiled in: an index of the
   character's own conversations in its own database, caught up slice by
