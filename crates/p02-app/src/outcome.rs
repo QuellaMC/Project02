@@ -19,7 +19,7 @@ use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::character::CharacterState;
-use crate::confirmation::ConfirmationId;
+use crate::confirmation::{Answer, ConfirmationId};
 
 /// The protocol a client reads, which health carries so that an old client
 /// meets a clear message rather than a mystery.
@@ -477,6 +477,78 @@ pub struct RunningDraft {
     pub text: String,
 }
 
+/// An account a connector asks to let in, waiting for the person's answer
+/// under a code any surface shows and answers by, until it expires.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingRequest {
+    pub connector_id: Identifier,
+    /// Six digits, unique among the requests waiting.
+    pub code: String,
+    pub subject: PairingSubject,
+    pub requested_at: Timestamp,
+    /// When the request expires, in milliseconds since the Unix epoch.
+    pub expires_at: i64,
+}
+
+/// The account a pairing is for: the connector's own id for it, and the
+/// name the person sees.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PairingSubject {
+    pub id: ClientStamp,
+    pub label: SpeakerName,
+}
+
+/// What came of a connector's request to let an account in. `paired`: the
+/// home lets it in already, so nothing is asked.
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PairingOutcome {
+    Pending {
+        request: PairingRequest,
+    },
+    Paired,
+    Refused {
+        reason: PairingRefusal,
+        message: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingRefusal {
+    UnknownConnector,
+    ConfigUnloadable,
+    InvalidSubject,
+}
+
+/// What an answer to a pairing request came to. `expired`: the deadline had
+/// passed, so the request was settled expired instead, as a confirmation
+/// is; `failed`: the approval could not be written, and the request waits
+/// on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PairingAnswer {
+    Settled { decision: Answer },
+    Expired,
+    Unknown,
+    Failed { message: String },
+}
+
+/// How a pairing request ended: with the person's answer, or at its
+/// deadline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingDecision {
+    Approved,
+    Denied,
+    Expired,
+}
+
 /// What every surface hears.
 #[derive(Clone, Debug, Serialize)]
 #[serde(
@@ -512,6 +584,13 @@ pub enum Event {
         id: ConfirmationId,
         #[serde(flatten)]
         settlement: Settlement,
+    },
+    PairingRequested(PairingRequest),
+    PairingSettled {
+        connector_id: Identifier,
+        code: String,
+        subject: PairingSubject,
+        decision: PairingDecision,
     },
     StateChanged {
         character_id: Identifier,
@@ -654,17 +733,19 @@ impl From<Progress> for TurnProgress {
     }
 }
 
-/// The turns in progress, folded from the events every surface hears: a
-/// turn begins at the stamped line that names its submission, each delta
-/// extends a draft, a draft ends at its commit or its withdrawal, and the
-/// turn ends at the completion that names the same submission, never at
-/// another's, since a submission refused on the spot completes while the
-/// turn ahead of it still runs. A conversation runs one turn at a time.
+/// The turns in progress, folded from the events in the order they were
+/// announced: a turn begins at the stamped line that names its submission,
+/// each delta extends a draft, a draft ends at its commit or its
+/// withdrawal, and the turn ends at the completion that names the same
+/// submission, never at another's, since a submission refused on the spot
+/// completes while the turn ahead of it still runs. A conversation runs one
+/// turn at a time. The one definition of a running turn: what a surface
+/// that had heard every event would hold.
 #[derive(Debug, Default)]
-pub(crate) struct RunningTurns(BTreeMap<ConversationId, RunningTurn>);
+pub struct RunningTurns(BTreeMap<ConversationId, RunningTurn>);
 
 impl RunningTurns {
-    pub(crate) fn fold(&mut self, event: &Event) {
+    pub fn fold(&mut self, event: &Event) {
         match event {
             Event::TurnProgress {
                 character_id,
@@ -741,7 +822,8 @@ impl RunningTurns {
         }
     }
 
-    pub(crate) fn turns(&self) -> Vec<RunningTurn> {
+    #[must_use]
+    pub fn turns(&self) -> Vec<RunningTurn> {
         self.0.values().cloned().collect()
     }
 }

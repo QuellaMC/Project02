@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
-use crate::daemon::World;
+use crate::daemon::{Daemon, WeakDaemon, World};
 use crate::outcome::{
     Event, MaintenanceFailure, OpenOutcome, OpenRefusal, StorageFailure, TurnOutcome, TurnRefusal,
     TurnStamp, sentence,
@@ -127,8 +127,9 @@ pub(crate) struct CharacterHandle {
 }
 
 impl CharacterHandle {
-    /// A new actor for character `id`, who starts at once.
-    pub(crate) fn spawn(world: Arc<World>, id: Identifier) -> Self {
+    /// A new actor for character `id` of `daemon`, who starts at once.
+    pub(crate) fn spawn(daemon: &Daemon, id: Identifier) -> Self {
+        let world = Arc::clone(daemon.world());
         let (commands, receiver) = mpsc::unbounded_channel();
         let (published, health) = watch::channel(CharacterHealth {
             state: CharacterState::Starting,
@@ -147,6 +148,7 @@ impl CharacterHandle {
             Actor {
                 id: id.clone(),
                 world,
+                daemon: daemon.downgrade(),
                 commands: receiver,
                 deferred: VecDeque::new(),
                 stop: stop.clone(),
@@ -325,6 +327,8 @@ enum Change {
 struct Actor {
     id: Identifier,
     world: Arc<World>,
+    /// What her own settings change through.
+    daemon: WeakDaemon,
     commands: mpsc::UnboundedReceiver<Command>,
     /// What her recovery set aside to answer once she is back.
     deferred: VecDeque<Command>,
@@ -455,7 +459,8 @@ impl Actor {
         let world = Arc::clone(&self.world);
         let id = self.id.clone();
         let broker = Arc::clone(&self.broker);
-        let assembled = tokio::task::spawn_blocking(move || assemble(&world, &id, broker))
+        let daemon = self.daemon.clone();
+        let assembled = tokio::task::spawn_blocking(move || assemble(&world, &id, broker, daemon))
             .await
             .unwrap_or_else(|error| Err(interrupted(&error)));
 
@@ -856,8 +861,13 @@ fn interrupted(error: &JoinError) -> String {
 /// for her, her package's settings merged into her overlay, her model, the
 /// plugins her package expects and her memory provider judged, and her
 /// host built with `broker` to ask the person and her settings for its own
-/// plugin to read and change.
-fn assemble(world: &Arc<World>, id: &Identifier, broker: Arc<Broker>) -> Result<Assembled, String> {
+/// plugin to read and change, through `daemon`.
+fn assemble(
+    world: &Arc<World>,
+    id: &Identifier,
+    broker: Arc<Broker>,
+    daemon: WeakDaemon,
+) -> Result<Assembled, String> {
     let discovery = discover(world.home.root());
     let definition = discovery
         .find(id.as_str())
@@ -897,6 +907,7 @@ fn assemble(world: &Arc<World>, id: &Identifier, broker: Arc<Broker>) -> Result<
         .confirmer(broker)
         .config_control(Arc::new(CharacterConfig::new(
             Arc::clone(world),
+            daemon,
             id.clone(),
         )))
         .activate()

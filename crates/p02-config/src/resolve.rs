@@ -498,6 +498,20 @@ impl<'s> Resolution<'s> {
         CharacterSettings { host, plugins }
     }
 
+    /// The value in effect for field `field` of the section `id` of
+    /// `namespace`, in the clear: what a change that edits it starts from.
+    /// None when the section or the field is not declared, or no value its
+    /// field takes is in effect.
+    #[must_use]
+    pub fn section_value(&self, namespace: Namespace, id: &str, field: &str) -> Option<&Value> {
+        self.section(namespace, id)?
+            .fields
+            .iter()
+            .find(|candidate| candidate.declaration.name().as_str() == field)?
+            .effective
+            .value()
+    }
+
     pub(crate) fn target(&self) -> &Target {
         &self.target
     }

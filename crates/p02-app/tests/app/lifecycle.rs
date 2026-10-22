@@ -4,14 +4,14 @@
 use std::sync::{Arc, Mutex};
 
 use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
-use p02_app::{Event, OpenOutcome, StartOutcome, TurnOutcome};
-use p02_config::connectors;
+use p02_app::{Answer, ConfirmationAnswer, Event, OpenOutcome, StartOutcome, TurnOutcome};
+use p02_config::{ConfigTarget, connectors};
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Round, Toy, World, a_while, begun, id, line, make_read_only, open, restore, said, settle,
-    wire,
+    Ear, Round, Toy, World, a_while, begun, change, home, id, line, make_read_only, open, restore,
+    said, settle, wire,
 };
 
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
@@ -46,8 +46,12 @@ async fn without_a_provider_every_character_fails_until_one_is_chosen() {
     assert_eq!(wire(&reason), "character_unavailable");
     assert!(message.contains(NO_PROVIDER), "{message}");
 
-    world.settings(json!({"project02": {"roleModelProvider": "nvidia"}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "set", "path": "project02.roleModelProvider", "value": "nvidia"}),
+    )
+    .await;
     daemon.reconcile().await;
 
     let states: Vec<_> = wire(&daemon.health().await)["characters"]
@@ -83,8 +87,12 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
         PathEntry::Absent
     ));
 
-    world.settings(json!({}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "unset", "path": "project02.enabled"}),
+    )
+    .await;
     assert_eq!(daemon.reconcile().await.starting, [id("mira")]);
 
     let conversation = open(&daemon).await;
@@ -106,8 +114,12 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
 
     ear.until(|event| matches!(event, Event::ConfirmationRequested(_)))
         .await;
-    world.settings(json!({"project02": {"enabled": false}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "set", "path": "project02.enabled", "value": false}),
+    )
+    .await;
 
     let plan = daemon.reconcile().await;
     let settled = ear
@@ -141,13 +153,23 @@ async fn a_change_switching_her_off_during_her_boot_ends_with_her_stopped() {
     });
 
     world.assembly.reached().await;
-    world.settings(json!({"project02": {"enabled": false}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "set", "path": "project02.enabled", "value": false}),
+    )
+    .await;
     world.assembly.open();
     boot.await.unwrap();
     daemon.reconcile().await;
     ear.reached("mira", Stopped).await;
-    assert_eq!(ear.states("mira"), [Starting, Ready, Stopping, Stopped]);
+
+    // Her boot ends ready, or her stop overtakes it: either way the stop
+    // has the last word.
+    let states = ear.states("mira");
+
+    assert_eq!(states.first(), Some(&Starting));
+    assert!(states.ends_with(&[Stopping, Stopped]), "{states:?}");
     assert_eq!(
         wire(&daemon.health().await)["characters"][0]["state"],
         "stopped"
@@ -254,13 +276,22 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     let conversation = open(&daemon).await;
     let mut ear = Ear::on(&daemon);
 
-    world.settings(json!({"connectors": {"telegram": {"config": {"mirror": false}}}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({
+            "kind": "section_field_set",
+            "namespace": "connectors",
+            "id": "telegram",
+            "field": "mirror",
+            "value": false,
+        }),
+    )
+    .await;
     assert_eq!(daemon.reconcile().await.reloading, []);
 
     world.assembly.shut();
-    world.settings(json!({"plugins": {"tone": {"config": {"tone": "warm"}}}}));
-    daemon.settings_changed();
+    change(&daemon, home(), warm()).await;
 
     let pass = tokio::spawn({
         let daemon = daemon.clone();
@@ -290,6 +321,63 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     assert_eq!(ear.states("mira"), [Reloading, Ready]);
 }
 
+/// A change her own plugin makes is the daemon's one change of settings:
+/// health goes out before the call's answer, and once her turn ends the
+/// reconciler rebuilds her from the settings she now runs on, after which
+/// nothing differs.
+#[tokio::test(start_paused = true)]
+async fn a_change_her_own_plugin_makes_is_announced_and_rebuilds_her_after_her_turn() {
+    let world = World::new();
+
+    world.settings(json!({"plugins": {"demo-config": {"enabled": true}}}));
+
+    let daemon = world.daemon(Vec::new()).await;
+
+    daemon.reconcile().await;
+
+    let conversation = open(&daemon).await;
+    let view = daemon
+        .config_view(ConfigTarget::Character {
+            character_id: "mira".to_owned(),
+        })
+        .await;
+    let mut ear = Ear::on(&daemon);
+
+    world.model.script([
+        Round::calls(
+            "runtime.plugin.config.update",
+            &json!({
+                "pluginId": "demo-config",
+                "fieldName": "tone",
+                "operation": "set",
+                "value": "warm",
+                "expectedFingerprint": wire(&view)["fingerprint"],
+            }),
+        ),
+        Round::says(&["Warmer now."]),
+    ]);
+
+    let turn = tokio::spawn({
+        let daemon = daemon.clone();
+        let line = line(&conversation, "Be warmer.", "warmer");
+
+        async move { daemon.deliver(line).await }
+    });
+    let requested = ear
+        .until(|event| matches!(event, Event::ConfirmationRequested(_)))
+        .await;
+    let answered =
+        daemon.answer_confirmation(wire(&requested)["id"].as_str().unwrap(), Answer::Approved);
+
+    assert_eq!(answered, ConfirmationAnswer::Answered);
+    ear.until(|event| matches!(event, Event::HealthChanged { .. }))
+        .await;
+    assert_eq!(said(&turn.await.unwrap()), ["Be warmer.", "Warmer now."]);
+    ear.reached("mira", Reloading).await;
+    ear.reached("mira", Ready).await;
+    assert_eq!(daemon.reconcile().await.reloading, []);
+}
+
 /// lifecycle.stop-during-reload: A stop issued during a character's reload wins (reloading, stopping, stopped).
 #[tokio::test(start_paused = true)]
 async fn a_stop_during_her_reload_wins() {
@@ -303,8 +391,7 @@ async fn a_stop_during_her_reload_wins() {
     let mut ear = Ear::on(&daemon);
 
     world.assembly.shut();
-    world.settings(json!({"plugins": {"tone": {"config": {"tone": "warm"}}}}));
-    daemon.settings_changed();
+    change(&daemon, home(), warm()).await;
     world.assembly.reached().await;
 
     let stop = begun(daemon.stop()).await;
@@ -412,6 +499,17 @@ async fn a_package_removed_while_she_runs_stops_her() {
         message,
         "Character \"nova\" is not installed. Installed characters: mira."
     );
+}
+
+/// The toy plugin's tone set warm, at the home.
+fn warm() -> serde_json::Value {
+    json!({
+        "kind": "section_field_set",
+        "namespace": "plugins",
+        "id": "tone",
+        "field": "tone",
+        "value": "warm",
+    })
 }
 
 #[expect(

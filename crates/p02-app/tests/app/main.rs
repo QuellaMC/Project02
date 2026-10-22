@@ -9,5 +9,6 @@
 mod confirmations;
 mod history;
 mod lifecycle;
+mod pairing;
 mod support;
 mod turns;

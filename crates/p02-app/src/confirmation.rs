@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use p02_core::Timestamp;
 use p02_plugins::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use p02_shared::Identifier;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
@@ -40,8 +40,9 @@ impl Serialize for ConfirmationId {
     }
 }
 
-/// The person's answer to a parked confirmation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The person's answer to a parked confirmation or a pairing request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Answer {
     Approved,
     Denied,
@@ -278,7 +279,7 @@ mod tests {
             mira(),
             Duration::from_millis(10),
             CancellationToken::new(),
-            Arc::new(Events::new()),
+            Arc::new(Events::default()),
         ));
         let asking = tokio::spawn({
             let broker = Arc::clone(&broker);

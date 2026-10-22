@@ -1,0 +1,40 @@
+[package]
+name = "p02-gateway"
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axum.workspace = true
+form_urlencoded.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+p02-app.workspace = true
+p02-config.workspace = true
+p02-core.workspace = true
+p02-shared.workspace = true
+p02-store.workspace = true
+rand.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_path_to_error.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tower-service.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+p02-contracts.workspace = true
+p02-plugins.workspace = true
+p02-role-model.workspace = true
+p02-shared = { workspace = true, features = ["http"] }
+reqwest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+[lints]
+workspace = true

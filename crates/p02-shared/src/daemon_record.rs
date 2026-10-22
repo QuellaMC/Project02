@@ -3,6 +3,8 @@ use std::io;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
 use crate::fs::read_text_lossy;
@@ -63,6 +65,13 @@ impl DaemonToken {
         } else {
             Err(ParseDaemonTokenError)
         }
+    }
+
+    /// The token a home is minted from 32 bytes a secure generator drew,
+    /// spelled base64url without padding, which is printable ASCII.
+    #[must_use]
+    pub fn from_random(random: [u8; 32]) -> Self {
+        Self(URL_SAFE_NO_PAD.encode(random))
     }
 
     #[must_use]

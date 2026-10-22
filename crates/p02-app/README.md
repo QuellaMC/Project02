@@ -47,7 +47,7 @@ tokio's blocking pool.
   parked confirmations first, closes her thread, its end hooks run, and
   shuts her plugins down, saying what failed of that. Her
   host is handed her settings, which its own plugin reads and changes in
-  her overlay alone.
+  her overlay alone, by the one change of settings below.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her
@@ -66,20 +66,43 @@ tokio's blocking pool.
   submission however it ends, so a client that stops waiting abandons
   nothing; and every delivery that reaches a character is announced as
   completed once, however it ended.
+- **Settings.** A settings screen's view and a connector's read are
+  p02-config's, read as the disk holds them now. A change, a client's or
+  a character's own plugin's alike, is made one way: as p02-config makes
+  every change, under the documents' locks; once it lands, health goes
+  out to every surface before the answer does, and a reconcile pass acts
+  on it behind the answer, on a task of its own, so a caller that stops
+  waiting leaves nothing undone. A plugin that a change her own plugin
+  made rebuilt live serves the rest of her turn, and once the turn ends
+  the pass rebuilds her from the settings she now runs on.
 - **Reconcile.** One rule for boot and for every settings change: an
   enabled character who runs nothing starts, one who failed starts again,
   one who is ready and would be built from another package or other
   settings now reloads, and a disabled one who still runs stops, as does
   one whose package left the roster, who is then no character to reach.
   Passes never overlap: a request while one runs marks one more after it,
-  so the newest roster has the last word. A settings change is announced
-  and then acted on, on a task of its own, so a caller that stops waiting
-  leaves neither undone.
+  so the newest roster has the last word.
+- **Pairing.** An account a connector does not know waits for the
+  person's answer under a six-digit code, drawn at random and unlike any
+  waiting, until its deadline, an hour unless a test harness shortens it;
+  asking again for the same account answers the same request, and an
+  account the home's allowlist holds is paired, settling a request that
+  waited for it, unless its approval is being written. An answer settles
+  it once: denied, or approved by writing the account's name into the
+  connector's pairing field in the home's document, by the one change of
+  settings, bound to the fingerprint it was read under and, while other
+  writes move the document, read again and merged up to three writes in
+  all; an account another hand paired meanwhile keeps the name it gave.
+  The daemon judges the deadline, as it does a confirmation's, and
+  settles a request nobody answered expired; an approval that cannot be
+  written leaves the request waiting with what is left of its time,
+  announced again. No request outlives the daemon's run.
 - **History.** A conversation's committed messages as one scrollback
   across her segments, newest page first and chronological within it, the
   cursor `v1:<segment>:<index>` naming where the next page ends; a limit is
   1 to 500, 100 unless given, and a cursor is one a page handed out.
-- **Events** are announced in one order, and the turns in progress are
-  folded from them in that order: a stream that opens with a snapshot reads
-  it after it subscribes, so it misses nothing after it and holds at worst
-  one event twice.
+- **Events** are announced in one order, and every subscriber hears each
+  one, in that order, however far behind it reads, since the stream a
+  client follows numbers every event. A turn in progress is folded from
+  them by one definition: what a surface that had heard every event would
+  hold.

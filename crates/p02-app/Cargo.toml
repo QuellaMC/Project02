@@ -16,6 +16,7 @@ p02-role-model.workspace = true
 p02-runtime.workspace = true
 p02-shared.workspace = true
 p02-store.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

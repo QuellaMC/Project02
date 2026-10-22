@@ -1,13 +1,12 @@
 //! The settings of the character a host serves, as the host's own plugin
 //! reads and changes them: read as her settings screen reads them, and
-//! changed in her own overlay through the one transaction of p02-config.
+//! changed in her own overlay through the daemon's one change of settings.
 
 use std::sync::Arc;
 
 use p02_characters::discover;
 use p02_config::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation, Resolution,
-    apply_change,
 };
 use p02_plugins::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
@@ -17,18 +16,23 @@ use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::character::unresolved;
-use crate::daemon::World;
+use crate::daemon::{WeakDaemon, World};
 use crate::outcome::sentence;
 
 #[derive(Debug)]
 pub(crate) struct CharacterConfig {
     world: Arc<World>,
+    daemon: WeakDaemon,
     character: Identifier,
 }
 
 impl CharacterConfig {
-    pub(crate) fn new(world: Arc<World>, character: Identifier) -> Self {
-        Self { world, character }
+    pub(crate) fn new(world: Arc<World>, daemon: WeakDaemon, character: Identifier) -> Self {
+        Self {
+            world,
+            daemon,
+            character,
+        }
     }
 
     /// What `work` makes of her settings as the disk holds them now.
@@ -84,19 +88,18 @@ impl ConfigControl for CharacterConfig {
                 field,
             },
         };
-        let outcome = apply_change(
-            &self.world.home,
-            &self.world.sections,
-            &discover(self.world.home.root()),
-            &ConfigChange {
-                target: ConfigTarget::Character {
-                    character_id: self.character.to_string(),
-                },
-                expected_fingerprint: expected_fingerprint.clone(),
-                operation,
+        let Some(daemon) = self.daemon.upgrade() else {
+            return FieldChangeOutcome::Failed {
+                message: "The daemon is stopped.".to_owned(),
+            };
+        };
+        let outcome = daemon.change_settings(&ConfigChange {
+            target: ConfigTarget::Character {
+                character_id: self.character.to_string(),
             },
-            self.world.durations.settings_lock,
-        );
+            expected_fingerprint: expected_fingerprint.clone(),
+            operation,
+        });
 
         match outcome {
             ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied {
