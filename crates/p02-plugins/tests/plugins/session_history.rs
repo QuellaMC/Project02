@@ -427,7 +427,10 @@ async fn a_catch_up_stopped_with_its_hook_goes_on_where_it_stopped() {
     storage.history.serve_at_most(1);
     storage.history.hold_after(2, Arc::clone(&gate));
 
-    let host = history_host(&storage, 500);
+    // The budget is what the held read runs out of; the reads after the
+    // gate opens are in memory, and the budget gives them room on a loaded
+    // machine, where a short one cut the catch-up a second time.
+    let host = history_host(&storage, 3_000);
     let dolphin = json!({"query": "dolphin"});
     let stopped = ask(&host, "sessions.search", dolphin.clone(), &turn()).await;
 
