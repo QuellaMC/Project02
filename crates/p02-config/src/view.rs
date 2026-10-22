@@ -2,23 +2,24 @@
 //! a connector's read, and the report of `inspect`. Only a connector's
 //! read carries a secret, since a token is what a connector exists to use.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU64;
 
 use p02_characters::Discovery;
-use p02_contracts::ConfigValueType;
+use p02_contracts::{AccessMap, ConfigValueType, Manifest, PluginKind};
 use p02_core::SpeakerName;
 use p02_shared::{Fingerprint, Identifier, error_sentence, sentence};
 use p02_store::Home;
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
 use crate::change::ConfigTarget;
 use crate::conceal::conceal;
-use crate::declaration::{Namespace, RoleModelProvider, Sections, Source, Target, connectors};
+use crate::declaration::{
+    Declared, Namespace, RoleModelProvider, Sections, Source, Target, connectors,
+};
 use crate::diagnostic::Diagnostic;
 use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, Status};
 
@@ -200,18 +201,24 @@ impl ReadSettingsError {
 impl Resolution<'_> {
     /// The view of these settings: every host field, and every section,
     /// and of each section every field, that the target may set; secrets
-    /// never.
+    /// never. A person looks a section up by its name, so the screen lists
+    /// the plugins' by id and then the connectors'.
     #[must_use]
     pub fn view(&self) -> ConfigView {
+        let mut sections: Vec<SectionView> = self
+            .sections()
+            .iter()
+            .filter_map(|section| self.section_shown(section))
+            .collect();
+
+        sections
+            .sort_by(|left, right| (left.namespace, &left.id).cmp(&(right.namespace, &right.id)));
+
         ConfigView::Ok {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
             project02: self.host().iter().map(field_view).collect(),
-            sections: self
-                .sections()
-                .iter()
-                .filter_map(|section| self.section_shown(section))
-                .collect(),
+            sections,
         }
     }
 
@@ -479,11 +486,18 @@ fn connector_entry(resolution: &Resolution<'_>, id: &str) -> ConnectorEntry {
     ConnectorEntry { activation, values }
 }
 
-/// The settings part of what `inspect` reports of a character.
+/// The settings part of what `inspect` reports of a character: where they
+/// come from and what they hold, what they make of each plugin this build
+/// has and of each connector, and the findings about them, a secret only as
+/// `[redacted]`. A plugin is reported from its manifest and her settings
+/// alone: none is built to report it.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigReport {
     runtime_config: RuntimeConfigReport,
+    /// The findings about what she runs: every one but a connector's.
+    activation_diagnostics: Vec<Diagnostic>,
+    plugins: Vec<PluginReport>,
     connectors: Vec<ConnectorReport>,
 }
 
@@ -521,8 +535,27 @@ pub struct HostReport {
     context_window_tokens: NonZeroU64,
 }
 
+/// A plugin as `inspect` reports it: its kind, whether her settings run it
+/// and why, the access its manifest asks for and the access running it
+/// grants, which is that and nothing else, the findings about it, and each
+/// field's value in effect.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReport {
+    plugin_id: Identifier,
+    kind: PluginKind,
+    enabled: bool,
+    requested_access: AccessMap,
+    granted_access: AccessMap,
+    activation_status: ActivationStatus,
+    activation_reasons: Vec<String>,
+    diagnostics: Vec<Diagnostic>,
+    #[serde(serialize_with = "by_name")]
+    config: Vec<EffectiveView>,
+}
+
 /// A connector as `inspect` reports it: its switch and activation, its
-/// diagnostics, and each field resolved, secrets redacted.
+/// diagnostics, and each field's value in effect.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorReport {
@@ -532,7 +565,13 @@ pub struct ConnectorReport {
     enabled: bool,
     activation: SectionActivation,
     diagnostics: Vec<Diagnostic>,
-    config: BTreeMap<String, EffectiveView>,
+    #[serde(serialize_with = "by_name")]
+    config: Vec<EffectiveView>,
+}
+
+/// A section's fields by name, in the order they are declared.
+fn by_name<S: Serializer>(fields: &[EffectiveView], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(fields.iter().map(|field| (&field.name, field)))
 }
 
 impl Resolution<'_> {
@@ -569,6 +608,20 @@ impl Resolution<'_> {
                 diagnostics: self.diagnostics().to_vec(),
                 fingerprint: self.fingerprint().clone(),
             },
+            activation_diagnostics: self
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| !diagnostic.about_connector())
+                .cloned()
+                .collect(),
+            plugins: self
+                .sections()
+                .iter()
+                .filter_map(|section| match section.declared {
+                    Declared::Plugin(manifest) => Some(self.plugin_report(section, manifest)),
+                    Declared::Connector(_) => None,
+                })
+                .collect(),
             connectors: self
                 .sections()
                 .iter()
@@ -580,13 +633,39 @@ impl Resolution<'_> {
                     enabled: section.enabled(),
                     activation: activation(section),
                     diagnostics: section.diagnostics.clone(),
-                    config: section
-                        .fields
-                        .iter()
-                        .map(|field| (field.declaration.name().to_string(), effective_view(field)))
-                        .collect(),
+                    config: section.fields.iter().map(effective_view).collect(),
                 })
                 .collect(),
+        }
+    }
+
+    fn plugin_report(&self, section: &Section<'_>, manifest: &Manifest) -> PluginReport {
+        let SectionActivation {
+            enabled,
+            status,
+            reasons,
+        } = activation(section);
+        let id = manifest.id();
+
+        PluginReport {
+            plugin_id: id.clone(),
+            kind: manifest.kind(),
+            enabled,
+            requested_access: manifest.requested_access().clone(),
+            granted_access: if enabled {
+                manifest.requested_access().clone()
+            } else {
+                AccessMap::default()
+            },
+            activation_status: status,
+            activation_reasons: reasons,
+            diagnostics: self
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.concerns(Namespace::Plugins, id.as_str()))
+                .cloned()
+                .collect(),
+            config: section.fields.iter().map(effective_view).collect(),
         }
     }
 }

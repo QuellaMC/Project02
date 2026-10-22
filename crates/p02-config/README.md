@@ -38,18 +38,20 @@ outcome are the wire's own types.
   declaration and its rule, and a blank text is never one, since unsetting
   is its own change. Each is set at the home, and over it by a character.
 - **Sections and scopes.** A plugin's section is the one its manifest
-  declares. A connector's is built in, Telegram's alone today: her bot's
-  token, a secret and hers alone; the home's management bot's token, a
-  secret and the home's alone; whether to mirror, on unless set; and the
-  accounts paired with the home, its own and none unless set, which an
-  approved pairing writes into. A section's scope, or a field's own, which
-  may only narrow it, says which document may set it: the home's for every
-  character, a character's alone, or the home's alone. A value a document
-  holds outside its scope is a warning at its path and is never in effect,
-  and a change outside its scope is refused, in both directions. A plugin
-  and a connector may share an id: their sections never meet. A stanza
-  naming a section this build lacks is a warning for that id, unless the
-  nearest document that switches it switches it off.
+  declares, held in the order the build lists its plugins, the order her
+  plugins run and are reported in. A connector's is built in, Telegram's
+  alone today: her bot's token, a secret and hers alone; the home's
+  management bot's token, a secret and the home's alone; whether to
+  mirror, on unless set; and the accounts paired with the home, its own
+  and none unless set, which an approved pairing writes into. A section's
+  scope, or a field's own, which may only narrow it, says which document
+  may set it: the home's for every character, a character's alone, or the
+  home's alone. A value a document holds outside its scope is a warning at
+  its path and is never in effect, and a change outside its scope is
+  refused, in both directions. A plugin and a connector may share an id:
+  their sections never meet. A stanza naming a section this build lacks is
+  a warning for that id, unless the nearest document that switches it
+  switches it off.
 - **Resolution.** For the home a value is the home's, else its declared
   default; for a character it is hers, else the home's, else the default,
   each from a document its scope lets her read, with where it came from. A
@@ -115,12 +117,18 @@ outcome are the wire's own types.
   finds nothing left to merge.
 - **The views.** A settings screen's view of the home or of a character:
   every host field, and every section and every field of it the target
-  may set, each with what the target's own document holds and what is in
-  effect from where, the diagnostics, and the fingerprints, a secret only
-  as `[redacted]`. A connector's read: an entry for the home and one per
-  character switched on, each by its own switch, with the values in effect
-  for it, secrets in the clear, since a token is what a connector exists
-  to use. And the part of `inspect`'s report that is the settings'. A
-  character not installed, or settings that cannot be resolved, is refused
-  with the reason. Formatted for a log, a resolution, a change and a
-  connector's read name what they hold and never show a value.
+  may set, the plugins' sections by id and then the connectors', as a
+  person looks one up, each with what the target's own document holds and
+  what is in effect from where, the diagnostics, and the fingerprints, a
+  secret only as `[redacted]`. A connector's read: an entry for the home
+  and one per character switched on, each by its own switch, with the
+  values in effect for it, secrets in the clear, since a token is what a
+  connector exists to use. And the part of `inspect`'s report that is the
+  settings': where they come from, the host's values, the findings about
+  what she runs, and each plugin and connector with its switch, its
+  activation and why, its findings and its values in effect, a plugin
+  with the access its manifest asks for and the access running it grants,
+  read from its manifest alone. A character not installed, or settings
+  that cannot be resolved, is refused with the reason. Formatted for a
+  log, a resolution, a change and a connector's read name what they hold
+  and never show a value.

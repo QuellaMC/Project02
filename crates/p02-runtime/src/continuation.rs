@@ -73,12 +73,14 @@ pub(crate) fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<S
 /// Condenses `turns`, after the `earlier` summary a continued session
 /// opened with, through the provider's plain completion. When the provider
 /// has no model for it, fails, or answers nothing, the mechanical summary
-/// says what it can, and the summarizer says why.
+/// says what it can, and the summarizer says why. Both speak of the person
+/// by `person`, the name the conversation recorded for them, as the
+/// transcript they condense names them.
 pub(crate) async fn summarize(
     adapter: &dyn RoleModelAdapter,
     turns: &[ConversationTurn],
     earlier: Option<&str>,
-    person: Person<'_>,
+    person: &SpeakerName,
     character: &SpeakerName,
     window: NonZeroU64,
 ) -> Summary {
@@ -89,7 +91,12 @@ pub(crate) async fn summarize(
         Recollection::First
     };
     let request = TextCompletionRequest {
-        instructions: summarizer_instructions(person, character, budget, recollection),
+        instructions: summarizer_instructions(
+            Person::Named(person),
+            character,
+            budget,
+            recollection,
+        ),
         input: summarizer_input(turns, earlier, window),
         max_output_chars: budget,
     };
@@ -299,7 +306,7 @@ fn capped(text: &str, budget: usize) -> Option<String> {
 fn mechanical_summary(
     turns: &[ConversationTurn],
     earlier: Option<&str>,
-    person: Person<'_>,
+    person: &SpeakerName,
     budget: usize,
 ) -> String {
     let first = turns
@@ -318,10 +325,6 @@ fn mechanical_summary(
         })
         .collect::<Vec<_>>()
         .join(" · ");
-    let name = match person {
-        Person::Named(name) => name.as_str(),
-        Person::Unnamed => "the person",
-    };
     let mut tools: Vec<&Identifier> = Vec::new();
 
     for call in turns
@@ -339,7 +342,7 @@ fn mechanical_summary(
             "Earlier conversation ({} turns, {first} to {last}) is not in context verbatim.",
             turns.len()
         ),
-        format!("Most recent things {name} said there: {quoted}."),
+        format!("Most recent things {person} said there: {quoted}."),
     ];
 
     if !tools.is_empty() {
@@ -593,8 +596,7 @@ mod tests {
             let budget = summary_budget(window(&mut random)).get();
             let earlier = (random.below(2) == 0).then(|| random.text(MAX_SUMMARY_CHARS));
             let person = SpeakerName::new("Sam").unwrap();
-            let mechanical =
-                mechanical_summary(&turns, earlier.as_deref(), Person::Named(&person), budget);
+            let mechanical = mechanical_summary(&turns, earlier.as_deref(), &person, budget);
             let answer = format!("  {}  ", random.text(3 * budget));
             let model = capped(&answer, budget).unwrap();
 

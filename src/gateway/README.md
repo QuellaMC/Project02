@@ -27,7 +27,9 @@ the runtime itself judges from what it was built with; `config.ts` is the
 config owner's two verbs — the view a settings page renders (the host's
 fields and the `sections`, one list over every namespace), and the change
 that goes through the one control transaction (a section's operations name
-it by namespace and id), applied by reconcile behind the answer;
+it by namespace and id), applied by reconcile behind the answer, and
+announced in `health_changed`, as a change a character's own plugin makes
+is too;
 `connector-config.ts` is the one read a connector makes, resolved through
 the same functions as the view and handing out values, not field shapes,
 and reads a connector's allowlist in the clear from the home's resolution

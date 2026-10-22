@@ -3,7 +3,7 @@
 //! default, with where it came from, what is wrong with it, and the
 //! fingerprints a change is bound to.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -600,7 +600,7 @@ impl fmt::Debug for HostSettings {
 #[derive(Clone, PartialEq, Eq)]
 pub struct CharacterSettings {
     host: HostSettings,
-    plugins: BTreeMap<Identifier, Map<String, Value>>,
+    plugins: Vec<(Identifier, Map<String, Value>)>,
 }
 
 impl CharacterSettings {
@@ -609,9 +609,11 @@ impl CharacterSettings {
         &self.host
     }
 
-    /// The plugins switched on, in id order, each with its values.
+    /// The plugins switched on, in the order this build lists them, which
+    /// is the order the model is offered their tools in, each with its
+    /// values.
     pub fn plugins(&self) -> impl Iterator<Item = (&Identifier, &Map<String, Value>)> {
-        self.plugins.iter()
+        self.plugins.iter().map(|(id, values)| (id, values))
     }
 }
 

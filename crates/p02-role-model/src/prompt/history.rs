@@ -102,12 +102,13 @@ pub(crate) fn wire_chars<T: Serialize + ?Sized>(value: &T) -> u64 {
     json_text(value).chars().count() as u64
 }
 
-/// The runtime's one token estimate: four characters a token, at least one
-/// a message. Coarse on purpose: the window and the prompt's measure share
-/// it, and a provider's own count is held against it, never put in its
-/// place.
-fn estimated_tokens(chars: u64) -> u64 {
-    chars.div_ceil(4).max(1)
+/// The runtime's one token estimate: four characters a token, rounded up,
+/// so a message, whose wire text is never empty, costs at least one.
+/// Coarse on purpose: the window and the prompt's measure share it, and a
+/// provider's own count is held against it, never put in its place.
+#[must_use]
+pub fn estimated_tokens(chars: u64) -> u64 {
+    chars.div_ceil(4)
 }
 
 fn turn_tokens(turn: &ConversationTurn) -> u64 {

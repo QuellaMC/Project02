@@ -224,9 +224,7 @@ describe('runtime plugin config control', () => {
       enabled: false,
       status: 'blocked',
     });
-    expect(inspected.activation.reasons).toContain(
-      'runtime_config_error:runtime_config_version_unsupported',
-    );
+    expect(inspected.activation.reasons).toEqual(['blocked_by_config_errors']);
   });
 
   it('lets an agent exactly set and unset an agent-mutable field', () => {

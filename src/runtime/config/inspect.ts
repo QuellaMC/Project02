@@ -91,10 +91,12 @@ export function createRuntimeSectionConfigInspectShape(options: {
     );
   }
 
-  const configuredEnabled =
-    (options.targetScope === 'character'
+  const switchedEnabled =
+    options.targetScope === 'character'
       ? effectiveSection?.enabled
-      : authoredSection?.enabled) ??
+      : authoredSection?.enabled;
+  const configuredEnabled =
+    switchedEnabled ??
     options.defaultEnabled ??
     declaration.activation.defaultEnabled;
   const enabledSource: RuntimeConfigEffectiveSource =
@@ -112,6 +114,7 @@ export function createRuntimeSectionConfigInspectShape(options: {
   );
   const activation = sectionActivationInspection({
     configuredEnabled,
+    switched: switchedEnabled !== undefined,
     diagnostics,
     declaration,
     ...(options.activation === undefined
@@ -251,8 +254,15 @@ export function createProject02ConfigFieldInspectShapes(options: {
   );
 }
 
+/**
+ * A section's activation where no activation decision was made for it, in
+ * the words a decision uses: blocked by an error in its settings, or on or
+ * off and why, by a document's switch or by its default.
+ */
 function sectionActivationInspection(options: {
   readonly configuredEnabled: boolean;
+  /** Whether a document switches it, rather than its default. */
+  readonly switched: boolean;
   readonly diagnostics: RuntimeConfigSectionInspectShape['diagnostics'];
   readonly declaration: RuntimeConfigSectionDeclaration;
   readonly activation?: RuntimeConfigSectionActivationShape;
@@ -265,31 +275,31 @@ function sectionActivationInspection(options: {
     });
   }
 
-  const blockingDiagnosticCodes = options.diagnostics
-    .filter(diagnostic => diagnostic.severity === 'error')
-    .map(diagnostic => diagnostic.code);
-
-  if (blockingDiagnosticCodes.length > 0) {
+  if (options.diagnostics.some(diagnostic => diagnostic.severity === 'error')) {
     return Object.freeze({
       enabled: false,
       status: 'blocked',
-      reasons: Object.freeze(
-        blockingDiagnosticCodes.map(code => `runtime_config_error:${code}`),
-      ),
+      reasons: Object.freeze(['blocked_by_config_errors']),
+    });
+  }
+
+  if (!options.configuredEnabled) {
+    return Object.freeze({
+      enabled: false,
+      status: 'disabled',
+      reasons: Object.freeze([
+        options.switched ? 'disabled_by_config' : 'not_enabled',
+      ]),
     });
   }
 
   return Object.freeze({
-    enabled: options.configuredEnabled,
-    status: options.configuredEnabled ? 'active' : 'disabled',
-    reasons: Object.freeze(
-      options.configuredEnabled
-        ? [
-            ...options.declaration.activation.reasons,
-            'config_inspection_active',
-          ]
-        : ['config_inspection_disabled'],
-    ),
+    enabled: true,
+    status: 'active',
+    reasons: Object.freeze([
+      ...options.declaration.activation.reasons,
+      options.switched ? 'enabled_by_config' : 'enabled_by_default',
+    ]),
   });
 }
 
@@ -378,9 +388,11 @@ export function inspectConfiguredConnectors(
 ): readonly InspectConfiguredConnector[] {
   return Object.freeze(
     builtInConnectors.map(connector => {
-      const enabled =
-        ownJsonRecordValue(effectiveConfig.config?.connectors, connector.id)
-          ?.enabled ?? connector.activation.defaultEnabled;
+      const switchedEnabled = ownJsonRecordValue(
+        effectiveConfig.config?.connectors,
+        connector.id,
+      )?.enabled;
+      const enabled = switchedEnabled ?? connector.activation.defaultEnabled;
       const diagnostics = Object.freeze(
         resolvedConfig.diagnostics.filter(diagnostic =>
           runtimeConfigDiagnosticMatchesSection({
@@ -402,6 +414,7 @@ export function inspectConfiguredConnectors(
         enabled,
         activation: sectionActivationInspection({
           configuredEnabled: enabled,
+          switched: switchedEnabled !== undefined,
           diagnostics,
           declaration: connector,
         }),

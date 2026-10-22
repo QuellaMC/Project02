@@ -4,7 +4,8 @@ One scenario driven through two builds of the daemon, a reference and a
 candidate, and what each left compared once normalized: what reached the
 stand-in model server, byte for byte but for the three differences a port
 is permitted; what reached the stand-in mem0 server; the event stream's
-frames, kinds and payloads; the history pages; and `inspect`'s reports.
+frames, kinds and payloads; the history pages; and `inspect`'s reports,
+but for what each build's store keeps its own way (plan D1).
 A port is checked against the reference's recorded behavior, never against
 its source. Both builds are met only through the conformance harness, as
 `tests/conformance` meets one.
@@ -65,14 +66,16 @@ the repository root, as the harness runs `PROJECT02_SERVE_CMD`:
 
 Unset, both builds are this checkout's TypeScript daemon, and the run
 proves that two of its runs leave the same recording. Against another
-build, the Rust binary among them:
+build, the Rust binary among them, built as `../conformance/README.md`
+builds it:
 
 ```sh
-PROJECT02_CANDIDATE_SERVE_CMD='path/to/project02 serve' \
-PROJECT02_CANDIDATE_INSPECT_CMD='path/to/project02 inspect' \
+PROJECT02_CANDIDATE_SERVE_CMD='target/debug/project02 serve' \
+PROJECT02_CANDIDATE_INSPECT_CMD='target/debug/project02 inspect' \
   pnpm test:differential
 ```
 
 CI runs `pnpm test:differential` as the `differential` job on every pull
-request and push; `pnpm check` leaves it out. The nightly run, with the
-Rust binary as the candidate, comes when that binary exists.
+request and push, and again with the Rust binary as the candidate for
+both commands in the `rust-conformance` job, after the conformance suite;
+`pnpm check` leaves it out.

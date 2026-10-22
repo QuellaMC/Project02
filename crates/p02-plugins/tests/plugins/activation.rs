@@ -197,11 +197,11 @@ async fn the_listed_plugins_activate_together() {
             .map(Identifier::as_str)
             .collect::<Vec<_>>(),
         [
+            "runtime.plugin",
             "character-memory",
             "character-state",
             "demo-config",
             "mem0",
-            "runtime.plugin",
             "session-history"
         ]
     );
@@ -212,11 +212,11 @@ async fn the_listed_plugins_activate_together() {
             .map(|definition| definition.tool.name().as_str())
             .collect::<Vec<_>>(),
         [
+            "runtime.plugin.list",
             "memory.update",
             "character_state.patch",
             "mem0.search",
             "mem0.add",
-            "runtime.plugin.list",
             "sessions.search",
             "sessions.read"
         ],

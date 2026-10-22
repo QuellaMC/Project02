@@ -16,8 +16,8 @@ use p02_contracts::{
     DecisionContext, FrameSize, InputEnvelope, PLUGIN_LIST_TOOL, PromptSize,
 };
 
+pub use history::{estimated_tokens, newest_turns_within, select_history_window};
 pub(crate) use history::{json_text, round_messages};
-pub use history::{newest_turns_within, select_history_window};
 pub(crate) use text::unusable_reply_note;
 pub use text::{
     CalendarDay, InvalidCalendarDayError, Person, Recollection, summarizer_instructions, today_note,

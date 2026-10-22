@@ -24,6 +24,105 @@ type Run = {
   readonly measured: number;
   /** The request body as the daemon spells it on the wire. */
   readonly spelled: (body: string) => string;
+  /** A session as its store keeps it, and inspect reports it. */
+  readonly stored: Stored;
+};
+
+/** What a store keeps of a session, which plan D1 lets each keep its own way. */
+type Stored = {
+  readonly steps: readonly string[];
+  readonly traceEntries: number;
+  readonly rawEvents: number;
+  readonly messages: number;
+  readonly continuationKind: boolean;
+  readonly reasoning: 'nested' | 'flat';
+  readonly reasoningBudget: number;
+  readonly turnSnapshot: boolean;
+  readonly evidence: readonly Readonly<Record<string, unknown>>[];
+};
+
+/** The TypeScript store's: its trace's own steps, a snapshot of the turn's plugins, each step's fingerprint and references. */
+const typescriptStore: Stored = {
+  steps: [
+    'runtime_event_received',
+    'runtime_event_normalized',
+    'runtime_turn_started',
+    'visible_message_committed',
+    'role_model_round',
+    'tool_call_started',
+    'tool_call_finished',
+    'raw_event_log_appended',
+    'runtime_turn_completed',
+  ],
+  traceEntries: 9,
+  rawEvents: 8,
+  messages: 2,
+  continuationKind: true,
+  reasoning: 'nested',
+  reasoningBudget: 16384,
+  turnSnapshot: true,
+  evidence: [
+    {
+      pluginId: 'runtime.plugin',
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      summary: 'Applied approved plugin "demo-config" config field "tone".',
+      redactionLabels: [],
+      sourceReferences: [{kind: 'runtime', id: 'call-1'}],
+      configFingerprint: 'sha256:cccc',
+    },
+    {
+      pluginId: 'runtime.plugin',
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      summary: 'Live-applied plugin "demo-config" config field "tone".',
+      redactionLabels: [],
+    },
+    {
+      pluginId: 'runtime.plugin',
+      evidenceKind: 'policy',
+      status: 'accepted',
+      summary: 'User approved one prepared config effect.',
+      redactionLabels: [],
+      policyOutcome: 'user_approved',
+    },
+  ],
+};
+
+/** The Rust store's: its records' own kinds, and the steps worded and labelled anew. */
+const rustStore: Stored = {
+  steps: [
+    'runtime_event_received',
+    'visible_message_committed',
+    'role_model_round',
+    'tool_call_started',
+    'tool_call_finished',
+    'runtime_turn_completed',
+  ],
+  traceEntries: 6,
+  rawEvents: 7,
+  messages: 2,
+  continuationKind: false,
+  reasoning: 'flat',
+  reasoningBudget: 16384,
+  turnSnapshot: false,
+  evidence: [
+    {
+      pluginId: 'runtime.plugin',
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      summary: 'Changed plugin "demo-config" field "tone".',
+      redactionLabels: ['memory'],
+    },
+    {
+      pluginId: 'runtime.plugin',
+      evidenceKind: 'policy',
+      status: 'accepted',
+      summary: 'User approved plugin "runtime.plugin".',
+      redactionLabels: [],
+      policyOutcome: 'user_approved',
+    },
+  ],
 };
 
 const reference: Run = {
@@ -46,10 +145,12 @@ const reference: Run = {
   rejection: 'visible_reply input includes unsupported fields: tone.',
   measured: 1152,
   spelled: body => body,
+  stored: typescriptStore,
 };
 
 /** One run's recording: a turn with a replayed turn before it, a tool round and a refused round, and what the run left besides. */
 function recordingOf(run: Run, replayed = true): Recording {
+  const {stored} = run;
   const conversation = `conv_${run.conversation}`;
   const callId = `evt_${run.event}.round-1.1.sessions.search`;
   const body = {
@@ -144,15 +245,60 @@ function recordingOf(run: Run, replayed = true): Recording {
               nvidiaBaseUrl: `http://127.0.0.1:${run.modelServerPort}/v1`,
               mem0BaseUrl: `http://127.0.0.1:${run.memoryServerPort}`,
             },
+            continuation: {
+              eventId: `evt_${run.event}`,
+              ...(stored.continuationKind
+                ? {kind: 'session_continuation_snapshot'}
+                : {}),
+              summary: 'They keep a journal.',
+            },
+            counts: {
+              traceEntries: stored.traceEntries,
+              rawEvents: stored.rawEvents,
+              conversationMessages: stored.messages,
+            },
             turns: [
               {
+                steps: stored.steps,
                 runtimeNotes: [{id: 'today', text: `Today is ${run.day}.`}],
                 summaryDay: run.moment.slice(0, 10),
                 promptSize: {total: {chars: run.measured}},
                 rawOutputText: JSON.stringify({
                   input: {expectedFingerprint: run.fingerprint},
                 }),
+                providerExchange: {
+                  provider: {name: 'nvidia'},
+                  ...(stored.reasoning === 'nested'
+                    ? {
+                        reasoning: {
+                          mode: 'enabled',
+                          params: {reasoning_budget: stored.reasoningBudget},
+                        },
+                      }
+                    : {
+                        reasoningParams: {
+                          reasoning_budget: stored.reasoningBudget,
+                        },
+                      }),
+                  requestBody: {model: 'conformance-model'},
+                },
                 parsedDecision: {rejectionDetails: run.rejection},
+                toolEvents: [
+                  {result: {status: 'accepted', evidence: stored.evidence}},
+                ],
+                pluginEvidence: {
+                  ...(stored.turnSnapshot
+                    ? {
+                        contractVersion: 'mvp-008.runtime_plugin.v2',
+                        plugins: [{pluginId: 'runtime.plugin'}],
+                        contextItems: [],
+                        toolInvocations: [],
+                      }
+                    : {}),
+                  evidence: stored.evidence,
+                  policyOutcomes: ['user_approved'],
+                  health: [],
+                },
               },
             ],
           },
@@ -213,6 +359,10 @@ it.each<[string, Partial<Run>]>([
     },
   ],
   ['prompt measures counted otherwise', {measured: 1153}],
+  [
+    "a session as the other store keeps it (plan D1): its trace's steps and counts, its continuation, its exchange's reasoning parameters, and its plugins' evidence",
+    {stored: rustStore},
+  ],
 ])('%s reads the same as the reference', (_, differences) => {
   expect(normalize(recordingOf({...reference, ...differences}))).toBe(
     normalize(recordingOf(reference)),
@@ -233,6 +383,32 @@ it.each<[string, Partial<Run>]>([
   [
     'the sentence that carries what the runtime said of a refused round',
     {unusableReply: 'That reply could not be used. The runtime said: '},
+  ],
+  [
+    'a step a turn took that the other did not',
+    {
+      stored: {
+        ...typescriptStore,
+        steps: [...typescriptStore.steps, 'role_model_round'],
+      },
+    },
+  ],
+  ['messages counted otherwise', {stored: {...typescriptStore, messages: 3}}],
+  [
+    'a reasoning parameter sent otherwise',
+    {stored: {...rustStore, reasoningBudget: 8192}},
+  ],
+  [
+    "a plugin's step that ended otherwise",
+    {
+      stored: {
+        ...rustStore,
+        evidence: rustStore.evidence.map(entry => ({
+          ...entry,
+          status: 'failed',
+        })),
+      },
+    },
   ],
 ])('%s shows', (_, differences) => {
   expect(normalize(recordingOf({...reference, ...differences}))).not.toBe(

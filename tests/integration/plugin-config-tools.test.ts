@@ -464,7 +464,7 @@ describe('host-owned runtime plugin management tools', () => {
     expect(output['activation']).toEqual({
       enabled: false,
       status: 'disabled',
-      reasons: ['config_inspection_disabled'],
+      reasons: ['not_enabled'],
     });
   });
 

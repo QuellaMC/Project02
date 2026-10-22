@@ -170,6 +170,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     runtimes,
     startsInFlight,
     emit,
+    healthChanged,
   });
   const reconciler = createRuntimeReconciler({
     loadHome,
@@ -592,6 +593,8 @@ function createRuntimeFactory(seams: {
   readonly runtimes: Map<string, LocalCharacterRuntime>;
   readonly startsInFlight: Map<string, Promise<void>>;
   readonly emit: (event: GatewayEvent) => void;
+  /** What a change her own plugin made reaches every surface as, as any change does. */
+  readonly healthChanged: () => void;
 }): (characterId: string) => LocalCharacterRuntime {
   const {options, runtimes, startsInFlight} = seams;
   const lastStates = new Map<string, string>();
@@ -609,6 +612,7 @@ function createRuntimeFactory(seams: {
       characterId,
       toolConfirmationTimeoutMs: options.toolConfirmationTimeoutMs,
       roleModelRequestTimeoutMs: options.roleModelRequestTimeoutMs,
+      settingsChanged: seams.healthChanged,
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),

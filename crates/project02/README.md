@@ -1,11 +1,14 @@
 # project02
 
-The daemon a person runs, `project02 serve [--store <dir>] [--init]`. It
-depends on p02-app, p02-config, p02-gateway, p02-plugins, p02-role-model,
-p02-shared and p02-store, and holds what none of them decides: where the
-home is, the switches of a test harness, the plugins compiled in, the
-signals that stop it, and what it prints. `inspect` and `telegram` come
-in later steps; any other command is a usage error.
+The binary a person runs: the daemon, `project02 serve [--store <dir>]
+[--init]`, and a report on a home, `project02 inspect [--store <dir>]
+[--character <id>] [--sessions | --session <id> | --conversations |
+--conversation <id>]`. It depends on p02-app, p02-characters,
+p02-config, p02-contracts, p02-core, p02-gateway, p02-plugins,
+p02-role-model, p02-shared and p02-store, and holds what none of them
+decides: where the home is, the switches of a test harness, the plugins
+compiled in, the signals that stop it, and what it prints. `telegram`
+comes in a later step; any other command is a usage error.
 
 - **The command line.** `serve` owns two flags, each at most once:
   `--store <dir>`, the home, else `.project02` in the working directory,
@@ -56,3 +59,29 @@ in later steps; any other command is a usage error.
   once its lease goes. A wait that runs out says to run serve again, with
   exit code 1, and a stop while waiting exits 1 quietly, never claiming
   the home on the way out.
+- **Inspect** reads a home through the store's own readers and writes
+  nothing, ever: no store, marker, settings document or overlay, whatever
+  needs repair. Its flags are read as serve's are, each at most once:
+  `--store` as serve takes it, `--character` an identifier, and at most
+  one report, a second refused as `Use exactly one of --sessions,
+  --session, --conversations, or --conversation.`; `--init` is refused,
+  since inspect never creates a store. The home is checked first, as every
+  way into it is, and a folder that holds nothing reports an empty store.
+- **The character** is the one named, whether or not she is switched on,
+  else the one character the settings switch on, a character whose
+  settings cannot be read counted on so that her damage is reported; none
+  or several are refused naming them, and one not installed naming the
+  installed ones. A package discovery could not publish is said on stderr,
+  `Warning: Character package <path> (<code>): <message>`, and the report
+  is of the healthy ones.
+- **The report** is one JSON document on stdout, indented by two with a
+  closing line feed: her settings as they stand, the part p02-config
+  renders, and beside them the report asked for, if any: her sessions as
+  her catalog lists them; one session's evidence, derived from its records
+  alone, each turn's trace the kinds of its records, its rounds what they
+  were shown and wrote, with the tokens their recorded measures come to;
+  the home's conversations; or one conversation with her segments of it in
+  the order they continue one another. A store inspect cannot read as one,
+  its files unreadable or not what a store holds, is `Error: Local runtime
+  store could not be read.`; every other refusal says what the store
+  found, with exit code 1 and nothing on stdout.

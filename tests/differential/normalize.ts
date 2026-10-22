@@ -39,6 +39,25 @@
  *   `<measured>`, since it counts in the unit row 17 changes and moves
  *   with every difference above; the requests it measures are compared.
  *
+ * What each store keeps of a session (plan D1: the Rust daemon owns
+ * storage version 15, defined as if written for the first time), wherever
+ * inspect reports one from its records:
+ * - The trace: version 15 writes no runtime_event_normalized record and
+ *   adds no runtime_turn_started or raw_event_log_appended step, so a
+ *   turn's steps are compared without those three, and the counts of a
+ *   session's trace entries and raw events are `<counted>`.
+ * - The continuation: its record says what it is, so the snapshot's own
+ *   `kind` goes.
+ * - The exchange: version 15 keeps the reasoning parameters a round sent
+ *   as `reasoningParams`, where the TypeScript store kept them as
+ *   `reasoning.params` beside their mode, so the reference's are read as
+ *   version 15 keeps them.
+ * - The plugins' evidence: version 15 keeps no snapshot of a turn's
+ *   plugins, context items, tool invocations or contract version, which
+ *   its rounds and tool events already hold, and each store words,
+ *   labels and references a plugin's steps its own way, so evidence is
+ *   compared by who took which step and how it ended, each once.
+ *
  * Spelling: each JSON text is compared as its value, and a text that is
  * not that value as the reference spells its kind — compact on the wire,
  * indented by two with a closing line feed from inspect — keeps the
@@ -143,7 +162,7 @@ function partsOf(recording: Recording): Part[] {
     ...recording.reports.flatMap(run => [
       {
         title: `inspect ${run.args.join(' ')}, exited ${String(run.exitCode)}`,
-        ...partOf(run.stdout, report),
+        ...partOf(run.stdout, report, asStored),
       },
       ...(run.stderr === '' ? [] : [{title: 'stderr', value: run.stderr}]),
     ]),
@@ -214,6 +233,81 @@ function inWindow(body: unknown): unknown {
   }
 
   return {...body, messages: {frames, turns}};
+}
+
+const unrecordedSteps = new Set([
+  'runtime_event_normalized',
+  'runtime_turn_started',
+  'raw_event_log_appended',
+]);
+const unkeptTurnEvidence = new Set([
+  'contractVersion',
+  'plugins',
+  'contextItems',
+  'toolInvocations',
+]);
+
+/** An inspect report as either store keeps a session, the differences plan D1 makes taken out. */
+function asStored(report: unknown): unknown {
+  return JSON.parse(JSON.stringify(report, stored)) as unknown;
+}
+
+/** A value of an inspect report under its key, as `JSON.stringify` visits each one. */
+function stored(key: string, value: unknown): unknown {
+  if (key === 'steps' && Array.isArray(value)) {
+    return value.filter(step => !unrecordedSteps.has(String(step)));
+  }
+
+  if (key === 'counts' && isRecord(value)) {
+    return {...value, traceEntries: '<counted>', rawEvents: '<counted>'};
+  }
+
+  if (key === 'continuation' && isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).filter(([name]) => name !== 'kind'),
+    );
+  }
+
+  if (key === 'providerExchange' && isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, entry]) =>
+        name === 'reasoning' && isRecord(entry)
+          ? ['reasoningParams', entry['params']]
+          : [name, entry],
+      ),
+    );
+  }
+
+  if (key === 'pluginEvidence' && isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).filter(([name]) => !unkeptTurnEvidence.has(name)),
+    );
+  }
+
+  return key === 'evidence' && Array.isArray(value) ? stepsTaken(value) : value;
+}
+
+/** Each step plugins took, by who took it and how it ended, once, in the order first taken. */
+function stepsTaken(evidence: readonly unknown[]): unknown[] {
+  const steps = new Map<string, unknown>();
+
+  for (const entry of evidence) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const {pluginId, evidenceKind, status, policyOutcome} = entry;
+    const step = {
+      pluginId,
+      evidenceKind,
+      status,
+      ...(policyOutcome === undefined ? {} : {policyOutcome}),
+    };
+
+    steps.set(JSON.stringify(step), step);
+  }
+
+  return [...steps.values()];
 }
 
 /**

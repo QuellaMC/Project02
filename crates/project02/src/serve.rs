@@ -6,24 +6,21 @@
 use std::error::Error;
 use std::io;
 use std::num::NonZeroU16;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use p02_app::{Daemon, DaemonSettings, Event, Health, Plugin};
 use p02_config::Severity;
 use p02_gateway::{Claim, ClaimOutcome, Page, Server};
 use p02_role_model::select_adapter;
-use p02_shared::{
-    DEFAULT_HOME, DaemonToken, DanglingLinks, ResolvePathError, canonical_path, error_sentence,
-};
+use p02_shared::{DaemonToken, error_sentence};
 use p02_store::{Home, StorageError};
 use tokio_util::sync::CancellationToken;
 
-use crate::Console;
 use crate::consent::{self, Unconsented};
 use crate::flags::ServeFlags;
 use crate::handover::{self, HandedOver};
 use crate::switches::Switches;
+use crate::{Console, home_of, package_problem};
 
 pub(crate) async fn run(flags: ServeFlags, switches: Switches, console: &mut Console) -> ExitCode {
     let stop = match listen_for_stop() {
@@ -103,15 +100,6 @@ pub(crate) fn address_line(port: NonZeroU16, token: &DaemonToken) -> String {
         "PROJECT02_GATEWAY=http://127.0.0.1:{port}/#token={}",
         token.as_str()
     )
-}
-
-/// The home `store` names, or `.project02` in the working directory, bound
-/// to its real path, so a link that later points elsewhere cannot move a
-/// running home.
-fn home_of(store: Option<PathBuf>) -> Result<Home, ResolvePathError> {
-    let path = store.unwrap_or_else(|| PathBuf::from(DEFAULT_HOME));
-
-    canonical_path(&path, DanglingLinks::Follow).map(Home::new)
 }
 
 /// The daemon on its socket, from the claim to the stop. Every failure on
@@ -227,10 +215,7 @@ fn report_startup_problems(health: &Health, console: &mut Console) {
     }
 
     for package in &health.packages.diagnostics {
-        console.warn(&format!(
-            "Character package {} ({}): {}",
-            package.path, package.code, package.message
-        ));
+        console.warn(&package_problem(package));
     }
 }
 

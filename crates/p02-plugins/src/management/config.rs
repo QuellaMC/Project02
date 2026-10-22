@@ -31,6 +31,9 @@ const UPDATE_FAILED: &str = "plugin_config_update_failed";
 const CONFLICT_SENTENCE: &str = "Plugin config changed after it was inspected. Inspect it again \
      with runtime.plugin.config, then ask for the change.";
 
+/// What a client shown the person a change's preview reads it as.
+const PREVIEW_KIND: &str = "runtime_plugin_config_change";
+
 /// What a reader of the settings is shown in place of a concealed value,
 /// which the model must not write back as one.
 const REDACTED: &str = "[redacted]";
@@ -102,18 +105,19 @@ pub(super) async fn prepare(
 
     Ok(ToolPreparation::Prepared {
         preview: Map::from_iter([
+            ("kind".to_owned(), Value::from(PREVIEW_KIND)),
             (
                 "targetPluginId".to_owned(),
                 Value::from(request.plugin.as_str()),
             ),
             ("fieldName".to_owned(), Value::from(field.as_str())),
             ("operation".to_owned(), Value::from(request.operation())),
-            ("before".to_owned(), before),
-            ("after".to_owned(), after),
             (
                 "expectedFingerprint".to_owned(),
                 Value::from(request.expected_fingerprint.as_str()),
             ),
+            ("before".to_owned(), before),
+            ("after".to_owned(), after),
         ]),
         effect: Box::new(Change {
             control,

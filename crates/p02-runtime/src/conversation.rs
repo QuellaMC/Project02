@@ -359,7 +359,7 @@ impl Conversation {
             mind.adapter,
             selection.summarized,
             history.summary.as_deref(),
-            turn::person(&self.cast.person),
+            &self.cast.person,
             &self.cast.character.display_name,
             mind.context_window,
         )

@@ -23,6 +23,6 @@ pub use resolve::{CharacterSettings, HostSettings, ReadSettingsError, Resolution
 pub use view::{
     ActivationStatus, Authored, CharacterConnectorEntry, ConfigReport, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, ConnectorReport, EffectiveView,
-    FieldView, HostReport, RuntimeConfigReport, SectionActivation, SectionView, ValueSource,
-    ViewRefusal,
+    FieldView, HostReport, PluginReport, RuntimeConfigReport, SectionActivation, SectionView,
+    ValueSource, ViewRefusal,
 };

@@ -56,7 +56,8 @@ the character's storage grants through the contracts.
 - **The list.** The plugins compiled into the daemon, each with its
   manifest, read once from its descriptor, and its factory: what a home's
   settings are judged against and what a character's plugins are built
-  from. A package's descriptor is the one the repository keeps for both
+  from, the host's own first and then the packages in id order, an order
+  everything that lists or runs them keeps, the model's tools among them. A package's descriptor is the one the repository keeps for both
   daemons; the host's own plugin keeps its own beside its code. Whether a
   plugin is on where no settings switch it is its manifest's to say:
   character memory, session history and the host's own plugin are on and
