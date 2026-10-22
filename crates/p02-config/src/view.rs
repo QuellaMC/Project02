@@ -159,24 +159,32 @@ impl ConfigView {
     }
 }
 
-/// Why settings cannot be shown, and the sentence that says so: the
-/// first thing keeping a document from loading, which never repeats a
-/// value.
+/// Why settings cannot be shown, and the sentence that says so.
 fn refusal(error: &ReadSettingsError) -> (ViewRefusal, String) {
-    match error {
-        ReadSettingsError::UnknownCharacter(reason) => {
-            (ViewRefusal::UnknownCharacter, sentence(reason))
+    let reason = match error {
+        ReadSettingsError::UnknownCharacter(_) => ViewRefusal::UnknownCharacter,
+        ReadSettingsError::Storage(_) | ReadSettingsError::Unloadable { .. } => {
+            ViewRefusal::ConfigUnloadable
         }
-        ReadSettingsError::Storage(error) => {
-            (ViewRefusal::ConfigUnloadable, sentence(&chain(error)))
-        }
-        ReadSettingsError::Unloadable { diagnostics } => (
-            ViewRefusal::ConfigUnloadable,
-            diagnostics
+    };
+
+    (reason, error.sentence())
+}
+
+impl ReadSettingsError {
+    /// What keeps the settings from being read, as the sentence a person
+    /// is shown: the first thing keeping a document from loading, which
+    /// never repeats a value.
+    #[must_use]
+    pub fn sentence(&self) -> String {
+        match self {
+            Self::UnknownCharacter(reason) => sentence(reason),
+            Self::Storage(error) => sentence(&chain(error)),
+            Self::Unloadable { diagnostics } => diagnostics
                 .first()
                 .map(|diagnostic| diagnostic.message().to_owned())
                 .unwrap_or_default(),
-        ),
+        }
     }
 }
 

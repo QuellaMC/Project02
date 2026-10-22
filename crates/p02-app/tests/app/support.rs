@@ -14,8 +14,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use p02_app::{
     CharacterState, Daemon, DaemonSettings, Durations, Event, Message, OpenOutcome, Plugin,
-    TurnOutcome,
+    RunningTurn, RunningTurns, TurnOutcome,
 };
+use p02_config::ChangeOutcome;
 use p02_contracts::{
     CommittedTurn, Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
     HookReport, HookStatus, InputEnvelope, Invocation, Manifest, PluginError, PreparedEffect,
@@ -27,7 +28,7 @@ use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{Notify, mpsc};
 
 /// How long a test waits for what it expects before it fails.
 const PATIENCE: Duration = Duration::from_secs(120);
@@ -236,6 +237,34 @@ pub(crate) fn said(outcome: &TurnOutcome) -> Vec<String> {
 /// The JSON a client reads of `value`.
 pub(crate) fn wire(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).unwrap()
+}
+
+/// Makes `operation` on the settings of `target` as a settings screen
+/// does, bound to the fingerprint its view shows, and expects it applied.
+pub(crate) async fn change(daemon: &Daemon, target: Value, operation: Value) {
+    let view = daemon
+        .config_view(serde_json::from_value(target.clone()).unwrap())
+        .await;
+    let outcome = daemon
+        .apply_change(
+            serde_json::from_value(json!({
+                "target": target,
+                "expectedFingerprint": wire(&view)["fingerprint"],
+                "operation": operation,
+            }))
+            .unwrap(),
+        )
+        .await;
+
+    assert!(
+        matches!(outcome, ChangeOutcome::Applied { .. }),
+        "{outcome:?}"
+    );
+}
+
+/// The home's settings, as a change targets them.
+pub(crate) fn home() -> Value {
+    json!({"scope": "global"})
 }
 
 /// A gate a step stops at while it is shut, to hold it in flight: a
@@ -584,7 +613,7 @@ impl PreparedEffect for Save {
 
 /// An ear on the daemon's events from the moment it was made.
 pub(crate) struct Ear {
-    events: broadcast::Receiver<Event>,
+    events: mpsc::UnboundedReceiver<Event>,
     pub(crate) heard: Vec<Event>,
 }
 
@@ -645,6 +674,17 @@ impl Ear {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The turns running by what was heard.
+    pub(crate) fn running(&self) -> Vec<RunningTurn> {
+        let mut running = RunningTurns::default();
+
+        for event in &self.heard {
+            running.fold(event);
+        }
+
+        running.turns()
     }
 
     /// Every kind of event heard, in order, as the wire names it.

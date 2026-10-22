@@ -6,18 +6,21 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use futures_util::FutureExt;
 use futures_util::future::join_all;
 use p02_characters::{CharacterDefinition, Discovery, discover};
-use p02_config::{Connector, Sections, connectors};
+use p02_config::{
+    ChangeOutcome, ConfigChange, ConfigTarget, ConfigView, Connector, ConnectorConfigView,
+    Sections, apply_change, connectors,
+};
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
 use p02_core::{ClientStamp, Conversation, ConversationId, Participant, VisibleMessageRole};
 use p02_shared::Identifier;
 use p02_store::{Home, StorageError};
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 
 use crate::character::{CharacterHandle, Request};
 use crate::confirmation::Answer;
@@ -25,15 +28,12 @@ use crate::history::{self, HistoryPage};
 use crate::outcome::{
     CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
     HistoryOutcome, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
-    PendingConfirmation, ReconcilePlan, RunningTurn, RunningTurns, StartOutcome, StartRefusal,
-    TurnOutcome, TurnRefusal, TurnStamp, sentence,
+    PendingConfirmation, ReconcilePlan, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal,
+    TurnStamp, sentence,
 };
+use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
 use crate::submissions::{Ledger, Line};
-
-/// How far a subscriber may fall behind the events before it misses some,
-/// which it is then told.
-const EVENT_BACKLOG: usize = 1024;
 
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
@@ -90,6 +90,8 @@ impl fmt::Debug for Plugin {
 pub struct Durations {
     /// How long a confirmation waits for the person's answer.
     pub confirmation: Duration,
+    /// How long a pairing request waits for the person's answer.
+    pub pairing: Duration,
     /// How long the model may say nothing; the provider's own bound when
     /// none.
     pub model_silence: Option<Duration>,
@@ -99,14 +101,26 @@ pub struct Durations {
     /// characters start together and one's first start on a loaded disk
     /// holds the home's lock a while.
     pub settings_lock: Duration,
+    /// How long an event stream stays silent before it says it is alive,
+    /// so that a client's own timeout never takes a quiet stream for a
+    /// dead one.
+    pub heartbeat: Duration,
+    /// How long a client may leave what it was sent untaken, a frame of
+    /// its stream or at a stop an answer, before it is taken for gone: a
+    /// client that reads takes it in milliseconds, whatever burst it
+    /// comes in, so this only ever meets one that stopped.
+    pub grace: Duration,
 }
 
 impl Default for Durations {
     fn default() -> Self {
         Self {
             confirmation: Duration::from_mins(5),
+            pairing: Duration::from_hours(1),
             model_silence: None,
             settings_lock: Duration::from_secs(10),
+            heartbeat: Duration::from_secs(15),
+            grace: Duration::from_secs(2),
         }
     }
 }
@@ -164,28 +178,41 @@ impl World {
     }
 }
 
-/// Every event, announced in one order: the running turns are folded from
-/// them in the order every subscriber hears them.
-#[derive(Debug)]
+/// Every event, announced in one order, which every subscriber hears whole:
+/// none is dropped for a subscriber that reads behind, since the stream a
+/// client follows numbers every event and a gap in it would be a lie.
+#[derive(Debug, Default)]
 pub(crate) struct Events {
-    sender: broadcast::Sender<Event>,
-    running: Mutex<RunningTurns>,
+    subscribers: Mutex<Vec<mpsc::UnboundedSender<Event>>>,
 }
 
 impl Events {
-    pub(crate) fn new() -> Self {
-        Self {
-            sender: broadcast::channel(EVENT_BACKLOG).0,
-            running: Mutex::new(RunningTurns::default()),
+    pub(crate) fn emit(&self, event: Event) {
+        let mut subscribers = self.subscribers();
+
+        // A subscriber that let go hears nothing more.
+        subscribers.retain(|subscriber| !subscriber.is_closed());
+
+        if let Some((last, others)) = subscribers.split_last() {
+            for subscriber in others {
+                let _ = subscriber.send(event.clone());
+            }
+
+            let _ = last.send(event);
         }
     }
 
-    pub(crate) fn emit(&self, event: Event) {
-        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+    fn subscribe(&self) -> mpsc::UnboundedReceiver<Event> {
+        let (subscriber, events) = mpsc::unbounded_channel();
 
-        running.fold(&event);
-        // Nobody listening is no failure.
-        let _ = self.sender.send(event);
+        self.subscribers().push(subscriber);
+        events
+    }
+
+    fn subscribers(&self) -> MutexGuard<'_, Vec<mpsc::UnboundedSender<Event>>> {
+        self.subscribers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -208,6 +235,18 @@ struct Inner {
     reconciler: Arc<Reconciler>,
     /// How many streams of each connector are open.
     presence: Mutex<BTreeMap<Identifier, usize>>,
+    pairings: Pairings,
+}
+
+/// The daemon, held by what it owns without keeping it alive: a
+/// character's own settings, and a pairing request's deadline.
+#[derive(Clone, Debug)]
+pub(crate) struct WeakDaemon(Weak<Inner>);
+
+impl WeakDaemon {
+    pub(crate) fn upgrade(&self) -> Option<Daemon> {
+        self.0.upgrade().map(|inner| Daemon { inner })
+    }
 }
 
 /// The actors the daemon built, and whether it stopped, which ends every
@@ -229,13 +268,13 @@ pub struct Presence {
 }
 
 impl Presence {
-    /// Health as it now stands, read and sent to every surface on a task
-    /// of its own.
+    /// Health as it now stands, read and sent to every surface on the
+    /// blocking pool.
     fn announce(&self) {
         let daemon = self.daemon.clone();
 
         self.runtime
-            .spawn(async move { daemon.health_changed().await });
+            .spawn_blocking(move || daemon.announce_health());
     }
 }
 
@@ -295,22 +334,37 @@ impl Daemon {
                     plugins,
                     durations,
                     test_provider,
-                    events: Arc::new(Events::new()),
+                    events: Arc::default(),
                 }),
                 characters: Mutex::default(),
                 routes: tokio::sync::Mutex::default(),
                 ledger: Arc::default(),
                 reconciler: Arc::default(),
                 presence: Mutex::default(),
+                pairings: Pairings::default(),
             }),
         })
+    }
+
+    /// The waits this daemon keeps, which its socket keeps too.
+    #[must_use]
+    pub fn durations(&self) -> Durations {
+        self.inner.world.durations
     }
 
     /// The daemon's whole state, read now: the roster as the disk says it
     /// is, each character's state as her actor published it, and the
     /// connectors on the stream.
     pub async fn health(&self) -> Health {
-        let roster = self.roster().await;
+        let daemon = self.clone();
+
+        blocking(move || daemon.health_now()).await
+    }
+
+    /// [`Daemon::health`], read on the calling thread, which waits on the
+    /// disk.
+    fn health_now(&self) -> Health {
+        let roster = Roster::read(&self.inner.world);
 
         Health {
             protocol_version: PROTOCOL_VERSION,
@@ -454,25 +508,12 @@ impl Daemon {
             .unwrap_or(ConfirmationAnswer::Unknown)
     }
 
-    /// Every event from now on. A stream that opens with a snapshot reads
-    /// health, the pending confirmations and the running turns after it
-    /// subscribes, so it hears every event after its snapshot, and at worst
-    /// one the snapshot already holds.
+    /// Every event from now on, in the order it is announced, each one
+    /// kept until it is read: a subscriber that reads behind falls behind
+    /// and misses nothing.
     #[must_use]
-    pub fn events(&self) -> broadcast::Receiver<Event> {
-        self.inner.world.events.sender.subscribe()
-    }
-
-    /// The turns in progress, each with its drafts so far.
-    #[must_use]
-    pub fn running_turns(&self) -> Vec<RunningTurn> {
-        self.inner
-            .world
-            .events
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .turns()
+    pub fn events(&self) -> mpsc::UnboundedReceiver<Event> {
+        self.inner.world.events.subscribe()
     }
 
     /// Starts `character`, or joins the start in flight, and answers once it
@@ -546,17 +587,72 @@ impl Daemon {
             .await
     }
 
-    /// What the gateway calls once a settings change landed: the roster as
-    /// it now stands goes out to every surface, and then a reconcile pass
-    /// acts on it, both on a task of their own, so a caller that stops
-    /// waiting leaves neither undone.
-    pub fn settings_changed(&self) {
+    /// The settings of `target` as its settings screen shows them.
+    pub async fn config_view(&self, target: ConfigTarget) -> ConfigView {
+        let world = Arc::clone(&self.inner.world);
+
+        blocking(move || {
+            ConfigView::read(
+                &world.home,
+                &world.sections,
+                &discover(world.home.root()),
+                &target,
+            )
+        })
+        .await
+    }
+
+    /// Makes `change` as [`Daemon::change_settings`] makes every change, on
+    /// the blocking pool, so a caller that stops waiting leaves nothing of
+    /// it undone.
+    pub async fn apply_change(&self, change: ConfigChange) -> ChangeOutcome {
         let daemon = self.clone();
 
-        tokio::spawn(async move {
-            daemon.health_changed().await;
-            daemon.reconcile().await;
-        });
+        blocking(move || daemon.change_settings(&change)).await
+    }
+
+    /// What connector `connector` runs on, for the home and for each
+    /// character switched on, secrets in the clear.
+    pub async fn connector_config(&self, connector: &str) -> ConnectorConfigView {
+        let world = Arc::clone(&self.inner.world);
+        let connector = connector.to_owned();
+
+        blocking(move || {
+            ConnectorConfigView::read(
+                &world.home,
+                &world.sections,
+                &discover(world.home.root()),
+                &connector,
+            )
+        })
+        .await
+    }
+
+    /// The one way the settings change, a client's change and a
+    /// character's own plugin's alike: made as p02-config makes every
+    /// change, under the documents' locks; once it lands, health as it now
+    /// stands goes out to every surface before the answer does, and a
+    /// reconcile pass acts on it behind the answer, on a task of its own,
+    /// so the characters running come to match it. It waits on the disk.
+    pub(crate) fn change_settings(&self, change: &ConfigChange) -> ChangeOutcome {
+        let world = &self.inner.world;
+        let outcome = apply_change(
+            &world.home,
+            &world.sections,
+            &discover(world.home.root()),
+            change,
+            world.durations.settings_lock,
+        );
+
+        if matches!(outcome, ChangeOutcome::Applied { .. }) {
+            self.announce_health();
+
+            let daemon = self.clone();
+
+            tokio::spawn(async move { daemon.reconcile().await });
+        }
+
+        outcome
     }
 
     /// Counts a stream of `connector` present from now until the presence
@@ -587,6 +683,8 @@ impl Daemon {
     /// or a recovery in flight is overtaken, a turn in flight finishes, and
     /// the reconcile pass in flight is waited for.
     pub async fn stop(&self) {
+        self.inner.pairings.stop();
+
         let handles: Vec<Arc<CharacterHandle>> = {
             let mut characters = self.inner.characters();
 
@@ -600,6 +698,18 @@ impl Daemon {
 
         self.inner.reconciler.settled().await;
         join_all(handles.iter().map(|handle| handle.stopped())).await;
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakDaemon {
+        WeakDaemon(Arc::downgrade(&self.inner))
+    }
+
+    pub(crate) fn world(&self) -> &Arc<World> {
+        &self.inner.world
+    }
+
+    pub(crate) fn pairings(&self) -> &Pairings {
+        &self.inner.pairings
     }
 
     pub(crate) fn handle(&self, id: &Identifier) -> Option<Arc<CharacterHandle>> {
@@ -645,10 +755,7 @@ impl Daemon {
                     Some(handle) if !handle.ended() => return Some(Arc::clone(handle)),
                     Some(handle) if !handle.gone() => Arc::clone(handle),
                     _ => {
-                        let handle = Arc::new(CharacterHandle::spawn(
-                            Arc::clone(&self.inner.world),
-                            id.clone(),
-                        ));
+                        let handle = Arc::new(CharacterHandle::spawn(self, id.clone()));
 
                         characters.handles.insert(id.clone(), Arc::clone(&handle));
                         return Some(handle);
@@ -660,8 +767,10 @@ impl Daemon {
         }
     }
 
-    async fn health_changed(&self) {
-        let health = self.health().await;
+    /// Health as it now stands, sent to every surface; it waits on the
+    /// disk.
+    fn announce_health(&self) {
+        let health = self.health_now();
 
         self.inner
             .world
@@ -843,7 +952,7 @@ fn installed<'d>(discovery: &'d Discovery, character: &str) -> Option<&'d Charac
 
 /// Runs `work` on the blocking pool, where the store may wait on a lock; a
 /// panic there is the caller's, as it would be inline.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     match tokio::task::spawn_blocking(work).await {
         Ok(done) => done,
         Err(error) => std::panic::resume_unwind(error.into_panic()),

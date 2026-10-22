@@ -9,6 +9,7 @@ rust-version.workspace = true
 http = ["dep:reqwest", "dep:rustls"]
 
 [dependencies]
+base64.workspace = true
 dunce.workspace = true
 reqwest = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }

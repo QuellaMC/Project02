@@ -7,6 +7,7 @@ mod confirmation;
 mod daemon;
 mod history;
 mod outcome;
+mod pairing;
 mod reconcile;
 mod submissions;
 
@@ -18,6 +19,8 @@ pub use outcome::{
     CancelReason, CharacterSummary, ConfigHealth, ConfirmationAnswer, ConfirmationQuestion,
     ConnectorPresence, Event, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
     MaintenanceFailure, OpenOutcome, OpenRefusal, PROTOCOL_VERSION, PackageReport, PackagesHealth,
-    PendingConfirmation, ReconcilePlan, RunningDraft, RunningTurn, Settlement, StartOutcome,
-    StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress, TurnRefusal, TurnStamp,
+    PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingSubject,
+    PendingConfirmation, ReconcilePlan, RunningDraft, RunningTurn, RunningTurns, Settlement,
+    StartOutcome, StartRefusal, StorageFailure, TurnMessage, TurnOutcome, TurnProgress,
+    TurnRefusal, TurnStamp,
 };

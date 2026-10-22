@@ -9,8 +9,8 @@ use p02_app::{Event, TurnOutcome};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, Toy, World, id, line, make_read_only, open, restore, said, settle, wire,
-    write,
+    Ear, Gate, Round, Toy, World, change, home, id, line, make_read_only, open, restore, said,
+    settle, wire, write,
 };
 
 /// A daemon on a home with the bundled Mira starts her on its first
@@ -50,8 +50,9 @@ async fn a_line_through_her_thread_completes_as_the_stream_tells() {
     });
 
     gate.reached().await;
+    ear.drain();
     assert_eq!(
-        wire(&daemon.running_turns()),
+        wire(&ear.running()),
         json!([{
             "characterId": "mira",
             "conversationId": conversation,
@@ -99,7 +100,7 @@ async fn a_line_through_her_thread_completes_as_the_stream_tells() {
             "committed": true,
         })
     );
-    assert_eq!(wire(&daemon.running_turns()), json!([]));
+    assert_eq!(wire(&ear.running()), json!([]));
 }
 
 /// turns.fatal-turn-refuses-queued: A delivery queued behind a fatal turn is refused `character_unavailable` rather than run after the restart.
@@ -402,11 +403,19 @@ async fn a_rotation_that_fails_is_maintenance_a_stop_and_a_start_clear() {
     );
     assert_eq!(ear.states("mira"), []);
 
-    world.settings(json!({"project02": {"enabled": false, "contextWindowTokens": 80}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "set", "path": "project02.enabled", "value": false}),
+    )
+    .await;
     daemon.reconcile().await;
-    world.settings(json!({"project02": {"contextWindowTokens": 80}}));
-    daemon.settings_changed();
+    change(
+        &daemon,
+        home(),
+        json!({"kind": "unset", "path": "project02.enabled"}),
+    )
+    .await;
     daemon.reconcile().await;
 
     let summary = &wire(&daemon.health().await)["characters"][0];
