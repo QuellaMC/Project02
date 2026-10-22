@@ -85,7 +85,7 @@ it('connectors.telegram-pairing-gate: an account the home does not know gets a p
   // A request good for a minute and two seconds: what it has left is two
   // minutes when it is made, and one minute two seconds later.
   const daemon = await startDaemon(home, {
-    PROJECT02_TEST_DURATIONS: 'pairing=62000,heartbeat=2100',
+    PROJECT02_TEST_DURATIONS: 'pairing=62000,heartbeat=4000',
   });
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
@@ -103,7 +103,10 @@ it('connectors.telegram-pairing-gate: an account the home does not know gets a p
   expect(asked['subject']).toEqual({id: String(bob.id), label: 'Bob (@bob)'});
   await telegram.shows(miraBot.token, bob.id, told('2 minutes'));
 
-  // A stream opened now pings two seconds and more on.
+  // A stream opened now pings four seconds and more on. What the code has
+  // left is read off the wall clock, which can step back meanwhile (WSL's
+  // steps back about a second every half minute), so it waits twice the
+  // two seconds the code needs.
   const clock = await openEvents(daemon);
 
   await clock.next(frame => frame.comment === 'ping');
