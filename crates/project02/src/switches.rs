@@ -37,14 +37,26 @@ const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
 /// through, the daemon's waits, and the two a second serve keeps itself.
+/// The default is a run no switch touched.
 #[derive(Debug)]
-pub(crate) struct Switches {
+pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
     pub(crate) durations: Durations,
     /// How long a second serve waits for a holder that does not answer.
     pub(crate) hold: Duration,
     /// How long one question to that holder waits for its answer.
     pub(crate) probe: Duration,
+}
+
+impl Default for Switches {
+    fn default() -> Self {
+        Self {
+            test_provider: None,
+            durations: Durations::default(),
+            hold: Duration::from_secs(30),
+            probe: Duration::from_secs(5),
+        }
+    }
 }
 
 /// A switch the command cannot use, and why.
@@ -67,12 +79,7 @@ pub(crate) fn read(
     provider: Option<&OsStr>,
     durations: Option<&OsStr>,
 ) -> Result<Switches, SwitchError> {
-    let mut switches = Switches {
-        test_provider: None,
-        durations: Durations::default(),
-        hold: Duration::from_secs(30),
-        probe: Duration::from_secs(5),
-    };
+    let mut switches = Switches::default();
 
     for (key, wait) in waits(durations, &SERVE_KEYS)? {
         match key {

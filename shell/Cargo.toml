@@ -1,0 +1,49 @@
+[package]
+name = "project02-shell"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.99"
+
+[[bin]]
+name = "project02-shell"
+
+# A workspace of its own, outside `crates/`, until the gate installs a
+# webview's development files; the daemon's crates come in by path.
+[workspace]
+
+[dependencies]
+p02-shared = { path = "../crates/p02-shared" }
+p02-telegram = { path = "../crates/p02-telegram" }
+project02 = { path = "../crates/project02" }
+tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-opener = "2.7.2"
+tauri-plugin-single-instance = "2.5.4"
+tokio = { version = "1.53.3", features = ["rt-multi-thread"] }
+tokio-util = "0.7.20"
+
+[build-dependencies]
+tauri-build = "2.7.4"
+
+# The workspace's lints, which the crate inherits once it is a member.
+[lints.rust]
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unsafe_code = "deny"
+
+[lints.clippy]
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+pedantic = { level = "warn", priority = -1 }
+print_stderr = "warn"
+print_stdout = "warn"
+undocumented_unsafe_blocks = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+strip = "symbols"

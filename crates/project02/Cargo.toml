@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [[bin]]
 name = "project02"
+doc = false
 
 [dependencies]
 p02-app.workspace = true

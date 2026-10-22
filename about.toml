@@ -1,0 +1,84 @@
+# The third-party notice the install ships, made with
+# `cargo about generate --workspace --fail about.hbs -o THIRD-PARTY-NOTICES.txt`.
+# It accepts what deny.toml allows and nothing more, in the order a crate
+# offering a choice is taken under: the terms that ask least of a binary first.
+accepted = [
+    "CC0-1.0",
+    "MIT-0",
+    "Unlicense",
+    "BSL-1.0",
+    "Zlib",
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+]
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-pc-windows-msvc",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
+
+# Each text below is in the crate, under a name cargo-about does not scan.
+[sync_wrapper.clarify]
+license = "Apache-2.0"
+files = [{ path = "LICENSE", checksum = "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594" }]
+
+[windows-link.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+[windows-sys.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+[windows-targets.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+[windows_aarch64_msvc.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+[windows_x86_64_gnu.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+[windows_x86_64_msvc.clarify]
+license = "MIT OR Apache-2.0"
+files = [{ path = "license-mit", license = "MIT", checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383" }]
+
+# Each text below is in the crate's repository at the commit it was published
+# from, and not in the package.
+[jsonschema-regex.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "117829c3ca21efb132d81a44b55363d395ab8eea18526873bc828da4c0e5f038" }]
+
+[jsonschema-value.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "117829c3ca21efb132d81a44b55363d395ab8eea18526873bc828da4c0e5f038" }]
+
+[ts-rs.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "db7f7f8e7236a2d0b41b855b2501b7b913caebbcda6ce498637a304ad1706ce1" }]
+
+[ts-rs-macros.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "db7f7f8e7236a2d0b41b855b2501b7b913caebbcda6ce498637a304ad1706ce1" }]
+
+[uuid-simd.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d" }]
+
+[vsimd.clarify]
+license = "MIT"
+git = [{ path = "LICENSE", checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d" }]

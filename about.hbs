@@ -1,0 +1,19 @@
+Third-party notices
+
+Project02 is built from the open-source crates named below. Each license
+text follows the list of crates it covers.
+
+Licenses, with the number of crates under each:
+{{#each overview}}
+  {{{name}}} ({{count}})
+{{/each}}
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}}, for:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} <{{{crate.repository}}}>{{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

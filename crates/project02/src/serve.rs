@@ -18,15 +18,18 @@ use tokio_util::sync::CancellationToken;
 use crate::consent::{self, Unconsented};
 use crate::flags::ServeFlags;
 use crate::handover::{self, HandedOver};
-use crate::stop::listen_for_stop;
 use crate::switches::Switches;
 use crate::{Console, home_of, package_problem};
 
-pub(crate) async fn run(flags: ServeFlags, switches: Switches, console: &mut Console) -> ExitCode {
-    let stop = match listen_for_stop() {
-        Ok(stop) => stop,
-        Err(error) => return failed(console, &error),
-    };
+/// What the line a client finds a daemon by begins with.
+pub const ADDRESS_PREFIX: &str = "PROJECT02_GATEWAY=";
+
+pub(crate) async fn run(
+    flags: ServeFlags,
+    switches: Switches,
+    stop: &CancellationToken,
+    console: &mut Console,
+) -> ExitCode {
     let plugins = match p02_plugins::list::plugins() {
         Ok(listed) => listed
             .iter()
@@ -47,7 +50,7 @@ pub(crate) async fn run(flags: ServeFlags, switches: Switches, console: &mut Con
         &home,
         flags.init,
         switches.durations.settings_lock,
-        &stop,
+        stop,
         console,
     )
     .await
@@ -60,7 +63,7 @@ pub(crate) async fn run(flags: ServeFlags, switches: Switches, console: &mut Con
     let claim = match Claim::take(&home) {
         Ok(ClaimOutcome::Claimed(claim)) => claim,
         Ok(ClaimOutcome::Held { record }) => {
-            match handover::hand_over(&home, record, &switches, &stop, console).await {
+            match handover::hand_over(&home, record, &switches, stop, console).await {
                 HandedOver::Claimed(claim) => claim,
                 HandedOver::Ended(code) => return code,
             }
@@ -73,7 +76,7 @@ pub(crate) async fn run(flags: ServeFlags, switches: Switches, console: &mut Con
         plugins,
     };
 
-    serve(home, claim, settings, &stop, console).await
+    serve(home, claim, settings, stop, console).await
 }
 
 /// Says why serve ends before it served: what broke, then why. A store
@@ -97,7 +100,7 @@ pub(crate) fn failed(console: &mut Console, error: &(dyn Error + 'static)) -> Ex
 /// serve hands back of the daemon that holds the home.
 pub(crate) fn address_line(port: NonZeroU16, token: &DaemonToken) -> String {
     format!(
-        "PROJECT02_GATEWAY=http://127.0.0.1:{port}/#token={}",
+        "{ADDRESS_PREFIX}http://127.0.0.1:{port}/#token={}",
         token.as_str()
     )
 }
