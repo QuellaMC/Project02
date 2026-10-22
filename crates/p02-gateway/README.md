@@ -23,18 +23,22 @@ Nothing here prints, reads an environment variable or parses a flag.
   origin, which when sent must be this daemon's page, `403
   forbidden_origin`; the bearer token, compared in one time whatever is
   presented, `401 unauthorized`, or `400 invalid_request` for a header
-  that is no bearer; and the body cap of 64 KiB, `413
-  payload_too_large`. Every answer of the API is never cached, and every
-  refusal of the transport is the one envelope
-  `{"error":{"code","message"}}`. A body is read as JSON of its route's
-  shape, which judges itself as it is read, so nothing validates it
-  twice: no unknown field, the stamps as stamps, a line's text within
-  16,384 characters, an id or a name within 128 characters; anything else is `400
-  invalid_request`, saying where. Each route answers its verb's outcome
-  verbatim under 200: the status describes the transport, and `status` in
-  the body what happened. An unknown route of the API, `/api` itself
-  included, is a 404 behind the same rules. No CORS header is sent, and a
-  token is taken from no cookie and no query.
+  that is no bearer; and, as its route reads its body, the cap of
+  64 KiB, `413 payload_too_large`: a route that takes no body reads
+  none. Every answer of the API is never cached, and every refusal of
+  the transport is the one envelope `{"error":{"code","message"}}`. A
+  body is read as JSON of its route's shape, which judges itself as it
+  is read, so nothing validates it twice: no unknown field, the stamps
+  as stamps, a line's text within 16,384 characters, an id or a name
+  within 128 characters; anything else is `400 invalid_request`, saying
+  where. A change of settings is read as p02-config's own change, whose
+  character, fields and fingerprint are judged against the home: one the
+  home does not hold is the change's own refusal, not the transport's.
+  Each route answers its verb's outcome verbatim under 200: the status
+  describes the transport, and `status` in the body what happened. An
+  unknown route of the API, `/api` itself included, is a 404 behind the
+  same rules. No CORS header is sent, and a token is taken from no
+  cookie and no query.
 - **The page.** Its files are built into the binary from `dist/web` as
   `pnpm build:web` left it when the binary was built, public and never
   cached; a path that names nothing the page holds meets the daemon's own
