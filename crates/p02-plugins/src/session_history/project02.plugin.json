@@ -1,0 +1,46 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "session-history",
+    "displayName": "Session History",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "Cross-session recall over this character's own conversation history: full-text search with anchored context windows, and transcript scrolling by message anchor.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": [
+      "tool_provider",
+      "handle_tool_call",
+      "before_role_model_call",
+      "after_turn_committed",
+      "on_shutdown"
+    ],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": []
+    },
+    "firstParty": true,
+    "runtimePolicy": {
+      "timeoutMs": 5000,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": true,
+      "reasons": ["built_in_session_history"]
+    },
+    "requestedAccess": {
+      "model_input": "write",
+      "session_history": "read",
+      "plugin_database": "write",
+      "turn_context": "read",
+      "trusted_context": "write"
+    }
+  }
+}

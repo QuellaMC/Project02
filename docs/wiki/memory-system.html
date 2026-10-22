@@ -50,7 +50,10 @@
         turn, and each lives in its own layer with its own trust story: a tiny
         curated memory injected whole into every prompt once it holds anything,
         session history it can search on demand, and optionally one external
-        retrieval-driven provider beside them.
+        retrieval-driven provider beside them. What the layers keep on this
+        device lives in the character's data directory, in a home at storage
+        version 15: a home the TypeScript daemon wrote is not read, and the
+        person starts a new one.
       </p>
 
       <p class="rule">
@@ -258,8 +261,9 @@
         owns every step: entries are validated and capped at write time,
         sections are typed and screened at render time, and the
         <code>trusted_context</code> access that feeds the trusted frames is
-        granted only to bundled packages by catalog provenance — a manifest flag
-        alone never earns it. The same grant lets a bundled plugin add a runtime
+        granted only to plugins compiled into the daemon, whose descriptors ship
+        with it: no plugin is loaded from anywhere else. The same grant lets a
+        bundled plugin add a runtime
         note to the trusted per-turn frame (the day, the character's own inner
         state, the recall nudge), cap-checked like curated sections. Automatic
         per-turn recall from an external provider is appended to the current
@@ -285,8 +289,8 @@
         Every sentence the runtime itself writes into the prompt speaks to the
         model as the character — its notes, its memories, how it feels, what its
         tools handed it — and lives in one module,
-        <code>src/role-model/prompt/prompt-text.ts</code>, so the wording can be
-        tuned in one place without touching how the frames are built.
+        <code>crates/p02-role-model/src/prompt/text.rs</code>, so the wording
+        can be tuned in one place without touching how the frames are built.
       </p>
 
       <p class="rule">

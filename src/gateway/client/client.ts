@@ -26,10 +26,7 @@ import {
   type TurnOutcome,
 } from '../api/index.ts';
 import {describeFetchFailure} from '../../shared/fetch-failure.ts';
-import {createSseFrameSplitter} from '../../shared/sse.ts';
-
-/** Where a client finds the daemon: the line `serve` prints, exported. */
-export const gatewayUrlEnvVarName = 'PROJECT02_GATEWAY';
+import {createSseFrameSplitter} from './sse.ts';
 
 /**
  * Which page of a conversation's scrollback to read: the cursor a previous

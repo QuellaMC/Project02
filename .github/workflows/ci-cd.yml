@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: check
+  clients:
+    name: clients
     runs-on: ubuntu-latest
 
     steps:
@@ -35,6 +35,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The browser suite and the conformance suite start the binary.
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo's registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-clients-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-clients-${{ runner.os }}-
+
       - name: Cache Playwright's Chromium
         uses: actions/cache@v4
         with:
@@ -44,8 +59,11 @@ jobs:
       - name: Install Chromium for the browser suite
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run local quality gate
+      - name: Run the clients' gate
         run: pnpm check
+
+      - name: Run the conformance suite against the binary
+        run: pnpm test:conformance
 
   rust:
     name: rust
@@ -92,113 +110,18 @@ jobs:
       - name: Run Rust quality gate
         run: pnpm check:rust
 
-  differential:
-    name: differential
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run the scenario through the reference and the candidate
-        run: pnpm test:differential
-
-  rust-conformance:
-    name: rust-conformance
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install the pinned Rust toolchain
-        run: rustup toolchain install
-
-      - name: Cache cargo's registry and build output
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: cargo-conformance-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-          restore-keys: cargo-conformance-${{ runner.os }}-
-
-      - name: Cache Playwright's Chromium
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-
-      - name: Install Chromium for the browser suite
-        run: pnpm exec playwright install --with-deps chromium
-
-      # The page is built into the binary, so it is built first.
-      - name: Build the page
-        run: pnpm build:web
-
-      - name: Build the binary
-        run: cargo build -p project02 --locked
-
-      - name: Run the conformance suite against the binary
-        run: pnpm exec vitest run --project conformance
-        env:
-          PROJECT02_SERVE_CMD: target/debug/project02 serve
-          PROJECT02_INSPECT_CMD: target/debug/project02 inspect
-          PROJECT02_CONNECTOR_CMD: node src/frontends/telegram/main.ts
-
-      # Its result stands apart from the suite's, so a row the suite fails
-      # does not keep it from running.
-      - name: Run the differential run with the binary as the candidate
-        if: ${{ !cancelled() }}
-        run: pnpm test:differential
-        env:
-          PROJECT02_CANDIDATE_SERVE_CMD: target/debug/project02 serve
-          PROJECT02_CANDIDATE_INSPECT_CMD: target/debug/project02 inspect
-
-      - name: Run the browser suite against the binary
-        run: pnpm test:browser
-        env:
-          PROJECT02_SERVE_CMD: target/debug/project02 serve
-
   pull-request-gate:
     name: pull-request-gate
     runs-on: ubuntu-latest
     needs:
-      - test
+      - clients
       - rust
-      - differential
     if: ${{ always() }}
 
     steps:
       - name: Require ci jobs to pass
         run: |
-          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.rust.result }}" != "success" ] || [ "${{ needs.differential.result }}" != "success" ]; then
+          if [ "${{ needs.clients.result }}" != "success" ] || [ "${{ needs.rust.result }}" != "success" ]; then
             echo "ci gate failed."
             exit 1
           fi

@@ -6,23 +6,21 @@ import {onTestFinished} from './runner.ts';
 import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 
 /** A program's command line, run from the repository root. */
-export type Command = readonly string[];
+type Command = readonly string[];
 
-/** The programs of this checkout, the TypeScript daemon's and the connector's. */
-export const typescriptPrograms = {
-  serve: 'node src/cli/serve/main.ts',
-  inspect: 'node src/cli/inspect/main.ts',
-  connector: 'node src/frontends/telegram/main.ts',
-} as const;
-
-const serveCommand = commandOf('PROJECT02_SERVE_CMD', typescriptPrograms.serve);
+// The daemon's commands are the binary `pnpm build` makes; the connector
+// is a program of its own until it joins the binary.
+const serveCommand = commandOf(
+  'PROJECT02_SERVE_CMD',
+  'target/debug/project02 serve',
+);
 const inspectCommand = commandOf(
   'PROJECT02_INSPECT_CMD',
-  typescriptPrograms.inspect,
+  'target/debug/project02 inspect',
 );
 const connectorCommand = commandOf(
   'PROJECT02_CONNECTOR_CMD',
-  typescriptPrograms.connector,
+  'node src/frontends/telegram/main.ts',
 );
 /** serve on a pseudo-terminal, through python3's pty module. */
 const terminalCommand = [
@@ -76,13 +74,12 @@ const inherited = Object.fromEntries(
   ),
 );
 
-/** `serve` with these arguments, started by the command given or else the one `PROJECT02_SERVE_CMD` names. */
+/** `serve` with these arguments, started by the command `PROJECT02_SERVE_CMD` names. */
 export function serve(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
-  command: Command = serveCommand,
 ): Serve {
-  return served(start('serve', [...command, ...args], env));
+  return served(start('serve', [...serveCommand, ...args], env));
 }
 
 /** `serve` with these arguments on a pseudo-terminal, as a person runs it. */
@@ -147,13 +144,12 @@ type Started = {
   ) => Promise<string>;
 };
 
-/** `inspect` with these arguments, started by the command given or else the one `PROJECT02_INSPECT_CMD` names: a report on a home, then its exit. */
+/** `inspect` with these arguments, started by the command `PROJECT02_INSPECT_CMD` names: a report on a home, then its exit. */
 export function inspect(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
-  command: Command = inspectCommand,
 ): Run {
-  return start('inspect', [...command, ...args], env).run;
+  return start('inspect', [...inspectCommand, ...args], env).run;
 }
 
 /** The Telegram connector with these arguments: a client of the daemon its home's record names. */
@@ -168,9 +164,8 @@ export function connector(
 export async function startDaemon(
   home: string,
   env: Readonly<Record<string, string>> = {},
-  command: Command = serveCommand,
 ): Promise<Daemon> {
-  const run = serve(['--store', home, '--init'], env, command);
+  const run = serve(['--store', home, '--init'], env);
 
   return {...run, ...(await run.address())};
 }
@@ -301,7 +296,7 @@ function start(
 }
 
 /** The command line a variable of the environment names, or else the fallback, split on whitespace. */
-export function commandOf(variable: string, fallback: string): Command {
+function commandOf(variable: string, fallback: string): Command {
   return (process.env[variable] ?? fallback).trim().split(/\s+/u);
 }
 

@@ -1,0 +1,42 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "character-memory",
+    "displayName": "Character Memory",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "First-party curated character memory: a small always-in-prompt store of durable notes and user-profile facts the character maintains through the memory.update tool.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": [
+      "tool_provider",
+      "before_role_model_call",
+      "handle_tool_call"
+    ],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": []
+    },
+    "firstParty": true,
+    "runtimePolicy": {
+      "timeoutMs": 10000,
+      "redactionLabels": ["memory"],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": true,
+      "reasons": ["built_in_character_memory"]
+    },
+    "requestedAccess": {
+      "character_file_store": "write",
+      "model_input": "write",
+      "trusted_context": "write"
+    }
+  }
+}

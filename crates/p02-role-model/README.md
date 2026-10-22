@@ -15,7 +15,8 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   without trust in two fences of its own; this turn's tool rounds on the
   history's wire; and the note about an unusable last reply. Text a plugin
   or a note supplies can neither close its fence nor reach a system
-  message. The bytes are the TypeScript daemon's but for the three listed
+  message. The bytes are the ones the prompt fixtures record, the
+  TypeScript daemon's as it last sent them, but for the three listed
   exceptions: characters counted as code points, tool payloads spelled by
   `serde_json`, and the parser's rejection wording.
 - **The history window** is the newest whole earlier turns that fit half
@@ -33,7 +34,7 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   plugin host, which decides which may overlap; the model's note beside its
   calls stays on the decision and is never a message.
 - **NVIDIA.** A round is a streamed chat completion: the request body as
-  the TypeScript daemon sends it, the tools under names the provider takes,
+  the prompt fixtures record it, the tools under names the provider takes,
   the stream reassembled whatever bytes it is cut into, and a reply drafted
   only from a native `visible_reply` call's arguments as they arrive. The
   provider's silence is bounded at 30 seconds unless shortened, before the
@@ -56,10 +57,7 @@ its summary, two earlier turns, one with a tool round, recalled memory,
 untrusted context, an untrusted plugin's runtime note, and tool names that
 collide once made provider-safe; a turn in its third round, with two rounds
 of its own and the note about an unusable reply; and a turn offering
-`visible_reply` alone. To record them again, give each fixture's `input` to
-the TypeScript daemon's `renderRoleModelTurnContext`, with Mira's persona
-from her bundled package, and send the result through
-`createNvidiaRoleModelProviderAdapter` with the model
-`nvidia/fixture-model` and a fetch client that keeps the body; the texts
-come from `summarizerInstructions`, `createTodayRuntimeNote` in UTC and
-`unusableReplyNote`.
+`visible_reply` alone. That daemon is retired, so the fixtures are the
+prompt's record: a change to what a prompt says rewrites its fixture in
+the same commit, from what `prompt::parity` renders, and is reviewed as
+the change of intent it is.

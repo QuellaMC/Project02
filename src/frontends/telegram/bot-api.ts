@@ -1,8 +1,8 @@
-import {endpointUnder} from '../../shared/base-url.ts';
 import {setTimeout as sleep} from 'node:timers/promises';
 
 import {describeFetchFailure} from '../../shared/fetch-failure.ts';
-import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {endpointUnder} from './base-url.ts';
+import {isJsonRecord} from './json-record.ts';
 
 export type TelegramUser = {
   readonly id: number;

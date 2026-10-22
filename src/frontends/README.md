@@ -2,21 +2,21 @@
 
 Every platform a person talks to a character on — the web page and the
 Telegram connector here — is a client of the daemon's wire and nothing
-more. A frontend value-imports only the contract (`gateway/api`),
-the reference client (`gateway/client`), `core`, and `shared` (arch rule
-`clients-see-only-the-wire`), and nothing in the daemon imports a
-frontend (`nothing-imports-frontends`): whatever a frontend cannot do
-through the API, nobody can. Each platform is one directory here with its
+more. A frontend imports only the contract (`gateway/api`), the
+reference client (`gateway/client`), and `shared` (arch rule
+`clients-see-only-the-wire`), and nothing else imports a frontend
+(`nothing-imports-frontends`): whatever a frontend cannot do through the
+API, nobody can. Each platform is one directory here with its
 own entry and tests; a connector joins as a sibling.
 
 ## web
 
 The page a person opens at the address `serve` prints. Vite builds `web/`
-into `dist/web`, which the daemon serves at its root — one origin, so no
-CORS; the token rides the fragment of the address. `pnpm build:web`
-builds it once, `pnpm serve` builds before it runs, and
-`pnpm exec vite build --watch` is the developer's loop, with a reload in
-the browser. The page's own `tsconfig.json` gives it the DOM and the JSX
+into `dist/web`, which the binary embeds when it is built and serves at
+its root — one origin, so no CORS; the token rides the fragment of the
+address. `pnpm build:web` builds it once, and `pnpm serve` builds it and
+then the binary before it runs, so a change to the page shows once `serve`
+runs again. The page's own `tsconfig.json` gives it the DOM and the JSX
 transform; the root program excludes the directory.
 
 The page follows the wire page's rules for a surface, stated once in
@@ -161,17 +161,17 @@ the shortest wait between two edits of a draft. Any other key — `serve`'s
 among them — or an address that is not http or https refuses the start,
 on stderr with exit code 1, as `serve` refuses a key it does not read.
 
-`main.ts` is the entry; `connector.ts` finds and follows the daemon,
-keeps the reading rule, and holds the bot table; `bot.ts` runs one
-token's bot; `bot-api.ts` is the Bot API as outcomes, never a throw, and
-its long poll; `node-fetch.ts` is the daemon's transport; `gate.ts` is
-the pairing gate; `outbox.ts` is what a bot writes in its chats;
-`cards.ts` holds the cards and their presses; and `character-bot.ts` and
-`management-bot.ts` are the two bots' rules. The connector suite
-(`tests/integration/telegram-connector.test.ts`) runs it against a real
-gateway on a loopback socket and the fake Bot API in
-`tests/support/telegram-api.ts`, which answers as Telegram does — a
-second poll on one token ends the first with a 409 — and the conformance
-suite (`tests/conformance/connectors*.test.ts`) runs it as a process beside
-a real `serve`, pointed at a Bot API of its own by
-`PROJECT02_TEST_TELEGRAM_API`.
+`main.ts` is the entry, with the test switches it reads
+(`test-durations.ts`, `base-url.ts`) and the stop a terminal asks for
+(`main-module.ts`); `connector.ts` finds and follows the daemon by the
+record `daemon-record.ts` reads, keeps the reading rule, and holds the bot
+table; `bot.ts` runs one token's bot; `bot-api.ts` is the Bot API as
+outcomes, never a throw, and its long poll; `node-fetch.ts` is the
+daemon's transport; `gate.ts` is the pairing gate; `outbox.ts` is what a
+bot writes in its chats; `cards.ts` holds the cards and their presses; and
+`character-bot.ts` and `management-bot.ts` are the two bots' rules. The
+conformance suite (`tests/conformance/connectors*.test.ts`) runs it as a
+process beside the binary's `serve`, pointed by
+`PROJECT02_TEST_TELEGRAM_API` at a Bot API of its own that answers as
+Telegram does — a second poll on one token ends the first with a 409 — and
+`tests/unit` holds the rules of its bots, their gate, outbox and cards.

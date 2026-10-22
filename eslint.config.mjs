@@ -64,16 +64,4 @@ export default tseslint.config(
       ],
     },
   },
-  // File-size ratchet: a pin only shrinks and goes once the file fits the cap.
-  // Pins fall via seam extraction, not size cuts; raising one needs its own
-  // commit with a stated reason.
-  {
-    files: ['src/plugins/host/host.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1365, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
 );

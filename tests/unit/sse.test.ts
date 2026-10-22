@@ -1,6 +1,9 @@
 import {describe, expect, it} from 'vitest';
 
-import {createSseFrameSplitter, parseSseFrame} from '../../src/shared/sse.ts';
+import {
+  createSseFrameSplitter,
+  parseSseFrame,
+} from '../../src/gateway/client/sse.ts';
 
 describe('gateway client SSE parsing', () => {
   it('reassembles frames split across chunks, whatever the line ending', () => {

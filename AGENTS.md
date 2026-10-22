@@ -1,8 +1,9 @@
 # AGENTS.md
 
-Operating guide for this repository — a TypeScript **Live Character Framework**:
-a character-driven agent runtime with persona continuity, plugins, tools, and
-durable local state.
+Operating guide for this repository — a **Live Character Framework**: a
+character-driven agent runtime with persona continuity, plugins, tools, and
+durable local state, its daemon in Rust under `crates/` and its clients in
+TypeScript under `src/`.
 
 Core rule:
 
@@ -167,7 +168,8 @@ is a useful sentence; silently writing a second copy is not.
 
 Architecture gates enforced by `pnpm arch:check`:
 
-- `src/core` is pure domain — it may import `core` and `shared` only.
+- A client — `src/frontends`, `src/gateway/client` — imports only the wire's
+  contract (`src/gateway/api`), the reference client, and `src/shared`.
 - `src/shared` is a leaf, and additions need a reviewed `consumers.json` entry
   naming the modules that really import the file — at least two, unless the
   file is internal plumbing other `src/shared` files import.
@@ -195,13 +197,11 @@ from refactoring.
 **The conformance suite is the daemon's acceptance gate.** A behavior the
 daemon must keep is a row of `tests/conformance/inventory.csv` with a test
 under `tests/conformance` titled by it, proved from outside the process; an
-internal test may not pin what that suite proves. A host rule no bundled
-plugin can show from outside is a `rust-unit` row, proved by a Rust test
-under `crates` titled by it, and the row says why. The differential run
-(`tests/differential`) holds a port to recorded behavior rather than to
-source: it drives one scenario through a reference build and a candidate
-and compares what each left, and CI runs it, as `pnpm test:differential`,
-in a job of its own.
+internal test may not pin what that suite proves. A rule of the daemon no
+test from outside can bring about — a host rule no bundled plugin shows, a
+race no client can hold open, a write no switch of the binary fails — is a
+`rust-unit` row, proved by a Rust test under `crates` titled by it, and the
+row says why.
 
 Reach for a unit test when the logic is worth pinning on its own: validation,
 parsing, routing, deterministic state, schema normalization, ID assignment,
@@ -255,12 +255,13 @@ style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
   Guidelines, which ask for newtypes with validating constructors.
 - Do not change public APIs unless the task requires it.
 
-`pnpm check` is the gate — format, lint, typecheck, arch, the web page's
-build, coverage, and the browser suite (Chromium via Playwright). CI runs
-the same command. Beside it, `pnpm check:rust` is the gate for the crates —
-rustfmt, clippy, the tests, and cargo-deny — which CI runs on Linux, macOS,
-and Windows, and `pnpm test:differential` is the differential run, which
-CI runs in a job of its own. For TypeScript-heavy changes also run:
+`pnpm check` is the clients' gate — format, lint, typecheck, arch, the web
+page's build, coverage, and the browser suite (Chromium via Playwright)
+against the binary. `pnpm check:rust` is the daemon's gate — rustfmt,
+clippy, the tests, the generated contract, and cargo-deny — which CI runs on
+Linux, macOS, and Windows, and `pnpm test:conformance` runs the conformance
+suite against the binary, which CI runs on Linux after `pnpm check`. For
+TypeScript-heavy changes also run:
 
 ```text
 pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters

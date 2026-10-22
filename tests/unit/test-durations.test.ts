@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {readTestDurations} from '../../src/shared/test-durations.ts';
+import {readTestDurations} from '../../src/frontends/telegram/test-durations.ts';
 
 const keys = ['pairing', 'heartbeat', 'grace'] as const;
 

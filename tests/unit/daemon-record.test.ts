@@ -3,7 +3,7 @@ import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
-import {readDaemonRecord} from '../../src/shared/daemon-record.ts';
+import {readDaemonRecord} from '../../src/frontends/telegram/daemon-record.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe("the daemon's record", () => {

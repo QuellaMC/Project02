@@ -1,7 +1,8 @@
 import {defineConfig, devices} from '@playwright/test';
 
 // The built page in Chromium against a daemon of its own per test; the
-// suite spawns the daemon itself, and pnpm check builds the page first.
+// suite spawns the daemon itself, and pnpm test:browser builds the page
+// and the binary that serves it first.
 export default defineConfig({
   testDir: './tests/browser',
   timeout: 60_000,

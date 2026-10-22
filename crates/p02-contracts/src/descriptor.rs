@@ -77,27 +77,16 @@ mod tests {
         HandleToolCallFailure, PluginKind,
     };
 
-    /// The bundled descriptors stay where the TypeScript daemon reads them,
-    /// in format v1, until the plugins they describe are compiled in and
-    /// embed them; read in place and lifted to v2 here, they have one
-    /// source until then.
+    /// A bundled plugin's descriptor, read where p02-plugins keeps it beside
+    /// the plugin's code, in the module named after its id.
     fn bundled(id: &str) -> Manifest {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../src/plugins/packages")
-            .join(id)
+            .join("../p02-plugins/src")
+            .join(id.replace('-', "_"))
             .join("project02.plugin.json");
         let text = p02_shared::read_text_lossy(&path).unwrap();
-        let mut descriptor: Value = serde_json::from_str(&text).unwrap();
-        let entries = descriptor.as_object_mut().unwrap();
 
-        assert_eq!(entries.remove("entry"), Some(json!("./index.ts")), "{id}");
-        assert_eq!(
-            entries.insert("format".to_owned(), json!(DESCRIPTOR_FORMAT)),
-            Some(json!("project02.plugin.v1"))
-        );
-
-        Manifest::from_descriptor(&descriptor.to_string())
-            .unwrap_or_else(|error| panic!("{id}: {error:?}"))
+        Manifest::from_descriptor(&text).unwrap_or_else(|error| panic!("{id}: {error:?}"))
     }
 
     #[test]
@@ -180,7 +169,8 @@ mod tests {
             mem0.requested_access(),
             &[
                 (AccessName::TurnContext, AccessLevel::Read),
-                (AccessName::ModelInput, AccessLevel::Write)
+                (AccessName::ModelInput, AccessLevel::Write),
+                (AccessName::PluginDatabase, AccessLevel::Write)
             ]
             .into_iter()
             .collect::<AccessMap>()

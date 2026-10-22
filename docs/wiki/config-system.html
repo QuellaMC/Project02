@@ -23,7 +23,7 @@
       authorable in both unless its scope keeps it to one, and a character's value wins over
       the home's. One loader, schema, redaction, inspection, and target-aware mutation path
       serves the daemon's config verbs, runtime activation, and the model-facing tools. The
-      config engine lives under <code>src/runtime/config</code>; model-facing plugin
+      config engine is the daemon's <code>crates/p02-config</code>; model-facing plugin
       operations are adapters over that boundary, never a second config system.
     </p>
 
@@ -214,8 +214,8 @@
 
     <p>
       A character's first valid write, like its first start, creates its data directory and
-      overlay. <code>pnpm inspect</code> reports a home's config, activation, connectors, and
-      sessions without writing anything.
+      overlay. <code>project02 inspect</code>, or <code>pnpm inspect</code> in a checkout,
+      reports a home's config, activation, connectors, and sessions without writing anything.
     </p>
 
     <h2>Connectors</h2>
@@ -223,8 +223,8 @@
     <p>
       A messaging connector's settings are a section under <code>connectors</code>, declared
       as every section is. Every connector is built in, so its declaration lives beside the
-      host's fields, in <code>src/runtime/config/connectors.ts</code>, rather than in a
-      package. Its settings are shown on the same settings page as a plugin's, under
+      host's fields, in <code>crates/p02-config</code>, rather than in a plugin's
+      descriptor. Its settings are shown on the same settings page as a plugin's, under
       <em>Messaging apps</em>, and written through the same config verb, never by the model,
       whose tools reach plugins only. Telegram is the first: <code>botToken</code>, the bot a
       character answers as, is that character's alone; <code>managementBotToken</code>, a bot
@@ -260,7 +260,7 @@
       have is reported as the warning <code>runtime_config_unknown_connector</code> at its
       path, and blocks nothing. A connector's section is resolved beside a character, never
       into one, so an error in its stanza blocks that section, with the reason, and stops no
-      character. <code>pnpm inspect</code> lists each connector beside the plugins: its switch
+      character. <code>project02 inspect</code> lists each connector beside the plugins: its switch
       and activation, its fields as the character's layered resolution holds them, secrets
       redacted, and the diagnostics that name its section.
     </p>
@@ -311,71 +311,18 @@
       offered, so no configuration can take it away.
     </p>
 
-    <h2>Unified plugin packages</h2>
+    <h2>Plugins compiled into the daemon</h2>
 
     <p>
-      Ordinary plugins use one package contract whether they ship with Project02 or are installed by
-      an operator. Project02 scans bundled packages and <code>&lt;home&gt;/plugins</code> into one
-      immutable catalog before activation. Cold discovery reads only package metadata; it does not
-      import disabled plugin code.
-    </p>
-
-    <pre><code>&lt;plugin-id&gt;/
-  package.json              # must declare { "type": "module" }
-  project02.plugin.json     # format, relative entry, cold manifest
-  index.ts | index.js | index.mjs</code></pre>
-
-    <pre><code>{
-  "format": "project02.plugin.v1",
-  "entry": "./index.ts",
-  "manifest": {
-    "...": "existing RuntimePluginManifest"
-  }
-}</code></pre>
-
-    <pre><code>export async function createProject02Plugin(input) {
-  return {
-    manifest: input.manifest,
-    providedTools: [],
-    lifecycleHooks: {}
-  };
-}</code></pre>
-
-    <p>
-      Every entry has exactly one runtime export, the named
-      <code>createProject02Plugin(input)</code> factory, and returns a normal runtime plugin.
-      The input contains <code>pluginId</code>, the validated <code>manifest</code>, the
-      character's <code>storeRoot</code>, <code>resolvedConfig</code>, and <code>redactedConfig</code>. The host
-      validates the returned plugin and requires exact manifest parity before registration. Node loads
-      all three supported extensions as ESM; TypeScript entries are limited to
-      <a href="https://nodejs.org/docs/latest-v24.x/api/typescript.html">Node 24's erasable syntax</a>
-      and are not compiled or type-checked by Project02. TypeScript plugin imports must include explicit
-      file extensions and use <code>import type</code> for type-only dependencies. See also
-      <a href="https://nodejs.org/api/packages.html">Node's package and module rules</a>.
-    </p>
-
-    <p>
-      CommonJS, <code>.cjs</code>, <code>.cts</code>, <code>.tsx</code>, extensionless entries,
-      URLs, metadata or entry symlinks, and entries outside the package directory are rejected.
-      Adding, removing, or changing a package is observed by the next Project02 process; active
-      processes do not hot-reload plugin code.
-    </p>
-
-    <h3>Installing an operator package</h3>
-    <ol>
-      <li>Copy the complete package folder to <code>&lt;home&gt;/plugins/&lt;plugin-id&gt;</code>.</li>
-      <li>Run <code>pnpm inspect --store &lt;home&gt; --sessions</code> to validate its cold descriptor and config schema without executing the entry; a package the catalog cannot publish is reported there and in every config view.</li>
-      <li>Enable it on the settings page — the home's, or one character's.</li>
-      <li>Restart the daemon so the enabled package is imported once during host construction.</li>
-    </ol>
-
-    <p>
-      Package provenance is host-owned rather than manifest-owned. Bundled Character State is the
-      reference ordinary package; the Mira package enables it in Mira's overlay rather than through a
-      global manifest default. Operator packages remain disabled
-      until explicitly enabled and cannot gain bundled trust or default activation by copying manifest
-      fields. Enabled packages execute trusted Node code in the Project02 process; plugin permissions
-      constrain host services and model exposure, not direct Node capabilities.
+      Every plugin is compiled into the daemon: the host's own <code>runtime.plugin</code>, and
+      the bundled character memory, character state, demo config, mem0 and session history,
+      each with its descriptor, format <code>project02.plugin.v2</code>, beside its code in
+      <code>crates/p02-plugins</code>. The descriptor's manifest is what the settings are judged
+      against before any plugin is built. Nothing is loaded from a home: a
+      <code>plugins.&lt;id&gt;</code> stanza naming no plugin of the build is reported as the
+      warning <code>runtime_config_unknown_plugin</code> at its path, and blocks nothing.
+      Bundled Character State is switched on where a character's package requires it: the
+      Mira package enables it in Mira's overlay rather than through a global manifest default.
     </p>
 
     <h2>Pre-release compatibility and future import</h2>
@@ -384,7 +331,9 @@
       Runtime config accepts only <code>project02.config.v2</code>. Project02 is private and
       untagged, so retired shapes have no readers: a document that still carries the former
       <code>project02.storeRoot</code> field, or a secret written as an environment reference,
-      is refused as unknown, and the person edits it out.
+      is refused as unknown, and the person edits it out. Nor is a home the TypeScript daemon
+      wrote read: the daemon's store is at storage version 15, a home at version 14 is refused
+      and never converted, and the person starts a new one.
     </p>
 
     <p>

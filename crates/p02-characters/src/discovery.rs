@@ -10,7 +10,7 @@ use crate::descriptor::{CharacterDefinition, MAX_DESCRIPTOR_BYTES, ParseDescript
 /// authored in.
 const BUNDLED: [(&str, &str); 1] = [(
     "mira",
-    include_str!("../../../src/characters/packages/mira/project02.character.json"),
+    include_str!("../packages/mira/project02.character.json"),
 )];
 
 /// Where a home keeps the packages its person added, a folder each.
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn every_folder_of_the_bundled_source_is_compiled_in() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/characters/packages");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages");
         let mut folders: Vec<String> = list_directory(&source)
             .unwrap()
             .into_iter()

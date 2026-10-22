@@ -1,0 +1,42 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "character-state",
+    "displayName": "Character State",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "First-party Character State: the character's own inner state as a trusted runtime note, with a tool to adjust it.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": [
+      "tool_provider",
+      "before_role_model_call",
+      "handle_tool_call"
+    ],
+    "config": {
+      "scope": "character_only",
+      "fields": []
+    },
+    "firstParty": true,
+    "runtimePolicy": {
+      "timeoutMs": 10000,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "reject_turn",
+        "handleToolCall": "reject_tool_call",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": false,
+      "reasons": ["built_in_character_state"]
+    },
+    "requestedAccess": {
+      "character_file_store": "write",
+      "model_input": "write",
+      "trusted_context": "write"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import {createHash, randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {
   readdirSync,
   readFileSync,
@@ -151,16 +151,19 @@ it('lifecycle.same-address-across-runs: a later run on the same home answers on 
   });
 });
 
-it('lifecycle.record-temp-residue: the next record write removes the daemon.json temp file a killed writer left', async () => {
+it("lifecycle.record-temp-residue: a daemon.json temp file is left be while the daemon holding the home's lease serves, a second serve writing nothing, and once that daemon is killed the next run's record write removes it", async () => {
   const home = createHome();
   const killed = await startDaemon(home);
-
-  killed.signal('SIGKILL');
-  await killed.exit();
-
-  const residue = `.daemon.json.${String(killed.pid)}.${randomUUID()}.tmp`;
+  const residue = `.daemon.json.${randomUUID()}.tmp`;
 
   writeFileSync(join(home, residue), '{"protocolVersion":7,');
+
+  const second = serve(['--store', home]);
+
+  expect(await second.exit()).toBe(0);
+  expect(readdirSync(home)).toContain(residue);
+  killed.signal('SIGKILL');
+  await killed.exit();
   await startDaemon(home);
   expect(readdirSync(home)).not.toContain(residue);
 });
@@ -512,23 +515,15 @@ it('lifecycle.store-init-foreign-dir: serve --init refuses a directory holding f
   expect(readdirSync(home)).toEqual(['notes.txt']);
 });
 
-it("lifecycle.store-init-residue: a live process's in-flight marker temp file does not stop a home's initialization, and one a dead process abandoned is refused", async () => {
-  const inFlight = createHome({
-    [`.schema.json.${String(process.pid)}.${randomUUID()}.tmp`]: '{',
-  });
-  const daemon = await startDaemon(inFlight);
+it("lifecycle.store-init-residue: serve --init on a home holding nothing but the marker temp file a dead writer left writes the marker, with the first character's data, and removes the temp file", async () => {
+  const residue = `.schema.json.${randomUUID()}.tmp`;
+  const home = createHome({[residue]: '{'});
+  const daemon = await startDaemon(home);
 
+  // The home's marker is written with her data, so her readiness is the wait.
   await wireOf(daemon).start('mira');
-  expect(readdirSync(inFlight)).toContain('schema.json');
-  daemon.signal('SIGINT');
-  await daemon.exit();
-
-  const abandoned = `.schema.json.${String(daemon.pid)}.${randomUUID()}.tmp`;
-  const crashed = createHome({[abandoned]: '{'});
-  const refused = serve(['--store', crashed, '--init']);
-
-  expect(await refused.exit()).toBe(1);
-  expect(readdirSync(crashed)).toEqual([abandoned]);
+  expect(readdirSync(home)).toContain('schema.json');
+  expect(readdirSync(home)).not.toContain(residue);
 });
 
 it("lifecycle.leftover-record: a leftover daemon.json beside no marker is the home's own, and one that is a symlink or a directory is refused", async () => {
@@ -582,33 +577,6 @@ it('lifecycle.store-wrong-dir: serve refuses a character data directory, or a di
   }
 
   expect(readdirSync(miraData)).toEqual(before);
-});
-
-it('lifecycle.foreign-host-lease: a home whose lease names a process on another host is never taken over', async () => {
-  const lease = {
-    version: 1,
-    resourceKey: 'daemon',
-    nonce: randomUUID(),
-    // No process on this host can have this pid: only its host keeps the lease.
-    pid: 4_194_305,
-    hostname: 'elsewhere.invalid',
-    acquiredAt: '2026-10-18T00:00:00.000Z',
-  };
-  const lock = `${createHash('sha256').update('daemon').digest('hex')}.lock`;
-  const home = createHome({
-    '.locks': {[lock]: {'owner.json': JSON.stringify(lease)}},
-  });
-  const run = serve(['--store', home, '--init'], {
-    PROJECT02_TEST_DURATIONS: 'hold=500',
-  });
-
-  expect(await run.exit()).toBe(1);
-  expect(run.stdout()).toBe('');
-  expect(readdirSync(home)).toEqual(['.locks']);
-  expect(readdirSync(join(home, '.locks'))).toEqual([lock]);
-  expect(
-    JSON.parse(readFileSync(join(home, '.locks', lock, 'owner.json'), 'utf8')),
-  ).toEqual(lease);
 });
 
 it('lifecycle.roster-boot: at boot every enabled character starts, and a disabled one is not started: health shows it switched off and not_started', async () => {

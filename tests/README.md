@@ -1,23 +1,18 @@
 # tests
 
-Seven buckets, one intent each — a test lives in exactly one:
+Three suites, one intent each — a test lives in exactly one:
 
-- `unit/` — one module exercised in memory; fakes for everything durable.
-- `contract/` — interface obligations that every implementation of a seam
-  must satisfy (store conformance, provider adapters, adapter proofs).
-- `integration/` — several real modules wired together, real temp
-  directories, real child processes where concurrency demands it.
-- `e2e/` — drives a CLI entrypoint end to end (see `e2e/README.md`).
+- `unit/` — a module of the clients, or a script of the repository,
+  exercised in memory with fakes for everything outside it.
 - `conformance/` — the daemon spawned as a process and met only where a
-  client meets it, with nothing imported from `src/` (see
-  `conformance/README.md`).
+  client meets it, with nothing imported from `src/` but the contract's
+  schema (see `conformance/README.md`).
 - `browser/` — the built page in Chromium, against a daemon met through
   the conformance harness (see `browser/README.md`).
-- `differential/` — one scenario driven through two builds of the daemon,
-  what each left compared once normalized (see `differential/README.md`).
 
-`support/` holds shared fixtures and harnesses; `fixtures/` holds data
-files and must stay a sibling of `support/` (reached via
-`import.meta.url`). Run one Vitest bucket with `vitest --project <name>`,
-the browser suite with `pnpm test:browser`; coverage is global and only
-measured on full runs.
+`support/` holds what more than one unit test uses. The daemon's own unit
+and integration tests are Rust tests under `crates/`, run by
+`pnpm check:rust`. Run the unit suite with `pnpm test`, the conformance
+suite with `pnpm test:conformance` and the browser suite with
+`pnpm test:browser`, each of the last two after building the page and the
+binary; coverage is measured on the unit suite alone.

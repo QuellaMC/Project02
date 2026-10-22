@@ -28,6 +28,5 @@ p02-shared.
   refusal saying why: no package is meant to be her, a package meant to
   be her was not published, or the folder that might hold her could not
   be read.
-- **The bundled packages** are read from `src/characters/packages/` when
-  the crate builds: the TypeScript daemon reads the same files until it is
-  retired, so the two keep one source until then.
+- **The bundled packages** are the folders of `packages/`, each read when
+  the crate builds.

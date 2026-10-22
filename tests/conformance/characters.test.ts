@@ -234,7 +234,7 @@ function characterRefs(home: string, characterId: string) {
   );
 }
 
-it("characters.persona-prompt: the persona's sections, a blank line apart, then the runtime's words naming the person, are the system message the model receives, and each round records the character's id, version and persona fingerprint", async () => {
+it("characters.persona-prompt: the persona's sections, a blank line apart, then the runtime's words naming the person, are the system message the model receives, and each round records her package's version and persona fingerprint", async () => {
   const persona = ['First paragraph.', 'Second paragraph.'];
   const model = await startModelServer();
   const home = createHome({
@@ -269,7 +269,6 @@ it("characters.persona-prompt: the persona's sections, a blank line apart, then 
   expect(system?.content?.slice(sections.length)).toContain('Sam');
   expect(characterRefs(home, 'nova')).toEqual([
     {
-      id: 'nova',
       version: '2.3.4',
       personaFingerprint: expect.stringMatching(
         /^sha256:[0-9a-f]{64}$/u,

@@ -8,8 +8,7 @@ export type * from './generated/contract.ts';
 export {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
+  maxSpeakerNameLength,
   turnCommittedTheLine,
 } from './contract.ts';
 export {foldRunningTurns, type RunningTurns} from './running-turns.ts';
-/** What `<home>/daemon.json` holds, for a reader that finds the daemon by it. */
-export type {DaemonRecord} from '../../shared/daemon-record.ts';

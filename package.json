@@ -1,69 +1,41 @@
 {
   "name": "project02",
-  "description": "TypeScript rebuild baseline for the Live Character Framework.",
+  "description": "The Live Character Framework's clients, beside the daemon under crates/: the web page, the reference client, and the Telegram connector.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=24.12.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3"
-    ],
-    "peerDependencyRules": {
-      "ignoreMissing": [
-        "@cloudflare/workers-types",
-        "@types/jest",
-        "@types/pg"
-      ]
-    }
-  },
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
-    "inspect": "node src/cli/inspect/main.ts",
-    "serve": "pnpm build:web && node src/cli/serve/main.ts",
+    "serve": "pnpm build:web && cargo run --locked -p project02 -- serve",
+    "inspect": "cargo run --locked -p project02 -- inspect",
     "telegram": "node src/frontends/telegram/main.ts",
     "build:web": "vite build",
+    "build": "pnpm build:web && cargo build --locked -p project02",
     "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"src/**/*.tsx\" \"tests/**/*.ts\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\"",
-    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"schemas/**/*.json\" \"scripts/**/*.mjs\" \"scripts/**/*.d.mts\" \"src/**/*.cjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
+    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/frontends/web/tsconfig.json --noEmit",
     "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs && node scripts/check-source-text.mjs && node scripts/check-conformance-inventory.mjs",
-    "plugin:new": "node scripts/create-plugin.mjs",
-    "character:new": "node scripts/create-character.mjs",
     "arch:baseline": "node scripts/arch-check.mjs --baseline",
-    "test": "vitest run --project=!differential",
-    "test:coverage": "vitest run --coverage --project=!differential",
-    "test:browser": "pnpm build:web && playwright test",
-    "test:differential": "vitest run --project=differential",
-    "test:watch": "vitest --project=!differential",
+    "test": "vitest run --project=unit",
+    "test:coverage": "vitest run --coverage --project=unit",
+    "test:watch": "vitest --project=unit",
+    "test:conformance": "pnpm build && vitest run --project=conformance",
+    "test:browser": "pnpm build && playwright test",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage && pnpm test:browser",
     "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- src/gateway/api/generated && cargo deny check"
-  },
-  "dependencies": {
-    "@hono/node-server": "2.1.1",
-    "ajv": "^8.20.0",
-    "better-sqlite3": "^12.11.1",
-    "compromise": "14.16.0",
-    "drizzle-orm": "^0.45.2",
-    "hono": "4.13.5",
-    "mem0ai": "^3.1.6",
-    "natural": "8.1.1",
-    "pg": "8.11.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "1.63.0",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.12.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitest/coverage-v8": "4.1.7",
+    "ajv": "^8.20.0",
     "dependency-cruiser": "^18.1.0",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^10.4.0",
     "prettier": "3.9.5",
     "react": "19.3.0",

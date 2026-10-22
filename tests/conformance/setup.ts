@@ -1,4 +1,4 @@
-/** Vitest's end of a test, for the harness: the setup file of the conformance project and of the differential run. */
+/** Vitest's end of a test, for the harness: the setup file of the conformance project. */
 import {onTestFinished} from 'vitest';
 
 import {useRunner} from './harness/runner.ts';

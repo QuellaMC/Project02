@@ -57,13 +57,13 @@ the character's storage grants through the contracts.
   manifest, read once from its descriptor, and its factory: what a home's
   settings are judged against and what a character's plugins are built
   from, the host's own first and then the packages in id order, an order
-  everything that lists or runs them keeps, the model's tools among them. A package's descriptor is the one the repository keeps for both
-  daemons; the host's own plugin keeps its own beside its code. Whether a
-  plugin is on where no settings switch it is its manifest's to say:
-  character memory, session history and the host's own plugin are on and
-  the rest off, character state switched on for a character whose package
-  requires it. A manifest that does not parse is a build that must not
-  ship: the list fails at its first use, naming the plugin.
+  everything that lists or runs them keeps, the model's tools among them.
+  Each plugin keeps its descriptor beside its code. Whether a plugin is on
+  where no settings switch it is its manifest's to say: character memory,
+  session history and the host's own plugin are on and the rest off,
+  character state switched on for a character whose package requires it.
+  A manifest that does not parse is a build that must not ship: the list
+  fails at its first use, naming the plugin.
 - **The host's own plugin.** `runtime.plugin`, which the host builds
   itself, linked to it, when a character's settings run it. It lists the
   plugins the host runs, each with the access it holds, the hooks the
