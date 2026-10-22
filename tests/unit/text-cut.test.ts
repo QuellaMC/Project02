@@ -1,6 +1,9 @@
 import {describe, expect, it} from 'vitest';
 
-import {codePointBoundary, truncateText} from '../../src/shared/text-cut.ts';
+import {
+  codePointBoundary,
+  truncateText,
+} from '../../src/frontends/telegram/text-cut.ts';
 
 describe('text cuts', () => {
   it('steps back a cut that falls between the halves of a surrogate pair, and leaves one just past the pair', () => {

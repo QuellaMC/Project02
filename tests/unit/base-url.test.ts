@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {endpointUnder} from '../../src/shared/base-url.ts';
+import {endpointUnder} from '../../src/frontends/telegram/base-url.ts';
 
 describe('a base URL', () => {
   it('names one endpoint under it whether it ends with a slash or not', () => {

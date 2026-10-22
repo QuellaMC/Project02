@@ -1,8 +1,8 @@
-import {maxSpeakerDisplayNameLength} from '../../core/index.ts';
-import type {
-  GatewayEvent,
-  PairingDecision,
-  PairingRequestOutcome,
+import {
+  maxSpeakerNameLength,
+  type GatewayEvent,
+  type PairingDecision,
+  type PairingRequestOutcome,
 } from '../../gateway/api/index.ts';
 import type {TelegramUser} from './bot-api.ts';
 import {
@@ -136,7 +136,7 @@ function labelOf(user: TelegramUser): string {
     .join(' ');
 
   return Array.from(name.replace(/\s+/gu, ' ').trim())
-    .slice(0, maxSpeakerDisplayNameLength)
+    .slice(0, maxSpeakerNameLength)
     .join('')
     .trim();
 }

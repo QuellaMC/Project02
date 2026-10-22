@@ -6,8 +6,8 @@ process and meets it only where a user or a client would: the address
 line it prints, HTTP and the event stream, the files in its home, its
 stdout, stderr and exit code, and for the connector what it asks of
 Telegram and of the daemon. Nothing here depends on how either is built,
-so the same suite runs against today's TypeScript programs and against
-any other build of them.
+so the suite runs against the binary `pnpm build` makes, or against any
+other build of the same commands.
 
 ## Rules
 
@@ -41,7 +41,7 @@ any other build of them.
 | File                         | Job                                                                                                                                                                                                                                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `harness/home.ts`            | A canonical temp home, empty for `serve --init` or seeded with the files a test names; a session log's records, the records of one kind across a character's sessions, and every file under a directory.                                                                                               |
-| `harness/daemon.ts`          | Spawns `serve`, `inspect` or the Telegram connector in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code. A start of `serve` or `inspect` may name its command, so one process can start two builds.                                                 |
+| `harness/daemon.ts`          | Spawns `serve`, `inspect` or the Telegram connector in its own process group, `serve` on a pseudo-terminal too: its address, signals, output and exit code.                                                                                                                                            |
 | `harness/wire.ts`            | One method per verb of `docs/wiki/gateway-api.html`, answering the outcome as JSON, held to the contract.                                                                                                                                                                                              |
 | `harness/events.ts`          | The event stream: frames as they came, each held to the contract, awaited by predicate, resumed by `Last-Event-ID`.                                                                                                                                                                                    |
 | `harness/schema.ts`          | The contract: an answer by its status, its route's outcome under 200 and the error envelope otherwise, and a frame by its event, `ready`, `resumed` or the event of that kind, held to the schema; a mismatch fails its test.                                                                          |
@@ -52,7 +52,6 @@ any other build of them.
 | `harness/telegram-server.ts` | Telegram's Bot API on loopback, answering by Telegram's envelope and its server's rules, a newer poll ending a waiting one with a 409: it keeps every call with its moment, answers one with a 429, keeps a webhook or revokes a token on demand, and drops every call while Telegram is out of reach. |
 | `harness/relay.ts`           | The daemon's wire relayed for the connector, through a home whose record names the relay: every request kept with its headers, an answer held back until released, a request refused, and the daemon out of reach, its stream cut, until it is back.                                                   |
 | `harness/server.ts`          | Binds a stand-in server to a loopback port of its own under the ceiling, and closes it with the test.                                                                                                                                                                                                  |
-| `harness/build-page.ts`      | Builds the page the daemon serves, once before the suite, when the checkout has none.                                                                                                                                                                                                                  |
 | `harness/terminal.py`        | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                                                                                                                           |
 | `harness/wait.ts`            | The ceiling, what a failed wait shows, and a wait on what a stand-in server keeps.                                                                                                                                                                                                                     |
 | `harness/runner.ts`          | The runner the harness serves: work for the end of the test running now, supplied by Vitest in `setup.ts` and by Playwright in the browser suite's `fixture.ts`. No other harness file imports a runner.                                                                                               |
@@ -60,12 +59,12 @@ any other build of them.
 ## Environment
 
 `PROJECT02_SERVE_CMD` is the command line that starts the daemon, split on
-whitespace and run from the repository root: `node src/cli/serve/main.ts`
+whitespace and run from the repository root: `target/debug/project02 serve`
 when unset. `PROJECT02_INSPECT_CMD` is the one that runs `inspect`, read
-the same way: `node src/cli/inspect/main.ts` when unset, and
+the same way: `target/debug/project02 inspect` when unset, and
 `PROJECT02_CONNECTOR_CMD` the one that starts the Telegram connector:
 `node src/frontends/telegram/main.ts` when unset. A test adds its own
-arguments, and the switches of `src/cli/README.md` it needs:
+arguments, and the switches of `crates/project02/README.md` it needs:
 `PROJECT02_TEST_PROVIDER=deterministic` for the fixed-reply voice,
 `PROJECT02_TEST_DURATIONS` for shortened waits. The connector takes the
 two of `src/frontends/README.md`: `PROJECT02_TEST_TELEGRAM_API`, naming
@@ -76,20 +75,10 @@ writes its settings into the home's `config.json` before the start.
 `python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal
 through its `pty` module (`harness/terminal.py`).
 
-Against another build of the daemon, this suite and the browser suite,
-which starts `serve` through the same harness. The Rust build,
-`crates/project02`, has `serve` and `inspect`, so the TypeScript connector
-stands in for the rest; its page is built into the binary, so the page is
-built first:
-
-```sh
-pnpm build:web && cargo build -p project02
-PROJECT02_SERVE_CMD='target/debug/project02 serve' \
-PROJECT02_INSPECT_CMD='target/debug/project02 inspect' \
-PROJECT02_CONNECTOR_CMD='node src/frontends/telegram/main.ts' \
-  pnpm exec vitest run --project conformance
-PROJECT02_SERVE_CMD='target/debug/project02 serve' pnpm test:browser
-```
+`pnpm test:conformance` builds the page, then the binary, which embeds
+the page as it finds it, and runs the suite; the browser suite starts
+`serve` through the same harness. The connector stays a program of its
+own until it joins the binary.
 
 Every answer the wire client reads and every frame the stream reader reads
 is held to the contract's schema, `src/gateway/api/generated/schema.json`,
@@ -97,8 +86,3 @@ which the Rust types the socket carries generate, so every row proves the
 contract against whichever build it runs. After a change to those types,
 `cargo test -p p02-gateway contract` writes the schema again, and the
 TypeScript declarations beside it.
-
-To compare two builds rather than prove one, `tests/differential` drives
-one scenario through a reference and a candidate and compares what each
-showed the model, the stream, history and `inspect`
-(`../differential/README.md`).

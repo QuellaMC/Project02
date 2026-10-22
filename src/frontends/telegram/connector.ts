@@ -17,8 +17,8 @@ import {
   daemonRecordFileName,
   readDaemonRecord,
   type DaemonRecord,
-} from '../../shared/daemon-record.ts';
-import {isJsonRecord} from '../../shared/json-boundary.ts';
+} from './daemon-record.ts';
+import {isJsonRecord} from './json-record.ts';
 import {backoffMs, createBotApi, pause, type PollPacing} from './bot-api.ts';
 import {
   botNames,

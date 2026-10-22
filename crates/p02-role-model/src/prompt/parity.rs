@@ -1,6 +1,6 @@
 //! The prompts the TypeScript daemon wrote, recorded in the crate's
 //! fixtures, which the Rust renderer is held to byte for byte: the README
-//! says how they were recorded and how to record them again.
+//! says how they were recorded and when they change.
 
 use std::num::NonZeroUsize;
 

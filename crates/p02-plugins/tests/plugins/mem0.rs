@@ -43,13 +43,10 @@ fn host_within(storage: &Arc<Storage>, settings: &Value, timeout_ms: u64) -> Plu
         .unwrap()
 }
 
-/// The bundled manifest with the database the embedded engine keeps its
-/// memories in, which the TypeScript daemon's memory provider refuses, so
-/// the descriptor cannot carry it until that daemon goes.
+/// The bundled manifest, its hooks bounded at `timeout_ms`.
 fn manifest(timeout_ms: u64) -> p02_contracts::Manifest {
     bundled_manifest("mem0", |manifest| {
         manifest["runtimePolicy"]["timeoutMs"] = json!(timeout_ms);
-        manifest["requestedAccess"]["plugin_database"] = json!("write");
     })
 }
 

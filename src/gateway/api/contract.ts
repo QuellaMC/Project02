@@ -18,6 +18,13 @@ export const gatewayLoopbackHostnames: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The longest name a speaker goes by, in characters, as `SpeakerName`
+ * declares it: a client that names someone, such as an account asking to
+ * pair, cuts the name to it.
+ */
+export const maxSpeakerNameLength = 128;
+
+/**
  * Whether a turn put the line it was given in the log. A surface holds a
  * line until it knows: one that was committed belongs to the thread, and
  * one that was not is the person's to write again. Nothing else answers

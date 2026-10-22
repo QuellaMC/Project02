@@ -1,27 +1,3 @@
 {
-  "base-url.ts": ["frontends", "plugins", "role-model", "runtime"],
-  "canonical-json.ts": ["app", "gateway", "plugins", "role-model", "runtime"],
-  "daemon-record.ts": ["frontends", "gateway", "runtime"],
-  "fetch-failure.ts": ["frontends", "gateway"],
-  "file-system.ts": ["cli", "plugins", "runtime"],
-  "identifier.ts": ["characters", "cli", "plugins", "role-model", "runtime"],
-  "json-boundary.ts": [
-    "app",
-    "characters",
-    "frontends",
-    "gateway",
-    "plugins",
-    "role-model",
-    "runtime"
-  ],
-  "main-module.ts": ["cli", "frontends"],
-  "node-error.ts": ["characters", "plugins", "runtime"],
-  "one-of.ts": ["plugins", "role-model", "runtime"],
-  "package-capture.ts": ["characters", "plugins"],
-  "package-metadata.ts": ["characters", "plugins", "runtime"],
-  "real-path.ts": ["plugins", "runtime"],
-  "redaction.ts": ["plugins", "runtime"],
-  "sse.ts": ["gateway", "role-model"],
-  "test-durations.ts": ["cli", "frontends"],
-  "text-cut.ts": ["frontends", "plugins", "runtime"]
+  "fetch-failure.ts": ["frontends", "gateway"]
 }

@@ -1,7 +1,6 @@
 //! The plugins compiled into the daemon: each one's manifest, read once
-//! from its descriptor, beside the factory that builds it. A package's
-//! descriptor is the one the repository keeps for both daemons; the host's
-//! own plugin, which has no package, keeps its own beside its code.
+//! from the descriptor it keeps beside its code, and the factory that
+//! builds it.
 
 use std::sync::LazyLock;
 
@@ -21,27 +20,27 @@ const PLUGINS: [(&str, &str, PluginFactory); 6] = [
     ),
     (
         "character-memory",
-        include_str!("../../../src/plugins/packages/character-memory/project02.plugin.json"),
+        include_str!("character_memory/project02.plugin.json"),
         character_memory::create,
     ),
     (
         "character-state",
-        include_str!("../../../src/plugins/packages/character-state/project02.plugin.json"),
+        include_str!("character_state/project02.plugin.json"),
         character_state::create,
     ),
     (
         "demo-config",
-        include_str!("../../../src/plugins/packages/demo-config/project02.plugin.json"),
+        include_str!("demo_config/project02.plugin.json"),
         demo_config::create,
     ),
     (
         "mem0",
-        include_str!("../../../src/plugins/packages/mem0/project02.plugin.json"),
+        include_str!("mem0/project02.plugin.json"),
         mem0::create,
     ),
     (
         "session-history",
-        include_str!("../../../src/plugins/packages/session-history/project02.plugin.json"),
+        include_str!("session_history/project02.plugin.json"),
         session_history::create,
     ),
 ];

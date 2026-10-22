@@ -34,6 +34,7 @@ type Section = {
   readonly namespace: string;
   readonly id: string;
   readonly enabled: boolean;
+  readonly activation: {readonly status: string};
   readonly fields: readonly Field[];
 };
 
@@ -995,6 +996,56 @@ it("config.retired-shapes-refused: a config.json still carrying project02.storeR
   }
 
   expect(readdirSync(elsewhere)).toEqual([]);
+});
+
+it("config.unknown-field-diagnostic: a hand-edited unknown field is an error at its path that stops the character: at the top level or at the retired project02.character the document does not load, and under a plugin's wrapper or in its config it blocks every plugin of hers but the host's own", async () => {
+  const failing = async (path: string, document: object): Promise<Wire> => {
+    const wire = wireOf(
+      await startDaemon(
+        createHome({'config.json': configJson(document)}),
+        fixedReplies,
+      ),
+    );
+
+    expect(await wire.start('mira'), path).toMatchObject({
+      character: {state: 'failed'},
+    });
+    expect(await wire.health(), path).toMatchObject({
+      config: {diagnostics: [{severity: 'error', path}]},
+    });
+
+    return wire;
+  };
+
+  for (const [path, document] of [
+    ['unknownField', {unknownField: true}],
+    ['project02.character', {project02: {character: 'mira'}}],
+  ] as const) {
+    const wire = await failing(path, document);
+
+    expect(await wire.configView(mira), path).toMatchObject({
+      status: 'refused',
+      reason: 'config_unloadable',
+    });
+  }
+
+  for (const [path, section] of [
+    ['plugins.demo-config.bogus', {enabled: true, bogus: true}],
+    ['plugins.demo-config.config.nope', {enabled: true, config: {nope: true}}],
+  ] as const) {
+    const wire = await failing(path, {plugins: {'demo-config': section}});
+    const {sections} = await viewOf(wire, mira);
+
+    expect(
+      sections
+        .filter(
+          ({namespace, activation}) =>
+            namespace === 'plugins' && activation.status === 'active',
+        )
+        .map(({id}) => id),
+      path,
+    ).toEqual(['runtime.plugin']);
+  }
 });
 
 it('config.overlay-unloadable: an overlay that is malformed, unreadable or invalid stops its character from starting with its diagnostic and has nothing written for her, and an edit sent from her screen as it was before is refused and leaves the overlay as it is', async () => {

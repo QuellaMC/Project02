@@ -71,7 +71,7 @@ impl Page {
             }
             None if path == "/" && (self.file)("index.html").is_none() => (
                 StatusCode::NOT_FOUND,
-                "No web page is built here: run `pnpm build:web`. The API is under /api.",
+                "No web page is built here: run `pnpm build`. The API is under /api.",
             )
                 .into_response(),
             None => Refusal::new(

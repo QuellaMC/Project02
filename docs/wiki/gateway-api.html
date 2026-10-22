@@ -46,11 +46,12 @@
       <h1>Project02 Gateway API</h1>
 
       <p>
-        The daemon (<code>pnpm serve</code>) holds every character runtime
-        behind one gateway and speaks HTTP plus server-sent events on a loopback
-        port. Every surface — the web page, a messaging
-        connector — is a client of this API and nothing else, so what one
-        surface sends, every surface sees. The contract's types are generated
+        The daemon, the binary's <code>project02 serve</code>, or
+        <code>pnpm serve</code> in a checkout, which builds the page and the
+        binary first, holds every character runtime behind one gateway and
+        speaks HTTP plus server-sent events on a loopback port. Every
+        surface — the web page, a messaging connector — is a client of this
+        API and nothing else, so what one surface sends, every surface sees. The contract's types are generated
         from the Rust types the socket carries into
         <code>src/gateway/api/generated/</code>, as TypeScript declarations
         and as a JSON Schema; this page is the wire.
@@ -75,6 +76,13 @@
       </p>
 
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:&lt;port&gt;/#token=&lt;token&gt;</code></pre>
+
+      <p>
+        A home is the daemon's own store, at storage version 15. A home the
+        TypeScript daemon wrote, at version 14, is not read and never
+        converted: <code>serve</code> refuses it, saying which version it
+        found, and the person starts a new home.
+      </p>
 
       <p>
         The same address is kept beside the config, in
@@ -121,8 +129,7 @@
         — is given up to thirty seconds: every half second the lease is tried
         and the address asked again, so a stop-then-start takes the home over
         on the same address and a start-twice hands the address back; when
-        the wait is up, or the holder is on another machine, it says so and
-        exits 1. Ctrl-C ends the wait at once.
+        the wait is up, it says so and exits 1. Ctrl-C ends the wait at once.
       </p>
 
       <p>
@@ -467,9 +474,10 @@
               The built web page's files: public bytes with no auth (the
               token reaches the page through the fragment), every one
               <code>Cache-Control: no-store</code>, served behind the API
-              router so no file answers for an API path. Before the page is
-              built, <code>/</code> is a plain-text 404 naming
-              <code>pnpm build:web</code> and <code>/api</code>.
+              router so no file answers for an API path. The page is built
+              into the binary: one built before the page was answers
+              <code>/</code> with a plain-text 404 naming
+              <code>pnpm build</code> and <code>/api</code>.
             </td>
           </tr>
         </tbody>

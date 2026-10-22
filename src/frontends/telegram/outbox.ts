@@ -1,4 +1,4 @@
-import {codePointBoundary, truncateText} from '../../shared/text-cut.ts';
+import {codePointBoundary, truncateText} from './text-cut.ts';
 import {
   pause,
   type BotApiOutcome,

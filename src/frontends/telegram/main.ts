@@ -6,15 +6,15 @@
  */
 import {resolve} from 'node:path';
 
-import {httpBaseUrlRule, isHttpBaseUrl} from '../../shared/base-url.ts';
-import {defaultProject02HomeRoot} from '../../shared/daemon-record.ts';
-import {isMainModule, stopSignal} from '../../shared/main-module.ts';
-import {readTestDurations} from '../../shared/test-durations.ts';
+import {httpBaseUrlRule, isHttpBaseUrl} from './base-url.ts';
 import {
   runTelegramConnector,
   type TelegramConnectorOptions,
 } from './connector.ts';
+import {defaultProject02HomeRoot} from './daemon-record.ts';
+import {isMainModule, stopSignal} from './main-module.ts';
 import {createNodeFetch} from './node-fetch.ts';
+import {readTestDurations} from './test-durations.ts';
 
 /** A test harness's fake of the Bot API, reached in Telegram's place; never a setting. */
 const testTelegramApiVariable = 'PROJECT02_TEST_TELEGRAM_API';
