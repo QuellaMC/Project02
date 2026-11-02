@@ -49,11 +49,11 @@
         The daemon, the binary's <code>project02 serve</code>, or
         <code>pnpm serve</code> in a checkout, which builds the page and the
         binary first, holds every character runtime behind one gateway and
-        speaks HTTP plus server-sent events on a loopback port. Every
-        surface — the web page, a messaging connector — is a client of this
-        API and nothing else, so what one surface sends, every surface sees. The contract's types are generated
-        from the Rust types the socket carries into
-        <code>src/gateway/api/generated/</code>, as TypeScript declarations
+        speaks HTTP plus server-sent events on a loopback port. Every surface —
+        the web page, a messaging connector — is a client of this API and
+        nothing else, so what one surface sends, every surface sees. The
+        contract's types are generated from the Rust types the socket carries
+        into <code>src/gateway/api/generated/</code>, as TypeScript declarations
         and as a JSON Schema; this page is the wire.
       </p>
 
@@ -68,20 +68,19 @@
       <p>
         <code>serve</code> claims its home — one daemon per home, held as a
         lease in the home's lock directory for the daemon's lifetime — binds
-        <code>127.0.0.1</code> on the home's port, and prints the one address
-        it has the moment the socket is bound: the line a client reads, and
-        the address a person opens. The roster comes up on the stream after
-        it, so a character can still be <code>starting</code> when the
-        address is out.
+        <code>127.0.0.1</code> on the home's port, and prints the one address it
+        has the moment the socket is bound: the line a client reads, and the
+        address a person opens. The roster comes up on the stream after it, so a
+        character can still be <code>starting</code> when the address is out.
       </p>
 
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:&lt;port&gt;/#token=&lt;token&gt;</code></pre>
 
       <p>
         A home is the daemon's own store, at storage version 15. A home the
-        TypeScript daemon wrote, at version 14, is not read and never
-        converted: <code>serve</code> refuses it, saying which version it
-        found, and the person starts a new home.
+        TypeScript daemon wrote, at version 14, is not read and never converted:
+        <code>serve</code> refuses it, saying which version it found, and the
+        person starts a new home.
       </p>
 
       <p>
@@ -99,21 +98,33 @@
 
       <p>
         The token and the port belong to the home, not to the run: a restart
-        answers on the same address, so an open tab reconnects on its own and
-        a bookmark keeps working. The token travels in the URL fragment, so it
-        never reaches a server log or a referrer; the same address, opened in
-        a browser, is the web page, served from the daemon's root, and the
-        page takes the token from the fragment. A first run takes whatever
-        free port the system hands it and records it: the address is read
-        from the printed line or the record, never known in advance. A later
-        run whose recorded port another program has taken since takes a free
-        one, says so on stdout before the address, and records the new one —
-        open tabs and bookmarks then need the new address, which nothing can
-        tell them.
+        answers on the same address, so an open tab reconnects on its own and a
+        bookmark keeps working. The token travels in the URL fragment, so it
+        never reaches a server log or a referrer; the same address, opened in a
+        browser, is the web page, served from the daemon's root, and the page
+        takes the token from the fragment. A first run takes whatever free port
+        the system hands it and records it: the address is read from the printed
+        line or the record, never known in advance. A later run whose recorded
+        port another program has taken since takes a free one, says so on stdout
+        before the address, and records the new one — open tabs and bookmarks
+        then need the new address, which nothing can tell them.
         <code>running</code> is removed by a clean stop and left behind by a
         crash: a reader never trusts it without asking the address, and the
         lease, not the record, is what says a daemon is alive. A record that
         cannot be read is replaced, with a new token, and said on stderr.
+      </p>
+      <p>
+        The desktop app runs this same daemon inside its own process, through
+        the binary's library, and reads this very line from the daemon's console
+        to open its window on the address; a developer's
+        <code>serve</code> already holding the home is the daemon the window
+        opens on, as a second <code>serve</code> is handed the address today.
+        The home is then the person's local data folder
+        (<code>%LOCALAPPDATA%\Project02</code>,
+        <code>~/Library/Application Support/Project02</code>,
+        <code>~/.local/share/project02</code>), the same for every version of
+        the app, and what the daemon would have printed goes to
+        <code>daemon.log</code> in the app's log folder.
       </p>
 
       <p>
@@ -121,37 +132,47 @@
         daemon. It reads the record and asks the address for
         <code>/api/health</code>: when the daemon answers as this home's, it
         prints <em>Already running on this home (pid …)</em> and the same
-        address line, and exits 0 — which is also how anyone gets the address
-        of a daemon that has been running since yesterday. A holder that does
-        not answer — it answers 503 because it is stopping, its socket has
-        already closed ahead of its lease, it has taken the lease but not yet
-        bound its socket, or a crash's record names a port nobody listens on
-        — is given up to thirty seconds: every half second the lease is tried
-        and the address asked again, so a stop-then-start takes the home over
-        on the same address and a start-twice hands the address back; when
-        the wait is up, it says so and exits 1. Ctrl-C ends the wait at once.
+        address line, and exits 0 — which is also how anyone gets the address of
+        a daemon that has been running since yesterday. A holder that does not
+        answer — it answers 503 because it is stopping, its socket has already
+        closed ahead of its lease, it has taken the lease but not yet bound its
+        socket, or a crash's record names a port nobody listens on — is given up
+        to thirty seconds: every half second the lease is tried and the address
+        asked again, so a stop-then-start takes the home over on the same
+        address and a start-twice hands the address back; when the wait is up,
+        it says so and exits 1. Ctrl-C ends the wait at once.
       </p>
 
       <p>
-        A connector's process finds the daemon by the same record, in the
-        home it serves.
+        A connector's process finds the daemon by the same record, in the home
+        it serves.
       </p>
 
       <h2>Stopping</h2>
 
       <p>
-        Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the
-        daemon prints <em>Stopping; finishing what is in flight</em>, requests
-        the stop at once (a boot still under way is joined, and its late
+        Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the daemon
+        prints <em>Stopping; finishing what is in flight</em>, requests the stop
+        at once (a boot still under way is joined, and its late
         <code>ready</code> suppressed), finishes the turns it accepted, ends
-        each stream once every frame queued for it is written, gives an
-        answer still being written two seconds to finish, closes the socket,
-        then rewrites the record without <code>running</code> and releases
-        the lease. A client that does not take a frame within two seconds is
-        dropped, at a stop as at any other time. A second signal of any kind
-        ends the process at once; the lease left behind is the next start's
-        to reclaim. On Windows, the console window's close is a SIGHUP
-        followed by a kill about ten seconds later.
+        each stream once every frame queued for it is written, gives an answer
+        still being written two seconds to finish, closes the socket, then
+        rewrites the record without <code>running</code> and releases the lease.
+        A client that does not take a frame within two seconds is dropped, at a
+        stop as at any other time. A second signal of any kind ends the process
+        at once; the lease left behind is the next start's to reclaim. On
+        Windows, the console window's close is a SIGHUP followed by a kill about
+        ten seconds later.
+      </p>
+      <p>
+        In the desktop app the stop is the same order on a token the app cancels
+        rather than a signal: Quit, from the tray, from a Mac's application menu
+        or Cmd-Q, first stops the Telegram connector the app runs beside the
+        daemon, then the daemon, each given its grace (five and twenty seconds),
+        and only then lets the app go; the Dock's Quit, a logout or a shutdown
+        run the same order for the seconds the system waits, and past them the
+        process ends as a crash does, which the next start recovers from as from
+        any other.
       </p>
 
       <h2>The four wire rules</h2>
@@ -181,16 +202,15 @@
               stream — up to a megabyte of frames — for a client that returns
               with <code>Last-Event-ID</code>: it opens with
               <code>resumed</code> and exactly the frames it missed, in order,
-              then reads on. Any other stream — no id, an id from another run
-              of the daemon, one before the tail — opens with a
+              then reads on. Any other stream — no id, an id from another run of
+              the daemon, one before the tail — opens with a
               <code>ready</code> frame that carries the daemon's snapshot:
-              health, the confirmations and pairing requests still waiting,
-              and the turns running with their drafts so far, taken in one
-              breath with the stream's registration, so every later frame
-              moves on from exactly that state. A client installs the
-              snapshot and reads on; what it wants of a conversation's
-              history it reads as one page, deduplicated by message id. The
-              log on disk stays the truth.
+              health, the confirmations and pairing requests still waiting, and
+              the turns running with their drafts so far, taken in one breath
+              with the stream's registration, so every later frame moves on from
+              exactly that state. A client installs the snapshot and reads on;
+              what it wants of a conversation's history it reads as one page,
+              deduplicated by message id. The log on disk stays the truth.
             </td>
           </tr>
           <tr>
@@ -307,8 +327,7 @@
               → <code>GatewayHealth</code>: protocol version, home root, config
               and package diagnostics, the roster with each character's state
               and last maintenance failure, and <code>connectors</code>: for
-              each built-in connector, whether a process of it is on the
-              stream.
+              each built-in connector, whether a process of it is on the stream.
             </td>
           </tr>
           <tr>
@@ -339,8 +358,7 @@
               <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
               until the turn ends — a turn waiting on a confirmation can take
               minutes. A browser's fetch waits without limit, and so does the
-              Telegram connector, whose HTTP client gives the call no
-              timeout.
+              Telegram connector, whose HTTP client gives the call no timeout.
             </td>
           </tr>
           <tr>
@@ -394,8 +412,8 @@
             <td><code>POST /api/config</code></td>
             <td>
               <code>ConfigChange</code> → <code>ConfigChangeOutcome</code>:
-              <code>applied</code> with the new fingerprint, <code>refused</code>
-              (<code>conflict</code>, <code>invalid</code>,
+              <code>applied</code> with the new fingerprint,
+              <code>refused</code> (<code>conflict</code>, <code>invalid</code>,
               <code>unknown_character</code>), or <code>failed</code>.
             </td>
           </tr>
@@ -403,9 +421,9 @@
             <td>connector config</td>
             <td><code>GET /api/connectors/:id/config</code></td>
             <td>
-              → <code>ConnectorConfigView</code>: <code>ok</code> with an
-              entry for the home and one for each installed character that is
-              switched on and whose own document loads, in roster order; or
+              → <code>ConnectorConfigView</code>: <code>ok</code> with an entry
+              for the home and one for each installed character that is switched
+              on and whose own document loads, in roster order; or
               <code>refused</code> (<code>unknown_connector</code>,
               <code>config_unloadable</code>). An entry is the section's own
               <code>activation</code> — its <code>status</code> is
@@ -413,13 +431,13 @@
               <code>blocked</code>, with the reasons — and the
               <code>values</code> it runs on, by field name: each field its
               target may set that holds a present, valid value, authored where
-              its scope permits or declared as its default, and none unless
-              the entry is active. The home's switch is a default, not a master
-              switch, so a connector reads each entry's own activation and
-              never combines two. Secrets are in the clear, as on no other
-              read, because a token is what a connector exists to use: a
-              connector is the owner's own program, on loopback under the
-              home's token, which already writes them.
+              its scope permits or declared as its default, and none unless the
+              entry is active. The home's switch is a default, not a master
+              switch, so a connector reads each entry's own activation and never
+              combines two. Secrets are in the clear, as on no other read,
+              because a token is what a connector exists to use: a connector is
+              the owner's own program, on loopback under the home's token, which
+              already writes them.
             </td>
           </tr>
           <tr>
@@ -428,11 +446,11 @@
             <td>
               <code>{subject: {id, label}}</code> →
               <code>PairingRequestOutcome</code>: <code>pending</code> with the
-              request — the one already waiting for that account, or a new
-              one — <code>paired</code> when the home's allowlist already
-              holds the account, or <code>refused</code>
-              (<code>unknown_connector</code>, <code>config_unloadable</code>,
-              <code>invalid_subject</code>). Described below.
+              request — the one already waiting for that account, or a new one —
+              <code>paired</code> when the home's allowlist already holds the
+              account, or <code>refused</code> (<code>unknown_connector</code>,
+              <code>config_unloadable</code>, <code>invalid_subject</code>).
+              Described below.
             </td>
           </tr>
           <tr>
@@ -467,13 +485,13 @@
             <td>page</td>
             <td><code>GET /</code> · <code>GET /assets/…</code></td>
             <td>
-              The built web page's files: public bytes with no auth (the
-              token reaches the page through the fragment), every one
-              <code>Cache-Control: no-store</code>, served behind the API
-              router so no file answers for an API path. The page is built
-              into the binary: one built before the page was answers
-              <code>/</code> with a plain-text 404 naming
-              <code>pnpm build</code> and <code>/api</code>.
+              The built web page's files: public bytes with no auth (the token
+              reaches the page through the fragment), every one
+              <code>Cache-Control: no-store</code>, served behind the API router
+              so no file answers for an API path. The page is built into the
+              binary: one built before the page was answers <code>/</code> with
+              a plain-text 404 naming <code>pnpm build</code> and
+              <code>/api</code>.
             </td>
           </tr>
         </tbody>
@@ -495,16 +513,16 @@ Content-Type: application/json
 
       <p>
         <code>source</code> is the client's stamp on the message —
-        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — naming the kind of surface a line
-        came from, for rendering. It is never a permission input, and never
-        what a surface tells its own lines by: every browser tab stamps
-        <code>web</code>, so a line is its sender's by its
-        <code>clientMessageId</code> alone.
-        Both stamps match <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are
-        persisted on the user's commit record, and come back in history. A stamp
-        that fails the pattern never reaches a turn: on the wire the body schema
-        answers <code>400</code> <code>invalid_request</code>, and a caller
-        holding the façade in-process gets a <code>refused</code> outcome
+        <code>web</code>, <code>telegram:&lt;bot&gt;</code> — naming the kind of
+        surface a line came from, for rendering. It is never a permission input,
+        and never what a surface tells its own lines by: every browser tab
+        stamps <code>web</code>, so a line is its sender's by its
+        <code>clientMessageId</code> alone. Both stamps match
+        <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are persisted on the
+        user's commit record, and come back in history. A stamp that fails the
+        pattern never reaches a turn: on the wire the body schema answers
+        <code>400</code> <code>invalid_request</code>, and a caller holding the
+        façade in-process gets a <code>refused</code> outcome
         (<code>invalid_message</code>) — the same rule, checked at whichever
         boundary the message crosses first.
       </p>
@@ -514,14 +532,14 @@ Content-Type: application/json
       <p>
         <code>GET /api/events</code> answers <code>text/event-stream</code>.
         Frames are <code>id: &lt;run&gt;-&lt;seq&gt;</code>,
-        <code>event: &lt;kind&gt;</code> and one <code>data:</code> line of
-        JSON — the id is a random id of this run of the daemon and a count
-        from one; a comment <code>: ping</code> arrives every 15 seconds so
-        an idle connection survives client timeouts. A client that does not
-        take a frame within two seconds is dropped; the daemon never buffers
-        for a client that is gone, and never judges one by how many frames a
-        burst left waiting. A client that returns sends the id of the last
-        frame it applied as <code>Last-Event-ID</code>; a <code>resumed</code>
+        <code>event: &lt;kind&gt;</code> and one <code>data:</code> line of JSON
+        — the id is a random id of this run of the daemon and a count from one;
+        a comment <code>: ping</code> arrives every 15 seconds so an idle
+        connection survives client timeouts. A client that does not take a frame
+        within two seconds is dropped; the daemon never buffers for a client
+        that is gone, and never judges one by how many frames a burst left
+        waiting. A client that returns sends the id of the last frame it applied
+        as <code>Last-Event-ID</code>; a <code>resumed</code>
         frame carries no id, so the id it holds stands.
       </p>
 
@@ -580,11 +598,11 @@ data: {…}</code></pre>
               <code>health</code> (the roster, each character's state and last
               maintenance failure, the connectors on the stream),
               <code>confirmations</code> and <code>pairings</code> still
-              waiting, and <code>turns</code> — each turn in progress, named
-              by its submission's <code>conversationId</code>,
+              waiting, and <code>turns</code> — each turn in progress, named by
+              its submission's <code>conversationId</code>,
               <code>source</code> and <code>clientMessageId</code>, with its
-              character and its open drafts' text so far. A client installs
-              it on every one it sees.
+              character and its open drafts' text so far. A client installs it
+              on every one it sees.
             </td>
           </tr>
           <tr>
@@ -600,13 +618,13 @@ data: {…}</code></pre>
             <td>
               A turn's progress: both committed roles —
               <code>user_message</code> (with <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code> —
-              and the reply's draft ahead of its commit:
-              <code>reply_delta</code> (one fragment of a draft, in order)
-              and <code>reply_withdrawn</code>. A committed
+              <code>clientMessageId</code>) and <code>visible_reply</code> — and
+              the reply's draft ahead of its commit:
+              <code>reply_delta</code> (one fragment of a draft, in order) and
+              <code>reply_withdrawn</code>. A committed
               <code>visible_reply</code> names the <code>draftId</code> it
-              replaces. Drafts are the one thing the stream says before the
-              log, and they say so by their kind.
+              replaces. Drafts are the one thing the stream says before the log,
+              and they say so by their kind.
             </td>
           </tr>
           <tr>
@@ -632,10 +650,10 @@ data: {…}</code></pre>
               contact-shaped surface — a bot in one chat — answers for its own
               turns and leaves the rest to the surface that sent them; a
               roster-shaped surface, where the person sees every character,
-              shows them all and names the surface that raised one. The
-              person is the same on every surface, and the daemon settles a
-              confirmation once for all of them. The same shape the pending
-              list returns.
+              shows them all and names the surface that raised one. The person
+              is the same on every surface, and the daemon settles a
+              confirmation once for all of them. The same shape the pending list
+              returns.
             </td>
           </tr>
           <tr>
@@ -644,21 +662,20 @@ data: {…}</code></pre>
               The decision: approved, denied, or cancelled — and, cancelled,
               why: <code>expired</code> (the deadline passed, whether the
               daemon's timer fired or an answer came too late) or
-              <code>stopped</code> (the character stopped or restarted with
-              the request parked).
+              <code>stopped</code> (the character stopped or restarted with the
+              request parked).
             </td>
           </tr>
           <tr>
             <td><code>pairing_requested</code></td>
             <td>
               An account a connector does not know, waiting for the owner's
-              answer: <code>connectorId</code>, the six-digit
-              <code>code</code>, the <code>subject</code> (<code>id</code>,
-              <code>label</code>), <code>requestedAt</code>, and
-              <code>expiresAt</code>, an hour on. The same shape the pairing
-              list returns. A request put back after an approval that could
-              not be written is announced again, so a surface adds a request
-              by its code, once.
+              answer: <code>connectorId</code>, the six-digit <code>code</code>,
+              the <code>subject</code> (<code>id</code>, <code>label</code>),
+              <code>requestedAt</code>, and <code>expiresAt</code>, an hour on.
+              The same shape the pairing list returns. A request put back after
+              an approval that could not be written is announced again, so a
+              surface adds a request by its code, once.
             </td>
           </tr>
           <tr>
@@ -667,9 +684,9 @@ data: {…}</code></pre>
               How a request ended: its <code>connectorId</code>,
               <code>code</code> and <code>subject</code>, and the
               <code>decision</code> — approved, denied, or
-              <code>expired</code> (the hour passed, whether the daemon's
-              timer fired or an answer came too late). An approval follows
-              the <code>health_changed</code> its write caused.
+              <code>expired</code> (the hour passed, whether the daemon's timer
+              fired or an answer came too late). An approval follows the
+              <code>health_changed</code> its write caused.
             </td>
           </tr>
           <tr>
@@ -687,13 +704,13 @@ data: {…}</code></pre>
             <td>
               The daemon's whole state, read again the moment a config change
               landed and before the pass that acts on it, or the moment a
-              connector's process came onto the stream or left it: the roster
-              as config now says it, the connectors on the stream, and the
-              config and package problems as they stand, the shape
-              <code>GET /api/health</code> returns. Every surface hears it,
-              not only the one that wrote, and one showing config reads its
-              view again on it, so two windows on one screen stay in step;
-              what the pass then does to each character follows as
+              connector's process came onto the stream or left it: the roster as
+              config now says it, the connectors on the stream, and the config
+              and package problems as they stand, the shape
+              <code>GET /api/health</code> returns. Every surface hears it, not
+              only the one that wrote, and one showing config reads its view
+              again on it, so two windows on one screen stay in step; what the
+              pass then does to each character follows as
               <code>state_changed</code>.
             </td>
           </tr>
@@ -708,8 +725,8 @@ data: {…}</code></pre>
       </table>
 
       <p>
-        A connector needs no event of its own for config; it keeps its read
-        of <code>GET /api/connectors/:id/config</code> current by one rule:
+        A connector needs no event of its own for config; it keeps its read of
+        <code>GET /api/connectors/:id/config</code> current by one rule:
       </p>
 
       <ul>
@@ -729,30 +746,29 @@ data: {…}</code></pre>
         </li>
         <li>
           A stream the daemon resumed replayed what was missed,
-          <code>health_changed</code> included, so <code>resumed</code> needs
-          no read.
+          <code>health_changed</code> included, so <code>resumed</code> needs no
+          read.
         </li>
       </ul>
 
       <h2>A connector</h2>
 
       <p class="rule">
-        A connector lets nobody in by itself: an account it does not know is
-        the owner's to admit, and the owner's yes reaches the connector as its
-        own config.
+        A connector lets nobody in by itself: an account it does not know is the
+        owner's to admit, and the owner's yes reaches the connector as its own
+        config.
       </p>
 
       <p>
         A connector's process opens its stream as
-        <code>GET /api/events?connector=&lt;id&gt;</code>, and the daemon
-        counts it on the stream from before the first frame — so the
-        connector's own <code>ready</code> already shows it — until the stream
-        ends. Health's <code>connectors</code> says, for each built-in
-        connector, whether a process of it is on the stream;
-        <code>health_changed</code> goes out when its first stream opens and
-        when its last one ends, and the settings page says on the connector's
-        block whether it is running. The connector keeps its config by the
-        rule above.
+        <code>GET /api/events?connector=&lt;id&gt;</code>, and the daemon counts
+        it on the stream from before the first frame — so the connector's own
+        <code>ready</code> already shows it — until the stream ends. Health's
+        <code>connectors</code> says, for each built-in connector, whether a
+        process of it is on the stream; <code>health_changed</code> goes out
+        when its first stream opens and when its last one ends, and the settings
+        page says on the connector's block whether it is running. The connector
+        keeps its config by the rule above.
       </p>
 
       <p>
@@ -762,9 +778,9 @@ data: {…}</code></pre>
         token by the pattern the stamps match, and the <code>label</code> the
         owner sees, one line of at most 128 characters with no space at either
         end. A subject the body schema cannot take is a 400, and one it takes
-        that breaks the rule is refused <code>invalid_subject</code>. The
-        answer is <code>paired</code> when the home's allowlist already holds
-        the account, or <code>pending</code> with the request: the one already
+        that breaks the rule is refused <code>invalid_subject</code>. The answer
+        is <code>paired</code> when the home's allowlist already holds the
+        account, or <code>pending</code> with the request: the one already
         waiting for that account, so asking again is safe, or a new one under a
         six-digit code unique among those waiting, good for one hour, until
         <code>expiresAt</code>. The connector tells the person asking the code
@@ -776,20 +792,23 @@ data: {…}</code></pre>
 
       <p>
         The owner answers by the code, on any surface. A denial removes the
-        request. An approval is the daemon's own config write, through the
-        same path as any change: the account, named by its label, goes into
-        that field in the home's document — which every character that sets
-        none of its own inherits — under the current fingerprint, with up to
-        three attempts in all when other writes moved the document. A connector
+        request. An approval is the daemon's own config write, through the same
+        path as any change: the account, named by its label, goes into that
+        field in the home's document — which every character that sets none of
+        its own inherits — under the current fingerprint, with up to three
+        attempts in all when other writes moved the document. A connector
         therefore hears it as <code>health_changed</code>, on which its next
         read finds the account, and then as <code>pairing_settled</code>. An
         answer at or past the deadline is answered <code>expired</code>, the
         daemon being the judge of the deadline as for a confirmation, and an
         hour with no answer settles the request as <code>expired</code> on the
-        stream. While an approval's write runs the request keeps its place, so asking for the same account again gets the same request, and a second answer meanwhile is <code>unknown</code>; an approval that could not be written puts the request back on the clock, announced again, and is
-        answered <code>failed</code> with the reason. A request lives as long
-        as the daemon's run: the <code>ready</code> after a restart carries
-        none, and asking again makes a new one.
+        stream. While an approval's write runs the request keeps its place, so
+        asking for the same account again gets the same request, and a second
+        answer meanwhile is <code>unknown</code>; an approval that could not be
+        written puts the request back on the clock, announced again, and is
+        answered <code>failed</code> with the reason. A request lives as long as
+        the daemon's run: the <code>ready</code> after a restart carries none,
+        and asking again makes a new one.
       </p>
 
       <p>
@@ -797,11 +816,11 @@ data: {…}</code></pre>
         confirmations — the connector, the account's label, the code and the
         time it expires, with Approve and Deny — installed from every
         <code>ready</code>, added from <code>pairing_requested</code> once per
-        code, and removed by <code>pairing_settled</code>. Answering a card,
-        the page leaves a settlement to the frame; an expiry is said once,
-        whichever news of it reaches the page first; a request the daemon no
-        longer knows is said to be no longer waiting; and an approval that
-        could not be written leaves the card, with the reason.
+        code, and removed by <code>pairing_settled</code>. Answering a card, the
+        page leaves a settlement to the frame; an expiry is said once, whichever
+        news of it reaches the page first; a request the daemon no longer knows
+        is said to be no longer waiting; and an approval that could not be
+        written leaves the card, with the reason.
       </p>
 
       <p>
@@ -811,10 +830,9 @@ data: {…}</code></pre>
         <code>&lt;bot id&gt;.&lt;chat id&gt;.&lt;message id&gt;</code> as its
         <code>clientMessageId</code>, so the same message carried again joins
         its turn. It answers private chats only, keeps nothing between runs —
-        each starts from the record, its <code>ready</code> and its config
-        read — and paces a draft by editing its message in each chat at most
-        every 1.5 seconds. <code>crates/p02-telegram/README.md</code> has the
-        rest.
+        each starts from the record, its <code>ready</code> and its config read
+        — and paces a draft by editing its message in each chat at most every
+        1.5 seconds. <code>crates/p02-telegram/README.md</code> has the rest.
       </p>
 
       <h2>The sync rule</h2>
@@ -829,9 +847,9 @@ data: {…}</code></pre>
         Because both roles are emitted from one post-persist seam, the stream
         and history never disagree: a reply whose write failed is a failed turn,
         never a message shown that history lacks. A message typed on the phone
-        appears in every open browser tab at once. A surface tells the lines it is
-        still holding apart by <code>clientMessageId</code>, which is its own:
-        <code>source</code> names the kind of surface, and two browser tabs
+        appears in every open browser tab at once. A surface tells the lines it
+        is still holding apart by <code>clientMessageId</code>, which is its
+        own: <code>source</code> names the kind of surface, and two browser tabs
         share it, so a tab that went by source alone would take another tab's
         lines for its own.
       </p>
@@ -839,22 +857,21 @@ data: {…}</code></pre>
       <h2>Streaming replies</h2>
 
       <p class="rule">
-        The reply reaches every surface as the model writes it, as a draft:
-        a draft is not a message, every draft ends exactly once, and the
-        parser stays the only judge.
+        The reply reaches every surface as the model writes it, as a draft: a
+        draft is not a message, every draft ends exactly once, and the parser
+        stays the only judge.
       </p>
 
       <p>
         A <code>reply_delta {draftId, text}</code> is a fragment of the
         character's reply, appended to what came before under the same
-        <code>draftId</code>. It has no message id, it is never persisted,
-        and no surface treats it as history. The draft ends in one of two
-        ways: the <code>visible_reply</code> that names its
-        <code>draftId</code> replaces it with the committed message, or a
+        <code>draftId</code>. It has no message id, it is never persisted, and
+        no surface treats it as history. The draft ends in one of two ways: the
+        <code>visible_reply</code> that names its <code>draftId</code> replaces
+        it with the committed message, or a
         <code>reply_withdrawn {draftId}</code> ends it with nothing said — a
-        round the parser refused, a reply whose write failed. The daemon
-        closes every draft a round
-        opened before the round moves on, so none is open at
+        round the parser refused, a reply whose write failed. The daemon closes
+        every draft a round opened before the round moves on, so none is open at
         <code>turn_completed</code>, and a client never infers an ending from
         another event.
       </p>
@@ -871,16 +888,16 @@ data: {…}</code></pre>
             <td><code>reply_delta {draftId, text}</code></td>
             <td>
               Opens a bubble for the character keyed by
-              <code>conversationId</code> and <code>draftId</code> on the
-              first delta; appends <code>text</code> on every one.
+              <code>conversationId</code> and <code>draftId</code> on the first
+              delta; appends <code>text</code> on every one.
             </td>
           </tr>
           <tr>
             <td><code>visible_reply {…, draftId}</code></td>
             <td>
               Replaces the bubble keyed <code>draftId</code> with the message
-              keyed <code>messageId</code>, text from the event. No open
-              bubble with that id: shows the message, as always.
+              keyed <code>messageId</code>, text from the event. No open bubble
+              with that id: shows the message, as always.
             </td>
           </tr>
           <tr>
@@ -891,9 +908,8 @@ data: {…}</code></pre>
             <td><code>ready</code></td>
             <td>
               Replaces every open draft with the ones the snapshot carries,
-              under their conversations: what a tab that never left would
-              hold. The truth about the thread stays on the newest history
-              page.
+              under their conversations: what a tab that never left would hold.
+              The truth about the thread stays on the newest history page.
             </td>
           </tr>
           <tr>
@@ -909,11 +925,11 @@ data: {…}</code></pre>
         Draft ids are <code>round.reply</code>, unique within the turn; a
         conversation runs one turn at a time, so a surface keys drafts by
         conversation. The committed text is the draft after the runtime's
-        normalization (line endings, trim), which is why the commit replaces
-        the draft rather than confirming it. Only the reply is ever drafted:
-        what a model writes to itself beside a tool call is never on the
-        stream. Pacing is each surface's own: a page renders every delta, a
-        connector edits its message on a timer.
+        normalization (line endings, trim), which is why the commit replaces the
+        draft rather than confirming it. Only the reply is ever drafted: what a
+        model writes to itself beside a tool call is never on the stream. Pacing
+        is each surface's own: a page renders every delta, a connector edits its
+        message on a timer.
       </p>
 
       <h2>What a client never has to notice</h2>
@@ -923,17 +939,16 @@ data: {…}</code></pre>
         stays small. A character's automatic recovery after a fatal turn lets
         its threads go; a delivery on a conversation the runtime let go of holds
         it again before running, so a client keeps its conversation id through
-        the episode. A delivery on a conversation this run of the daemon has
-        not opened — a tab that reconnected after a restart keeps its id — is
-        routed from the store's record of the conversation, so no client
-        reopens a thread after a restart; <code>unknown_conversation</code>
-        means a conversation the home does not hold, and a record that
-        cannot be read is refused <code>conversation_unreadable</code> with
-        the reason, never mistaken for one. A reconnect gets its
-        whole world in the <code>ready</code> frame, or exactly what it missed
-        after <code>resumed</code>. A confirmation names the turn that raised
-        it. And a turn whose answer was lost is safe to send again under its
-        id.
+        the episode. A delivery on a conversation this run of the daemon has not
+        opened — a tab that reconnected after a restart keeps its id — is routed
+        from the store's record of the conversation, so no client reopens a
+        thread after a restart; <code>unknown_conversation</code> means a
+        conversation the home does not hold, and a record that cannot be read is
+        refused <code>conversation_unreadable</code> with the reason, never
+        mistaken for one. A reconnect gets its whole world in the
+        <code>ready</code> frame, or exactly what it missed after
+        <code>resumed</code>. A confirmation names the turn that raised it. And
+        a turn whose answer was lost is safe to send again under its id.
       </p>
 
       <h2>Config</h2>
@@ -945,25 +960,25 @@ data: {…}</code></pre>
       </p>
 
       <p>
-        A view is what a settings page renders. Its <code>project02</code>
-        fields, in the order a page shows them, and each plugin's fields share
-        one shape — what this scope authored, what is in effect and which layer
-        put it there, whether a change reloads the character; a plugin's switch
-        says the same of itself as <code>enabledSource</code>. Whatever a view
-        offers, the scope can save: every host field is authorable at the home
-        and per character, a plugin or field that belongs to a character
-        (<code>"character_only"</code>) is absent from the home's view, and one
-        that belongs to the home (<code>"global_only"</code>) from a character's.
-        A connector's settings, under <code>connectors</code>, are a section
-        like a plugin's, and what is said here of a plugin holds for them.
-        The global scope resolves the home's document alone; a character's
-        scope resolves the merged view, that character's own values over the
-        home's. Either way, a value is taken only from a layer its plugin's or
-        field's scope permits: one found elsewhere never takes effect, and the
-        view's diagnostics carry it as the warning
-        <code>runtime_config_authored_outside_scope</code> at its path. A field
-        no such layer authored carries its declared default as its effective
-        value, <code>effective.source: "default"</code>, and reads
+        A view is what a settings page renders. Its
+        <code>project02</code> fields, in the order a page shows them, and each
+        plugin's fields share one shape — what this scope authored, what is in
+        effect and which layer put it there, whether a change reloads the
+        character; a plugin's switch says the same of itself as
+        <code>enabledSource</code>. Whatever a view offers, the scope can save:
+        every host field is authorable at the home and per character, a plugin
+        or field that belongs to a character (<code>"character_only"</code>) is
+        absent from the home's view, and one that belongs to the home
+        (<code>"global_only"</code>) from a character's. A connector's settings,
+        under <code>connectors</code>, are a section like a plugin's, and what
+        is said here of a plugin holds for them. The global scope resolves the
+        home's document alone; a character's scope resolves the merged view,
+        that character's own values over the home's. Either way, a value is
+        taken only from a layer its plugin's or field's scope permits: one found
+        elsewhere never takes effect, and the view's diagnostics carry it as the
+        warning <code>runtime_config_authored_outside_scope</code> at its path.
+        A field no such layer authored carries its declared default as its
+        effective value, <code>effective.source: "default"</code>, and reads
         <code>"missing"</code> when it has none. A document that does not load
         is refused with the diagnostic, never rendered as blank fields; a
         character switched off is still viewed, and its <code>enabled</code>
@@ -981,9 +996,9 @@ data: {…}</code></pre>
         <code>refused</code> with <code>conflict</code>: the page re-reads and
         the person saves again. The fingerprint hashes a secret's presence,
         never its value, so two pages replacing the same secret at once both
-        succeed and the later value stands. A secret is sent as its value
-        and kept with the scope's document; every view shows only that it is
-        set, and a write naming what the scope's view leaves out is refused as
+        succeed and the later value stands. A secret is sent as its value and
+        kept with the scope's document; every view shows only that it is set,
+        and a write naming what the scope's view leaves out is refused as
         <code>invalid</code>. A write the daemon cannot make — a file another
         writer holds for longer than it will wait, an unwritable home — is
         <code>failed</code> with the reason.
