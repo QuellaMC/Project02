@@ -10,3 +10,31 @@ packages the gate's Linux job installs (`pkg-config`,
 `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev` and
 `libxdo-dev`); on Windows, the MSVC build tools and WebView2; on macOS,
 Xcode's command line tools.
+
+- **The home** is `%LOCALAPPDATA%\Project02`, `~/Library/Application
+  Support/Project02`, or `$XDG_DATA_HOME/project02` (else
+  `~/.local/share/project02`): the person's, outside the app, the same for
+  every version, and never the app's own data folder, which the webview
+  writes into. `--store <dir>` on the shell's command line takes its place;
+  nothing else is accepted there.
+- **The start** makes the store there as `serve --init` does, the person
+  having consented by installing, and starts the connector beside the
+  daemon. The window opens on the address the daemon says; a daemon that
+  ends before it says one, or a window that cannot open, is a dialog with
+  the last lines of the daemon's log, then the app quits. When another
+  daemon already holds the home, its address is the one the window opens
+  on.
+- **The window**, when closed, hides: the characters keep answering in
+  Telegram. The tray's Open, the Dock, and a second launch bring it back; a
+  second launch starts nothing.
+- **The logs** are `daemon.log` and `telegram.log` in the app's log folder,
+  `~/Library/Logs/io.github.quellamc.project02` on macOS and
+  `io.github.quellamc.project02/logs` under the local data folder
+  elsewhere, begun anew at each start; the tray opens the folder, and the
+  data folder.
+- **Quit**, from the tray, or from a Mac's application menu or Cmd-Q,
+  runs one stop order: the connector, given 5 s, then the daemon, given
+  20 s, then the app leaves. One that outstays its grace ends with the
+  process. The Dock's Quit, a logout and a shutdown run the same order as
+  the app ends, for the seconds the system waits; past them the process
+  ends as a crash does, which the runtime recovers from.
