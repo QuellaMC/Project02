@@ -124,6 +124,12 @@ async fn a_stop_drains_the_turn_in_flight_then_ends_each_stream_whole() {
 /// A stop gives a client that stopped reading a large answer the grace,
 /// then cuts it, and lets go of nothing before.
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows takes a whole answer into its buffers at one write while they have room, \
+              so an answer to a reader that stopped is never still being written there: the \
+              system delivers it after the stop"
+)]
 async fn a_stop_gives_a_stalled_reader_the_grace_then_cuts_it() {
     let world = World::new();
     let grace = Duration::from_millis(500);

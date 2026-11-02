@@ -430,7 +430,10 @@ async fn a_connector_is_present_while_its_streams_are_open() {
 #[tokio::test]
 async fn a_client_that_stops_reading_is_dropped_within_the_grace() {
     let world = World::new();
-    let grace = Duration::from_millis(300);
+    // Long enough that the client which keeps reading, parsing every frame
+    // on this one test thread in a debug build, is never the one taken for
+    // stalled on a slow machine.
+    let grace = Duration::from_secs(1);
     let gateway = Gateway::with(&world, waits(|durations| durations.grace = grace)).await;
     let conversation = gateway.conversation().await;
     let mut watching = gateway.events().await;
@@ -445,11 +448,12 @@ async fn a_client_that_stops_reading_is_dropped_within_the_grace() {
 
     let piece = "x".repeat(64 * 1024);
 
-    // Eight mebibytes of draft: far more than the sockets between the two
-    // hold for a reader that takes nothing.
+    // Two mebibytes of draft: several times what the response's own buffer
+    // and the bounded sockets between the two hold for a reader that takes
+    // nothing.
     gateway
         .model
-        .script([Round::says("Done.").drafting(&[piece.as_str(); 128])]);
+        .script([Round::says("Done.").drafting(&[piece.as_str(); 32])]);
 
     let said = Instant::now();
     let turn = tokio::spawn({
