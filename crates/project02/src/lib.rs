@@ -103,8 +103,10 @@ pub(crate) fn package_problem(package: &PackageReport) -> String {
 }
 
 /// Where a command speaks: `out` carries the address and what a person
-/// reads of the run, `err` every problem. A writer that stopped listening
-/// stops nothing, so what it would have read is let go.
+/// reads of the run, `err` every problem. Each line is handed on as it is
+/// said, since a program's writer, unlike a terminal, may keep it back
+/// until flushed. A writer that stopped listening stops nothing, so what
+/// it would have read is let go.
 pub struct Console {
     out: Box<dyn Write + Send>,
     err: Box<dyn Write + Send>,
@@ -127,17 +129,16 @@ impl Console {
     }
 
     pub(crate) fn say(&mut self, line: &str) {
-        let _ = writeln!(self.out, "{line}");
+        deliver(self.out.as_mut(), format_args!("{line}\n"));
     }
 
     /// A question, the answer typed on its line.
     pub(crate) fn ask(&mut self, question: &str) {
-        let _ = write!(self.out, "{question}");
-        let _ = self.out.flush();
+        deliver(self.out.as_mut(), format_args!("{question}"));
     }
 
     pub(crate) fn warn(&mut self, line: &str) {
-        let _ = writeln!(self.err, "{line}");
+        deliver(self.err.as_mut(), format_args!("{line}\n"));
     }
 
     /// Says why the command ends here.
@@ -153,9 +154,15 @@ impl fmt::Debug for Console {
     }
 }
 
+fn deliver(stream: &mut dyn Write, text: fmt::Arguments<'_>) {
+    let _ = stream.write_fmt(text);
+    let _ = stream.flush();
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead as _, BufReader};
+    use std::io::{BufRead as _, BufReader, BufWriter};
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     use p02_shared::{http_client, read_daemon_record};
@@ -207,5 +214,38 @@ mod tests {
             read_daemon_record(home.path()).unwrap().unwrap().running,
             None
         );
+    }
+
+    /// What a program's writer was given, read while the console holds it.
+    #[derive(Clone, Default)]
+    struct Kept(Arc<Mutex<Vec<u8>>>);
+
+    impl Kept {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl Write for Kept {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn each_line_reaches_a_writer_that_buffers_as_it_is_said() {
+        let (out, err) = (Kept::default(), Kept::default());
+        let mut console = Console::new(BufWriter::new(out.clone()), BufWriter::new(err.clone()));
+
+        console.say("Said.");
+        console.warn("Warned.");
+
+        assert_eq!(out.text(), "Said.\n");
+        assert_eq!(err.text(), "Warned.\n");
     }
 }
