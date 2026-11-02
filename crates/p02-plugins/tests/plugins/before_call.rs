@@ -273,10 +273,11 @@ async fn a_hook_that_blocks_its_thread_cannot_hold_the_turn() {
     let started = std::time::Instant::now();
     let prepared = prepared(host.before_role_model_call(&turn()).await);
 
-    // The hook sleeps two seconds on its own worker; the turn waits its
-    // 100 ms and the second after.
+    // The hook sleeps four seconds on its own worker; the turn waits its
+    // 100 ms and the second after, and is back well before the sleep ends
+    // on a slow machine too.
     assert!(
-        started.elapsed() < Duration::from_millis(1_500),
+        started.elapsed() < Duration::from_secs(3),
         "{:?}",
         started.elapsed()
     );

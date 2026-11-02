@@ -450,7 +450,7 @@ impl RuntimePlugin for Blocking {
         &self,
         _context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(4));
         Ok(BeforeRoleModelCallOutput::default())
     }
 }
