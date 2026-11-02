@@ -1,6 +1,6 @@
 //! The home: a folder the daemon serves from, marked by its `schema.json`.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -112,23 +112,43 @@ impl Home {
     /// does not hold before its marker; or one whose control entries are not
     /// the real files and directories a home's state lives in, since a link
     /// would carry that state outside it. Every way into a home asks this
-    /// first.
+    /// first. The folder is judged from one listing of it: by its marker
+    /// when the listing holds one, else by what lies there, so a marker
+    /// written as the folder is judged, by a character's first data, never
+    /// reads as a foreign file.
     ///
     /// # Errors
     ///
     /// [`StorageError`] naming the first refusal.
     pub fn check(&self) -> Result<(), StorageError> {
-        match marker::read(&self.root)? {
-            None => {
-                self.check_outside_character_data()?;
-                self.check_unmarked()
+        let entries = match list_directory(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(source) => {
+                return Err(StorageError::Read {
+                    path: self.root.clone(),
+                    source,
+                });
             }
-            Some(Marker::Home { .. }) => self.check_control_entries(),
-            Some(Marker::CharacterData { .. }) => Err(StorageError::WrongScope {
-                path: self.root.clone(),
-                found: Scope::CharacterData,
-            }),
+        };
+
+        if entries
+            .iter()
+            .any(|(name, _)| name.as_os_str() == OsStr::new(SCHEMA_FILE))
+        {
+            return match marker::read(&self.root)? {
+                Some(Marker::Home { .. }) => self.check_control_entries(),
+                Some(Marker::CharacterData { .. }) => Err(StorageError::WrongScope {
+                    path: self.root.clone(),
+                    found: Scope::CharacterData,
+                }),
+                // Listed and gone since: judged again by what is there now.
+                None => self.check(),
+            };
         }
+
+        self.check_outside_character_data()?;
+        self.check_unmarked(entries)
     }
 
     /// Makes the folder a home, or adopts the home it is: the refusals of
@@ -202,18 +222,7 @@ impl Home {
         Ok(())
     }
 
-    fn check_unmarked(&self) -> Result<(), StorageError> {
-        let entries = match list_directory(&self.root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(source) => {
-                return Err(StorageError::Read {
-                    path: self.root.clone(),
-                    source,
-                });
-            }
-        };
-
+    fn check_unmarked(&self, entries: Vec<(OsString, PathEntry)>) -> Result<(), StorageError> {
         for (name, entry) in entries {
             if !self.belongs_before_its_marker(&name, &entry)? {
                 return Err(StorageError::UnmarkedHome {
