@@ -1367,7 +1367,7 @@ dependencies = [
 name = "p02-telegram"
 version = "0.0.0"
 dependencies = [
- "axum",
+ "async-trait",
  "p02-app",
  "p02-config",
  "p02-core",

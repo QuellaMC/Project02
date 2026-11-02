@@ -5,6 +5,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 p02-app.workspace = true
 p02-config.workspace = true
 p02-core.workspace = true
@@ -18,7 +19,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
-axum.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "test-util", "time"] }
 
 [lints]

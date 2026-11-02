@@ -7,7 +7,9 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use p02_shared::{BaseUrl, error_sentence, http_client};
+use reqwest::header::CONTENT_TYPE;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,8 +76,21 @@ impl fmt::Debug for BotToken {
     }
 }
 
+/// How a bot's calls reach the Bot API: a call's JSON posted to its path,
+/// answered within `bound` with the status and the body Telegram sent.
+/// The path holds the bot's token, so no failure names it.
+#[async_trait]
+pub(crate) trait Transport: Send + Sync + fmt::Debug {
+    async fn post(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        bound: Duration,
+    ) -> Result<(u16, Vec<u8>), Failure>;
+}
+
 /// Where the Bot API is, and the one client every bot's calls ride.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Telegram {
     client: reqwest::Client,
     base: BaseUrl,
@@ -93,10 +108,34 @@ impl Telegram {
     }
 }
 
+#[async_trait]
+impl Transport for Telegram {
+    async fn post(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        bound: Duration,
+    ) -> Result<(u16, Vec<u8>), Failure> {
+        let response = self
+            .client
+            .post(self.base.endpoint(path))
+            .header(CONTENT_TYPE, "application/json")
+            .body(body)
+            .timeout(bound)
+            .send()
+            .await
+            .map_err(unreached)?;
+        let status = response.status().as_u16();
+        let body = response.bytes().await.map_err(unreached)?;
+
+        Ok((status, body.into()))
+    }
+}
+
 /// One bot's calls to Telegram.
 #[derive(Clone, Debug)]
 pub(crate) struct BotApi {
-    telegram: Telegram,
+    telegram: Arc<dyn Transport>,
     token: BotToken,
 }
 
@@ -286,7 +325,7 @@ struct Parameters {
 }
 
 impl BotApi {
-    pub(crate) fn new(telegram: Telegram, token: BotToken) -> Self {
+    pub(crate) fn new(telegram: Arc<dyn Transport>, token: BotToken) -> Self {
         Self { telegram, token }
     }
 
@@ -414,21 +453,9 @@ impl BotApi {
         body: &impl Serialize,
         wait: Duration,
     ) -> Result<T, Failure> {
-        let url = self
-            .telegram
-            .base
-            .endpoint(&format!("bot{}/{method}", &*self.token.0));
-        let response = self
-            .telegram
-            .client
-            .post(url)
-            .json(body)
-            .timeout(wait + ANSWER_BOUND)
-            .send()
-            .await
-            .map_err(unreached)?;
-        let status = response.status().as_u16();
-        let body = response.bytes().await.map_err(unreached)?;
+        let body = serde_json::to_vec(body).expect("plain data always serializes");
+        let path = format!("bot{}/{method}", &*self.token.0);
+        let (status, body) = self.telegram.post(&path, body, wait + ANSWER_BOUND).await?;
 
         answer(method, status, &body)
     }
@@ -497,7 +524,7 @@ mod tests {
             .send()
             .await
             .unwrap_err();
-        let api = BotApi::new(Telegram::new(base).unwrap(), BotToken::new(token));
+        let api = BotApi::new(Arc::new(Telegram::new(base).unwrap()), BotToken::new(token));
         let failure = api.get_me().await.unwrap_err();
 
         // What the client says of itself names the URL, and so the token.

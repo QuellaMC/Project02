@@ -767,14 +767,14 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::bot_api::{BotToken, Telegram};
+    use crate::bot_api::BotToken;
     use crate::stand_in::{Heard, StandIn};
     use crate::table::Owner;
 
     /// connectors.telegram-split-stops-at-failure: A text longer than one Telegram message stops at the first piece Telegram would not take: the pieces after it are not sent.
     #[tokio::test(start_paused = true)]
     async fn a_long_text_stops_at_the_piece_telegram_would_not_take() {
-        let telegram = StandIn::start().await;
+        let telegram = StandIn::new();
         let heard = Arc::new(Heard::default());
         let (_settings, settings) = watch::channel(Arc::new(BotSettings {
             owner: Owner::Character {
@@ -789,10 +789,7 @@ mod tests {
         let stop = CancellationToken::new();
         let tasks = TaskTracker::new();
         let outbox = Outbox::start(
-            BotApi::new(
-                Telegram::new(telegram.base()).unwrap(),
-                BotToken::new("987654:mira"),
-            ),
+            BotApi::new(Arc::new(telegram.clone()), BotToken::new("987654:mira")),
             settings,
             Leave { held, claimed },
             Duration::from_millis(1_500),

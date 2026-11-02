@@ -15,7 +15,7 @@ use tokio::time::{Instant, sleep, sleep_until};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::bot_api::{BotApi, BotToken, CallbackQuery, Telegram, Update, User};
+use crate::bot_api::{BotApi, BotToken, CallbackQuery, Transport, Update, User};
 use crate::character::Character;
 use crate::daemon::{Daemon, Unanswered};
 use crate::management::Management;
@@ -57,7 +57,7 @@ pub(crate) struct Leave {
 /// What a bot is started with.
 #[derive(Debug)]
 pub(crate) struct Start {
-    pub(crate) telegram: Telegram,
+    pub(crate) telegram: Arc<dyn Transport>,
     pub(crate) token: BotToken,
     pub(crate) settings: BotSettings,
     pub(crate) draft_edits: Duration,
@@ -635,7 +635,7 @@ mod tests {
     use p02_app::{
         ConfirmationId, ConfirmationQuestion, PendingConfirmation, RunningTurns, Settlement,
     };
-    use p02_shared::{BaseUrl, Identifier};
+    use p02_shared::Identifier;
     use serde_json::{Map, json};
 
     use super::*;
@@ -660,7 +660,7 @@ mod tests {
     /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once and writes nothing for the 30 s it waits, neither a call it had under way nor the frames a settings read held back; once its polls are its own again it catches up from the snapshot and says it gets its messages again.
     #[tokio::test(start_paused = true)]
     async fn a_bot_outpolled_waits_writing_nothing_then_catches_up_from_the_snapshot() {
-        let telegram = StandIn::start().await;
+        let telegram = StandIn::new();
         let conflict = telegram.conflict_next_poll();
         let heard = Arc::new(Heard::default());
         let waited = parked("Set tone to pirate.");
@@ -683,7 +683,7 @@ mod tests {
 
         let bot = Bot::start(
             Start {
-                telegram: Telegram::new(telegram.base()).unwrap(),
+                telegram: Arc::new(telegram.clone()),
                 token: BotToken::new("123456:home"),
                 settings: BotSettings {
                     owner: Owner::Management {
@@ -786,10 +786,7 @@ mod tests {
     async fn a_frame_handed_on_waits_for_a_settings_read_begun_since() {
         let stop = CancellationToken::new();
         let tasks = TaskTracker::new();
-        let api = BotApi::new(
-            Telegram::new(BaseUrl::parse("http://127.0.0.1:9").unwrap()).unwrap(),
-            BotToken::new("123456:home"),
-        );
+        let api = BotApi::new(Arc::new(StandIn::new()), BotToken::new("123456:home"));
         let (_settings, settings) = watch::channel(Arc::new(BotSettings {
             owner: Owner::Management {
                 names: BTreeMap::new(),

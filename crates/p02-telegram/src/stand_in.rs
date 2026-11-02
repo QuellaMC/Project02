@@ -1,25 +1,20 @@
-//! Telegram's Bot API on loopback for this crate's own tests, made with
-//! the production stack: every call kept with the moment it came, by the
-//! clock the test runs on, and answered as Telegram answers it, but for a
-//! poll the test ends with a 409 and a call it has refused or asked to
-//! wait.
+//! Telegram's Bot API in memory for this crate's tests, answering on the
+//! clock the test runs on, so a paused clock never races a socket: every
+//! call kept with the moment it came, and answered as Telegram answers it,
+//! but for a poll the test ends with a 409 and a call it has refused or
+//! asked to wait.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Router;
-use axum::body::Bytes;
-use axum::extract::State;
-use axum::http::Uri;
-use axum::response::{IntoResponse, Response};
-use p02_shared::BaseUrl;
+use async_trait::async_trait;
 use serde_json::{Value, json};
-use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
 use tokio::time::Instant;
 
 use crate::Lines;
+use crate::bot_api::{Failure, Transport};
 
 /// A call as the stand-in received it.
 #[derive(Clone, Debug)]
@@ -29,7 +24,7 @@ pub(crate) struct Call {
     pub(crate) at: Instant,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Shared {
     calls: watch::Sender<Vec<Call>>,
     /// The next poll waits for this, and is then ended as another program's
@@ -40,29 +35,17 @@ struct Shared {
     refusals: Mutex<VecDeque<(String, usize, Value)>>,
 }
 
+/// Its clones are one Bot API: a test keeps one and hands a bot another.
+#[derive(Clone, Debug)]
 pub(crate) struct StandIn {
-    base: BaseUrl,
     shared: Arc<Shared>,
 }
 
 impl StandIn {
-    pub(crate) async fn start() -> Self {
-        let shared = Arc::new(Shared::default());
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = BaseUrl::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
-        let app = Router::new()
-            .fallback(answer)
-            .with_state(Arc::clone(&shared));
-
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        Self { base, shared }
-    }
-
-    pub(crate) fn base(&self) -> BaseUrl {
-        self.base.clone()
+    pub(crate) fn new() -> Self {
+        Self {
+            shared: Arc::new(Shared::default()),
+        }
     }
 
     /// The next poll waits until the sender is used, and is then answered
@@ -128,9 +111,24 @@ impl StandIn {
     }
 }
 
-async fn answer(State(shared): State<Arc<Shared>>, uri: Uri, body: Bytes) -> Response {
-    let method = uri.path().rsplit('/').next().unwrap_or_default().to_owned();
-    let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+#[async_trait]
+impl Transport for StandIn {
+    async fn post(
+        &self,
+        path: &str,
+        body: Vec<u8>,
+        _bound: Duration,
+    ) -> Result<(u16, Vec<u8>), Failure> {
+        let envelope = answer(&self.shared, path, &body).await;
+
+        Ok((200, envelope.to_string().into_bytes()))
+    }
+}
+
+/// The envelope Telegram answers the call with.
+async fn answer(shared: &Shared, path: &str, body: &[u8]) -> Value {
+    let method = path.rsplit('/').next().unwrap_or_default().to_owned();
+    let body: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let refused = {
         let mut refusals = shared.refusals.lock().unwrap();
 
@@ -153,32 +151,32 @@ async fn answer(State(shared): State<Arc<Shared>>, uri: Uri, body: Bytes) -> Res
     });
 
     if let Some(answer) = refused {
-        return envelope(&answer);
+        return answer;
     }
 
     match method.as_str() {
-        "getMe" => envelope(&json!({
+        "getMe" => json!({
             "ok": true,
             "result": {"id": 123_456, "is_bot": true, "first_name": "home_bot", "username": "home_bot"},
-        })),
+        }),
         "getUpdates" => {
             let conflict = shared.conflict.lock().unwrap().take();
 
             if let Some(ended) = conflict {
                 let _ = ended.await;
 
-                return envelope(&json!({
+                return json!({
                     "ok": false,
                     "error_code": 409,
                     "description": "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running",
-                }));
+                });
             }
 
             tokio::time::sleep(Duration::from_secs(
                 body["timeout"].as_u64().unwrap_or_default(),
             ))
             .await;
-            envelope(&json!({"ok": true, "result": []}))
+            json!({"ok": true, "result": []})
         }
         "sendMessage" => {
             let sent = shared
@@ -188,25 +186,17 @@ async fn answer(State(shared): State<Arc<Shared>>, uri: Uri, body: Bytes) -> Res
                 .filter(|call| call.method == method)
                 .count();
 
-            envelope(&json!({
+            json!({
                 "ok": true,
                 "result": {
                     "message_id": sent,
                     "chat": {"id": body["chat_id"], "type": "private"},
                     "text": body["text"],
                 },
-            }))
+            })
         }
-        _ => envelope(&json!({"ok": true, "result": true})),
+        _ => json!({"ok": true, "result": true}),
     }
-}
-
-fn envelope(body: &Value) -> Response {
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        body.to_string(),
-    )
-        .into_response()
 }
 
 /// What a connector said, in order, each line with the stream it went to.

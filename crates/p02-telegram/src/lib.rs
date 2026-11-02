@@ -77,7 +77,7 @@ pub enum Ended {
 /// bot has ended.
 pub async fn run(options: Options, lines: Arc<dyn Lines>, stop: CancellationToken) -> Ended {
     let telegram = match Telegram::new(options.telegram) {
-        Ok(telegram) => telegram,
+        Ok(telegram) => Arc::new(telegram),
         Err(error) => {
             lines.report(&format!(
                 "Telegram connector: {}",
