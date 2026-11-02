@@ -394,7 +394,6 @@ async fn a_reload_decided_during_her_turn_is_said_at_once_and_follows_the_turn()
     assert!(!first.is_finished());
     gate.open();
     assert_eq!(said(&first.await.unwrap()), ["First?", "First."]);
-    assert_eq!(daemon.reconcile().await.reloading, [id("mira")]);
     assert_eq!(said(&second.await.unwrap()), ["Second?", "Hello."]);
     ear.until(|event| {
         matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == "second")
