@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Installing Project02</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.55;
+        color: #17202a;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 1rem;
+        background: #f4f6f7;
+        border-radius: 0.4rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 0.55rem;
+        border: 1px solid #ccd1d1;
+        text-align: left;
+        vertical-align: top;
+      }
+      .rule {
+        padding: 0.8rem 1rem;
+        border-left: 4px solid #2874a6;
+        background: #ebf5fb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Installing Project02</h1>
+
+      <p>
+        Project02 is an app for Windows, macOS and Linux: a window to talk to
+        the characters in, and an icon in the tray that keeps them answering in
+        Telegram while the window is closed. The character service and the
+        Telegram connector run inside it, so there is nothing else to start.
+      </p>
+
+      <h2>Getting it</h2>
+
+      <p>
+        Take the file for your system from the
+        <a href="https://github.com/QuellaMC/Project02/releases">releases</a>
+        page:
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>System</th>
+            <th>The file</th>
+            <th>Then</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Windows</td>
+            <td><code>Project02_…_x64-setup.exe</code></td>
+            <td>
+              Open it. It installs the app for you alone, with no administrator,
+              and fetches WebView2, which shows the app's page, when your
+              Windows lacks it.
+            </td>
+          </tr>
+          <tr>
+            <td>macOS</td>
+            <td>
+              <code>Project02_…_aarch64.dmg</code> for a Mac with Apple silicon,
+              <code>Project02_…_x64.dmg</code> for one with an Intel processor;
+              <em>About This Mac</em> names the chip.
+            </td>
+            <td>Open the disk image and drag Project02 into Applications.</td>
+          </tr>
+          <tr>
+            <td>Linux</td>
+            <td>
+              <code>Project02_…_amd64.AppImage</code>, or
+              <code>Project02_…_amd64.deb</code>
+            </td>
+            <td>
+              Mark the AppImage executable and run it, or install the deb.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Opening it the first time</h2>
+
+      <p>
+        The app is not signed yet, so Windows and macOS each stop it once, in
+        their own words, before it opens. Before that, a browser may warn that
+        the file <em>isn't commonly downloaded</em>: keep it.
+      </p>
+
+      <ul>
+        <li>
+          <strong>Windows</strong> says <em>Windows protected your PC</em>.
+          Press <em>More info</em>, then <em>Run anyway</em>.
+        </li>
+        <li>
+          <strong>macOS</strong> says it cannot verify the app:
+          <em>Apple could not verify “Project02” is free of malware…</em> Open
+          System Settings, then <em>Privacy &amp; Security</em>, scroll to the
+          message about Project02, press <em>Open Anyway</em>, and confirm once
+          more. It asks once for each version.
+        </li>
+      </ul>
+
+      <h2>The first run</h2>
+
+      <p>
+        A window opens within about a second on <em>Set up your home</em>:
+        choose how your character thinks and paste the key it needs, say what to
+        call you, then open the chat. An icon appears in the tray, or on a Mac
+        in the menu bar; Windows 11 may keep it behind the taskbar's arrow
+        until you drag it out.
+      </p>
+
+      <h2>Telegram</h2>
+
+      <p>
+        To talk to a character in Telegram too, open its settings, the ⚙ beside
+        its name, and paste its bot's token, as @BotFather gave it, into
+        <em>Bot token</em> under <em>Messaging apps</em>. The connector is
+        already running, and the Telegram block says so:
+        <em>Connector: running.</em>
+      </p>
+
+      <h2>Later</h2>
+
+      <p>
+        Closing the window does not quit: the characters keep answering in
+        Telegram, and <em>Open Project02</em> in the tray, the Dock, or opening
+        the app again brings the window back. Quit from the tray, or on a Mac
+        from the application menu or with Cmd-Q, when you mean it. A new version
+        is a new download from the releases page, installed over the old one as
+        the first was; nothing said is lost.
+      </p>
+
+      <h2>Where things are</h2>
+
+      <p class="rule">
+        Everything said and every setting is kept in the home, outside the app:
+        installing, updating and uninstalling the app leave it as it is.
+      </p>
+
+      <ul>
+        <li>
+          <strong>The home</strong> is <code>%APPDATA%\Project02</code> on
+          Windows, <code>~/Library/Application Support/Project02</code> on
+          macOS, and <code>~/.local/share/project02</code> on Linux, or
+          <code>$XDG_DATA_HOME/project02</code> where that is set.
+          <em>Open data folder</em> in the tray shows it.
+        </li>
+        <li>
+          <strong>The logs</strong> are <code>daemon.log</code>, the character
+          service's, and <code>telegram.log</code>, the connector's;
+          <em>Open logs</em> in the tray opens their folder. When the character
+          service cannot start, a dialog says so with the end of
+          <code>daemon.log</code> and where the whole log is, and the app quits.
+        </li>
+        <li>
+          <strong>The third-party notice</strong>,
+          <code>THIRD-PARTY-NOTICES.txt</code>, ships with the app: what it is
+          built from, with the text of each license.
+        </li>
+      </ul>
+
+      <h2>For a developer</h2>
+
+      <p>
+        The app changes nothing in a checkout: <code>project02 serve</code>,
+        <code>project02 telegram</code> and <code>project02 inspect</code> work
+        on <code>.project02</code> in the folder they run from, the checkout's
+        root under <code>pnpm serve</code> and <code>pnpm inspect</code>. Where
+        a webview's development files are installed, as
+        <code>crates/project02-shell/README.md</code> lists them,
+        <code>cargo run -p project02-shell -- --store .project02</code>, after
+        <code>pnpm build:web</code>, runs the app on that same home.
+        <code>project02 inspect --store &lt;home&gt;</code> reads an installed
+        app's home, given its path from the list above.
+      </p>
+    </main>
+  </body>
+</html>
