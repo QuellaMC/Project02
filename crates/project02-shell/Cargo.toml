@@ -11,7 +11,10 @@ name = "project02-shell"
 p02-shared.workspace = true
 p02-telegram.workspace = true
 project02.workspace = true
-tauri.workspace = true
+# Declared here, not in the workspace table: Tauri's CLI reads the tray
+# feature on this entry to bundle the library the tray loads, and skips an
+# inherited one.
+tauri = { version = "2.12.5", features = ["tray-icon"] }
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true

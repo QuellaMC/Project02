@@ -10,7 +10,11 @@ use tokio_util::sync::CancellationToken;
 /// second of any kind ends the process at once, exit code 1, with nothing
 /// more of the stop: the way out when stopping hangs, which a serve leaves
 /// as a crash does, the lease to the kernel and the record naming its run.
-pub(crate) fn listen_for_stop() -> io::Result<CancellationToken> {
+///
+/// # Errors
+///
+/// [`io::Error`] when the process cannot register for its signals.
+pub fn listen_for_stop() -> io::Result<CancellationToken> {
     let stop = CancellationToken::new();
     let mut signals = Signals::new()?;
 

@@ -2,7 +2,7 @@ allow-dbg-in-tests = true
 allow-print-in-tests = true
 allow-unwrap-in-tests = true
 # A name the docs use as a word, beside clippy's own list.
-doc-valid-idents = ["OpenAI", "WebView2", ".."]
+doc-valid-idents = ["AppImage", "OpenAI", "WebView2", ".."]
 
 # Refused everywhere but the fs seam of p02-shared, which opts in with an
 # `expect`. A platform's own functions resolve only on that platform, and

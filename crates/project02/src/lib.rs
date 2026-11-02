@@ -27,6 +27,7 @@ use crate::flags::Command;
 
 pub use crate::flags::ServeFlags;
 pub use crate::serve::ADDRESS_PREFIX;
+pub use crate::stop::listen_for_stop;
 pub use crate::switches::Switches;
 
 /// The binary: the command line `args`, the program's name left out, run

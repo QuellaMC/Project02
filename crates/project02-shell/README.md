@@ -32,12 +32,14 @@ Xcode's command line tools.
   `io.github.quellamc.project02/logs` under the local data folder
   elsewhere, begun anew at each start; the tray opens the folder, and the
   data folder.
-- **Quit**, from the tray, or from a Mac's application menu or Cmd-Q,
-  runs one stop order: the connector, given 5 s, then the daemon, given
-  20 s, then the app leaves. One that outstays its grace ends with the
-  process. The Dock's Quit, a logout and a shutdown run the same order as
-  the app ends, for the seconds the system waits; past them the process
-  ends as a crash does, which the runtime recovers from.
+- **Quit**, from the tray, from a Mac's application menu or Cmd-Q, or by
+  the first signal a `kill`, Ctrl-C or a closed terminal sends, which the
+  app listens for as `project02 serve` does, runs one stop order: the
+  connector, given 5 s, then the daemon, given 20 s, then the app leaves.
+  One that outstays its grace ends with the process, and a second signal
+  ends it at once. The Dock's Quit, a logout and a shutdown run the same
+  order as the app ends, for the seconds the system waits; past them the
+  process ends as a crash does, which the runtime recovers from.
 - **The notice** is `THIRD-PARTY-NOTICES.txt` at the repository root, and
   every bundle carries it: the crates the app is built from, with the texts
   of their licenses, and the mem0 prompt the daemon includes. From the
@@ -50,3 +52,15 @@ Xcode's command line tools.
   `about.hbs`. The command needs the network, for the texts some crates
   keep only in their repository; offline it warns and puts the canonical
   texts in their place, which the check then reports as a difference.
+- **The bundles** are made by Tauri's bundler from `tauri.conf.json`, each
+  on the system it is for: on Windows an NSIS installer that installs for
+  the person alone, with no administrator; on macOS the app and a disk
+  image; on Linux an AppImage, which carries the appindicator library the
+  tray loads, and a deb, which depends on it. To make them, install the
+  CLI as a tool with `cargo install tauri-cli --version 2.12.4 --locked`,
+  run `pnpm build:web` at the repository root so the daemon's page is
+  embedded, then `cargo tauri build` here; they land in
+  `target/release/bundle`. The packaging workflow runs
+  `scripts/smoke-shell.sh` on the AppImage and the app it builds: on a
+  temporary home the app must serve and connect, end with exit code 0 at
+  SIGTERM with its record left without a run, and carry the notice.

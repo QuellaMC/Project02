@@ -102,10 +102,35 @@ fn start(app: &mut App, named: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
 
     let app = app.handle().clone();
 
+    thread::Builder::new().name("signals".to_owned()).spawn({
+        let app = app.clone();
+
+        move || quit_when_signalled(&app)
+    })?;
     thread::Builder::new()
         .name("address".to_owned())
         .spawn(move || open_when_served(&app, &address))?;
     Ok(())
+}
+
+/// Runs the stop order at the first signal a person or the system sends
+/// the process, the one `project02 serve` stops at: a `kill`, Ctrl-C in the
+/// terminal that started the app, a hangup. A second signal ends the
+/// process at once, the way out when stopping hangs, so the listener stays
+/// until the process ends. One that cannot begin leaves the signals to end
+/// the process, as a crash does.
+fn quit_when_signalled(app: &AppHandle) -> io::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()?;
+
+    runtime.block_on(async {
+        let stop = project02::listen_for_stop()?;
+
+        stop.cancelled().await;
+        quit(app);
+        std::future::pending().await
+    })
 }
 
 /// Opens the window on the address the daemon says; when the daemon ends
