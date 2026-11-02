@@ -55,9 +55,12 @@ Xcode's command line tools.
   texts in their place, which the check then reports as a difference.
 - **The bundles** are made by Tauri's bundler from `tauri.conf.json`, each
   on the system it is for: on Windows an NSIS installer that installs for
-  the person alone, with no administrator; on macOS the app and a disk
-  image; on Linux an AppImage, which carries the appindicator library the
-  tray loads, and a deb, which depends on it. Tauri's CLI is a development
+  the person alone, with no administrator; on macOS the app, signed ad
+  hoc, and a disk image; on Linux an AppImage, which carries the appindicator library the
+  tray loads, and a deb, which depends on it. The ad-hoc signature needs
+  no account: a Mac refuses a download with no signature at all as
+  damaged, and one signed ad hoc the way *Open Anyway* passes; an identity
+  in `APPLE_SIGNING_IDENTITY` replaces it. Tauri's CLI is a development
   dependency, which the lockfile pins at 2.12.4: at the repository root run
   `pnpm install`, then `pnpm build:web` so the daemon's page is embedded,
   then `pnpm exec tauri build`, which finds this crate by its
