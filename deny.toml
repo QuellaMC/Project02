@@ -10,6 +10,12 @@ targets = [
 
 [advisories]
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0370", reason = "a maintenance notice on proc-macro-error, which Tauri depends on through gtk-rs 0.18 on Linux" },
+    { id = "RUSTSEC-2026-0370", reason = "a maintenance notice on zvariant, which Tauri's opener and single-instance plugins depend on through zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "a maintenance notice on zbus_names, which Tauri's opener and single-instance plugins depend on through zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "a maintenance notice on zvariant_derive, which Tauri's opener and single-instance plugins depend on through zbus 5" },
+]
 
 [licenses]
 allow = [
@@ -22,6 +28,10 @@ allow = [
     "ISC",
     "MIT",
     "MIT-0",
+    # Tauri brings in cssparser, cssparser-macros, dtoa-short, selectors and
+    # option-ext. MPL-2.0 asks only that modifications to their files be
+    # published, and this project makes none.
+    "MPL-2.0",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
