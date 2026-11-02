@@ -163,6 +163,7 @@ mod tests {
 
     use super::*;
 
+    /// lifecycle.serve-in-a-program: A program that runs the daemon in its own process, on a console and a stop token of its own, finds the address on that console's out, on the line that begins with `ADDRESS_PREFIX`, and the daemon answers there with its token; cancelling the token ends serve with exit 0, daemon.json no longer naming a running process.
     #[test]
     fn a_program_runs_the_daemon_on_its_own_console_until_it_cancels_the_stop() {
         let home = tempfile::tempdir().unwrap();
