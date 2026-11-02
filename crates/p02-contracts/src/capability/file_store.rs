@@ -134,7 +134,12 @@ impl FileStore {
     ) -> Result<T, StoreError> {
         self.check_open()?;
 
-        let files = self.backend.lease(self.deadline.into_std())?;
+        // The store waits on the real clock, so it is given what remains of
+        // the hook's budget, not the deadline as an instant: under a test's
+        // paused clock, which the real one runs ahead of, that instant may
+        // lie in the real past before the hook has begun.
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        let files = self.backend.lease(std::time::Instant::now() + remaining)?;
 
         operation(&mut LeasedStore { files, store: self })
     }

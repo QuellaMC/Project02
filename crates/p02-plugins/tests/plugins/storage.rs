@@ -102,10 +102,12 @@ impl CharacterStorage for Storage {
     }
 }
 
-/// A plugin's documents.
+/// A plugin's documents, and the deadline its last lease was waited for
+/// by.
 #[derive(Debug, Default)]
 pub(crate) struct Files {
     documents: Mutex<BTreeMap<String, Value>>,
+    waited_until: Mutex<Option<std::time::Instant>>,
 }
 
 #[derive(Debug)]
@@ -115,13 +117,16 @@ impl Files {
     pub(crate) fn get(&self, path: &str) -> Option<Value> {
         self.documents.lock().unwrap().get(path).cloned()
     }
+
+    /// The deadline the last lease was waited for by, on the real clock.
+    pub(crate) fn waited_until(&self) -> Option<std::time::Instant> {
+        *self.waited_until.lock().unwrap()
+    }
 }
 
 impl FileStoreBackend for Files {
-    fn lease(
-        &self,
-        _deadline: std::time::Instant,
-    ) -> Result<Box<dyn LeasedFiles + '_>, StoreError> {
+    fn lease(&self, deadline: std::time::Instant) -> Result<Box<dyn LeasedFiles + '_>, StoreError> {
+        *self.waited_until.lock().unwrap() = Some(deadline);
         Ok(Box::new(Leased(self.documents.lock().unwrap())))
     }
 }

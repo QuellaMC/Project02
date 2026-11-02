@@ -3,6 +3,7 @@
 
 use std::error::Error;
 use std::sync::Arc;
+use std::time::Duration;
 
 use p02_contracts::{
     CommittedTurn, EvidenceStatus, FactoryInput, MissingConfigValueError, PluginError,
@@ -345,4 +346,40 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
         "without turn_context the message is absent, not empty"
     );
     assert_eq!(bare.seen("committed").and_then(|seen| seen.message), None);
+}
+
+/// The store is waited for by what remains of the hook's budget, on the
+/// clock the store runs on, so a paused clock the real one has run ahead
+/// of, as a slow test machine's has, refuses no lease.
+#[tokio::test(start_paused = true)]
+async fn a_stores_lease_is_waited_for_by_what_remains_of_the_hooks_budget() {
+    let probe = Arc::new(Probe::default());
+    let storage = Storage::new();
+    let files = storage.files("probe");
+    let host = PluginHost::builder(storage)
+        .enable(
+            &Spec {
+                access: json!({"character_file_store": "write"}),
+                ..Spec::new("probe")
+            },
+            Arc::clone(&probe) as _,
+        )
+        .activate()
+        .unwrap();
+
+    // The real clock runs on while the paused one stands: by the time the
+    // hook begins, its one-second budget has passed on the real clock.
+    std::thread::sleep(Duration::from_millis(1_500));
+    host.before_role_model_call(&turn()).await;
+
+    assert_eq!(
+        probe.seen("before").and_then(|seen| seen.store),
+        Some(StoreAccess::ReadWrite)
+    );
+    assert!(
+        files
+            .waited_until()
+            .is_some_and(|until| until > std::time::Instant::now()),
+        "the store was given a deadline already past on its clock"
+    );
 }
