@@ -17,6 +17,7 @@ use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use p02_app::Daemon;
 use p02_shared::DaemonToken;
+use socket2::SockRef;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -30,6 +31,14 @@ use crate::page::Page;
 /// How long accepting waits before it tries again when the system has no
 /// room for another connection.
 const ACCEPT_RETRY: Duration = Duration::from_secs(1);
+
+/// How much of what a connection writes the system holds for a client
+/// that has not read it. Bounded, so that a client that stopped reading
+/// stalls its writer within this much on every system, where the grace
+/// meets it: left to itself, Windows grows a socket's send buffer as the
+/// writer asks and Linux grows it to megabytes, and a stream's grace would
+/// meet the stall only after all of that.
+const SEND_BUFFER: usize = 64 * 1024;
 
 /// The daemon behind HTTP and its event stream, on a loopback port.
 #[derive(Debug)]
@@ -185,6 +194,7 @@ async fn accept(
 
         match accepted {
             Ok((stream, _)) => {
+                bound(&stream);
                 connections.spawn(serve(
                     stream,
                     router.clone(),
@@ -204,6 +214,13 @@ async fn accept(
             }
         }
     }
+}
+
+/// Bounds what the system holds of `stream`'s writes unread. A stream the
+/// system will not bound keeps the system's own buffer, and a client of it
+/// that stopped reading is seen that much later.
+fn bound(stream: &TcpStream) {
+    let _ = SockRef::from(stream).set_send_buffer_size(SEND_BUFFER);
 }
 
 fn failed_connection(error: &io::Error) -> bool {

@@ -58,8 +58,12 @@ Nothing here prints, reads an environment variable or parses a flag.
   A stream's frames are written one at a time, each once the one before
   it was taken: a client that has not taken one within the grace is gone,
   its connection closed and nothing more queued for it, however long its
-  queue, which says nothing about a client. A connector's stream counts
-  it present from before its first frame until its end.
+  queue, which says nothing about a client. What the system holds of a
+  connection's writes unread is bounded to 64 KiB on every system, so
+  the grace meets a client that stopped reading within that much and
+  not, as Windows and Linux would otherwise have it, after megabytes. A
+  connector's stream counts it present from before its first frame until
+  its end.
 - **The stop.** New API requests answer 503 at once; the daemon stops,
   its turns draining with the socket and the streams open, so an accepted
   turn still receives its answer and the stream its reply; then each
