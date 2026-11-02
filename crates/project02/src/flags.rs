@@ -27,9 +27,9 @@ pub(crate) enum Command {
 /// none for the default, and whether they consent to a store being made
 /// there.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct ServeFlags {
-    pub(crate) store: Option<PathBuf>,
-    pub(crate) init: bool,
+pub struct ServeFlags {
+    pub store: Option<PathBuf>,
+    pub init: bool,
 }
 
 /// What `inspect` is asked: the home, as `serve` takes it, the character

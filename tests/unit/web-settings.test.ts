@@ -587,7 +587,7 @@ describe('web settings', () => {
       'Connector: running.',
     );
     expect(connectorPresenceSentence(health, 'telegram')).toBe(
-      'Connector: not running. Start it with project02 telegram.',
+      'Connector: not running. Opening the app starts it; at a terminal, run project02 telegram.',
     );
     expect(connectorPresenceSentence(health, 'discord')).toBeUndefined();
     expect(connectorPresenceSentence(undefined, 'telegram')).toBeUndefined();

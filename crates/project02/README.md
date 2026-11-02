@@ -9,7 +9,10 @@ p02-characters, p02-config, p02-contracts, p02-core, p02-gateway,
 p02-plugins, p02-role-model, p02-shared, p02-store and p02-telegram, and
 holds what none of them decides: where the home is, the switches of a
 test harness, the plugins compiled in, the signals that stop it, and what
-it prints. Any other command is a usage error.
+it prints. Any other command is a usage error. Its library is the same
+daemon for a program that runs it in its own process, as the desktop shell
+does: `serve` with a stop the caller cancels and a console of the caller's,
+and `ADDRESS_PREFIX`, which begins the line the address is said on.
 
 - **The command line.** `serve` owns two flags, each at most once:
   `--store <dir>`, the home, else `.project02` in the working directory,

@@ -294,7 +294,7 @@ test("page.settings-connector-presence: a connector's block says from health whe
   const {daemon} = await miraHome({});
   const telegram = page.locator('[data-section="connectors/telegram"]');
   const notRunning =
-    'Connector: not running. Start it with project02 telegram.';
+    'Connector: not running. Opening the app starts it; at a terminal, run project02 telegram.';
 
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings', exact: true}).click();

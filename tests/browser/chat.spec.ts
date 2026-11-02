@@ -361,7 +361,7 @@ test("page.notices: another surface's turn that failed, a page of the thread tha
   );
   await startDaemon(home);
   await expect(page.getByRole('alert')).toContainText(
-    'Open the address pnpm serve printed.',
+    'This address does not work: open the one project02 serve printed, or open the app again.',
   );
   await expect(texts).toHaveText(['Hello.', 'Hi.', 'From the phone.']);
   await expect(composerFor(page)).toHaveValue('Not sent yet.');

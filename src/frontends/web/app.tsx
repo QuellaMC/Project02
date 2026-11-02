@@ -32,8 +32,8 @@ export function App({session}: {readonly session: Session}) {
       <header className="banners">
         {connection.status === 'refused' ? (
           <p className="banner banner-refused" role="alert">
-            {connection.message} Open the address <code>pnpm serve</code>{' '}
-            printed.
+            {connection.message} This address does not work: open the one{' '}
+            <code>project02 serve</code> printed, or open the app again.
           </p>
         ) : null}
         {connection.status === 'connecting' ? (

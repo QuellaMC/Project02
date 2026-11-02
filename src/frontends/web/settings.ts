@@ -371,8 +371,8 @@ function namesSection(
 
 /**
  * Whether a connector's process is on the daemon's stream, as health says
- * it, and the command that starts one that is not: `project02 <id>`.
- * Nothing for a connector health does not list.
+ * it, and how one that is not is started, in words true at a terminal and
+ * in the app alike. Nothing for a connector health does not list.
  */
 export function connectorPresenceSentence(
   health: GatewayHealth | undefined,
@@ -386,7 +386,7 @@ export function connectorPresenceSentence(
 
   return presence.connected
     ? 'Connector: running.'
-    : `Connector: not running. Start it with project02 ${id}.`;
+    : `Connector: not running. Opening the app starts it; at a terminal, run project02 ${id}.`;
 }
 
 /**
