@@ -1,0 +1,28 @@
+Third-party notices
+
+Project02 is built from the open-source crates named below, and includes a
+prompt from mem0, named at the end. Each license text follows the list of
+crates it covers.
+
+The licenses in this notice:
+{{#each overview}}
+  {{{name}}}
+{{/each}}
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}}, for:
+{{#each used_by}}
+  {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} <{{{crate.repository}}}>{{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}
+
+--------------------------------------------------------------------------------
+Text included from mem0 <https://github.com/mem0ai/mem0>:
+  the additive extraction prompt of the mem0ai package
+
+Copyright 2023 Taranjeet Singh
+
+Licensed under the Apache License 2.0, whose text appears above.

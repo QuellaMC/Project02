@@ -38,3 +38,15 @@ Xcode's command line tools.
   process. The Dock's Quit, a logout and a shutdown run the same order as
   the app ends, for the seconds the system waits; past them the process
   ends as a crash does, which the runtime recovers from.
+- **The notice** is `THIRD-PARTY-NOTICES.txt` at the repository root, and
+  every bundle carries it: the crates the app is built from, with the texts
+  of their licenses, and the mem0 prompt the daemon includes. From the
+  repository root, cargo-about 0.9.2 makes it from `about.toml`, which
+  accepts what `deny.toml` allows, with
+  `cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-NOTICES.txt`;
+  `pnpm check:rust` runs that and fails while the committed file differs.
+  `--fail` writes nothing while a crate's license cannot be read or is not
+  accepted; the mem0 prompt, being no crate, is a fixed section of
+  `about.hbs`. The command needs the network, for the texts some crates
+  keep only in their repository; offline it warns and puts the canonical
+  texts in their place, which the check then reports as a difference.

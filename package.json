@@ -24,7 +24,7 @@
     "test:conformance": "pnpm build && vitest run --project=conformance",
     "test:browser": "pnpm build && playwright test",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage && pnpm test:browser",
-    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- src/gateway/api/generated && cargo deny check"
+    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- src/gateway/api/generated && cargo deny check && cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-NOTICES.txt && git diff --exit-code -- THIRD-PARTY-NOTICES.txt"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
