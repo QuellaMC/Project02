@@ -1,0 +1,210 @@
+name: package
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+          # The oldest base Tauri names, which keeps the daemon's glibc floor.
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # jq -j writes no newline: jq on Windows ends a line with a carriage return.
+      - name: Require the tag to name the app's version
+        if: github.event_name == 'push'
+        run: |
+          version=$(jq -j .version crates/project02-shell/tauri.conf.json)
+          if [[ $GITHUB_REF_NAME != "v$version" ]]; then
+            echo "::error::The tag $GITHUB_REF_NAME is not v$version, the version crates/project02-shell/tauri.conf.json names."
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install the pinned Rust toolchain for the target
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+
+      - name: Install the webview's development files
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+
+      # Tauri's CLI among them, at the version the lockfile pins: the tray's
+      # library and the deb's dependencies are its doing.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The daemon embeds the page.
+      - name: Build the page
+        run: pnpm build:web
+
+      # The signing the plan defers (D11): no account exists yet. A secret the
+      # owner adds under one of these names reaches the bundler; one never added
+      # stays unset, since the bundler takes an empty value for one that is set.
+      # Windows signing is configuration in tauri.conf.json once a certificate
+      # exists.
+      - name: Pass on the signing secrets that exist
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in ${!APPLE_@}; do
+            if [[ -n ${!name} ]]; then
+              delimiter=$(openssl rand -hex 16)
+              printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "${!name}" "$delimiter" >>"$GITHUB_ENV"
+            fi
+          done
+
+      # pnpm runs the CLI at the repository root, where it finds the shell's
+      # crate by its tauri.conf.json.
+      - name: Build the bundles
+        run: pnpm exec tauri build --target ${{ matrix.target }}
+
+      - name: Smoke the AppImage
+        if: runner.os == 'Linux'
+        # Empty, so the smoke runs the app on a display and a session bus of its own.
+        env:
+          DISPLAY: ""
+        run: |
+          target/${{ matrix.target }}/release/bundle/appimage/*.AppImage --appimage-extract >/dev/null
+          scripts/smoke-shell.sh squashfs-root/AppRun
+
+      - name: Smoke the app
+        if: runner.os == 'macOS'
+        run: scripts/smoke-shell.sh target/${{ matrix.target }}/release/bundle/macos/Project02.app/Contents/MacOS/Project02
+
+      # Windows gives a script no graceful quit: a close request hides the
+      # window, and a session's end is the system's. So the installed app,
+      # started as a person starts it, on its own home, is ended as a crash
+      # ends it, and its next start must take the home over.
+      - name: Smoke the installed app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $record = Join-Path $env:APPDATA 'Project02\daemon.json'
+          $logs = Join-Path $env:LOCALAPPDATA 'io.github.quellamc.project02\logs'
+          $app = $null
+
+          function Pass($what) { "ok: $what" }
+
+          function Fail($why) {
+            "FAILED: $why"
+            foreach ($log in 'daemon.log', 'telegram.log') {
+              "--- $log"
+              Get-Content -LiteralPath (Join-Path $logs $log) -ErrorAction Ignore
+            }
+            if ($app) { Stop-Process -Id $app.Id -Force -ErrorAction Ignore }
+            exit 1
+          }
+
+          function Await($done, $why) {
+            $deadline = (Get-Date).AddSeconds(60)
+            while (-not (& $done)) {
+              if ((Get-Date) -gt $deadline) { Fail "$why within 60 s" }
+              Start-Sleep -Milliseconds 200
+            }
+          }
+
+          # Read sharing delete: the daemon replaces the record by a rename,
+          # which a reader without it would refuse.
+          function RecordedPid {
+            try {
+              $reader = [IO.StreamReader]::new([IO.File]::Open($record, 'Open', 'Read', 'ReadWrite, Delete'))
+              try { ($reader.ReadToEnd() | ConvertFrom-Json).running.pid } finally { $reader.Dispose() }
+            } catch { $null }
+          }
+
+          function Start-App { Start-Process -FilePath $exe -PassThru }
+
+          $setup = Get-Item 'target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe'
+          $installer = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($installer.ExitCode -ne 0) { Fail "$($setup.Name) /S ended with exit code $($installer.ExitCode)" }
+          $installed = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Project02').InstallLocation.Trim('"')
+          $exe = Join-Path $installed 'Project02.exe'
+          Pass "$($setup.Name) installed $exe for the person alone"
+
+          $app = Start-App
+          Await { (RecordedPid) -eq $app.Id } "$record did not name the app's run, pid $($app.Id),"
+          Pass "the record names the app's run, pid $($app.Id)"
+          Await { Select-String -LiteralPath (Join-Path $logs 'daemon.log') -Pattern '^PROJECT02_GATEWAY=http://127\.0\.0\.1:' -Quiet -ErrorAction Ignore } "the daemon did not say its address"
+          Pass "the daemon's log holds its address"
+
+          $ended = $app.Id
+          Stop-Process -Id $ended -Force
+          if (-not $app.WaitForExit(30000)) { Fail "the app still ran 30 s after Stop-Process" }
+          Pass "Stop-Process ended the app as a crash does"
+          if ((RecordedPid) -ne $ended) { Fail "$record no longer names the ended run, pid $ended" }
+          Pass "the record still names the ended run, pid $ended"
+
+          $app = Start-App
+          Await { (RecordedPid) -eq $app.Id } "$record did not name the next run, pid $($app.Id),"
+          Pass "the next start took the home over, pid $($app.Id)"
+          Stop-Process -Id $app.Id -Force
+
+      - name: Upload the bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+
+  release:
+    needs: bundle
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Gather every target's bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: bundles
+
+      - name: Publish them to a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mapfile -t files < <(find bundles -type f)
+          gh release create "$GITHUB_REF_NAME" --draft --title "Project02 $GITHUB_REF_NAME" --notes "" "${files[@]}"

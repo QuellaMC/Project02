@@ -57,11 +57,18 @@ Xcode's command line tools.
   on the system it is for: on Windows an NSIS installer that installs for
   the person alone, with no administrator; on macOS the app and a disk
   image; on Linux an AppImage, which carries the appindicator library the
-  tray loads, and a deb, which depends on it. To make them, install the
-  CLI as a tool with `cargo install tauri-cli --version 2.12.4 --locked`,
-  run `pnpm build:web` at the repository root so the daemon's page is
-  embedded, then `cargo tauri build` here; they land in
-  `target/release/bundle`. The packaging workflow runs
-  `scripts/smoke-shell.sh` on the AppImage and the app it builds: on a
-  temporary home the app must serve and connect, end with exit code 0 at
-  SIGTERM with its record left without a run, and carry the notice.
+  tray loads, and a deb, which depends on it. Tauri's CLI is a development
+  dependency, which the lockfile pins at 2.12.4: at the repository root run
+  `pnpm install`, then `pnpm build:web` so the daemon's page is embedded,
+  then `pnpm exec tauri build`, which finds this crate by its
+  `tauri.conf.json`; they land in `target/release/bundle`.
+  `.github/workflows/package.yml` makes every bundle, by hand or from a
+  version tag `v*`, on a runner of the system it is for, smokes each there,
+  and keeps them with the run; a tag, which must be `v` and the version
+  `tauri.conf.json` names, also publishes them to a draft release once
+  every one has passed. On the AppImage and the app the smoke is
+  `scripts/smoke-shell.sh`: on a temporary home the app must serve and
+  connect, end with exit code 0 at SIGTERM with its record left without a
+  run, and carry the notice. Windows gives a script no graceful quit, so
+  there the installed app, started as a person starts it, is ended as a
+  crash ends it, and its next start must take its home over.
