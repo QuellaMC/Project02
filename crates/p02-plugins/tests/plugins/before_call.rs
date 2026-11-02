@@ -78,7 +78,8 @@ async fn a_timed_out_hook_degrades_and_the_turn_goes_on() {
     let prepared = prepared(host.before_role_model_call(&turn()).await);
     let timeout = &prepared.evidence[0];
 
-    assert_eq!(started.elapsed(), Duration::from_millis(50));
+    // The deadline, then the second the host hears a hook for its last word.
+    assert_eq!(started.elapsed(), Duration::from_millis(1_050));
     assert_eq!(timeout.plugin_id().as_str(), "hang");
     assert_eq!(timeout.kind(), EvidenceKind::BeforeRoleModelCall);
     assert_eq!(timeout.status(), EvidenceStatus::Degraded);

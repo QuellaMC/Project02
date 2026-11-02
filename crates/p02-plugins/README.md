@@ -20,9 +20,11 @@ the character's storage grants through the contracts.
   blocks its worker holds that worker alone, so the host keeps its
   deadline; blocking work belongs on the blocking pool, where session
   history does its database work. No hook of a turn already abandoned
-  starts. When the host stops waiting (an answer, the deadline, the turn
-  abandoned) the hook's writes end, and a hook that did not answer in time
-  has its task aborted and its token cancelled. A plugin that is ending
+  starts. At the deadline the hook's writes end and its token is
+  cancelled, and the host hears it for a second more, so a hook that stops
+  at the token answers with what it gave up; one silent past that is
+  refused as timed out and its task aborted. When the turn is abandoned
+  the host stops waiting at once. A plugin that is ending
   only reads: its store is read-only and it opens no database, which has
   no read-only view. A failure goes through the hook's failure policy:
   `beforeRoleModelCall` degrades or rejects the turn; a tool call is

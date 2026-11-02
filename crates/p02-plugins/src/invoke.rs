@@ -3,15 +3,19 @@
 //! Each hook runs as a task of its own, so a hook that blocks its thread
 //! holds that worker alone and the host keeps its deadline, and a hook
 //! that panics fails through its plugin's policy instead of taking the
-//! turn down. A hook of a turn already abandoned is never started.
-//! Whichever way the host stops waiting (an answer, the deadline, the turn
-//! being abandoned, or the caller dropping the wait) the hook's writes
-//! end, and unless it answered in time its task is aborted and its token
-//! cancelled, so work it started elsewhere starts nothing more.
+//! turn down. A hook of a turn already abandoned is never started. At the
+//! deadline the hook's writes end and its token is cancelled, and the host
+//! hears it for a second more, so a hook that stops at its token answers
+//! with what it gave up; one silent past that is timed out. Whichever way
+//! the host stops waiting (an answer, the turn being abandoned, or the
+//! caller dropping the wait) the hook's writes end, and a hook that did not
+//! answer has its task aborted and its token cancelled, so work it started
+//! elsewhere starts nothing more.
 
 use std::any::Any;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use p02_contracts::{Hook, HookContext, PluginError, StoreAccess, WriteHold};
 use tokio::task::{AbortHandle, JoinError};
@@ -21,6 +25,12 @@ use tokio_util::sync::CancellationToken;
 use crate::host::Slot;
 use crate::policy;
 use crate::turn::Turn;
+
+/// How long the host hears a hook past its deadline, its writes ended and
+/// its token cancelled: time for a hook that stops at the token to say
+/// what it gave up with, or what it could not finish, on a machine with
+/// its mind elsewhere. A hook silent past it timed out.
+const LAST_WORD: Duration = Duration::from_secs(1);
 
 /// What the host runs under a plugin's budget: one of its hooks, or the
 /// preparation of an approval-gated call, which is part of `handleToolCall`
@@ -118,23 +128,36 @@ impl Slot {
         let deadline = Instant::now() + policy.timeout();
         let cancellation = turn.cancellation().child_token();
         let unanswered = cancellation.clone().drop_guard();
-        let (context, _writes) = self.context(turn, invocation, deadline, cancellation);
+        let (context, writes) = self.context(turn, invocation, deadline, cancellation.clone());
         let mut task = tokio::spawn(call(context));
         let _abort = AbortOnDrop(task.abort_handle());
 
-        let settled = tokio::select! {
-            settled = tokio::time::timeout_at(deadline, &mut task) => settled,
+        let in_time = tokio::select! {
+            in_time = tokio::time::timeout_at(deadline, &mut task) => in_time,
             () = turn.cancellation().cancelled() => return Err(abandoned()),
+        };
+        let settled = match in_time {
+            Ok(settled) => settled,
+            Err(_elapsed) => {
+                drop(writes);
+                cancellation.cancel();
+
+                tokio::select! {
+                    last_word = tokio::time::timeout(LAST_WORD, &mut task) => match last_word {
+                        Ok(settled) => settled,
+                        Err(_elapsed) => return Err(timed_out()),
+                    },
+                    () = turn.cancellation().cancelled() => return Err(abandoned()),
+                }
+            }
         };
 
         match settled {
-            Err(_elapsed) => Err(timed_out()),
-            Ok(_late) if Instant::now() >= deadline => Err(timed_out()),
-            Ok(Ok(answer)) => {
+            Ok(answer) => {
                 unanswered.disarm();
                 answer.map_err(|error| failure(FailureKind::Exception, said(error.to_string())))
             }
-            Ok(Err(stopped)) => Err(failure(FailureKind::Exception, stopped_message(stopped))),
+            Err(stopped) => Err(failure(FailureKind::Exception, stopped_message(stopped))),
         }
     }
 

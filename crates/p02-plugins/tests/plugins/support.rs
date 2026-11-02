@@ -547,6 +547,37 @@ impl RuntimePlugin for Stalling {
     }
 }
 
+/// Waits in its hook for the host to cancel it, as a plugin on a silent
+/// backend does, then answers with what it gave up.
+#[derive(Debug)]
+pub(crate) struct GivingUp {
+    tools: Vec<ProvidedTool>,
+}
+
+impl GivingUp {
+    pub(crate) const WORD: &'static str = "gave the backend up; whether it wrote is unknown";
+
+    pub(crate) fn new(tools: Vec<ProvidedTool>) -> Arc<Self> {
+        Arc::new(Self { tools })
+    }
+}
+
+#[async_trait]
+impl RuntimePlugin for GivingUp {
+    fn provided_tools(&self) -> &[ProvidedTool] {
+        &self.tools
+    }
+
+    async fn handle_tool_call(
+        &self,
+        _call: &ToolCall,
+        context: &HookContext,
+    ) -> Result<ToolCallOutcome, PluginError> {
+        context.cancellation().cancelled().await;
+        Err(PluginError::new(Self::WORD))
+    }
+}
+
 /// What a hook's context carried: the turn's message, the store and how it
 /// may be used, the session history, and the databases.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

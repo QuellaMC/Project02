@@ -13,7 +13,6 @@ mod settings;
 mod tools;
 
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
@@ -26,7 +25,6 @@ use p02_core::VisibleMessageRole;
 use p02_memory::{Message, ObservedOn, Role, Scope, Turn};
 use p02_shared::Identifier;
 use serde_json::{Value, json};
-use tokio::time::Instant;
 
 use self::backend::{
     BackendError, Failure, Found, Operation, RECALL_LIMIT, Readiness, Write, Written,
@@ -44,10 +42,6 @@ const ID_CHARS: usize = 120;
 /// How much of a summary the records keep: the warning that leads one
 /// must survive the cut.
 const SUMMARY_CHARS: usize = 160;
-
-/// How long before its deadline a hook that waits on a write answers, so
-/// that what it says is recorded, and not that it timed out.
-const ANSWER_MARGIN: Duration = Duration::from_millis(100);
 
 static MEMORY_LABEL: LazyLock<RedactionLabel> =
     LazyLock::new(|| RedactionLabel::new("memory").expect("memory is a redaction label"));
@@ -216,14 +210,15 @@ impl RuntimePlugin for Mem0Plugin {
                     text: excerpt(text_input(call, "text")?, MEMORY_CHARS).into_owned(),
                     sources: vec![context.turn().event.event_id().to_string()],
                 };
-                let written = tokio::time::timeout_at(
-                    answer_by(context.deadline()),
-                    setup
-                        .backend
-                        .write(&scope, write, context.plugin_database()),
-                )
-                .await
-                .map_err(|_| failed(&BackendError::new(Operation::Add, Failure::Abandoned)))?
+                let written = tokio::select! {
+                    biased;
+                    written = setup.backend.write(&scope, write, context.plugin_database()) => {
+                        written
+                    }
+                    () = context.cancellation().cancelled() => {
+                        Err(BackendError::new(Operation::Add, Failure::Abandoned))
+                    }
+                }
                 .map_err(|error| failed(&error))?;
 
                 added(written, context)
@@ -247,11 +242,12 @@ impl RuntimePlugin for Mem0Plugin {
         Ok(health_report(&self.captures.outcomes(), checked))
     }
 
-    /// Drains the queued captures until the deadline, then abandons the
-    /// rest. Nothing runs after this, and the next launch counts from
-    /// nothing, so a capture lost to now is recorded here alone.
+    /// Drains the queued captures until the host cancels the hook at its
+    /// deadline, then abandons the rest. Nothing runs after this, and the
+    /// next launch counts from nothing, so a capture lost to now is
+    /// recorded here alone.
     async fn on_shutdown(&self, context: &HookContext) -> Result<HookReport, PluginError> {
-        let outcomes = self.captures.drain(answer_by(context.deadline())).await;
+        let outcomes = self.captures.drain(context.cancellation()).await;
         let (status, summary) = match &outcomes.loss {
             Some(loss) => (
                 EvidenceStatus::Degraded,
@@ -545,12 +541,10 @@ fn failed(error: &BackendError) -> PluginError {
     PluginError::new(error.to_string())
 }
 
-fn answer_by(deadline: Instant) -> Instant {
-    deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     /// memory.mem0-health-unknown-outcome: a capture that outlives its minute is counted lost with its outcome unknown, and mem0's health leads with that warning, so the 160 characters of its summary never cut it

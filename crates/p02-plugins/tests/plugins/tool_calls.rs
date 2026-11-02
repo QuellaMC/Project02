@@ -19,8 +19,8 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Scripted, Seen, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of, id, note,
-    run_round, tool, turn,
+    Enable, GivingUp, Scripted, Seen, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of,
+    id, note, run_round, tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
@@ -84,7 +84,29 @@ async fn a_round_runs_shared_calls_together_and_exclusive_ones_alone_in_order() 
     );
 }
 
-/// plugins.hook-timeout: a tool handler that overruns its timeout is refused `handler_timeout`, recorded by its policy, and its late write to its store is blocked
+/// plugins.hook-last-word: a tool handler the host cancels at its deadline is heard for what it gives up with: its own failure is the refusal, not the timeout, and at the deadline, not after the second the host would wait
+#[tokio::test(start_paused = true)]
+async fn a_tool_handler_cancelled_at_its_deadline_is_refused_with_its_own_word() {
+    let storage = Storage::new();
+    let host = PluginHost::builder(Arc::clone(&storage) as _)
+        .enable(
+            &Spec {
+                timeout_ms: 50,
+                ..Spec::tools("notes")
+            },
+            GivingUp::new(vec![tool("notes.save")]),
+        )
+        .activate()
+        .unwrap();
+    let started = Instant::now();
+    let report = one(&host, call("c1", "notes.save", json!({})), &turn()).await;
+
+    assert_eq!(started.elapsed(), Duration::from_millis(50));
+    assert_eq!(reason(&report), Some("handler_failed"));
+    assert_eq!(message(&report), GivingUp::WORD);
+}
+
+/// plugins.hook-timeout: a tool handler that overruns its timeout and says nothing within the second after is refused `handler_timeout`, recorded by its policy, and its late write to its store is blocked
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tool_handler_past_its_timeout_is_refused_and_its_late_write_blocked() {
     for (policy, status) in [

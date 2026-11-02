@@ -17,7 +17,9 @@ p02-shared, and the runtime reaches plugins and providers only through it.
   cooperative: every call on a capability handle (the character store, the
   session history, the opening of a plugin database) checks the token
   before it acts, so a hook past its deadline finishes the call it is in and
-  starts nothing more, and store writes end when the hook settles. The
+  starts nothing more, and store writes end at the deadline. The host hears
+  a hook it cancelled for a second more, so what it gives up with, or the
+  report of what it could not finish, is the answer recorded. The
   store crate implements what the handles reach, one `CharacterStorage`
   per character, and it alone opens a database. What a plugin returns,
   the host stamps into records held to the JSON limits, so a plugin never

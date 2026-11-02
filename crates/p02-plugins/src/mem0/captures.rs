@@ -13,7 +13,7 @@ use std::time::Duration;
 use futures_util::FutureExt as _;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use super::backend::{BackendError, Failure, Operation, Written};
 
@@ -141,13 +141,15 @@ impl Captures {
         }
     }
 
-    /// Waits until every queued capture is done or `deadline` passes; then
-    /// abandons what is left, whose outcome nobody will learn.
-    pub(super) async fn drain(&self, deadline: Instant) -> Outcomes {
+    /// Waits until every queued capture is done or `stop` is cancelled;
+    /// then abandons what is left, whose outcome nobody will learn.
+    pub(super) async fn drain(&self, stop: &CancellationToken) -> Outcomes {
         let mut pending = self.shared.pending.subscribe();
-        let drained = tokio::time::timeout_at(deadline, pending.wait_for(|&left| left == 0))
-            .await
-            .is_ok();
+        let drained = tokio::select! {
+            biased;
+            drained = pending.wait_for(|&left| left == 0) => drained.is_ok(),
+            () = stop.cancelled() => false,
+        };
 
         if !drained {
             let worker = self
@@ -247,9 +249,7 @@ mod tests {
         }));
 
         assert_eq!(
-            captures
-                .drain(Instant::now() + Duration::from_secs(10))
-                .await,
+            captures.drain(&CancellationToken::new()).await,
             Outcomes {
                 pending: 0,
                 incomplete: 1,
