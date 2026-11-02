@@ -310,13 +310,18 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
 
   model.answer(overflowingDraft());
   await say('Talk a lot.', 'long');
+
+  const answered = performance.now();
+
   await watching.next(telegram(false));
 
-  const dropped = performance.now() - submitted;
+  const dropped = performance.now();
 
-  // The grace of one second runs from the stall, then the drop: within the grace means about it.
-  expect(dropped).toBeGreaterThanOrEqual(900);
-  expect(dropped).toBeLessThan(5_000);
+  // The grace of one second runs from the stall, which the burst brings on
+  // at once, then the drop; a machine slow to turn the draft into frames
+  // stalls the client later, and at the latest a grace after the turn ends.
+  expect(dropped - submitted).toBeGreaterThanOrEqual(900);
+  expect(dropped - answered).toBeLessThan(5_000);
   stalled.resume();
   await stalled.ended();
   expect(stalled.body()).not.toContain('event: turn_completed');
