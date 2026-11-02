@@ -891,10 +891,11 @@ it('lifecycle.stop-cuts-stalled-reader: a stop gives a client that stopped readi
 
   const events = await openEvents(daemon);
 
-  // A reader that takes nothing leaves the sockets' buffers to hold what
-  // they can, under three mebibytes here, and JSON writes a control
-  // character as six bytes: the answer is twice that.
-  model.answer(reply('\u0001'.repeat(1024 * 1024)));
+  // A reader that takes nothing leaves the daemon's bounded send buffer
+  // and the socket's own receive buffer to hold what they can, a few
+  // hundred kibibytes, and JSON writes a control character as six bytes:
+  // the answer is 1.5 MiB.
+  model.answer(reply('\u0001'.repeat(256 * 1024)));
 
   const body = JSON.stringify({
     conversationId: opened.conversationId,

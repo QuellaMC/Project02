@@ -35,12 +35,13 @@ function longReply(characters: number): unknown[] {
 }
 
 /**
- * More draft than the sockets' buffers between the daemon and a client
- * hold, which the model then breaks off: frames enough to stall a client
- * that stops reading, of which the daemon keeps nothing.
+ * Several times more draft than the daemon's bounded send buffer, its
+ * response's own buffer and a client's receive buffer hold together, which
+ * the model then breaks off: frames enough to stall a client that stops
+ * reading, of which the daemon keeps nothing.
  */
 function overflowingDraft(): Answer {
-  return {chunks: longReply(8 * 1024 * 1024), end: 'cut'};
+  return {chunks: longReply(2 * 1024 * 1024), end: 'cut'};
 }
 
 it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, the daemon snapshot of health, waiting confirmations and pairings and running turns, as text/event-stream that is never cached', async () => {

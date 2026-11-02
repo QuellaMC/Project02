@@ -1,7 +1,7 @@
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-import {expect, it} from 'vitest';
+import {expect, it, vi} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
@@ -267,6 +267,13 @@ it("config.connector-config-read: a connector's read hands the home's entry and 
   const active = expect.objectContaining({status: 'active'}) as unknown;
   const disabled = expect.objectContaining({status: 'disabled'}) as unknown;
 
+  // The read lists the characters the boot has registered, and the daemon
+  // answers on its address before its boot ends.
+  await vi.waitFor(async () => {
+    const health = (await wire.health()) as {readonly characters: unknown[]};
+
+    expect(health.characters).toHaveLength(4);
+  });
   expect(await wire.connectorConfig('telegram')).toEqual({
     status: 'ok',
     connectorId: 'telegram',
