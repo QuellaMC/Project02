@@ -11,11 +11,12 @@ packages the gate's Linux job installs (`pkg-config`,
 `libxdo-dev`); on Windows, the MSVC build tools and WebView2; on macOS,
 Xcode's command line tools.
 
-- **The home** is `%LOCALAPPDATA%\Project02`, `~/Library/Application
+- **The home** is `%APPDATA%\Project02`, `~/Library/Application
   Support/Project02`, or `$XDG_DATA_HOME/project02` (else
   `~/.local/share/project02`): the person's, outside the app, the same for
-  every version, and never the app's own data folder, which the webview
-  writes into. `--store <dir>` on the shell's command line takes its place;
+  every version, and neither the app's own data folder, which the webview
+  writes into, nor on Windows the local one, where the installer puts the
+  app itself. `--store <dir>` on the shell's command line takes its place;
   nothing else is accepted there.
 - **The start** makes the store there as `serve --init` does, the person
   having consented by installing, and starts the connector beside the

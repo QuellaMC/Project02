@@ -5,17 +5,17 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// The home under the platform's local data folder `local_data`, as
-/// Tauri's `local_data_dir()` names it: `%LOCALAPPDATA%` on Windows,
-/// `~/Library/Application Support` on macOS, and `$XDG_DATA_HOME`, else
-/// `~/.local/share`, on Linux. `Project02` there, `project02` on Linux.
-/// Never one of the app's own data folders: on Windows the one that roams
-/// would carry the home to other machines, and the webview writes into the
-/// local one before a store could be made there, which the store then
-/// refuses.
+/// The home under the platform's data folder `data`, as Tauri's
+/// `data_dir()` names it: `%APPDATA%` on Windows, `~/Library/Application
+/// Support` on macOS, and `$XDG_DATA_HOME`, else `~/.local/share`, on
+/// Linux. `Project02` there, `project02` on Linux. Never one of the app's
+/// own data folders, which the webview writes into before a store could be
+/// made there, which the store then refuses; and not Windows' local data
+/// folder, where the per-user installer puts the app itself under this
+/// same name.
 #[must_use]
-pub fn per_user(local_data: &Path) -> PathBuf {
-    local_data.join(if cfg!(target_os = "linux") {
+pub fn per_user(data: &Path) -> PathBuf {
+    data.join(if cfg!(target_os = "linux") {
         "project02"
     } else {
         "Project02"
@@ -57,8 +57,8 @@ mod tests {
         );
         #[cfg(windows)]
         assert_eq!(
-            per_user(Path::new(r"C:\Users\ada\AppData\Local")),
-            Path::new(r"C:\Users\ada\AppData\Local\Project02")
+            per_user(Path::new(r"C:\Users\ada\AppData\Roaming")),
+            Path::new(r"C:\Users\ada\AppData\Roaming\Project02")
         );
 
         assert_eq!(named(&line(&[])), Ok(None));

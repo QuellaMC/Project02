@@ -84,7 +84,7 @@ fn failed(why: &dyn Display) -> ExitCode {
 fn start(app: &mut App, named: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     let home = match named {
         Some(dir) => path::absolute(dir)?,
-        None => home::per_user(&app.path().local_data_dir()?),
+        None => home::per_user(&app.path().data_dir()?),
     };
     let logs = app.path().app_log_dir()?;
 
