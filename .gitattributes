@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Generated and compared byte for byte; four license texts in it end lines with CRLF.
+THIRD-PARTY-NOTICES.txt -text
