@@ -18,6 +18,10 @@ tauri-plugin-single-instance.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util.workspace = true
 
+[dev-dependencies]
+p02-shared = { workspace = true, features = ["http"] }
+tempfile.workspace = true
+
 [build-dependencies]
 tauri-build.workspace = true
 
