@@ -29,14 +29,16 @@ pub struct TurnText {
     pub recent_visible_message_ids: Vec<MessageId>,
 }
 
-/// One hook call's view of its turn: who and when, the hook's deadline and
-/// cancellation, and only the capabilities its plugin was granted.
+/// One hook call's view of its turn: who and when, the hook's cancellation,
+/// and only the capabilities its plugin was granted.
 ///
 /// Cancellation is cooperative. When the hook overruns its plugin's budget
-/// or the turn is abandoned, the host stops waiting and cancels the token:
-/// async work should watch it, and every capability handle refuses each
-/// later call, so a hook past its deadline finishes the call it is in and
-/// starts no other.
+/// the host cancels the token and hears the hook for a second more, so a
+/// hook that stops at the token answers with what it gave up; when the
+/// turn is abandoned the host cancels it and stops waiting. Async work
+/// should watch it, and every capability handle refuses each later call,
+/// so a hook past its deadline finishes the call it is in and starts no
+/// other.
 #[derive(Clone, Debug)]
 pub struct HookContext {
     plugin_id: Identifier,
@@ -90,7 +92,7 @@ impl HookContext {
 
     /// Grants the plugin's character-scoped store (`character_file_store`),
     /// held to this hook's deadline and cancellation. The host keeps the
-    /// hold until the hook settles.
+    /// hold until the hook settles, and no later than its deadline.
     pub fn with_character_file_store(
         mut self,
         backend: Arc<dyn FileStoreBackend>,
@@ -126,12 +128,6 @@ impl HookContext {
     #[must_use]
     pub fn turn(&self) -> &TurnIdentity {
         &self.turn
-    }
-
-    /// When the host stops waiting for the hook.
-    #[must_use]
-    pub fn deadline(&self) -> Instant {
-        self.deadline
     }
 
     /// Cancelled when the hook overruns its budget or its turn is

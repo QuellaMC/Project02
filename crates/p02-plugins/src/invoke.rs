@@ -7,10 +7,10 @@
 //! deadline the hook's writes end and its token is cancelled, and the host
 //! hears it for a second more, so a hook that stops at its token answers
 //! with what it gave up; one silent past that is timed out. Whichever way
-//! the host stops waiting (an answer, the turn being abandoned, or the
-//! caller dropping the wait) the hook's writes end, and a hook that did not
-//! answer has its task aborted and its token cancelled, so work it started
-//! elsewhere starts nothing more.
+//! the host stops waiting (an answer, that second passing, the turn being
+//! abandoned, or the caller dropping the wait) the hook's writes end, and
+//! a hook that did not answer has its task aborted and its token
+//! cancelled, so work it started elsewhere starts nothing more.
 
 use std::any::Any;
 use std::future::Future;
