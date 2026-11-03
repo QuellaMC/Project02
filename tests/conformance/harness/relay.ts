@@ -75,11 +75,18 @@ type Holding = {
 
 type Scripted = {readonly hold: Holding} | {readonly status: number};
 
-/** A relay to the daemon serving `home`, whose record it copies under its own port. */
+/**
+ * A relay to the daemon serving `home`, whose record it copies under its own
+ * port. It forwards to the port the home's record names at the time, since a
+ * daemon that comes back finds its last port taken now and then, binds
+ * another, and records it.
+ */
 export async function startRelay(home: string): Promise<Relay> {
-  const record = JSON.parse(
-    readFileSync(join(home, 'daemon.json'), 'utf8'),
-  ) as Readonly<Record<string, unknown>>;
+  const recordOf = (): Readonly<Record<string, unknown>> =>
+    JSON.parse(readFileSync(join(home, 'daemon.json'), 'utf8')) as Readonly<
+      Record<string, unknown>
+    >;
+  const record = recordOf();
   const requests = observed<RelayedRequest>();
   const scripts = new Map<string, Scripted[]>();
   const parked: (() => void)[] = [];
@@ -101,7 +108,7 @@ export async function startRelay(home: string): Promise<Relay> {
   ): void => {
     const outgoing = forward({
       host: '127.0.0.1',
-      port: Number(record['port']),
+      port: Number(recordOf()['port']),
       method: request.method,
       path: request.url,
       headers: request.headers,
