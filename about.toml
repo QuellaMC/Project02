@@ -1,5 +1,5 @@
 # The third-party notice the install ships, made with
-# `cargo about generate --workspace --fail about.hbs -o THIRD-PARTY-NOTICES.txt`.
+# `cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-NOTICES.txt`.
 # It accepts what deny.toml allows and nothing more, in the order a crate
 # offering a choice is taken under: the terms that ask least of a binary first.
 accepted = [
