@@ -5,10 +5,10 @@ import {fileURLToPath} from 'node:url';
 
 import {describe, expect, it} from 'vitest';
 
-import {createTestTempRoot} from '../support/temp-root.ts';
+import {createTestTempRoot} from './temp-root.ts';
 
 const script = fileURLToPath(
-  new URL('../../scripts/check-conformance-inventory.mjs', import.meta.url),
+  new URL('../scripts/check-conformance-inventory.mjs', import.meta.url),
 );
 const header =
   'id,area,statement,boundary,source_tests,coverage_today,blackbox,notes,' +

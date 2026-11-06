@@ -1,6 +1,6 @@
 {
   "name": "project02",
-  "description": "The Live Character Framework's clients, beside the daemon under crates/: the web page and the reference client.",
+  "description": "The Live Character Framework's TypeScript workspace, beside the daemon under crates/: the page and the wire under packages/, and the suites that drive the binary under tests/.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
@@ -10,39 +10,27 @@
   "scripts": {
     "serve": "pnpm build:web && cargo run --locked -p project02 -- serve",
     "inspect": "cargo run --locked -p project02 -- inspect",
-    "build:web": "vite build",
+    "build:web": "pnpm --filter @project02/page build",
     "build": "pnpm build:web && cargo build --locked -p project02",
-    "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"src/**/*.ts\" \"src/**/*.tsx\" \"tests/**/*.ts\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\"",
-    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"src/**/*.tsx\" \"src/**/*.css\" \"src/**/*.html\" \"src/**/*.json\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"vitest.config.ts\" \"vite.config.ts\" \"playwright.config.ts\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"tsconfig.json\" \".prettierrc.json\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/frontends/web/tsconfig.json --noEmit",
+    "lint": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"packages/**/*.ts\" \"packages/**/*.tsx\" \"tests/**/*.ts\"",
+    "format": "prettier --write \"packages/**/*.ts\" \"packages/**/*.tsx\" \"packages/**/*.css\" \"packages/**/*.html\" \"packages/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"scripts/**/*.mjs\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig.base.json\" \".prettierrc.json\"",
+    "format:check": "prettier --check \"packages/**/*.ts\" \"packages/**/*.tsx\" \"packages/**/*.css\" \"packages/**/*.html\" \"packages/**/*.json\" \"tests/**/*.ts\" \"tests/**/*.json\" \"scripts/**/*.mjs\" \"eslint.config.mjs\" \".dependency-cruiser.mjs\" \"package.json\" \"pnpm-workspace.yaml\" \"tsconfig.base.json\" \".prettierrc.json\"",
+    "typecheck": "pnpm -r typecheck",
     "arch:check": "node scripts/arch-check.mjs && node scripts/check-source-text.mjs && node scripts/check-conformance-inventory.mjs",
-    "arch:baseline": "node scripts/arch-check.mjs --baseline",
-    "test": "vitest run --project=unit",
-    "test:coverage": "vitest run --coverage --project=unit",
-    "test:watch": "vitest --project=unit",
-    "test:conformance": "pnpm build && vitest run --project=conformance",
-    "test:browser": "pnpm build && playwright test",
+    "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage && pnpm --filter @project02/tests test",
+    "test:conformance": "pnpm build && pnpm --filter @project02/tests test:conformance",
+    "test:browser": "pnpm build && pnpm --filter @project02/tests test:browser",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage && pnpm test:browser",
-    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- src/gateway/api/generated && cargo deny check && cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-NOTICES.txt && git diff --exit-code -- THIRD-PARTY-NOTICES.txt"
+    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets --locked -- -D warnings && cargo test --workspace --locked && git diff --exit-code -- packages/wire/src/contract/generated && cargo deny check && cargo about generate --workspace --locked --fail about.hbs -o THIRD-PARTY-NOTICES.txt && git diff --exit-code -- THIRD-PARTY-NOTICES.txt"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "1.63.0",
     "@tauri-apps/cli": "2.12.4",
-    "@types/node": "^24.12.4",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vitest/coverage-v8": "4.1.7",
-    "ajv": "^8.20.0",
     "dependency-cruiser": "^18.1.0",
     "eslint": "^10.4.0",
     "prettier": "3.9.5",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.60.0",
-    "vite": "8.3.0",
-    "vitest": "^4.1.7"
+    "typescript-eslint": "^8.60.0"
   }
 }

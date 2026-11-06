@@ -7,8 +7,8 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
-} from '../../gateway/api/index.ts';
-import type {GatewayClient} from '../../gateway/client/index.ts';
+} from '@project02/wire/contract';
+import type {GatewayClient} from '@project02/wire/client';
 import {
   changeEnded,
   changeSent,

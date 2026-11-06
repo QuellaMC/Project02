@@ -4,7 +4,7 @@ import type {
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
-} from '../../gateway/api/index.ts';
+} from '@project02/wire/contract';
 import type {Session} from './session.ts';
 import {
   connectorPresenceSentence,

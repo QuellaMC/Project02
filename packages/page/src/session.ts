@@ -4,13 +4,13 @@
  * page reads the store, never the client. The address is the page's own,
  * so this runs only in a browser: the browser suite is its cover.
  */
-import {turnCommittedTheLine, type Answer} from '../../gateway/api/index.ts';
+import {turnCommittedTheLine, type Answer} from '@project02/wire/contract';
 import {
   createGatewayClient,
   GatewayClientError,
   type GatewayClient,
   type HistoryPage,
-} from '../../gateway/client/index.ts';
+} from '@project02/wire/client';
 import {
   createSettingsVerbs,
   noSettingsVerbs,

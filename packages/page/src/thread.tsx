@@ -1,6 +1,6 @@
 import {useEffect, useRef} from 'react';
 
-import type {CharacterSummary} from '../../gateway/api/index.ts';
+import type {CharacterSummary} from '@project02/wire/contract';
 import type {Session} from './session.ts';
 import {composerText, type Thread, type WebState} from './store.ts';
 

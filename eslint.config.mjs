@@ -3,18 +3,11 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // Generated from the Rust wire types; neither written nor styled by hand.
-  {ignores: ['src/gateway/api/generated/']},
+  {ignores: ['packages/wire/src/contract/generated/']},
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
-    files: [
-      'src/**/*.ts',
-      'src/**/*.tsx',
-      'tests/**/*.ts',
-      'vitest.config.ts',
-      'vite.config.ts',
-      'playwright.config.ts',
-    ],
+    files: ['packages/**/*.ts', 'packages/**/*.tsx', 'tests/**/*.ts'],
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -40,7 +33,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['tests/**/*.ts'],
+    files: ['packages/**/*.test.ts', 'tests/**/*.ts'],
     rules: {
       'no-restricted-properties': [
         'error',
@@ -51,7 +44,8 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    files: ['packages/*/src/**/*.ts', 'packages/*/src/**/*.tsx'],
+    ignores: ['**/*.test.ts'],
     rules: {
       complexity: ['error', 20],
       'max-lines': [

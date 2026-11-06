@@ -8,6 +8,8 @@ import {attachEvidence, ceilingMs, waitFailure, within} from './wait.ts';
 /** A program's command line, run from the repository root. */
 type Command = readonly string[];
 
+const repositoryRoot = fileURLToPath(new URL('../../..', import.meta.url));
+
 // Every command is the binary `pnpm build` makes.
 const serveCommand = commandOf(
   'PROJECT02_SERVE_CMD',
@@ -182,6 +184,7 @@ function start(
 ): Started {
   const [command = '', ...commandArgs] = commandLine;
   const child = spawn(command, commandArgs, {
+    cwd: repositoryRoot,
     env: {...inherited, ...env},
     detached: true,
     stdio: [stdin, 'pipe', 'pipe'],

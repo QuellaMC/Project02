@@ -18,13 +18,13 @@ import {
   settingsOpened,
   setupNeeded,
   valueText,
-} from '../../src/frontends/web/settings.ts';
+} from './settings.ts';
 import {
   initialState,
   installSnapshot,
   threadOpened,
   type WebState,
-} from '../../src/frontends/web/store.ts';
+} from './store.ts';
 import type {
   ConfigTarget,
   ConfigView,
@@ -33,7 +33,7 @@ import type {
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
-} from '../../src/gateway/api/index.ts';
+} from '@project02/wire/contract';
 
 const home: ConfigTarget = {scope: 'global'};
 const mira: ConfigTarget = {scope: 'character', characterId: 'mira'};

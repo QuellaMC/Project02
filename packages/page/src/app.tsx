@@ -5,7 +5,7 @@ import type {
   CharacterSummary,
   PairingRequest,
   PendingConfirmation,
-} from '../../gateway/api/index.ts';
+} from '@project02/wire/contract';
 import {webSource, type Session} from './session.ts';
 import {readableName} from './settings.ts';
 import {SettingsScreen} from './settings.tsx';

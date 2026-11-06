@@ -3,7 +3,6 @@
     "target": "ES2024",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2024"],
     "types": ["node"],
     "strict": true,
     "noEmit": true,
@@ -18,14 +17,5 @@
     "useUnknownInCatchVariables": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
-  },
-  "include": [
-    "src/**/*.ts",
-    "tests/**/*.ts",
-    "vitest.config.ts",
-    "vite.config.ts",
-    "playwright.config.ts",
-    "eslint.config.mjs"
-  ],
-  "exclude": ["node_modules", "coverage", "dist", "src/frontends/web"]
+  }
 }

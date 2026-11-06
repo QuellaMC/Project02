@@ -1,0 +1,20 @@
+{
+  "name": "@project02/wire",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./contract": "./src/contract/index.ts",
+    "./client": "./src/client/index.ts",
+    "./schema.json": "./src/contract/generated/schema.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "@vitest/coverage-v8": "4.1.7",
+    "vitest": "^4.1.7"
+  }
+}

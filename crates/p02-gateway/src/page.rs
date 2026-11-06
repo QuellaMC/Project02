@@ -12,10 +12,10 @@ use rust_embed::{EmbeddedFile, RustEmbed};
 
 use crate::http::Refusal;
 
-/// What `pnpm build:web` left in `dist/web` when the binary was built, or
-/// nothing when it had not run.
+/// What `pnpm build:web` left in `packages/page/dist` when the binary was
+/// built, or nothing when it had not run.
 #[derive(RustEmbed)]
-#[folder = "../../dist/web/"]
+#[folder = "../../packages/page/dist/"]
 #[allow_missing = true]
 struct Built;
 
