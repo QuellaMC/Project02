@@ -204,7 +204,7 @@ export function createGatewayClient(
     },
     startCharacter: (characterId, callOptions) =>
       route.post<StartOutcome>(
-        `/api/characters/${characterId}/start`,
+        `/api/characters/${segment(characterId)}/start`,
         undefined,
         callOptions,
       ),
@@ -218,7 +218,7 @@ export function createGatewayClient(
       route.post<TurnOutcome>('/api/turns', message, callOptions),
     history: (conversationId, page = {}, callOptions) =>
       route.get<HistoryOutcome>(
-        `/api/conversations/${conversationId}/messages${query({
+        `/api/conversations/${segment(conversationId)}/messages${query({
           before: page.before,
           limit: page.limit === undefined ? undefined : String(page.limit),
         })}`,
@@ -228,7 +228,7 @@ export function createGatewayClient(
       route.get<PendingConfirmation[]>('/api/confirmations', callOptions),
     answerConfirmation: (id, decision, callOptions) =>
       route.post<AnswerOutcome>(
-        `/api/confirmations/${id}`,
+        `/api/confirmations/${segment(id)}`,
         {decision} satisfies AnswerBody,
         callOptions,
       ),
@@ -245,12 +245,12 @@ export function createGatewayClient(
       route.post<ConfigChangeOutcome>('/api/config', change, callOptions),
     connectorConfig: (connectorId, callOptions) =>
       route.get<ConnectorConfigView>(
-        `/api/connectors/${connectorId}/config`,
+        `/api/connectors/${segment(connectorId)}/config`,
         callOptions,
       ),
     requestPairing: (connectorId, subject, callOptions) =>
       route.post<PairingRequestOutcome>(
-        `/api/connectors/${connectorId}/pairing`,
+        `/api/connectors/${segment(connectorId)}/pairing`,
         {subject} satisfies PairingRequestBody,
         callOptions,
       ),
@@ -258,7 +258,7 @@ export function createGatewayClient(
       route.get<PairingRequest[]>('/api/pairing', callOptions),
     settlePairing: (code, decision, callOptions) =>
       route.post<PairingSettleOutcome>(
-        `/api/pairing/${code}`,
+        `/api/pairing/${segment(code)}`,
         {decision} satisfies AnswerBody,
         callOptions,
       ),
@@ -384,6 +384,14 @@ function createRoutes(
       options?: GatewayCallOptions,
     ) => (await send('POST', path, body, options)) as Outcome,
   };
+}
+
+/**
+ * A value as one segment of a path: the daemon reads it back as given,
+ * whatever characters it holds, and never as a path of its own.
+ */
+function segment(value: string): string {
+  return encodeURIComponent(value);
 }
 
 /** The query of the parameters given, none when none is. */
