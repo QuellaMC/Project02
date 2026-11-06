@@ -34,5 +34,5 @@ pub use json_boundary::{
     BoundJsonError, Credentials, JsonLimits, bound_json, bound_json_object, redact_credentials,
 };
 pub use redaction::is_credential_key;
-pub use sentence::{error_sentence, sentence};
+pub use sentence::{error_chain, error_sentence, sentence};
 pub use sse::{SseFrame, SseFrameSplitter};

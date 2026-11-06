@@ -4,14 +4,13 @@ use std::sync::{LazyLock, Mutex, PoisonError};
 
 use p02_contracts::PluginDatabase;
 use p02_memory::{Engine, EngineError, SCHEMA_VERSION, Scope, Settings, initialize};
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_chain};
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 
 use super::backend::{
     BackendError, Failure, Found, Operation, RECALL_LIMIT, Readiness, Write, Written,
 };
-use crate::boundary::described;
 
 static DATABASE: LazyLock<Identifier> =
     LazyLock::new(|| Identifier::new("memory").expect("the name is an identifier"));
@@ -58,9 +57,9 @@ impl Embedded {
                 tokio::task::spawn_blocking(move || {
                     let connection = databases
                         .open(&DATABASE, SCHEMA_VERSION, initialize)
-                        .map_err(|error| described(&error))?;
+                        .map_err(|error| error_chain(&error))?;
 
-                    Engine::open(connection, settings).map_err(|error| described(&error))
+                    Engine::open(connection, settings).map_err(|error| error_chain(&error))
                 })
                 .await
                 .map_err(|_| "its opening job stopped".to_owned())?
@@ -182,7 +181,7 @@ impl Embedded {
         };
         let ended = ended?.await.unwrap_or(Err(EngineError::Interrupted));
 
-        ended.err().map(|error| described(&error))
+        ended.err().map(|error| error_chain(&error))
     }
 }
 
@@ -200,5 +199,5 @@ impl Drop for Embedded {
 }
 
 fn failed(operation: Operation, error: &EngineError) -> BackendError {
-    BackendError::new(operation, Failure::Engine(described(error)))
+    BackendError::new(operation, Failure::Engine(error_chain(error)))
 }

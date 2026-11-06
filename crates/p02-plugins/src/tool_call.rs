@@ -12,11 +12,11 @@ use p02_contracts::{
     PolicyOutcome, PreparedEffect, ProvidedTool, ToolCall, ToolCallId, ToolCallOutcome,
     ToolCallResult, ToolConcurrency, ToolPreparation,
 };
-use p02_shared::{Credentials, Identifier, JsonLimits, bound_json, bound_json_object};
+use p02_shared::{Credentials, Identifier, JsonLimits, bound_json, bound_json_object, error_chain};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::boundary::{described, quoted, within_answer_limits};
+use crate::boundary::{quoted, within_answer_limits};
 use crate::confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use crate::host::{Core, PluginHost, Route, Slot};
 use crate::invoke::{FailureKind, HookFailure, Invocation};
@@ -291,7 +291,7 @@ impl Slot {
                     JsonLimits::default(),
                     Credentials::Redact,
                 )
-                .map_err(|error| described(&error))?;
+                .map_err(|error| error_chain(&error))?;
 
                 (ToolCallResult::Accepted { output }, evidence)
             }
@@ -382,7 +382,7 @@ impl Slot {
             JsonLimits::default(),
             Credentials::Redact,
         )
-        .map_err(|error| breach(described(&error)))?;
+        .map_err(|error| breach(error_chain(&error)))?;
         let blocking = notes.iter().any(EvidenceNote::blocks_tool_invocation);
         let evidence = self.stamp_all(turn, notes).map_err(breach)?;
 

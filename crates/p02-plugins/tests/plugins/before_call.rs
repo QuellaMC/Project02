@@ -14,7 +14,8 @@ use serde_json::json;
 use tokio::time::Instant;
 
 use crate::support::{
-    Blocking, Failing, Hanging, Panicking, Scripted, Spec, Verbose, host_of, id, note, turn,
+    Blocking, Failing, FailingWithCause, Hanging, Panicking, Scripted, Spec, Verbose, host_of, id,
+    note, turn,
 };
 
 fn prepared(outcome: BeforeCallOutcome) -> PreparedContext {
@@ -223,6 +224,32 @@ async fn a_failing_hook_follows_its_failure_behavior() {
     assert_eq!(
         rejection.evidence[0].policy_outcome(),
         Some(PolicyOutcome::RequiredRejected)
+    );
+}
+
+/// plugins.hook-failure-names-cause: a hook's failure is recorded with each cause beneath it, so a store's refusal under "the plugin store call failed" is named, never the message alone
+#[tokio::test(start_paused = true)]
+async fn a_failing_hooks_cause_is_named() {
+    let rejection = rejected(
+        host_of(vec![(
+            Spec {
+                before: "reject_turn",
+                ..Spec::new("flaky")
+            },
+            Arc::new(FailingWithCause),
+        )])
+        .before_role_model_call(&turn())
+        .await,
+    );
+
+    assert_eq!(
+        rejection.message,
+        "the plugin store call failed: the store's lease was refused"
+    );
+    assert_eq!(
+        rejection.evidence[0].summary(),
+        "Required before-role-model plugin hook rejected the turn: the plugin store call \
+         failed: the store's lease was refused"
     );
 }
 

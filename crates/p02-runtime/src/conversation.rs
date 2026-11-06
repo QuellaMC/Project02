@@ -11,6 +11,7 @@ use p02_core::{
     SessionId, SpeakerName,
 };
 use p02_plugins::PluginHost;
+use p02_shared::error_chain;
 use p02_store::{
     CharacterData, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
     SessionContinuation, SessionContinued, SessionLog, SessionWriter, StorageError, Summarizer,
@@ -295,7 +296,7 @@ impl Conversation {
     /// segment's end, in a sentence, when anything did.
     pub async fn close(mut self, host: &PluginHost) -> Option<String> {
         let Some(disk) = self.disk.take() else {
-            return Some(turn::described(&RunTurnError::StateLost));
+            return Some(error_chain(&RunTurnError::StateLost));
         };
         let session = disk.writer.session_id().clone();
         let mut failures = end(host, &session, &self.cast.character).await;
@@ -307,7 +308,7 @@ impl Conversation {
         })
         .await
         {
-            failures.push(turn::described(&error));
+            failures.push(error_chain(&error));
         }
 
         joined(&failures)
@@ -349,7 +350,7 @@ impl Conversation {
             Err(error) => {
                 return Some(Rotation::Failed {
                     from,
-                    message: turn::described(&error),
+                    message: error_chain(&error),
                 });
             }
         };
@@ -381,7 +382,7 @@ impl Conversation {
             Err(error) => {
                 return Some(Rotation::Failed {
                     from,
-                    message: turn::described(&error),
+                    message: error_chain(&error),
                 });
             }
         };
@@ -394,13 +395,13 @@ impl Conversation {
         })
         .await
         {
-            failures.push(turn::described(&error));
+            failures.push(error_chain(&error));
         }
 
         failures.extend(end(mind.host, &from, &self.cast.character).await);
 
         if let Err(error) = blocking(move || ended.release()).await {
-            failures.push(turn::described(&error));
+            failures.push(error_chain(&error));
         }
 
         Some(Rotation::Rotated {
@@ -546,13 +547,13 @@ impl Disk {
         let made = self
             .data
             .continue_session(&self.holder, &from)
-            .map_err(|error| turn::described(&error))?;
+            .map_err(|error| error_chain(&error))?;
         let to = made.session_id().clone();
         let mut writer = self
             .data
             .session_log(&self.conversation, to.segment())
             .and_then(SessionLog::writer)
-            .map_err(|error| format!("{}; {LEFT_EMPTY}", turn::described(&error)))?;
+            .map_err(|error| format!("{}; {LEFT_EMPTY}", error_chain(&error)))?;
         let committed = SessionContinuation::new(
             to.clone(),
             next.continued_from,
@@ -575,13 +576,13 @@ impl Disk {
         match committed {
             Ok(()) => Ok((std::mem::replace(&mut self.writer, writer), to)),
             Err(error) => {
-                let failure = turn::described(&error);
+                let failure = error_chain(&error);
 
                 match writer.discard() {
                     Ok(()) => Err(failure),
                     Err(discard) => Err(format!(
                         "{failure}; {LEFT_EMPTY}: {}",
-                        turn::described(&discard)
+                        error_chain(&discard)
                     )),
                 }
             }

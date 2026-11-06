@@ -4,12 +4,12 @@
 //! through its failure policy; nothing a plugin returns is cut to fit.
 
 use std::borrow::Cow;
-use std::error::Error;
 
 use p02_contracts::{
     Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, Hook, PolicyOutcome, RedactionLabel,
     merged_labels, within_limits,
 };
+use p02_shared::error_chain;
 use serde::Serialize;
 
 use crate::host::Slot;
@@ -85,7 +85,7 @@ impl Slot {
                     note,
                     self.labels(turn),
                 )
-                .map_err(|error| described(&error))
+                .map_err(|error| error_chain(&error))
             })
             .collect()
     }
@@ -122,20 +122,5 @@ impl Slot {
 /// the JSON limits.
 pub(crate) fn within_answer_limits(answer: &impl Serialize, hook: Hook) -> Result<(), String> {
     within_limits(answer, &format!("Plugin {} result", hook.name()))
-        .map_err(|error| described(&error))
-}
-
-/// A refusal of the contracts with its causes, which name a place in the
-/// plugin's answer and never a path on disk.
-pub(crate) fn described(error: &dyn Error) -> String {
-    let mut text = error.to_string();
-    let mut cause = error.source();
-
-    while let Some(error) = cause {
-        text.push_str(": ");
-        text.push_str(&error.to_string());
-        cause = error.source();
-    }
-
-    text
+        .map_err(|error| error_chain(&error))
 }

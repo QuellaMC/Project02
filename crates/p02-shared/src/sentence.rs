@@ -21,10 +21,9 @@ pub fn sentence(fragment: &str) -> String {
     sentence
 }
 
-/// `error` and each cause beneath it as one sentence: what broke, then
-/// why.
+/// `error` and each cause beneath it, one fragment: what broke, then why.
 #[must_use]
-pub fn error_sentence(error: &dyn Error) -> String {
+pub fn error_chain(error: &dyn Error) -> String {
     let mut words = error.to_string();
     let mut cause = error.source();
 
@@ -34,7 +33,14 @@ pub fn error_sentence(error: &dyn Error) -> String {
         cause = error.source();
     }
 
-    sentence(&words)
+    words
+}
+
+/// `error` and each cause beneath it as one sentence: what broke, then
+/// why.
+#[must_use]
+pub fn error_sentence(error: &dyn Error) -> String {
+    sentence(&error_chain(error))
 }
 
 #[cfg(test)]

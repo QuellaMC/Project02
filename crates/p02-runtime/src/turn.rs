@@ -2,7 +2,6 @@
 //! admits them, the plugins' hooks around the model's rounds, and what the
 //! turn announces as it goes.
 
-use std::error::Error;
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
@@ -25,7 +24,7 @@ use p02_role_model::{
     CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
     TurnOutcome, TurnSink, run_turn, select_history_window, today_note,
 };
-use p02_shared::{BoundJsonError, Identifier};
+use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
     PayloadSummary, RecordBody, RecordError, RoundRecord, RoundSnapshot, RuntimeRejection,
@@ -190,20 +189,6 @@ pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
     } else {
         Person::Named(name)
     }
-}
-
-/// An error and the causes under it, as one sentence: what broke, then why.
-pub(crate) fn described(error: &dyn Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-
-    text
 }
 
 /// What the person is told of a text that is no line, which their client
@@ -680,7 +665,7 @@ impl OpenTurn<'_> {
                 }))
                 .await
             {
-                failed.push(described(&error));
+                failed.push(error_chain(&error));
             }
         }
 

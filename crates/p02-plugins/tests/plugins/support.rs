@@ -384,6 +384,27 @@ impl RuntimePlugin for Failing {
     }
 }
 
+/// Fails its before-call hook the way a plugin's store call fails: with
+/// the store's refusal beneath the failure.
+#[derive(Debug)]
+pub(crate) struct FailingWithCause;
+
+#[async_trait]
+impl RuntimePlugin for FailingWithCause {
+    async fn before_role_model_call(
+        &self,
+        _context: &HookContext,
+    ) -> Result<BeforeRoleModelCallOutput, PluginError> {
+        Err(PluginError::with_source(
+            "the plugin store call failed",
+            std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "the store's lease was refused",
+            ),
+        ))
+    }
+}
+
 /// Fails every hook with more words than any record keeps.
 #[derive(Debug, Default)]
 pub(crate) struct Verbose {

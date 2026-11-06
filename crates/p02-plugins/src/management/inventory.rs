@@ -9,10 +9,9 @@ use p02_contracts::{
     AccessMap, Declaration, EvidenceKind, EvidenceNote, EvidenceStatus, Hook, Manifest,
     PluginError, ProvidedTool, ToolCall, ToolCallOutcome,
 };
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_chain};
 use serde_json::{Value, json};
 
-use crate::boundary::described;
 use crate::config_control::{ActivationStatus, ConfigControl};
 use crate::host::Core;
 use crate::package::blocking;
@@ -48,7 +47,7 @@ pub(super) async fn answer(
             None => BTreeMap::new(),
         };
         let installed =
-            crate::list::plugins().map_err(|error| PluginError::new(described(error)))?;
+            crate::list::plugins().map_err(|error| PluginError::new(error_chain(error)))?;
 
         listed.extend(
             installed
