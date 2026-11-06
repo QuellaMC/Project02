@@ -1,8 +1,8 @@
 //! The wire's contract, written from the types that cross the socket: the
-//! TypeScript declarations the page, the client and the connector compile
-//! against, and the JSON Schema the conformance suite holds every answer
-//! and every frame to. Both are generated files, which the repository's
-//! formatter and linter leave alone.
+//! TypeScript declarations the page and the client compile against, and
+//! the JSON Schema the conformance suite holds every answer and every
+//! frame to. Both are generated files, which the repository's formatter
+//! and linter leave alone.
 
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashSet};
