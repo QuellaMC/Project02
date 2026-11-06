@@ -11,6 +11,7 @@ use p02_app::{
     PairingOutcome, TurnOutcome,
 };
 use p02_config::ConnectorConfigView;
+use p02_core::ClientStamp;
 use p02_gateway::{
     AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody,
     PairingSubjectBody, Ready, Short,
@@ -119,13 +120,16 @@ impl Daemon {
         .await
     }
 
+    /// Asks to let in the account `subject`, which wrote to the bot whose
+    /// stamp is `source`.
     pub(crate) async fn request_pairing(
         &self,
         subject: PairingSubjectBody,
+        source: ClientStamp,
     ) -> Result<PairingOutcome, Unanswered> {
         self.post(
             &format!("/api/connectors/{CONNECTOR}/pairing"),
-            &PairingRequestBody { subject },
+            &PairingRequestBody { subject, source },
         )
         .await
     }

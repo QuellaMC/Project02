@@ -1499,6 +1499,10 @@
         "subject": {
           "$ref": "#/$defs/PairingSubject"
         },
+        "source": {
+          "$ref": "#/$defs/ClientStamp",
+          "description": "The connector's endpoint the account first wrote to, as the stamp\nits lines will carry: for Telegram, `telegram:<bot username>`."
+        },
         "requestedAt": {
           "$ref": "#/$defs/Timestamp"
         },
@@ -1512,6 +1516,7 @@
         "connectorId",
         "code",
         "subject",
+        "source",
         "requestedAt",
         "expiresAt"
       ],
@@ -1523,12 +1528,17 @@
       "properties": {
         "subject": {
           "$ref": "#/$defs/PairingSubjectBody"
+        },
+        "source": {
+          "$ref": "#/$defs/ClientStamp",
+          "description": "The connector's endpoint the account wrote to, as the stamp its\nlines will carry: for Telegram, `telegram:<bot username>`."
         }
       },
       "required": [
-        "subject"
+        "subject",
+        "source"
       ],
-      "description": "The account a connector asks the person to let in."
+      "description": "The account a connector asks the person to let in, and where it wrote."
     },
     "PairingRequestOutcome": {
       "oneOf": [

@@ -407,10 +407,10 @@ async fn request_pairing(
     };
 
     match read::<PairingRequestBody>("The pairing request", &headers, body) {
-        Ok(PairingRequestBody { subject }) => answer(
+        Ok(PairingRequestBody { subject, source }) => answer(
             &app.0
                 .daemon
-                .request_pairing(&connector, subject.id, &subject.label.0)
+                .request_pairing(&connector, subject.id, &subject.label.0, source)
                 .await,
         ),
         Err(refusal) => refusal.into_response(),
@@ -713,11 +713,14 @@ pub struct AnswerBody {
     pub decision: Answer,
 }
 
-/// The account a connector asks the person to let in.
+/// The account a connector asks the person to let in, and where it wrote.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct PairingRequestBody {
     pub subject: PairingSubjectBody,
+    /// The connector's endpoint the account wrote to, as the stamp its
+    /// lines will carry: for Telegram, `telegram:<bot username>`.
+    pub source: ClientStamp,
 }
 
 /// The account a pairing is for: its id a stamp, and its name within the

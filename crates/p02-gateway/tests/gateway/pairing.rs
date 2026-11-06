@@ -11,12 +11,16 @@ use crate::support::{Gateway, World};
 const ALICE: &str = "381940562";
 const BOB: &str = "987654321";
 
+/// Asks for the account as Mira's bot does when it writes there.
 async fn ask(gateway: &Gateway, connector: &str, id: &str, label: &str) -> Value {
     gateway
         .verb(
             Method::POST,
             &format!("/api/connectors/{connector}/pairing"),
-            Some(&json!({"subject": {"id": id, "label": label}})),
+            Some(&json!({
+                "subject": {"id": id, "label": label},
+                "source": "telegram:mira_bot",
+            })),
         )
         .await
 }

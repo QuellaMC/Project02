@@ -25,17 +25,17 @@ stream and the verbs a page calls, and runs only in a browser; `app.tsx`
 and `thread.tsx` render the store — the roster, every confirmation and
 pairing request waiting, the thread with its draft bubbles, the one-line
 composer. A pairing request is a card beside the confirmations, with its
-connector, the account, the code and when it expires; the daemon's answer
-to a click settles it as a confirmation's answer does — a settlement is
-left to the frame, an expiry is said once whichever news of it comes
-first, a request the daemon no longer knows is no longer waiting — and an
-approval that could not be written keeps the card and says why. The
-turns in progress are the contract's own shape, folded from frames by the
-contract's one fold and installed from every `ready`; a stream the daemon
-resumed is live again with nothing installed. A restart of the daemon is a
-reconnect on the same address, and the next line goes through without a
-click. The browser suite under `tests/browser` drives the built page in
-Chromium against a real daemon.
+connector, the account, the source it wrote to, the code and when it
+expires; the daemon's answer to a click settles it as a confirmation's
+answer does — a settlement is left to the frame, an expiry is said once
+whichever news of it comes first, a request the daemon no longer knows is
+no longer waiting — and an approval that could not be written keeps the
+card and says why. The turns in progress are the contract's own shape,
+folded from frames by the contract's one fold and installed from every
+`ready`; a stream the daemon resumed is live again with nothing installed.
+A restart of the daemon is a reconnect on the same address, and the next
+line goes through without a click. The browser suite under `tests/browser`
+drives the built page in Chromium against a real daemon.
 
 The settings screen is the page's one writer of config, over the daemon's
 two verbs. `settings.ts` holds its rules, pure and tested in Node: the

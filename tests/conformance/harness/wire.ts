@@ -106,13 +106,16 @@ export function wireOf(daemon: Address) {
       ),
     pairingRequest: (
       connectorId: string,
-      subject: {readonly id: string; readonly label: string},
+      request: {
+        readonly subject: {readonly id: string; readonly label: string};
+        readonly source: string;
+      },
     ) =>
       call(
         'POST',
         `/api/connectors/${segment(connectorId)}/pairing`,
         'PairingRequestOutcome',
-        {subject},
+        request,
       ),
     pendingPairings: () =>
       call('GET', '/api/pairing', {listOf: 'PairingRequest'}),

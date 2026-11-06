@@ -316,16 +316,26 @@ export type PairingRequest = { connectorId: Identifier,
 /**
  * Six digits, unique among the requests waiting.
  */
-code: string, subject: PairingSubject, requestedAt: Timestamp, 
+code: string, subject: PairingSubject, 
+/**
+ * The connector's endpoint the account first wrote to, as the stamp
+ * its lines will carry: for Telegram, `telegram:<bot username>`.
+ */
+source: ClientStamp, requestedAt: Timestamp, 
 /**
  * When the request expires, in milliseconds since the Unix epoch.
  */
 expiresAt: number, };
 
 /**
- * The account a connector asks the person to let in.
+ * The account a connector asks the person to let in, and where it wrote.
  */
-export type PairingRequestBody = { subject: PairingSubjectBody, };
+export type PairingRequestBody = { subject: PairingSubjectBody, 
+/**
+ * The connector's endpoint the account wrote to, as the stamp its
+ * lines will carry: for Telegram, `telegram:<bot username>`.
+ */
+source: ClientStamp, };
 
 /**
  * What came of a connector's request to let an account in. `paired`: the

@@ -845,6 +845,7 @@ function pairingOf(
     connectorId: event.connectorId,
     code: event.code,
     subject: event.subject,
+    source: event.source,
     requestedAt: event.requestedAt,
     expiresAt: event.expiresAt,
   };

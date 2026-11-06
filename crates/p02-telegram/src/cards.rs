@@ -134,8 +134,8 @@ impl CardText {
             }
             Self::Pairing(request) => {
                 let mut text = format!(
-                    "{} wants to pair · code {}",
-                    request.subject.label, request.code
+                    "{} wants to pair via {} · code {}",
+                    request.subject.label, request.source, request.code
                 );
 
                 if !ended {

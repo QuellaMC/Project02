@@ -103,7 +103,9 @@ tokio's blocking pool.
   The daemon judges the deadline, as it does a confirmation's, and
   settles a request nobody answered expired; an approval that cannot be
   written leaves the request waiting with what is left of its time,
-  announced again. No request outlives the daemon's run.
+  announced again. No request outlives the daemon's run. A request names
+  the source its account wrote to first, the stamp its lines will carry;
+  asking again from another keeps it.
 - **History.** A conversation's committed messages as one scrollback
   across her segments, newest page first and chronological within it, the
   cursor `v1:<segment>:<index>` naming where the next page ends; a limit is

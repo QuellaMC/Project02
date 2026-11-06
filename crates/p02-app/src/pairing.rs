@@ -70,16 +70,18 @@ impl Pairings {
 
 impl Daemon {
     /// Asks the person to let in the account `id` of connector `connector`,
-    /// named `label`: an account the home lets in already is `paired`, and a
-    /// request waiting for that account settles approved with it, unless
-    /// its approval is being written; otherwise the request waiting for it,
-    /// or a new one under a fresh code until the pairing deadline, which
-    /// every surface hears of.
+    /// named `label`, which wrote to `source`: an account the home lets in
+    /// already is `paired`, and a request waiting for that account settles
+    /// approved with it, unless its approval is being written; otherwise
+    /// the request waiting for that account, wherever it wrote this time,
+    /// or a new one from `source` under a fresh code until the pairing
+    /// deadline, which every surface hears of.
     pub async fn request_pairing(
         &self,
         connector: &str,
         id: ClientStamp,
         label: &str,
+        source: ClientStamp,
     ) -> PairingOutcome {
         let Some(connector) = connectors()
             .iter()
@@ -106,7 +108,7 @@ impl Daemon {
         };
         let daemon = self.clone();
 
-        blocking(move || daemon.ask(connector, PairingSubject { id, label })).await
+        blocking(move || daemon.ask(connector, PairingSubject { id, label }, source)).await
     }
 
     /// The requests waiting, oldest first.
@@ -133,7 +135,12 @@ impl Daemon {
         blocking(move || daemon.settle(&code, answer)).await
     }
 
-    fn ask(&self, connector: &'static Connector, subject: PairingSubject) -> PairingOutcome {
+    fn ask(
+        &self,
+        connector: &'static Connector,
+        subject: PairingSubject,
+        source: ClientStamp,
+    ) -> PairingOutcome {
         let paired = match allowlist(self.world(), connector) {
             Ok(allowlist) => allowlist.accounts.contains_key(subject.id.as_str()),
             Err(message) => {
@@ -172,6 +179,7 @@ impl Daemon {
                 connector_id: connector.id().clone(),
                 code: fresh_code(&waiting),
                 subject,
+                source,
                 expires_at: requested_at
                     .unix_millis()
                     .saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX)),

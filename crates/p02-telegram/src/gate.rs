@@ -46,7 +46,10 @@ impl Gate {
             Some(daemon) => {
                 let subject = PairingSubjectBody { id, label: short };
 
-                match chat.unless_stopped(daemon.request_pairing(subject)).await {
+                match chat
+                    .unless_stopped(daemon.request_pairing(subject, chat.source.clone()))
+                    .await
+                {
                     Some(asked) => asked.ok(),
                     None => return false,
                 }

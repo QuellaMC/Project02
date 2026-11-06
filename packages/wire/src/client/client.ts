@@ -4,6 +4,7 @@ import {
   type Answer,
   type AnswerBody,
   type AnswerOutcome,
+  type ClientStamp,
   type ConfigChange,
   type ConfigChangeOutcome,
   type ConfigTarget,
@@ -132,6 +133,7 @@ export type GatewayClient = {
   requestPairing(
     connectorId: string,
     subject: PairingSubject,
+    source: ClientStamp,
     options?: GatewayCallOptions,
   ): Promise<PairingRequestOutcome>;
   pendingPairings(
@@ -248,10 +250,10 @@ export function createGatewayClient(
         `/api/connectors/${segment(connectorId)}/config`,
         callOptions,
       ),
-    requestPairing: (connectorId, subject, callOptions) =>
+    requestPairing: (connectorId, subject, source, callOptions) =>
       route.post<PairingRequestOutcome>(
         `/api/connectors/${segment(connectorId)}/pairing`,
-        {subject} satisfies PairingRequestBody,
+        {subject, source} satisfies PairingRequestBody,
         callOptions,
       ),
     pendingPairings: callOptions =>

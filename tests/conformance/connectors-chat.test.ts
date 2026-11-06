@@ -149,8 +149,8 @@ it("connectors.telegram-pairing-refused: an account a bot cannot ask the daemon 
   writeFileSync(join(home, 'config.json'), '{"version":');
 
   const {message} = (await wire.pairingRequest('telegram', {
-    id: '1',
-    label: 'Someone',
+    subject: {id: '1', label: 'Someone'},
+    source: 'telegram:mira_bot',
   })) as {readonly message: string};
 
   telegram.push(miraBot.token, messageFrom(bob, 1, 'Let me in.'));

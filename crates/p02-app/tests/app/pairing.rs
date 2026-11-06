@@ -16,7 +16,12 @@ async fn a_request_nobody_answers_expires_at_its_deadline() {
     let daemon = world.daemon(Vec::new()).await;
     let mut ear = Ear::on(&daemon);
     let PairingOutcome::Pending { request } = daemon
-        .request_pairing("telegram", ClientStamp::new("381940562").unwrap(), "Alice")
+        .request_pairing(
+            "telegram",
+            ClientStamp::new("381940562").unwrap(),
+            "Alice",
+            ClientStamp::new("telegram:mira_bot").unwrap(),
+        )
         .await
     else {
         panic!("the request waits");
