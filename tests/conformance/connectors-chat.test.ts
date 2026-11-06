@@ -400,9 +400,7 @@ it('connectors.telegram-held-while-daemon-down: a line written while the daemon 
   await telegram.shows(miraBot.token, alice.id, 'Hello, Alice.');
   first.signal('SIGINT');
   await first.exit();
-  await run.printed(
-    `Telegram connector: waiting for the daemon on ${home}; run project02 serve.`,
-  );
+  await run.printed(`Telegram connector: waiting for the daemon on ${home}.`);
   telegram.push(miraBot.token, messageFrom(alice, 2, 'Anyone there?'));
 
   const back = await startDaemon(home);

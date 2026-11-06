@@ -466,7 +466,7 @@ fn moved(home: &Path, followed: &DaemonRecord) -> bool {
 
 fn waiting(home: &Path) -> String {
     format!(
-        "Telegram connector: waiting for the daemon on {}; run project02 serve.",
+        "Telegram connector: waiting for the daemon on {}.",
         home.display()
     )
 }
