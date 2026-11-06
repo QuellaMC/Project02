@@ -22,6 +22,7 @@ use crate::error::StorageError;
 use crate::jsonl::{committed_lines, holds_a_line, read_coherently, read_lines};
 use crate::layout::{EntryKind, FINDER_METADATA, RAW_EVENTS_FILE};
 use crate::lock::{Resource, with_lock};
+use crate::log::{SessionLog, SessionWriter};
 
 /// A session the catalog lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,54 +91,63 @@ impl CharacterData {
     }
 
     /// Makes the first segment, `<conversation>.1`, of the conversation
-    /// `holder` holds: only its holder makes a conversation's segments.
+    /// `holder` holds, and hands back its writer: only its holder makes a
+    /// conversation's segments, and each is listed and its writer taken
+    /// under one lock. When the writer cannot be taken, the row and the
+    /// directory it made are taken back before the error leaves.
     ///
     /// # Errors
     ///
-    /// [`StorageError::SessionExists`] when it was made before, or an error
-    /// of [`CharacterData::sessions`] or of the writes.
+    /// [`StorageError::SessionExists`] when it was made before,
+    /// [`StorageError::NotAParticipant`] when the conversation is not
+    /// between this character and the person, or an error of
+    /// [`CharacterData::sessions`], of the writes or of
+    /// [`SessionLog::writer`].
     pub fn create_session(
         &self,
         holder: &ConversationWriter,
-    ) -> Result<SessionEntry, StorageError> {
-        let id = SessionId::new(holder.conversation_id().clone(), NonZeroU64::MIN);
+    ) -> Result<SessionWriter, StorageError> {
+        let log = self.session_log(holder.conversation(), NonZeroU64::MIN)?;
 
         self.with_catalog(|catalog| {
-            if catalog.contains_key(&id) {
-                return Err(StorageError::SessionExists(id.clone()));
+            if catalog.contains_key(log.session_id()) {
+                return Err(StorageError::SessionExists(log.session_id().clone()));
             }
 
-            self.insert(catalog, id.clone(), &write_file_atomically)
+            self.insert(catalog, log, &write_file_atomically)
         })
     }
 
     /// Makes the segment after `from`, which must be the newest of the
-    /// conversation `holder` holds: only its holder makes a conversation's
-    /// segments, so none comes after one it is still writing, and the
-    /// number is chosen and written under one lock.
+    /// conversation `holder` holds, and hands back its writer: only its
+    /// holder makes a conversation's segments, so none comes after one it
+    /// is still writing, and the number is chosen, the segment listed and
+    /// its writer taken under one lock. When the writer cannot be taken,
+    /// the row and the directory it made are taken back before the error
+    /// leaves.
     ///
     /// # Errors
     ///
     /// [`StorageError::NotLatestSegment`] when `from` is not the newest
-    /// segment of the conversation `holder` holds, or an error of
-    /// [`CharacterData::sessions`] or of the writes.
+    /// segment of the conversation `holder` holds,
+    /// [`StorageError::NotAParticipant`] when that conversation is not
+    /// between this character and the person, or an error of
+    /// [`CharacterData::sessions`], of the writes or of
+    /// [`SessionLog::writer`].
     pub fn continue_session(
         &self,
         holder: &ConversationWriter,
         from: &SessionId,
-    ) -> Result<SessionEntry, StorageError> {
+    ) -> Result<SessionWriter, StorageError> {
+        let conversation = holder.conversation();
+        let log = self.session_log(conversation, from.segment().saturating_add(1))?;
+
         self.with_catalog(|catalog| {
-            if newest(catalog, holder.conversation_id()).map(SessionEntry::session_id) != Some(from)
-            {
+            if newest(catalog, conversation.id()).map(SessionEntry::session_id) != Some(from) {
                 return Err(StorageError::NotLatestSegment(from.clone()));
             }
 
-            let next = SessionId::new(
-                from.conversation_id().clone(),
-                from.segment().saturating_add(1),
-            );
-
-            self.insert(catalog, next, &write_file_atomically)
+            self.insert(catalog, log, &write_file_atomically)
         })
     }
 
@@ -313,15 +323,20 @@ impl CharacterData {
         Ok(catalog)
     }
 
-    /// Adds session `id` to the catalog and makes its directory, or takes
-    /// over one an interrupted start left empty. A failed rewrite takes
-    /// back the directory it made.
+    /// Lists the session of `log` and makes its directory, or takes over one
+    /// an interrupted start left empty, then takes its writer. When the
+    /// rewrite fails, the directory it made is taken back; when the writer
+    /// cannot be taken, the row is taken back too, then that directory. No
+    /// session is left listed that nobody writes, unless taking its row back
+    /// fails as well, which leaves it listed and empty, as a crash before its
+    /// first record would.
     fn insert(
         &self,
         catalog: &mut Catalog,
-        id: SessionId,
+        log: SessionLog,
         replace: &dyn Fn(&Path, &[u8]) -> io::Result<()>,
-    ) -> Result<SessionEntry, StorageError> {
+    ) -> Result<SessionWriter, StorageError> {
+        let id = log.session_id().clone();
         let sessions_root = self.sessions_root();
         let directory = sessions_root.join(id.to_string());
 
@@ -349,17 +364,25 @@ impl CharacterData {
             created_at: Timestamp::now(),
         };
 
-        catalog.insert(id, entry.clone());
+        catalog.insert(id.clone(), entry);
 
-        if let Err(error) = self.rewrite(catalog, replace) {
-            if made {
-                remove_directory(&directory).map_err(StorageError::write(&directory))?;
-            }
+        let failure = match self.rewrite(catalog, replace) {
+            Err(error) => error,
+            Ok(()) => match log.writer() {
+                Ok(writer) => return Ok(writer),
+                Err(error) => {
+                    catalog.remove(&id);
+                    self.rewrite(catalog, replace)?;
+                    error
+                }
+            },
+        };
 
-            return Err(error);
+        if made {
+            remove_directory(&directory).map_err(StorageError::write(&directory))?;
         }
 
-        Ok(entry)
+        Err(failure)
     }
 
     fn rewrite(
@@ -502,8 +525,8 @@ mod tests {
             Participant::local_user(SpeakerName::new("Sam").unwrap()),
         ];
         let conversation = home.ensure_conversation(participants.clone()).unwrap();
-        let writer = home.conversation_writer(conversation.id()).unwrap();
-        let first = data.create_session(&writer).unwrap();
+        let holder = home.conversation_writer(conversation.clone()).unwrap();
+        let first = data.create_session(&holder).unwrap();
         let conversation_directory = home.conversations_root().join(conversation.id().as_str());
         let replaced = [
             home.root().join("schema.json"),
@@ -514,7 +537,10 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(data.catalog_path()).unwrap(),
-            format!("{}\n", serde_json::to_string(&first).unwrap())
+            format!(
+                "{}\n",
+                serde_json::to_string(&data.session(first.session_id()).unwrap()).unwrap()
+            )
         );
         for path in &replaced {
             assert!(
@@ -536,9 +562,11 @@ mod tests {
         }
 
         let catalog = std::fs::read(data.catalog_path()).unwrap();
-        let next = SessionId::parse(&format!("{}.2", conversation.id())).unwrap();
+        let next = data
+            .session_log(&conversation, NonZeroU64::new(2).unwrap())
+            .unwrap();
         let failed = data.with_catalog(|catalog| {
-            data.insert(catalog, next.clone(), &|_, _| {
+            data.insert(catalog, next, &|_, _| {
                 Err(io::Error::new(
                     io::ErrorKind::StorageFull,
                     "the disk is full",
@@ -579,7 +607,7 @@ mod tests {
         std::fs::create_dir_all(&record).unwrap();
         assert_eq!(
             TakenLines::default()
-                .write(&data, &writer)
+                .write(&data, &holder)
                 .unwrap_err()
                 .code(),
             "write_failed"
@@ -588,6 +616,7 @@ mod tests {
             names_in(&data.taken_lines_root()),
             [format!("{}.json", conversation.id())]
         );
-        writer.release();
+        first.release();
+        holder.release();
     }
 }

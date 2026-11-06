@@ -65,9 +65,10 @@ only on tokio's blocking pool, where a lock's wait blocks.
   the person last said there and which tools were used. Both speak of the
   person by the name the conversation recorded for them, as the transcript
   they condense names them. The continuation
-  record is the commit point: a failure before it lands discards the new
-  segment, or leaves it empty for the next open to discard, and the thread
-  stays where it was, to plan again after the next turn; after it the old
-  segment's lines are recorded, its end hooks run and its lease is
-  released, and what of that fails is reported, never undone. Every length
-  is counted in characters.
+  record is the commit point: the store makes the new segment with its
+  writer, taking it back when it cannot give it one, a record that fails to
+  land discards it through that writer, or leaves it empty for the next open
+  to discard when the discard fails too, and the thread stays where it was,
+  to plan again after the next turn; after it the old segment's lines are
+  recorded, its end hooks run and its lease is released, and what of that
+  fails is reported, never undone. Every length is counted in characters.

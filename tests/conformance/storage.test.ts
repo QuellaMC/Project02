@@ -18,6 +18,7 @@ import {serve, startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {
   characterJson,
+  chmod,
   configJson,
   createHome,
   sessionLog,
@@ -283,6 +284,52 @@ it("storage.continuation: once its history outgrows the window the conversation 
   expect(new Set(events.frames.map(frame => frame.event))).toEqual(
     new Set(['ready', 'turn_progress', 'turn_completed']),
   );
+});
+
+it('storage.continuation-writer-failure: a rotation whose new segment cannot be given its writer leaves nothing of that segment behind, neither its row nor its directory, so the thread stays where it was and the next completed turn rotates from there without a restart', async () => {
+  const home = createHome({'config.json': rotatingEveryTurn});
+  const daemon = await startDaemon(home, fixedReplies);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const locks = join(home, 'character-data', 'mira', '.locks');
+  const segments = (...numbers: number[]) =>
+    numbers.map(segment => `${conversationId}.${String(segment)}`);
+  let failure: string | undefined;
+
+  // The first rotation makes the lock file of every lock the next one
+  // takes but its new segment's writer's, which the locks directory,
+  // taking no new file, then refuses.
+  await say('One.', 'one');
+
+  const events = await openEvents(daemon);
+
+  chmod(locks, 0o555);
+
+  try {
+    expect(await say('Two.', 'two')).toMatchObject({status: 'completed'});
+    failure = (
+      await events.next(frameOf('maintenance_failed', {characterId: 'mira'}))
+    ).data;
+  } finally {
+    chmod(locks, 0o755);
+  }
+
+  expect(failure).toContain(
+    basename(lockOf(locks, `session-writer:${conversationId}.3`).file),
+  );
+  expect(catalogOf(home, 'mira')).toEqual(segments(1, 2));
+  expect(
+    readdirSync(join(home, 'character-data', 'mira', 'sessions')).sort(),
+  ).toEqual(segments(1, 2));
+  expect(await say('Three.', 'three')).toMatchObject({status: 'completed'});
+  expect(catalogOf(home, 'mira')).toEqual(segments(1, 2, 3));
+  expect(sessionLog(home, 'mira', `${conversationId}.3`)).toMatchObject([
+    {
+      kind: 'session_continued',
+      sessionContinuation: {continuedFrom: {sessionId: `${conversationId}.2`}},
+    },
+  ]);
 });
 
 it("storage.round-records: each model round is its own role_model_round record of what the model was shown and wrote and the parser's verdict on it, named by number by its tool calls and by the terminal record, which carries the commit validation; the same tool in two turns gets two call ids, and a later refusal keeps the accepted call and its evidence", async () => {

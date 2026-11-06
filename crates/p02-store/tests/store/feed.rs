@@ -40,7 +40,8 @@ fn texts(batch: &MessageBatch) -> Vec<&str> {
 fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
-    let entry = world.first_segment(world.conversation.id()).unwrap();
+    let writer = world.first_segment(&world.conversation).unwrap();
+    let entry = world.data.session(writer.session_id()).unwrap();
 
     for (line, reply) in [
         ("Tea?", "Tea, always."),
@@ -55,7 +56,7 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
             .completed();
     }
 
-    written(&world, 1, &script.records);
+    written(writer, &script.records);
 
     let feed = world.data.session_history();
 
@@ -109,7 +110,7 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
         .round(Some(answer(&["Maybe."], &[], None)))
         .replies()
         .completed();
-    written(&world, 1, &script.records[earlier..]);
+    written(world.log(1).writer().unwrap(), &script.records[earlier..]);
 
     let reopened = world.data.session_history();
     let caught_up = |cursor: HistoryCursor| {
@@ -142,7 +143,7 @@ fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
-    world.first_segment(world.conversation.id()).unwrap();
+    world.first_segment(&world.conversation).unwrap().release();
 
     for (line, reply) in [
         ("Tea?", "Tea, always."),
@@ -167,7 +168,10 @@ fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
         format!("{}\n", lines.join("\n")),
     )
     .unwrap();
-    world.next_segment(&world.segment(1)).unwrap();
+    world
+        .next_segment(&world.conversation, 1)
+        .unwrap()
+        .release();
 
     let feed = world.data.session_history();
     let older = feed

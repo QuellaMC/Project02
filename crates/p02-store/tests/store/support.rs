@@ -21,7 +21,7 @@ use p02_core::{
 use p02_shared::{Credentials, DanglingLinks, Fingerprint, Identifier, canonical_path};
 use p02_store::{
     CharacterData, EventReceived, Home, Judgement, LogRecord, MessageCommitted, PayloadSummary,
-    RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionEntry, SessionLog,
+    RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionLog, SessionWriter,
     StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence,
     TurnRejected, TurnRejection, TurnStatus,
 };
@@ -89,25 +89,29 @@ impl World {
         )
     }
 
-    /// Makes the first segment of `conversation`, as its holder does.
+    /// Makes the first segment of `conversation`, as its holder does, and
+    /// hands back its writer.
     pub(crate) fn first_segment(
         &self,
-        conversation: &ConversationId,
-    ) -> Result<SessionEntry, StorageError> {
-        let holder = self.home.conversation_writer(conversation).unwrap();
+        conversation: &Conversation,
+    ) -> Result<SessionWriter, StorageError> {
+        let holder = self.home.conversation_writer(conversation.clone()).unwrap();
         let made = self.data.create_session(&holder);
 
         holder.release();
         made
     }
 
-    /// Makes the segment after `from`, as its conversation's holder does.
-    pub(crate) fn next_segment(&self, from: &SessionId) -> Result<SessionEntry, StorageError> {
-        let holder = self
-            .home
-            .conversation_writer(from.conversation_id())
-            .unwrap();
-        let made = self.data.continue_session(&holder, from);
+    /// Makes the segment after segment `from` of `conversation`, as its
+    /// holder does, and hands back its writer.
+    pub(crate) fn next_segment(
+        &self,
+        conversation: &Conversation,
+        from: u64,
+    ) -> Result<SessionWriter, StorageError> {
+        let holder = self.home.conversation_writer(conversation.clone()).unwrap();
+        let from = SessionId::new(conversation.id().clone(), NonZeroU64::new(from).unwrap());
+        let made = self.data.continue_session(&holder, &from);
 
         holder.release();
         made
@@ -116,23 +120,6 @@ impl World {
     /// The log of segment `segment` of Mira's conversation with Sam.
     pub(crate) fn log(&self, segment: u64) -> SessionLog {
         self.log_of(&self.conversation, segment)
-    }
-
-    /// Mira's conversation with Sam under the id `id`, held in memory, with
-    /// its first segment in her catalog.
-    pub(crate) fn conversation_named(&self, id: &str) -> Conversation {
-        let conversation = Conversation::new(
-            ConversationId::new(id).unwrap(),
-            vec![
-                Participant::character(mira()),
-                Participant::local_user(sam()),
-            ],
-            Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
-        )
-        .unwrap();
-
-        self.first_segment(conversation.id()).unwrap();
-        conversation
     }
 
     pub(crate) fn log_of(&self, conversation: &Conversation, segment: u64) -> SessionLog {
@@ -152,6 +139,19 @@ impl World {
 
 pub(crate) fn sam() -> SpeakerName {
     SpeakerName::new("Sam").unwrap()
+}
+
+/// Mira's conversation with Sam under the id `id`, held in memory.
+pub(crate) fn conversation_named(id: &str) -> Conversation {
+    Conversation::new(
+        ConversationId::new(id).unwrap(),
+        vec![
+            Participant::character(mira()),
+            Participant::local_user(sam()),
+        ],
+        Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
+    )
+    .unwrap()
 }
 
 pub(crate) fn session(text: &str) -> SessionId {

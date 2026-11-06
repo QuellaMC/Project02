@@ -47,7 +47,7 @@ impl TakenLines {
         writer: &ConversationWriter,
     ) -> Result<(), StorageError> {
         let root = data.taken_lines_root();
-        let path = path(data, writer.conversation_id());
+        let path = path(data, writer.conversation().id());
         let segments: Map<String, Value> = self
             .segments
             .iter()

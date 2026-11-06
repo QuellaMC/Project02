@@ -14,8 +14,7 @@ use p02_plugins::PluginHost;
 use p02_shared::error_chain;
 use p02_store::{
     CharacterData, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
-    SessionContinuation, SessionContinued, SessionLog, SessionWriter, StorageError, Summarizer,
-    TakenLines,
+    SessionContinuation, SessionContinued, SessionWriter, StorageError, Summarizer, TakenLines,
 };
 
 use crate::continuation;
@@ -130,7 +129,6 @@ pub(crate) struct Mind<'a> {
 #[derive(Debug)]
 pub(crate) struct Disk {
     data: CharacterData,
-    conversation: p02_core::Conversation,
     holder: ConversationWriter,
     pub(crate) writer: SessionWriter,
     taken: TakenLines,
@@ -190,8 +188,8 @@ impl Conversation {
             Participant::character(character.profile),
             Participant::local_user(person),
         ])?;
-        let holder = home.conversation_writer(conversation.id())?;
-        let current = match current_segment(&data, &conversation, &holder) {
+        let holder = home.conversation_writer(conversation)?;
+        let current = match current_segment(&data, &holder) {
             Ok(current) => current,
             Err(error) => {
                 holder.release();
@@ -200,7 +198,7 @@ impl Conversation {
         };
 
         Ok(Self {
-            id: conversation.id().clone(),
+            id: holder.conversation().id().clone(),
             cast: Cast {
                 character: current.character,
                 person: current.person,
@@ -209,7 +207,6 @@ impl Conversation {
             },
             disk: Some(Disk {
                 data,
-                conversation,
                 holder,
                 writer: current.writer,
                 taken: current.taken,
@@ -426,10 +423,9 @@ struct Current {
 
 fn current_segment(
     data: &CharacterData,
-    conversation: &p02_core::Conversation,
     holder: &ConversationWriter,
 ) -> Result<Current, StorageError> {
-    let mut writer = resume(data, conversation, holder)?;
+    let mut writer = resume(data, holder)?;
     let segment = writer.session_id().segment();
     let cast = writer.replay().map(|replay| {
         (
@@ -438,7 +434,7 @@ fn current_segment(
         )
     });
 
-    match cast.and_then(|cast| Ok((cast, taken_lines(data, conversation, segment)?))) {
+    match cast.and_then(|cast| Ok((cast, taken_lines(data, holder.conversation(), segment)?))) {
         Ok(((character, person), taken)) => Ok(Current {
             writer,
             character,
@@ -458,14 +454,15 @@ fn current_segment(
 /// discarded, and the one before it tried.
 fn resume(
     data: &CharacterData,
-    conversation: &p02_core::Conversation,
     holder: &ConversationWriter,
 ) -> Result<SessionWriter, StorageError> {
+    let conversation = holder.conversation();
+
     loop {
-        let segment = match data.latest_segment(conversation.id())? {
-            Some(latest) => latest.session_id().segment(),
-            None => data.create_session(holder)?.session_id().segment(),
+        let Some(latest) = data.latest_segment(conversation.id())? else {
+            return data.create_session(holder);
         };
+        let segment = latest.session_id().segment();
         let mut writer = data.session_log(conversation, segment)?.writer()?;
         let left_by_a_rotation = match writer.replay() {
             Ok(replay) => segment > NonZeroU64::MIN && replay.records().is_empty(),
@@ -513,7 +510,8 @@ fn taken_lines(
     Ok(taken)
 }
 
-/// What a rotation that failed after making its segment says of it.
+/// What a rotation whose first record never landed says of the segment it
+/// made, when discarding that segment failed too.
 const LEFT_EMPTY: &str = "the segment it made stays empty, for the next open to discard";
 
 /// What a continuation records, but the segment it opens.
@@ -538,22 +536,18 @@ impl Disk {
         Ok(())
     }
 
-    /// Makes the segment after the current one and commits `next` as its
-    /// first record, the last step that can fail: a segment whose record
-    /// never landed is discarded again. Hands back the writer of the
-    /// segment it continued, for its end, and the segment it opened.
+    /// Makes the segment after the current one, under its writer, and
+    /// commits `next` as its first record, the last step that can fail: a
+    /// segment whose record never landed is discarded again through that
+    /// writer. Hands back the writer of the segment it continued, for its
+    /// end, and the segment it opened.
     fn continue_in(&mut self, next: Next) -> Result<(SessionWriter, SessionId), String> {
         let from = next.continued_from.session_id.clone();
-        let made = self
+        let mut writer = self
             .data
             .continue_session(&self.holder, &from)
             .map_err(|error| error_chain(&error))?;
-        let to = made.session_id().clone();
-        let mut writer = self
-            .data
-            .session_log(&self.conversation, to.segment())
-            .and_then(SessionLog::writer)
-            .map_err(|error| format!("{}; {LEFT_EMPTY}", error_chain(&error)))?;
+        let to = writer.session_id().clone();
         let committed = SessionContinuation::new(
             to.clone(),
             next.continued_from,

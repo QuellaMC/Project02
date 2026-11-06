@@ -29,12 +29,17 @@ async fn a_reopened_thread_resumes_its_latest_whole_segment() {
     chat.say("Tea?", "tea").await;
 
     let closed = chat.conversation.take().unwrap().close(&chat.host).await;
-    let holder = chat.world.home.conversation_writer(&id).unwrap();
+    let holder = chat
+        .world
+        .home
+        .conversation_writer(chat.world.home.conversation(&id).unwrap())
+        .unwrap();
 
     chat.world
         .data()
         .continue_session(&holder, &session(&format!("{id}.1")))
-        .unwrap();
+        .unwrap()
+        .release();
     holder.release();
     chat.conversation = Some(chat.world.open());
 

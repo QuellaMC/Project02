@@ -5,10 +5,10 @@
 
 use std::path::PathBuf;
 
-use p02_core::{Conversation, SessionId};
+use p02_core::SessionId;
 use p02_store::{LogRecord, SessionLog, StorageError};
 
-use crate::support::{Script, World, answer, lines_of};
+use crate::support::{Script, World, answer, conversation_named, lines_of};
 
 /// A small generator of its own, so a failing seed is a seed to rerun.
 struct Random(u64);
@@ -156,11 +156,11 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
 /// Seed `seed`'s log, written through its writer into a conversation of its
 /// own.
 fn written(world: &World, seed: u64) -> (SessionLog, PathBuf, Vec<LogRecord>) {
-    let conversation: Conversation = world.conversation_named(&format!("seed{seed}"));
+    let conversation = conversation_named(&format!("seed{seed}"));
+    let mut writer = world.first_segment(&conversation).unwrap();
     let log = world.log_of(&conversation, 1);
     let records = generated_log(seed, log.session_id().clone());
     let path = world.path_of(log.session_id());
-    let mut writer = log.clone().writer().unwrap();
 
     for record in &records {
         writer.append(record.clone()).unwrap();

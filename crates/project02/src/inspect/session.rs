@@ -714,12 +714,12 @@ mod tests {
                 Participant::local_user(SpeakerName::new("Sam").unwrap()),
             ])
             .unwrap();
-        let holder = home.conversation_writer(conversation.id()).unwrap();
-        let entry = data.create_session(&holder).unwrap();
+        let holder = home.conversation_writer(conversation.clone()).unwrap();
+        let mut writer = data.create_session(&holder).unwrap();
 
         holder.release();
 
-        let session = entry.session_id().clone();
+        let session = writer.session_id().clone();
         let identity = EventIdentity::new(
             EventId::new("evt_tea").unwrap(),
             TraceId::new("trace_tea").unwrap(),
@@ -764,11 +764,6 @@ mod tests {
             )],
         )
         .unwrap();
-        let mut writer = data
-            .session_log(&conversation, session.segment())
-            .unwrap()
-            .writer()
-            .unwrap();
 
         for body in [
             RecordBody::EventReceived(EventReceived {
@@ -830,6 +825,7 @@ mod tests {
 
         writer.release();
 
+        let entry = data.session(&session).unwrap();
         let replay = data
             .session_log(&conversation, session.segment())
             .unwrap()

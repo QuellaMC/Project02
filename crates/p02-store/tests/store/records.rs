@@ -4,7 +4,7 @@
 
 use p02_store::{LogRecord, StorageError};
 
-use crate::support::{World, lines_of, session};
+use crate::support::{World, conversation_named, lines_of, session};
 
 const TEA_RECEIVED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" Tea? ","normalizedCurrentUserMessage":"Tea?"}}"#;
 const TEA_ASKED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-1"],"visibleMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?"},"source":"web","clientMessageId":"tea"}"#;
@@ -46,8 +46,14 @@ const FIRST_SEGMENT: [&str; 15] = [
 #[test]
 fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
     let world = World::new();
-    let conversation = world.conversation_named("conv_a");
-    let second = world.next_segment(&session("conv_a.1")).unwrap();
+    let conversation = conversation_named("conv_a");
+
+    world.first_segment(&conversation).unwrap().release();
+
+    let second = world.next_segment(&conversation, 1).unwrap();
+
+    assert_eq!(second.session_id(), &session("conv_a.2"));
+    second.release();
 
     for (segment, lines) in [(1, FIRST_SEGMENT.as_slice()), (2, &[CONTINUED])] {
         let log = world.log_of(&conversation, segment);
@@ -60,16 +66,16 @@ fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
 
         assert_eq!(encoded, lines_of(&path));
     }
-
-    assert_eq!(second.session_id(), &session("conv_a.2"));
 }
 
 #[test]
 fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
     let world = World::new();
-    let conversation = world.conversation_named("conv_a");
+    let conversation = conversation_named("conv_a");
     let log = world.log_of(&conversation, 1);
     let path = world.path_of(log.session_id());
+
+    world.first_segment(&conversation).unwrap().release();
 
     for (rule, says, lines) in broken_logs() {
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
@@ -93,7 +99,7 @@ fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
 
     let continued = world.log_of(&conversation, 2);
 
-    world.next_segment(&session("conv_a.1")).unwrap();
+    world.next_segment(&conversation, 1).unwrap().release();
     std::fs::write(
         world.path_of(continued.session_id()),
         [
