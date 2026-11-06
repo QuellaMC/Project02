@@ -13,7 +13,7 @@ use p02_contracts::{
     ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
-    ClientStamp, EventIdentity, MessageId, ParseUserLineError, Participant, SpeakerName, Timestamp,
+    BlankTextError, ClientStamp, EventIdentity, MessageId, Participant, SpeakerName, Timestamp,
     UserLine, VisibleMessage, VisibleText,
 };
 use p02_plugins::{
@@ -120,6 +120,10 @@ pub(crate) enum Ended {
 /// The sentence a turn the runtime failed records.
 const RUNTIME_FAILURE: &str = "The runtime failed before the turn could complete.";
 
+/// What the person is told of a blank text, which their client shows as it
+/// stands.
+const BLANK_REFUSAL: &str = "Provide a non-empty message.";
+
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
 /// Takes `submission` through the turn under `identity`, on the thread's
@@ -134,7 +138,7 @@ pub(crate) async fn run(
 ) -> Ended {
     let line = match UserLine::new(submission.line) {
         Ok(line) => line,
-        Err(error) => return refuse(disk, identity, submission.line, error).await,
+        Err(BlankTextError) => return refuse(disk, identity, submission.line).await,
     };
     let begun = match begin(disk, identity, &submission, line).await {
         Ok(begun) => begun,
@@ -191,24 +195,10 @@ pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
     }
 }
 
-/// What the person is told of a text that is no line, which their client
-/// shows as it stands.
-fn refusal(error: ParseUserLineError) -> &'static str {
-    match error {
-        ParseUserLineError::Blank => "Provide exactly one non-empty message.",
-        ParseUserLineError::Multiline => "Provide exactly one non-empty single-line message.",
-    }
-}
-
-/// Records a text that is no line as its event, taken as no line, and the
-/// runtime's refusal of it.
-async fn refuse(
-    disk: &mut Option<Disk>,
-    identity: &EventIdentity,
-    raw: &str,
-    error: ParseUserLineError,
-) -> Ended {
-    let message = refusal(error).to_owned();
+/// Records a blank text as its event, taken as no line, and the runtime's
+/// refusal of it.
+async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) -> Ended {
+    let message = BLANK_REFUSAL.to_owned();
     let refused = {
         let (identity, raw, message) = (identity.clone(), raw.to_owned(), message.clone());
 

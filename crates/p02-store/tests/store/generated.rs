@@ -79,7 +79,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
         }
 
         match random.below(7) {
-            0 => script.refused_input(&format!("{line}\n{line}")),
+            0 => script.refused_input(" \t\r\n\u{3000}\u{2028} "),
             1 => {
                 let mut cut_short = script.turn(&line);
 

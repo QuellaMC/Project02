@@ -272,7 +272,7 @@ impl Script {
         }
     }
 
-    /// A line refused as no line: received, then rejected.
+    /// A blank text refused as no line: received, then rejected.
     pub(crate) fn refused_input(&mut self, raw: &str) {
         let identity = self.identity();
 
@@ -290,7 +290,7 @@ impl Script {
             RecordBody::TurnRejected(
                 TurnRejected::new(
                     TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
-                    "A message must be a single line.".to_owned(),
+                    "Provide a non-empty message.".to_owned(),
                 )
                 .unwrap(),
             ),

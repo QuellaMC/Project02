@@ -23,10 +23,10 @@ identities of each. It depends on p02-shared alone.
   to each other: who spoke, under the name they had then, and the text as
   shown. Visible text is normalized once, line endings to `\n` and the
   ends trimmed, and a stored text that is not already normalized is
-  refused, never silently rewritten. What a person says in a turn is one
-  line: trimmed, and refused when blank or when it breaks a line anywhere.
-  A client stamps the line it carries with its surface and the id it
-  submitted the line under, each one token.
+  refused, never silently rewritten. What a person says in a turn is their
+  line, which may span several lines of text: normalized the same way, and
+  refused when blank. A client stamps the line it carries with its surface
+  and the id it submitted the line under, each one token.
 - **Identities.** A runtime event is named by an `EventIdentity`, its
   event and trace ids and the canonical UTC time it was created at, in
   the one spelling `toISOString` gives: `2026-06-15T00:00:00.000Z`, which

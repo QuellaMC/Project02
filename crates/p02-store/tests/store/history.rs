@@ -52,7 +52,7 @@ fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
         .round(Some(answer(&["Curious.", "And calm."], &[], None)))
         .replies()
         .completed();
-    script.refused_input("one\ntwo");
+    script.refused_input(" \t\n ");
     script
         .turn("Cut short?")
         .user("cut")

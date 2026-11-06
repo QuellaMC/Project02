@@ -21,11 +21,16 @@ const LINE_BREAKS: [char; 4] = ['\r', '\n', '\u{2028}', '\u{2029}'];
 #[serde(try_from = "String")]
 pub struct VisibleText(String);
 
-/// Why a text is not [`VisibleText`].
+/// Why a text is not [`VisibleText`] once normalized: nothing is left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("visible text must not be blank")]
+pub struct BlankTextError;
+
+/// Why a text is not [`VisibleText`] as it stands.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ParseVisibleTextError {
-    #[error("visible text must not be blank")]
-    Blank,
+    #[error(transparent)]
+    Blank(#[from] BlankTextError),
     #[error(
         "visible text must already be normalized: '\\n' line endings and no space at either end"
     )]
@@ -38,13 +43,13 @@ impl VisibleText {
     ///
     /// # Errors
     ///
-    /// [`ParseVisibleTextError::Blank`] when nothing is left.
-    pub fn normalize(raw: &str) -> Result<Self, ParseVisibleTextError> {
+    /// [`BlankTextError`] when nothing is left.
+    pub fn normalize(raw: &str) -> Result<Self, BlankTextError> {
         let unified = raw.replace("\r\n", "\n").replace('\r', "\n");
         let trimmed = unified.trim();
 
         if trimmed.is_empty() {
-            Err(ParseVisibleTextError::Blank)
+            Err(BlankTextError)
         } else {
             Ok(Self(trimmed.to_owned()))
         }
@@ -86,38 +91,19 @@ impl fmt::Display for VisibleText {
     }
 }
 
-/// What a person says in a turn: one line, trimmed, with something left.
-/// It is visible text as it stands.
+/// What a person says in one turn, as visible text: their line in the
+/// dialogue, which may span several lines of text.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct UserLine(VisibleText);
 
-/// Why a text is not a [`UserLine`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum ParseUserLineError {
-    #[error("a message must not be blank")]
-    Blank,
-    #[error("a message must be a single line")]
-    Multiline,
-}
-
 impl UserLine {
-    /// What a person typed, trimmed. A line break refuses it wherever it
-    /// stands, even at an end the trim would cut away.
+    /// What a person sent, normalized as [`VisibleText::normalize`] does.
     ///
     /// # Errors
     ///
-    /// [`ParseUserLineError::Blank`] when nothing is left, else
-    /// [`ParseUserLineError::Multiline`] when `raw` breaks a line.
-    pub fn new(raw: &str) -> Result<Self, ParseUserLineError> {
-        let trimmed = raw.trim();
-
-        if trimmed.is_empty() {
-            Err(ParseUserLineError::Blank)
-        } else if raw.contains(LINE_BREAKS) {
-            Err(ParseUserLineError::Multiline)
-        } else {
-            Ok(Self(VisibleText(trimmed.to_owned())))
-        }
+    /// [`BlankTextError`] when nothing is left.
+    pub fn new(raw: &str) -> Result<Self, BlankTextError> {
+        VisibleText::normalize(raw).map(Self)
     }
 
     #[must_use]
@@ -296,10 +282,7 @@ mod tests {
             VisibleText::normalize("  one\r\ntwo\rthree \n").map(|text| text.0),
             Ok("one\ntwo\nthree".to_owned())
         );
-        assert_eq!(
-            VisibleText::normalize(" \r\n\t"),
-            Err(ParseVisibleTextError::Blank)
-        );
+        assert_eq!(VisibleText::normalize(" \r\n\t"), Err(BlankTextError));
         assert!(VisibleText::parse("one\ntwo").is_ok());
         assert_eq!(
             VisibleText::parse("one\r\ntwo"),
@@ -309,27 +292,6 @@ mod tests {
             VisibleText::parse(" padded"),
             Err(ParseVisibleTextError::Unnormalized)
         );
-    }
-
-    #[test]
-    fn a_user_line_is_one_trimmed_line_with_something_left() {
-        assert_eq!(
-            UserLine::new("  are you there?\t").map(|line| line.to_string()),
-            Ok("are you there?".to_owned())
-        );
-
-        for (raw, refusal) in [
-            ("", ParseUserLineError::Blank),
-            (" \t ", ParseUserLineError::Blank),
-            ("\n", ParseUserLineError::Blank),
-            ("hello\nthere", ParseUserLineError::Multiline),
-            ("hello\r", ParseUserLineError::Multiline),
-            ("hello\n", ParseUserLineError::Multiline),
-            ("hello\u{2028}there", ParseUserLineError::Multiline),
-            ("hello\u{2029}", ParseUserLineError::Multiline),
-        ] {
-            assert_eq!(UserLine::new(raw), Err(refusal), "{raw:?}");
-        }
     }
 
     #[test]

@@ -116,26 +116,20 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     assert_eq!(context.runtime_notes()[0].id().as_str(), "today");
 }
 
-/// A text that is no line is refused with its event and the refusal
-/// recorded, nothing committed and the model never asked, and the next line
+/// A blank text is refused with its event and the refusal recorded,
+/// nothing committed and the model never asked, and the next line
 /// completes.
 #[tokio::test]
-async fn a_text_that_is_no_line_is_refused_and_the_next_line_completes() {
+async fn a_blank_text_is_refused_and_the_next_line_completes() {
     let mut chat = Chat::new(&[]);
 
     chat.model.script([Round::says(reply(&["Hi."]))]);
 
-    for (text, sentence) in [
-        (" \t ", "Provide exactly one non-empty message."),
-        (
-            "One\ntwo",
-            "Provide exactly one non-empty single-line message.",
-        ),
-    ] {
-        match chat.say(text, "refused").await {
-            Delivery::InputRejected { message, .. } => assert_eq!(message, sentence),
-            other => panic!("{other:?}"),
+    match chat.say(" \t ", "refused").await {
+        Delivery::InputRejected { message, .. } => {
+            assert_eq!(message, "Provide a non-empty message.");
         }
+        other => panic!("{other:?}"),
     }
 
     assert_eq!(chat.heard.take(), Vec::<String>::new());
@@ -146,8 +140,7 @@ async fn a_text_that_is_no_line_is_refused_and_the_next_line_completes() {
     assert_eq!(
         chat.kinds(1),
         [
-            RECEIVED, REJECTED, RECEIVED, REJECTED, RECEIVED, COMMITTED, ROUND, COMMITTED,
-            COMPLETED
+            RECEIVED, REJECTED, RECEIVED, COMMITTED, ROUND, COMMITTED, COMPLETED
         ]
     );
     assert!(matches!(
