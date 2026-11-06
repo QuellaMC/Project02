@@ -16,6 +16,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {expect, it, onTestFinished} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
+import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, snapshot} from './harness/home.ts';
 import {
   calling,
@@ -488,15 +489,14 @@ it("memory.session-history-index: the index holds the lines that committed, a re
 
 it('memory.session-history-search: sessions.search finds lines of earlier sessions and lines out of the window but never what the model sees or its own interim reply; it routes CJK, short, non-ASCII case-folded and literal queries, keeps one best hit per session, the newest of equals, and centers a 160-character snippet on the match beside text bounded to 200', async () => {
   const model = await startModelServer();
-  const wire = wireOf(
-    await startDaemon(
-      createHome({
-        'config.json': configJson({
-          project02: {...model.settings, contextWindowTokens: 1},
-        }),
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({
+        project02: {...model.settings, contextWindowTokens: 1},
       }),
-    ),
+    }),
   );
+  const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
   const long = `${'a'.repeat(300)} anchovy pizza ${'b'.repeat(300)}`;
@@ -605,10 +605,20 @@ it('memory.session-history-search: sessions.search finds lines of earlier sessio
 
   // With the window wide again, a line the model still sees is indexed
   // once committed but never found, while the earlier sessions still are.
+  // The change reaches her behind its answer, by a reload: the next line
+  // waits for her to be ready with it.
+  const events = await openEvents(daemon);
+
   await saveConfig(
     wire,
     {scope: 'global'},
     {kind: 'set', path: 'project02.contextWindowTokens', value: 32768},
+  );
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'reloading'}),
+  );
+  await events.next(
+    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
   );
   model.answer(
     reply('Noted.'),
