@@ -1,5 +1,8 @@
 [workspace]
 members = ["crates/*"]
+# A bare cargo command at the root acts on the binary: the shell is Tauri's
+# CLI to build, and the gates this would narrow name --workspace.
+default-members = ["crates/project02"]
 resolver = "3"
 
 [workspace.package]
