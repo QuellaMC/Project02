@@ -20,7 +20,7 @@ import {
   streamResumed,
   threadOpened,
   type WebState,
-} from '../../src/frontends/web/store.ts';
+} from './store.ts';
 import type {
   CharacterSummary,
   GatewayEvent,
@@ -31,7 +31,7 @@ import type {
   PairingRequest,
   PendingConfirmation,
   RunningTurn,
-} from '../../src/gateway/api/index.ts';
+} from '@project02/wire/contract';
 
 const mira: CharacterSummary = {
   id: 'mira',

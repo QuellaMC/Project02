@@ -1,24 +1,20 @@
-# frontends
+# page
 
-Every platform a person talks to a character on is a client of the
-daemon's wire and nothing more: the web page here, and the Telegram
-connector, which is the binary's `project02 telegram`
-(`crates/p02-telegram`). A frontend imports only the contract,
-`gateway/api`, and the reference client, `gateway/client` (arch rule
-`clients-see-only-the-wire`), and nothing else imports a frontend
-(`nothing-imports-frontends`): whatever a frontend cannot do through the
-API, nobody can. Each platform here is one directory with its own entry
-and tests.
+The page a person opens at the address `serve` prints. Every platform a
+person talks to a character on is a client of the daemon's wire and
+nothing more: this page, and the Telegram connector, which is the
+binary's `project02 telegram` (`crates/p02-telegram`). The page imports
+only the contract, `@project02/wire/contract`, and the reference client,
+`@project02/wire/client` (arch rule `clients-see-only-the-wire`), and
+nothing imports the page (`nothing-imports-the-page`): whatever the page
+cannot do through the API, nobody can.
 
-## web
-
-The page a person opens at the address `serve` prints. Vite builds `web/`
-into `dist/web`, which the binary embeds when it is built and serves at
-its root — one origin, so no CORS; the token rides the fragment of the
-address. `pnpm build:web` builds it once, and `pnpm serve` builds it and
-then the binary before it runs, so a change to the page shows once `serve`
-runs again. The page's own `tsconfig.json` gives it the DOM and the JSX
-transform; the root program excludes the directory.
+Vite builds `src/` into `dist/`, which the binary embeds when it is built
+and serves at its root — one origin, so no CORS; the token rides the
+fragment of the address. `pnpm build:web` builds it once, and `pnpm serve`
+builds it and then the binary before it runs, so a change to the page
+shows once `serve` runs again. The package's `tsconfig.json` gives it the
+DOM and the JSX transform.
 
 The page follows the wire page's rules for a surface, stated once in
 `store.ts`: everything a tab shows is one value, and every change to it is

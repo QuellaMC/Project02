@@ -40,11 +40,11 @@ Nothing here prints, reads an environment variable or parses a flag.
   `status` in the body what happened. An unknown route of the API,
   `/api` itself included, is a 404 behind the same rules. No CORS header
   is sent, and a token is taken from no cookie and no query.
-- **The page.** Its files are built into the binary from `dist/web` as
-  `pnpm build:web` left it when the binary was built, public and never
-  cached; a path that names nothing the page holds meets the daemon's own
-  404, and nothing can climb out to the disk. Built without a page, the
-  root says how to build one.
+- **The page.** Its files are built into the binary from
+  `packages/page/dist` as `pnpm build:web` left it when the binary was
+  built, public and never cached; a path that names nothing the page
+  holds meets the daemon's own 404, and nothing can climb out to the
+  disk. Built without a page, the root says how to build one.
 - **The event stream.** One subscription to the daemon's events, taken
   with the streams, folds the turns running, numbers every event from 1
   under the run's id, eight random bytes as 16 hex digits, formats it once
@@ -73,8 +73,9 @@ Nothing here prints, reads an environment variable or parses a flag.
   the protocol version, a constant no derive spells, implements both by
   hand as that one number.
   A test of this crate, `cargo test -p p02-gateway contract`, walks them
-  from the wire's roots and writes `src/gateway/api/generated/contract.ts`,
-  the declarations the page and the client compile against, and
+  from the wire's roots and writes
+  `packages/wire/src/contract/generated/contract.ts`, the declarations the
+  page and the client compile against, and
   `schema.json`, the schema the conformance suite holds every answer and
   frame to, both generated files the repository's formatter and linter
   leave alone; another test holds one value of each type, as serde writes

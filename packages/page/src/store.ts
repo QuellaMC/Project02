@@ -23,8 +23,8 @@ import {
   type PendingConfirmation,
   type RunningTurns,
   type TurnOutcome,
-} from '../../gateway/api/index.ts';
-import type {HistoryPage} from '../../gateway/client/index.ts';
+} from '@project02/wire/contract';
+import type {HistoryPage} from '@project02/wire/client';
 
 export type Connection =
   | {readonly status: 'connecting'}

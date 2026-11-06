@@ -227,7 +227,9 @@ fn repository() -> &'static Path {
 
 /// Where a client imports the contract from.
 fn generated(name: &str) -> PathBuf {
-    repository().join("src/gateway/api/generated").join(name)
+    repository()
+        .join("packages/wire/src/contract/generated")
+        .join(name)
 }
 
 /// Writes `text` to `path` unless the file already holds it.

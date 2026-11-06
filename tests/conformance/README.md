@@ -11,8 +11,8 @@ other build of the same commands.
 
 ## Rules
 
-- Nothing is imported from `src/` or `tests/support/` but the contract's
-  schema, `src/gateway/api/generated/schema.json`, which the Rust types
+- Nothing is imported from `packages/` or the rest of `tests/` but the
+  contract's schema, `@project02/wire/schema.json`, which the Rust types
   the socket carries generate. Reading them to learn the wire is
   expected; the suite keeps its own small client so a client bug and a
   daemon bug stay apart.
@@ -79,8 +79,9 @@ the page as it finds it, and runs the suite; the browser suite starts
 `serve` through the same harness.
 
 Every answer the wire client reads and every frame the stream reader reads
-is held to the contract's schema, `src/gateway/api/generated/schema.json`,
-which the Rust types the socket carries generate, so every row proves the
-contract against whichever build it runs. After a change to those types,
+is held to the contract's schema,
+`packages/wire/src/contract/generated/schema.json`, which the Rust types
+the socket carries generate, so every row proves the contract against
+whichever build it runs. After a change to those types,
 `cargo test -p p02-gateway contract` writes the schema again, and the
 TypeScript declarations beside it.

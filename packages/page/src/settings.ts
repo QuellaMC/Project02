@@ -17,7 +17,7 @@ import type {
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
-} from '../../gateway/api/index.ts';
+} from '@project02/wire/contract';
 import {noticed, type SettingsPage, type WebState} from './store.ts';
 
 type OkView = Extract<ConfigView, {status: 'ok'}>;

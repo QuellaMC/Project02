@@ -57,7 +57,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install Chromium for the browser suite
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --filter @project02/tests exec playwright install --with-deps chromium
 
       - name: Run the clients' gate
         run: pnpm check

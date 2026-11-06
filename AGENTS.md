@@ -3,7 +3,7 @@
 Operating guide for this repository — a **Live Character Framework**: a
 character-driven agent runtime with persona continuity, plugins, tools, and
 durable local state, its daemon in Rust under `crates/` and its clients in
-TypeScript under `src/`.
+TypeScript under `packages/`.
 
 Core rule:
 
@@ -49,10 +49,11 @@ landmine.
 
 ## 1. Orientation
 
-Top-level modules under `src/` carry a `README.md` stating what that module
-owns; read it before changing the module, and write one when adding a module
-that lacks it. Those READMEs, the code, and the tests are the source of truth
-for what exists. This file is process, not architecture.
+Each crate under `crates/` and each package under `packages/` carries a
+`README.md` stating what it owns; read it before changing the crate or
+package, and write one when adding one that lacks it. Those READMEs, the code,
+and the tests are the source of truth for what exists. This file is process,
+not architecture.
 
 Precedence when sources disagree: the current user request controls the task,
 tests and code control already-built behavior, and this file controls how you
@@ -168,14 +169,12 @@ is a useful sentence; silently writing a second copy is not.
 
 Architecture gates enforced by `pnpm arch:check`:
 
-- A client — `src/frontends`, `src/gateway/client` — imports only the wire's
-  contract (`src/gateway/api`) and the reference client.
-- Cross-module imports land on barrels (`src/<module>/index.ts`), not deep paths.
-- Pre-existing violations live in `.dependency-cruiser-known-violations.json`,
-  which may only shrink. Regenerate with `pnpm arch:baseline` in the same PR
-  that removes violations; a baseline diff that adds entries is a rejection.
+- A client — `packages/page`, `packages/wire/src/client` — imports only the
+  wire's contract (`packages/wire/src/contract`) and the reference client.
+- Cross-package imports name the package (`@project02/wire/contract`), never a
+  relative path into it, so they land on what its exports offer.
 
-The same ratchet applies to the `max-lines` overrides in `eslint.config.mjs`.
+The `max-lines` overrides in `eslint.config.mjs` may only shrink.
 
 ---
 
@@ -211,7 +210,7 @@ When you remove or replace behavior, remove its tests with it.
 
 Coverage is a floor that catches untested code, not a target to farm. Never
 write a test whose purpose is to move the number. If deleting a duplicate
-drops coverage below the thresholds in `vitest.config.ts`, lower the threshold
+drops coverage below the thresholds in the package's `vitest.config.ts`, lower the threshold
 in the same PR and say why in the description — that is a real change of
 intent, and it should be reviewed as one.
 
@@ -261,7 +260,7 @@ suite against the binary, which CI runs on Linux after `pnpm check`. For
 TypeScript-heavy changes also run:
 
 ```text
-pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters
+pnpm typecheck --noUnusedLocals --noUnusedParameters
 ```
 
 Do not commit dependency folders, caches, coverage, build output, or temp

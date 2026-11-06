@@ -7,7 +7,7 @@
  */
 import {Ajv2020, type ValidateFunction} from 'ajv/dist/2020.js';
 
-import schema from '../../../src/gateway/api/generated/schema.json' with {type: 'json'};
+import schema from '@project02/wire/schema.json' with {type: 'json'};
 import {failure} from './wait.ts';
 
 /** What a route answers under 200: a definition of the contract, or a list of one. */

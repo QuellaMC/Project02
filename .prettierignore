@@ -1,2 +1,2 @@
 # Generated from the Rust wire types by `cargo test -p p02-gateway contract`.
-src/gateway/api/generated/
+packages/wire/src/contract/generated/

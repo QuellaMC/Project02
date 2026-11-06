@@ -24,7 +24,7 @@ import {
   type PendingConfirmation,
   type StartOutcome,
   type TurnOutcome,
-} from '../api/index.ts';
+} from '../contract/index.ts';
 import {createSseFrameSplitter} from './sse.ts';
 
 /**
