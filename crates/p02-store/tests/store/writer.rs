@@ -1,7 +1,9 @@
 //! A session's writer: one at a time, appending only what follows its log,
 //! after whatever a crash or a failed write left after the last line.
 
-use p02_store::{LogRecord, RecordBody, StorageError, TurnCompleted, TurnStatus};
+use std::num::NonZeroU32;
+
+use p02_store::{Judgement, LogRecord, RecordBody, StorageError, TurnCompleted};
 use serde_json::json;
 
 use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
@@ -9,10 +11,7 @@ use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
 #[test]
 fn a_session_has_one_writer_at_a_time() {
     let world = World::new();
-
-    world.first_segment(world.conversation.id()).unwrap();
-
-    let writer = world.log(1).writer().unwrap();
+    let writer = world.first_segment(&world.conversation).unwrap();
     let busy = world.log(1).writer().unwrap_err();
 
     assert_eq!(busy.code(), "session_busy");
@@ -25,8 +24,8 @@ fn a_session_has_one_writer_at_a_time() {
 fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
+    let mut writer = world.first_segment(&world.conversation).unwrap();
 
-    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")
@@ -34,7 +33,6 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
         .replies()
         .completed();
 
-    let mut writer = world.log(1).writer().unwrap();
     let path = world.path_of(&world.segment(1));
     let stranger = LogRecord::new(
         p02_core::EventIdentity::new(
@@ -44,10 +42,12 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
         )
         .unwrap(),
         RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: Vec::new(),
             tool_call_ids: Vec::new(),
-            judgement: None,
+            judgement: Judgement {
+                round: NonZeroU32::MIN,
+                accepted_reply: None,
+            },
             runtime_plugin_evidence: Vec::new(),
             runtime_plugin_turn_evidence: None,
         }),
@@ -77,8 +77,8 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
 fn a_writer_reads_its_log_again_when_it_changed_beneath_it_and_cuts_a_torn_line() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
+    let mut writer = world.first_segment(&world.conversation).unwrap();
 
-    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")
@@ -86,7 +86,6 @@ fn a_writer_reads_its_log_again_when_it_changed_beneath_it_and_cuts_a_torn_line(
         .replies()
         .completed();
 
-    let mut writer = world.log(1).writer().unwrap();
     let path = world.path_of(&world.segment(1));
     let (head, tail) = script.records.split_at(3);
 
@@ -120,10 +119,10 @@ fn a_writer_reads_its_log_again_when_it_changed_beneath_it_and_cuts_a_torn_line(
 fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
+    let mut writer = world.first_segment(&world.conversation).unwrap();
 
     let written = "model-written-credential";
 
-    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Patch?")
         .user("patch")
@@ -139,8 +138,6 @@ fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
         .round(Some(answer(&["Done."], &[], None)))
         .replies()
         .completed();
-
-    let mut writer = world.log(1).writer().unwrap();
 
     for record in &script.records {
         writer.append(record.clone()).unwrap();

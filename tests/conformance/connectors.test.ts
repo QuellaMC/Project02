@@ -140,7 +140,7 @@ it("connectors.telegram-discovery: the connector finds the daemon by its home's 
     },
   });
   const telegram = await startTelegramServer([miraBot]);
-  const waiting = `Telegram connector: waiting for the daemon on ${home}; run project02 serve.`;
+  const waiting = `Telegram connector: waiting for the daemon on ${home}.`;
   const run = connector(['--store', home], telegram.env);
 
   await run.printed(waiting);
@@ -401,7 +401,7 @@ it('connectors.telegram-config-reads: the connector reads its settings on every 
 
   relay.away();
   await run.printed(
-    `Telegram connector: waiting for the daemon on ${relay.home}; run project02 serve.`,
+    `Telegram connector: waiting for the daemon on ${relay.home}.`,
   );
   relay.back();
   await relay.reached(requests =>

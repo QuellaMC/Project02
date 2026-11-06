@@ -263,7 +263,7 @@ function PairingCard({
       <p className="card-title">{readableName(request.connectorId)} pairing</p>
       <p className="card-summary">{request.subject.label}</p>
       <CardActions
-        note={`code ${request.code} · expires at ${clockTime(request.expiresAt)}`}
+        note={`code ${request.code} · expires at ${clockTime(request.expiresAt)} · via ${request.source}`}
         onAnswer={onSettle}
       />
     </div>

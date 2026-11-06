@@ -23,17 +23,16 @@ pub struct TurnEvidence {
     pub health: Vec<HealthSnapshot>,
 }
 
-/// A turn completed: what it committed and, when the model ran, the
-/// verdict on the round it ended on.
+/// A turn completed: what it committed and the verdict on the round it
+/// ended on.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "WireCompleted", into = "WireCompleted")]
+#[serde(from = "WireCompleted", into = "WireCompleted")]
 pub struct TurnCompleted {
-    pub status: TurnStatus,
     /// The turn's committed messages, in the order they were said.
     pub visible_message_ids: Vec<MessageId>,
     /// The turn's finished tool calls, in the order they finished.
     pub tool_call_ids: Vec<ToolCallId>,
-    pub judgement: Option<Judgement>,
+    pub judgement: Judgement,
     pub runtime_plugin_evidence: Vec<Evidence>,
     pub runtime_plugin_turn_evidence: Option<TurnEvidence>,
 }
@@ -162,19 +161,23 @@ impl TurnRejected {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WireCompleted {
-    status: TurnStatus,
+    status: Completed,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     visible_message_ids: Vec<MessageId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tool_call_ids: Vec<ToolCallId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    round: Option<NonZeroU32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    commit_validation: Option<CommitValidation>,
+    round: NonZeroU32,
+    commit_validation: CommitValidation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     runtime_plugin_evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     runtime_plugin_turn_evidence: Option<TurnEvidence>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Completed {
+    Completed,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -197,51 +200,34 @@ enum Accepted {
     Accepted,
 }
 
-impl TryFrom<WireCompleted> for TurnCompleted {
-    type Error = RecordError;
-
-    fn try_from(wire: WireCompleted) -> Result<Self, Self::Error> {
-        let judgement = match (wire.round, wire.commit_validation) {
-            (None, None) => None,
-            (Some(round), Some(validation)) => Some(Judgement {
-                round,
-                accepted_reply: validation.result.accepted_visible_reply_text,
-            }),
-            _ => return Err(RecordError::Judgement),
-        };
-
-        Ok(Self {
-            status: wire.status,
+impl From<WireCompleted> for TurnCompleted {
+    fn from(wire: WireCompleted) -> Self {
+        Self {
             visible_message_ids: wire.visible_message_ids,
             tool_call_ids: wire.tool_call_ids,
-            judgement,
+            judgement: Judgement {
+                round: wire.round,
+                accepted_reply: wire.commit_validation.result.accepted_visible_reply_text,
+            },
             runtime_plugin_evidence: wire.runtime_plugin_evidence,
             runtime_plugin_turn_evidence: wire.runtime_plugin_turn_evidence,
-        })
+        }
     }
 }
 
 impl From<TurnCompleted> for WireCompleted {
     fn from(completed: TurnCompleted) -> Self {
-        let (round, commit_validation) = match completed.judgement {
-            Some(judgement) => (
-                Some(judgement.round),
-                Some(CommitValidation {
-                    result: AcceptedCommit {
-                        status: Accepted::Accepted,
-                        accepted_visible_reply_text: judgement.accepted_reply,
-                    },
-                }),
-            ),
-            None => (None, None),
-        };
-
         Self {
-            status: completed.status,
+            status: Completed::Completed,
             visible_message_ids: completed.visible_message_ids,
             tool_call_ids: completed.tool_call_ids,
-            round,
-            commit_validation,
+            round: completed.judgement.round,
+            commit_validation: CommitValidation {
+                result: AcceptedCommit {
+                    status: Accepted::Accepted,
+                    accepted_visible_reply_text: completed.judgement.accepted_reply,
+                },
+            },
             runtime_plugin_evidence: completed.runtime_plugin_evidence,
             runtime_plugin_turn_evidence: completed.runtime_plugin_turn_evidence,
         }

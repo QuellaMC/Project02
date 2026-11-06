@@ -446,7 +446,7 @@
             <td>pairing request</td>
             <td><code>POST /api/connectors/:id/pairing</code></td>
             <td>
-              <code>{subject: {id, label}}</code> →
+              <code>{subject: {id, label}, source}</code> →
               <code>PairingRequestOutcome</code>: <code>pending</code> with the
               request — the one already waiting for that account, or a new one —
               <code>paired</code> when the home's allowlist already holds the
@@ -460,7 +460,8 @@
             <td><code>GET /api/pairing</code></td>
             <td>
               → <code>PairingRequest[]</code>: every pairing request still
-              waiting, with its code and deadline.
+              waiting, with its account, the source it wrote to, its code and
+              deadline.
             </td>
           </tr>
           <tr>
@@ -674,7 +675,8 @@ data: {…}</code></pre>
               An account a connector does not know, waiting for the owner's
               answer: <code>connectorId</code>, the six-digit <code>code</code>,
               the <code>subject</code> (<code>id</code>, <code>label</code>),
-              <code>requestedAt</code>, and <code>expiresAt</code>, an hour on.
+              the <code>source</code> it wrote to, <code>requestedAt</code>, and
+              <code>expiresAt</code>, an hour on.
               The same shape the pairing list returns. A request put back after
               an approval that could not be written is announced again, so a
               surface adds a request by its code, once.
@@ -779,12 +781,16 @@ data: {…}</code></pre>
         <code>subject</code> — its own <code>id</code> for the account, one
         token by the pattern the stamps match, and the <code>label</code> the
         owner sees, one line of at most 128 characters with no space at either
-        end. A subject the body schema cannot take is a 400, and one it takes
-        that breaks the rule is refused <code>invalid_subject</code>. The answer
-        is <code>paired</code> when the home's allowlist already holds the
+        end — and the <code>source</code>: where the account wrote, as the
+        stamp its lines will carry once it is paired,
+        <code>telegram:&lt;bot username&gt;</code> for Telegram. A subject the
+        body schema cannot take is a 400, and one it takes that breaks the rule
+        is refused <code>invalid_subject</code>. The answer is
+        <code>paired</code> when the home's allowlist already holds the
         account, or <code>pending</code> with the request: the one already
-        waiting for that account, so asking again is safe, or a new one under a
-        six-digit code unique among those waiting, good for one hour, until
+        waiting for that account, so asking again is safe, which keeps the
+        source the account first wrote to, or a new one under a six-digit code
+        unique among those waiting, good for one hour, until
         <code>expiresAt</code>. The connector tells the person asking the code
         and the hour, and lets in exactly the accounts the allowlist in its own
         config entry holds — the field its declaration names as
@@ -815,14 +821,15 @@ data: {…}</code></pre>
 
       <p>
         The web page shows each request waiting as a card beside the
-        confirmations — the connector, the account's label, the code and the
-        time it expires, with Approve and Deny — installed from every
-        <code>ready</code>, added from <code>pairing_requested</code> once per
-        code, and removed by <code>pairing_settled</code>. Answering a card, the
-        page leaves a settlement to the frame; an expiry is said once, whichever
-        news of it reaches the page first; a request the daemon no longer knows
-        is said to be no longer waiting; and an approval that could not be
-        written leaves the card, with the reason.
+        confirmations — the connector, the account's label, the code, the time
+        it expires and the source it wrote to, with Approve and Deny —
+        installed from every <code>ready</code>, added from
+        <code>pairing_requested</code> once per code, and removed by
+        <code>pairing_settled</code>. Answering a card, the page leaves a
+        settlement to the frame; an expiry is said once, whichever news of it
+        reaches the page first; a request the daemon no longer knows is said to
+        be no longer waiting; and an approval that could not be written leaves
+        the card, with the reason.
       </p>
 
       <p>

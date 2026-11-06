@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{Hook, HookContext, PluginError, StoreAccess, WriteHold};
+use p02_shared::error_chain;
 use tokio::task::{AbortHandle, JoinError};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -155,7 +156,7 @@ impl Slot {
         match settled {
             Ok(answer) => {
                 unanswered.disarm();
-                answer.map_err(|error| failure(FailureKind::Exception, said(error.to_string())))
+                answer.map_err(|error| failure(FailureKind::Exception, said(error_chain(&error))))
             }
             Err(stopped) => Err(failure(FailureKind::Exception, stopped_message(stopped))),
         }

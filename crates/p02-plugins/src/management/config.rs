@@ -10,12 +10,11 @@ use p02_contracts::{
     ConfigField, ConfigValueType, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
     Manifest, PluginError, PreparedEffect, ToolCall, ToolCallOutcome, ToolPreparation,
 };
-use p02_shared::{Identifier, is_credential_key, redact_credentials};
+use p02_shared::{Identifier, error_chain, is_credential_key, redact_credentials};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
-use crate::boundary::described;
 use crate::config_control::{
     ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, Rebuild,
 };
@@ -266,7 +265,7 @@ impl Request {
             host.core()
                 .map_err(|stopped| stopped.to_string())?
                 .reload(&self.plugin, values)
-                .map_err(|error| described(&error))
+                .map_err(|error| error_chain(&error))
         };
         let outcome = control.change(
             &FieldChange {
@@ -381,7 +380,7 @@ async fn settings(
 /// The plugin this build has under the id `text`.
 fn installed(text: &str) -> Result<Option<&'static Manifest>, PluginError> {
     Ok(crate::list::plugins()
-        .map_err(|error| PluginError::new(described(error)))?
+        .map_err(|error| PluginError::new(error_chain(error)))?
         .iter()
         .map(|(manifest, _)| manifest)
         .find(|manifest| manifest.id().as_str() == text))

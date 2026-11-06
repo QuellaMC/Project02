@@ -187,7 +187,7 @@ test('page.confirmation-card: a tool round that needs approval shows a Confirmat
   ]);
 });
 
-test("page.pairing-card: a pairing request a connector asked for shows a Pairing card with the account and its code; an approval the home cannot take keeps it and says why, Approve removes it and puts the account in the home's pairedUsers, and one nobody answers is said once when it expires", async ({
+test("page.pairing-card: a pairing request a connector asked for shows a Pairing card with the account, its code and the source it wrote to; an approval the home cannot take keeps it and says why, Approve removes it and puts the account in the home's pairedUsers, and one nobody answers is said once when it expires", async ({
   page,
 }) => {
   // Long enough for a person to answer one, short enough to wait out.
@@ -203,10 +203,14 @@ test("page.pairing-card: a pairing request a connector asked for shows a Pairing
   // the home refuses the approval's write.
   await expect(composerFor(page)).toBeVisible();
 
-  const forAlice = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const forAlice = (await wire.pairingRequest('telegram', {
+    subject: alice,
+    source: 'telegram:mira_bot',
+  })) as Asked;
   const card = cards.filter({hasText: alice.label});
 
   await expect(card).toContainText(`code ${forAlice.request.code}`);
+  await expect(card).toContainText('via telegram:mira_bot');
   chmod(home, 0o500);
 
   try {
@@ -224,7 +228,10 @@ test("page.pairing-card: a pairing request a connector asked for shows a Pairing
     home: {values: {pairedUsers: {[alice.id]: alice.label}}},
   });
 
-  const forBob = (await wire.pairingRequest('telegram', bob)) as Asked;
+  const forBob = (await wire.pairingRequest('telegram', {
+    subject: bob,
+    source: 'telegram:mira_bot',
+  })) as Asked;
 
   await expect(cards).toContainText(bob.label);
   await expect(notices).toHaveText([

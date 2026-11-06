@@ -564,6 +564,9 @@ pub struct PairingRequest {
     /// Six digits, unique among the requests waiting.
     pub code: String,
     pub subject: PairingSubject,
+    /// The connector's endpoint the account first wrote to, as the stamp
+    /// its lines will carry: for Telegram, `telegram:<bot username>`.
+    pub source: ClientStamp,
     pub requested_at: Timestamp,
     /// When the request expires, in milliseconds since the Unix epoch.
     pub expires_at: i64,

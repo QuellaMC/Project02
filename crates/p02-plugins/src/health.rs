@@ -7,9 +7,8 @@ use p02_contracts::{
     Declaration, Evidence, EvidenceKind, EvidenceStatus, HEALTH_REJECTION, HealthFailure,
     HealthReport, HealthSnapshot, HealthStatus, Hook, PolicyOutcome,
 };
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_chain};
 
-use crate::boundary::described;
 use crate::host::{PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure};
 use crate::text::excerpt;
@@ -88,7 +87,7 @@ impl Slot {
                     report,
                     self.labels(turn),
                 )
-                .map_err(|error| HookFailure::breach(described(&error)))
+                .map_err(|error| HookFailure::breach(error_chain(&error)))
             });
 
         match checked {

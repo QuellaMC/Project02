@@ -19,17 +19,19 @@ use crate::lock::{Lease, Resource, acquire, with_lock};
 
 /// One process's hold on an open conversation, refused at once to every
 /// other: only its holder makes the conversation's segments and writes the
-/// record of its taken lines.
+/// record of its taken lines. It holds the conversation as it began, so
+/// every segment it makes speaks of its participants by the names they had
+/// then.
 #[derive(Debug)]
 #[must_use = "a writer holds its conversation until it is released"]
 pub struct ConversationWriter {
-    conversation: ConversationId,
+    conversation: Conversation,
     lease: Lease,
 }
 
 impl ConversationWriter {
     #[must_use]
-    pub fn conversation_id(&self) -> &ConversationId {
+    pub fn conversation(&self) -> &Conversation {
         &self.conversation
     }
 
@@ -146,7 +148,7 @@ impl Home {
         Ok(conversations)
     }
 
-    /// The writer's hold on conversation `id`.
+    /// The writer's hold on `conversation`.
     ///
     /// # Errors
     ///
@@ -154,13 +156,18 @@ impl Home {
     /// of [`Home::check`].
     pub fn conversation_writer(
         &self,
-        id: &ConversationId,
+        conversation: Conversation,
     ) -> Result<ConversationWriter, StorageError> {
         self.check()?;
 
+        let lease = acquire(&[(
+            &self.locks_root(),
+            &Resource::ConversationWriter(conversation.id()),
+        )])?;
+
         Ok(ConversationWriter {
-            conversation: id.clone(),
-            lease: acquire(&[(&self.locks_root(), &Resource::ConversationWriter(id))])?,
+            conversation,
+            lease,
         })
     }
 }

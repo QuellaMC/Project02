@@ -20,7 +20,7 @@ use p02_role_model::estimated_tokens;
 use p02_shared::Identifier;
 use p02_store::{
     LogRecord, RecordBody, RecordKind, RoundRecord, SessionContinuation, SessionEntry,
-    SessionReplay, ToolCallFinished, ToolCallStarted, TurnEvidence, TurnRejection, TurnStatus,
+    SessionReplay, ToolCallFinished, ToolCallStarted, TurnEvidence, TurnRejection,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -91,7 +91,6 @@ struct Turn<'r> {
 #[serde(rename_all = "snake_case")]
 enum Ending {
     Completed,
-    CompletedWithFailures,
     Rejected,
 }
 
@@ -337,24 +336,18 @@ impl<'r> Ended<'r> {
     fn of(record: &'r LogRecord) -> Option<Self> {
         match record.body() {
             RecordBody::TurnCompleted(completed) => Some(Self {
-                status: match completed.status {
-                    TurnStatus::Completed => Ending::Completed,
-                    TurnStatus::CompletedWithFailures => Ending::CompletedWithFailures,
-                },
+                status: Ending::Completed,
                 committed: &completed.visible_message_ids,
                 finished: &completed.tool_call_ids,
                 evidence: &completed.runtime_plugin_evidence,
                 health: completed.runtime_plugin_turn_evidence.as_ref(),
-                verdict: completed
-                    .judgement
-                    .as_ref()
-                    .map(|judgement| CommitValidation {
-                        round: judgement.round,
-                        status: Verdict::Accepted,
-                        accepted_visible_reply_text: judgement.accepted_reply.as_ref(),
-                        rejection_reason: None,
-                        rejection_details: None,
-                    }),
+                verdict: Some(CommitValidation {
+                    round: completed.judgement.round,
+                    status: Verdict::Accepted,
+                    accepted_visible_reply_text: completed.judgement.accepted_reply.as_ref(),
+                    rejection_reason: None,
+                    rejection_details: None,
+                }),
                 refusal: None,
             }),
             RecordBody::TurnRejected(rejected) => Some(Self {
@@ -721,12 +714,12 @@ mod tests {
                 Participant::local_user(SpeakerName::new("Sam").unwrap()),
             ])
             .unwrap();
-        let holder = home.conversation_writer(conversation.id()).unwrap();
-        let entry = data.create_session(&holder).unwrap();
+        let holder = home.conversation_writer(conversation.clone()).unwrap();
+        let mut writer = data.create_session(&holder).unwrap();
 
         holder.release();
 
-        let session = entry.session_id().clone();
+        let session = writer.session_id().clone();
         let identity = EventIdentity::new(
             EventId::new("evt_tea").unwrap(),
             TraceId::new("trace_tea").unwrap(),
@@ -771,11 +764,6 @@ mod tests {
             )],
         )
         .unwrap();
-        let mut writer = data
-            .session_log(&conversation, session.segment())
-            .unwrap()
-            .writer()
-            .unwrap();
 
         for body in [
             RecordBody::EventReceived(EventReceived {
@@ -805,16 +793,15 @@ mod tests {
                 .unwrap(),
             ),
             RecordBody::TurnCompleted(TurnCompleted {
-                status: TurnStatus::Completed,
                 visible_message_ids: vec![
                     MessageId::new(session.clone(), NonZeroU64::MIN),
                     MessageId::new(session.clone(), NonZeroU64::new(2).unwrap()),
                 ],
                 tool_call_ids: vec![started.tool_call_id().clone()],
-                judgement: Some(Judgement {
+                judgement: Judgement {
                     round: NonZeroU32::new(2).unwrap(),
                     accepted_reply: Some(text("Not yet.")),
-                }),
+                },
                 runtime_plugin_evidence: vec![evidence(
                     &identity,
                     "session-history",
@@ -838,6 +825,7 @@ mod tests {
 
         writer.release();
 
+        let entry = data.session(&session).unwrap();
         let replay = data
             .session_log(&conversation, session.segment())
             .unwrap()

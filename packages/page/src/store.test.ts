@@ -146,6 +146,7 @@ function pairing(code: string, label: string): PairingRequest {
     connectorId: 'telegram',
     code,
     subject: {id: `account-${code}`, label},
+    source: 'telegram:mira_bot',
     requestedAt: '2026-10-17T09:00:00.000Z',
     expiresAt: 3_600_000,
   };

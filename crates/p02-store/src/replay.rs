@@ -106,8 +106,6 @@ pub enum ReplayError {
     MessagesDisagree,
     #[error("the record names other tool calls than its turn finished")]
     CallsDisagree,
-    #[error("a completed turn that ran the model judges the round it ended on")]
-    Unjudged,
     #[error("the record judges round {round}, not the round the turn ended on, {ran}")]
     JudgedNotLast { round: NonZeroU32, ran: usize },
     #[error("a completed turn ends on a round the parser accepted, which asked for no tool")]
@@ -577,13 +575,7 @@ fn check_completed(turn: &Turn, completed: &TurnCompleted) -> Result<(), ReplayE
         &completed.tool_call_ids,
     )?;
 
-    let Some(judgement) = &completed.judgement else {
-        return if turn.rounds.is_empty() {
-            Ok(())
-        } else {
-            Err(ReplayError::Unjudged)
-        };
-    };
+    let judgement = &completed.judgement;
     let round = last_round(turn, judgement.round)?;
     let DecisionResult::Accepted { decision } = &round.result else {
         return Err(ReplayError::CompletedOnRefusal);

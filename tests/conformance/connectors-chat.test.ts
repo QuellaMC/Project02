@@ -149,8 +149,8 @@ it("connectors.telegram-pairing-refused: an account a bot cannot ask the daemon 
   writeFileSync(join(home, 'config.json'), '{"version":');
 
   const {message} = (await wire.pairingRequest('telegram', {
-    id: '1',
-    label: 'Someone',
+    subject: {id: '1', label: 'Someone'},
+    source: 'telegram:mira_bot',
   })) as {readonly message: string};
 
   telegram.push(miraBot.token, messageFrom(bob, 1, 'Let me in.'));
@@ -339,6 +339,8 @@ it("connectors.telegram-turn-ended-told: the chat a line came from is told once 
 
   const unavailable = (await wire.open('nova')) as {readonly message: string};
   const notRunning = `Nova is not available right now: ${unavailable.message}`;
+  const refused =
+    'Mira could not answer: Provide a non-empty message.\nYour message was not taken; send it again.';
 
   telegram.push(novaBot.token, messageFrom(alice, 1, 'Hello, Nova.'));
   await telegram.shows(novaBot.token, alice.id, notRunning);
@@ -357,12 +359,8 @@ it("connectors.telegram-turn-ended-told: the chat a line came from is told once 
     alice.id,
     `Mira could not answer: ${String(unanswered['message'])}`,
   );
-  telegram.push(miraBot.token, messageFrom(alice, 2, 'Two\nlines.'));
-  await telegram.shows(
-    miraBot.token,
-    alice.id,
-    'Mira could not answer: Provide exactly one non-empty single-line message.\nYour message was not taken; send it again.',
-  );
+  telegram.push(miraBot.token, messageFrom(alice, 2, '   '));
+  await telegram.shows(miraBot.token, alice.id, refused);
 
   // A line answered after each: once its reply is in, a second telling
   // would be in before it.
@@ -379,7 +377,7 @@ it("connectors.telegram-turn-ended-told: the chat a line came from is told once 
   ]);
   expect(textsIn(telegram.calls(miraBot.token), alice.id)).toEqual([
     `Mira could not answer: ${String(unanswered['message'])}`,
-    'Mira could not answer: Provide exactly one non-empty single-line message.\nYour message was not taken; send it again.',
+    refused,
     'Hello, Alice.',
   ]);
 });
@@ -400,9 +398,7 @@ it('connectors.telegram-held-while-daemon-down: a line written while the daemon 
   await telegram.shows(miraBot.token, alice.id, 'Hello, Alice.');
   first.signal('SIGINT');
   await first.exit();
-  await run.printed(
-    `Telegram connector: waiting for the daemon on ${home}; run project02 serve.`,
-  );
+  await run.printed(`Telegram connector: waiting for the daemon on ${home}.`);
   telegram.push(miraBot.token, messageFrom(alice, 2, 'Anyone there?'));
 
   const back = await startDaemon(home);

@@ -56,8 +56,6 @@ enum Opening {
 #[derive(Debug)]
 pub(crate) struct Character {
     id: Identifier,
-    /// The stamp on every line this bot carries.
-    source: ClientStamp,
     gate: Gate,
     thread: Option<Thread>,
     /// Every running turn, folded by the contract's one rule; her thread's
@@ -76,11 +74,9 @@ pub(crate) struct Character {
 }
 
 impl Character {
-    pub(crate) fn new(id: Identifier, chat: &Chat) -> Self {
+    pub(crate) fn new(id: Identifier) -> Self {
         Self {
             id,
-            source: ClientStamp::new(&format!("telegram:{}", chat.username))
-                .expect("a bot's username is letters, digits and underscores"),
             gate: Gate::default(),
             thread: None,
             turns: RunningTurns::default(),
@@ -98,8 +94,8 @@ impl Character {
 
     /// Whether a turn is shown here: this bot carried its line, or Mirror
     /// is on.
-    fn shown(&self, chat: &Chat, turn: &RunningTurn) -> bool {
-        turn.source == self.source
+    fn shown(chat: &Chat, turn: &RunningTurn) -> bool {
+        turn.source == chat.source
             || matches!(chat.settings().owner, Owner::Character { mirror: true, .. })
     }
 
@@ -144,7 +140,7 @@ impl Character {
             conversation_id: short(thread.conversation.as_str()),
             sender_id: short(thread.sender.as_str()),
             text: line.text,
-            source: self.source.clone(),
+            source: chat.source.clone(),
             client_message_id: line.id.clone(),
         };
 
@@ -186,7 +182,7 @@ impl Character {
         let Some(turn) = self.her_turn() else {
             return;
         };
-        let shown = self.shown(chat, turn);
+        let shown = Self::shown(chat, turn);
 
         for draft in &turn.drafts {
             chat.outbox
@@ -205,7 +201,7 @@ impl Character {
 
         let to = match &pending.turn {
             None => Target::EveryPaired,
-            Some(turn) if turn.source == self.source => {
+            Some(turn) if turn.source == chat.source => {
                 chat_of_line(&turn.client_message_id).map_or(Target::EveryPaired, Target::Chat)
             }
             Some(_) => return,
@@ -239,7 +235,7 @@ impl Character {
             } => {
                 let unanswered = matches!(status, TurnStatus::Rejected | TurnStatus::Failed);
 
-                if *source == self.source
+                if *source == chat.source
                     && unanswered
                     && let Some(account) = chat_of_line(client_message_id)
                 {
@@ -268,7 +264,7 @@ impl Character {
                 ..
             } => {
                 let turn = self.turns.get(conversation_id);
-                let shown = turn.is_some_and(|turn| self.shown(chat, turn));
+                let shown = turn.is_some_and(|turn| Self::shown(chat, turn));
 
                 match progress {
                     TurnProgress::UserMessage {
@@ -280,7 +276,7 @@ impl Character {
                             turn.filter(|turn| shown && turn.client_message_id == *id)
                         {
                             chat.outbox.started(
-                                (turn.source != self.source)
+                                (turn.source != chat.source)
                                     .then(|| format!("You ({}): {text}", turn.source)),
                             );
                         }

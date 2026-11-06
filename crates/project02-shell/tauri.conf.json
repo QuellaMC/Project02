@@ -15,6 +15,8 @@
     "targets": ["nsis", "app", "dmg", "appimage", "deb"],
     "publisher": "QuellaMC",
     "shortDescription": "A character of your own to talk to, in a window and in Telegram.",
+    "longDescription": "Project02 runs a character of your own on this computer: a window to talk to the characters in, and an icon in the tray that keeps them answering in Telegram while the window is closed. The characters' words come from the model provider you set up; what they remember, and every conversation, stays in a folder of yours on this computer.",
+    "category": "SocialNetworking",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -24,6 +26,11 @@
     ],
     "resources": {
       "../../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+    },
+    "linux": {
+      "deb": {
+        "section": "net"
+      }
     },
     "windows": {
       "nsis": {

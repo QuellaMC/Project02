@@ -51,7 +51,10 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   const wire = wireOf(daemon);
 
   await wire.start('mira');
-  await wire.pairingRequest('telegram', {id: 'friend', label: 'A friend'});
+  await wire.pairingRequest('telegram', {
+    subject: {id: 'friend', label: 'A friend'},
+    source: 'telegram:mira_bot',
+  });
 
   const stream = await exchange(daemon, {
     path: '/api/events',
@@ -86,8 +89,14 @@ it('stream.frame-ids: frames are numbered <run>-<seq> from one under a 16-hex ru
   const run = id.slice(0, 16);
 
   expect(id).toMatch(/^[0-9a-f]{16}-0$/u);
-  await wire.pairingRequest('telegram', {id: 'one', label: 'One'});
-  await wire.pairingRequest('telegram', {id: 'two', label: 'Two'});
+  await wire.pairingRequest('telegram', {
+    subject: {id: 'one', label: 'One'},
+    source: 'telegram:mira_bot',
+  });
+  await wire.pairingRequest('telegram', {
+    subject: {id: 'two', label: 'Two'},
+    source: 'telegram:mira_bot',
+  });
   await first.next(frameOf('pairing_requested', {subject: {id: 'two'}}));
 
   const second = await openEvents(daemon);

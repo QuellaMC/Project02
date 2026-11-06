@@ -89,14 +89,14 @@ lock's wait blocks.
   reply committed and every call started and finished. Every message joins
   the session through the core session's gate. A call starts once and
   finishes once, as itself, in its turn. The record that ends a turn names
-  exactly what it committed and what finished. A completed turn that ran the
-  model ends on an accepted round that asked for no tool, having committed
-  every reply that round said, and anchors the last; a rejection that judges
-  a round repeats that round's refusal or is the runtime's own, a commit
-  refused after a round that would have completed the turn or a budget spent
-  on a round still asking for a tool before any of it was taken up, and one
-  that judges none comes where its reason stops a turn: a line refused
-  before it is committed, a plugin's refusal before any round.
+  exactly what it committed and what finished. A completed turn ends on an
+  accepted round that asked for no tool, having committed every reply that
+  round said, and anchors the last; a rejection that judges a round repeats
+  that round's refusal or is the runtime's own, a commit refused after a
+  round that would have completed the turn or a budget spent on a round
+  still asking for a tool before any of it was taken up, and one that judges
+  none comes where its reason stops a turn: a line refused before it is
+  committed, a plugin's refusal before any round.
 - **History.** The one projection of a log into the turns its model is
   shown: a turn once it committed the person's line, a round of tool calls
   once a call it started came back, a continued session's carried turns
@@ -115,14 +115,17 @@ lock's wait blocks.
   are read as they were at one moment, as a log is, so a session made or
   discarded while they are read is never taken for damage. A conversation's
   first segment is made once, and each next one only from the newest, both
-  by the conversation's holder alone; only the newest, when it never took a
-  record, is discarded, by its writer alone, so nothing is appended while it
-  goes and the segments left run unbroken. Sessions and conversations list
-  oldest first, in code-point order. A conversation is made once per set of
-  participants, as `conv_` and a random UUID, a make whose write fails takes
-  its directory back, and a directory without its record is a make a crash
-  interrupted. A conversation's taken lines are read leniently and written
-  whole by the holder of the conversation; the segments stay their truth.
+  by the conversation's holder alone, and each with its writer under the
+  catalog's lock: one whose writer cannot be taken is taken back, its row
+  and then the directory made for it, before the error leaves. Only the
+  newest, when it never took a record, is discarded, by its writer alone,
+  so nothing is appended while it goes and the segments left run unbroken.
+  Sessions and conversations list oldest first, in code-point order. A
+  conversation is made once per set of participants, as `conv_` and a
+  random UUID, a make whose write fails takes its directory back, and a
+  directory without its record is a make a crash interrupted. A
+  conversation's taken lines are read leniently and written whole by the
+  holder of the conversation; the segments stay their truth.
 - **The history feed.** A character's plugins read her committed
   conversations through it: the sessions her catalog lists, read as every
   reader reads the catalog, and each session's visible messages from a

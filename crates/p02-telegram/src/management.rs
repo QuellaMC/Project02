@@ -2,7 +2,8 @@
 //! pairing gate as a character's bot; for a paired account, who is on,
 //! what waits, and an answer to a pairing request; and every confirmation
 //! and pairing request of the home shown in every paired chat as a card
-//! with Approve and Deny, naming the surface a confirmation was raised on.
+//! with Approve and Deny, naming the surface a confirmation was raised on
+//! and the source a pairing request's account wrote to.
 
 use p02_app::{Answer, Event, PairingAnswer, PairingRequest, PendingConfirmation, RosterState};
 

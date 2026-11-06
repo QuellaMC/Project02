@@ -110,15 +110,15 @@ it('connectors.telegram-long-poll: a bot polls for messages and button presses f
     offset: (batch.at(-1)?.update_id ?? 0) + 1,
     ...polled,
   });
+  // Each names its account and the bot it wrote to.
   expect(
     relay.requests
       .filter(request => request.path === pairingRequest)
-      .map(
-        request =>
-          (JSON.parse(request.body) as {readonly subject: {id: string}}).subject
-            .id,
-      ),
-  ).toEqual([String(bob.id), String(carol.id)]);
+      .map(request => JSON.parse(request.body) as unknown),
+  ).toMatchObject([
+    {subject: {id: String(bob.id)}, source: 'telegram:mira_bot'},
+    {subject: {id: String(carol.id)}, source: 'telegram:mira_bot'},
+  ]);
 });
 
 it('connectors.telegram-409: a bot whose waiting poll another program ends by polling the same token says so on stderr, naming the bot that waits', async () => {

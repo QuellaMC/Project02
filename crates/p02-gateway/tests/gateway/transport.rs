@@ -287,7 +287,11 @@ async fn a_body_or_query_the_route_cannot_take_is_400() {
         ),
         (
             "/api/connectors/telegram/pairing",
-            json!({"subject": {"id": "two tokens", "label": "Alice"}}).to_string(),
+            json!({
+                "subject": {"id": "two tokens", "label": "Alice"},
+                "source": "telegram:mira_bot",
+            })
+            .to_string(),
             true,
             "pairing request.subject.id",
         ),

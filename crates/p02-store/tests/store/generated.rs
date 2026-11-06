@@ -5,10 +5,10 @@
 
 use std::path::PathBuf;
 
-use p02_core::{Conversation, SessionId};
+use p02_core::SessionId;
 use p02_store::{LogRecord, SessionLog, StorageError};
 
-use crate::support::{Script, World, answer, lines_of};
+use crate::support::{Script, World, answer, conversation_named, lines_of};
 
 /// A small generator of its own, so a failing seed is a seed to rerun.
 struct Random(u64);
@@ -63,9 +63,9 @@ impl Random {
 }
 
 /// A session of turns of every shape the runtime writes, in random order:
-/// replies, tool rounds, refused rounds, refusals, failures, ends, and
-/// turns a crash cut short, which the next turn closes; message numbers a
-/// failed write spent are skipped.
+/// replies, tool rounds, refused rounds, refusals, failures, and turns a
+/// crash cut short, which the next turn closes; message numbers a failed
+/// write spent are skipped.
 fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
     let mut random = Random(seed);
     let mut script = Script::new(session);
@@ -78,10 +78,9 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
             script.skip_message();
         }
 
-        match random.below(8) {
-            0 => script.refused_input(&format!("{line}\n{line}")),
-            1 => script.session_end(),
-            2 => {
+        match random.below(7) {
+            0 => script.refused_input(" \t\r\n\u{3000}\u{2028} "),
+            1 => {
                 let mut cut_short = script.turn(&line);
 
                 cut_short.user(&client);
@@ -92,12 +91,12 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                         .start_calls();
                 }
             }
-            3 => script
+            2 => script
                 .turn(&line)
                 .user(&client)
                 .round(None)
                 .rejected_by_its_round(),
-            4 => {
+            3 => {
                 let replies = random.sentences(3);
                 let replies: Vec<&str> = replies.iter().map(String::as_str).collect();
 
@@ -109,7 +108,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                     .replies()
                     .completed();
             }
-            5 => {
+            4 => {
                 let interim = random.sentences(2);
                 let interim: Vec<&str> = interim.iter().map(String::as_str).collect();
                 let replies = random.sentences(2);
@@ -132,7 +131,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                     with_tools.after_commit();
                 }
             }
-            6 => script
+            5 => script
                 .turn(&line)
                 .user(&client)
                 .round(Some(answer(&[], &["tired"], None)))
@@ -157,11 +156,11 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
 /// Seed `seed`'s log, written through its writer into a conversation of its
 /// own.
 fn written(world: &World, seed: u64) -> (SessionLog, PathBuf, Vec<LogRecord>) {
-    let conversation: Conversation = world.conversation_named(&format!("seed{seed}"));
+    let conversation = conversation_named(&format!("seed{seed}"));
+    let mut writer = world.first_segment(&conversation).unwrap();
     let log = world.log_of(&conversation, 1);
     let records = generated_log(seed, log.session_id().clone());
     let path = world.path_of(log.session_id());
-    let mut writer = log.clone().writer().unwrap();
 
     for record in &records {
         writer.append(record.clone()).unwrap();

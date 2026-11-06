@@ -15,16 +15,19 @@ type Asked = {
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 const alice = {id: '381940562', label: 'Alice (@alice)'};
 const bob = {id: '987654321', label: 'Bob (@bob)'};
+/** Each account's request, written to Mira's bot. */
+const fromAlice = {subject: alice, source: 'telegram:mira_bot'};
+const fromBob = {subject: bob, source: 'telegram:mira_bot'};
 
 function homeConfig(home: string): string {
   return readFileSync(join(home, 'config.json'), 'utf8');
 }
 
-it('pairing.request-pending: an account a connector does not know waits under a six-digit code for an hour, announced on the stream, and asking again returns the same request', async () => {
+it('pairing.request-pending: an account a connector does not know waits under a six-digit code for an hour, naming the account and the source it wrote to, announced on the stream, and asking again, wherever the account wrote then, returns the same request with the source it first wrote to', async () => {
   const daemon = await startDaemon(createHome());
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
-  const asked = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const asked = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
   const {request} = asked;
 
   expect(asked).toEqual({
@@ -33,6 +36,7 @@ it('pairing.request-pending: an account a connector does not know waits under a 
       connectorId: 'telegram',
       code: expect.stringMatching(/^\d{6}$/u) as string,
       subject: alice,
+      source: 'telegram:mira_bot',
       requestedAt: expect.any(String) as string,
       expiresAt: Date.parse(request.requestedAt) + 60 * 60_000,
     },
@@ -40,7 +44,13 @@ it('pairing.request-pending: an account a connector does not know waits under a 
   expect(
     JSON.parse((await events.next(frameOf('pairing_requested'))).data ?? ''),
   ).toEqual({kind: 'pairing_requested', ...request});
-  expect(await wire.pairingRequest('telegram', alice)).toEqual(asked);
+  // The request is the account's: written to another bot, it is the same.
+  expect(
+    await wire.pairingRequest('telegram', {
+      ...fromAlice,
+      source: 'telegram:nova_bot',
+    }),
+  ).toEqual(asked);
   expect(await wire.pendingPairings()).toEqual([request]);
 });
 
@@ -57,7 +67,7 @@ it("pairing.approve-writes-allowlist: an approval writes the account into the ho
   await wire.start('nova');
 
   const events = await openEvents(daemon);
-  const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const {request} = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
 
   expect(await wire.pairingAnswer(request.code, 'approved')).toEqual({
     status: 'settled',
@@ -86,7 +96,7 @@ it("pairing.approve-writes-allowlist: an approval writes the account into the ho
       {characterId: 'nova', values: paired},
     ],
   });
-  expect(await wire.pairingRequest('telegram', alice)).toEqual({
+  expect(await wire.pairingRequest('telegram', fromAlice)).toEqual({
     status: 'paired',
   });
 
@@ -111,7 +121,7 @@ it('pairing.deny: a denial settles denied and writes nothing, a second answer is
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
   const before = homeConfig(home);
-  const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const {request} = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
 
   expect(await wire.pairingAnswer(request.code, 'denied')).toEqual({
     status: 'settled',
@@ -125,21 +135,24 @@ it('pairing.deny: a denial settles denied and writes nothing, a second answer is
     status: 'unknown',
   });
   await expect(
-    wire.pairingRequest('telegram', {id: 'two tokens', label: alice.label}),
+    wire.pairingRequest('telegram', {
+      ...fromAlice,
+      subject: {id: 'two tokens', label: alice.label},
+    }),
   ).rejects.toThrow('POST /api/connectors/telegram/pairing answered 400');
 });
 
 it('pairing.invalid-subject: pairing is refused unknown_connector for a connector that does not pair and invalid_subject for a label with a line break, and an answer to a code never given is unknown', async () => {
   const wire = wireOf(await startDaemon(createHome()));
 
-  expect(await wire.pairingRequest('discord', alice)).toMatchObject({
+  expect(await wire.pairingRequest('discord', fromAlice)).toMatchObject({
     status: 'refused',
     reason: 'unknown_connector',
   });
   expect(
     await wire.pairingRequest('telegram', {
-      id: alice.id,
-      label: 'Alice\nApproved',
+      ...fromAlice,
+      subject: {id: alice.id, label: 'Alice\nApproved'},
     }),
   ).toMatchObject({status: 'refused', reason: 'invalid_subject'});
   expect(await wire.pairingAnswer('123456', 'approved')).toEqual({
@@ -155,7 +168,7 @@ it('pairing.expire: a request nobody answers in time settles expired on the stre
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
   const asked = performance.now();
-  const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const {request} = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
 
   await events.next(
     frameOf('pairing_settled', {
@@ -184,7 +197,7 @@ it('pairing.approve-write-failed: an approval the home cannot take answers faile
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
   const asked = performance.now();
-  const {request} = (await wire.pairingRequest('telegram', alice)) as Asked;
+  const {request} = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
 
   await events.next(frameOf('pairing_requested', {code: request.code}));
   // Three heartbeats on, well short of the deadline: a request the failure
@@ -227,8 +240,8 @@ it('pairing.paired-elsewhere-settles: a request whose account another settings w
   const daemon = await startDaemon(home);
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
-  const forAlice = (await wire.pairingRequest('telegram', alice)) as Asked;
-  const forBob = (await wire.pairingRequest('telegram', bob)) as Asked;
+  const forAlice = (await wire.pairingRequest('telegram', fromAlice)) as Asked;
+  const forBob = (await wire.pairingRequest('telegram', fromBob)) as Asked;
   const named = {[alice.id]: 'Alice', [bob.id]: 'Bob'};
 
   await saveConfig(
@@ -242,7 +255,7 @@ it('pairing.paired-elsewhere-settles: a request whose account another settings w
       value: named,
     },
   );
-  expect(await wire.pairingRequest('telegram', alice)).toEqual({
+  expect(await wire.pairingRequest('telegram', fromAlice)).toEqual({
     status: 'paired',
   });
   await events.next(
@@ -271,7 +284,7 @@ it("pairing.not-across-restart: pairing requests live as long as the daemon's ru
   const first = await startDaemon(home);
   const before = (await wireOf(first).pairingRequest(
     'telegram',
-    alice,
+    fromAlice,
   )) as Asked;
 
   first.signal('SIGINT');
@@ -285,7 +298,10 @@ it("pairing.not-across-restart: pairing requests live as long as the daemon's ru
     await wireOf(next).pairingAnswer(before.request.code, 'approved'),
   ).toEqual({status: 'unknown'});
 
-  const again = (await wireOf(next).pairingRequest('telegram', alice)) as Asked;
+  const again = (await wireOf(next).pairingRequest(
+    'telegram',
+    fromAlice,
+  )) as Asked;
 
   await events.next(
     frameOf('pairing_requested', {code: again.request.code, subject: alice}),

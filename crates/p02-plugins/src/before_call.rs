@@ -8,10 +8,10 @@ use p02_contracts::{
     BeforeRoleModelCallOutput, Declaration, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
     Hook, PluginContextItem, PluginCuratedSection, PolicyOutcome, RuntimeNote,
 };
-use p02_shared::Identifier;
+use p02_shared::{Identifier, error_chain};
 use serde::Serialize;
 
-use crate::boundary::{RECORD_LIMIT, described, quoted, within_answer_limits};
+use crate::boundary::{RECORD_LIMIT, quoted, within_answer_limits};
 use crate::host::{PluginHost, Slot};
 use crate::invoke::{FailureKind, HookFailure};
 use crate::policy::trusted_context;
@@ -157,13 +157,13 @@ impl Slot {
             .into_iter()
             .map(|item| PluginContextItem::new(plugin_id.clone(), item))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| malformed(described(&error)))?;
+            .map_err(|error| malformed(error_chain(&error)))?;
         let curated_sections = output
             .curated_sections
             .into_iter()
             .map(|section| PluginCuratedSection::new(plugin_id.clone(), section))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| malformed(described(&error)))?;
+            .map_err(|error| malformed(error_chain(&error)))?;
 
         within_answer_limits(
             &Answer {
@@ -218,7 +218,7 @@ impl Slot {
                     .map(|note| note.with_plugin(plugin_id.clone()))
             })
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| refused(described(&error)))?;
+            .map_err(|error| refused(error_chain(&error)))?;
 
         Ok(PreparedContext {
             runtime_notes,

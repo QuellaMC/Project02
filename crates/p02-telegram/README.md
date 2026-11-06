@@ -55,10 +55,11 @@ switches and the signals, and prints the lines it is handed.
   its line raised is a card in that line's chat.
 - **The management bot** answers `/status`, `/pending`, `/approve <code>`
   and `/deny <code>`, and shows every confirmation of the home, naming the
-  surface it was raised on, and every pairing request as a card.
+  surface it was raised on, and every pairing request as a card, naming
+  the source its account wrote to.
 - **The gate.** An account the settings do not hold is asked for with a
-  pairing request to the daemon and told its code; nothing it sends is
-  carried, and it is told how its request ended.
+  pairing request to the daemon, from the bot's stamp, and told its code;
+  nothing it sends is carried, and it is told how its request ended.
 - **The outbox** makes a bot's calls to Telegram one at a time, in the
   order decided, none while another program's polls hold the token, and
   each write to a paired account's chat only while the account is

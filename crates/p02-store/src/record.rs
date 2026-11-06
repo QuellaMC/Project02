@@ -134,8 +134,6 @@ pub enum RecordError {
     RejectionRound,
     #[error("the turn records no reason this build knows: \"{0}\"")]
     UnknownReason(String),
-    #[error("a completed turn names the round it judged exactly when it records its verdict")]
-    Judgement,
     #[error("a rejection's message must not be blank")]
     BlankMessage,
     #[error("a continuation summary is trimmed text of 1 to {MAX_SUMMARY_CHARS} characters")]

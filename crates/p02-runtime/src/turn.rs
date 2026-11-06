@@ -2,7 +2,6 @@
 //! admits them, the plugins' hooks around the model's rounds, and what the
 //! turn announces as it goes.
 
-use std::error::Error;
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
@@ -14,7 +13,7 @@ use p02_contracts::{
     ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
-    ClientStamp, EventIdentity, MessageId, ParseUserLineError, Participant, SpeakerName, Timestamp,
+    BlankTextError, ClientStamp, EventIdentity, MessageId, Participant, SpeakerName, Timestamp,
     UserLine, VisibleMessage, VisibleText,
 };
 use p02_plugins::{
@@ -25,7 +24,7 @@ use p02_role_model::{
     CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
     TurnOutcome, TurnSink, run_turn, select_history_window, today_note,
 };
-use p02_shared::{BoundJsonError, Identifier};
+use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
     PayloadSummary, RecordBody, RecordError, RoundRecord, RoundSnapshot, RuntimeRejection,
@@ -121,6 +120,10 @@ pub(crate) enum Ended {
 /// The sentence a turn the runtime failed records.
 const RUNTIME_FAILURE: &str = "The runtime failed before the turn could complete.";
 
+/// What the person is told of a blank text, which their client shows as it
+/// stands.
+const BLANK_REFUSAL: &str = "Provide a non-empty message.";
+
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
 /// Takes `submission` through the turn under `identity`, on the thread's
@@ -135,7 +138,7 @@ pub(crate) async fn run(
 ) -> Ended {
     let line = match UserLine::new(submission.line) {
         Ok(line) => line,
-        Err(error) => return refuse(disk, identity, submission.line, error).await,
+        Err(BlankTextError) => return refuse(disk, identity, submission.line).await,
     };
     let begun = match begin(disk, identity, &submission, line).await {
         Ok(begun) => begun,
@@ -192,38 +195,10 @@ pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
     }
 }
 
-/// An error and the causes under it, as one sentence: what broke, then why.
-pub(crate) fn described(error: &dyn Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-
-    text
-}
-
-/// What the person is told of a text that is no line, which their client
-/// shows as it stands.
-fn refusal(error: ParseUserLineError) -> &'static str {
-    match error {
-        ParseUserLineError::Blank => "Provide exactly one non-empty message.",
-        ParseUserLineError::Multiline => "Provide exactly one non-empty single-line message.",
-    }
-}
-
-/// Records a text that is no line as its event, taken as no line, and the
-/// runtime's refusal of it.
-async fn refuse(
-    disk: &mut Option<Disk>,
-    identity: &EventIdentity,
-    raw: &str,
-    error: ParseUserLineError,
-) -> Ended {
-    let message = refusal(error).to_owned();
+/// Records a blank text as its event, taken as no line, and the runtime's
+/// refusal of it.
+async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) -> Ended {
+    let message = BLANK_REFUSAL.to_owned();
     let refused = {
         let (identity, raw, message) = (identity.clone(), raw.to_owned(), message.clone());
 
@@ -635,13 +610,12 @@ impl OpenTurn<'_> {
         };
 
         self.append(RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: ids(&messages),
             tool_call_ids: finished,
-            judgement: Some(Judgement {
+            judgement: Judgement {
                 round,
                 accepted_reply,
-            }),
+            },
             runtime_plugin_evidence: evidence,
             runtime_plugin_turn_evidence: Some(turn_evidence),
         }))
@@ -680,7 +654,7 @@ impl OpenTurn<'_> {
                 }))
                 .await
             {
-                failed.push(described(&error));
+                failed.push(error_chain(&error));
             }
         }
 

@@ -143,8 +143,8 @@ impl Hook {
     }
 }
 
-/// A failure a plugin reports from a hook or its factory. Its message is
-/// what the host records of it.
+/// A failure a plugin reports from a hook or its factory. The host records
+/// its message and each cause beneath it, so what broke is named with why.
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct PluginError {

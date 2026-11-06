@@ -9,16 +9,15 @@ use p02_core::{
     UserLine, VisibleMessageRole,
 };
 use p02_store::{
-    ContinuedFrom, LogRecord, RecordBody, SessionContinuation, SessionContinued, Summarizer,
+    ContinuedFrom, LogRecord, RecordBody, SessionContinuation, SessionContinued, SessionWriter,
+    Summarizer,
 };
 use serde_json::json;
 
 use crate::support::{Script, World, answer, id, mira, sam};
 
-/// Appends `records` to segment `segment`'s log, as its writer does.
-pub(crate) fn written(world: &World, segment: u64, records: &[LogRecord]) {
-    let mut writer = world.log(segment).writer().unwrap();
-
+/// Appends `records` through `writer`, then releases it.
+pub(crate) fn written(mut writer: SessionWriter, records: &[LogRecord]) {
     for record in records {
         writer.append(record.clone()).unwrap();
     }
@@ -36,8 +35,8 @@ fn texts(turn: &ConversationTurn) -> Vec<&str> {
 fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
+    let writer = world.first_segment(&world.conversation).unwrap();
 
-    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("Feeling?")
         .user("feeling")
@@ -52,7 +51,7 @@ fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
         .round(Some(answer(&["Curious.", "And calm."], &[], None)))
         .replies()
         .completed();
-    script.refused_input("one\ntwo");
+    script.refused_input(" \t\n ");
     script
         .turn("Cut short?")
         .user("cut")
@@ -64,7 +63,7 @@ fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
         .round(Some(answer(&["Here."], &[], None)))
         .replies()
         .completed();
-    written(&world, 1, &script.records);
+    written(writer, &script.records);
 
     let history = world.log(1).read().unwrap().history();
     let [tools, cut_short, replied] = history.turns.as_slice() else {
@@ -103,18 +102,18 @@ fn a_turn_replays_as_its_line_its_answered_tool_rounds_and_its_final_replies() {
 fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
     let world = World::new();
     let mut first = Script::new(world.segment(1));
+    let writer = world.first_segment(&world.conversation).unwrap();
 
-    world.first_segment(world.conversation.id()).unwrap();
     first
         .turn("Tea?")
         .user("tea")
         .round(Some(answer(&["Tea, always."], &[], None)))
         .replies()
         .completed();
-    written(&world, 1, &first.records);
+    written(writer, &first.records);
 
     let carried = world.log(1).read().unwrap().history().turns;
-    let continued = world.next_segment(&world.segment(1)).unwrap();
+    let continued = world.next_segment(&world.conversation, 1).unwrap();
     let mut second = Script::new(continued.session_id().clone());
     let identity = first.records[0].identity().clone();
     let continuation = SessionContinuation::new(
@@ -149,7 +148,7 @@ fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
         .round(Some(answer(&["Never."], &[], None)))
         .replies()
         .completed();
-    written(&world, 2, &second.records);
+    written(continued, &second.records);
 
     let history = world.log(2).read().unwrap().history();
 
@@ -162,8 +161,8 @@ fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
 fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_message() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
+    let writer = world.first_segment(&world.conversation).unwrap();
 
-    world.first_segment(world.conversation.id()).unwrap();
     script
         .turn("One?")
         .user("one")
@@ -176,7 +175,7 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
         .user("three")
         .round(None)
         .rejected_by_its_round();
-    written(&world, 1, &script.records);
+    written(writer, &script.records);
 
     let replay = world.log(1).read().unwrap();
     let session = replay.session();
@@ -247,33 +246,30 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
         ],
     );
     let mut script = Script::new(SessionId::new(group.id().clone(), NonZeroU64::MIN));
+    let writer = world.first_segment(&group).unwrap();
 
-    world.first_segment(group.id()).unwrap();
     script
         .turn("Hello?")
         .user("hello")
         .round(Some(answer(&["Hi."], &[], None)))
         .replies()
         .completed();
-
-    let log = world.data.session_log(&group, NonZeroU64::MIN).unwrap();
-    let mut writer = log.clone().writer().unwrap();
-
-    for record in &script.records {
-        writer.append(record.clone()).unwrap();
-    }
-
-    writer.release();
-    assert_eq!(log.read().unwrap().session().user_name(), &sam());
+    written(writer, &script.records);
+    assert_eq!(
+        world
+            .log_of(&group, 1)
+            .read()
+            .unwrap()
+            .session()
+            .user_name(),
+        &sam()
+    );
 
     let without = between("conv_without", vec![Participant::character(mira()), alice]);
 
     assert_eq!(
-        world
-            .data
-            .session_log(&without, NonZeroU64::MIN)
-            .unwrap_err()
-            .code(),
+        world.first_segment(&without).unwrap_err().code(),
         "character_identity_mismatch"
     );
+    assert_eq!(world.data.sessions().unwrap().len(), 1);
 }

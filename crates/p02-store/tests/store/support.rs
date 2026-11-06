@@ -21,7 +21,7 @@ use p02_core::{
 use p02_shared::{Credentials, DanglingLinks, Fingerprint, Identifier, canonical_path};
 use p02_store::{
     CharacterData, EventReceived, Home, Judgement, LogRecord, MessageCommitted, PayloadSummary,
-    RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionEntry, SessionLog,
+    RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionLog, SessionWriter,
     StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence,
     TurnRejected, TurnRejection, TurnStatus,
 };
@@ -89,25 +89,29 @@ impl World {
         )
     }
 
-    /// Makes the first segment of `conversation`, as its holder does.
+    /// Makes the first segment of `conversation`, as its holder does, and
+    /// hands back its writer.
     pub(crate) fn first_segment(
         &self,
-        conversation: &ConversationId,
-    ) -> Result<SessionEntry, StorageError> {
-        let holder = self.home.conversation_writer(conversation).unwrap();
+        conversation: &Conversation,
+    ) -> Result<SessionWriter, StorageError> {
+        let holder = self.home.conversation_writer(conversation.clone()).unwrap();
         let made = self.data.create_session(&holder);
 
         holder.release();
         made
     }
 
-    /// Makes the segment after `from`, as its conversation's holder does.
-    pub(crate) fn next_segment(&self, from: &SessionId) -> Result<SessionEntry, StorageError> {
-        let holder = self
-            .home
-            .conversation_writer(from.conversation_id())
-            .unwrap();
-        let made = self.data.continue_session(&holder, from);
+    /// Makes the segment after segment `from` of `conversation`, as its
+    /// holder does, and hands back its writer.
+    pub(crate) fn next_segment(
+        &self,
+        conversation: &Conversation,
+        from: u64,
+    ) -> Result<SessionWriter, StorageError> {
+        let holder = self.home.conversation_writer(conversation.clone()).unwrap();
+        let from = SessionId::new(conversation.id().clone(), NonZeroU64::new(from).unwrap());
+        let made = self.data.continue_session(&holder, &from);
 
         holder.release();
         made
@@ -116,23 +120,6 @@ impl World {
     /// The log of segment `segment` of Mira's conversation with Sam.
     pub(crate) fn log(&self, segment: u64) -> SessionLog {
         self.log_of(&self.conversation, segment)
-    }
-
-    /// Mira's conversation with Sam under the id `id`, held in memory, with
-    /// its first segment in her catalog.
-    pub(crate) fn conversation_named(&self, id: &str) -> Conversation {
-        let conversation = Conversation::new(
-            ConversationId::new(id).unwrap(),
-            vec![
-                Participant::character(mira()),
-                Participant::local_user(sam()),
-            ],
-            Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
-        )
-        .unwrap();
-
-        self.first_segment(conversation.id()).unwrap();
-        conversation
     }
 
     pub(crate) fn log_of(&self, conversation: &Conversation, segment: u64) -> SessionLog {
@@ -152,6 +139,19 @@ impl World {
 
 pub(crate) fn sam() -> SpeakerName {
     SpeakerName::new("Sam").unwrap()
+}
+
+/// Mira's conversation with Sam under the id `id`, held in memory.
+pub(crate) fn conversation_named(id: &str) -> Conversation {
+    Conversation::new(
+        ConversationId::new(id).unwrap(),
+        vec![
+            Participant::character(mira()),
+            Participant::local_user(sam()),
+        ],
+        Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
+    )
+    .unwrap()
 }
 
 pub(crate) fn session(text: &str) -> SessionId {
@@ -185,7 +185,6 @@ pub(crate) struct TurnScript<'a> {
     messages: Vec<MessageId>,
     started: Vec<ToolCallStarted>,
     finished: Vec<ToolCallId>,
-    evidence: Vec<Evidence>,
 }
 
 impl Script {
@@ -270,11 +269,10 @@ impl Script {
             messages: Vec::new(),
             started: Vec::new(),
             finished: Vec::new(),
-            evidence: Vec::new(),
         }
     }
 
-    /// A line refused as no line: received, then rejected.
+    /// A blank text refused as no line: received, then rejected.
     pub(crate) fn refused_input(&mut self, raw: &str) {
         let identity = self.identity();
 
@@ -292,39 +290,10 @@ impl Script {
             RecordBody::TurnRejected(
                 TurnRejected::new(
                     TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
-                    "A message must be a single line.".to_owned(),
+                    "Provide a non-empty message.".to_owned(),
                 )
                 .unwrap(),
             ),
-        );
-    }
-
-    /// The end of a session its plugins recorded.
-    pub(crate) fn session_end(&mut self) {
-        let identity = self.identity();
-
-        self.push(
-            &identity,
-            RecordBody::EventReceived(EventReceived {
-                payload_summary: PayloadSummary {
-                    raw_input: "/exit".to_owned(),
-                    normalized_current_user_message: Some(VisibleText::parse("/exit").unwrap()),
-                },
-            }),
-        );
-
-        let evidence = evidence(&identity, "session-history", EvidenceKind::SessionEnd);
-
-        self.push(
-            &identity,
-            RecordBody::TurnCompleted(TurnCompleted {
-                status: TurnStatus::Completed,
-                visible_message_ids: Vec::new(),
-                tool_call_ids: Vec::new(),
-                judgement: None,
-                runtime_plugin_evidence: vec![evidence],
-                runtime_plugin_turn_evidence: None,
-            }),
         );
     }
 }
@@ -565,23 +534,20 @@ impl TurnScript<'_> {
     /// The turn completed on its last round, anchoring the last reply it
     /// said, with the health its plugins reported.
     pub(crate) fn completed(&mut self) {
-        let judgement = (!self.rounds.is_empty()).then(|| {
-            let DecisionResult::Accepted { decision } = self.rounds.last().unwrap() else {
-                panic!("a turn completes on an accepted round");
-            };
-
-            Judgement {
-                round: self.last_round(),
-                accepted_reply: decision
-                    .tool_calls()
-                    .iter()
-                    .rev()
-                    .find_map(|call| match call {
-                        p02_contracts::ModelToolCall::VisibleReply { text } => Some(text.clone()),
-                        p02_contracts::ModelToolCall::Plugin { .. } => None,
-                    }),
-            }
-        });
+        let Some(DecisionResult::Accepted { decision }) = self.rounds.last() else {
+            panic!("a turn completes on an accepted round");
+        };
+        let judgement = Judgement {
+            round: self.last_round(),
+            accepted_reply: decision
+                .tool_calls()
+                .iter()
+                .rev()
+                .find_map(|call| match call {
+                    p02_contracts::ModelToolCall::VisibleReply { text } => Some(text.clone()),
+                    p02_contracts::ModelToolCall::Plugin { .. } => None,
+                }),
+        };
         let health = HealthSnapshot::new(
             id("mem0"),
             self.identity.created_at().clone(),
@@ -593,11 +559,10 @@ impl TurnScript<'_> {
         )
         .unwrap();
         let body = RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: self.messages.clone(),
             tool_call_ids: self.finished.clone(),
             judgement,
-            runtime_plugin_evidence: std::mem::take(&mut self.evidence),
+            runtime_plugin_evidence: Vec::new(),
             runtime_plugin_turn_evidence: Some(TurnEvidence {
                 health: vec![health],
             }),

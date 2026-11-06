@@ -173,56 +173,45 @@ it('turns.stamp-pattern: a turn whose source stamp breaks the pattern is a 400 b
   );
 });
 
-it('turns.single-line-only: a blank line, or one with a line break of any kind, is rejected input_validation_rejected with nothing committed and nothing asked of the model', async () => {
+it('turns.multi-line-message: a message of several lines is taken with its line breaks, CRLF and CR made LF and both ends trimmed, and reaches the model, the history and the stream as written; a blank one is rejected input_validation_rejected with nothing committed and nothing asked of the model', async () => {
   const model = await startModelServer();
-  const wire = wireOf(
-    await startDaemon(
-      createHome({'config.json': configJson({project02: model.settings})}),
-    ),
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: model.settings})}),
   );
+  const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
-  const rejected = (message: string) => ({
+  const events = await openEvents(daemon);
+  const sent = ' Two things:\r\nthe tea,\rand the rain.\r\n\r\nThat is all.\n';
+  const taken = 'Two things:\nthe tea,\nand the rain.\n\nThat is all.';
+
+  expect(await say(' \r\n\t ', 'blank')).toEqual({
     status: 'rejected',
     characterId: 'mira',
     conversationId,
     reason: 'input_validation_rejected',
-    message,
+    message: 'Provide a non-empty message.',
     committed: false,
   });
 
-  expect(await say(' \t ', 'blank')).toEqual(
-    rejected('Provide exactly one non-empty message.'),
+  model.answer(reply('Both noted.'));
+  expect(await say(sent, 'lines')).toMatchObject({
+    status: 'completed',
+    messages: [{text: taken}, {}],
+  });
+  expect(
+    model.requests.map(request => messagesOf(request).at(-1)?.content),
+  ).toEqual([taken]);
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    messages: [{text: taken}, {text: 'Both noted.'}],
+  });
+
+  const announced = await events.next(
+    frameOf('turn_progress', {progress: {kind: 'user_message'}}),
   );
 
-  for (const [text, id] of [
-    ['One\ntwo', 'line-feed'],
-    ['One\r\ntwo', 'crlf'],
-    ['One\rtwo', 'carriage-return'],
-    ['One\u2028two', 'line-separator'],
-    ['One\u2029two', 'paragraph-separator'],
-  ] as const) {
-    expect(await say(text, id), id).toEqual(
-      rejected('Provide exactly one non-empty single-line message.'),
-    );
-  }
-
-  expect(model.requests).toEqual([]);
-  await expect(wire.history(conversationId)).resolves.toMatchObject({
-    messages: [],
-  });
-});
-
-it('turns.line-normalization: a line is committed and shown trimmed of the whitespace around it', async () => {
-  const wire = wireOf(await startDaemon(createHome(), fixedReplies));
-  const say = await converse(wire, 'mira');
-  const {conversationId} = await conversationOf(wire, 'mira');
-
-  expect(await say(' \t Hello there. \t ', 'padded')).toMatchObject({
-    messages: [{text: 'Hello there.'}, {}],
-  });
-  await expect(wire.history(conversationId)).resolves.toMatchObject({
-    messages: [{text: 'Hello there.'}, {}],
+  expect(JSON.parse(announced.data ?? '')).toMatchObject({
+    progress: {clientMessageId: 'lines', text: taken},
   });
 });
 

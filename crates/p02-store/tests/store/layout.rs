@@ -7,12 +7,11 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::path::Path;
 
 use p02_characters::CharacterVersion;
-use p02_core::ConversationId;
 use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
 use p02_store::{CharacterData, StorageError};
 use serde_json::{Value, json};
 
-use crate::support::{World, mira};
+use crate::support::{World, conversation_named, mira};
 
 /// Every file under `root`, with its bytes; a directory left empty counts
 /// too, and a link names where it leads.
@@ -220,7 +219,7 @@ fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left
     let zeta = world.root().join("character-data").join("zeta");
     let data = world.data.root();
 
-    world.first_segment(world.conversation.id()).unwrap();
+    world.first_segment(&world.conversation).unwrap().release();
     std::fs::create_dir_all(&zeta).unwrap();
     for name in ["schema.json", "sessions.jsonl"] {
         std::fs::copy(data.join(name), zeta.join(name)).unwrap();
@@ -396,7 +395,7 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
         };
         let path = path.as_str();
 
-        world.first_segment(world.conversation.id()).unwrap();
+        world.first_segment(&world.conversation).unwrap().release();
         std::fs::create_dir_all(world.data.root().join("taken-lines")).unwrap();
         std::fs::create_dir_all(world.data.root().join("plugin-data")).unwrap();
         std::fs::write(world.data.root().join("config.json"), "{}").unwrap();
@@ -413,10 +412,10 @@ fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
                 let data = data.unwrap();
                 let holder = world
                     .home
-                    .conversation_writer(&ConversationId::new("conv_new").unwrap())?;
+                    .conversation_writer(conversation_named("conv_new"))?;
 
                 data.sessions()?;
-                data.create_session(&holder)?;
+                data.create_session(&holder)?.release();
                 holder.release();
                 world.home.conversations().map(drop)
             })

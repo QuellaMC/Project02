@@ -1,8 +1,8 @@
 //! The wire's contract, written from the types that cross the socket: the
-//! TypeScript declarations the page, the client and the connector compile
-//! against, and the JSON Schema the conformance suite holds every answer
-//! and every frame to. Both are generated files, which the repository's
-//! formatter and linter leave alone.
+//! TypeScript declarations the page and the client compile against, and
+//! the JSON Schema the conformance suite holds every answer and every
+//! frame to. Both are generated files, which the repository's formatter
+//! and linter leave alone.
 
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashSet};
@@ -314,7 +314,10 @@ fn read() -> Vec<(&'static str, Value)> {
         reads::<AnswerBody>("AnswerBody", json!({"decision": "approved"})),
         reads::<PairingRequestBody>(
             "PairingRequestBody",
-            json!({"subject": {"id": "381940562", "label": "Alice (@alice)"}}),
+            json!({
+                "subject": {"id": "381940562", "label": "Alice (@alice)"},
+                "source": "telegram:mira_bot",
+            }),
         ),
         reads::<ConfigChange>(
             "ConfigChange",
@@ -401,6 +404,7 @@ fn written() -> Vec<(&'static str, Value)> {
         connector_id: id("telegram"),
         code: "123456".to_owned(),
         subject: subject.clone(),
+        source: stamp("telegram:mira_bot"),
         requested_at: at.clone(),
         expires_at: 1_793_000_000_000,
     };

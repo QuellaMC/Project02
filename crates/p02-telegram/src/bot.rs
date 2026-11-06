@@ -68,6 +68,13 @@ pub(crate) struct Start {
     pub(crate) stop: CancellationToken,
 }
 
+/// The stamp on every line the bot `username` carries and every pairing
+/// request it makes.
+fn source_of(username: &str) -> ClientStamp {
+    ClientStamp::new(&format!("telegram:{username}"))
+        .expect("a bot's username is letters, digits and underscores")
+}
+
 /// A running bot, as the table holds it.
 #[derive(Debug)]
 pub(crate) struct Bot {
@@ -155,6 +162,7 @@ async fn run(api: BotApi, parts: Parts) {
         return;
     };
     let username = me.username.unwrap_or_else(|| me.id.to_string());
+    let source = source_of(&username);
     let character = match &settings.borrow().owner {
         Owner::Management { .. } => {
             lines.say(&format!("Telegram: management bot @{username} is on."));
@@ -182,7 +190,7 @@ async fn run(api: BotApi, parts: Parts) {
     let chat = Chat {
         api: api.clone(),
         id: me.id,
-        username: username.clone(),
+        source,
         settings: settings.clone(),
         daemon,
         outbox,
@@ -198,7 +206,7 @@ async fn run(api: BotApi, parts: Parts) {
     };
 
     match character {
-        Some(id) => tasks.spawn(follow(Character::new(id, &chat), chat, intake)),
+        Some(id) => tasks.spawn(follow(Character::new(id), chat, intake)),
         None => tasks.spawn(follow(Management::default(), chat, intake)),
     };
     tasks.close();
@@ -457,7 +465,9 @@ pub(crate) struct Chat {
     pub(crate) api: BotApi,
     /// As Telegram numbers the bot: stable where a username is not.
     pub(crate) id: i64,
-    pub(crate) username: String,
+    /// The stamp on every line the bot carries and every pairing request
+    /// it makes.
+    pub(crate) source: ClientStamp,
     settings: watch::Receiver<Arc<BotSettings>>,
     daemon: watch::Receiver<Option<Daemon>>,
     pub(crate) outbox: Outbox,
@@ -811,7 +821,7 @@ mod tests {
         let chat = Chat {
             api: api.clone(),
             id: 123_456,
-            username: "home_bot".to_owned(),
+            source: source_of("home_bot"),
             settings: settings.clone(),
             daemon,
             outbox: Outbox::start(

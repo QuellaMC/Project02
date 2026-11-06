@@ -210,9 +210,9 @@ When you remove or replace behavior, remove its tests with it.
 
 Coverage is a floor that catches untested code, not a target to farm. Never
 write a test whose purpose is to move the number. If deleting a duplicate
-drops coverage below the thresholds in the package's `vitest.config.ts`, lower the threshold
-in the same PR and say why in the description — that is a real change of
-intent, and it should be reviewed as one.
+drops coverage below the thresholds in the package's `vitest.config.ts`,
+lower the threshold in the same PR and say why in the description — that
+is a real change of intent, and it should be reviewed as one.
 
 Never call live model providers or external services from tests — use fakes,
 stubs, or test adapters. Keep test temp roots canonical (`realpath`); macOS

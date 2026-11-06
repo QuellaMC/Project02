@@ -26,6 +26,8 @@ const bob = {id: 5151, first_name: 'Bob', username: 'bob'};
 const carol = {id: 6161, first_name: 'Carol'};
 const dave = {id: 7171, first_name: 'Dave'};
 const erin = {id: 8181, first_name: 'Erin'};
+/** The stamp of a bot this connector does not run, which a pairing request may name. */
+const otherBot = 'telegram:other_bot';
 const mira = {scope: 'character', characterId: 'mira'} as const;
 
 type Parked = {
@@ -37,6 +39,7 @@ type Parked = {
 type Asked = {
   readonly code: string;
   readonly subject: {readonly id: string; readonly label: string};
+  readonly source: string;
   readonly expiresAt: number;
 };
 
@@ -129,9 +132,10 @@ function confirmationCard(
   ].join('\n');
 }
 
+/** A pairing request as its card says it: who wants to pair, via the source they wrote to, the code, and what its deadline has left until it ends. */
 function pairingCard(asked: Asked, ended = false): string {
   return (
-    `${asked.subject.label} wants to pair · code ${asked.code}` +
+    `${asked.subject.label} wants to pair via ${asked.source} · code ${asked.code}` +
     (ended ? '' : ` · expires in ${left(asked.expiresAt)}`)
   );
 }
@@ -299,7 +303,7 @@ it("connectors.telegram-cards: a confirmation a bot's line raised is a card with
   );
 });
 
-it("connectors.telegram-management-bot: the management bot shows every confirmation of the home as a card naming the surface it was raised on and every pairing request as a card whose Approve pairs the account, posts those already waiting when it starts, answers a paired account's /status, /approve, /deny and /pending, and keeps what arrives while nobody is paired for the first account paired", async () => {
+it("connectors.telegram-management-bot: the management bot shows every confirmation of the home as a card naming the surface it was raised on and every pairing request as a card naming the source its account wrote to, whose Approve pairs the account, posts those already waiting when it starts, answers a paired account's /status, /approve, /deny and /pending, and keeps what arrives while nobody is paired for the first account paired", async () => {
   const model = await startModelServer();
   const home = cardsHome(model, [alice], homeBot);
   const daemon = await startDaemon(home);
@@ -313,8 +317,8 @@ it("connectors.telegram-management-bot: the management bot shows every confirmat
   const pending = await nextParked(events);
   const fromBob = (
     (await wire.pairingRequest('telegram', {
-      id: String(bob.id),
-      label: 'Bob (@bob)',
+      subject: {id: String(bob.id), label: 'Bob (@bob)'},
+      source: otherBot,
     })) as {readonly request: Asked}
   ).request;
   const telegram = await startTelegramServer([homeBot, miraBot]);
@@ -472,8 +476,8 @@ it("connectors.telegram-toast-cut: a press whose answer would run past the 200 c
   const wire = wireOf(daemon);
   const fromBob = (
     (await wire.pairingRequest('telegram', {
-      id: String(bob.id),
-      label: 'Bob (@bob)',
+      subject: {id: String(bob.id), label: 'Bob (@bob)'},
+      source: otherBot,
     })) as {readonly request: Asked}
   ).request;
   const telegram = await startTelegramServer([homeBot]);

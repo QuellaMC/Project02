@@ -15,7 +15,10 @@ async fn ask_pairing(gateway: &Gateway, id: &str) -> Value {
         .verb(
             Method::POST,
             "/api/connectors/telegram/pairing",
-            Some(&json!({"subject": {"id": id, "label": format!("Account {id}")}})),
+            Some(&json!({
+                "subject": {"id": id, "label": format!("Account {id}")},
+                "source": "telegram:mira_bot",
+            })),
         )
         .await
 }
