@@ -620,13 +620,12 @@ impl OpenTurn<'_> {
         };
 
         self.append(RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: ids(&messages),
             tool_call_ids: finished,
-            judgement: Some(Judgement {
+            judgement: Judgement {
                 round,
                 accepted_reply,
-            }),
+            },
             runtime_plugin_evidence: evidence,
             runtime_plugin_turn_evidence: Some(turn_evidence),
         }))

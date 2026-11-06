@@ -21,14 +21,11 @@ const FAILED_RECEIVED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","created
 const FAILED_ASKED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-4"],"visibleMessage":{"id":"conv_a.1:message-4","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Still there?"}}"#;
 const FAILED_ROUND: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"role_model_round","round":1,"roleModelIOSnapshot":{"inputEnvelope":{"event":{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z"},"userMessage":"Still there?","decisionContext":{"sessionId":"conv_a.1","characterSnapshot":{"id":"mira","displayName":"Mira"},"historyWindow":{"turnEventIds":["evt_1"]},"runtimeNotes":[],"pluginContextItems":[],"curatedContextSections":[]},"pluginToolDefinitions":[],"toolRounds":[],"outputContract":{"version":"mvp-006.tool_calls.v1"}},"characterRef":{"version":"1.1.0","personaFingerprint":"sha256:6b965dfe599ffa2f70010c2ccb993b9305b8bc98f0badd2f9cb582c853836931"},"promptSize":{"frames":[{"kind":"system_protocol","count":1,"chars":100}],"toolChars":0}},"parsedRoleModelDecisionSnapshot":{"result":{"status":"rejected","rejection":{"reason":"provider_error","details":"The provider answered 503."}}}}"#;
 const FAILED_REJECTED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"runtime_turn_rejected","reason":"provider_error","message":"The provider answered 503.","visibleMessageIds":["conv_a.1:message-4"],"round":1}"#;
-const END_RECEIVED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":"/exit","normalizedCurrentUserMessage":"/exit"}}"#;
-const END_COMPLETED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"runtime_turn_completed","status":"completed"}"#;
-const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
+const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_3"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
 
 /// The first segment: a turn with a tool round and the plugins' work after
-/// it, a line refused as no line, a turn whose provider failed, and the
-/// session's end.
-const FIRST_SEGMENT: [&str; 17] = [
+/// it, a line refused as no line, and a turn whose provider failed.
+const FIRST_SEGMENT: [&str; 15] = [
     TEA_RECEIVED,
     TEA_ASKED,
     TEA_ROUND_1,
@@ -44,8 +41,6 @@ const FIRST_SEGMENT: [&str; 17] = [
     FAILED_ASKED,
     FAILED_ROUND,
     FAILED_REJECTED,
-    END_RECEIVED,
-    END_COMPLETED,
 ];
 
 #[test]
@@ -188,7 +183,8 @@ fn broken_logs() -> Vec<(&'static str, &'static str, Vec<String>)> {
         ("a terminal judging an earlier round", "not the round the turn ended on", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""round":2"#, r#""round":1"#)]).collect()),
         ("a terminal anchoring a reply never said", "anchors the last reply", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""acceptedVisibleReplyText":"Tea, always.""#, r#""acceptedVisibleReplyText":"Coffee.""#)]).collect()),
         ("a turn completed short of its replies", "goes on past round 2 before taking up all it gave", strings(&FIRST_SEGMENT[..6]).into_iter().chain([replace(TEA_COMPLETED, r#"["conv_a.1:message-1","conv_a.1:message-2"]"#, r#"["conv_a.1:message-1"]"#)]).collect()),
-        ("a completed turn that judges nothing", "judges the round it ended on", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#","round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}"#, "")]).collect()),
+        ("a completed turn that judges nothing", "missing field `round`", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#","round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}"#, "")]).collect()),
+        ("a completed turn saying completed_with_failures", "unknown variant `completed_with_failures`", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""status":"completed""#, r#""status":"completed_with_failures""#)]).collect()),
         ("a model refusal that judges no round", "names the round it judged", strings(&FIRST_SEGMENT[11..14]).into_iter().chain([replace(FAILED_REJECTED, r#","round":1"#, "")]).collect()),
         ("a commit refused short of its round's replies", "a commit refused after a round that would have completed the turn", strings(&FIRST_SEGMENT[..6]).into_iter().chain([r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_rejected","reason":"commit_validation_failure","message":"Memory is unwell.","visibleMessageIds":["conv_a.1:message-1"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2}"#.to_owned()]).collect()),
         ("a budget spent after its round's calls ran", "before any of it was taken up", strings(&called).into_iter().chain([TEA_ANSWERED.to_owned(), r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_rejected","reason":"tool_rounds_exhausted","message":"Role model exceeded maximum executable tool rounds (99).","visibleMessageIds":["conv_a.1:message-1"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":1}"#.to_owned()]).collect()),
@@ -196,7 +192,7 @@ fn broken_logs() -> Vec<(&'static str, &'static str, Vec<String>)> {
         ("a line refused once it was committed", "only before it goes further", strings(&asked).into_iter().chain([replace(&replace(&replace(&replace(SPLIT_REFUSED, "evt_2", "evt_1"), "trace_2", "trace_1"), "09:01:00", "09:00:00"), r#"line."}"#, r#"line.","visibleMessageIds":["conv_a.1:message-1"]}"#)]).collect()),
         ("a plugin's refusal after a round", "only before it goes further", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), replace(&replace(&replace(&replace(&replace(SPLIT_REFUSED, "evt_2", "evt_1"), "trace_2", "trace_1"), "09:01:00", "09:00:00"), "input_validation_rejected", "plugin_before_role_model_call_rejected"), r#"line."}"#, r#"line.","visibleMessageIds":["conv_a.1:message-1"]}"#)]).collect()),
         ("after_turn_committed before the turn completed", "follows the record that completed", strings(&asked).into_iter().chain([TEA_AFTER.to_owned()]).collect()),
-        ("a continuation not first", "before any other", strings(&[END_RECEIVED, END_COMPLETED, CONTINUED])),
+        ("a continuation not first", "before any other", strings(&[SPLIT_RECEIVED, SPLIT_REFUSED, CONTINUED])),
         ("a continuation of another session", "not its own", vec![CONTINUED.to_owned()]),
     ]
 }

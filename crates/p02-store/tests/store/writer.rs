@@ -1,7 +1,9 @@
 //! A session's writer: one at a time, appending only what follows its log,
 //! after whatever a crash or a failed write left after the last line.
 
-use p02_store::{LogRecord, RecordBody, StorageError, TurnCompleted, TurnStatus};
+use std::num::NonZeroU32;
+
+use p02_store::{Judgement, LogRecord, RecordBody, StorageError, TurnCompleted};
 use serde_json::json;
 
 use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
@@ -44,10 +46,12 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
         )
         .unwrap(),
         RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: Vec::new(),
             tool_call_ids: Vec::new(),
-            judgement: None,
+            judgement: Judgement {
+                round: NonZeroU32::MIN,
+                accepted_reply: None,
+            },
             runtime_plugin_evidence: Vec::new(),
             runtime_plugin_turn_evidence: None,
         }),

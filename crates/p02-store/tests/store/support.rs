@@ -185,7 +185,6 @@ pub(crate) struct TurnScript<'a> {
     messages: Vec<MessageId>,
     started: Vec<ToolCallStarted>,
     finished: Vec<ToolCallId>,
-    evidence: Vec<Evidence>,
 }
 
 impl Script {
@@ -270,7 +269,6 @@ impl Script {
             messages: Vec::new(),
             started: Vec::new(),
             finished: Vec::new(),
-            evidence: Vec::new(),
         }
     }
 
@@ -296,35 +294,6 @@ impl Script {
                 )
                 .unwrap(),
             ),
-        );
-    }
-
-    /// The end of a session its plugins recorded.
-    pub(crate) fn session_end(&mut self) {
-        let identity = self.identity();
-
-        self.push(
-            &identity,
-            RecordBody::EventReceived(EventReceived {
-                payload_summary: PayloadSummary {
-                    raw_input: "/exit".to_owned(),
-                    normalized_current_user_message: Some(VisibleText::parse("/exit").unwrap()),
-                },
-            }),
-        );
-
-        let evidence = evidence(&identity, "session-history", EvidenceKind::SessionEnd);
-
-        self.push(
-            &identity,
-            RecordBody::TurnCompleted(TurnCompleted {
-                status: TurnStatus::Completed,
-                visible_message_ids: Vec::new(),
-                tool_call_ids: Vec::new(),
-                judgement: None,
-                runtime_plugin_evidence: vec![evidence],
-                runtime_plugin_turn_evidence: None,
-            }),
         );
     }
 }
@@ -565,23 +534,20 @@ impl TurnScript<'_> {
     /// The turn completed on its last round, anchoring the last reply it
     /// said, with the health its plugins reported.
     pub(crate) fn completed(&mut self) {
-        let judgement = (!self.rounds.is_empty()).then(|| {
-            let DecisionResult::Accepted { decision } = self.rounds.last().unwrap() else {
-                panic!("a turn completes on an accepted round");
-            };
-
-            Judgement {
-                round: self.last_round(),
-                accepted_reply: decision
-                    .tool_calls()
-                    .iter()
-                    .rev()
-                    .find_map(|call| match call {
-                        p02_contracts::ModelToolCall::VisibleReply { text } => Some(text.clone()),
-                        p02_contracts::ModelToolCall::Plugin { .. } => None,
-                    }),
-            }
-        });
+        let Some(DecisionResult::Accepted { decision }) = self.rounds.last() else {
+            panic!("a turn completes on an accepted round");
+        };
+        let judgement = Judgement {
+            round: self.last_round(),
+            accepted_reply: decision
+                .tool_calls()
+                .iter()
+                .rev()
+                .find_map(|call| match call {
+                    p02_contracts::ModelToolCall::VisibleReply { text } => Some(text.clone()),
+                    p02_contracts::ModelToolCall::Plugin { .. } => None,
+                }),
+        };
         let health = HealthSnapshot::new(
             id("mem0"),
             self.identity.created_at().clone(),
@@ -593,11 +559,10 @@ impl TurnScript<'_> {
         )
         .unwrap();
         let body = RecordBody::TurnCompleted(TurnCompleted {
-            status: TurnStatus::Completed,
             visible_message_ids: self.messages.clone(),
             tool_call_ids: self.finished.clone(),
             judgement,
-            runtime_plugin_evidence: std::mem::take(&mut self.evidence),
+            runtime_plugin_evidence: Vec::new(),
             runtime_plugin_turn_evidence: Some(TurnEvidence {
                 health: vec![health],
             }),

@@ -229,7 +229,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
     let continued = world.next_segment(&world.segment(1)).unwrap();
     let mut script = Script::new(continued.session_id().clone());
 
-    script.session_end();
+    script.turn("Hello?");
 
     let mut writer = world.log(2).writer().unwrap();
 
@@ -262,7 +262,12 @@ fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions()
     let first = world.first_segment(world.conversation.id()).unwrap();
     let mut script = Script::new(world.segment(1));
 
-    script.session_end();
+    script
+        .turn("Hello?")
+        .user("hello")
+        .round(Some(answer(&["Hi."], &[], None)))
+        .replies()
+        .completed();
 
     let mut writer = world.log(1).writer().unwrap();
 
@@ -284,7 +289,7 @@ fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions()
         "{refused}"
     );
     assert_eq!(world.data.session(first.session_id()).unwrap(), first);
-    assert_eq!(world.log(1).read().unwrap().records().len(), 2);
+    assert_eq!(world.log(1).read().unwrap().records(), script.records);
 
     std::fs::write(&catalog, format!("{rows}{rows}")).unwrap();
 
@@ -456,7 +461,7 @@ fn a_listing_raced_by_a_session_made_or_discarded_never_reports_damage() {
                     .writer()
                     .unwrap();
 
-                script.session_end();
+                script.turn("Hello?");
                 writer.append(script.records[0].clone()).unwrap();
                 writer.release();
                 latest = kept.session_id().clone();
