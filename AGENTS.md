@@ -8,297 +8,175 @@ TypeScript under `packages/`.
 Core rule:
 
 ```text
-The model proposes. The runtime, tests, and policy commit.
+The model proposes. The runtime decides and commits.
 ```
 
 ---
 
-## 0. Simplicity and the Greenfield Principle
+## 1. What We Are Building
 
-**Simplicity is the ultimate sophistication.** Simple can be harder than
-complex: you have to work hard to get your thinking clean to make it simple.
-Complexity that remains is thinking that stopped early.
+A personal app in early development. The people who use it are not
+engineers: they install it, pick a character, and talk to her. It is not a
+platform that must never fail. Build it the way a small team builds a good
+app: simple code, a few guarantees kept without exception, and problems
+fixed when someone hits them.
 
-**Every line of code and documentation should read as if it had been written
-correctly the first time.** The two principles share top rank. They govern
-every other section here and apply to source, tests, docs, and this file.
+**Simplicity is the ultimate sophistication.** Complexity that remains is
+thinking that stopped early. Every line of code and documentation should
+read as if it had been written correctly the first time.
 
-1. **No patching.** Trace a break to its cause and fix it there. Do not stack
-   special cases, copy logic and tweak it, or add a flag to route around the
-   problem. Tearing something down and rewriting it is in scope.
-2. **Code explains itself.** Names carry the *what*. A comment carries a *why*
-   or a rule that cannot be inferred from the code, and it is clear, simple,
-   and rare. Explanatory comments that narrate the code misguide more than
-   they help: delete them, or rewrite the code that needed them. No
-   commented-out code.
-3. **No residue.** No backup copies, orphaned files, or dead code. When a
-   mechanism goes, its tests, fixtures, and docs go with it.
-4. **Deployment parity.** Deployed and local source stay byte-identical.
+The character is a person, not a bot under policy. The framework gives her
+mechanics — a heartbeat, tools, memory — and never rules on her behavior.
+What she does comes from her persona and from what the person tells her.
 
-Before changing code, ask *"if I were writing this for the first time, how
-would I write it?"* — not *"how do I graft this onto what is here?"* Two
-corollaries: a business rule is defined in exactly one place, and all state
-changes pass through the same entry point, so a competing second source never
-appears.
+## 2. How Strict to Be
 
-Document only what is high-value, stable, and not discoverable by reading the
-code. When tempted by "good enough for now", prefer the rewrite over leaving a
-landmine.
+Be strict in three places, and only these:
 
----
+1. **The person's data survives.** Conversations, her memories and the
+   settings are never lost or corrupted by a crash, an interrupted write or
+   a second window. Use the plain tools: append-only logs, whole-file
+   atomic writes, one writer per file.
+2. **Secrets stay secret.** Keys are never logged, recorded or shown back.
+3. **Only the person decides.** Only paired people reach her, and nothing
+   acts on the person's machine, accounts, messages or money without their
+   say.
 
-## 1. Orientation
+Everywhere else, do the simplest thing that works:
 
-Each crate under `crates/` and each package under `packages/` carries a
-`README.md` stating what it owns; read it before changing the crate or
-package, and write one when adding one that lacks it. Those READMEs, the code,
-and the tests are the source of truth for what exists. This file is process,
-not architecture.
+- Read stored data forgivingly. Skip or repair what cannot be used, and say
+  so, rather than refusing the whole home. Add a field with a default
+  rather than a version bump that locks older data out.
+- Validate where outside data comes in: the wire, files, model output.
+  Inside, trust our own types. Do not add checks that guard our code
+  against itself; test the code instead.
+- Build for what a person can actually do. A case that takes deliberate
+  effort to produce is not a requirement: it gets no handling, tests or
+  docs.
+- When something a person would notice fails, tell them plainly what broke
+  and what to do next.
 
-Precedence when sources disagree: the current user request controls the task,
-tests and code control already-built behavior, and this file controls how you
-work. Call out a mismatch rather than silently resolving it.
+## 3. Writing Code
 
----
+1. **No patching.** Trace a break to its cause and fix it there. Do not
+   stack special cases or add a flag to route around a problem. Rewriting
+   is in scope.
+2. **One job, one place.** A rule lives in one place, and every change of a
+   kind goes through one path. When you touch an area and find two paths
+   doing one job, merge them; a merge that would sprawl is its own PR, right
+   after this one.
+3. **Code explains itself.** Names carry the _what_; a rare comment carries
+   a _why_ the code cannot show. No commented-out code.
+4. **No residue.** When something goes, its tests, fixtures and docs go
+   with it.
+5. **Reuse before building.** Look in this repository, then the standard
+   library and existing dependencies, then a maintained package. Name every
+   new runtime dependency, and the alternative you rejected, in the PR.
+6. **Grow from working behavior.** No speculative frameworks, placeholder
+   APIs or fields for a someday caller.
+7. **Settings are a last resort.** Each one is a decision handed to someone
+   with less context than we have. Add one only for a real user who would
+   change it; otherwise pick a good default.
 
-## 2. Design for the User
+Keep persistence, model calls, side effects, rendering and external tools
+behind clear boundaries, and prefer deterministic code wherever model
+judgment is not needed. This project has not shipped: keep a shape only
+when a person's data or scripts depend on it, not because it was written
+first.
 
-The people who run this are not engineers. They install it, pick a character,
-and talk to it. Judge every change by what it costs them, not by how complete
-it looks from inside the code.
+## 4. Orientation
 
-**Simplify the complex.** Difficulty belongs in the runtime, where we can
-solve it once, not in the user's lap as one more thing to understand. A
-setting is a decision handed to someone with less context than we have — so
-every new flag, field, or environment variable needs a real user who would
-change it and a reason the runtime cannot decide for them. Otherwise pick a
-good default and keep it out of the surface.
+Each crate under `crates/` and each package under `packages/` has a
+`README.md` saying what it owns. Read it before changing that code, and keep
+it short and current. The code and tests are the source of truth for what
+exists. When the request, the code and this file disagree, say so rather
+than resolving it silently.
 
-Before building for a case, ask whether a regular user reaches it. A case that
-takes deliberate effort to produce is not a requirement, and code written for
-it is code that will be maintained forever on the strength of a hypothetical.
-Ask the same about functions: what does someone actually do with this?
+## 5. Working Order
 
-This is not licence to drop real robustness. Crashes mid-write, interrupted
-processes, a full disk, two windows open at once — a regular user hits all of
-these without trying, and their data is at stake. Those are ordinary
-conditions, not edge cases. The distinction is whether a person could
-plausibly land there, not whether the code path looks unusual.
-
----
-
-## 3. Operating Order
-
-1. Identify the request or issue that authorizes the work.
-2. Find the level where the cause actually lives, and fix it there.
-3. Add or update tests for the behavior that changed.
-4. Run `pnpm check`.
+1. Know which request the work is for.
+2. Fix the cause where it lives.
+3. Test what changed.
+4. Run the checks.
 5. Say what changed, how it was tested, and what is still open.
 
-Scope discipline applies to *adding* things — do not grow features because a
-larger one feels convenient, and park good out-of-scope ideas in the PR
-description. It does not mean patching shallowly to keep a diff small.
+Do not grow a feature because a larger one feels convenient; park good
+ideas in the PR description.
 
----
+**Plans are short:** what changes for the person, the decisions, the steps.
 
-## 4. One Seam Per Job
+**Reviews are suggestions,** whether they come from GPT Pro, Codex or
+anyone else. Adopt what fixes a problem a person could hit, and decline the
+rest in a sentence. Stop a PR's review loop after two rounds unless a real
+bug is still open.
 
-One job, one implementation. Two code paths doing the same job will drift,
-and then a bug fixed in one stays alive in the other.
+## 6. Testing
 
-When you touch an area, look for seams that have split apart: two validators
-for one shape, two ways to write a file, two places that decide the same
-thing. Unifying them is in scope and does not need separate authorization.
-Say what you merged in the PR description. Refactoring that would sprawl past
-the current task belongs in its own PR, right after this one — not abandoned,
-and not smuggled into a feature commit.
+Test what a person or a calling module would notice if it broke. One
+behavior, one test: do not prove again in a unit test what an end-to-end
+test already proves, and do not write a case per branch when the branches
+are one behavior.
 
-**A small patch is usually a report about the architecture.** When you find
-yourself adding a special case, a flag, or a guard so that one caller behaves,
-stop and look at the seam. The question is not "how do I handle this case" but
-"why can this case exist at all." A shape that makes the bad state
-unrepresentable retires the edge case and every future one like it; a guard
-retires today's bug report.
+- **Conformance tests** (`tests/conformance`) run the real binary from
+  outside, as a client would, for what a person or a client sees.
+- **Rust tests** under `crates/` cover logic worth pinning on its own, and
+  what no client can bring about from outside.
+- **Browser tests** (`tests/browser`) cover the page.
 
-Some patches are genuinely just patches — a wrong constant, a typo in a
-message, an off-by-one. Fix those directly. The rule is about repeated
-special-casing, which is the signal worth acting on.
+Never call live model providers or external services from tests: use fakes
+or the harness's stand-in servers. Keep test temp roots canonical
+(`realpath`), since macOS symlinks a temp dir that CI does not.
 
-Grow structure from working behavior: start with the smallest path that
-actually runs, add when real usage or tests create pressure, and skip
-speculative frameworks, empty modules, placeholder APIs, and schema fields
-added for a someday caller.
+Coverage thresholds are a floor, not a target. When removing a test drops a
+package below its threshold, lower the threshold in the same PR and say
+why.
 
-Compatibility is owed to real callers. This project has not shipped, so
-nothing outside the repository depends on a name here; keep a shape when an
-operator's data or scripts would break, not because it was written first. A
-test that only exists to exercise an old shape is removed with the shape.
+## 7. Model, Data and Security
 
----
+Model output may propose actions; the runtime decides what is allowed. Raw
+model output never directly changes stored state. An action that touches
+the person's files, accounts, messages, money or settings goes through the
+runtime's checks and, when needed, the person's confirmation.
 
-## 5. Reuse Before Building
+## 8. Languages and Checks
 
-Do not rebuild what already works. Before writing a function, constant,
-interface, codec, validator, or helper, look for it in this order:
+Node 24.12+, pnpm, TypeScript, ESLint and Vitest for the clients; Rust as
+`rust-toolchain.toml` pins it for the daemon.
 
-1. **This repository.** Search for the behavior. If it exists, call it, or
-   widen it and merge both callers onto the one seam.
-2. **The Node standard library and existing dev dependencies.** Node 24 covers
-   far more than it used to; check before hand-rolling.
-3. **A maintained package**, when the problem is real, general, and solved
-   better elsewhere than we would solve it. Prefer a well-maintained
-   community package over hand-rolling the same wheel; `package.json` is the
-   inventory. Name every new runtime dependency and the alternative you
-   rejected in the PR description; never add one quietly.
-4. **Write it yourself**, on a shared seam with a concrete second caller.
+- TypeScript follows Google style: Prettier plus the gts rules in
+  `eslint.config.mjs`. Prefer simple, readable code. No `any`, `as any`,
+  `@ts-ignore`, `@ts-expect-error`, broad casts or non-null assertions
+  without a stated reason, and no type-level cleverness.
+- Rust follows the Rust API Guidelines, validating at the edges as §2 says.
+- A client (`packages/page`, `packages/wire/src/client`) imports only the
+  wire's contract and the reference client, and cross-package imports name
+  the package (`@project02/wire/contract`). `pnpm arch:check` enforces both.
+- The `max-lines` overrides in `eslint.config.mjs` may only shrink.
 
-Say what you looked for and what you found. "I searched and there was nothing"
-is a useful sentence; silently writing a second copy is not.
+The gates are `pnpm check` for the clients, `pnpm check:rust` for the daemon,
+and `pnpm test:conformance` against the binary. CI runs all three.
 
----
+Do not commit dependency folders, caches, coverage, build output or temp
+files. Before a commit that touches package or tooling files, check `git
+status --short` and `git ls-files -ci --exclude-standard`.
 
-## 6. Implementation Standards
+## 9. Branches, Commits and PRs
 
-- Follow existing project patterns and reuse existing logic.
-- Create shared helpers only for a real shared boundary with a concrete caller.
-- Keep persistence, model calls, side effects, logging, rendering, and external
-  tools behind explicit boundaries.
-- Prefer explicit data shapes over implicit prompt behavior, and deterministic
-  code wherever model judgment is not actually needed.
-- Keep identifiers and persisted record meanings stable once they exist.
+One part, one branch, one PR, merged before the next starts unless the
+owner stacks them. All changes to `main` go through a PR unless the owner
+says otherwise. Branch names: `feature/`, `fix/`, `docs/` or `chore/` plus a
+short name.
 
-Architecture gates enforced by `pnpm arch:check`:
+- Sign commits (`git commit -S`), and keep each commit coherent.
+- PR descriptions are Markdown with `## Summary` and `## Tests`.
+- No agent or platform branding in commits, PRs, code or generated files.
 
-- A client — `packages/page`, `packages/wire/src/client` — imports only the
-  wire's contract (`packages/wire/src/contract`) and the reference client.
-- Cross-package imports name the package (`@project02/wire/contract`), never a
-  relative path into it, so they land on what its exports offer.
+## 10. Documentation
 
-The `max-lines` overrides in `eslint.config.mjs` may only shrink.
+Document only what is useful, stable and not discoverable from the code.
+`docs/wiki/` holds HTML reference pages for subsystems that need more than a
+README. `docs/plan/` and `docs/develop-journal/` are gitignored scratch
+space. PR descriptions carry the record of normal changes.
 
----
-
-## 7. Testing
-
-Test behavior — what a user or a calling module would notice if it broke. Use
-TDD for runtime or behavior changes when practical.
-
-**One behavior, one test.** Do not re-assert through a unit test what an
-integration test already proves end to end, and do not add a case per branch
-when the branches are one behavior. Duplicated tests are not extra safety:
-they cost the same maintenance as real ones, fail in groups for a single
-cause, and make the suite expensive to change — which is what stops people
-from refactoring.
-
-**The conformance suite is the daemon's acceptance gate.** A behavior the
-daemon must keep is a row of `tests/conformance/inventory.csv` with a test
-under `tests/conformance` titled by it, proved from outside the process; an
-internal test may not pin what that suite proves. A rule of the daemon no
-test from outside can bring about — a host rule no bundled plugin shows, a
-race no client can hold open, a write no switch of the binary fails — is a
-`rust-unit` row, proved by a Rust test under `crates` titled by it, and the
-row says why.
-
-Reach for a unit test when the logic is worth pinning on its own: validation,
-parsing, routing, deterministic state, schema normalization, ID assignment,
-model-output parsing, commit validation. Reach for an integration test at real
-boundaries: input to output, provider to core, model loop to commit, tool
-request to tool result. When a behavior is fully covered by the integration
-test, that is the test.
-
-When you remove or replace behavior, remove its tests with it.
-
-Coverage is a floor that catches untested code, not a target to farm. Never
-write a test whose purpose is to move the number. If deleting a duplicate
-drops coverage below the thresholds in the package's `vitest.config.ts`,
-lower the threshold in the same PR and say why in the description — that
-is a real change of intent, and it should be reviewed as one.
-
-Never call live model providers or external services from tests — use fakes,
-stubs, or test adapters. Keep test temp roots canonical (`realpath`); macOS
-symlinks a temp dir that CI does not, and the difference silently splits local
-and CI results.
-
----
-
-## 8. Model, Persistence, Security, and Errors
-
-Model output may propose actions; runtime policy decides what is allowed. Raw
-model output must never directly mutate durable state.
-
-Any action affecting user data, external systems, money, private information,
-messages, documents, files, accounts, or settings goes through explicit
-validation and, when needed, user confirmation.
-
-Every boundary defines what happens when validation, parsing, logging, model
-output, or duplicate processing fails. Do not hide runtime errors behind
-friendly language — a non-technical user needs to know what broke and what to
-do next, which is not the same as being spared the fact that it broke.
-
----
-
-## 9. TypeScript and Checks
-
-Node 24.12+, pnpm, TypeScript, ESLint, Vitest. Code follows Google TypeScript
-style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
-
-- Prefer simple, readable TypeScript over type-level cleverness.
-- No `any`, `as any`, `@ts-ignore`, `@ts-expect-error`, broad casts, or non-null
-  assertions without explicit justification.
-- No branded types, complex conditional types, or framework-wide abstractions
-  unless the task requires them. That rule is TypeScript's, against
-  type-level cleverness; the Rust crates under `crates/` follow the Rust API
-  Guidelines, which ask for newtypes with validating constructors.
-- Do not change public APIs unless the task requires it.
-
-`pnpm check` is the clients' gate — format, lint, typecheck, arch, the web
-page's build, coverage, and the browser suite (Chromium via Playwright)
-against the binary. `pnpm check:rust` is the daemon's gate — rustfmt,
-clippy, the tests, the generated contract, and cargo-deny — which CI runs on
-Linux, macOS, and Windows, and `pnpm test:conformance` runs the conformance
-suite against the binary, which CI runs on Linux after `pnpm check`. For
-TypeScript-heavy changes also run:
-
-```text
-pnpm typecheck --noUnusedLocals --noUnusedParameters
-```
-
-Do not commit dependency folders, caches, coverage, build output, or temp
-files. Before commits touching package or tooling files, check `git status
---short` and `git ls-files -ci --exclude-standard`.
-
----
-
-## 10. Branch, Commit, and PR Policy
-
-One branch, one PR, merged before the next starts. All changes to `main` go
-through a PR unless the user directs otherwise.
-
-Branch names: `feature/`, `fix/`, `docs/`, `chore/` plus a short name.
-
-- Sign commits (`git commit -S`).
-- Keep commits coherent; do not mix unrelated work.
-- PR descriptions are real multi-line Markdown with `## Summary` and `## Tests`.
-- No agent or platform branding in commits, PR titles, PR bodies, code, or
-  generated artifacts.
-
----
-
-## 11. Documentation
-
-`docs/wiki/` holds durable HTML reference pages; add one when a subsystem needs
-explanation that does not belong in a module README. `docs/plan/` and
-`docs/develop-journal/` are gitignored local scratch space — nothing there is
-a shared source of truth. PR descriptions carry the record for normal changes.
-
-`.gitignore` does not apply to files already tracked, so an ignored path can
-still sit in the index and produce committable diffs. If you find one, untrack
-it (`git rm --cached`) rather than editing it in place.
-
----
-
-## 12. Final Rule
-
-Design the architecture globally. Implement behavior locally. Fix causes at the
-seam, not symptoms at the call site. Let schemas, modules, settings, and docs
-grow only when a real user's working behavior needs them.
+A path in `.gitignore` can still be tracked. If you find one, untrack it
+(`git rm --cached`) rather than editing it.
