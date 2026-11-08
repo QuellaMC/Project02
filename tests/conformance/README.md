@@ -16,13 +16,10 @@ other build of the same commands.
   the socket carries generate. Reading them to learn the wire is
   expected; the suite keeps its own small client so a client bug and a
   daemon bug stay apart.
-- A test's title is its row id in `inventory.csv`, a colon, a space, then
-  the behavior as a sentence:
+- A test's title is a short id, its area and a name, a colon, a space,
+  then the behavior as a sentence:
   `lifecycle.address-line: serve prints its address as its first stdout line once it answers there`.
-  `pnpm arch:check` runs `scripts/check-conformance-inventory.mjs`, which
-  fails when a title names no row and when a row marked done has no test:
-  here, for a page row in `tests/browser`, or for a `rust-unit` row in
-  `crates`, where a test's title is the `///` line above its attributes.
+  Ids are unique, so a search for one finds its test.
 - A test waits only on what it can observe: a printed line, a frame, a
   request reaching a stand-in server, an exit, a file. Never a sleep.
 - Every wait has a ceiling of ten seconds, counted for a printed line from
@@ -81,7 +78,7 @@ the page as it finds it, and runs the suite; the browser suite starts
 Every answer the wire client reads and every frame the stream reader reads
 is held to the contract's schema,
 `packages/wire/src/contract/generated/schema.json`, which the Rust types
-the socket carries generate, so every row proves the contract against
+the socket carries generate, so every test proves the contract against
 whichever build it runs. After a change to those types,
 `cargo test -p p02-gateway contract` writes the schema again, and the
 TypeScript declarations beside it.

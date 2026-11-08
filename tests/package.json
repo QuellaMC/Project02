@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run --project=unit",
     "test:conformance": "vitest run --project=conformance",
     "test:browser": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
