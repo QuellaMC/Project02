@@ -18,7 +18,6 @@ pub enum TurnStatus {
 
 /// What the turn's plugins reported about their health.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct TurnEvidence {
     pub health: Vec<HealthSnapshot>,
 }
@@ -47,7 +46,7 @@ pub struct Judgement {
 
 /// What the plugins did once a completed turn was durable.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct AfterTurnCommitted {
     pub status: TurnStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -159,7 +158,7 @@ impl TurnRejected {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireCompleted {
     status: Completed,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -181,13 +180,12 @@ enum Completed {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct CommitValidation {
     result: AcceptedCommit,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct AcceptedCommit {
     status: Accepted,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,7 +233,7 @@ impl From<TurnCompleted> for WireCompleted {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireRejected {
     reason: String,
     message: String,

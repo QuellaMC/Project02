@@ -1,8 +1,9 @@
 //! A session's evidence as `inspect` reports it, derived from its records
 //! alone: each turn's steps, the messages it committed, what each of its
 //! rounds was shown and wrote, the calls they made, what the plugins said
-//! and the verdict the turn ended on. Nothing is measured or judged again,
-//! so a session reads the same on every run.
+//! and the verdict the turn ended on, and the lines of its log the read
+//! skipped. Nothing is measured or judged again, so a session reads the
+//! same on every run.
 
 use std::num::NonZeroU32;
 
@@ -20,7 +21,7 @@ use p02_role_model::estimated_tokens;
 use p02_shared::Identifier;
 use p02_store::{
     LogRecord, RecordBody, RecordKind, RoundRecord, SessionContinuation, SessionEntry,
-    SessionReplay, ToolCallFinished, ToolCallStarted, TurnEvidence, TurnRejection,
+    SessionReplay, SkippedLines, ToolCallFinished, ToolCallStarted, TurnEvidence, TurnRejection,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -34,6 +35,8 @@ pub(super) struct SessionReport<'r> {
     continuation: Option<Continuation<'r>>,
     evidence_scopes: EvidenceScopes,
     counts: Counts,
+    #[serde(skip_serializing_if = "SkippedLines::is_empty")]
+    skipped_lines: &'r SkippedLines,
     turns: Vec<Turn<'r>>,
 }
 
@@ -305,6 +308,7 @@ impl<'r> SessionReport<'r> {
                 raw_events: records.len(),
                 conversation_messages: replay.session().messages().len(),
             },
+            skipped_lines: replay.skipped_lines(),
             turns: records
                 .iter()
                 .filter_map(|ending| turn(records, replay.session().messages(), ending))
@@ -676,9 +680,11 @@ mod tests {
         };
         let result = DecisionResult::parse(&raw.to_string(), Credentials::Redact);
 
-        RecordBody::ModelRound(Box::new(
-            RoundRecord::new(NonZeroU32::new(number).unwrap(), snapshot, result).unwrap(),
-        ))
+        RecordBody::ModelRound(Box::new(RoundRecord::new(
+            NonZeroU32::new(number).unwrap(),
+            snapshot,
+            result,
+        )))
     }
 
     fn evidence(identity: &EventIdentity, plugin: &str, kind: EvidenceKind) -> Evidence {

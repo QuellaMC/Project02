@@ -1,14 +1,48 @@
 //! A file of JSON lines: a line counts once its newline is on disk, so text
 //! after the last newline is an append a crash cut short and is no line,
-//! while a line before it that is not what it should be is damage. A file
-//! of lines is read as it was at one moment, with what lies beside it.
+//! while a line before it that is not what it should be is damage, which a
+//! session's log and catalog skip and a plugin's log refuses. A file of
+//! lines is read as it was at one moment, with what lies beside it.
 
+use std::fmt;
 use std::io;
 use std::path::Path;
 
 use p02_shared::{FileStamp, file_stamp, read_file};
+use serde::Serialize;
 
 use crate::error::StorageError;
+
+/// The committed lines of a file a read skipped, numbered from 1, said as
+/// "line 2" or "lines 3, 7".
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct SkippedLines(Vec<usize>);
+
+impl SkippedLines {
+    pub(crate) fn push(&mut self, line: usize) {
+        self.0.push(line);
+    }
+
+    #[must_use]
+    pub fn numbers(&self) -> &[usize] {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Display for SkippedLines {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let numbers: Vec<String> = self.0.iter().map(ToString::to_string).collect();
+        let noun = if numbers.len() == 1 { "line" } else { "lines" };
+
+        write!(formatter, "{noun} {}", numbers.join(", "))
+    }
+}
 
 /// The committed lines of `bytes`, without their newlines, each numbered
 /// from 1.

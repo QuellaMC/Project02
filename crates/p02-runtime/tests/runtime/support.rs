@@ -113,18 +113,25 @@ impl World {
     }
 
     /// The records of segment `segment` of `conversation`, read as every
-    /// reader of the log reads them.
+    /// reader of the log reads them, which skips none of what the runtime
+    /// wrote.
     pub(crate) fn records(&self, conversation: &ConversationId, segment: u64) -> Vec<LogRecord> {
-        self.data()
+        let replay = self
+            .data()
             .session_log(
                 &self.home.conversation(conversation).unwrap(),
                 NonZeroU64::new(segment).unwrap(),
             )
             .unwrap()
             .read()
-            .unwrap()
-            .records()
-            .to_vec()
+            .unwrap();
+
+        assert!(
+            replay.skipped_lines().is_empty(),
+            "{}",
+            replay.skipped_lines()
+        );
+        replay.records().to_vec()
     }
 
     pub(crate) fn kinds(&self, conversation: &ConversationId, segment: u64) -> Vec<RecordKind> {

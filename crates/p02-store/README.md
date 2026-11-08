@@ -1,177 +1,51 @@
 # p02-store
 
 Everything the daemon keeps under a home, at storage schema version 15,
-the one gate a session's log is read and written through, and the storage
-a character's plugins reach. It depends on p02-characters, p02-contracts,
-p02-core and p02-shared, reaches the disk only through the fs seam of
-p02-shared, and opens every database of the daemon through rusqlite. Its
-work is synchronous: the runtime runs it on a blocking thread, where a
-lock's wait blocks.
+and the storage a character's plugins reach. It reaches the disk only
+through the fs seam of p02-shared and opens every database through
+rusqlite. Its work is synchronous: the runtime runs it on a blocking
+thread.
 
 - **The layout.** A home holds its marker `schema.json`, its settings
-  `config.json`, the daemon's record, its `.locks`, the character packages
-  its person added under `characters/`, a record per conversation at
-  `conversations/<id>/conversation.json`, and `character-data/<id>/` per
-  character: her marker, her overlay `config.json`, her `.locks`, her
-  sessions catalog `sessions.jsonl`, a directory per session
-  `sessions/<conversation>.<segment>/` holding its log `raw-events.jsonl`,
-  the record of each conversation's taken lines,
-  `taken-lines/<conversation>.json`, and each plugin's own data,
-  `plugin-data/<plugin>/`. Every name is spelled once.
-- **Markers.** Nothing below a home or a character's data directory is read
-  or written until its marker vouches for it: version 15, what it marks,
-  and for character data the character it belongs to and the version of
-  her package last merged into her overlay, which is written after the
-  overlay. A marker of any other version is refused, saying which, and is
-  never converted; a data directory marked for another character is
-  refused, naming her. A directory with no marker is made one only while
-  it holds nothing but control state, never history or anything foreign;
-  a home's character data counts among its control state, since each
-  character's directory is vouched for by its own marker and judged when
-  she is reached, so that damage there fails her alone. No home is made
-  inside a character's data, and nothing at all is written for a
-  directory that is refused, not even the home's marker. Control entries
-  must be real files and directories: a link would carry their state
-  outside the directory its marker vouches for.
-- **Files.** A file is replaced whole, under the lock that guards it, so a
-  temporary found beside it is a dead writer's and goes before the write.
-  Logs are appended to and never rewritten: a line counts once its
-  newline is on disk, text after the last newline is an append a crash cut
-  short and is no line, and the next append cuts it. A session's log is
-  not flushed: a line a crash of the machine loses is lost as its call
-  would have been. A plugin's log is, since its ledger counts each line
-  once it has landed. Files are made owner-only.
-- **Locks.** The operating system's advisory lock on
-  `<locks root>/<sha256 of the key>.lock`, which the kernel releases when
-  its holder dies, so no lock is ever stale and none is reclaimed. Lock
-  files stay where they are; beside a held one, `<…>.owner.json` says who
-  holds it (the key, a nonce, the process, since when), for a
-  person, and for a waiter to see the lock change hands; whether a lock is
-  held is never read from it. A lease that lasts as long as a daemon, a
-  conversation or a session's writer is refused at once (`daemon`,
-  `conversation-writer:<id>`, `session-writer:<id>`); a short guarded write
-  is waited for while it changes hands, and given up after ten seconds
-  without a change (`conversations-catalog`, `storage-schema`,
-  `session-catalog`); a plugin's files, which a hook holds for its own
-  short work, after two, and never past the deadline of the hook that
-  asks (`plugin:<root of its files>`); a settings document, which its
-  writer holds while it reads and replaces it, as long as its caller
-  waits (`runtime-control-file:<its path>`), the home's and each
-  character's in the home's `.locks`. A lock that cannot be had is
-  reported `storage_busy`, a session's writer `session_busy`. Locks taken
-  together are taken in the order of their files and released in reverse.
-  A holder passes its lease along rather than taking it again.
-- **Records.** A session's log holds one record per line: the event it
-  belongs to, its kind, and exactly the fields its kind has, in the order
-  they are written. A model round records what it was shown and what it
-  wrote, every credential-named value in that redacted too, and its verdict
-  must be what the decision parser reads that output as, or the provider's
-  failure when nothing came. A tool call's input and result are kept as the
-  model is shown them again, and an exchange as its provider's, so no
-  credential-named value reaches the log; a call no plugin offers comes back
-  as the runtime's refusal of it, never an answer. A committed line that is
-  no record is damage and fails the read, never a shorter history; a read
-  whose file changes beneath it is tried once more, then refused as raced.
-- **The gate.** Every record enters through one gate, replayed or appended
-  now, and is checked whole before anything of it is taken in. A
-  continuation is a session's first record, and names it. A turn starts
-  once, with its event received, under an identity of its own; while it is
-  open no other turn's record comes, and once it has ended only the plugins'
-  work after its commit does; a new turn closes one a crash left open. It
-  commits the line its event was taken as, first and once and before any
-  round, and its rounds are given that one text; a line its client submitted
-  under an id the session already took is not taken again. Its rounds are
-  numbered as they happen, each shown this session and its character, and
-  every other record that names a round names one the turn ran. A reply
-  comes only from an accepted round, in the order that round said them, and
-  a call only from an accepted round, in the order it asked for them; a
-  round comes only once the turn took up all the round before it gave, every
-  reply committed and every call started and finished. Every message joins
-  the session through the core session's gate. A call starts once and
-  finishes once, as itself, in its turn. The record that ends a turn names
-  exactly what it committed and what finished. A completed turn ends on an
-  accepted round that asked for no tool, having committed every reply that
-  round said, and anchors the last; a rejection that judges a round repeats
-  that round's refusal or is the runtime's own, a commit refused after a
-  round that would have completed the turn or a budget spent on a round
-  still asking for a tool before any of it was taken up, and one that judges
-  none comes where its reason stops a turn: a line refused before it is
-  committed, a plugin's refusal before any round.
-- **History.** The one projection of a log into the turns its model is
-  shown: a turn once it committed the person's line, a round of tool calls
-  once a call it started came back, a continued session's carried turns
-  first, with its summary. A live writer and a reopened session run it over
-  the same records.
-- **Catalogs.** A character's sessions catalog lists each session once,
-  rewritten whole under its lock, beside a directory per session; the two
-  agree, so a directory holding evidence the catalog does not list is a
-  session lost and never read past, while a directory an interrupted start
-  or discard left, empty or holding only a torn line, is no session. A log
-  is made by its segment's first record, so only the newest segment of a
-  conversation is without one: a segment another continues whose log is
-  gone lost its records, and a read that must have it whole refuses it. A
-  catalog row cut by a crash is no row; a damaged or repeated row fails a
-  listing but not a read of another session. The catalog and the directories
-  are read as they were at one moment, as a log is, so a session made or
-  discarded while they are read is never taken for damage. A conversation's
-  first segment is made once, and each next one only from the newest, both
-  by the conversation's holder alone, and each with its writer under the
-  catalog's lock: one whose writer cannot be taken is taken back, its row
-  and then the directory made for it, before the error leaves. Only the
-  newest, when it never took a record, is discarded, by its writer alone,
-  so nothing is appended while it goes and the segments left run unbroken.
-  Sessions and conversations list oldest first, in code-point order. A
-  conversation is made once per set of participants, as `conv_` and a
-  random UUID, a make whose write fails takes its directory back, and a
-  directory without its record is a make a crash interrupted. A
-  conversation's taken lines are read leniently and written whole by the
-  holder of the conversation; the segments stay their truth.
-- **The history feed.** A character's plugins read her committed
-  conversations through it: the sessions her catalog lists, read as every
-  reader reads the catalog, and each session's visible messages from a
-  cursor, a batch of whole lines about as large as asked at a time. A
-  cursor is the place just past a line; one that is no line's end in the
-  log as it is now, which only ever grows, is a cursor of a log that
-  shrank or was replaced, and its reader starts again from the top. The
-  feed reads a log through the gate as every reader does, but reads past
-  its damage: a line the gate refuses is counted and skipped, and since a
-  refused record changes nothing, the lines after it are judged as if it
-  were not there. So a damaged older segment costs the plugins only what
-  it lost, while every reader that must have the session whole still fails
-  at it.
-- **Plugin files.** A plugin's own files, documents (`.json`) replaced
-  whole and logs (`.jsonl`) appended to, every value held to the JSON
-  limits, written or read. A path a plugin names is segments of ASCII
-  letters, digits, `.`, `_` and `-`, each beginning with a letter or a
-  digit, the last ending in `.json` or `.jsonl`: none leaves the store or
-  names what the store keeps beside the plugin's files, a file's name says
-  its kind, and an entry on the way that is no real directory or file is
-  refused. One lessee holds a plugin's files at a time, in this process or
-  another. The store's ledger, `.plugin-store.json`, counts the writes it
-  committed, the revision its plugin reads, and journals the one in
-  flight: what file it is, the digest of what it found there and what it
-  makes of it. A write is journaled, made and flushed, checked and
-  committed; one that fails and leaves its file unfinished is taken back,
-  and one a crash cut short is finished by the next lease, made where it
-  never reached its file, kept where it landed, completed where its line
-  was cut short. A file that is neither what the write found nor what it
-  made is damage, refused and left as it is. A log's torn or blank tail is
-  no line, and its next append cuts it; a damaged line before it is
-  damage.
-- **Databases.** A plugin's databases lie beside its files,
-  `<name>.sqlite`, and this crate alone opens a database: `clippy.toml`
-  refuses it everywhere else. Each is made owner-only, waits two seconds
-  for a lock another connection holds, keeps a write-ahead log synced at
-  its checkpoints, enforces foreign keys, and holds its plugin's schema
-  version as `user_version`; an empty one is initialized in one
-  transaction that keeps every other writer out. A database is a view its
-  plugin builds again, so one at another version, or one SQLite itself
-  finds damaged, is deleted with its `-wal` and `-shm`, those first, and
-  made anew; one another program holds, and every other failure, is
-  reported and left as it is.
-- **What plugins reach.** A character's data is her plugins' storage: the
-  history feed, and each plugin's files and databases, each handle made
-  without touching the disk, so a capability nobody uses touches no file.
-- **The daemon's record.** `daemon.json`, pretty-printed with a trailing
-  newline, owner-only and replaced whole, is written only by the holder of
-  the home's `daemon` lease, which every other daemon is refused at once.
+  `config.json`, the daemon's record `daemon.json`, its `.locks`, the
+  character packages in `characters/`, one record per conversation at
+  `conversations/<id>/conversation.json`, and per character
+  `character-data/<id>/`: her marker, her overlay `config.json`, her
+  `.locks`, her sessions catalog `sessions.jsonl`, each session's log at
+  `sessions/<conversation>.<segment>/raw-events.jsonl`, the lines each
+  conversation took at `taken-lines/<conversation>.json`, and each
+  plugin's files and `.sqlite` databases in `plugin-data/<plugin>/`.
+- **Keeping data safe.** Nothing below a home or a character's data is
+  read or written until its marker vouches for it; a data directory marked
+  for another character is refused, naming her, and a control entry that
+  is a link is refused, so no state lives outside its directory. Logs are
+  appended, never rewritten: a line counts once its newline is on disk,
+  and what a crash left after the last one is cut by the next append.
+  Every other file is replaced whole, owner-only, under its lock. Locks
+  are the kernel's, released when their holder dies: one daemon per home,
+  one holder per conversation, one writer per session, one lessee per
+  plugin's files, and short waits for catalogs and settings. Every
+  credential-named value a round wrote or a call carried is redacted
+  before it is recorded, and again as it is read. A line a client
+  submitted under an id its conversation already took is not run again.
+  A plugin's writes are journaled, so the next lease finishes or takes
+  back one a crash cut short. Its databases are views it builds again:
+  one at another version, or one SQLite finds damaged, is made anew. This
+  crate alone opens a database, as `clippy.toml` holds.
+- **Reading forgivingly.** A session's log is replayed, not policed: each
+  record joins the turn its event started, and the replay keeps the
+  session's messages, the lines its client submitted, and the history its
+  model is shown. A committed line that is no record, a record whose turn
+  never started, a continuation after the first record, and a message the
+  session cannot take are skipped and named, and an append the replay
+  would skip is refused instead. A catalog row that is no session row, or
+  lists a session again, is skipped the same way, and the next rewrite
+  leaves it out. What was skipped is said: `inspect --session` shows its
+  `skippedLines`, `serve` warns once as a thread opens past any, and
+  plugins reading history count it as damage. A round keeps the verdict it
+  recorded, and a field a record does not know is ignored.
+- **What stays refused** is what reading past would lose without saying:
+  a catalog and the session directories beside it that disagree, the
+  missing log of a segment another continues, a damaged file of a
+  plugin's, and a marker written by a newer Project02. A marker of an
+  older version is read as it is.

@@ -1,7 +1,9 @@
 //! A character's sessions catalog, `sessions.jsonl`: one row per session,
 //! rewritten whole under its lock, beside one directory per session. The
 //! two must agree: a directory holding evidence that the catalog does not
-//! list is a session lost, never one to read past.
+//! list is a session lost, never one to read past. A row that is no
+//! session row, or lists a session again, is skipped, and the next rewrite
+//! leaves it out.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -19,14 +21,14 @@ use serde::{Deserialize, Serialize};
 use crate::character_data::CharacterData;
 use crate::conversations::ConversationWriter;
 use crate::error::StorageError;
-use crate::jsonl::{committed_lines, holds_a_line, read_coherently, read_lines};
+use crate::jsonl::{SkippedLines, committed_lines, holds_a_line, read_coherently, read_lines};
 use crate::layout::{EntryKind, FINDER_METADATA, RAW_EVENTS_FILE};
 use crate::lock::{Resource, with_lock};
 use crate::log::{SessionLog, SessionWriter};
 
 /// A session the catalog lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionEntry {
     session_id: SessionId,
     created_at: Timestamp,
@@ -44,7 +46,23 @@ impl SessionEntry {
     }
 }
 
+/// A character's sessions as her catalog lists them, oldest first, and
+/// the lines of the catalog its read skipped.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCatalog {
+    pub sessions: Vec<SessionEntry>,
+    /// The rows that were no session row, or listed a session again.
+    pub skipped_lines: SkippedLines,
+}
+
 type Catalog = BTreeMap<SessionId, SessionEntry>;
+
+/// A catalog's rows as read: the sessions they list, and the rows skipped.
+#[derive(Default)]
+struct Rows {
+    listed: Catalog,
+    skipped: SkippedLines,
+}
 
 impl CharacterData {
     /// Every session the catalog lists, oldest first: by when each was
@@ -53,25 +71,29 @@ impl CharacterData {
     /// # Errors
     ///
     /// [`StorageError`] when the catalog cannot be read or does not agree
-    /// with the session directories: a damaged row, a session it lists
-    /// whose directory is missing or not real, or a directory holding
-    /// evidence that it does not list.
-    pub fn sessions(&self) -> Result<Vec<SessionEntry>, StorageError> {
-        let mut sessions: Vec<SessionEntry> = self.read_catalog()?.into_values().collect();
+    /// with the session directories: a session it lists whose directory is
+    /// missing or not real, or a directory holding evidence that it does
+    /// not list.
+    pub fn sessions(&self) -> Result<SessionCatalog, StorageError> {
+        let rows = self.read_catalog()?;
+        let mut sessions: Vec<SessionEntry> = rows.listed.into_values().collect();
 
         sessions.sort_by(by_age);
-        Ok(sessions)
+        Ok(SessionCatalog {
+            sessions,
+            skipped_lines: rows.skipped,
+        })
     }
 
-    /// The session `id`, as its row says: found even when rows of other
-    /// sessions are damaged, so one bad row costs only its own session.
+    /// The session `id`, as its row says, whatever the directories of other
+    /// sessions hold.
     ///
     /// # Errors
     ///
     /// [`StorageError::SessionNotFound`] when no row names it,
     /// [`StorageError::UncataloguedSession`] when none does but its directory
-    /// holds evidence, and an error when its own row is damaged or its
-    /// directory is missing or not real.
+    /// holds evidence, and an error when its directory is missing or not
+    /// real.
     pub fn session(&self, id: &SessionId) -> Result<SessionEntry, StorageError> {
         let path = self.catalog_path();
 
@@ -87,7 +109,7 @@ impl CharacterData {
         &self,
         conversation: &ConversationId,
     ) -> Result<Option<SessionEntry>, StorageError> {
-        Ok(newest(&self.read_catalog()?, conversation).cloned())
+        Ok(newest(&self.read_catalog()?.listed, conversation).cloned())
     }
 
     /// Makes the first segment, `<conversation>.1`, of the conversation
@@ -197,7 +219,7 @@ impl CharacterData {
         let locks = self.locks_root();
 
         with_lock(&locks, &Resource::SessionCatalog, || {
-            let mut catalog = self.read_catalog()?;
+            let mut catalog = self.read_catalog()?.listed;
 
             work(&mut catalog)
         })
@@ -206,37 +228,16 @@ impl CharacterData {
     /// The catalog as the directories agree with it, both as they were at
     /// one moment, so a session made or discarded while they are read is
     /// never taken for damage.
-    fn read_catalog(&self) -> Result<Catalog, StorageError> {
+    fn read_catalog(&self) -> Result<Rows, StorageError> {
         let path = self.catalog_path();
 
-        read_coherently(&path, || self.agreeing_catalog(&path)).map(|(_, catalog)| catalog)
+        read_coherently(&path, || self.agreeing_catalog(&path)).map(|(_, rows)| rows)
     }
 
     /// Row `id` of the catalog at `path` as its directory agrees with it,
     /// read once.
     fn agreeing_row(&self, path: &Path, id: &SessionId) -> Result<SessionEntry, StorageError> {
-        let content = read_lines(path)?;
-        let mut found = None;
-
-        for (line, bytes) in committed_lines(&content) {
-            let names_it = serde_json::from_slice::<serde_json::Value>(bytes)
-                .ok()
-                .and_then(|row| row.get("sessionId").cloned())
-                .is_some_and(|named| named == id.to_string());
-
-            if names_it {
-                if found.is_some() {
-                    return Err(StorageError::RepeatedCatalogRow {
-                        path: path.to_path_buf(),
-                        line,
-                        session: id.clone(),
-                    });
-                }
-
-                found = Some(decode_row(path, line, bytes)?);
-            }
-        }
-
+        let found = rows(path)?.listed.remove(id);
         let directory = self.sessions_root().join(id.to_string());
 
         let Some(entry) = found else {
@@ -254,23 +255,9 @@ impl CharacterData {
     /// The catalog at `path` as the directories agree with it, read once.
     /// A catalog that is missing or empty while directories hold evidence
     /// is a catalog lost.
-    fn agreeing_catalog(&self, path: &Path) -> Result<Catalog, StorageError> {
-        let content = read_lines(path)?;
-        let mut catalog = Catalog::new();
-
-        for (line, bytes) in committed_lines(&content) {
-            let entry = decode_row(path, line, bytes)?;
-            let session = entry.session_id.clone();
-
-            if catalog.insert(session.clone(), entry).is_some() {
-                return Err(StorageError::RepeatedCatalogRow {
-                    path: path.to_path_buf(),
-                    line,
-                    session,
-                });
-            }
-        }
-
+    fn agreeing_catalog(&self, path: &Path) -> Result<Rows, StorageError> {
+        let rows = rows(path)?;
+        let catalog = &rows.listed;
         let sessions_root = self.sessions_root();
         let entries = match list_directory(&sessions_root) {
             Ok(entries) => entries,
@@ -320,7 +307,7 @@ impl CharacterData {
             check_session_directory(&sessions_root.join(id.to_string()))?;
         }
 
-        Ok(catalog)
+        Ok(rows)
     }
 
     /// Lists the session of `log` and makes its directory, or takes over one
@@ -423,12 +410,22 @@ fn by_age(left: &SessionEntry, right: &SessionEntry) -> Ordering {
         .cmp(&(right.created_at.as_str(), right.session_id.to_string()))
 }
 
-fn decode_row(path: &Path, line: usize, bytes: &[u8]) -> Result<SessionEntry, StorageError> {
-    serde_json::from_slice(bytes).map_err(|source| StorageError::MalformedCatalogRow {
-        path: path.to_path_buf(),
-        line,
-        source,
-    })
+/// The rows of the catalog at `path`: the first row of each session, and
+/// every other committed row skipped.
+fn rows(path: &Path) -> Result<Rows, StorageError> {
+    let content = read_lines(path)?;
+    let mut rows = Rows::default();
+
+    for (line, bytes) in committed_lines(&content) {
+        match serde_json::from_slice::<SessionEntry>(bytes) {
+            Ok(entry) if !rows.listed.contains_key(&entry.session_id) => {
+                rows.listed.insert(entry.session_id.clone(), entry);
+            }
+            _ => rows.skipped.push(line),
+        }
+    }
+
+    Ok(rows)
 }
 
 fn check_session_directory(directory: &Path) -> Result<(), StorageError> {

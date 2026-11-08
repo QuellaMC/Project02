@@ -41,8 +41,9 @@ and `ADDRESS_PREFIX`, which begins the line the address is said on.
   as it is replaced, and the startup problems follow there, a setting in
   error as `Config: <message>` and a package discovery could not publish
   as `Character package <path> (<code>): <message>`; the roster comes up
-  behind the address. While it serves, a character's failure and a
-  failure of her work behind the conversation are said on stderr as
+  behind the address. While it serves, a character's failure, a failure
+  of her work behind the conversation, and what opening her thread skipped
+  because it could not be read are said on stderr as
   `<character>: <message>`.
 - **The stop**, for serve and the connector alike, is the first SIGINT,
   SIGTERM or SIGHUP, or on Windows the first of the console's events, and
@@ -82,9 +83,11 @@ and `ADDRESS_PREFIX`, which begins the line the address is said on.
 - **The report** is one JSON document on stdout, indented by two with a
   closing line feed: her settings as they stand, the part p02-config
   renders, and beside them the report asked for, if any: her sessions as
-  her catalog lists them; one session's evidence, derived from its records
-  alone, each turn's trace the kinds of its records, its rounds what they
-  were shown and wrote, with the tokens their recorded measures come to;
+  her catalog lists them, a row it skipped warned of on stderr; one
+  session's evidence, derived from its records alone, each turn's trace
+  the kinds of its records, its rounds what they were shown and wrote,
+  with the tokens their recorded measures come to, and the lines of its
+  log the read skipped as `skippedLines`;
   the home's conversations; or one conversation with her segments of it in
   the order they continue one another. A store inspect cannot read as one,
   its files unreadable or not what a store holds, is `Error: Local runtime

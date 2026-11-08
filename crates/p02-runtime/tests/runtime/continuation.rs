@@ -200,6 +200,7 @@ async fn a_rotation_that_fails_leaves_the_turn_completed_and_the_thread_in_its_s
         .data()
         .sessions()
         .unwrap()
+        .sessions
         .iter()
         .map(|entry| entry.session_id().to_string())
         .collect();

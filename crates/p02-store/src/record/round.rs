@@ -2,19 +2,16 @@ use std::num::NonZeroU32;
 
 use p02_characters::CharacterRef;
 use p02_contracts::{
-    DecisionRejectionReason, DecisionResult, InputEnvelope, PromptSize, ProviderExchange,
-    ProviderMetadata,
+    DecisionResult, InputEnvelope, PromptSize, ProviderExchange, ProviderMetadata,
 };
-use p02_shared::{Credentials, redact_credentials};
+use p02_shared::redact_credentials;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use super::RecordError;
 
 /// One model round, recorded before anything it decided happens: what the
 /// model was shown and what it wrote, and the parser's verdict on that.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "WireRound", into = "WireRound")]
+#[serde(from = "WireRound", into = "WireRound")]
 pub struct RoundRecord {
     round: NonZeroU32,
     snapshot: RoundSnapshot,
@@ -23,7 +20,7 @@ pub struct RoundRecord {
 
 /// What a round was shown and what it wrote, with who answered.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct RoundSnapshot {
     pub input_envelope: InputEnvelope,
     /// What the model wrote; none when the provider failed and nothing
@@ -39,7 +36,7 @@ pub struct RoundSnapshot {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireRound {
     round: NonZeroU32,
     #[serde(rename = "roleModelIOSnapshot")]
@@ -48,44 +45,21 @@ struct WireRound {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ParsedDecision {
     result: DecisionResult,
 }
 
 impl RoundRecord {
     /// Round `round`, judged `result`, what it wrote kept as the rest of the
-    /// record keeps a value: every credential-named one in it redacted. The
-    /// verdict must be what that output reads as: the decision parser's,
-    /// credentials redacted, or, when nothing came, the provider's failure.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::Verdict`] when it is not.
-    pub fn new(
-        round: NonZeroU32,
-        mut snapshot: RoundSnapshot,
-        result: DecisionResult,
-    ) -> Result<Self, RecordError> {
+    /// record keeps a value: every credential-named one in it redacted.
+    #[must_use]
+    pub fn new(round: NonZeroU32, mut snapshot: RoundSnapshot, result: DecisionResult) -> Self {
         snapshot.raw_output_text = snapshot.raw_output_text.map(kept_output);
 
-        let agrees = match &snapshot.raw_output_text {
-            None => matches!(
-                &result,
-                DecisionResult::Rejected { rejection }
-                    if rejection.reason == DecisionRejectionReason::ProviderError
-            ),
-            Some(raw) => DecisionResult::parse(raw, Credentials::Redact) == result,
-        };
-
-        if agrees {
-            Ok(Self {
-                round,
-                snapshot,
-                result,
-            })
-        } else {
-            Err(RecordError::Verdict { round })
+        Self {
+            round,
+            snapshot,
+            result,
         }
     }
 
@@ -105,16 +79,8 @@ impl RoundRecord {
     }
 }
 
-impl TryFrom<WireRound> for RoundRecord {
-    type Error = RecordError;
-
-    fn try_from(wire: WireRound) -> Result<Self, Self::Error> {
-        if let Some(raw) = &wire.snapshot.raw_output_text
-            && kept_output(raw.clone()) != *raw
-        {
-            return Err(RecordError::UnkeptOutput);
-        }
-
+impl From<WireRound> for RoundRecord {
+    fn from(wire: WireRound) -> Self {
         Self::new(
             wire.round,
             wire.snapshot,

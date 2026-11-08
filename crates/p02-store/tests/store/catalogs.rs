@@ -1,13 +1,14 @@
 //! The catalogs: a character's sessions and their directories, which must
-//! agree; a home's conversations, one record per thread; and the record of
-//! the lines a conversation's segments took.
+//! agree, a row that is no session row skipped; a home's conversations, one
+//! record per thread; and the record of the lines a conversation's segments
+//! took.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
 use p02_core::{ClientStamp, ConversationId, MessageId, Participant, SpeakerName};
-use p02_store::{SessionEntry, StorageError, TakenLines};
+use p02_store::{SessionEntry, TakenLines};
 use serde_json::{Value, json};
 
 use crate::support::{Script, World, answer, conversation_named, id, lines_of, sam};
@@ -182,7 +183,10 @@ fn segments_are_made_in_order_and_only_the_newest_goes_on_or_is_discarded() {
             .map(SessionEntry::session_id),
         Some(second.session_id())
     );
-    assert_eq!(ids(&world.data.sessions().unwrap()), catalog_ids(&world));
+    assert_eq!(
+        ids(&world.data.sessions().unwrap().sessions),
+        catalog_ids(&world)
+    );
     assert_eq!(
         catalog_ids(&world),
         [world.segment(1).to_string(), world.segment(2).to_string()]
@@ -211,7 +215,7 @@ fn a_catalog_a_crash_cut_mid_row_still_lists_every_session_before_the_cut() {
         std::fs::write(&catalog, format!("{}\n{}\n{tail}", rows[0], rows[1])).unwrap();
 
         assert_eq!(
-            ids(&world.data.sessions().unwrap()),
+            ids(&world.data.sessions().unwrap().sessions),
             [world.segment(1).to_string(), world.segment(2).to_string()]
         );
     }
@@ -237,7 +241,7 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
     std::fs::write(&torn, r#"{"eventId":"evt_torn","kin"#).unwrap();
 
     assert_eq!(
-        ids(&world.data.sessions().unwrap()),
+        ids(&world.data.sessions().unwrap().sessions),
         [world.segment(1).to_string()]
     );
 
@@ -269,7 +273,37 @@ fn what_an_interrupted_operation_leaves_is_tolerated() {
 }
 
 #[test]
-fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions() {
+fn a_damaged_or_repeated_catalog_row_is_skipped_and_named_and_the_next_rewrite_leaves_it_out() {
+    let world = World::new();
+    let catalog = world.data.root().join("sessions.jsonl");
+    let first = world.first_segment(&world.conversation).unwrap();
+    let entry = world.data.session(first.session_id()).unwrap();
+
+    first.release();
+
+    let row = std::fs::read_to_string(&catalog).unwrap();
+
+    std::fs::write(&catalog, format!("{row}{{\"sessionId\": 7}}\n{row}")).unwrap();
+
+    let listed = world.data.sessions().unwrap();
+
+    assert_eq!(listed.sessions, std::slice::from_ref(&entry));
+    assert_eq!(listed.skipped_lines.numbers(), [2, 3]);
+    assert_eq!(world.data.session(entry.session_id()).unwrap(), entry);
+
+    world
+        .next_segment(&world.conversation, 1)
+        .unwrap()
+        .release();
+    assert_eq!(
+        catalog_ids(&world),
+        [world.segment(1).to_string(), world.segment(2).to_string()]
+    );
+    assert!(world.data.sessions().unwrap().skipped_lines.is_empty());
+}
+
+#[test]
+fn damage_beside_the_catalog_is_reported_never_read_as_fewer_sessions() {
     let world = World::new();
     let catalog = world.data.root().join("sessions.jsonl");
     let mut writer = world.first_segment(&world.conversation).unwrap();
@@ -290,34 +324,6 @@ fn damage_in_the_catalog_or_beside_it_is_reported_never_read_as_fewer_sessions()
     writer.release();
 
     let rows = std::fs::read_to_string(&catalog).unwrap();
-
-    std::fs::write(&catalog, format!("{rows}{{\"sessionId\": 7}}\n")).unwrap();
-
-    let refused = world.data.sessions().unwrap_err();
-
-    assert_eq!(refused.code(), "malformed_record");
-    assert!(
-        matches!(refused, StorageError::MalformedCatalogRow { line: 2, .. }),
-        "{refused}"
-    );
-    assert_eq!(world.data.session(first.session_id()).unwrap(), first);
-    assert_eq!(world.log(1).read().unwrap().records(), script.records);
-
-    std::fs::write(&catalog, format!("{rows}{rows}")).unwrap();
-
-    for refused in [
-        world.data.sessions().map(drop).unwrap_err(),
-        world
-            .data
-            .session(first.session_id())
-            .map(drop)
-            .unwrap_err(),
-    ] {
-        assert!(
-            matches!(refused, StorageError::RepeatedCatalogRow { line: 2, .. }),
-            "{refused}"
-        );
-    }
 
     std::fs::remove_file(&catalog).unwrap();
 

@@ -77,10 +77,9 @@
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:&lt;port&gt;/#token=&lt;token&gt;</code></pre>
 
       <p>
-        A home is the daemon's own store, at storage version 15. A home the
-        TypeScript daemon wrote, at version 14, is not read and never converted:
-        <code>serve</code> refuses it, saying which version it found, and the
-        person starts a new home.
+        A home is the daemon's own store, at storage version 15. A home an
+        older build wrote is read as it stands; one a newer Project02 wrote is
+        refused, and <code>serve</code> says so.
       </p>
 
       <p>
@@ -1030,7 +1029,7 @@ data: {…}</code></pre>
       <h2>Storage failures are outcomes</h2>
 
       <p>
-        A read-only store, a busy lease, a damaged segment: the daemon answers
+        A read-only store, a busy lease, a missing segment: the daemon answers
         <code
           >{"status": "failed", "code": &lt;storage code&gt;, "message"}</code
         >

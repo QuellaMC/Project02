@@ -419,6 +419,7 @@ impl Actor {
             });
             let mut turn = std::pin::pin!(take_line(
                 &self.world,
+                &self.health,
                 &self.id,
                 &self.broker,
                 TurnParts {
@@ -514,21 +515,6 @@ impl Actor {
         });
     }
 
-    /// A background failure of hers, which the turn's outcome never says.
-    fn note_maintenance(&self, message: String) {
-        let failure = MaintenanceFailure {
-            at: Timestamp::now(),
-            message,
-        };
-
-        self.health
-            .send_modify(|health| health.maintenance = Some(failure.clone()));
-        self.world.events.emit(Event::MaintenanceFailed {
-            character_id: self.id.clone(),
-            failure,
-        });
-    }
-
     async fn boot(&mut self) {
         self.publish(Change::Starting);
         self.assemble().await;
@@ -573,6 +559,8 @@ impl Actor {
 
         match hold(
             &self.world,
+            &self.health,
+            &self.id,
             &mut parts.thread,
             &parts.character,
             &parts.person,
@@ -658,7 +646,7 @@ impl Actor {
                     .collect();
 
                 if !failures.is_empty() {
-                    self.note_maintenance(failures.join("; "));
+                    note_maintenance(&self.world, &self.health, &self.id, failures.join("; "));
                 }
 
                 (
@@ -734,7 +722,7 @@ impl Actor {
         let failures = self.release().await;
 
         if !failures.is_empty() {
-            self.note_maintenance(failures.join("; "));
+            note_maintenance(&self.world, &self.health, &self.id, failures.join("; "));
         }
 
         if self.stop.is_cancelled() {
@@ -856,6 +844,7 @@ struct TurnParts<'p> {
 /// line her thread cannot take comes to.
 async fn take_line(
     world: &World,
+    health: &watch::Sender<CharacterHealth>,
     id: &Identifier,
     broker: &Broker,
     parts: TurnParts<'_>,
@@ -863,17 +852,24 @@ async fn take_line(
 ) -> Result<(Delivery, ConversationId, bool), TurnOutcome> {
     let Request { stamp, text } = request;
     let conversation = stamp.conversation_id.clone();
-    let thread = hold(world, parts.thread, parts.character, parts.person)
-        .await
-        .map_err(|unheld| TurnOutcome::Failed {
-            character_id: id.clone(),
-            conversation_id: conversation.clone(),
-            message: match unheld {
-                Unheld::Storage(error) => error_sentence(&error),
-                Unheld::Interrupted(error) => interrupted(&error),
-            },
-            committed: false,
-        })?;
+    let thread = hold(
+        world,
+        health,
+        id,
+        parts.thread,
+        parts.character,
+        parts.person,
+    )
+    .await
+    .map_err(|unheld| TurnOutcome::Failed {
+        character_id: id.clone(),
+        conversation_id: conversation.clone(),
+        message: match unheld {
+            Unheld::Storage(error) => error_sentence(&error),
+            Unheld::Interrupted(error) => interrupted(&error),
+        },
+        committed: false,
+    })?;
 
     if *thread.id() != conversation {
         return Err(TurnOutcome::refused(
@@ -922,9 +918,11 @@ enum Unheld {
 }
 
 /// Her thread with the person, opened on the blocking pool the first time
-/// it is asked for.
+/// it is asked for; what the open read past is noted as maintenance.
 async fn hold<'t>(
     world: &World,
+    health: &watch::Sender<CharacterHealth>,
+    id: &Identifier,
     thread: &'t mut Option<Conversation>,
     character: &Character,
     person: &SpeakerName,
@@ -934,14 +932,40 @@ async fn hold<'t>(
     } else {
         let home = world.home.clone();
         let (character, person) = (character.clone(), person.clone());
+        let opened =
+            tokio::task::spawn_blocking(move || Conversation::open(&home, character, person))
+                .await
+                .map_err(Unheld::Interrupted)?
+                .map_err(Unheld::Storage)?;
 
-        tokio::task::spawn_blocking(move || Conversation::open(&home, character, person))
-            .await
-            .map_err(Unheld::Interrupted)?
-            .map_err(Unheld::Storage)?
+        if let Some(skipped) = opened.skipped() {
+            note_maintenance(world, health, id, skipped.to_owned());
+        }
+
+        opened
     };
 
     Ok(thread.insert(held))
+}
+
+/// A background failure of character `id`'s, which the turn's outcome never
+/// says.
+fn note_maintenance(
+    world: &World,
+    health: &watch::Sender<CharacterHealth>,
+    id: &Identifier,
+    message: String,
+) {
+    let failure = MaintenanceFailure {
+        at: Timestamp::now(),
+        message,
+    };
+
+    health.send_modify(|health| health.maintenance = Some(failure.clone()));
+    world.events.emit(Event::MaintenanceFailed {
+        character_id: id.clone(),
+        failure,
+    });
 }
 
 fn interrupted(error: &JoinError) -> String {

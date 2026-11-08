@@ -93,7 +93,6 @@ struct NotAStorePath;
 /// A store's ledger: how many writes it committed, and the one it journaled
 /// and has not committed yet.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Ledger {
     revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +103,7 @@ struct Ledger {
 /// it found there, so whoever finds it after a crash can tell how far it
 /// came.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 enum Pending {
     /// A document replaced by `content`; `replaces` is the digest of the
     /// document it found, none when there was none.

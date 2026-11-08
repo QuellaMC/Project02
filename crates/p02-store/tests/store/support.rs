@@ -434,9 +434,11 @@ impl TurnScript<'_> {
         );
 
         self.rounds.push(result.clone());
-        self.push(RecordBody::ModelRound(Box::new(
-            RoundRecord::new(round, snapshot(envelope, raw), result).unwrap(),
-        )));
+        self.push(RecordBody::ModelRound(Box::new(RoundRecord::new(
+            round,
+            snapshot(envelope, raw),
+            result,
+        ))));
         self
     }
 

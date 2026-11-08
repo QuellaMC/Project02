@@ -1,6 +1,6 @@
-//! One line through the turn: its records in the order the store's gate
-//! admits them, the plugins' hooks around the model's rounds, and what the
-//! turn announces as it goes.
+//! One line through the turn: its records in the order they happen, the
+//! plugins' hooks around the model's rounds, and what the turn announces as
+//! it goes.
 
 use std::num::NonZeroU32;
 
@@ -286,9 +286,8 @@ async fn begin(
 }
 
 /// The turn failed: its rejection is recorded if it still can be, naming
-/// what it committed and finished, so the log reads back whole with the
-/// person's line and every shown reply anchored. The failure reported is
-/// the turn's, so the record's own is not.
+/// what it committed and finished, so the log says how the turn ended. The
+/// failure reported is the turn's, so the record's own is not.
 async fn failed(
     disk: &mut Option<Disk>,
     identity: &EventIdentity,
@@ -716,7 +715,7 @@ impl TurnSink for OpenTurn<'_> {
                 provider_exchange: round.output.provider_exchange.clone(),
             },
             round.result.clone(),
-        )?;
+        );
 
         self.append(RecordBody::ModelRound(Box::new(record))).await
     }

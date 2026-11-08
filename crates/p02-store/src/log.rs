@@ -1,15 +1,11 @@
 //! A session's log, `sessions/<session>/raw-events.jsonl`: one record per
 //! line, appended and never rewritten. Reading it replays every committed
-//! line through the gate; writing it takes the session's writer lease,
-//! which one writer holds at a time.
-//!
-//! A read that must have the whole session fails at the first line the gate
-//! refuses. One that reads on past damage, as plugins read history, skips
-//! each refused line instead: a refused record changes nothing, so the lines
-//! after it are judged as if it were not there, by the same gate.
+//! line, skipping one that is no record or does not fit, so a damaged line
+//! costs only itself; writing it takes the session's writer lease, which
+//! one writer holds at a time.
 
 use std::num::NonZeroU64;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use p02_core::{
     CharacterProfile, Conversation, Session, SessionId, SpeakerName, VisibleMessageRole,
@@ -25,8 +21,8 @@ use crate::record::LogRecord;
 use crate::replay::SessionReplay;
 
 /// One session's log, as one character keeps it, bound to the names its
-/// conversation's participants had when it began: every record of it must
-/// speak of that character and that person.
+/// conversation's participants had when it began: each of its messages is
+/// said by that character or that person.
 #[derive(Clone, Debug)]
 pub struct SessionLog {
     data: CharacterData,
@@ -54,19 +50,12 @@ struct Cached {
     replay: SessionReplay,
 }
 
-/// A log as the gate judged it: what the gate took, and each committed line,
-/// where it ends and the record of it the gate took, if it took one.
+/// A log as it was read: its replay, and each committed line, where it
+/// ends and the record of it the replay took, if it took one.
 #[derive(Debug)]
-pub(crate) struct JudgedLog {
+pub(crate) struct ReadLog {
     replay: SessionReplay,
     lines: Vec<(usize, Option<usize>)>,
-}
-
-/// What a read does at a committed line the gate refuses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OnDamage {
-    Fail,
-    Skip,
 }
 
 impl CharacterData {
@@ -115,27 +104,22 @@ impl SessionLog {
         &self.session
     }
 
-    /// The session as its log has it, every committed record replayed.
+    /// The session as its log has it, every committed line replayed and
+    /// each one that is no record or does not fit skipped.
     ///
     /// # Errors
     ///
     /// [`StorageError`] when the catalog does not list the session, its
-    /// directory or log is missing or not real, the log changed while it
-    /// was read twice over, or a committed line is damage: no record, or a
-    /// record that does not follow the ones before it.
+    /// directory or log is missing or not real, or the log changed while it
+    /// was read twice over.
     pub fn read(&self) -> Result<SessionReplay, StorageError> {
-        self.data.session(&self.session)?;
-        Ok(self.load(OnDamage::Fail)?.1.replay)
+        Ok(self.read_log()?.replay)
     }
 
-    /// The log read on past its damage, each line the gate refuses skipped.
-    ///
-    /// # Errors
-    ///
-    /// An error of [`SessionLog::read`] but for damage.
-    pub(crate) fn read_leniently(&self) -> Result<JudgedLog, StorageError> {
+    /// The log as [`SessionLog::read`] reads it, with where each line ends.
+    pub(crate) fn read_log(&self) -> Result<ReadLog, StorageError> {
         self.data.session(&self.session)?;
-        Ok(self.load(OnDamage::Skip)?.1)
+        Ok(self.load()?.1)
     }
 
     /// The session's writer: its lease, refused at once while another
@@ -173,15 +157,15 @@ impl SessionLog {
     }
 
     fn cached(&self) -> Result<Cached, StorageError> {
-        let (stamp, judged) = self.load(OnDamage::Fail)?;
+        let (stamp, read) = self.load()?;
 
         Ok(Cached {
             stamp,
-            replay: judged.replay,
+            replay: read.replay,
         })
     }
 
-    fn load(&self, on_damage: OnDamage) -> Result<(Option<FileStamp>, JudgedLog), StorageError> {
+    fn load(&self) -> Result<(Option<FileStamp>, ReadLog), StorageError> {
         let directory = self.directory();
 
         match describe_entry(&directory) {
@@ -216,7 +200,7 @@ impl SessionLog {
                     .latest_segment(self.session.conversation_id())?
                     .is_none_or(|entry| *entry.session_id() == self.session);
 
-                if !newest && on_damage == OnDamage::Fail {
+                if !newest {
                     return Err(StorageError::MissingLog { path });
                 }
             }
@@ -231,62 +215,37 @@ impl SessionLog {
 
         let (stamp, content) = read_coherently(&path, || read_lines(&path))?;
 
-        Ok((stamp, self.replay(&path, &content, on_damage)?))
+        Ok((stamp, self.replay(&content)))
     }
 
-    fn replay(
-        &self,
-        path: &Path,
-        content: &[u8],
-        on_damage: OnDamage,
-    ) -> Result<JudgedLog, StorageError> {
-        let mut judged = JudgedLog {
-            replay: SessionReplay::new(Session::new(
-                self.session.clone(),
-                self.character.clone(),
-                self.user_name.clone(),
-            )),
-            lines: Vec::new(),
-        };
+    fn replay(&self, content: &[u8]) -> ReadLog {
+        let mut replay = SessionReplay::new(Session::new(
+            self.session.clone(),
+            self.character.clone(),
+            self.user_name.clone(),
+        ));
+        let mut lines = Vec::new();
         let mut end = 0;
 
         for (line, bytes) in committed_lines(content) {
             end += bytes.len() + 1;
 
-            let taken = judged.replay.records().len();
-            let applied = LogRecord::from_line(bytes)
-                .map_err(|source| StorageError::MalformedRecord {
-                    path: path.to_path_buf(),
-                    line,
-                    source,
-                })
-                .and_then(|record| {
-                    judged
-                        .replay
-                        .apply(record)
-                        .map_err(|source| StorageError::BrokenLog {
-                            path: path.to_path_buf(),
-                            line,
-                            source,
-                        })
-                });
+            let taken = replay
+                .read_line(line, bytes)
+                .then(|| replay.records().len() - 1);
 
-            match (applied, on_damage) {
-                (Ok(()), _) => judged.lines.push((end, Some(taken))),
-                (Err(_), OnDamage::Skip) => judged.lines.push((end, None)),
-                (Err(error), OnDamage::Fail) => return Err(error),
-            }
+            lines.push((end, taken));
         }
 
-        Ok(judged)
+        ReadLog { replay, lines }
     }
 }
 
-impl JudgedLog {
+impl ReadLog {
     /// Each committed line, oldest first: where it ends, just past its
-    /// newline, and the record of it the gate took, none when it refused it.
+    /// newline, and the record of it the replay took, none when it skipped
+    /// the line.
     pub(crate) fn lines(&self) -> impl Iterator<Item = (usize, Option<&LogRecord>)> {
-        // A taken line's index is the count of records before it was taken.
         self.lines
             .iter()
             .map(|(end, taken)| (*end, taken.map(|index| &self.replay.records()[index])))
@@ -309,13 +268,13 @@ impl SessionWriter {
         Ok(&self.fresh()?.replay)
     }
 
-    /// Appends `record` after the log's last whole line, once the gate takes
-    /// it: what a crash left after the last line is cut first. The line is
-    /// not flushed to disk; it counts once its newline is there.
+    /// Appends `record` after the log's last whole line, once the replay
+    /// takes it: what a crash left after the last line is cut first. The
+    /// line is not flushed to disk; it counts once its newline is there.
     ///
     /// # Errors
     ///
-    /// [`StorageError::Refused`] when the record does not follow the log,
+    /// [`StorageError::Refused`] when the record does not fit the log,
     /// [`StorageError::Write`] when the append failed, which may have left
     /// part of the line for the next append to cut, or an error of reading
     /// the log again.

@@ -1,9 +1,7 @@
 //! A character's committed conversations as her plugins read them: the
 //! sessions her catalog lists, and the visible messages each session's log
-//! committed, from a cursor, a batch at a time. Only what the gate takes is
-//! a message; a line it refuses is counted as damage and read past, so a
-//! damaged older segment costs its plugins what it lost and no more, while
-//! every reader that must have a session whole still fails there.
+//! committed, from a cursor, a batch at a time. A line the log's read skips
+//! is counted as damage, and a catalog row it skips as a damaged entry.
 //!
 //! A cursor is the place in the log just past a line, in bytes. A log is
 //! only ever appended to, so a place once read stays where it was, and one
@@ -38,7 +36,7 @@ impl HistoryFeed {
         let log = self
             .data
             .session_log(&conversation, session.segment())?
-            .read_leniently()?;
+            .read_log()?;
         let lines: Vec<_> = log.lines().collect();
         // The first line after the place the cursor names, and that place.
         let resume = |cursor: &HistoryCursor| {
@@ -95,21 +93,22 @@ impl HistoryFeed {
 }
 
 impl SessionHistoryFeed for HistoryFeed {
-    /// Every session the catalog lists, oldest first. The catalog is read
-    /// as every other reader reads it, so damage there fails the listing
-    /// and none is ever counted.
+    /// Every session the catalog lists, oldest first, as every other reader
+    /// reads the catalog.
     fn list_sessions(&self) -> Result<SessionListing, SessionHistoryError> {
-        let sessions = self.data.sessions().map_err(feed_error)?;
+        let catalog = self.data.sessions().map_err(feed_error)?;
 
         Ok(SessionListing {
-            sessions: sessions
+            sessions: catalog
+                .sessions
                 .into_iter()
                 .map(|entry| SessionSummary {
                     session_id: entry.session_id().clone(),
                     created_at: entry.created_at().clone(),
                 })
                 .collect(),
-            damaged_entry_count: 0,
+            damaged_entry_count: u64::try_from(catalog.skipped_lines.numbers().len())
+                .unwrap_or(u64::MAX),
         })
     }
 

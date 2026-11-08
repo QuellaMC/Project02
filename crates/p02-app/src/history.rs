@@ -145,6 +145,7 @@ impl Segments {
     fn of(data: CharacterData, conversation: Conversation) -> Result<Self, StorageError> {
         let mut numbers: Vec<NonZeroU64> = data
             .sessions()?
+            .sessions
             .iter()
             .map(SessionEntry::session_id)
             .filter(|session| session.conversation_id() == conversation.id())

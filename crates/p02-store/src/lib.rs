@@ -31,6 +31,7 @@ pub use database::OpenDatabaseError;
 pub use error::{BusyCode, StorageError};
 pub use history::ConversationHistory;
 pub use home::{Home, SettingsDocument};
+pub use jsonl::SkippedLines;
 pub use layout::EntryKind;
 pub use lock::Lease;
 pub use log::{SessionLog, SessionWriter};
@@ -44,5 +45,5 @@ pub use record::{
     TurnRejected, TurnRejection, TurnStatus,
 };
 pub use replay::{ReplayError, SessionReplay};
-pub use sessions::SessionEntry;
+pub use sessions::{SessionCatalog, SessionEntry};
 pub use taken_lines::TakenLines;

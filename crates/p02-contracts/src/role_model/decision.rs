@@ -54,9 +54,9 @@ pub struct CharacterDecision {
     text: Option<String>,
 }
 
-/// A recorded decision, closed like the answer the parser judges.
+/// A recorded decision.
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct UncheckedDecision {
     version: DecisionVersion,
     tool_calls: Vec<ModelToolCall>,
@@ -153,17 +153,15 @@ vocabulary! {
 
 /// A refused round, and in `details` what the model is told about it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct DecisionRejection {
     pub reason: DecisionRejectionReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
 }
 
-/// The judgement of one model round. A record of it is closed, so it holds
-/// one verdict and nothing beside it.
+/// The judgement of one model round.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum DecisionResult {
     Accepted { decision: CharacterDecision },
     Rejected { rejection: DecisionRejection },
@@ -531,25 +529,6 @@ mod tests {
 
         assert!(serde_json::from_value::<InputEnvelope>(envelope).is_err());
         assert!(serde_json::from_value::<CharacterDecision>(decision).is_err());
-        assert!(
-            serde_json::from_value::<CharacterDecision>(json!({
-                "version": DECISION_CONTRACT_VERSION,
-                "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
-                "sideEffect": "write a file",
-            }))
-            .is_err()
-        );
-        assert!(
-            serde_json::from_value::<DecisionResult>(json!({
-                "status": "accepted",
-                "decision": {
-                    "version": DECISION_CONTRACT_VERSION,
-                    "toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": "Hi."}}],
-                },
-                "rejection": {"reason": "malformed_output"},
-            }))
-            .is_err()
-        );
     }
 
     #[test]

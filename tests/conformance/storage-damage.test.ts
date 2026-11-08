@@ -13,7 +13,7 @@ import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
-import {serve, startDaemon, type Daemon} from './harness/daemon.ts';
+import {inspect, serve, startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionLog, snapshot} from './harness/home.ts';
 import {
@@ -345,19 +345,12 @@ it('storage.crash-residue-tolerated: residue an interrupted operation left is pa
   expect(readFileSync(catalog, 'utf8')).toContain(`${conversationId}.3`);
 });
 
-it('storage.damaged-record: damage is reported, never read as a shorter history: a segment the catalog names that the disk lacks, or a catalog gone or empty while segment directories hold records, fails the open, history and turns missing_file, and a committed catalog row that is no session row fails them malformed_record naming its line, the catalog left as it was', async () => {
+it('storage.damaged-record: damage that would lose history is reported, never read as a shorter history: a segment the catalog names that the disk lacks, or a catalog gone or empty while segment directories hold records, fails the open, history and turns missing_file, the catalog left as it was', async () => {
   const {home: stopped, conversationId} = await threeSegments();
   const data = join('character-data', 'mira');
   const catalog = join(data, 'sessions.jsonl');
-  const [one = '', two = '', three = ''] = readFileSync(
-    join(stopped, catalog),
-    'utf8',
-  )
-    .trimEnd()
-    .split('\n');
   const damages = [
     [
-      'missing_file',
       'is missing',
       (home: string) => {
         rmSync(join(home, data, 'sessions', `${conversationId}.1`), {
@@ -366,32 +359,20 @@ it('storage.damaged-record: damage is reported, never read as a shorter history:
       },
     ],
     [
-      'missing_file',
       'is missing or empty',
       (home: string) => {
         rmSync(join(home, catalog));
       },
     ],
     [
-      'missing_file',
       'is missing or empty',
       (home: string) => {
         writeFileSync(join(home, catalog), '');
       },
     ],
-    [
-      'malformed_record',
-      'Line 2 of sessions catalog',
-      (home: string) => {
-        writeFileSync(
-          join(home, catalog),
-          `${one}\n{"session": "lost"}\n${two}\n${three}\n`,
-        );
-      },
-    ],
   ] as const;
 
-  for (const [code, said, damage] of damages) {
+  for (const [said, damage] of damages) {
     const home = createHome();
 
     cpSync(stopped, home, {recursive: true});
@@ -406,7 +387,7 @@ it('storage.damaged-record: damage is reported, never read as a shorter history:
     const wire = wireOf(daemon);
     const failed = {
       status: 'failed',
-      code,
+      code: 'missing_file',
       message: expect.stringContaining(said) as string,
     };
 
@@ -416,7 +397,7 @@ it('storage.damaged-record: damage is reported, never read as a shorter history:
       failed,
     );
     await expect(
-      lineOn(wire, conversationId, 'Three.', `three-${code}`),
+      lineOn(wire, conversationId, 'Three.', 'three'),
       said,
     ).resolves.toMatchObject({
       status: 'failed',
@@ -429,48 +410,52 @@ it('storage.damaged-record: damage is reported, never read as a shorter history:
   }
 });
 
-it('storage.damaged-segment-tolerance: a damaged line in an older segment lets the character start and chat while the history page reaching it fails malformed_record, and without the taken-lines record a damaged line in the segment before the current one fails the open', async () => {
+it('storage.damaged-segment-tolerance: a committed line that is no record, in an older segment or the current one, and a sessions catalog row that is no session row are skipped and said: serve warns once on stderr as the thread opens past them, inspect --session shows the lines and --sessions warns of the row, the character chats on, history reads every message around them, and a line the damaged segment took is still refused duplicate_submission', async () => {
   const {home, conversationId, segment} = await threeSegments();
-  const takenLines = join(
-    home,
-    'character-data',
-    'mira',
-    'taken-lines',
-    `${conversationId}.json`,
-  );
-  const log = (n: number) => join(segment(n), 'raw-events.jsonl');
-  const [first, second] = [
-    readFileSync(log(1), 'utf8'),
-    readFileSync(log(2), 'utf8'),
-  ];
+  const data = join(home, 'character-data', 'mira');
+  const current = `${conversationId}.3`;
 
-  rmSync(takenLines);
-  writeFileSync(log(1), first + damagedRecord);
+  rmSync(join(data, 'taken-lines', `${conversationId}.json`));
+  appendFileSync(join(segment(1), 'raw-events.jsonl'), damagedRecord);
+  appendFileSync(join(segment(3), 'raw-events.jsonl'), damagedRecord);
+  appendFileSync(join(data, 'sessions.jsonl'), '{"session": "lost"}\n');
 
   const daemon = await startDaemon(home, fixedReplies);
   const wire = wireOf(daemon);
 
   expect(await wire.start('mira')).toMatchObject({character: {state: 'ready'}});
   await expect(wire.open('mira')).resolves.toMatchObject({status: 'opened'});
+  await daemon.printedOnStderr(
+    `mira: Skipped what could not be read, line 4 of her sessions catalog and line 2 of session ${current}; the rest was read.`,
+  );
+  await expect(
+    lineOn(wire, conversationId, 'One.', 'one'),
+  ).resolves.toMatchObject({status: 'refused', reason: 'duplicate_submission'});
   await expect(
     lineOn(wire, conversationId, 'Three.', 'three'),
   ).resolves.toMatchObject({status: 'completed'});
   await expect(wire.history(conversationId)).resolves.toMatchObject({
-    status: 'failed',
-    code: 'malformed_record',
+    messages: [
+      {text: 'One.'},
+      {role: 'character'},
+      {text: 'Two.'},
+      {role: 'character'},
+      {text: 'Three.'},
+      {role: 'character'},
+    ],
   });
-  daemon.signal('SIGINT');
-  await daemon.exit();
-  writeFileSync(log(1), first);
-  writeFileSync(log(2), second + damagedRecord);
 
-  const damaged = wireOf(await startDaemon(home, fixedReplies));
+  const session = inspect(['--store', home, '--session', current]);
 
-  await damaged.start('mira');
-  await expect(damaged.open('mira')).resolves.toMatchObject({
-    status: 'failed',
-    code: 'malformed_record',
-  });
+  expect(await session.exit(), session.stderr()).toBe(0);
+  expect(JSON.parse(session.stdout())).toMatchObject({skippedLines: [2]});
+
+  const sessions = inspect(['--store', home, '--sessions']);
+
+  expect(await sessions.exit(), sessions.stderr()).toBe(0);
+  expect(sessions.stderr()).toContain(
+    'Warning: Skipped line 4 of the sessions catalog of "mira", which could not be read.',
+  );
 });
 
 it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never read as empty or folded around: a line of character-state's log that is no patch it wrote, met as the log is folded once its checkpoint is gone, an event whose states disagree with its patch, or a checkpoint value out of range rejects the turn before the model is asked and writes nothing, and a memory document that is no document leaves the curated memory out of the prompt while memory.update is refused and the document stays as it was", async () => {

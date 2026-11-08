@@ -57,6 +57,7 @@ async fn a_reopened_thread_resumes_its_latest_whole_segment() {
         .data()
         .sessions()
         .unwrap()
+        .sessions
         .iter()
         .map(|entry| entry.session_id().to_string())
         .collect();

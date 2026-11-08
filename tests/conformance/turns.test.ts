@@ -893,7 +893,7 @@ it("turns.history-stopped-character: history reads the thread of a stopped chara
   });
 });
 
-it("turns.speaker-name-persisted: committed messages keep the speaker id and name of the session's character, a reopened session goes on under them, and a name edited on disk fails the open malformed_record", async () => {
+it("turns.speaker-name-persisted: committed messages keep the speaker id and name of the session's character, a reopened session goes on under them, and a message whose name was edited on disk is skipped, never read under that name", async () => {
   const home = createHome();
   const earlier = await startDaemon(home, fixedReplies);
   const earlierWire = wireOf(earlier);
@@ -938,8 +938,11 @@ it("turns.speaker-name-persisted: committed messages keep the speaker id and nam
 
   await wire.start('mira');
   await expect(wire.open('mira')).resolves.toMatchObject({
-    status: 'failed',
-    code: 'malformed_record',
+    status: 'opened',
+    conversationId,
+  });
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    messages: [{speakerId: 'local-user', text: 'Hello.'}],
   });
   writeFileSync(transcript, committed);
   await expect(wire.open('mira')).resolves.toMatchObject({

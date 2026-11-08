@@ -271,5 +271,5 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
         world.first_segment(&without).unwrap_err().code(),
         "character_identity_mismatch"
     );
-    assert_eq!(world.data.sessions().unwrap().len(), 1);
+    assert_eq!(world.data.sessions().unwrap().sessions.len(), 1);
 }

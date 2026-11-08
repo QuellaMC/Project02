@@ -1,9 +1,8 @@
 //! The records of a session log, one per line. Each record names the event
-//! it belongs to, says what kind it is, and holds exactly the fields its
-//! kind has, in the order they are written; a line with any other field is
-//! no record. What one record may say about itself is checked here, by the
-//! one constructor every record is made through, read or written; what it
-//! may say given the records before it is the replay gate's.
+//! it belongs to, says what kind it is, and holds the fields its kind has,
+//! in the order they are written; a field it does not know is ignored. What
+//! one record may say about itself is checked here, by the one constructor
+//! every record is made through, read or written.
 
 mod commit;
 mod continuation;
@@ -72,13 +71,13 @@ pub enum RecordKind {
 
 /// What came in for a turn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct EventReceived {
     pub payload_summary: PayloadSummary,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PayloadSummary {
     /// The text as it came.
     pub raw_input: String,
@@ -88,7 +87,7 @@ pub struct PayloadSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionContinued {
     pub session_continuation: SessionContinuation,
 }
@@ -116,14 +115,8 @@ pub enum RecordError {
     EvidenceOfAnotherPlugin,
     #[error("a model round records another event's input")]
     EnvelopeOfAnotherEvent,
-    #[error("model round {round} records a decision its output does not read as")]
-    Verdict { round: std::num::NonZeroU32 },
-    #[error("a model round keeps what it wrote with every credential-named value redacted")]
-    UnkeptOutput,
-    #[error(
-        "a tool call is kept other than its session keeps it: within the JSON limits, credentials redacted"
-    )]
-    UnkeptToolCall(#[source] Option<BoundJsonError>),
+    #[error("a tool call's input or result is past the JSON limits")]
+    UnkeptToolCall(#[source] BoundJsonError),
     #[error("a call no plugin offers comes back as the runtime's refusal of it, never an answer")]
     UndeclaredAnswered,
     #[error(

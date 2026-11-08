@@ -95,7 +95,7 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
     let asked = match flags.report {
         Report::Settings => Asked::Settings {},
         Report::Sessions => Asked::Sessions {
-            sessions: sessions(data()?.as_ref())?,
+            sessions: sessions(data()?.as_ref(), console)?,
         },
         Report::Session(session) => {
             let data =
@@ -116,7 +116,7 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
             let conversation = home
                 .conversation(&conversation)
                 .map_err(|error| unread(&error))?;
-            let mut sessions: Vec<SessionEntry> = sessions(data()?.as_ref())?
+            let mut sessions: Vec<SessionEntry> = sessions(data()?.as_ref(), console)?
                 .into_iter()
                 .filter(|entry| entry.session_id().conversation_id() == conversation.id())
                 .collect();
@@ -133,11 +133,26 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
         .map_err(|error| error_sentence(&error))
 }
 
-/// Her sessions, as her catalog lists them; none while she has no data.
-fn sessions(data: Option<&CharacterData>) -> Result<Vec<SessionEntry>, String> {
-    data.map_or(Ok(Vec::new()), |data| {
-        data.sessions().map_err(|error| unread(&error))
-    })
+/// Her sessions, as her catalog lists them, what it skipped warned of; none
+/// while she has no data.
+fn sessions(
+    data: Option<&CharacterData>,
+    console: &mut Console,
+) -> Result<Vec<SessionEntry>, String> {
+    let Some(data) = data else {
+        return Ok(Vec::new());
+    };
+    let catalog = data.sessions().map_err(|error| unread(&error))?;
+
+    if !catalog.skipped_lines.is_empty() {
+        console.warn(&format!(
+            "Warning: Skipped {} of the sessions catalog of \"{}\", which could not be read.",
+            catalog.skipped_lines,
+            data.character()
+        ));
+    }
+
+    Ok(catalog.sessions)
 }
 
 /// The character the report is of: the one named, whether or not she is

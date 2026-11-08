@@ -29,7 +29,7 @@ enum Said {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireCommit {
     visible_message_ids: Vec<MessageId>,
     visible_message: VisibleMessage,
