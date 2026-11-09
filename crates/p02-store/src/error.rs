@@ -133,13 +133,6 @@ pub enum StorageError {
         #[source]
         source: ValueProblem,
     },
-    #[error("line {line} of {} is no JSON value within the JSON limits", .path.display())]
-    MalformedLine {
-        path: PathBuf,
-        line: usize,
-        #[source]
-        source: ValueProblem,
-    },
     #[error("the ledger {} of a plugin's store is malformed", .path.display())]
     MalformedLedger {
         path: PathBuf,
@@ -205,7 +198,6 @@ impl StorageError {
             | Self::Refused(_)
             | Self::InvalidParticipants(_)
             | Self::MalformedDocument { .. }
-            | Self::MalformedLine { .. }
             | Self::MalformedLedger { .. }
             | Self::InterruptedWriteConflict { .. } => "malformed_record",
             Self::UnsafeStorePath { .. } | Self::WrongFileKind { .. } => "invalid_store_path",

@@ -182,22 +182,18 @@ impl LeasedPluginFiles {
             .transpose()
     }
 
-    /// The log's committed lines, each a value; what follows the last
-    /// newline is an append cut short and no line.
+    /// The log's committed lines, each a value, and a line that is no JSON
+    /// value within the limits null, for its plugin to pass over as it
+    /// passes over any line it cannot use; what follows the last newline is
+    /// an append cut short and no line.
     pub(crate) fn read_log(&self, path: &str) -> Result<Vec<Value>, StorageError> {
         let path = StorePath::named(path, FileKind::Log)?;
         let target = self.located(&path)?;
         let bytes = read_entry(&target)?.unwrap_or_default();
 
-        committed_lines(&bytes)
-            .map(|(line, text)| {
-                value_of(text, &path.text).map_err(|source| StorageError::MalformedLine {
-                    path: target.clone(),
-                    line,
-                    source,
-                })
-            })
-            .collect()
+        Ok(committed_lines(&bytes)
+            .map(|(_, text)| value_of(text, &path.text).unwrap_or(Value::Null))
+            .collect())
     }
 
     fn replace_with(
