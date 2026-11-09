@@ -76,8 +76,8 @@ impl Session {
         }
     }
 
-    /// Adds `message` after the last. Numbers climb but may skip: a message
-    /// whose write failed spent its number, and the next never reuses it.
+    /// Adds `message` after the last. Numbers climb but may skip, where the
+    /// log lost a record in between.
     ///
     /// # Errors
     ///

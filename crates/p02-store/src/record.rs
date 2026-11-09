@@ -20,7 +20,7 @@ pub use terminal::{
     AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnRejected, TurnRejection,
     TurnStatus,
 };
-pub use tool::{ToolCallFinished, ToolCallStarted, ToolDispatch};
+pub use tool::{ToolCallFinished, ToolCallStarted};
 
 /// One line of a session log: the event it belongs to, and what happened.
 #[derive(Clone, Debug, PartialEq)]

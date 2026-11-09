@@ -255,7 +255,7 @@ impl Character {
 
                 match progress {
                     TurnProgress::UserMessage {
-                        client_message_id: Some(id),
+                        client_message_id: id,
                         text,
                         ..
                     } => {
@@ -295,7 +295,7 @@ impl Character {
         if let Event::TurnProgress {
             progress:
                 TurnProgress::UserMessage {
-                    client_message_id: Some(id),
+                    client_message_id: id,
                     ..
                 },
             ..

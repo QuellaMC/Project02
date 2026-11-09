@@ -16,6 +16,7 @@ pub struct MessageCommitted {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Said {
+    /// A line an earlier build wrote may lack its stamps.
     ByPerson {
         source: Option<ClientStamp>,
         client_message_id: Option<ClientStamp>,
@@ -47,14 +48,14 @@ impl MessageCommitted {
     #[must_use]
     pub fn user(
         message: VisibleMessage,
-        source: Option<ClientStamp>,
-        client_message_id: Option<ClientStamp>,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
     ) -> Self {
         Self {
             message,
             said: Said::ByPerson {
-                source,
-                client_message_id,
+                source: Some(source),
+                client_message_id: Some(client_message_id),
             },
         }
     }
@@ -107,9 +108,13 @@ impl TryFrom<WireCommit> for MessageCommitted {
 
     fn try_from(wire: WireCommit) -> Result<Self, Self::Error> {
         Ok(match (wire.visible_message.role, wire.round) {
-            (VisibleMessageRole::User, _) => {
-                Self::user(wire.visible_message, wire.source, wire.client_message_id)
-            }
+            (VisibleMessageRole::User, _) => Self {
+                message: wire.visible_message,
+                said: Said::ByPerson {
+                    source: wire.source,
+                    client_message_id: wire.client_message_id,
+                },
+            },
             (VisibleMessageRole::Character, Some(round)) => {
                 Self::character(wire.visible_message, round, wire.runtime_plugin_evidence)
             }

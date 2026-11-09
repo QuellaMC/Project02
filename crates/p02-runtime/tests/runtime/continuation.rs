@@ -5,7 +5,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use p02_contracts::{ConversationTurn, ProviderName, TextCompletion};
 use p02_core::{MessageId, SessionId};
-use p02_runtime::{CompletedTurn, Delivery, Rotation};
+use p02_runtime::{CompletedTurn, Delivery};
 use p02_store::{RecordBody, SessionContinuation, Summarizer, SummaryProvider, TakenLines};
 
 use crate::support::{Chat, Round, make_read_only, reply, restore, stamp};
@@ -19,14 +19,26 @@ fn session(text: &str) -> SessionId {
 }
 
 /// Sam says line `n`, which Mira answers with reply `n`.
-async fn line(chat: &mut Chat, n: u32) -> (CompletedTurn, Option<Rotation>) {
+async fn line(chat: &mut Chat, n: u32) -> CompletedTurn {
     chat.model
         .script([Round::says(reply(&[&format!("Reply {n}.")]))]);
 
     match chat.say(&format!("Line {n}."), &format!("line-{n}")).await {
-        Delivery::Completed { turn, rotation } => (turn, rotation),
+        Delivery::Completed(turn) => turn,
         other => panic!("{other:?}"),
     }
+}
+
+/// The segments of the thread her sessions catalog names.
+fn segments(chat: &Chat) -> Vec<String> {
+    chat.world
+        .data()
+        .sessions()
+        .unwrap()
+        .sessions
+        .iter()
+        .map(|entry| entry.session_id().to_string())
+        .collect()
 }
 
 fn continuation(chat: &Chat, segment: u64) -> SessionContinuation {
@@ -64,24 +76,25 @@ async fn continues(summary: Option<&str>) {
         });
     }
 
-    assert_eq!(line(&mut chat, 1).await.1, None);
-    assert_eq!(line(&mut chat, 2).await.1, None);
+    line(&mut chat, 1).await;
+    line(&mut chat, 2).await;
+    assert_eq!(segments(&chat), [format!("{id}.1")]);
 
-    let rotation = line(&mut chat, 3).await.1;
+    let turn = line(&mut chat, 3).await;
     let day = day_of(&chat);
     let (written, summarizer) = expected(summary, &day);
     let continued = continuation(&chat, 2);
     let requests = chat.model.summarized.lock().unwrap().clone();
 
+    assert_eq!(turn.post_commit_failures, Vec::<String>::new());
+    assert_eq!(segments(&chat), [format!("{id}.1"), format!("{id}.2")]);
     assert_eq!(
-        rotation,
-        Some(Rotation::Rotated {
-            from: session(&format!("{id}.1")),
-            to: session(&format!("{id}.2")),
-            summarized_turn_count: NonZeroU32::new(2).unwrap(),
-            summarizer: summarizer.clone(),
-            end_failure: None,
-        })
+        continued.continued_from().session_id,
+        session(&format!("{id}.1"))
+    );
+    assert_eq!(
+        continued.summarized_turn_count(),
+        NonZeroU32::new(2).unwrap()
     );
     assert_eq!(continued.summary(), written);
     assert_eq!(continued.summarizer(), &summarizer);
@@ -95,10 +108,10 @@ async fn continues(summary: Option<&str>) {
     );
     assert!(requests[0].instructions.contains("Sam"));
 
-    let (turn, rotation) = line(&mut chat, 4).await;
+    let turn = line(&mut chat, 4).await;
     let asked = chat.model.asked.lock().unwrap();
 
-    assert_eq!(rotation, None);
+    assert_eq!(segments(&chat), [format!("{id}.1"), format!("{id}.2")]);
     assert_eq!(turn.messages[0].id.to_string(), format!("{id}.2:message-1"));
     assert_eq!(said(&asked[3].history), ["Line 3."]);
     assert_eq!(
@@ -173,34 +186,22 @@ async fn a_rotation_that_fails_leaves_the_turn_completed_and_the_thread_in_its_s
     // holds the catalog decides; Windows refuses to replace one.
     let catalog_writable = make_read_only(&catalog);
     let data_writable = make_read_only(&data);
-    let (turn, rotation) = line(&mut chat, 3).await;
+    let turn = line(&mut chat, 3).await;
 
     restore(&data, data_writable);
     restore(&catalog, catalog_writable);
 
-    let Some(Rotation::Failed { from, message }) = rotation else {
-        panic!("{rotation:?}");
+    let [failure] = turn.post_commit_failures.as_slice() else {
+        panic!("{:?}", turn.post_commit_failures);
     };
-    let segments: Vec<String> = chat
-        .world
-        .data()
-        .sessions()
-        .unwrap()
-        .sessions
-        .iter()
-        .map(|entry| entry.session_id().to_string())
-        .collect();
 
     assert_eq!(turn.messages[1].text.as_str(), "Reply 3.");
-    assert_eq!(from, session(&format!("{id}.1")));
-    assert!(message.contains("could not write"), "{message}");
-    assert_eq!(segments, [format!("{id}.1")]);
+    assert!(failure.contains("could not write"), "{failure}");
+    assert_eq!(segments(&chat), [format!("{id}.1")]);
 
-    let (turn, rotation) = line(&mut chat, 4).await;
+    let turn = line(&mut chat, 4).await;
 
     assert_eq!(turn.messages[0].id.to_string(), format!("{id}.1:message-7"));
-    assert!(
-        matches!(rotation, Some(Rotation::Rotated { .. })),
-        "{rotation:?}"
-    );
+    assert_eq!(turn.post_commit_failures, Vec::<String>::new());
+    assert_eq!(segments(&chat), [format!("{id}.1"), format!("{id}.2")]);
 }

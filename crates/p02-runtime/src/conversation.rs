@@ -1,6 +1,6 @@
-//! The open thread between the person and one character: lines taken one
-//! at a time, a line an earlier run took refused, the turn run, and the
-//! segment rotated when its history outgrows the model's window.
+//! The open thread between the person and one character: its segment
+//! under its writer, the lines it takes one at a time, and the lines its
+//! closed segments took.
 
 use std::num::{NonZeroU32, NonZeroU64};
 
@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use p02_characters::Persona;
 use p02_contracts::{ConversationTurn, RoleModelAdapter};
 use p02_core::{
-    CharacterProfile, ClientStamp, ConversationId, EventIdentity, MessageId, Participant,
+    CharacterProfile, ClientStamp, ConversationId, EventId, EventIdentity, MessageId, Participant,
     SessionId, SpeakerName,
 };
 use p02_plugins::PluginHost;
@@ -19,8 +19,7 @@ use p02_store::{
     TakenLines,
 };
 
-use crate::continuation;
-use crate::turn::{self, CompletedTurn, Ended, Progress, RejectedTurn, RunTurnError};
+use crate::turn::{self, CompletedTurn, Progress, RejectedTurn, RunTurnError};
 
 /// A character as a thread runs her: who she is, and the persona her model
 /// is given.
@@ -36,10 +35,10 @@ pub struct Character {
 pub struct Submission<'a> {
     pub line: &'a str,
     /// The surface the line came from.
-    pub source: Option<ClientStamp>,
+    pub source: ClientStamp,
     /// The id the client submitted the line under, which a repeat of the
     /// line reuses.
-    pub client_message_id: Option<ClientStamp>,
+    pub client_message_id: ClientStamp,
 }
 
 /// The open thread between the person and one character on one home: the
@@ -68,42 +67,15 @@ pub enum Delivery {
     },
     /// The text was no line: its event and the refusal are in the log, and
     /// no message is.
-    InputRejected {
-        identity: EventIdentity,
-        message: String,
-    },
-    /// The turn completed, and `rotation` says what then became of the
-    /// character's memory, when anything did.
-    Completed {
-        turn: CompletedTurn,
-        rotation: Option<Rotation>,
-    },
+    InputRejected { message: String },
+    /// The turn completed, and the session continued after it when it was
+    /// due to.
+    Completed(CompletedTurn),
     /// The turn ended refused, the person's line kept.
-    Rejected { turn: RejectedTurn },
+    Rejected(RejectedTurn),
     /// The runtime itself failed, so the turn is fatal: its caller restarts
     /// the character.
-    Failed {
-        identity: EventIdentity,
-        error: RunTurnError,
-    },
-}
-
-/// What happened to the character's memory after a completed turn.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Rotation {
-    /// The session continues in segment `to`, the oldest turns of `from`
-    /// condensed. What failed of ending `from` is reported, the
-    /// continuation adopted all the same.
-    Rotated {
-        from: SessionId,
-        to: SessionId,
-        summarized_turn_count: NonZeroU32,
-        summarizer: Summarizer,
-        end_failure: Option<String>,
-    },
-    /// The continuation was not committed: the thread stays in `from`, and
-    /// the next completed turn plans it again.
-    Failed { from: SessionId, message: String },
+    Failed(RunTurnError),
 }
 
 /// What a line is answered with: the name the person goes by, the
@@ -135,6 +107,7 @@ pub(crate) struct Disk {
     data: CharacterData,
     holder: ConversationWriter,
     pub(crate) writer: SessionWriter,
+    /// The lines its closed segments took.
     taken: TakenLines,
 }
 
@@ -222,11 +195,9 @@ impl Conversation {
         self.skipped.as_deref()
     }
 
-    /// Takes one line through the turn, as `mind` answers it, and
-    /// continues the session in a new segment after a completed turn whose
-    /// history the model's window would no longer hold whole. `listener`
-    /// hears the turn's progress on the turn's own task, in order, and is
-    /// never awaited.
+    /// Takes one line through the turn, as `mind` answers it, unless a run
+    /// before this one took it. `listener` hears the turn's progress on the
+    /// turn's own task, in order, and is never awaited.
     ///
     /// A delivery dropped before it ends loses the thread, as a panic on
     /// the blocking pool does: every later step fails. The thread opens
@@ -238,48 +209,15 @@ impl Conversation {
         mind: &mut dyn Mind,
         listener: &(dyn Fn(Progress) + Send + Sync),
     ) -> Delivery {
-        let identity = EventIdentity::mint();
-
-        if let Some(client_message_id) = submission.client_message_id.clone() {
-            match self.taken(client_message_id.clone()).await {
-                Ok(Some(message_id)) => {
-                    return Delivery::Duplicate {
-                        client_message_id,
-                        message_id,
-                    };
-                }
-                Ok(None) => {}
-                Err(error) => return Delivery::Failed { identity, error },
-            }
-        }
-
-        let Some(session) = self
-            .disk
-            .as_ref()
-            .map(|disk| disk.writer.session_id().clone())
-        else {
-            return Delivery::Failed {
-                identity,
-                error: RunTurnError::StateLost,
-            };
-        };
-        match turn::run(
-            &mut self.disk,
-            &identity,
-            submission,
-            &self.character,
-            &mut *mind,
-            listener,
-        )
-        .await
-        {
-            Ended::InputRejected { message } => Delivery::InputRejected { identity, message },
-            Ended::Rejected(turn) => Delivery::Rejected { turn },
-            Ended::Failed(error) => Delivery::Failed { identity, error },
-            Ended::Completed(turn) => Delivery::Completed {
-                turn,
-                rotation: self.rotate(session, mind).await,
+        match self.taken(submission.client_message_id.clone()).await {
+            Ok(Some(message_id)) => Delivery::Duplicate {
+                client_message_id: submission.client_message_id,
+                message_id,
             },
+            Ok(None) => {
+                turn::run(&mut self.disk, submission, &self.character, mind, listener).await
+            }
+            Err(error) => Delivery::Failed(error),
         }
     }
 
@@ -317,85 +255,6 @@ impl Conversation {
             Ok(current.or_else(|| disk.taken.taken(&client_message_id).cloned()))
         })
         .await
-    }
-
-    /// Continues the session `from` in a new segment when the model's window
-    /// would no longer hold its history whole, as `mind` stands when the
-    /// turn ended. The continuation record is the commit point: until it
-    /// lands the thread stays where it was, and after it the old segment's
-    /// lines are recorded and its lease is released, what of that fails
-    /// reported and never undone.
-    async fn rotate(&mut self, from: SessionId, mind: &dyn Mind) -> Option<Rotation> {
-        let read = on_disk(&mut self.disk, |disk| {
-            let replay = disk.writer.replay()?;
-
-            Ok((replay.history(), replay.user_lines().clone()))
-        })
-        .await;
-        let (history, user_lines) = match read {
-            Ok(read) => read,
-            Err(error) => {
-                return Some(Rotation::Failed {
-                    from,
-                    message: error_chain(&error),
-                });
-            }
-        };
-        let selection = continuation::select(&history.turns, mind.context_window())?;
-        let last_event_id = history.turns.last()?.identity.event_id().clone();
-        let summary = continuation::summarize(
-            mind.adapter(),
-            selection.summarized,
-            history.summary.as_deref(),
-            mind.person(),
-            &self.character.profile.display_name,
-            mind.context_window(),
-        )
-        .await;
-        let next = Next {
-            continued_from: ContinuedFrom {
-                session_id: from.clone(),
-                last_event_id,
-            },
-            summary: summary.text,
-            summarized_turn_count: selection.summarized_turn_count,
-            carried_turns: selection.carried.to_vec(),
-            summarizer: summary.summarizer.clone(),
-        };
-        let continued = on_disk(&mut self.disk, move |disk| Ok(disk.continue_in(next))).await;
-        let (ended, to) = match continued {
-            Ok(Ok(continued)) => continued,
-            Ok(Err(message)) => return Some(Rotation::Failed { from, message }),
-            Err(error) => {
-                return Some(Rotation::Failed {
-                    from,
-                    message: error_chain(&error),
-                });
-            }
-        };
-        let segment = from.segment();
-        let mut failures = Vec::new();
-
-        if let Err(error) = on_disk(&mut self.disk, move |disk| {
-            disk.taken.insert(segment, user_lines);
-            Ok(disk.taken.write(&disk.data, &disk.holder)?)
-        })
-        .await
-        {
-            failures.push(error_chain(&error));
-        }
-
-        if let Err(error) = blocking(move || ended.release()).await {
-            failures.push(error_chain(&error));
-        }
-
-        Some(Rotation::Rotated {
-            from,
-            to,
-            summarized_turn_count: selection.summarized_turn_count,
-            summarizer: summary.summarizer,
-            end_failure: joined(&failures),
-        })
     }
 }
 
@@ -533,13 +392,15 @@ fn taken_lines(
 /// made, when discarding that segment failed too.
 const LEFT_EMPTY: &str = "the segment it made stays empty, for the next open to discard";
 
-/// What a continuation records, but the segment it opens.
-struct Next {
-    continued_from: ContinuedFrom,
-    summary: String,
-    summarized_turn_count: NonZeroU32,
-    carried_turns: Vec<ConversationTurn>,
-    summarizer: Summarizer,
+/// What a continuation records, but the segments it continues and opens.
+#[derive(Debug)]
+pub(crate) struct Next {
+    /// The event of the turn the segment it continues ended on.
+    pub(crate) last_event_id: EventId,
+    pub(crate) summary: String,
+    pub(crate) summarized_turn_count: NonZeroU32,
+    pub(crate) carried_turns: Vec<ConversationTurn>,
+    pub(crate) summarizer: Summarizer,
 }
 
 impl Disk {
@@ -554,49 +415,55 @@ impl Disk {
         Ok(())
     }
 
-    /// Makes the segment after the current one, under its writer, and
-    /// commits `next` as its first record, the last step that can fail: a
-    /// segment whose record never landed is discarded again through that
-    /// writer. Hands back the writer of the segment it continued, for its
-    /// end, and the segment it opened.
-    fn continue_in(&mut self, next: Next) -> Result<(SessionWriter, SessionId), String> {
-        let from = next.continued_from.session_id.clone();
-        let mut writer = self
-            .data
-            .continue_session(&self.holder, &from)
-            .map_err(|error| error_chain(&error))?;
-        let to = writer.session_id().clone();
-        let committed = writer.append(LogRecord::new(
+    /// Continues the current segment in the next, `next` its first record
+    /// and the commit point: a segment whose record never landed is
+    /// discarded again through its writer, and the thread stays where it
+    /// was. After it, the lines the old segment took are recorded and its
+    /// lease released, what fails of that never undone. What failed, in a
+    /// sentence.
+    pub(crate) fn continue_in(&mut self, next: Next) -> Option<String> {
+        let from = self.writer.session_id().clone();
+        let lines = match self.writer.replay() {
+            Ok(replay) => replay.user_lines().clone(),
+            Err(error) => return Some(error_chain(&error)),
+        };
+        let mut writer = match self.data.continue_session(&self.holder, &from) {
+            Ok(writer) => writer,
+            Err(error) => return Some(error_chain(&error)),
+        };
+        let continuation = SessionContinuation::new(
+            writer.session_id().clone(),
+            ContinuedFrom {
+                session_id: from.clone(),
+                last_event_id: next.last_event_id,
+            },
+            next.summary,
+            next.summarized_turn_count,
+            next.carried_turns,
+            next.summarizer,
+        );
+
+        if let Err(error) = writer.append(LogRecord::new(
             EventIdentity::mint(),
             RecordBody::SessionContinued(SessionContinued {
-                session_continuation: SessionContinuation::new(
-                    to.clone(),
-                    next.continued_from,
-                    next.summary,
-                    next.summarized_turn_count,
-                    next.carried_turns,
-                    next.summarizer,
-                ),
+                session_continuation: continuation,
             }),
-        ));
+        )) {
+            let failure = error_chain(&error);
 
-        match committed {
-            Ok(()) => Ok((std::mem::replace(&mut self.writer, writer), to)),
-            Err(error) => {
-                let failure = error_chain(&error);
-
-                match writer.discard() {
-                    Ok(()) => Err(failure),
-                    Err(discard) => Err(format!(
-                        "{failure}; {LEFT_EMPTY}: {}",
-                        error_chain(&discard)
-                    )),
-                }
-            }
+            return Some(match writer.discard() {
+                Ok(()) => failure,
+                Err(discard) => format!("{failure}; {LEFT_EMPTY}: {}", error_chain(&discard)),
+            });
         }
-    }
-}
 
-fn joined(failures: &[String]) -> Option<String> {
-    (!failures.is_empty()).then(|| failures.join("; "))
+        let ended = std::mem::replace(&mut self.writer, writer);
+
+        self.taken.insert(from.segment(), lines);
+
+        let recorded = self.taken.write(&self.data, &self.holder);
+
+        ended.release();
+        recorded.err().map(|error| error_chain(&error))
+    }
 }

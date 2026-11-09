@@ -7,15 +7,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore,
-    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall,
-    ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
+    Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore, HookContext, PluginError,
+    PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
+    ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
     ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ProposedToolCall,
     ToolCallReport, Turn,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::time::Instant;
 
 use crate::storage::Storage;
@@ -272,16 +272,6 @@ async fn a_verbose_failure_is_cut_to_what_a_record_keeps_and_still_replays() {
     assert_eq!(text.chars().count(), 4_096);
     assert!(text.ends_with("..."));
     assert_eq!(report.evidence[0].summary(), text);
-    assert!(
-        ConversationToolCall::new(
-            ToolCallId::new("c1").unwrap(),
-            id("chatty"),
-            id("chatty.run"),
-            Map::new(),
-            report.result,
-        )
-        .is_ok()
-    );
 }
 
 /// plugins.output-redaction: tool output values under credential-shaped keys, nested and in lists, are redacted before the model or the log sees them

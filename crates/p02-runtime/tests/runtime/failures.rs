@@ -49,7 +49,7 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         })
         .await;
 
-    assert!(matches!(failed, Delivery::Failed { .. }), "{failed:?}");
+    assert!(matches!(failed, Delivery::Failed(_)), "{failed:?}");
     assert_eq!(
         chat.heard.take(),
         [
@@ -62,7 +62,7 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     );
     assert_eq!(chat.reopen().await, None);
 
-    let Delivery::Completed { turn, .. } = chat.say("hello again", "again").await else {
+    let Delivery::Completed(turn) = chat.say("hello again", "again").await else {
         panic!("the reopened thread takes the next line");
     };
     let store = chat.world.data().file_store(&id("keeper"));
@@ -141,23 +141,14 @@ async fn a_thread_whose_delivery_was_dropped_opens_again_and_goes_on() {
     let reopened = chat.say("Hello?", "third").await;
 
     assert!(
-        matches!(
-            lost,
-            Delivery::Failed {
-                error: RunTurnError::StateLost,
-                ..
-            }
-        ),
+        matches!(lost, Delivery::Failed(RunTurnError::StateLost)),
         "{lost:?}"
     );
     assert_eq!(
         closed.as_deref(),
         Some("the conversation lost its hold on the disk to an earlier failure")
     );
-    assert!(
-        matches!(reopened, Delivery::Completed { .. }),
-        "{reopened:?}"
-    );
+    assert!(matches!(reopened, Delivery::Completed(_)), "{reopened:?}");
     assert_eq!(
         chat.kinds(1),
         [

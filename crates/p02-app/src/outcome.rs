@@ -698,10 +698,8 @@ pub enum TurnProgress {
         speaker_id: Identifier,
         speaker_name: SpeakerName,
         text: VisibleText,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source: Option<ClientStamp>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        client_message_id: Option<ClientStamp>,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
     },
     VisibleReply {
         message_id: MessageId,
@@ -843,8 +841,8 @@ impl RunningTurns {
     ) {
         match progress {
             TurnProgress::UserMessage {
-                source: Some(source),
-                client_message_id: Some(client_message_id),
+                source,
+                client_message_id,
                 ..
             } => {
                 self.0.insert(
@@ -881,9 +879,7 @@ impl RunningTurns {
                     turn.drafts.retain(|draft| draft.draft_id != *draft_id);
                 }
             }
-            TurnProgress::UserMessage { .. }
-            | TurnProgress::ToolCallsRequested { .. }
-            | TurnProgress::ToolCallCompleted { .. } => {}
+            TurnProgress::ToolCallsRequested { .. } | TurnProgress::ToolCallCompleted { .. } => {}
         }
     }
 

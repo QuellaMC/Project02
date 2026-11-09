@@ -1,19 +1,21 @@
 //! The continuation of a session that has outgrown the model's window:
-//! which turns are carried whole and which condensed, what the summarizer
-//! reads, and the summary when no model writes one. Every length is counted
-//! in characters.
+//! when it continues, which turns are carried whole and which condensed,
+//! what the summarizer reads, and the summary when no model writes one.
+//! Every length is counted in characters.
 
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 
 use p02_contracts::{
     ConversationTurn, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallResult,
 };
-use p02_core::{SpeakerName, Timestamp, VisibleMessage};
+use p02_core::{EventIdentity, SpeakerName, Timestamp, VisibleMessage};
 use p02_role_model::{
     Person, Recollection, newest_turns_within, select_history_window, summarizer_instructions,
 };
-use p02_shared::Identifier;
-use p02_store::{Summarizer, SummaryProvider};
+use p02_shared::{Identifier, error_chain};
+use p02_store::{ConversationHistory, Summarizer, SummaryProvider};
+
+use crate::conversation::{Disk, Mind, Next, on_disk};
 
 /// The least a summary may hold, however small the window: anything less
 /// is too thin to continue from.
@@ -37,17 +39,65 @@ const NO_TEXT: &str = "The summarizer returned no text.";
 /// The turns a continuation condenses and the turns it carries whole,
 /// oldest first each: together, the whole history.
 #[derive(Debug)]
-pub(crate) struct Selection<'a> {
-    pub(crate) summarized: &'a [ConversationTurn],
-    pub(crate) summarized_turn_count: NonZeroU32,
-    pub(crate) carried: &'a [ConversationTurn],
+struct Selection<'a> {
+    summarized: &'a [ConversationTurn],
+    summarized_turn_count: NonZeroU32,
+    carried: &'a [ConversationTurn],
 }
 
 /// The summary a continuation opens with, and who wrote it.
 #[derive(Debug)]
-pub(crate) struct Summary {
-    pub(crate) text: String,
-    pub(crate) summarizer: Summarizer,
+struct Summary {
+    text: String,
+    summarizer: Summarizer,
+}
+
+/// Once the turn of `event` completed after `history`, continues the
+/// session in a new segment when the model's window, as `mind` stands now,
+/// would no longer hold the whole of it, the summary naming her
+/// `character`. What failed, in a sentence: a continuation not committed
+/// leaves the thread where it was, for the next completed turn to plan
+/// again.
+pub(crate) async fn rotate(
+    disk: &mut Option<Disk>,
+    event: &EventIdentity,
+    history: ConversationHistory,
+    character: &SpeakerName,
+    mind: &dyn Mind,
+) -> Option<String> {
+    let ConversationHistory { mut turns, summary } = history;
+    let completed = {
+        let event = event.clone();
+
+        on_disk(disk, move |disk| Ok(disk.writer.replay()?.turn(&event))).await
+    };
+
+    match completed {
+        Ok(completed) => turns.extend(completed),
+        Err(error) => return Some(error_chain(&error)),
+    }
+
+    let selection = select(&turns, mind.context_window())?;
+    let summary = summarize(
+        mind.adapter(),
+        selection.summarized,
+        summary.as_deref(),
+        mind.person(),
+        character,
+        mind.context_window(),
+    )
+    .await;
+    let next = Next {
+        last_event_id: event.event_id().clone(),
+        summary: summary.text,
+        summarized_turn_count: selection.summarized_turn_count,
+        carried_turns: selection.carried.to_vec(),
+        summarizer: summary.summarizer,
+    };
+
+    on_disk(disk, move |disk| Ok(disk.continue_in(next)))
+        .await
+        .unwrap_or_else(|error| Some(error_chain(&error)))
 }
 
 /// The continuation `turns` call for in a window of `window` tokens, if
@@ -55,7 +105,7 @@ pub(crate) struct Summary {
 /// whole turn: the newest turns that fit a quarter of the window are
 /// carried whole, by the window's own measure, and every turn before them
 /// is condensed, a turn too big for the quarter with the rest.
-pub(crate) fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<Selection<'_>> {
+fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<Selection<'_>> {
     if select_history_window(turns, window).len() == turns.len() {
         return None;
     }
@@ -77,7 +127,7 @@ pub(crate) fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<S
 /// has no model for it, fails, or answers nothing, the mechanical summary
 /// says what it can, and the summarizer says why. Both speak of the person
 /// by `person`, the name they go by now.
-pub(crate) async fn summarize(
+async fn summarize(
     adapter: &dyn RoleModelAdapter,
     turns: &[ConversationTurn],
     earlier: Option<&str>,
@@ -515,7 +565,6 @@ mod tests {
                 .clone(),
             result,
         )
-        .unwrap()
     }
 
     /// A window of 1 to 65,536 tokens, as many small ones as large.

@@ -411,8 +411,8 @@ fn written() -> Vec<(&'static str, Value)> {
                 speaker_id: id("local-user"),
                 speaker_name: SpeakerName::new("You").unwrap(),
                 text: text.clone(),
-                source: Some(stamp("web")),
-                client_message_id: None,
+                source: stamp("web"),
+                client_message_id: stamp("line-1"),
             },
         },
         Event::TurnProgress {

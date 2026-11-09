@@ -1,13 +1,13 @@
 use std::num::NonZeroU32;
 
 use p02_contracts::{ConversationToolCall, Evidence, ToolCallId, ToolCallResult};
-use p02_shared::{BoundJsonError, Identifier};
+use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 /// A tool call a round made, recorded before it runs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "WireStarted")]
+#[serde(rename_all = "camelCase")]
 pub struct ToolCallStarted {
     round: NonZeroU32,
     tool_call_id: ToolCallId,
@@ -16,49 +16,16 @@ pub struct ToolCallStarted {
     tool_input: Map<String, Value>,
 }
 
-/// How a call came to its result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolDispatch {
-    /// The plugin host ran it.
-    Host,
-    /// No plugin offers the tool, so the runtime refused it unasked.
-    Undeclared,
-}
-
 /// A tool call that came back.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "WireFinished")]
+#[serde(rename_all = "camelCase")]
 pub struct ToolCallFinished {
     round: NonZeroU32,
     tool_call_id: ToolCallId,
     tool_name: Identifier,
     tool_plugin_id: Identifier,
-    dispatched_to_host: bool,
     tool_result: ToolCallResult,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    runtime_plugin_evidence: Vec<Evidence>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WireStarted {
-    round: NonZeroU32,
-    tool_call_id: ToolCallId,
-    tool_name: Identifier,
-    tool_plugin_id: Identifier,
-    tool_input: Map<String, Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WireFinished {
-    round: NonZeroU32,
-    tool_call_id: ToolCallId,
-    tool_name: Identifier,
-    tool_plugin_id: Identifier,
-    dispatched_to_host: bool,
-    tool_result: ToolCallResult,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     runtime_plugin_evidence: Vec<Evidence>,
 }
 
@@ -66,24 +33,21 @@ impl ToolCallStarted {
     /// Call `tool_call_id` of round `round`, of `tool_name`, which
     /// `tool_plugin_id` answers, with `tool_input` kept as its session keeps
     /// a call's input.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the input breaks the JSON limits.
+    #[must_use]
     pub fn new(
         round: NonZeroU32,
         tool_call_id: ToolCallId,
         tool_name: Identifier,
         tool_plugin_id: Identifier,
         tool_input: Map<String, Value>,
-    ) -> Result<Self, BoundJsonError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             round,
             tool_call_id,
             tool_name,
             tool_plugin_id,
-            tool_input: ConversationToolCall::kept_input(tool_input)?,
-        })
+            tool_input: ConversationToolCall::kept_input(tool_input),
+        }
     }
 
     #[must_use]
@@ -112,52 +76,19 @@ impl ToolCallStarted {
     }
 }
 
-impl TryFrom<WireStarted> for ToolCallStarted {
-    type Error = BoundJsonError;
-
-    fn try_from(wire: WireStarted) -> Result<Self, Self::Error> {
-        Self::new(
-            wire.round,
-            wire.tool_call_id,
-            wire.tool_name,
-            wire.tool_plugin_id,
-            wire.tool_input,
-        )
-    }
-}
-
-impl ToolDispatch {
-    fn of(dispatched_to_host: bool) -> Self {
-        if dispatched_to_host {
-            Self::Host
-        } else {
-            Self::Undeclared
-        }
-    }
-}
-
 impl ToolCallFinished {
     /// The call `started` came back with `result`, kept as its session
     /// keeps a call's result, and the evidence the call made.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the result breaks the JSON limits.
-    pub fn new(
-        started: &ToolCallStarted,
-        dispatch: ToolDispatch,
-        result: ToolCallResult,
-        evidence: Vec<Evidence>,
-    ) -> Result<Self, BoundJsonError> {
-        Ok(Self {
+    #[must_use]
+    pub fn new(started: &ToolCallStarted, result: ToolCallResult, evidence: Vec<Evidence>) -> Self {
+        Self {
             round: started.round,
             tool_call_id: started.tool_call_id.clone(),
             tool_name: started.tool_name.clone(),
             tool_plugin_id: started.tool_plugin_id.clone(),
-            dispatched_to_host: dispatch == ToolDispatch::Host,
-            tool_result: ConversationToolCall::kept_result(result)?,
+            tool_result: ConversationToolCall::kept_result(result),
             runtime_plugin_evidence: evidence,
-        })
+        }
     }
 
     #[must_use]
@@ -181,28 +112,7 @@ impl ToolCallFinished {
     }
 
     #[must_use]
-    pub fn dispatch(&self) -> ToolDispatch {
-        ToolDispatch::of(self.dispatched_to_host)
-    }
-
-    #[must_use]
     pub fn tool_result(&self) -> &ToolCallResult {
         &self.tool_result
-    }
-}
-
-impl TryFrom<WireFinished> for ToolCallFinished {
-    type Error = BoundJsonError;
-
-    fn try_from(wire: WireFinished) -> Result<Self, Self::Error> {
-        Ok(Self {
-            round: wire.round,
-            tool_call_id: wire.tool_call_id,
-            tool_name: wire.tool_name,
-            tool_plugin_id: wire.tool_plugin_id,
-            dispatched_to_host: wire.dispatched_to_host,
-            tool_result: ConversationToolCall::kept_result(wire.tool_result)?,
-            runtime_plugin_evidence: wire.runtime_plugin_evidence,
-        })
     }
 }

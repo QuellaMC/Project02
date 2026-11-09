@@ -488,7 +488,7 @@ messages: ReadonlyArray<GatewayVisibleMessage>, } | { "status": "rejected", char
 /**
  * What a turn says as it goes, in order.
  */
-export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, source?: ClientStamp, clientMessageId?: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, 
+export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, 
 /**
  * The draft this message replaces.
  */

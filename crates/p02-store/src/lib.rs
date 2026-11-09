@@ -41,7 +41,7 @@ pub use record::{
     AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MessageCommitted,
     PayloadSummary, RecordBody, RecordError, RecordKind, RoundRecord, RuntimeRejection,
     SessionContinuation, SessionContinued, Summarizer, SummaryProvider, ToolCallFinished,
-    ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
+    ToolCallStarted, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
 };
 pub use replay::{ReplayError, SessionReplay};
 pub use sessions::{SessionCatalog, SessionEntry};

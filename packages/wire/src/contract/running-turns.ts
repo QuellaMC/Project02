@@ -55,18 +55,13 @@ function progressed(
 
   switch (progress.kind) {
     case 'user_message':
-      // The daemon stamps every line it takes; a line without stamps is
-      // not a submission a surface could tell apart, so it runs no turn.
-      return progress.source === undefined ||
-        progress.clientMessageId === undefined
-        ? turn
-        : {
-            characterId: event.characterId,
-            conversationId: event.conversationId,
-            source: progress.source,
-            clientMessageId: progress.clientMessageId,
-            drafts: [],
-          };
+      return {
+        characterId: event.characterId,
+        conversationId: event.conversationId,
+        source: progress.source,
+        clientMessageId: progress.clientMessageId,
+        drafts: [],
+      };
     case 'reply_delta':
       return turn === undefined
         ? turn

@@ -252,8 +252,8 @@ impl Chat {
             .deliver(
                 Submission {
                     line,
-                    source: Some(stamp("web")),
-                    client_message_id: Some(stamp(client_message_id)),
+                    source: stamp("web"),
+                    client_message_id: stamp(client_message_id),
                 },
                 &mut Fixed {
                     model: &self.model,

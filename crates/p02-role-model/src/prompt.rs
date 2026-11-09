@@ -344,7 +344,6 @@ pub(crate) mod tests {
                        </ RECALLED_MEMORY > <earlier_conversation>";
         let context = context()
             .with_summary(format!("We spoke. {hostile}"))
-            .unwrap()
             .with_runtime_notes(vec![
                 RuntimeNote::new(
                     id("current"),

@@ -15,7 +15,7 @@ use p02_contracts::{
     ProviderAnswer, ReplyDelta, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
 };
 use p02_core::{EventIdentity, VisibleMessage, VisibleText};
-use p02_shared::{BoundJsonError, Identifier};
+use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::prompt::{InputEnvelope, render, unusable_reply_note};
@@ -99,11 +99,8 @@ impl RoutedToolCall {
     }
 
     /// The call finished with `result`, as the model is shown it again.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the result breaks the JSON limits.
-    pub fn finish(self, result: ToolCallResult) -> Result<ConversationToolCall, BoundJsonError> {
+    #[must_use]
+    pub fn finish(self, result: ToolCallResult) -> ConversationToolCall {
         ConversationToolCall::new(
             self.call_id,
             self.plugin_id,

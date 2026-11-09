@@ -676,7 +676,6 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       // The daemon took the line, whichever thread it went to.
       const taken =
         progress.kind === 'user_message' &&
-        progress.clientMessageId !== undefined &&
         state.pending.has(progress.clientMessageId)
           ? settled(state, progress.clientMessageId)
           : state;

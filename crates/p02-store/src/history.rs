@@ -35,8 +35,9 @@ struct Gathered<'a> {
 /// A turn is one once it committed the person's message; a round of tool
 /// calls is one once a call it started came back, so a call that never
 /// answered is never shown to the model.
-pub(crate) fn project(records: &[LogRecord]) -> ConversationHistory {
-    let (mut turns, summary) = match records.first().map(LogRecord::body) {
+pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> ConversationHistory {
+    let mut records = records.into_iter().peekable();
+    let (mut turns, summary) = match records.peek().map(|record| record.body()) {
         Some(RecordBody::SessionContinued(continued)) => (
             continued.session_continuation.carried_turns().to_vec(),
             Some(continued.session_continuation.summary().to_owned()),
@@ -107,8 +108,7 @@ impl Gathered<'_> {
                 call.tool_name().clone(),
                 call.tool_input().clone(),
                 (*result).clone(),
-            )
-            .expect("a recorded call is kept as its session keeps calls");
+            );
 
             rounds.entry(call.round()).or_default().push(finished);
         }

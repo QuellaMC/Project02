@@ -41,7 +41,7 @@ async fn a_reopened_thread_resumes_its_latest_whole_segment() {
     holder.release();
     chat.conversation = Some(chat.world.open());
 
-    let Delivery::Completed { turn, .. } = chat.say("Coffee?", "coffee").await else {
+    let Delivery::Completed(turn) = chat.say("Coffee?", "coffee").await else {
         panic!("the resumed segment takes the next line");
     };
     let asked = chat.model.asked.lock().unwrap();
@@ -100,10 +100,7 @@ async fn a_line_taken_before_is_a_duplicate_wherever_it_was_taken() {
     chat.window = NonZeroU64::MIN;
     assert!(matches!(
         chat.say("Coffee?", "coffee").await,
-        Delivery::Completed {
-            rotation: Some(_),
-            ..
-        }
+        Delivery::Completed(_)
     ));
 
     let closed_log = chat.log(1);

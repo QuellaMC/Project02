@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use p02_contracts::{ChatMessage, DecisionResult, ModelOutput, ToolCallOutcome};
 use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
-use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch, TurnRejected};
+use p02_store::{LogRecord, RecordBody, RecordKind, TurnRejected};
 use serde_json::{Value, json};
 
 use crate::support::{Chat, Fixed, Round, Toy, calling, reply, stamp, told, written};
@@ -51,8 +51,8 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
         .deliver(
             Submission {
                 line: " Hello? ",
-                source: Some(stamp("web")),
-                client_message_id: Some(stamp("hello")),
+                source: stamp("web"),
+                client_message_id: stamp("hello"),
             },
             &mut Fixed {
                 model,
@@ -90,14 +90,10 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     assert!(matches!(
         &progress[0],
         Progress::UserMessage { source, client_message_id, .. }
-            if source == &Some(stamp("web")) && client_message_id == &Some(stamp("hello"))
+            if source == &stamp("web") && client_message_id == &stamp("hello")
     ));
 
-    let Delivery::Completed {
-        turn,
-        rotation: None,
-    } = delivery
-    else {
+    let Delivery::Completed(turn) = delivery else {
         panic!("{delivery:?}");
     };
 
@@ -119,7 +115,7 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
     chat.model.script([Round::says(reply(&["Hi."]))]);
 
     match chat.say(" \t ", "refused").await {
-        Delivery::InputRejected { message, .. } => {
+        Delivery::InputRejected { message } => {
             assert_eq!(message, "Provide a non-empty message.");
         }
         other => panic!("{other:?}"),
@@ -128,7 +124,7 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
     assert_eq!(chat.heard.take(), Vec::<String>::new());
     assert!(matches!(
         chat.say("Hi?", "hi").await,
-        Delivery::Completed { .. }
+        Delivery::Completed(_)
     ));
     assert_eq!(
         chat.kinds(1),
@@ -157,15 +153,14 @@ async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keep
 
     assert!(matches!(
         chat.say("Hello?", "first").await,
-        Delivery::Rejected {
-            turn: RejectedTurn { reason: "provider_error", ref message }
-        } if message == "The provider answered 503."
+        Delivery::Rejected(RejectedTurn { reason: "provider_error", ref message })
+            if message == "The provider answered 503."
     ));
 
     chat.model
         .script((0..100).map(|_| Round::says(ModelOutput::default())));
 
-    let Delivery::Rejected { turn } = chat.say("Hello again?", "second").await else {
+    let Delivery::Rejected(turn) = chat.say("Hello again?", "second").await else {
         panic!("a malformed last answer rejects its turn");
     };
     let records = chat.records(1);
@@ -228,7 +223,7 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
         Round::says(reply(&["Noted."])),
     ]);
 
-    let Delivery::Completed { turn, .. } = chat.say("Remember tea and cake.", "notes").await else {
+    let Delivery::Completed(turn) = chat.say("Remember tea and cake.", "notes").await else {
         panic!("the turn completes");
     };
     let records = chat.records(1);
@@ -239,12 +234,10 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
             _ => None,
         })
         .collect();
-    let finished: Vec<(String, ToolDispatch)> = records
+    let finished: Vec<String> = records
         .iter()
         .filter_map(|record| match record.body() {
-            RecordBody::ToolCallFinished(call) => {
-                Some((call.tool_plugin_id().to_string(), call.dispatch()))
-            }
+            RecordBody::ToolCallFinished(call) => Some(call.tool_plugin_id().to_string()),
             _ => None,
         })
         .collect();
@@ -267,14 +260,7 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
         ]
     );
     assert_eq!(started, [r#""tea""#, r#""all""#, r#""cake""#]);
-    assert_eq!(
-        finished,
-        [
-            ("notes".to_owned(), ToolDispatch::Host),
-            ("undeclared.notes.burn".to_owned(), ToolDispatch::Undeclared),
-            ("notes".to_owned(), ToolDispatch::Host),
-        ]
-    );
+    assert_eq!(finished, ["notes", "undeclared.notes.burn", "notes"]);
     assert_eq!(
         shown,
         [
@@ -324,9 +310,8 @@ async fn a_round_budget_spent_still_asking_for_a_tool_rejects_the_turn() {
     assert!(
         matches!(
             &delivery,
-            Delivery::Rejected {
-                turn: RejectedTurn { reason: "tool_rounds_exhausted", message }
-            } if message == "Role model exceeded maximum executable tool rounds (99)."
+            Delivery::Rejected(RejectedTurn { reason: "tool_rounds_exhausted", message })
+                if message == "Role model exceeded maximum executable tool rounds (99)."
         ),
         "{delivery:?}"
     );

@@ -192,7 +192,7 @@ impl TurnSink for Recording {
             .map(|call| {
                 let output = json!({"found": call.tool_name().to_string()});
 
-                call.finish(ToolCallResult::Accepted { output }).unwrap()
+                call.finish(ToolCallResult::Accepted { output })
             })
             .collect())
     }

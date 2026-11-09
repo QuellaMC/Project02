@@ -93,9 +93,9 @@ pub struct RuntimeNote {
     plugin_id: Option<Identifier>,
 }
 
-/// Why a text cannot be a note or a summary of the decision context.
+/// Why a text cannot be a runtime note: it is blank.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("a runtime note's text and a context summary must not be blank")]
+#[error("a runtime note's text must not be blank")]
 pub struct BlankContextTextError;
 
 impl RuntimeNote {
@@ -170,15 +170,10 @@ impl DecisionContext {
         }
     }
 
-    /// # Errors
-    ///
-    /// [`BlankContextTextError`] when `summary` is blank.
-    pub fn with_summary(
-        mut self,
-        summary: impl Into<String>,
-    ) -> Result<Self, BlankContextTextError> {
-        self.context_summary = Some(non_blank(summary.into())?);
-        Ok(self)
+    #[must_use]
+    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
+        self.context_summary = Some(summary.into());
+        self
     }
 
     #[must_use]
@@ -238,23 +233,11 @@ mod tests {
     }
 
     #[test]
-    fn notes_and_summaries_say_something() {
-        let context = DecisionContext::new(
-            CharacterProfile {
-                id: id("mira"),
-                display_name: SpeakerName::new("Mira").unwrap(),
-            },
-            SpeakerName::new("Sam").unwrap(),
-        );
-
+    fn a_note_says_something() {
         assert!(RuntimeNote::new(id("today"), "Today is Saturday, August 15, 2026.").is_ok());
         assert_eq!(
             RuntimeNote::new(id("today"), " "),
             Err(BlankContextTextError)
-        );
-        assert_eq!(
-            context.with_summary("\n").unwrap_err(),
-            BlankContextTextError
         );
     }
 }

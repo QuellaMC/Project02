@@ -19,9 +19,7 @@ use p02_contracts::{RoleModelAdapter, TurnIdentity, vocabulary};
 use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerName, Timestamp};
 use p02_plugins::{PluginHost, Turn};
 use p02_role_model::{NvidiaSettings, select_adapter};
-use p02_runtime::{
-    Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Rotation, Submission,
-};
+use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{RuntimeRejection, StorageError};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -495,7 +493,7 @@ impl Actor {
                 ),
                 false,
             ),
-            Delivery::InputRejected { message, .. } => (
+            Delivery::InputRejected { message } => (
                 TurnOutcome::Rejected {
                     character_id,
                     conversation_id: conversation,
@@ -507,7 +505,7 @@ impl Actor {
                 },
                 false,
             ),
-            Delivery::Rejected { turn } => (
+            Delivery::Rejected(turn) => (
                 TurnOutcome::Rejected {
                     character_id,
                     conversation_id: conversation,
@@ -517,24 +515,11 @@ impl Actor {
                 },
                 false,
             ),
-            Delivery::Completed {
-                turn:
-                    CompletedTurn {
-                        messages,
-                        post_commit_failures,
-                    },
-                rotation,
-            } => {
-                let failures: Vec<String> = post_commit_failures
-                    .into_iter()
-                    .chain(match rotation {
-                        Some(Rotation::Failed { message, .. }) => Some(message),
-                        Some(Rotation::Rotated { end_failure, .. }) => end_failure,
-                        None => None,
-                    })
-                    .collect();
-
-                self.her.noted(&failures);
+            Delivery::Completed(CompletedTurn {
+                messages,
+                post_commit_failures,
+            }) => {
+                self.her.noted(&post_commit_failures);
 
                 (
                     TurnOutcome::Completed {
@@ -545,7 +530,7 @@ impl Actor {
                     false,
                 )
             }
-            Delivery::Failed { error, .. } => {
+            Delivery::Failed(error) => {
                 let message = error_sentence(&error);
 
                 self.her.publish(Change::Failed(message.clone()));
@@ -843,8 +828,8 @@ async fn take_line(
         .deliver(
             Submission {
                 line: &text,
-                source: Some(stamp.source),
-                client_message_id: Some(stamp.client_message_id),
+                source: stamp.source,
+                client_message_id: stamp.client_message_id,
             },
             &mut Current { her, built },
             &listener,

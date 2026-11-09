@@ -90,7 +90,7 @@ function progress(
 function userMessage(
   messageId: string,
   text: string,
-  clientMessageId?: string,
+  clientMessageId: string,
   conversation = conversationId,
 ): GatewayEvent {
   return progress(
@@ -101,7 +101,7 @@ function userMessage(
       speakerName: 'You',
       text,
       source: 'web',
-      ...(clientMessageId === undefined ? {} : {clientMessageId}),
+      clientMessageId,
     },
     conversation,
   );

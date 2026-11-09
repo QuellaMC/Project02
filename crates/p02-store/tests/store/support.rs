@@ -18,8 +18,7 @@ use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{
     CharacterData, EventReceived, Home, Judgement, LogRecord, MessageCommitted, PayloadSummary,
     RecordBody, RoundRecord, RuntimeRejection, SessionLog, SessionWriter, StorageError,
-    ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection,
-    TurnStatus,
+    ToolCallFinished, ToolCallStarted, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -335,8 +334,8 @@ impl TurnScript<'_> {
         let message = self.script.message(VisibleMessageRole::User, &line);
         let commit = MessageCommitted::user(
             message.clone(),
-            Some(ClientStamp::new("web").unwrap()),
-            Some(ClientStamp::new(client_message_id).unwrap()),
+            ClientStamp::new("web").unwrap(),
+            ClientStamp::new(client_message_id).unwrap(),
         );
 
         self.messages.push(message.id);
@@ -422,8 +421,7 @@ impl TurnScript<'_> {
                     name.clone(),
                     id("character-state"),
                     input.clone(),
-                )
-                .unwrap();
+                );
 
                 self.started.push(started.clone());
                 self.push(RecordBody::ToolCallStarted(started));
@@ -443,7 +441,6 @@ impl TurnScript<'_> {
             let mood = started.tool_input()["mood"].clone();
             let finished = ToolCallFinished::new(
                 &started,
-                ToolDispatch::Host,
                 ToolCallResult::Accepted {
                     output: json!({"applied": {"mood": mood}, "token": "kept-secret"}),
                 },
@@ -452,8 +449,7 @@ impl TurnScript<'_> {
                     "character-state",
                     EvidenceKind::ToolInvocation,
                 )],
-            )
-            .unwrap();
+            );
 
             self.finished.push(started.tool_call_id().clone());
             self.push(RecordBody::ToolCallFinished(finished));
