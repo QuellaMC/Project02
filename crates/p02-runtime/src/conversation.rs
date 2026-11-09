@@ -59,8 +59,8 @@ pub struct Conversation {
 /// What became of a line.
 #[derive(Debug)]
 pub enum Delivery {
-    /// A run before this one took the line, as `message_id`: nothing ran,
-    /// and nothing was written.
+    /// A turn took the line already, as `message_id`: nothing ran, and
+    /// nothing was written.
     Duplicate {
         client_message_id: ClientStamp,
         message_id: MessageId,
@@ -195,9 +195,9 @@ impl Conversation {
         self.skipped.as_deref()
     }
 
-    /// Takes one line through the turn, as `mind` answers it, unless a run
-    /// before this one took it. `listener` hears the turn's progress on the
-    /// turn's own task, in order, and is never awaited.
+    /// Takes one line through the turn, as `mind` answers it, unless a turn
+    /// took it already. `listener` hears the turn's progress on the turn's
+    /// own task, in order, and is never awaited.
     ///
     /// A delivery dropped before it ends loses the thread, as a panic on
     /// the blocking pool does: every later step fails. The thread opens
@@ -238,7 +238,7 @@ impl Conversation {
         .map(|error| error_chain(&error))
     }
 
-    /// The message a run before this one committed a line submitted as
+    /// The message a turn committed a line submitted as
     /// `client_message_id` as, in the current segment or a closed one.
     async fn taken(
         &mut self,
@@ -300,7 +300,7 @@ fn read_current(
     );
 
     Ok((
-        taken_lines(data, holder.conversation(), session.segment())?,
+        TakenLines::before(data, holder.conversation(), session.segment())?,
         skipped,
     ))
 }
@@ -356,36 +356,6 @@ fn resume(
 
         writer.discard()?;
     }
-}
-
-/// The lines the segments before `current` took: the thread's record of
-/// them, completed from every segment it does not cover. The segment just
-/// before `current` must be read, as the current one must, since a run can
-/// end between a rotation and its record; an older one that cannot be read
-/// gives up its lines.
-fn taken_lines(
-    data: &CharacterData,
-    conversation: &p02_core::Conversation,
-    current: NonZeroU64,
-) -> Result<TakenLines, StorageError> {
-    let mut taken = TakenLines::read(data, conversation.id());
-
-    for segment in (1..current.get()).filter_map(NonZeroU64::new) {
-        if taken.covers(segment) {
-            continue;
-        }
-
-        match data
-            .session_log(conversation, segment)
-            .and_then(|log| log.read())
-        {
-            Ok(replay) => taken.insert(segment, replay.user_lines().clone()),
-            Err(error) if segment.get() + 1 == current.get() => return Err(error),
-            Err(_) => {}
-        }
-    }
-
-    Ok(taken)
 }
 
 /// What a rotation whose first record never landed says of the segment it

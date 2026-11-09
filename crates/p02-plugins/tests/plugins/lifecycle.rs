@@ -156,7 +156,7 @@ async fn a_shutdown_never_waits_on_a_blocking_job() {
     );
 
     let started = std::time::Instant::now();
-    let ended = tokio::time::timeout(Duration::from_secs(5), host.shutdown(&turn()))
+    let ended = tokio::time::timeout(Duration::from_secs(5), host.shutdown())
         .await
         .expect("shutdown does not wait on the job");
     let mut job_ended = job_ended;

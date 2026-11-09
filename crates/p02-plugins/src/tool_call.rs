@@ -174,7 +174,6 @@ impl Slot {
             Err(unasked) => return unasked,
         };
         let request = ConfirmationRequest {
-            turn: turn.identity().clone(),
             plugin_id: plugin_id.clone(),
             tool_name: tool.name().clone(),
             call_id,

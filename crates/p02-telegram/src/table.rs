@@ -9,7 +9,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_app::{Event, Health, PairingRequest, PendingConfirmation, RunningTurns};
+use p02_app::{Event, Health, PairingRequest, PendingConfirmation, RunningTurn};
 use p02_config::{ConnectorConfigView, ConnectorEntry};
 use p02_gateway::Ready;
 use p02_shared::{Identifier, error_sentence};
@@ -88,7 +88,7 @@ impl Owner {
 pub(crate) struct Snapshot {
     pub(crate) confirmations: Vec<PendingConfirmation>,
     pub(crate) pairings: Vec<PairingRequest>,
-    pub(crate) turns: RunningTurns,
+    pub(crate) turns: Vec<RunningTurn>,
 }
 
 /// The snapshot as of the frame numbered `seq`, the one a bot that catches
@@ -100,12 +100,17 @@ pub(crate) struct Latest {
 }
 
 impl Snapshot {
-    /// The turns folded by the contract's one rule; what waits added as it
-    /// is raised, announced again or not, and dropped as it is settled.
+    /// Each turn as its newest frame says it, until the completion that
+    /// ends it; what waits added as it is raised, announced again or not,
+    /// and dropped as it is settled.
     fn move_on(&mut self, event: &Event) {
-        self.turns.fold(event);
-
         match event {
+            Event::TurnRunning(turn) => {
+                self.turns
+                    .retain(|running| running.conversation_id != turn.conversation_id);
+                self.turns.push(turn.clone());
+            }
+            Event::TurnCompleted { .. } => self.turns.retain(|turn| !event.ends(turn)),
             Event::ConfirmationRequested(pending) => {
                 self.confirmations
                     .retain(|waiting| waiting.id != pending.id);
@@ -265,7 +270,7 @@ impl Table {
         let snapshot = Snapshot {
             confirmations,
             pairings,
-            turns: turns.into_iter().collect(),
+            turns,
         };
 
         self.seq += 1;

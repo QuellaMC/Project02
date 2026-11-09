@@ -15,8 +15,8 @@ use p02_app::{
     HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal, PackageReport,
     PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
     PairingSubject, PendingConfirmation, ProtocolVersion, RosterState, RunningDraft, RunningTurn,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, ToolCallStatus, TurnMessage,
-    TurnOutcome, TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
+    Settlement, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, ToolCallStatus,
+    TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
 };
 use p02_characters::discover;
 use p02_config::{
@@ -53,7 +53,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<Health>();
     wire.written::<StartOutcome>();
     wire.written::<OpenOutcome>();
-    wire.written::<TurnOutcome>();
+    wire.written::<SubmitOutcome>();
     wire.written::<HistoryOutcome>();
     wire.written::<PendingConfirmation>();
     wire.written::<ConfirmationAnswer>();
@@ -304,7 +304,6 @@ fn read() -> Vec<(&'static str, Value)> {
             "GatewayMessage",
             json!({
                 "conversationId": "conv_1",
-                "senderId": "local-user",
                 "text": "Hello.",
                 "source": "web",
                 "clientMessageId": "line-1",
@@ -402,6 +401,16 @@ fn written() -> Vec<(&'static str, Value)> {
         requested_at: at.clone(),
         expires_at: 1_793_000_000_000,
     };
+    let running = RunningTurn {
+        character_id: id("mira"),
+        conversation_id: conversation.clone(),
+        source: stamp("web"),
+        client_message_id: stamp("line-1"),
+        drafts: vec![RunningDraft {
+            draft_id: "1.1".to_owned(),
+            text: "Hel".to_owned(),
+        }],
+    };
     let events = [
         Event::TurnProgress {
             character_id: id("mira"),
@@ -424,6 +433,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 tool_name: id("notes.add"),
             },
         },
+        Event::TurnRunning(running.clone()),
         Event::TurnCompleted {
             character_id: id("mira"),
             conversation_id: conversation.clone(),
@@ -476,25 +486,20 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "Mira is not ready.".to_owned(),
             },
         ),
+        read_back("SubmitOutcome", &SubmitOutcome::AlreadyQueued),
         read_back(
-            "TurnOutcome",
-            &TurnOutcome::Completed {
-                character_id: id("mira"),
-                conversation_id: conversation.clone(),
-                messages: vec![TurnMessage {
-                    message_id: message_id.clone(),
-                    speaker_id: id("mira"),
-                    speaker_name: mira.clone(),
-                    text: text.clone(),
-                }],
-            },
-        ),
-        read_back(
-            "TurnOutcome",
-            &TurnOutcome::Refused {
+            "SubmitOutcome",
+            &SubmitOutcome::Refused {
                 reason: TurnRefusal::DuplicateSubmission,
                 message: "The line is taken already.".to_owned(),
             },
+        ),
+        read_back(
+            "SubmitOutcome",
+            &SubmitOutcome::Failed(StorageFailure {
+                code: "write_failed".to_owned(),
+                message: "The disk is full.".to_owned(),
+            }),
         ),
         value(
             "HistoryOutcome",
@@ -590,16 +595,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 health,
                 confirmations: vec![pending],
                 pairings: vec![request],
-                turns: vec![RunningTurn {
-                    character_id: id("mira"),
-                    conversation_id: conversation,
-                    source: stamp("web"),
-                    client_message_id: stamp("line-1"),
-                    drafts: vec![RunningDraft {
-                        draft_id: "1.1".to_owned(),
-                        text: "Hel".to_owned(),
-                    }],
-                }],
+                turns: vec![running],
             },
         ),
     ];

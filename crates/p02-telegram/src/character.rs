@@ -1,15 +1,13 @@
 //! A character's bot: her thread with the person, opened once the bot
 //! knows its name; the pairing gate on every message and press; a paired
-//! account's line carried to her; her conversation shown in every paired
-//! chat as the stream tells it; and a card with Approve and Deny for each
-//! confirmation a turn of this bot's line raises. Nothing is read from
+//! account's line handed to her inbox; her conversation shown in every
+//! paired chat as the stream tells it; and a card with Approve and Deny for
+//! each confirmation a turn of this bot's line raises. Nothing is read from
 //! history.
 
-use std::collections::VecDeque;
-
 use p02_app::{
-    CharacterState, Event, OpenOutcome, PendingConfirmation, RunningTurn, RunningTurns,
-    StorageFailure, TurnOutcome, TurnProgress, TurnRefusal, TurnStatus,
+    CharacterState, Event, OpenOutcome, PendingConfirmation, RunningTurn, StorageFailure,
+    SubmitOutcome, TurnProgress, TurnRefusal, TurnStatus,
 };
 use p02_core::{ClientStamp, ConversationId};
 use p02_gateway::{GatewayMessage, Text};
@@ -25,39 +23,14 @@ use crate::table::{Owner, Snapshot};
 
 const TEXT_ONLY: &str = "I can only read text here for now.";
 
-/// Her thread with the person: the conversation, and who the person is in
-/// it.
-#[derive(Debug)]
-struct Thread {
-    conversation: ConversationId,
-    sender: Identifier,
-}
-
-/// A line waiting to be carried to her.
-#[derive(Debug)]
-struct Line {
-    chat: i64,
-    id: ClientStamp,
-    text: Text,
-}
-
 #[derive(Debug)]
 pub(crate) struct Character {
     id: Identifier,
     gate: Gate,
-    thread: Option<Thread>,
-    /// Every running turn, folded by the contract's one rule; her thread's
-    /// is the one shown.
-    turns: RunningTurns,
-    /// Her turn frames from before her thread was known, followed once it
-    /// is. She opens it only after the turn she is running, so a whole turn
-    /// can pass before it is known.
-    held: Vec<Event>,
-    /// The lines waiting to be carried, oldest first.
-    lines: VecDeque<Line>,
-    /// The line handed to her that she has not taken yet: the next waits
-    /// for it, since she takes lines in the order they reach her.
-    handed: Option<ClientStamp>,
+    /// Her thread with the person, where her lines go, once it is open.
+    thread: Option<ConversationId>,
+    /// Her turn as the daemon last said it, while one runs.
+    turn: Option<RunningTurn>,
     /// Whether her thread is being opened.
     opening: bool,
 }
@@ -68,10 +41,7 @@ impl Character {
             id,
             gate: Gate::default(),
             thread: None,
-            turns: RunningTurns::default(),
-            held: Vec::new(),
-            lines: VecDeque::new(),
-            handed: None,
+            turn: None,
             opening: false,
         }
     }
@@ -80,15 +50,11 @@ impl Character {
         chat.settings().owner.name().to_owned()
     }
 
-    /// Whether a turn is shown here: this bot carried its line, or Mirror
-    /// is on.
-    fn shown(chat: &Chat, turn: &RunningTurn) -> bool {
-        turn.source == chat.source
+    /// Whether a turn of the line `source` carried is shown here: this bot
+    /// carried it, or Mirror is on.
+    fn shown(chat: &Chat, source: &ClientStamp) -> bool {
+        *source == chat.source
             || matches!(chat.settings().owner, Owner::Character { mirror: true, .. })
-    }
-
-    fn her_turn(&self) -> Option<&RunningTurn> {
-        self.turns.get(&self.thread.as_ref()?.conversation)
     }
 
     /// Opens her thread, unless it is open or being opened.
@@ -106,75 +72,67 @@ impl Character {
         chat.spawn(async move { Done::Opened(daemon.open(&id).await) });
     }
 
-    /// Hands her the next line once she has taken the one before it,
-    /// opening her thread first when it is not known. The delivery then
-    /// waits for its turn, however long, while the lines after it go on.
-    fn carry(&mut self, chat: &mut Chat) {
-        if self.handed.is_some() || self.lines.is_empty() {
-            return;
-        }
-
-        let Some(thread) = &self.thread else {
-            self.open(chat);
-            return;
-        };
+    /// Hands the line `id` to her inbox, her thread opened first when it is
+    /// not known, and waits for the daemon's answer: the update is handed
+    /// on only after it, so Telegram lets go of a message once it is
+    /// queued. The daemon answers once the line is in her inbox, never
+    /// after her turn, so a press behind it that answers a confirmation her
+    /// running turn waits on is not held by it. What it says is why the
+    /// line was not queued, which its chat is told; nothing once it is, or
+    /// once the bot stops.
+    async fn hand(&mut self, chat: &mut Chat, id: ClientStamp, text: Text) -> Option<String> {
         let Some(daemon) = chat.daemon() else {
-            return;
+            return Some(DAEMON_DOWN.to_owned());
         };
-        let Some(line) = self.lines.pop_front() else {
-            return;
+        let conversation = match &self.thread {
+            Some(thread) => thread.clone(),
+            None => match chat.unless_stopped(daemon.open(&self.id)).await? {
+                Ok(OpenOutcome::Opened {
+                    conversation_id, ..
+                }) => self.thread.insert(conversation_id).clone(),
+                Ok(
+                    OpenOutcome::Refused { message, .. }
+                    | OpenOutcome::Failed(StorageFailure { message, .. }),
+                ) => return Some(unavailable(chat, &message)),
+                Err(_) => return Some(DAEMON_DOWN.to_owned()),
+            },
         };
         let message = GatewayMessage {
-            conversation_id: short(thread.conversation.as_str()),
-            sender_id: short(thread.sender.as_str()),
-            text: line.text,
+            conversation_id: short(conversation.as_str()),
+            text,
             source: chat.source.clone(),
-            client_message_id: line.id.clone(),
+            client_message_id: id,
         };
 
-        self.handed = Some(line.id);
-        chat.spawn(async move {
-            Done::Delivered {
-                chat: line.chat,
-                outcome: daemon.deliver(&message).await,
-                id: message.client_message_id,
-            }
+        match chat.unless_stopped(daemon.deliver(&message)).await? {
+            Ok(
+                SubmitOutcome::Queued
+                | SubmitOutcome::AlreadyQueued
+                // A line the daemon took already under this id, which
+                // Telegram handed on again.
+                | SubmitOutcome::Refused {
+                    reason: TurnRefusal::DuplicateSubmission,
+                    ..
+                },
+            ) => None,
+            Ok(
+                SubmitOutcome::Refused { message, .. }
+                | SubmitOutcome::Failed(StorageFailure { message, .. }),
+            ) => Some(unavailable(chat, &message)),
+            Err(_) => Some(DAEMON_DOWN.to_owned()),
+        }
+    }
+
+    /// Her turn as the daemon says it now, none once it ended: its drafts
+    /// brought to their words in the chats, posted where none is when it
+    /// is shown here, and a draft shown that it no longer holds withdrawn.
+    fn running(&mut self, chat: &Chat, turn: Option<RunningTurn>) {
+        let (drafts, shown) = turn.as_ref().map_or((Vec::new(), false), |turn| {
+            (turn.drafts.clone(), Self::shown(chat, &turn.source))
         });
-    }
 
-    /// The line waiting first is told, in its chat, why her thread could
-    /// not be opened for it, and the next asks again.
-    fn unopened(&mut self, chat: &mut Chat, told: String) {
-        if let Some(line) = self.lines.pop_front() {
-            chat.outbox.say_to_paired(line.chat, told);
-        }
-
-        self.carry(chat);
-    }
-
-    fn opened(&mut self, chat: &mut Chat, thread: Thread) {
-        self.thread = Some(thread);
-        self.show_drafts(chat);
-
-        for event in std::mem::take(&mut self.held) {
-            self.frame(chat, &event);
-        }
-
-        self.carry(chat);
-    }
-
-    /// Her thread's drafts as the fold has them, brought to their words in
-    /// the chats: posted where none is, edited where one shows other words.
-    fn show_drafts(&self, chat: &Chat) {
-        let Some(turn) = self.her_turn() else {
-            return;
-        };
-        let shown = Self::shown(chat, turn);
-
-        for draft in &turn.drafts {
-            chat.outbox
-                .draft(&draft.draft_id, draft.text.clone(), shown);
-        }
+        chat.outbox.drafts(drafts, shown);
+        self.turn = turn;
     }
 
     /// A confirmation of hers that a turn of this bot's line raised is
@@ -206,104 +164,24 @@ impl Character {
         );
     }
 
-    /// A turn of her thread, as the stream tells it: its line shown as the
-    /// person's when another surface carried it, its reply as it is
-    /// written, then as committed; and, for a line of this bot's that did
-    /// not complete, why, in the chat it came from.
-    fn follow_turn(&self, chat: &Chat, event: &Event) {
-        match event {
-            Event::TurnCompleted {
-                source,
-                client_message_id,
-                status,
-                committed,
-                message,
-                ..
-            } => {
-                let unanswered = matches!(status, TurnStatus::Rejected | TurnStatus::Failed);
-
-                if *source == chat.source
-                    && unanswered
-                    && let Some(account) = chat_of_line(client_message_id)
-                {
-                    let why = message.clone().unwrap_or_else(|| {
-                        match status {
-                            TurnStatus::Rejected => "rejected",
-                            _ => "failed",
-                        }
-                        .to_owned()
-                    });
-                    let again = if *committed {
-                        ""
-                    } else {
-                        "\nYour message was not taken; send it again."
-                    };
-
-                    chat.outbox.say_to_paired(
-                        account,
-                        format!("{} could not answer: {why}{again}", Self::name(chat)),
-                    );
-                }
+    /// What her turn says as it goes: its line shown as the person's when
+    /// another surface carried it, and each reply ending its draft as
+    /// committed.
+    fn progressed(&self, chat: &Chat, progress: &TurnProgress) {
+        match progress {
+            TurnProgress::UserMessage { source, text, .. } if Self::shown(chat, source) => {
+                chat.outbox
+                    .started((*source != chat.source).then(|| format!("You ({source}): {text}")));
             }
-            Event::TurnProgress {
-                conversation_id,
-                progress,
-                ..
-            } => {
-                let turn = self.turns.get(conversation_id);
-                let shown = turn.is_some_and(|turn| Self::shown(chat, turn));
+            TurnProgress::VisibleReply { draft_id, text, .. } => {
+                let shown = self
+                    .turn
+                    .as_ref()
+                    .is_some_and(|turn| Self::shown(chat, &turn.source));
 
-                match progress {
-                    TurnProgress::UserMessage {
-                        client_message_id: id,
-                        text,
-                        ..
-                    } => {
-                        if let Some(turn) =
-                            turn.filter(|turn| shown && turn.client_message_id == *id)
-                        {
-                            chat.outbox.started(
-                                (turn.source != chat.source)
-                                    .then(|| format!("You ({}): {text}", turn.source)),
-                            );
-                        }
-                    }
-                    TurnProgress::ReplyDelta { draft_id, .. } => {
-                        let text = turn
-                            .and_then(|turn| {
-                                turn.drafts.iter().find(|draft| draft.draft_id == *draft_id)
-                            })
-                            .map(|draft| draft.text.clone())
-                            .unwrap_or_default();
-
-                        chat.outbox.draft(draft_id, text, shown);
-                    }
-                    TurnProgress::VisibleReply { draft_id, text, .. } => {
-                        chat.outbox.commit(draft_id, text.to_string(), shown);
-                    }
-                    TurnProgress::ReplyWithdrawn { draft_id } => chat.outbox.withdraw(draft_id),
-                    _ => {}
-                }
+                chat.outbox.commit(draft_id, text.to_string(), shown);
             }
             _ => {}
-        }
-    }
-
-    /// Her thread's line the stream says she took: when it is the one
-    /// handed to her, the next goes.
-    fn taken(&mut self, chat: &mut Chat, event: &Event) {
-        if let Event::TurnProgress {
-            progress:
-                TurnProgress::UserMessage {
-                    client_message_id: id,
-                    ..
-                },
-            ..
-        } = event
-            && self.handed.as_ref() == Some(id)
-        {
-            self.handed = None;
-            self.carry(chat);
         }
     }
 
@@ -358,9 +236,10 @@ impl Rules for Character {
             }
             Some(text) => {
                 // The id names the bot, the chat and the message, so a
-                // resend after a lost answer joins its turn: Telegram
-                // numbers messages within a chat, and a bot that replaces
-                // this one opens a chat of its own numbered from one again.
+                // message Telegram hands on again is the line it was:
+                // Telegram numbers messages within a chat, and a bot that
+                // replaces this one opens a chat of its own numbered from
+                // one again.
                 let (Ok(id), Ok(text)) = (
                     ClientStamp::new(&format!("{}.{account}.{}", chat.id, message.id)),
                     Text::new(&text),
@@ -369,42 +248,28 @@ impl Rules for Character {
                 };
 
                 chat.outbox.typing(account);
-                self.lines.push_back(Line {
-                    chat: account,
-                    id,
-                    text,
-                });
-                self.carry(chat);
+
+                if let Some(told) = self.hand(chat, id, text).await {
+                    chat.outbox.say_to_paired(account, told);
+                }
             }
         }
     }
 
-    /// On a stream the daemon could not resume, the running turns are the
-    /// snapshot's, and what was held for a thread not known yet is
-    /// superseded. A draft shown here that the snapshot still carries keeps
-    /// its message and is brought to the snapshot's words; one it does not
-    /// is withdrawn. A card whose confirmation the snapshot no longer holds
-    /// is ended, and one still waiting has its card where it should.
+    /// On a stream the daemon could not resume, her turn is the snapshot's:
+    /// a draft shown here that it still carries keeps its message and is
+    /// brought to its words, and one it does not is withdrawn. A card whose
+    /// confirmation the snapshot no longer holds is ended, and one still
+    /// waiting has its card where it should.
     fn install(&mut self, chat: &mut Chat, snapshot: &Snapshot) {
-        self.turns = snapshot.turns.clone();
-        self.held.clear();
-        chat.outbox.withdraw_except(
-            self.her_turn()
-                .map(|turn| {
-                    turn.drafts
-                        .iter()
-                        .map(|draft| draft.draft_id.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
-        );
+        let turn = snapshot
+            .turns
+            .iter()
+            .find(|turn| turn.character_id == self.id)
+            .cloned();
 
-        if self.thread.is_none() {
-            self.open(chat);
-        } else {
-            self.show_drafts(chat);
-        }
-
+        self.running(chat, turn);
+        self.open(chat);
         chat.outbox.keep_cards(
             CardKind::Confirmation,
             snapshot
@@ -421,29 +286,37 @@ impl Rules for Character {
 
     fn frame(&mut self, chat: &mut Chat, event: &Event) {
         match event {
+            Event::TurnRunning(turn) if turn.character_id == self.id => {
+                self.running(chat, Some(turn.clone()));
+            }
             Event::TurnProgress {
                 character_id,
-                conversation_id,
+                progress,
                 ..
-            }
-            | Event::TurnCompleted {
+            } if *character_id == self.id => self.progressed(chat, progress),
+            Event::TurnCompleted {
                 character_id,
-                conversation_id,
+                source,
+                client_message_id,
+                status,
+                committed,
+                message,
                 ..
-            } => match &self.thread {
-                None if *character_id == self.id => self.held.push(event.clone()),
-                None => {}
-                Some(thread) => {
-                    let hers = *conversation_id == thread.conversation;
-
-                    self.turns.fold(event);
-
-                    if hers {
-                        self.follow_turn(chat, event);
-                        self.taken(chat, event);
-                    }
+            } if *character_id == self.id => {
+                if *source == chat.source
+                    && matches!(status, TurnStatus::Rejected | TurnStatus::Failed)
+                    && let Some(account) = chat_of_line(client_message_id)
+                {
+                    chat.outbox.say_to_paired(
+                        account,
+                        unanswered(chat, *status, *committed, message.as_deref()),
+                    );
                 }
-            },
+
+                if self.turn.as_ref().is_some_and(|turn| event.ends(turn)) {
+                    self.running(chat, None);
+                }
+            }
             Event::StateChanged {
                 character_id,
                 state: CharacterState::Ready,
@@ -460,71 +333,48 @@ impl Rules for Character {
         }
     }
 
-    fn done(&mut self, chat: &mut Chat, done: Done) {
+    fn done(&mut self, _chat: &mut Chat, done: Done) {
         match done {
             Done::Toasted => {}
             Done::Opened(opened) => {
                 self.opening = false;
 
-                match opened {
-                    Ok(OpenOutcome::Opened {
-                        conversation_id,
-                        user_participant_id,
-                        ..
-                    }) => self.opened(
-                        chat,
-                        Thread {
-                            conversation: conversation_id,
-                            sender: user_participant_id,
-                        },
-                    ),
-                    // She cannot take a line yet: the line waiting is told
-                    // why, and her thread is opened once she is ready, by
-                    // the next line, or by the next snapshot.
-                    Ok(
-                        OpenOutcome::Refused { message, .. }
-                        | OpenOutcome::Failed(StorageFailure { message, .. }),
-                    ) => {
-                        let told =
-                            format!("{} is not available right now: {message}", Self::name(chat));
-
-                        self.unopened(chat, told);
-                    }
-                    Err(_) => self.unopened(chat, DAEMON_DOWN.to_owned()),
-                }
-            }
-            // How a turn that ran ended is the stream's to tell; a refusal
-            // before any turn only its answer says, but for a line the daemon
-            // took already under this id, which Telegram hands on again.
-            Done::Delivered {
-                chat: account,
-                id,
-                outcome,
-            } => {
-                let told = match outcome {
-                    Ok(TurnOutcome::Refused { reason, message })
-                        if reason != TurnRefusal::DuplicateSubmission =>
-                    {
-                        Some(format!(
-                            "{} is not available right now: {message}",
-                            Self::name(chat)
-                        ))
-                    }
-                    Ok(_) => None,
-                    Err(_) => Some(DAEMON_DOWN.to_owned()),
-                };
-
-                if let Some(told) = told {
-                    chat.outbox.say_to_paired(account, told);
-                }
-
-                if self.handed.as_ref() == Some(&id) {
-                    self.handed = None;
-                    self.carry(chat);
+                // One she cannot open yet is opened once she is ready, by
+                // the next line, or by the next snapshot.
+                if let Ok(OpenOutcome::Opened {
+                    conversation_id, ..
+                }) = opened
+                {
+                    self.thread = Some(conversation_id);
                 }
             }
         }
     }
+}
+
+/// What the chat of a line of this bot's is told when its turn was
+/// rejected or failed: why, in the daemon's words, and whether to send the
+/// line again.
+fn unanswered(chat: &Chat, status: TurnStatus, committed: bool, message: Option<&str>) -> String {
+    let why = message.unwrap_or(match status {
+        TurnStatus::Rejected => "rejected",
+        _ => "failed",
+    });
+    let again = if committed {
+        ""
+    } else {
+        "\nYour message was not taken; send it again."
+    };
+
+    format!("{} could not answer: {why}{again}", Character::name(chat))
+}
+
+/// What a chat is told when she cannot take its line, and why.
+fn unavailable(chat: &Chat, why: &str) -> String {
+    format!(
+        "{} is not available right now: {why}",
+        Character::name(chat)
+    )
 }
 
 /// The account whose chat a line of this bot's came from: its id names the

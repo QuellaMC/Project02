@@ -4,7 +4,13 @@ import {join} from 'node:path';
 
 import {expect, it, onTestFinished} from 'vitest';
 
-import {serve, startDaemon, terminal} from './harness/daemon.ts';
+import {
+  connector,
+  inspect,
+  serve,
+  startDaemon,
+  terminal,
+} from './harness/daemon.ts';
 import {
   frameOf,
   openEvents,
@@ -92,11 +98,23 @@ it('lifecycle.address-line: serve prints its address as its first stdout line on
   });
 });
 
+it('lifecycle.help: serve, inspect and telegram each print their usage with --help and exit 0, with nothing on stderr', async () => {
+  for (const [run, usage] of [
+    [serve(['--help']), 'Usage: project02 serve '],
+    [inspect(['--help']), 'Usage: project02 inspect '],
+    [connector(['--help']), 'Usage: project02 telegram '],
+  ] as const) {
+    expect(await run.exit()).toBe(0);
+    expect(run.stdout().startsWith(usage), run.stdout()).toBe(true);
+    expect(run.stderr()).toBe('');
+  }
+});
+
 it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the protocol version, token, port and running process, and a clean stop drops only the running process', async () => {
   const home = createHome();
   const daemon = await startDaemon(home);
   const address = {
-    protocolVersion: 7,
+    protocolVersion: 8,
     token: daemon.token,
     port: Number(new URL(daemon.origin).port),
   };
@@ -114,7 +132,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
 it("lifecycle.port-default-and-fallback: when another program holds the home's port, serve says so before its address line, binds a free port and records it for the next run", async () => {
   const port = await occupiedPort();
   const home = createHome({
-    'daemon.json': JSON.stringify({protocolVersion: 7, token: 'kept', port}),
+    'daemon.json': JSON.stringify({protocolVersion: 8, token: 'kept', port}),
   });
   const moved = await startDaemon(home);
 
@@ -149,17 +167,14 @@ it('lifecycle.stop-signals: SIGINT, SIGTERM and SIGHUP each stop it cleanly, wit
   }
 });
 
-it('lifecycle.stop-drains-in-flight: a stop says so, answers a line sent meanwhile 503 unavailable, finishes the turn in flight on its answer and the stream, then ends the stream and exits 0', async () => {
+it('lifecycle.stop-drains-in-flight: a stop says so, answers a line sent meanwhile 503 unavailable, finishes the turn in flight and tells it on the stream, then ends the stream and exits 0', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
   );
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
-  const {conversationId, userParticipantId} = await conversationOf(
-    wire,
-    'mira',
-  );
+  const {conversationId} = await conversationOf(wire, 'mira');
   const events = await openEvents(daemon);
   const held = model.hold();
   const turn = say('Still there?', 'in-flight');
@@ -175,7 +190,6 @@ it('lifecycle.stop-drains-in-flight: a stop says so, answers a line sent meanwhi
     headers: jsonFrom(daemon),
     body: JSON.stringify({
       conversationId,
-      senderId: userParticipantId,
       text: 'Too late.',
       source: 'web',
       clientMessageId: 'late',

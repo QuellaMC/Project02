@@ -1,7 +1,7 @@
 //! A character's data directory, `<home>/character-data/<id>/`: her
 //! sessions and their catalog, the record of the lines her conversations
-//! took, her plugins' data, her locks, her settings overlay, and her
-//! marker.
+//! took, her inbox, her plugins' data, her locks, her settings overlay, and
+//! her marker.
 
 use std::path::{Path, PathBuf};
 
@@ -12,8 +12,8 @@ use p02_shared::{Identifier, create_directories};
 use crate::error::StorageError;
 use crate::home::{Home, check_real};
 use crate::layout::{
-    CONFIG_FILE, EntryKind, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY, SESSION_CATALOG_FILE,
-    SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
+    CONFIG_FILE, EntryKind, INBOX_FILE, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY,
+    SESSION_CATALOG_FILE, SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
 };
 use crate::marker::{self, Marker, Scope};
 
@@ -148,6 +148,10 @@ impl CharacterData {
         self.root.join(TAKEN_LINES_DIRECTORY)
     }
 
+    pub(crate) fn inbox_path(&self) -> PathBuf {
+        self.root.join(INBOX_FILE)
+    }
+
     /// Where a plugin's own data lives in hers, `plugin-data/<plugin>/`.
     pub(crate) fn plugin_root(&self, plugin: &Identifier) -> PathBuf {
         self.root.join(PLUGIN_DATA_DIRECTORY).join(plugin.as_str())
@@ -200,6 +204,7 @@ fn checked_marker(home: &Home, root: &Path) -> Result<Option<Marker>, StorageErr
         (TAKEN_LINES_DIRECTORY, EntryKind::Directory),
         (PLUGIN_DATA_DIRECTORY, EntryKind::Directory),
         (SESSION_CATALOG_FILE, EntryKind::File),
+        (INBOX_FILE, EntryKind::File),
         (CONFIG_FILE, EntryKind::File),
     ] {
         check_real(&root.join(name), expected)?;

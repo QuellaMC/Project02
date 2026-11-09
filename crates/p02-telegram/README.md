@@ -44,13 +44,15 @@ switches and the signals, and prints the lines it is handed.
   not decode still carries its id, so the next poll asks past it. Every
   outcome is a result or a failure, never an error, and no sentence it
   makes carries the token its URL holds.
-- **A character's bot** opens her thread, carries a paired account's
-  lines to her one at a time, stamped `telegram:<bot username>` and
-  `<bot id>.<chat id>.<message id>`, and shows her conversation in every
-  paired chat as the stream tells it: a reply posted with its first
-  words, edited at most once an interval, 1.5 s, and ended as committed;
-  another surface's turn too while Mirror is on. A confirmation a turn of
-  its line raised is a card in that line's chat.
+- **A character's bot** opens her thread, hands a paired account's lines
+  to her inbox in the order they came, each stamped
+  `telegram:<bot username>` and `<bot id>.<chat id>.<message id>`, and asks
+  Telegram past a message only once its line is queued. It shows her
+  conversation in every paired chat as the stream tells it: a reply
+  posted with its first words, edited at most once an interval, 1.5 s, to
+  her turn as the daemon last said it, and ended as committed; another
+  surface's turn too while Mirror is on. A confirmation a turn of its line
+  raised is a card in that line's chat.
 - **The management bot** answers `/status`, `/pending`, `/approve <code>`
   and `/deny <code>`, and shows every confirmation of the home, naming the
   surface it was raised on, and every pairing request as a card, naming
@@ -63,6 +65,6 @@ switches and the signals, and prints the lines it is handed.
   account is paired, checked as its turn comes; a text longer than
   Telegram's 4096 goes in as many messages as it takes, counted in UTF-16
   units, stopping at one that could not be sent.
-- **The stop** cancels every bot, dropping each call in flight, so the
-  daemon sees a delivery and a pairing request given up while its turn
-  runs on, and answers once every bot has ended.
+- **The stop** cancels every bot, dropping each call in flight, and
+  answers once every bot has ended; a message whose line was not yet
+  queued is asked for again, and handed on, by the next run.

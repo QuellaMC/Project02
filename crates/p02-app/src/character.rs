@@ -1,13 +1,12 @@
 //! One actor per character: a task owning everything of hers, her state,
 //! the parts she is assembled from, her thread with the person and her
-//! confirmations, which answers what it is asked in the order it was asked
-//! and between two steps reads whether she is to stop.
+//! confirmations, which answers what it is asked in the order it was asked,
+//! takes the lines in her inbox one at a time while she is ready, and
+//! between two steps reads whether she is to stop.
 
-use std::collections::VecDeque;
-use std::future::Future;
 use std::num::NonZeroU64;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use p02_characters::discover;
@@ -15,13 +14,13 @@ use p02_config::{
     CharacterSettings, Diagnostic, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
 };
-use p02_contracts::{RoleModelAdapter, TurnIdentity, vocabulary};
-use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerName, Timestamp};
-use p02_plugins::{PluginHost, Turn};
+use p02_contracts::{RoleModelAdapter, vocabulary};
+use p02_core::{SpeakerName, Timestamp};
+use p02_plugins::PluginHost;
 use p02_role_model::{NvidiaSettings, select_adapter};
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
-use p02_store::{RuntimeRejection, StorageError};
+use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -29,8 +28,8 @@ use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{
-    Event, MaintenanceFailure, OpenOutcome, OpenRefusal, StorageFailure, TurnOutcome, TurnRefusal,
-    TurnStamp,
+    Event, MaintenanceFailure, OpenOutcome, OpenRefusal, RunningTurn, StorageFailure, TurnRefusal,
+    TurnStamp, TurnStatus, duplicate,
 };
 use crate::reconcile::settings_now;
 
@@ -61,19 +60,13 @@ pub(crate) struct CharacterHealth {
     pub(crate) maintenance: Option<MaintenanceFailure>,
 }
 
-/// A line of the person's for a character, as the daemon routed it to her.
-#[derive(Debug)]
-pub(crate) struct Request {
-    pub(crate) stamp: TurnStamp,
-    pub(crate) text: String,
-}
-
 #[derive(Debug)]
 enum Command {
     /// Answered once her start settles, whichever start that is.
     Start(oneshot::Sender<()>),
     Open(oneshot::Sender<OpenOutcome>),
-    Deliver(Request, oneshot::Sender<TurnOutcome>),
+    /// A line was queued for her, which she takes in its turn.
+    Queued,
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -117,7 +110,6 @@ impl CharacterHandle {
                     broker: Arc::clone(&broker),
                 },
                 commands: receiver,
-                deferred: VecDeque::new(),
                 parts: None,
             }
             .run(),
@@ -149,6 +141,15 @@ impl CharacterHandle {
         self.commands.is_closed()
     }
 
+    /// Whether a line queued for her now is one she takes: she is starting
+    /// or ready, and no failure of hers waits for the person.
+    pub(crate) fn takes_lines(&self) -> bool {
+        matches!(
+            self.health.borrow().state,
+            CharacterState::Starting | CharacterState::Ready
+        )
+    }
+
     /// Whether her actor is gone: stopped, or ended without saying so.
     pub(crate) fn gone(&self) -> bool {
         self.health.borrow().state == CharacterState::Stopped || self.health.has_changed().is_err()
@@ -177,23 +178,11 @@ impl CharacterHandle {
             })
     }
 
-    /// Puts `request` in her queue at once, behind what she was asked
-    /// before it, and answers once she has.
-    pub(crate) fn deliver(
-        &self,
-        request: Request,
-    ) -> impl Future<Output = TurnOutcome> + Send + 'static {
-        let answer = self.ask(|reply| Command::Deliver(request, reply));
-        let (id, health) = (self.id.clone(), self.health.clone());
-
-        async move {
-            answer.await.unwrap_or_else(|_| {
-                TurnOutcome::refused(
-                    TurnRefusal::CharacterUnavailable,
-                    not_ready(&id, &health.borrow()),
-                )
-            })
-        }
+    /// Tells her a line was queued for her, which she takes once she is
+    /// free.
+    pub(crate) fn queued(&self) {
+        // One whose stop began takes no line: it waits for her next start.
+        let _ = self.commands.send(Command::Queued);
     }
 
     /// The sentence she answers with while she takes nothing.
@@ -246,12 +235,14 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 }
 
 /// What she is built of, from her package and her settings as they were
-/// when she was built: who she is, the name the person goes by, the model
-/// and the plugins she answers with, her model's window, and those
-/// settings, which her next request compares with what they say then.
+/// when she was built: who she is, her data, the name the person goes by,
+/// the model and the plugins she answers with, her model's window, and
+/// those settings, which her next request compares with what they say
+/// then.
 #[derive(Debug)]
 struct Built {
     character: Character,
+    data: CharacterData,
     person: SpeakerName,
     context_window: NonZeroU64,
     adapter: Arc<dyn RoleModelAdapter>,
@@ -285,8 +276,6 @@ enum Change {
 struct Actor {
     her: Her,
     commands: mpsc::UnboundedReceiver<Command>,
-    /// What was asked of her during a turn, to answer once it ends.
-    deferred: VecDeque<Command>,
     parts: Option<Parts>,
 }
 
@@ -307,20 +296,18 @@ impl Actor {
         self.boot().await;
 
         while !self.her.stop.is_cancelled() {
-            let command = if let Some(command) = self.deferred.pop_front() {
-                Some(command)
-            } else {
-                tokio::select! {
-                    biased;
-                    () = self.her.stop.cancelled() => break,
-                    command = self.commands.recv() => command,
-                }
-            };
+            if self.take_next().await {
+                continue;
+            }
 
-            match command {
-                Some(command) => self.handle(command).await,
-                // The daemon let go of her without a stop.
-                None => break,
+            tokio::select! {
+                biased;
+                () = self.her.stop.cancelled() => break,
+                command = self.commands.recv() => match command {
+                    Some(command) => self.handle(command).await,
+                    // The daemon let go of her without a stop.
+                    None => break,
+                },
             }
         }
 
@@ -340,74 +327,127 @@ impl Actor {
                 let opened = self.open().await;
                 let _ = reply.send(opened);
             }
-            Command::Deliver(request, reply) => self.deliver(request, reply).await,
+            // She looks in her inbox whenever she is free.
+            Command::Queued => {}
         }
     }
 
-    /// Takes a line through her thread while she still hears what she is
-    /// asked: a start is answered at once, since she runs, and so is an open
-    /// of her thread once it is open; a line waits its turn, in the order it
-    /// came. A turn the runtime fails leaves her failed, and she is built
-    /// again behind it, the lines sent meanwhile waiting for her.
-    async fn deliver(&mut self, request: Request, reply: oneshot::Sender<TurnOutcome>) {
-        let mut parts = match self.current().await {
-            Ok(parts) => parts,
-            Err(refusal) => {
-                let _ = reply.send(TurnOutcome::refused(
-                    TurnRefusal::CharacterUnavailable,
-                    refusal,
-                ));
-                return;
-            }
+    /// Takes the oldest line in her inbox through her thread, while she is
+    /// ready and her settings still build her: true when she took one. The
+    /// line leaves her inbox once its turn ends, however it ended, and only
+    /// then is the end announced, so a client that hears it and sends the
+    /// line again is answered as her thread has it. A turn the runtime
+    /// fails leaves her failed, and she is built again behind it; her inbox
+    /// failing fails her.
+    async fn take_next(&mut self) -> bool {
+        let Some(line) = self.oldest_queued().await else {
+            return false;
         };
-        let opened = parts.thread.as_ref().map(|thread| OpenOutcome::Opened {
-            conversation_id: thread.id().clone(),
-            character_id: self.her.id.clone(),
-            user_participant_id: Participant::local_user_id().clone(),
-        });
-        let taken = {
-            let mut turn = std::pin::pin!(take_line(&self.her, &mut parts, request));
+        let Ok(mut parts) = self.current().await else {
+            return false;
+        };
 
-            loop {
-                tokio::select! {
-                    biased;
-                    taken = &mut turn => break taken,
-                    Some(command) = self.commands.recv() => match command {
-                        Command::Open(answer) => match &opened {
-                            Some(opened) => {
-                                let _ = answer.send(opened.clone());
-                            }
-                            // The turn opens her thread: it is answered after.
-                            None => self.deferred.push_back(Command::Open(answer)),
-                        },
-                        Command::Start(answer) => {
-                            let _ = answer.send(());
-                        }
-                        line @ Command::Deliver(..) => self.deferred.push_back(line),
-                    },
-                }
-            }
-        };
+        if self.her.stop.is_cancelled() {
+            self.parts = Some(parts);
+            return false;
+        }
+
+        let taken = self.turn(&mut parts, &line).await;
+        let data = parts.built.data.clone();
 
         self.parts = Some(parts);
 
-        let (outcome, fatal) = match taken {
-            Ok((delivery, conversation, committed)) => {
-                self.answered(delivery, conversation, committed)
-            }
-            Err(refused) => (refused, false),
-        };
-        let _ = reply.send(outcome);
+        let (ending, failure) = self.ended(taken);
+        let removed = {
+            let line = line.clone();
 
-        if fatal {
-            self.restart().await;
+            blocking(move || data.unqueue(&line)).await
+        };
+
+        self.her
+            .world
+            .events
+            .emit(ending.announced(self.her.id.clone(), line));
+
+        match (removed, failure) {
+            (Err(error), _) => self.fail(error_sentence(&error)).await,
+            (Ok(()), Some(failure)) => {
+                self.her.publish(Change::Failed(failure));
+                self.restart().await;
+            }
+            (Ok(()), None) => {}
+        }
+
+        true
+    }
+
+    /// Takes `line` through her thread on `parts`, opened before the turn
+    /// begins, while she still hears what she is asked: an open of her
+    /// thread is answered at once, and so is a start, since she runs.
+    async fn turn(
+        &mut self,
+        parts: &mut Parts,
+        line: &QueuedLine,
+    ) -> Result<(Delivery, bool), Ending> {
+        let Parts { built, thread } = parts;
+        let thread = hold(&self.her, thread, &built.character)
+            .await
+            .map_err(|error| Ending::failed(error_sentence(&error), false))?;
+        let opened = OpenOutcome::Opened {
+            conversation_id: thread.id().clone(),
+            character_id: self.her.id.clone(),
+        };
+        let mut turn = std::pin::pin!(take_line(&self.her, thread, built, line));
+
+        loop {
+            tokio::select! {
+                biased;
+                taken = &mut turn => break Ok(taken),
+                Some(command) = self.commands.recv() => match command {
+                    Command::Open(answer) => {
+                        let _ = answer.send(opened.clone());
+                    }
+                    Command::Start(answer) => {
+                        let _ = answer.send(());
+                    }
+                    // She looks in her inbox again once the turn ends.
+                    Command::Queued => {}
+                },
+            }
+        }
+    }
+
+    /// The oldest line in her inbox, while she is ready; what the read
+    /// skipped is noted as maintenance, and a read that fails fails her.
+    async fn oldest_queued(&mut self) -> Option<QueuedLine> {
+        let data = self
+            .parts
+            .as_ref()
+            .filter(|_| self.her.state() == CharacterState::Ready)?
+            .built
+            .data
+            .clone();
+
+        match blocking(move || data.inbox()).await {
+            Ok(Inbox { lines, skipped }) => {
+                if !skipped.is_empty() {
+                    self.her.note_maintenance(format!(
+                        "Skipped what could not be read, {skipped} of her inbox; the rest was read."
+                    ));
+                }
+
+                lines.into_iter().next()
+            }
+            Err(error) => {
+                self.fail(error_sentence(&error)).await;
+                None
+            }
         }
     }
 
     /// Her parts to use, brought up to date with her settings first; or
     /// the sentence she refuses with while she is not ready, or once her
-    /// settings no longer build her, which fails her and lets go of what
-    /// she ran on.
+    /// settings no longer build her, which fails her.
     async fn current(&mut self) -> Result<Parts, String> {
         let mut parts = match self.parts.take() {
             Some(parts) if self.her.state() == CharacterState::Ready => parts,
@@ -418,8 +458,8 @@ impl Actor {
         };
 
         if let Err(failure) = self.her.refresh(&mut parts.built).await {
-            self.her.settle(Change::Failed(failure));
-            self.her.noted(&parts.release().await);
+            self.parts = Some(parts);
+            self.fail(failure).await;
             return Err(self.her.not_ready());
         }
 
@@ -461,89 +501,63 @@ impl Actor {
             Ok(conversation_id) => OpenOutcome::Opened {
                 conversation_id,
                 character_id: self.her.id.clone(),
-                user_participant_id: Participant::local_user_id().clone(),
             },
             Err(error) => OpenOutcome::Failed(StorageFailure::of(&error)),
         }
     }
 
-    /// What `delivery` on `conversation` comes to, and whether the runtime
-    /// failed the turn; `committed` says whether the line was heard
-    /// committed.
-    fn answered(
-        &self,
-        delivery: Delivery,
-        conversation: ConversationId,
-        committed: bool,
-    ) -> (TurnOutcome, bool) {
-        let character_id = self.her.id.clone();
+    /// How `taken` ended its turn, and the sentence of the runtime's
+    /// failure of it, which fails her.
+    fn ended(&self, taken: Result<(Delivery, bool), Ending>) -> (Ending, Option<String>) {
+        let (delivery, committed) = match taken {
+            Ok(taken) => taken,
+            Err(ending) => return (ending, None),
+        };
 
         match delivery {
             Delivery::Duplicate {
                 client_message_id,
                 message_id,
             } => (
-                TurnOutcome::refused(
+                Ending::refused(
                     TurnRefusal::DuplicateSubmission,
-                    format!(
-                        "clientMessageId \"{client_message_id}\" is already on this conversation \
-                         as message {message_id}, taken by an earlier run of the daemon; read the \
-                         thread for its reply."
-                    ),
+                    duplicate(&client_message_id, &message_id),
+                    true,
                 ),
-                false,
+                None,
             ),
             Delivery::InputRejected { message } => (
-                TurnOutcome::Rejected {
-                    character_id,
-                    conversation_id: conversation,
-                    reason: RuntimeRejection::InputValidationRejected
-                        .as_str()
-                        .to_owned(),
+                Ending::rejected(
+                    RuntimeRejection::InputValidationRejected.as_str(),
                     message,
-                    committed: false,
-                },
-                false,
+                    false,
+                ),
+                None,
             ),
-            Delivery::Rejected(turn) => (
-                TurnOutcome::Rejected {
-                    character_id,
-                    conversation_id: conversation,
-                    reason: turn.reason.to_owned(),
-                    message: turn.message,
-                    committed: true,
-                },
-                false,
-            ),
+            Delivery::Rejected(turn) => (Ending::rejected(turn.reason, turn.message, true), None),
             Delivery::Completed(CompletedTurn {
-                messages,
                 post_commit_failures,
+                ..
             }) => {
                 self.her.noted(&post_commit_failures);
 
-                (
-                    TurnOutcome::Completed {
-                        character_id,
-                        conversation_id: conversation,
-                        messages: messages.into_iter().map(Into::into).collect(),
-                    },
-                    false,
-                )
+                (Ending::completed(), None)
             }
             Delivery::Failed(error) => {
                 let message = error_sentence(&error);
 
-                self.her.publish(Change::Failed(message.clone()));
-                (
-                    TurnOutcome::Failed {
-                        character_id,
-                        conversation_id: conversation,
-                        message,
-                        committed,
-                    },
-                    true,
-                )
+                (Ending::failed(message.clone(), committed), Some(message))
             }
+        }
+    }
+
+    /// Fails her saying why, and lets go of what she ran on, what failed of
+    /// that noted as maintenance: she takes nothing until her next start.
+    async fn fail(&mut self, failure: String) {
+        self.her.settle(Change::Failed(failure));
+
+        if let Some(parts) = self.parts.take() {
+            self.her.noted(&parts.release().await);
         }
     }
 
@@ -562,18 +576,12 @@ impl Actor {
 
     /// Her stop: what is still asked of her is answered as stopping, her
     /// thread is closed, and her host shut down; what failed of that is
-    /// said as she stops.
+    /// said as she stops. The lines in her inbox wait for her next start.
     async fn stop_now(&mut self) {
         self.her.publish(Change::Stopping);
         self.commands.close();
 
-        let mut unanswered: Vec<Command> = self.deferred.drain(..).collect();
-
         while let Ok(command) = self.commands.try_recv() {
-            unanswered.push(command);
-        }
-
-        for command in unanswered {
             self.answer_stopping(command);
         }
 
@@ -598,12 +606,68 @@ impl Actor {
                     message: self.her.not_ready(),
                 });
             }
-            Command::Deliver(_, reply) => {
-                let _ = reply.send(TurnOutcome::refused(
-                    TurnRefusal::CharacterUnavailable,
-                    self.her.not_ready(),
-                ));
-            }
+            Command::Queued => {}
+        }
+    }
+}
+
+/// How a turn ended, as its completion announces it: its status, whether
+/// its line is in the log, and why when it did not complete.
+struct Ending {
+    status: TurnStatus,
+    committed: bool,
+    reason: Option<String>,
+    message: Option<String>,
+}
+
+impl Ending {
+    fn completed() -> Self {
+        Self {
+            status: TurnStatus::Completed,
+            committed: true,
+            reason: None,
+            message: None,
+        }
+    }
+
+    fn rejected(reason: &str, message: String, committed: bool) -> Self {
+        Self {
+            status: TurnStatus::Rejected,
+            committed,
+            reason: Some(reason.to_owned()),
+            message: Some(message),
+        }
+    }
+
+    fn refused(reason: TurnRefusal, message: String, committed: bool) -> Self {
+        Self {
+            status: TurnStatus::Refused,
+            committed,
+            reason: Some(reason.as_str().to_owned()),
+            message: Some(message),
+        }
+    }
+
+    fn failed(message: String, committed: bool) -> Self {
+        Self {
+            status: TurnStatus::Failed,
+            committed,
+            reason: None,
+            message: Some(message),
+        }
+    }
+
+    /// The completion of `line`'s turn on `character`.
+    fn announced(self, character: Identifier, line: QueuedLine) -> Event {
+        Event::TurnCompleted {
+            character_id: character,
+            conversation_id: line.conversation_id,
+            source: line.source,
+            client_message_id: line.client_message_id,
+            status: self.status,
+            committed: self.committed,
+            reason: self.reason,
+            message: self.message,
         }
     }
 }
@@ -751,15 +815,7 @@ impl Mind for Current<'_> {
 impl Built {
     /// Ends her plugins: what failed, a sentence each.
     async fn shut_down(self) -> Vec<String> {
-        // Her end belongs to no session, but a hook is handed the turn it
-        // serves, so it names a session of no conversation.
-        let ending = Turn::new(TurnIdentity {
-            session_id: SessionId::new(ConversationId::mint(), NonZeroU64::MIN),
-            event: EventIdentity::mint(),
-            character: self.character.profile,
-        });
-
-        self.host.shutdown(&ending).await.failures()
+        self.host.shutdown().await.failures()
     }
 }
 
@@ -778,58 +834,45 @@ impl Parts {
     }
 }
 
-/// Takes `request` through her thread on `parts`: what the runtime made of
-/// it, on which conversation, and whether the line was heard committed; or
-/// what a line her thread cannot take comes to.
+/// Takes `line` through `thread`, as `built` answers it: what the runtime
+/// made of it, and whether the line was heard committed. The stream is told
+/// the turn as it goes: each message and tool call, and the turn as it runs
+/// whenever that changes.
 async fn take_line(
     her: &Her,
-    parts: &mut Parts,
-    request: Request,
-) -> Result<(Delivery, ConversationId, bool), TurnOutcome> {
-    let Request { stamp, text } = request;
-    let conversation = stamp.conversation_id.clone();
-    let Parts { built, thread } = parts;
-    let thread =
-        hold(her, thread, &built.character)
-            .await
-            .map_err(|error| TurnOutcome::Failed {
-                character_id: her.id.clone(),
-                conversation_id: conversation.clone(),
-                message: error_sentence(&error),
-                committed: false,
-            })?;
-
-    if *thread.id() != conversation {
-        return Err(TurnOutcome::refused(
-            TurnRefusal::UnknownConversation,
-            format!(
-                "Character \"{}\" holds no open conversation \"{conversation}\".",
-                her.id
-            ),
-        ));
-    }
-
+    thread: &mut Conversation,
+    built: &mut Built,
+    line: &QueuedLine,
+) -> (Delivery, bool) {
     let committed = AtomicBool::new(false);
+    let running = Mutex::new(RunningTurn::of(her.id.clone(), line));
     let listener = |progress: Progress| {
         if matches!(progress, Progress::UserMessage { .. }) {
             committed.store(true, Ordering::Relaxed);
         }
 
-        her.world.events.emit(Event::TurnProgress {
-            character_id: her.id.clone(),
-            conversation_id: conversation.clone(),
-            progress: progress.into(),
-        });
+        let told = running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .told(progress);
+
+        for event in told {
+            her.world.events.emit(event);
+        }
     };
 
-    her.broker.running(Some(stamp.clone()));
+    her.broker.running(Some(TurnStamp {
+        conversation_id: line.conversation_id.clone(),
+        source: line.source.clone(),
+        client_message_id: line.client_message_id.clone(),
+    }));
 
     let delivery = thread
         .deliver(
             Submission {
-                line: &text,
-                source: stamp.source,
-                client_message_id: stamp.client_message_id,
+                line: &line.text,
+                source: line.source.clone(),
+                client_message_id: line.client_message_id.clone(),
             },
             &mut Current { her, built },
             &listener,
@@ -837,7 +880,7 @@ async fn take_line(
         .await;
 
     her.broker.running(None);
-    Ok((delivery, conversation, committed.into_inner()))
+    (delivery, committed.into_inner())
 }
 
 /// Her thread with the person, opened on the blocking pool the first time
@@ -911,7 +954,7 @@ fn assemble(
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
         .fold(
             PluginHost::builder(
-                Arc::new(data),
+                Arc::new(data.clone()),
                 broker,
                 Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
             ),
@@ -929,6 +972,7 @@ fn assemble(
                 profile: definition.profile.clone(),
                 persona: definition.persona.clone(),
             },
+            data,
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,
             adapter,

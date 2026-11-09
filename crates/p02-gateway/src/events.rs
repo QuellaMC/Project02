@@ -3,7 +3,7 @@
 //! that comes back, and each open stream fed its frames in order, each one
 //! given the grace to be taken.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
 use std::fmt;
 use std::pin::Pin;
@@ -17,9 +17,10 @@ use axum::response::{IntoResponse, Response};
 use hyper::body::Frame;
 use p02_app::{
     Daemon, Event, Health, PairingRequest, PendingConfirmation, Presence, ProtocolVersion,
-    RunningTurn, RunningTurns,
+    RunningTurn,
 };
 use p02_config::Connector;
+use p02_core::ConversationId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,8 +30,7 @@ use tokio_util::task::TaskTracker;
 use ts_rs::TS;
 
 /// How much of the stream is kept for a client that comes back, in UTF-8
-/// bytes of formatted frames: minutes of a busy stream, since a reply is a
-/// few kilobytes a second. A client further behind gets the snapshot,
+/// bytes of formatted frames. A client further behind gets the snapshot,
 /// which is always right.
 const TAIL_BYTES: usize = 1024 * 1024;
 
@@ -42,12 +42,11 @@ const PING: &[u8] = b": ping\n\n";
 const RESUMED: &[u8] = b"event: resumed\ndata: {}\n\n";
 
 /// The streams over the daemon's events. One subscription, taken when they
-/// are made and kept while they live, folds the turns running and numbers
-/// and formats every event once, keeps the tail, and hands each frame to
-/// every open stream, all in one step, so a stream that opens in a step of
-/// its own finds the turns running exactly as of the frame it goes on
-/// from: a client that installs them and applies the frames after tells
-/// no draft twice.
+/// are made and kept while they live, keeps each turn running as its
+/// newest frame says it, numbers and formats every event once, keeps the
+/// tail, and hands each frame to every open stream, all in one step, so a
+/// stream that opens in a step of its own finds the turns running exactly
+/// as of the frame it goes on from.
 #[derive(Clone)]
 pub(crate) struct Streams(Arc<Shared>);
 
@@ -69,9 +68,11 @@ struct Hub {
     /// in the order it was announced.
     events: mpsc::UnboundedReceiver<Event>,
     tail: Tail,
-    turns: RunningTurns,
+    /// Each turn running, as its newest frame says it, until the
+    /// completion that ends it.
+    turns: BTreeMap<ConversationId, RunningTurn>,
     /// The number of the newest frame that changed what `ready` reads of
-    /// the daemon: every event but a turn's, whose turns the hub folds
+    /// the daemon: every event but a turn's, whose turns the hub keeps
     /// itself.
     changed: u64,
     open: Vec<mpsc::UnboundedSender<Bytes>>,
@@ -110,7 +111,7 @@ impl Streams {
         let hub = Hub {
             events: daemon.events(),
             tail: Tail::default(),
-            turns: RunningTurns::default(),
+            turns: BTreeMap::new(),
             changed: 0,
             open: Vec::new(),
             closed: false,
@@ -239,7 +240,7 @@ impl Streams {
                     health,
                     confirmations,
                     pairings,
-                    turns: hub.turns.turns(),
+                    turns: hub.turns.values().cloned().collect(),
                 };
                 let id = format!("{}-{}", shared.run, hub.tail.latest);
 
@@ -318,14 +319,16 @@ impl Hub {
     }
 
     fn publish(&mut self, run: &str, event: &Event) {
-        self.turns.fold(event);
         self.tail.latest += 1;
 
-        if !matches!(
-            event,
-            Event::TurnProgress { .. } | Event::TurnCompleted { .. }
-        ) {
-            self.changed = self.tail.latest;
+        match event {
+            Event::TurnRunning(turn) => {
+                self.turns
+                    .insert(turn.conversation_id.clone(), turn.clone());
+            }
+            Event::TurnCompleted { .. } => self.turns.retain(|_, turn| !event.ends(turn)),
+            Event::TurnProgress { .. } => {}
+            _ => self.changed = self.tail.latest,
         }
 
         let frame = numbered(run, self.tail.latest, event);

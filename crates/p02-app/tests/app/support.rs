@@ -14,7 +14,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use p02_app::{
     CharacterState, Daemon, DaemonSettings, Durations, Event, Message, OpenOutcome, Plugin,
-    RunningTurn, RunningTurns, TurnOutcome,
+    RunningTurn, TurnProgress,
 };
 use p02_config::ChangeOutcome;
 use p02_contracts::{
@@ -188,21 +188,37 @@ pub(crate) async fn open(daemon: &Daemon) -> String {
 pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Message {
     Message {
         conversation_id: conversation.to_owned(),
-        sender_id: "local-user".to_owned(),
         text: text.to_owned(),
         source: ClientStamp::new("web").unwrap(),
         client_message_id: ClientStamp::new(id).unwrap(),
     }
 }
 
-/// What the person and the character said in a completed turn.
-pub(crate) fn said(outcome: &TurnOutcome) -> Vec<String> {
-    match outcome {
-        TurnOutcome::Completed { messages, .. } => messages
-            .iter()
-            .map(|message| message.text.to_string())
-            .collect(),
-        other => panic!("{other:?}"),
+/// A turn as the stream told it: what it committed, the person's line
+/// first, and its completion as the wire carries it.
+#[derive(Debug)]
+pub(crate) struct Told {
+    pub(crate) said: Vec<String>,
+    pub(crate) ended: Value,
+}
+
+/// Sends `line`, which her inbox takes at once, and hears its turn to its
+/// end.
+pub(crate) async fn told(daemon: &Daemon, line: Message) -> Told {
+    let mut ear = Ear::on(daemon);
+    let id = line.client_message_id.clone();
+    let conversation = line.conversation_id.clone();
+
+    assert_eq!(
+        wire(&daemon.deliver(line).await),
+        json!({"status": "queued"})
+    );
+
+    let ended = ear.ended(id.as_str()).await;
+
+    Told {
+        said: ear.said(&conversation, id.as_str()),
+        ended: wire(&ended),
     }
 }
 
@@ -611,6 +627,41 @@ impl Ear {
         .expect("the event comes")
     }
 
+    /// Hears events until the turn of the line `id` ends, and hands its
+    /// completion back.
+    pub(crate) async fn ended(&mut self, id: &str) -> Event {
+        self.until(|event| {
+            matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == id)
+        })
+        .await
+    }
+
+    /// What the turn of the line `id` on `conversation` committed, as
+    /// heard: the person's line, then each reply.
+    pub(crate) fn said(&self, conversation: &str, id: &str) -> Vec<String> {
+        self.heard
+            .iter()
+            .filter_map(|event| match event {
+                Event::TurnProgress {
+                    conversation_id,
+                    progress,
+                    ..
+                } if conversation_id.as_str() == conversation => match progress {
+                    TurnProgress::UserMessage {
+                        text,
+                        client_message_id,
+                        ..
+                    } => Some((Some(client_message_id.as_str()), text)),
+                    TurnProgress::VisibleReply { text, .. } => Some((None, text)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .skip_while(|(line, _)| *line != Some(id))
+            .map(|(_, text)| text.to_string())
+            .collect()
+    }
+
     /// Hears every event sent so far.
     pub(crate) fn drain(&mut self) {
         while let Ok(event) = self.events.try_recv() {
@@ -645,15 +696,15 @@ impl Ear {
             .collect()
     }
 
-    /// The turns running by what was heard.
-    pub(crate) fn running(&self) -> Vec<RunningTurn> {
-        let mut running = RunningTurns::default();
-
-        for event in &self.heard {
-            running.fold(event);
-        }
-
-        running.turns()
+    /// Each state of a turn running that was heard, in order.
+    pub(crate) fn running(&self) -> Vec<&RunningTurn> {
+        self.heard
+            .iter()
+            .filter_map(|event| match event {
+                Event::TurnRunning(turn) => Some(turn),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Every kind of event heard, in order, as the wire names it.

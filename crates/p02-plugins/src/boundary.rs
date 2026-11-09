@@ -77,7 +77,7 @@ impl Slot {
             .into_iter()
             .map(|note| {
                 Evidence::new(
-                    turn.identity().event.clone(),
+                    turn.event().clone(),
                     self.manifest.id().clone(),
                     note,
                     self.labels(),
@@ -103,7 +103,7 @@ impl Slot {
         };
 
         Evidence::new(
-            turn.identity().event.clone(),
+            turn.event().clone(),
             self.manifest.id().clone(),
             note,
             self.labels(),

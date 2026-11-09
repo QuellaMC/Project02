@@ -209,7 +209,7 @@ impl RuntimePlugin for CharacterMemoryPlugin {
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let session = &context.turn().session_id;
+        let session = &context.turn()?.session_id;
         let kept = self
             .snapshot()
             .as_ref()

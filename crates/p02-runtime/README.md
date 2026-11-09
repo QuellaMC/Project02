@@ -10,8 +10,8 @@ is the line and its client's two stamps, a `Mind` answers it as her
 settings stand before each request to the model, and a `Delivery` says
 how the turn ended.
 
-- **One line at a time.** A line a run before this one took is answered
-  with the message it was committed as; nothing runs.
+- **One line at a time.** A line a turn took already is answered with the
+  message it was committed as; nothing runs.
 - **In the order it happens.** The event, the person's line, each model
   round before anything it decided, each reply and tool call, then the
   turn's ending, before the plugins' work after it. A message is

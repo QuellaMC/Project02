@@ -158,8 +158,8 @@ fn refusal(report: &ToolCallReport) -> (&str, &str) {
 
 /// Ends `host` once the captures it queued settled, and says what its
 /// shutdown recorded.
-async fn drained(host: PluginHost, turn: &Turn) -> String {
-    host.shutdown(turn).await.evidence[0].summary().to_owned()
+async fn drained(host: PluginHost) -> String {
+    host.shutdown().await.evidence[0].summary().to_owned()
 }
 
 /// Recalls `turn` until `count` memories come back, as re-embedding
@@ -473,7 +473,7 @@ async fn a_capture_the_shutdown_could_not_wait_for_is_reported_lost() {
     capture(&host, &turn, &committed).await;
     held.arrived().await;
 
-    let report = host.shutdown(&turn).await;
+    let report = host.shutdown().await;
 
     assert_eq!(
         (report.evidence[0].status(), report.evidence[0].summary()),
@@ -503,7 +503,7 @@ async fn a_failed_capture_is_forgotten_once_a_capture_after_it_completes() {
         capture(&host, &turn, &committed).await;
     }
 
-    assert_eq!(drained(host, &line("bye")).await, "Closed memory provider.");
+    assert_eq!(drained(host).await, "Closed memory provider.");
 }
 
 #[tokio::test]
@@ -908,7 +908,7 @@ async fn recall_ranks_each_memory_by_the_vector_of_its_own_text_and_leaves_out_t
         Answer::extraction(&[tea, cat, "Biscuit sleeps all day."]),
     );
     capture(&capturing, &turn, &committed).await;
-    assert_eq!(drained(capturing, &turn).await, "Closed memory provider.");
+    assert_eq!(drained(capturing).await, "Closed memory provider.");
 
     let query = "What tea does Sam like?";
     let recalled = recall(&host(&storage, &embedded(&openai, "embed-a")), &line(query)).await;
@@ -1052,7 +1052,7 @@ async fn an_extraction_with_no_memory_list_loses_the_capture_and_the_shutdown_sa
     capture(&host, &turn, &committed).await;
 
     assert_eq!(
-        drained(host, &turn).await,
+        drained(host).await,
         "Closed memory provider. mem0 add failed: the extraction model's answer held no memory \
          list."
     );
@@ -1069,7 +1069,7 @@ async fn the_engine_writes_nothing_but_the_database_it_is_handed() {
     recall(&host, &turn).await;
     capture(&host, &turn, &committed).await;
     output(&ask(&host, "mem0.add", json!({"text": "Sam likes cake."}), &turn).await);
-    assert_eq!(drained(host, &turn).await, "Closed memory provider.");
+    assert_eq!(drained(host).await, "Closed memory provider.");
 
     let files = storage.files_on_disk();
 

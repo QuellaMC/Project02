@@ -1,11 +1,13 @@
 //! A call that asks the person first: the confirmation it parks, its
 //! answer, and its deadline.
 
+use std::time::Duration;
+
 use p02_app::{Answer, ConfirmationAnswer, Event};
 use p02_core::Timestamp;
 use serde_json::json;
 
-use crate::support::{Ear, Round, Toy, World, line, open, said, wire};
+use crate::support::{Ear, Round, Toy, World, line, open, told, wire};
 
 /// A tool call that asks first parks a confirmation, stamped with its
 /// deadline and the turn that raised it, which every surface hears and the
@@ -32,7 +34,7 @@ async fn an_approved_confirmation_settles_before_its_turn_completes() {
         let daemon = daemon.clone();
         let line = line(&conversation, "Remember tea.", "tea");
 
-        async move { daemon.deliver(line).await }
+        async move { told(&daemon, line).await }
     });
     let requested = ear
         .until(|event| matches!(event, Event::ConfirmationRequested(_)))
@@ -62,7 +64,7 @@ async fn an_approved_confirmation_settles_before_its_turn_completes() {
         daemon.answer_confirmation(&id, Answer::Approved),
         ConfirmationAnswer::Answered
     );
-    assert_eq!(said(&turn.await.unwrap()), ["Remember tea.", "Saved."]);
+    assert_eq!(turn.await.unwrap().said, ["Remember tea.", "Saved."]);
     ear.until(|event| matches!(event, Event::TurnCompleted { .. }))
         .await;
 
@@ -107,15 +109,28 @@ async fn a_confirmation_nobody_answers_expires_and_the_turn_goes_on() {
         Round::says(&["I could not save it."]),
     ]);
 
-    let outcome = daemon
-        .deliver(line(&conversation, "Remember tea.", "tea"))
+    assert_eq!(
+        wire(
+            &daemon
+                .deliver(line(&conversation, "Remember tea.", "tea"))
+                .await
+        ),
+        json!({"status": "queued"})
+    );
+    ear.until(|event| matches!(event, Event::ConfirmationRequested(_)))
         .await;
+    tokio::time::sleep(Duration::from_mins(5) + Duration::from_millis(1)).await;
+
     let settled = wire(
         &ear.until(|event| matches!(event, Event::ConfirmationSettled { .. }))
             .await,
     );
 
-    assert_eq!(said(&outcome), ["Remember tea.", "I could not save it."]);
+    ear.ended("tea").await;
+    assert_eq!(
+        ear.said(&conversation, "tea"),
+        ["Remember tea.", "I could not save it."]
+    );
     assert_eq!(settled["decision"], "cancelled");
     assert_eq!(settled["reason"], "expired");
     assert_eq!(

@@ -454,7 +454,7 @@ mod tests {
     async fn a_declared_hook_the_plugin_leaves_out_fails() {
         let context = HookContext::new(
             Identifier::new("toolbox").unwrap(),
-            Arc::new(TurnIdentity {
+            Some(Arc::new(TurnIdentity {
                 session_id: SessionId::parse("chat.1").unwrap(),
                 event: EventIdentity::new(
                     EventId::new("evt_1").unwrap(),
@@ -466,7 +466,7 @@ mod tests {
                     id: Identifier::new("mira").unwrap(),
                     display_name: SpeakerName::new("Mira").unwrap(),
                 },
-            }),
+            })),
             Instant::now(),
             CancellationToken::new(),
         );

@@ -231,6 +231,20 @@ pub fn create_directories(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Empties the file at `path` in place, which takes no new file, so it
+/// works where a replacement would not: on a full disk, or in a directory
+/// that takes no new entry. The caller must hold the lock that guards
+/// `path`. The truncation is not flushed to disk: a crash before it lands
+/// leaves the file whole.
+///
+/// # Errors
+///
+/// The `io::Error` the open or the truncation failed with, `NotFound` when
+/// nothing is there.
+pub fn empty_file(path: &Path) -> io::Result<()> {
+    OpenOptions::new().write(true).open(path)?.set_len(0)
+}
+
 /// Removes the file at `path`; a link there is removed, not followed.
 ///
 /// # Errors

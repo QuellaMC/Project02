@@ -429,13 +429,6 @@ async fn poll(
 pub(crate) enum Done {
     Toasted,
     Opened(Result<p02_app::OpenOutcome, Unanswered>),
-    /// A line's delivery, answered once its turn ended: the chat it came
-    /// from, its id, and the outcome.
-    Delivered {
-        chat: i64,
-        id: ClientStamp,
-        outcome: Result<p02_app::TurnOutcome, Unanswered>,
-    },
 }
 
 /// What a bot's rules run on: the bot as Telegram knows it, the daemon and

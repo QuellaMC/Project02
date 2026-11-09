@@ -37,6 +37,8 @@ pub(crate) enum Resource<'a> {
     StorageSchema,
     /// A character's sessions catalog.
     SessionCatalog,
+    /// A character's inbox.
+    Inbox,
     /// A session's log, which one writer appends to.
     SessionWriter(&'a SessionId),
     /// A plugin's files in a character's data, at their root, which one
@@ -56,6 +58,7 @@ impl Resource<'_> {
             Self::ConversationWriter(id) => format!("conversation-writer:{id}"),
             Self::StorageSchema => "storage-schema".to_owned(),
             Self::SessionCatalog => "session-catalog".to_owned(),
+            Self::Inbox => "inbox".to_owned(),
             Self::SessionWriter(id) => format!("session-writer:{id}"),
             Self::PluginFiles(root) => format!("plugin:{}", root.display()),
             Self::SettingsDocument { path, .. } => {
@@ -72,9 +75,10 @@ impl Resource<'_> {
     fn stall_budget(&self) -> Duration {
         match self {
             Self::Daemon | Self::ConversationWriter(_) | Self::SessionWriter(_) => Duration::ZERO,
-            Self::ConversationsCatalog | Self::StorageSchema | Self::SessionCatalog => {
-                Duration::from_secs(10)
-            }
+            Self::ConversationsCatalog
+            | Self::StorageSchema
+            | Self::SessionCatalog
+            | Self::Inbox => Duration::from_secs(10),
             Self::PluginFiles(_) => Duration::from_secs(2),
             Self::SettingsDocument { wait, .. } => *wait,
         }
@@ -409,6 +413,7 @@ mod tests {
                 waited,
                 BusyCode::Storage,
             ),
+            (Resource::Inbox, "inbox", waited, BusyCode::Storage),
             (
                 Resource::SessionWriter(&session),
                 "session-writer:conv_a.1",

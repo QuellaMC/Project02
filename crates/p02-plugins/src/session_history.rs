@@ -153,7 +153,7 @@ impl RuntimePlugin for SessionHistoryPlugin {
             )],
         };
 
-        let session = context.turn().session_id.clone();
+        let session = context.turn()?.session_id.clone();
         let index = Arc::clone(&self.index);
         let caught_up = blocking(move || {
             reach.indexed(&index, |index, history| {

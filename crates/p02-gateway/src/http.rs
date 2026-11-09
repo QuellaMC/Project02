@@ -288,7 +288,6 @@ async fn turn(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Re
                 .daemon
                 .deliver(Message {
                     conversation_id: line.conversation_id.0,
-                    sender_id: line.sender_id.0,
                     text: line.text.0,
                     source: line.source,
                     client_message_id: line.client_message_id,
@@ -543,14 +542,13 @@ pub struct OpenConversationBody {
     pub character_id: Short,
 }
 
-/// A line from one participant into one conversation, with the two stamps
-/// its client puts on it: which surface carried it, and the id a repeat of
-/// the same submission reuses.
+/// The person's line into one conversation, with the two stamps its client
+/// puts on it: which surface carried it, and the id a repeat of the same
+/// submission reuses.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GatewayMessage {
     pub conversation_id: Short,
-    pub sender_id: Short,
     pub text: Text,
     pub source: ClientStamp,
     pub client_message_id: ClientStamp,

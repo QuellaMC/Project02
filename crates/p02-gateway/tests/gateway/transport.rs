@@ -23,7 +23,7 @@ async fn a_body_or_query_the_route_cannot_take_is_400() {
         (
             "/api/turns",
             json!({"conversationId": "conv"}).to_string(),
-            "senderId",
+            "text",
         ),
         ("/api/turns", stamped.to_string(), "not a client stamp"),
         (

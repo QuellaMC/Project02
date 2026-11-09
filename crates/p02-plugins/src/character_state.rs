@@ -189,7 +189,7 @@ impl RuntimePlugin for CharacterStatePlugin {
     ) -> Result<ToolCallOutcome, PluginError> {
         let patch = Patch::from_input(call.input()).map_err(PluginError::new)?;
         let (event, call_id) = (
-            context.turn().event.event_id().to_string(),
+            context.turn()?.event.event_id().to_string(),
             call.call_id().to_string(),
         );
         let (before, after) = leased(store(context)?, move |files| {

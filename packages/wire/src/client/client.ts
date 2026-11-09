@@ -24,7 +24,7 @@ import {
   type PairingSubject,
   type PendingConfirmation,
   type StartOutcome,
-  type TurnOutcome,
+  type SubmitOutcome,
 } from '../contract/index.ts';
 import {createSseFrameSplitter} from './sse.ts';
 
@@ -98,13 +98,13 @@ export type GatewayClient = {
     options?: GatewayCallOptions,
   ): Promise<OpenOutcome>;
   /**
-   * Waits for the turn, however long, and is never retried, unless the
-   * caller's signal ends the wait; the turn runs on without it.
+   * Answers once the line is in the character's inbox, or refused; how
+   * its turn ends, the stream tells.
    */
   deliver(
     message: GatewayMessage,
     options?: GatewayCallOptions,
-  ): Promise<TurnOutcome>;
+  ): Promise<SubmitOutcome>;
   history(
     conversationId: string,
     page?: HistoryPage,
@@ -172,17 +172,19 @@ export class GatewayClientError extends Error {
 }
 
 const defaultRetryMs = 1_000;
-const eventKinds: ReadonlySet<GatewayEvent['kind']> = new Set([
-  'turn_progress',
-  'turn_completed',
-  'confirmation_requested',
-  'confirmation_settled',
-  'pairing_requested',
-  'pairing_settled',
-  'state_changed',
-  'health_changed',
-  'maintenance_failed',
-]);
+/** Every kind of event the contract declares: one it adds fails to compile here until it is named. */
+const eventKinds: Readonly<Record<GatewayEvent['kind'], true>> = {
+  turn_progress: true,
+  turn_running: true,
+  turn_completed: true,
+  confirmation_requested: true,
+  confirmation_settled: true,
+  pairing_requested: true,
+  pairing_settled: true,
+  state_changed: true,
+  health_changed: true,
+  maintenance_failed: true,
+};
 
 export function createGatewayClient(
   options: GatewayClientOptions,
@@ -217,7 +219,7 @@ export function createGatewayClient(
         callOptions,
       ),
     deliver: (message, callOptions) =>
-      route.post<TurnOutcome>('/api/turns', message, callOptions),
+      route.post<SubmitOutcome>('/api/turns', message, callOptions),
     history: (conversationId, page = {}, callOptions) =>
       route.get<HistoryOutcome>(
         `/api/conversations/${segment(conversationId)}/messages${query({
@@ -665,7 +667,7 @@ function isGatewayEvent(data: unknown): data is GatewayEvent {
     data !== null &&
     'kind' in data &&
     typeof data.kind === 'string' &&
-    (eventKinds as ReadonlySet<string>).has(data.kind)
+    Object.hasOwn(eventKinds, data.kind)
   );
 }
 

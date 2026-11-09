@@ -4,12 +4,12 @@
 use std::sync::Arc;
 
 use p02_app::CharacterState::{Failed, Ready, Starting, Stopped, Stopping};
-use p02_app::{Event, OpenOutcome, RosterState, StartOutcome, TurnOutcome};
+use p02_app::{Event, OpenOutcome, RosterState, StartOutcome};
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, Toy, World, a_while, begun, change, home, line, open, said, settle, wire,
+    Ear, Gate, Round, Toy, World, a_while, begun, change, home, line, open, settle, told, wire,
 };
 
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
@@ -107,11 +107,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     let turn = tokio::spawn({
         let daemon = daemon.clone();
 
-        async move {
-            daemon
-                .deliver(line(&conversation, "Remember tea.", "tea"))
-                .await
-        }
+        async move { told(&daemon, line(&conversation, "Remember tea.", "tea")).await }
     });
 
     ear.until(|event| matches!(event, Event::ConfirmationRequested(_)))
@@ -132,7 +128,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     assert_eq!(wire(&settled)["decision"], "cancelled");
     assert_eq!(wire(&settled)["reason"], "stopped");
     assert!(daemon.pending_confirmations().is_empty());
-    assert!(matches!(turn.await.unwrap(), TurnOutcome::Completed { .. }));
+    assert_eq!(turn.await.unwrap().ended["status"], "completed");
     assert_eq!(
         wire(&daemon.health().await)["characters"][0]["state"],
         "stopped"
@@ -272,7 +268,7 @@ async fn a_rebuild_between_her_requests_keeps_her_turn_and_a_line_sent_meanwhile
         let daemon = daemon.clone();
         let line = line(&conversation, text, id);
 
-        tokio::spawn(async move { daemon.deliver(line).await })
+        tokio::spawn(async move { told(&daemon, line).await })
     };
 
     gate.shut();
@@ -295,12 +291,12 @@ async fn a_rebuild_between_her_requests_keeps_her_turn_and_a_line_sent_meanwhile
     a_while().await;
     assert!(!first.is_finished() && !second.is_finished());
     world.assembly.open();
-    assert_eq!(said(&first.await.unwrap()), ["First?", "First."]);
+    assert_eq!(first.await.unwrap().said, ["First?", "First."]);
 
     let delivered = second.await.unwrap();
 
-    assert_eq!(said(&delivered), ["Second?", "Hello."]);
-    assert_eq!(wire(&delivered)["conversationId"], conversation);
+    assert_eq!(delivered.said, ["Second?", "Hello."]);
+    assert_eq!(delivered.ended["conversationId"], conversation);
     ear.until(|event| {
         matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == "second")
     })
@@ -331,7 +327,7 @@ async fn a_stop_answers_after_what_it_ended_was_announced() {
         let daemon = daemon.clone();
         let line = line(&conversation, "Still there?", "in-flight");
 
-        async move { daemon.deliver(line).await }
+        async move { told(&daemon, line).await }
     });
 
     gate.reached().await;
@@ -342,7 +338,7 @@ async fn a_stop_answers_after_what_it_ended_was_announced() {
     stop.await;
     ear.drain();
 
-    assert_eq!(said(&turn.await.unwrap()), ["Still there?", "Still here."]);
+    assert_eq!(turn.await.unwrap().said, ["Still there?", "Still here."]);
     assert!(
         ear.kinds().iter().any(|kind| kind == "turn_completed"),
         "{:?}",

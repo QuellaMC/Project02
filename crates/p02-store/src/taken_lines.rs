@@ -1,6 +1,6 @@
 //! The lines a conversation's closed segments took, by segment and by the id
-//! each was submitted under: what a delivery asks, to refuse a line an
-//! earlier run took however far back. One record per conversation,
+//! each was submitted under: what a delivery asks, to refuse a line taken
+//! however far back. One record per conversation,
 //! `taken-lines/<conversation>.json` beside the character's sessions,
 //! rewritten whole. The segments stay the truth, so a record that is
 //! missing or holds anything unexpected reads as none, and is made again
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 
-use p02_core::{ClientStamp, ConversationId, MessageId, SessionId};
+use p02_core::{ClientStamp, Conversation, ConversationId, MessageId, SessionId};
 use p02_shared::{create_directories, read_file, write_file_atomically};
 use serde_json::{Map, Value};
 
@@ -34,6 +34,40 @@ impl TakenLines {
             .and_then(|content| serde_json::from_slice(&content).ok())
             .and_then(|record| decode(&record, conversation))
             .unwrap_or_default()
+    }
+
+    /// The lines the segments of `conversation` before `current` took: its
+    /// record, completed from every segment the record does not cover, and
+    /// nothing written. The segment just before `current` must be read, as
+    /// the current one must, since a run can end between a rotation and
+    /// its record; an older one that cannot be read gives up its lines.
+    ///
+    /// # Errors
+    ///
+    /// An error of reading the segment just before `current`.
+    pub fn before(
+        data: &CharacterData,
+        conversation: &Conversation,
+        current: NonZeroU64,
+    ) -> Result<Self, StorageError> {
+        let mut taken = Self::read(data, conversation.id());
+
+        for segment in (1..current.get()).filter_map(NonZeroU64::new) {
+            if taken.covers(segment) {
+                continue;
+            }
+
+            match data
+                .session_log(conversation, segment)
+                .and_then(|log| log.read())
+            {
+                Ok(replay) => taken.insert(segment, replay.user_lines().clone()),
+                Err(error) if segment.get() + 1 == current.get() => return Err(error),
+                Err(_) => {}
+            }
+        }
+
+        Ok(taken)
     }
 
     /// Writes the record of the conversation `writer` holds.
@@ -90,6 +124,35 @@ impl TakenLines {
         self.segments
             .values()
             .find_map(|lines| lines.get(client_message_id))
+    }
+}
+
+impl CharacterData {
+    /// The message a line submitted under `id` was committed as in
+    /// `conversation`, in whichever of its segments took it, as the disk
+    /// holds them now.
+    pub(crate) fn taken_line(
+        &self,
+        conversation: &Conversation,
+        id: &ClientStamp,
+    ) -> Result<Option<MessageId>, StorageError> {
+        let Some(latest) = self.latest_segment(conversation.id())? else {
+            return Ok(None);
+        };
+        let current = latest.session_id().segment();
+
+        if let Some(message) = self
+            .session_log(conversation, current)?
+            .read()?
+            .user_lines()
+            .get(id)
+        {
+            return Ok(Some(message.clone()));
+        }
+
+        Ok(TakenLines::before(self, conversation, current)?
+            .taken(id)
+            .cloned())
     }
 }
 

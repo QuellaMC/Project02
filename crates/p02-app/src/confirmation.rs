@@ -253,10 +253,7 @@ impl Drop for Abandoned<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU64;
-
-    use p02_contracts::{ToolCallId, TurnIdentity};
-    use p02_core::{CharacterProfile, ConversationId, EventIdentity, SessionId, SpeakerName};
+    use p02_contracts::ToolCallId;
     use serde_json::Map;
 
     use super::*;
@@ -267,14 +264,6 @@ mod tests {
 
     fn request() -> ConfirmationRequest {
         ConfirmationRequest {
-            turn: TurnIdentity {
-                session_id: SessionId::new(ConversationId::mint(), NonZeroU64::MIN),
-                event: EventIdentity::mint(),
-                character: CharacterProfile {
-                    id: mira(),
-                    display_name: SpeakerName::new("Mira").unwrap(),
-                },
-            },
             plugin_id: Identifier::new("notes").unwrap(),
             tool_name: Identifier::new("notes.save").unwrap(),
             call_id: ToolCallId::new("call-1").unwrap(),

@@ -1,7 +1,7 @@
 //! The daemon: the one object every surface reaches the characters
 //! through. It holds the actors, the routes from conversations to them, the
-//! ledger of submissions, the reconciler and the events, and answers every
-//! condition a client can reach with an outcome, never an error.
+//! reconciler and the events, and answers every condition a client can
+//! reach with an outcome, never an error.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -19,20 +19,20 @@ use p02_config::{
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
-use p02_store::{Home, StorageError};
+use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use tokio::sync::mpsc;
 
-use crate::character::{CharacterHandle, Request};
+use crate::character::CharacterHandle;
 use crate::confirmation::Answer;
 use crate::history::{self, HistoryPage};
 use crate::outcome::{
     CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
     HistoryOutcome, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PendingConfirmation,
-    ProtocolVersion, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal, TurnStamp,
+    ProtocolVersion, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, TurnRefusal,
+    duplicate,
 };
 use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
-use crate::submissions::Ledger;
 
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
@@ -139,7 +139,6 @@ pub struct DaemonSettings {
 #[derive(Clone, Debug)]
 pub struct Message {
     pub conversation_id: String,
-    pub sender_id: String,
     pub text: String,
     /// The surface the line came from.
     pub source: ClientStamp,
@@ -226,10 +225,9 @@ struct Inner {
     world: Arc<World>,
     characters: Mutex<Characters>,
     /// Which character each conversation this run routed belongs to. A
-    /// delivery holds it from its routing until its line is in her queue,
+    /// delivery holds it from its routing until its line is in her inbox,
     /// and deliveries take it in the order they came.
     routes: tokio::sync::Mutex<HashMap<ConversationId, Identifier>>,
-    ledger: Arc<Ledger>,
     reconciler: Arc<Reconciler>,
     /// How many streams of each connector are open.
     presence: Mutex<BTreeMap<Identifier, usize>>,
@@ -336,7 +334,6 @@ impl Daemon {
                 }),
                 characters: Mutex::default(),
                 routes: tokio::sync::Mutex::default(),
-                ledger: Arc::default(),
                 reconciler: Arc::default(),
                 presence: Mutex::default(),
                 pairings: Pairings::default(),
@@ -440,32 +437,64 @@ impl Daemon {
         opened
     }
 
-    /// Takes `message` to the character its conversation belongs to, once
-    /// per submission, and announces how the delivery ended. Its routing
-    /// and its place in her queue are one step, which lines take in the
-    /// order they came, so they reach her in that order.
-    pub async fn deliver(&self, message: Message) -> TurnOutcome {
-        let outcome = {
-            let mut routes = self.inner.routes.lock().await;
-            let (conversation, character) =
-                match self.route(&mut routes, &message.conversation_id).await {
-                    Ok(found) => found,
-                    Err(refused) => return refused,
-                };
-            let stamp = TurnStamp {
-                conversation_id: conversation.clone(),
-                source: message.source,
-                client_message_id: message.client_message_id,
+    /// Queues `message` in the inbox of the character its conversation
+    /// belongs to, and answers once it is there: she takes it in its turn,
+    /// and the stream tells how that ended. A line sent again is answered
+    /// as her inbox has it, queued already or taken as the message it
+    /// became, whether or not she takes lines now. Its routing and its
+    /// place in her inbox are one step, which lines take in the order they
+    /// came, so they reach her in that order; a new line for a character
+    /// that is starting waits for her, and one for a character who failed
+    /// or does not run is refused, saying why.
+    pub async fn deliver(&self, message: Message) -> SubmitOutcome {
+        let mut routes = self.inner.routes.lock().await;
+        let (conversation, character) =
+            match self.route(&mut routes, &message.conversation_id).await {
+                Ok(found) => found,
+                Err(refused) => return refused,
             };
-
-            self.inner.ledger.submit(
-                stamp.conversation_id.clone(),
-                stamp.client_message_id.clone(),
-                || self.take(character, stamp, message.text),
-            )
+        let taker = self.live(&character).filter(|handle| handle.takes_lines());
+        let line = QueuedLine {
+            conversation_id: conversation,
+            source: message.source,
+            client_message_id: message.client_message_id,
+            text: message.text,
         };
+        let home = self.inner.world.home.clone();
+        let id = line.client_message_id.clone();
+        let her = character.clone();
+        // The line and the word to her that it waits are one piece of work,
+        // which a client that hangs up meanwhile does not cut in two.
+        let queued = blocking(move || {
+            let data = CharacterData::ensure(&home, &her)?;
+            let Some(taker) = taker else {
+                return data.sent_before(&line);
+            };
+            let queued = data.queue(&line)?;
 
-        outcome.await
+            if queued == Queueing::Queued {
+                taker.queued();
+            }
+
+            Ok(Some(queued))
+        })
+        .await;
+
+        drop(routes);
+
+        match queued {
+            Ok(Some(Queueing::Queued)) => SubmitOutcome::Queued,
+            Ok(Some(Queueing::AlreadyQueued)) => SubmitOutcome::AlreadyQueued,
+            Ok(Some(Queueing::Taken(message_id))) => SubmitOutcome::Refused {
+                reason: TurnRefusal::DuplicateSubmission,
+                message: duplicate(&id, &message_id),
+            },
+            Ok(None) => SubmitOutcome::Refused {
+                reason: TurnRefusal::CharacterUnavailable,
+                message: self.unavailable(character.as_str()),
+            },
+            Err(error) => SubmitOutcome::Failed(StorageFailure::of(&error)),
+        }
     }
 
     /// The confirmations parked now, by character, oldest first.
@@ -657,8 +686,9 @@ impl Daemon {
 
     /// Stops every character, for good: no start follows. A boot or a
     /// recovery in flight is overtaken, a turn in flight finishes and is
-    /// announced, and the reconcile pass in flight is waited for; once it
-    /// answers, everything the stop ended has been announced.
+    /// announced, the lines queued behind it wait in her inbox, and the
+    /// reconcile pass in flight is waited for; once it answers, everything
+    /// the stop ended has been announced.
     pub async fn stop(&self) {
         self.inner.pairings.stop();
 
@@ -675,7 +705,6 @@ impl Daemon {
 
         self.inner.reconciler.settled().await;
         join_all(handles.iter().map(|handle| handle.stopped())).await;
-        self.inner.ledger.settled().await;
     }
 
     pub(crate) fn downgrade(&self) -> WeakDaemon {
@@ -780,37 +809,6 @@ impl Daemon {
         self.handle(id).filter(|handle| !handle.ended())
     }
 
-    /// A new submission's line put in her queue at once, unless she takes
-    /// none now, and how its delivery ended, announced to every surface.
-    fn take(
-        &self,
-        character: Identifier,
-        stamp: TurnStamp,
-        text: String,
-    ) -> impl Future<Output = TurnOutcome> + Send + 'static {
-        let answer = match self.live(&character) {
-            Some(handle) => handle
-                .deliver(Request {
-                    stamp: stamp.clone(),
-                    text,
-                })
-                .boxed(),
-            None => std::future::ready(TurnOutcome::refused(
-                TurnRefusal::CharacterUnavailable,
-                self.unavailable(character.as_str()),
-            ))
-            .boxed(),
-        };
-        let events = Arc::clone(&self.inner.world.events);
-
-        async move {
-            let outcome = answer.await;
-
-            events.emit(Event::turn_completed(character, stamp, &outcome));
-            outcome
-        }
-    }
-
     /// The sentence `character` answers with while she takes nothing.
     fn unavailable(&self, character: &str) -> String {
         Identifier::new(character)
@@ -829,12 +827,10 @@ impl Daemon {
         &self,
         routes: &mut HashMap<ConversationId, Identifier>,
         conversation: &str,
-    ) -> Result<(ConversationId, Identifier), TurnOutcome> {
-        let unknown = || {
-            TurnOutcome::refused(
-                TurnRefusal::UnknownConversation,
-                format!("Conversation \"{conversation}\" does not exist."),
-            )
+    ) -> Result<(ConversationId, Identifier), SubmitOutcome> {
+        let unknown = || SubmitOutcome::Refused {
+            reason: TurnRefusal::UnknownConversation,
+            message: format!("Conversation \"{conversation}\" does not exist."),
         };
         let Ok(id) = ConversationId::new(conversation) else {
             return Err(unknown());
@@ -850,13 +846,13 @@ impl Daemon {
             Ok(record) => character_of(&record).ok_or_else(unknown)?,
             Err(StorageError::ConversationNotFound(_)) => return Err(unknown()),
             Err(error) => {
-                return Err(TurnOutcome::refused(
-                    TurnRefusal::UnknownConversation,
-                    format!(
+                return Err(SubmitOutcome::Refused {
+                    reason: TurnRefusal::UnknownConversation,
+                    message: format!(
                         "Conversation \"{id}\" cannot be read: {}",
                         error_sentence(&error)
                     ),
-                ));
+                });
             }
         };
 

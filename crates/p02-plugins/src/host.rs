@@ -142,12 +142,14 @@ impl PluginHost {
         self.core.offered()
     }
 
-    /// Ends every plugin: each `onShutdown` runs only reading, its store
-    /// read-only and no database open to it, and what failed is reported.
-    /// Work a hook left running is not waited for; the host is gone
-    /// afterwards, so nothing runs a hook again.
-    pub async fn shutdown(self, turn: &Turn) -> HookPhaseReport {
-        self.core.run_lifecycle(&Lifecycle::Shutdown, turn).await
+    /// Ends every plugin: each `onShutdown` serves no turn and runs only
+    /// reading, its store read-only and no database open to it, and what
+    /// failed is reported. Work a hook left running is not waited for; the
+    /// host is gone afterwards, so nothing runs a hook again.
+    pub async fn shutdown(self) -> HookPhaseReport {
+        self.core
+            .run_lifecycle(&Lifecycle::Shutdown, &Turn::end())
+            .await
     }
 
     pub(crate) fn core(&self) -> &Arc<Core> {

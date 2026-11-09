@@ -189,7 +189,7 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
 
     host.before_role_model_call(&turn()).await;
     host.after_turn_committed(&turn(), &committed).await;
-    host.shutdown(&turn()).await;
+    host.shutdown().await;
 
     assert_eq!(
         granted.seen("before"),
@@ -207,11 +207,12 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
     assert_eq!(
         granted.seen("shutdown"),
         Some(Seen {
-            message: Some("hello".to_owned()),
+            message: None,
             store: Some(StoreAccess::ReadOnly),
             history: true,
             databases: false,
-        })
+        }),
+        "her end serves no turn, so it shows no turn's text"
     );
     assert_eq!(
         reader.seen("before"),

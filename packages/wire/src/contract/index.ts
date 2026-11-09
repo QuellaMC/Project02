@@ -9,6 +9,4 @@ export {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
   maxSpeakerNameLength,
-  turnCommittedTheLine,
 } from './contract.ts';
-export {foldRunningTurns, type RunningTurns} from './running-turns.ts';

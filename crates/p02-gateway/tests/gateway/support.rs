@@ -140,7 +140,6 @@ impl Gateway {
     pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Value {
         json!({
             "conversationId": conversation,
-            "senderId": "local-user",
             "text": text,
             "source": "web",
             "clientMessageId": id,

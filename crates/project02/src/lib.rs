@@ -40,6 +40,10 @@ pub fn run(args: &[OsString]) -> ExitCode {
         Ok(Command::Serve(flags)) => serve_until_signalled(flags, &mut console),
         Ok(Command::Inspect(flags)) => inspect::run(flags, &mut console),
         Ok(Command::Telegram(flags)) => telegram::run(flags, &mut console),
+        Ok(Command::Help(usage)) => {
+            console.say(&usage);
+            ExitCode::SUCCESS
+        }
         Err(usage) => console.failed(&usage),
     }
 }

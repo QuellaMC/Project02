@@ -12,6 +12,7 @@ pub(crate) const SESSION_CATALOG_FILE: &str = "sessions.jsonl";
 pub(crate) const SESSIONS_DIRECTORY: &str = "sessions";
 pub(crate) const RAW_EVENTS_FILE: &str = "raw-events.jsonl";
 pub(crate) const TAKEN_LINES_DIRECTORY: &str = "taken-lines";
+pub(crate) const INBOX_FILE: &str = "inbox.jsonl";
 pub(crate) const PLUGIN_DATA_DIRECTORY: &str = "plugin-data";
 pub(crate) const DATABASE_SUFFIX: &str = ".sqlite";
 /// What SQLite keeps beside a database in write-ahead-log mode, each named

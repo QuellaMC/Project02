@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use p02_app::{
     Answer, ConfirmationAnswer, Event, Health, OpenOutcome, PROTOCOL_VERSION, PairingAnswer,
-    PairingOutcome, TurnOutcome,
+    PairingOutcome, SubmitOutcome,
 };
 use p02_config::ConnectorConfigView;
 use p02_core::ClientStamp;
@@ -39,8 +39,8 @@ const STREAM_RETRY: Duration = Duration::from_secs(1);
 pub(crate) const CONNECTOR: &str = "telegram";
 
 /// The daemon a record names, as the connector reaches it: plain HTTP on
-/// loopback, its token as the bearer, and no timeout, since a delivery
-/// waits for its turn and a turn parked on a confirmation waits minutes.
+/// loopback, its token as the bearer, and no timeout, since an open waits
+/// for her start however long it takes.
 #[derive(Clone, Debug)]
 pub(crate) struct Daemon {
     client: reqwest::Client,
@@ -102,8 +102,8 @@ impl Daemon {
         .await
     }
 
-    /// Waits for the line's turn, however long it is parked.
-    pub(crate) async fn deliver(&self, line: &GatewayMessage) -> Result<TurnOutcome, Unanswered> {
+    /// Hands the line to her inbox, and answers once it is there.
+    pub(crate) async fn deliver(&self, line: &GatewayMessage) -> Result<SubmitOutcome, Unanswered> {
         self.post("/api/turns", line).await
     }
 

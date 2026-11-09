@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {expect, it} from 'vitest';
 
 import {startDaemon, type Daemon} from './harness/daemon.ts';
-import {frameOf, openEvents} from './harness/events.ts';
+import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {characterJson, chmod, configJson, createHome} from './harness/home.ts';
 import {
   messagesOf,
@@ -12,7 +12,13 @@ import {
   startModelServer,
   undecided,
 } from './harness/model-server.ts';
-import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
+import {
+  conversationOf,
+  converse,
+  saveConfig,
+  wireOf,
+  type Wire,
+} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 // A window this small rotates the segment after every turn.
@@ -21,6 +27,22 @@ const rotatingEveryTurn = configJson({project02: {contextWindowTokens: 1}});
 async function stop(daemon: Daemon): Promise<void> {
   daemon.signal('SIGINT');
   await daemon.exit();
+}
+
+function dataOf(frame: Frame): unknown {
+  return JSON.parse(frame.data ?? '');
+}
+
+/** Lines from the local user on the web, onto the character's conversation. */
+async function linesTo(wire: Wire, characterId: string) {
+  const {conversationId} = await conversationOf(wire, characterId);
+
+  return (text: string, clientMessageId: string) => ({
+    conversationId,
+    text,
+    source: 'web',
+    clientMessageId,
+  });
 }
 
 it('turns.open-direct: an open on a running character answers its direct conversation, the same one on every open, after a restart too', async () => {
@@ -42,29 +64,42 @@ it('turns.open-direct: an open on a running character answers its direct convers
   await expect(again.open('mira')).resolves.toEqual(opened);
 });
 
-it("turns.deliver-completed: a turn answers once it has ended, completed with the committed user line and the reply under the character's display name", async () => {
-  const wire = wireOf(await startDaemon(createHome(), fixedReplies));
-  const say = await converse(wire, 'mira');
-  const {conversationId} = await conversationOf(wire, 'mira');
+it("turns.deliver-queued: a line is answered queued at once, and the stream tells its turn: the reply under the character's display name, then the turn completed with its line in the log", async () => {
+  const daemon = await startDaemon(createHome(), fixedReplies);
+  const wire = wireOf(daemon);
 
-  expect(await say('Hello there.', 'hello')).toEqual({
-    status: 'completed',
+  await wire.start('mira');
+
+  const line = await linesTo(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const events = await openEvents(daemon);
+
+  await expect(wire.turn(line('Hello there.', 'hello'))).resolves.toEqual({
+    status: 'queued',
+  });
+  expect(
+    dataOf(
+      await events.next(
+        frameOf('turn_progress', {progress: {kind: 'visible_reply'}}),
+      ),
+    ),
+  ).toMatchObject({
     characterId: 'mira',
     conversationId,
-    messages: [
-      {
-        messageId: expect.any(String) as string,
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'Hello there.',
-      },
-      {
-        messageId: expect.any(String) as string,
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: "I'm here. Tell me what you need.",
-      },
-    ],
+    progress: {
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: "I'm here. Tell me what you need.",
+    },
+  });
+  expect(dataOf(await events.next(frameOf('turn_completed')))).toEqual({
+    kind: 'turn_completed',
+    characterId: 'mira',
+    conversationId,
+    source: 'web',
+    clientMessageId: 'hello',
+    status: 'completed',
+    committed: true,
   });
 });
 
@@ -102,100 +137,145 @@ it('turns.multi-line-message: a line of several lines, CRLF and CR made LF and b
   });
 });
 
-it('turns.client-message-id-join: a repeat of a submission, while it runs or after, gets its outcome without a second model request; only a new id runs a new turn, and the same id on another conversation is another turn', async () => {
+it('turns.repeat-answers: a line sent again while it is queued or running answers already_queued and runs nothing more; once she took it, a repeat answers duplicate_submission naming the message it became, the same after a restart, and it is in history once; the same id to another character is another line', async () => {
   const model = await startModelServer();
-  const wire = wireOf(
-    await startDaemon(
-      createHome({
-        'config.json': configJson({project02: model.settings}),
-        characters: {
-          zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
-        },
-      }),
-    ),
-  );
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+    characters: {
+      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+    },
+  });
+  const first = await startDaemon(home);
+  const wire = wireOf(first);
   const say = await converse(wire, 'mira');
+  const line = await linesTo(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const events = await openEvents(first);
   const held = model.hold();
-  const first = say('Hello?', 'hello');
+  const one = say('One.', 'one');
 
   await held.arrived();
-
-  const repeat = say('Hello?', 'hello');
-
-  // Nothing outside the daemon shows whether the repeat is in before the
-  // turn ends or after; either way it gets the outcome and the model is
-  // not asked again. The round trip makes the first the likelier.
-  await wire.health();
-  held.release(reply('Hello.'));
-
-  const outcome = await first;
-
-  expect(outcome).toMatchObject({status: 'completed'});
-  expect(await repeat).toEqual(outcome);
-  expect(await say('Hello?', 'hello')).toEqual(outcome);
-  expect(model.requests).toHaveLength(1);
-  model.answer(reply('Hello again.'));
-  expect(await say('Hello?', 'hello-again')).toMatchObject({
-    status: 'completed',
-    messages: [{}, {text: 'Hello again.'}],
+  await expect(wire.turn(line('Two.', 'two'))).resolves.toEqual({
+    status: 'queued',
   });
-  expect(model.requests).toHaveLength(2);
+
+  for (const [text, id] of [
+    ['One.', 'one'],
+    ['Two.', 'two'],
+  ] as const) {
+    await expect(wire.turn(line(text, id)), id).resolves.toEqual({
+      status: 'already_queued',
+    });
+  }
+
+  model.answer(reply('Second.'));
+  held.release(reply('First.'));
+  await expect(one).resolves.toMatchObject({status: 'completed'});
+
+  const two = dataOf(
+    await events.next(
+      frameOf('turn_progress', {
+        progress: {kind: 'user_message', clientMessageId: 'two'},
+      }),
+    ),
+  ) as {readonly progress: {readonly messageId: string}};
+
+  await events.next(
+    frameOf('turn_completed', {clientMessageId: 'two', status: 'completed'}),
+  );
+
+  const taken = await wire.turn(line('Two.', 'two'));
+
+  expect(taken).toEqual({
+    status: 'refused',
+    reason: 'duplicate_submission',
+    message: expect.stringContaining(two.progress.messageId) as string,
+  });
 
   const sayZeta = await converse(wire, 'zeta');
 
   model.answer(reply('Zeta here.'));
-  expect(await sayZeta('Hello?', 'hello')).toMatchObject({
+  await expect(sayZeta('Two.', 'two')).resolves.toMatchObject({
     status: 'completed',
     messages: [{}, {text: 'Zeta here.'}],
   });
+  await stop(first);
+
+  const again = wireOf(await startDaemon(home));
+
+  await again.start('mira');
+  await expect(again.turn(line('Two.', 'two'))).resolves.toEqual(taken);
   expect(model.requests).toHaveLength(3);
+  await expect(again.history(conversationId)).resolves.toMatchObject({
+    messages: [
+      {clientMessageId: 'one'},
+      {text: 'First.'},
+      {clientMessageId: 'two'},
+      {text: 'Second.'},
+    ],
+  });
 });
 
-it('turns.duplicate-submission-across-restart: after a restart a line already committed, also one just before a rotation, is refused duplicate_submission, said committed on the stream, and is in history once', async () => {
-  const home = createHome({'config.json': rotatingEveryTurn});
-  const rotating = await startDaemon(home, fixedReplies);
-  const sayRotating = await converse(wireOf(rotating), 'mira');
+it('turns.inbox-survives-kill: a line sent while her turn is held at the model is queued at once, survives the daemon killed, and runs once she is back; the line the kill cut short is not run again, and while she cannot start, a line sent again is answered as her inbox has it', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const killed = await startDaemon(home);
+  const wire = wireOf(killed);
 
-  await sayRotating('Rotated away.', 'rotated');
-  await stop(rotating);
-  writeFileSync(join(home, 'config.json'), configJson({}));
+  await wire.start('mira');
 
-  const staying = await startDaemon(home, fixedReplies);
-  const sayStaying = await converse(wireOf(staying), 'mira');
-
-  await sayStaying('Still here.', 'current');
-  await stop(staying);
-
-  const daemon = await startDaemon(home, fixedReplies);
-  const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
+  const line = await linesTo(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
-  const events = await openEvents(daemon);
+  const cut = model.hold();
+
+  await expect(wire.turn(line('One.', 'one'))).resolves.toEqual({
+    status: 'queued',
+  });
+  await cut.arrived();
+  await expect(wire.turn(line('Two.', 'two'))).resolves.toEqual({
+    status: 'queued',
+  });
+  killed.signal('SIGKILL');
+  await killed.exit();
+  writeFileSync(
+    join(home, 'config.json'),
+    configJson({project02: {...model.settings, contextWindowTokens: -5}}),
+  );
+
+  const back = await startDaemon(home);
+  const again = wireOf(back);
+  const events = await openEvents(back);
+
+  await again.start('mira');
 
   for (const [text, id] of [
-    ['Rotated away.', 'rotated'],
-    ['Still here.', 'current'],
+    ['One.', 'one'],
+    ['Two.', 'two'],
   ] as const) {
-    expect(await say(text, id), id).toMatchObject({
-      status: 'refused',
-      reason: 'duplicate_submission',
+    await expect(again.turn(line(text, id)), id).resolves.toEqual({
+      status: 'already_queued',
     });
-    await events.next(
-      frameOf('turn_completed', {
-        clientMessageId: id,
-        status: 'refused',
-        committed: true,
-      }),
-    );
   }
 
-  await expect(wire.history(conversationId)).resolves.toMatchObject({
-    messages: [
-      {clientMessageId: 'rotated'},
-      {role: 'character'},
-      {clientMessageId: 'current'},
-      {role: 'character'},
-    ],
+  writeFileSync(
+    join(home, 'config.json'),
+    configJson({project02: model.settings}),
+  );
+
+  const held = model.hold();
+
+  await again.start('mira');
+  await held.arrived();
+  expect(messagesOf(model.requests[1]).at(-1)?.content).toBe('Two.');
+  held.release(reply('Two, at last.'));
+  await events.next(
+    frameOf('turn_completed', {clientMessageId: 'two', status: 'completed'}),
+  );
+  expect(model.requests).toHaveLength(2);
+  await expect(again.history(conversationId)).resolves.toMatchObject({
+    messages: [{text: 'One.'}, {text: 'Two.'}, {text: 'Two, at last.'}],
   });
 });
 

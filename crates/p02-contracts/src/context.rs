@@ -9,6 +9,7 @@ use crate::capability::{
     DatabaseOpener, FileStore, FileStoreBackend, PluginDatabase, SessionHistory,
     SessionHistoryFeed, StoreAccess, WriteHold,
 };
+use crate::plugin::PluginError;
 
 /// Which turn a hook serves. The host stamps it on everything the plugin
 /// returns, so a plugin cannot write a record of another turn.
@@ -28,8 +29,9 @@ pub struct TurnText {
     pub recent_visible_message_ids: Vec<MessageId>,
 }
 
-/// One hook call's view of its turn: who and when, the hook's cancellation,
-/// and only the capabilities its plugin was granted.
+/// One hook call's view: the turn it serves, which `onShutdown` has none
+/// of, the hook's cancellation, and only the capabilities its plugin was
+/// granted.
 ///
 /// Cancellation is cooperative. When the hook overruns its plugin's budget
 /// the host cancels the token and hears the hook for a second more, so a
@@ -41,7 +43,7 @@ pub struct TurnText {
 #[derive(Clone, Debug)]
 pub struct HookContext {
     plugin_id: Identifier,
-    turn: Arc<TurnIdentity>,
+    turn: Option<Arc<TurnIdentity>>,
     deadline: Instant,
     cancellation: CancellationToken,
     turn_text: Option<Arc<TurnText>>,
@@ -51,13 +53,13 @@ pub struct HookContext {
 }
 
 impl HookContext {
-    /// A context that grants nothing yet; the host adds what the plugin
-    /// may see. `cancellation` is the hook's own token, a child of its
-    /// turn's.
+    /// A context that grants nothing yet, serving `turn`, none for her
+    /// end; the host adds what the plugin may see. `cancellation` is the
+    /// hook's own token, a child of its turn's.
     #[must_use]
     pub fn new(
         plugin_id: Identifier,
-        turn: Arc<TurnIdentity>,
+        turn: Option<Arc<TurnIdentity>>,
         deadline: Instant,
         cancellation: CancellationToken,
     ) -> Self {
@@ -115,9 +117,15 @@ impl HookContext {
         &self.plugin_id
     }
 
-    #[must_use]
-    pub fn turn(&self) -> &TurnIdentity {
-        &self.turn
+    /// The turn the hook serves.
+    ///
+    /// # Errors
+    ///
+    /// [`PluginError`] in `onShutdown`, which serves her end, not a turn.
+    pub fn turn(&self) -> Result<&TurnIdentity, PluginError> {
+        self.turn
+            .as_deref()
+            .ok_or_else(|| PluginError::new("onShutdown serves no turn"))
     }
 
     /// Cancelled when the hook overruns its budget or its turn is
@@ -256,7 +264,7 @@ mod tests {
 
         HookContext::new(
             Identifier::new("notes").unwrap(),
-            Arc::new(TurnIdentity {
+            Some(Arc::new(TurnIdentity {
                 session_id: SessionId::parse("chat.1").unwrap(),
                 event: EventIdentity::new(
                     EventId::new("evt_1").unwrap(),
@@ -268,7 +276,7 @@ mod tests {
                     id: mira,
                     display_name: SpeakerName::new("Mira").unwrap(),
                 },
-            }),
+            })),
             Instant::now() + Duration::from_secs(10),
             cancellation,
         )

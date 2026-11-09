@@ -170,7 +170,7 @@ export type GatewayErrorBody = { error: Refusal, };
 /**
  * What every surface hears.
  */
-export type GatewayEvent = { "kind": "turn_progress", characterId: Identifier, conversationId: ConversationId, progress: TurnProgress, } | { "kind": "turn_completed", characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, status: TurnStatus, committed: boolean, reason?: string, message?: string, } | { "kind": "confirmation_requested" } & PendingConfirmation | { "kind": "confirmation_settled", characterId: Identifier, id: ConfirmationId, } & ({ "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, }) | { "kind": "pairing_requested" } & PairingRequest | { "kind": "pairing_settled", connectorId: Identifier, code: string, subject: PairingSubject, decision: PairingDecision, } | { "kind": "state_changed", characterId: Identifier, state: CharacterRuntimeState, 
+export type GatewayEvent = { "kind": "turn_progress", characterId: Identifier, conversationId: ConversationId, progress: TurnProgress, } | { "kind": "turn_running" } & RunningTurn | { "kind": "turn_completed", characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, status: TurnStatus, committed: boolean, reason?: string, message?: string, } | { "kind": "confirmation_requested" } & PendingConfirmation | { "kind": "confirmation_settled", characterId: Identifier, id: ConfirmationId, } & ({ "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, }) | { "kind": "pairing_requested" } & PairingRequest | { "kind": "pairing_settled", connectorId: Identifier, code: string, subject: PairingSubject, decision: PairingDecision, } | { "kind": "state_changed", characterId: Identifier, state: CharacterRuntimeState, 
 /**
  * Present when a failure caused the change.
  */
@@ -179,7 +179,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 7, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 8, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -190,27 +190,22 @@ config: ConfigHealth,
 packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connectors: ReadonlyArray<ConnectorPresence>, };
 
 /**
- * A line from one participant into one conversation, with the two stamps
- * its client puts on it: which surface carried it, and the id a repeat of
- * the same submission reuses.
+ * The person's line into one conversation, with the two stamps its client
+ * puts on it: which surface carried it, and the id a repeat of the same
+ * submission reuses.
  */
-export type GatewayMessage = { conversationId: Short, senderId: Short, text: Text, source: ClientStamp, clientMessageId: ClientStamp, };
+export type GatewayMessage = { conversationId: Short, text: Text, source: ClientStamp, clientMessageId: ClientStamp, };
 
 /**
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 7, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 8, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
  */
 export type GatewayRefusalReason = "unknown_conversation" | "character_unavailable" | "duplicate_submission";
-
-/**
- * A committed message as a client renders it.
- */
-export type GatewayVisibleMessage = { messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, };
 
 /**
  * A committed message as the scrollback shows it, with the stamps its
@@ -258,11 +253,7 @@ export type OpenConversationBody = { characterId: Short, };
 /**
  * What came of opening a character's thread with the person.
  */
-export type OpenOutcome = { "status": "opened", conversationId: ConversationId, characterId: Identifier, 
-/**
- * Who the caller is in the thread: the sender a delivery names.
- */
-userParticipantId: Identifier, } | { "status": "refused", reason: OpenRefusal, message: string, } | { "status": "failed" } & StorageFailure;
+export type OpenOutcome = { "status": "opened", conversationId: ConversationId, characterId: Identifier, } | { "status": "refused", reason: OpenRefusal, message: string, } | { "status": "failed" } & StorageFailure;
 
 export type OpenRefusal = "character_unavailable";
 
@@ -371,13 +362,13 @@ export type Refusal = { code: string, message: string, };
 export type RosterState = "not_started" | "starting" | "ready" | "stopping" | "stopped" | "failed";
 
 /**
- * One open draft: the reply's text so far under its id.
+ * A reply she is still writing: its text so far, under its draft's id.
  */
 export type RunningDraft = { draftId: string, text: string, };
 
 /**
- * A turn in progress, as the stream has told it so far: the submission it
- * runs for, its character, and each open draft's text.
+ * A turn as it runs: the line that started it, her character, and her
+ * drafts so far, each its whole text, in the order they opened.
  */
 export type RunningTurn = { characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, drafts: ReadonlyArray<RunningDraft>, };
 
@@ -456,6 +447,13 @@ export type StartRefusal = "unknown_character" | "gateway_stopped";
 export type StorageFailure = { code: string, message: string, };
 
 /**
+ * What became of a line sent to a character: queued in her inbox, where
+ * she takes it in its turn and the stream tells how that ended, or
+ * refused at once.
+ */
+export type SubmitOutcome = { "status": "queued" } | { "status": "already_queued" } | { "status": "refused", reason: GatewayRefusalReason, message: string, } | { "status": "failed" } & StorageFailure;
+
+/**
  * A line's text, as long as a line may be.
  */
 export type Text = string;
@@ -477,26 +475,16 @@ export type ToolCallStatus = "accepted" | "rejected";
 export type TurnIdentity = { conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, };
 
 /**
- * What became of a delivered line.
- */
-export type TurnOutcome = { "status": "completed", characterId: Identifier, conversationId: ConversationId, 
-/**
- * What the turn committed, the person's line first.
- */
-messages: ReadonlyArray<GatewayVisibleMessage>, } | { "status": "rejected", characterId: Identifier, conversationId: ConversationId, reason: string, message: string, committed: boolean, } | { "status": "refused", reason: GatewayRefusalReason, message: string, } | { "status": "failed", characterId: Identifier, conversationId: ConversationId, message: string, committed: boolean, };
-
-/**
  * What a turn says as it goes, in order.
  */
 export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, 
 /**
  * The draft this message replaces.
  */
-draftId: string, } | { "kind": "reply_delta", draftId: string, text: string, } | { "kind": "reply_withdrawn", draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, toolName: Identifier, };
+draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, toolName: Identifier, };
 
 /**
- * How a delivery ended, as the frame announcing it says: the status of
- * its outcome.
+ * How a turn ended, as the frame announcing it says.
  */
 export type TurnStatus = "completed" | "rejected" | "refused" | "failed";
 

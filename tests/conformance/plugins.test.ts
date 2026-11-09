@@ -239,7 +239,7 @@ it('plugins.config-tools-live-apply: each change of hers the person approves is 
   );
 });
 
-it('plugins.memory-provider-selection: naming as her memory provider a plugin that is off fails her at her next line, which is refused saying so, as her settings say at that setting; she stays failed until the setting is put right, which starts her again', async () => {
+it('plugins.memory-provider-selection: naming as her memory provider a plugin that is off fails her at her next line, saying so, as her settings say at that setting, and the line waits in her inbox; she stays failed until the setting is put right, which starts her again, and she answers it', async () => {
   const daemon = await startDaemon(createHome(), {
     ...fixedReplies,
     PROJECT02_TEST_DURATIONS: 'heartbeat=500',
@@ -255,11 +255,9 @@ it('plugins.memory-provider-selection: naming as her memory provider a plugin th
     {scope: 'global'},
     {kind: 'set', path: 'project02.defaultMemoryProvider', value: 'mem0'},
   );
-  expect(await say('Hello?', 'hello')).toMatchObject({
-    status: 'refused',
-    reason: 'character_unavailable',
-    message: expect.stringContaining('"mem0"') as string,
-  });
+
+  const waiting = say('Hello?', 'hello');
+
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'failed'}),
   );
@@ -297,4 +295,8 @@ it('plugins.memory-provider-selection: naming as her memory provider a plugin th
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
   );
+  await expect(waiting).resolves.toMatchObject({
+    status: 'completed',
+    messages: [{text: 'Hello?'}, {}],
+  });
 });

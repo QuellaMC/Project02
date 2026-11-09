@@ -30,8 +30,8 @@ expires; the daemon's answer to a click settles it as a confirmation's
 answer does — a settlement is left to the frame, an expiry is said once
 whichever news of it comes first, a request the daemon no longer knows is
 no longer waiting — and an approval that could not be written keeps the
-card and says why. The turns in progress are the contract's own shape,
-folded from frames by the contract's one fold and installed from every
+card and says why. Each turn in progress is the daemon's own word on it,
+replaced whole by each `turn_running` frame and installed from every
 `ready`; a stream the daemon resumed is live again with nothing installed.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`

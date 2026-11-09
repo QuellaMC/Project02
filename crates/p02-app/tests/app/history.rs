@@ -3,7 +3,7 @@
 use p02_app::HistoryPage;
 use serde_json::{Value, json};
 
-use crate::support::{Round, World, line, open, wire};
+use crate::support::{Round, World, line, open, told, wire};
 
 fn page(before: Option<&str>, limit: Option<&str>) -> HistoryPage {
     HistoryPage {
@@ -40,13 +40,11 @@ async fn history_pages_back_across_her_segments() {
 
     for n in 1..=4 {
         world.model.script([Round::says(&[&format!("Reply {n}.")])]);
-        daemon
-            .deliver(line(
-                &conversation,
-                &format!("Line {n}."),
-                &format!("line-{n}"),
-            ))
-            .await;
+        told(
+            &daemon,
+            line(&conversation, &format!("Line {n}."), &format!("line-{n}")),
+        )
+        .await;
     }
 
     daemon.stop().await;

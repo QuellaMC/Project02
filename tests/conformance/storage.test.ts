@@ -91,7 +91,7 @@ function catalogOf(home: string, characterId: string): string[] {
     .sort((left, right) => left.localeCompare(right, 'en', {numeric: true}));
 }
 
-it("storage.layout: a character's history lives under character-data/<id>: the sessions catalog, a directory per segment <conversationId>.N holding its raw events, the taken-lines record and the locks; the conversation lives at conversations/<id>/conversation.json", async () => {
+it("storage.layout: a character's history lives under character-data/<id>: the sessions catalog, a directory per segment <conversationId>.N holding its raw events, the taken-lines record, her inbox and the locks; the conversation lives at conversations/<id>/conversation.json", async () => {
   const home = createHome({'config.json': rotatingEveryTurn});
   const wire = wireOf(await startDaemon(home, fixedReplies));
   const say = await converse(wire, 'mira');
@@ -105,6 +105,7 @@ it("storage.layout: a character's history lives under character-data/<id>: the s
       'sessions.jsonl',
       'sessions',
       'taken-lines',
+      'inbox.jsonl',
       '.locks',
     ]),
   );
@@ -288,7 +289,7 @@ it("storage.continuation: once its history outgrows the window the conversation 
   await say('Still there?', 'still');
   await events.next(frameOf('turn_completed', {clientMessageId: 'still'}));
   expect(new Set(events.frames.map(frame => frame.event))).toEqual(
-    new Set(['ready', 'turn_progress', 'turn_completed']),
+    new Set(['ready', 'turn_progress', 'turn_running', 'turn_completed']),
   );
 });
 

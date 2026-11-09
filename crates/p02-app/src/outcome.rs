@@ -3,19 +3,17 @@
 //! conformance suite read.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use p02_characters::{PackageDiagnostic, PackageLocation};
 use p02_config::Diagnostic;
 use p02_contracts::vocabulary;
 use p02_core::{
-    ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessage,
-    VisibleMessageRole, VisibleText,
+    ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
 };
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
-use p02_store::StorageError;
+use p02_store::{QueuedLine, StorageError};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -27,7 +25,7 @@ use crate::confirmation::{Answer, ConfirmationId};
 
 /// The protocol a client reads, which health carries so that an old client
 /// meets a clear message rather than a mystery.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// [`PROTOCOL_VERSION`] as health and a stream's first frame carry it: the
 /// one value either can say, which the contract declares as that number,
@@ -83,59 +81,27 @@ impl TS for ProtocolVersion {
     }
 }
 
-/// What became of a delivered line.
+/// What became of a line sent to a character: queued in her inbox, where
+/// she takes it in its turn and the stream tells how that ended, or
+/// refused at once.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "status",
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-pub enum TurnOutcome {
-    Completed {
-        character_id: Identifier,
-        conversation_id: ConversationId,
-        /// What the turn committed, the person's line first.
-        messages: Vec<TurnMessage>,
-    },
-    /// The turn ended refused; `committed` says whether its line is in the
-    /// log.
-    Rejected {
-        character_id: Identifier,
-        conversation_id: ConversationId,
-        reason: String,
-        message: String,
-        committed: bool,
-    },
-    /// Refused before any turn ran.
+pub enum SubmitOutcome {
+    /// In her inbox now, behind every line before it.
+    Queued,
+    /// In her inbox already, under the same id.
+    AlreadyQueued,
+    /// Refused before it was queued.
     Refused {
         reason: TurnRefusal,
         message: String,
     },
-    /// The runtime failed the turn; `committed` says whether its line is in
-    /// the log.
-    Failed {
-        character_id: Identifier,
-        conversation_id: ConversationId,
-        message: String,
-        committed: bool,
-    },
-}
-
-impl TurnOutcome {
-    /// Whether the turn put its line in the log, which a surface holding the
-    /// line waits to know. A duplicate is the one refusal whose line is
-    /// there already: a run before this one took it.
-    pub(crate) fn committed(&self) -> bool {
-        match self {
-            Self::Completed { .. } => true,
-            Self::Rejected { committed, .. } | Self::Failed { committed, .. } => *committed,
-            Self::Refused { reason, .. } => *reason == TurnRefusal::DuplicateSubmission,
-        }
-    }
-
-    pub(crate) fn refused(reason: TurnRefusal, message: String) -> Self {
-        Self::Refused { reason, message }
-    }
+    /// Her inbox could not take it.
+    Failed(StorageFailure),
 }
 
 vocabulary! {
@@ -149,27 +115,13 @@ vocabulary! {
     }
 }
 
-/// A committed message as a client renders it.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename = "GatewayVisibleMessage")]
-#[schemars(rename = "GatewayVisibleMessage")]
-pub struct TurnMessage {
-    pub message_id: MessageId,
-    pub speaker_id: Identifier,
-    pub speaker_name: SpeakerName,
-    pub text: VisibleText,
-}
-
-impl From<VisibleMessage> for TurnMessage {
-    fn from(message: VisibleMessage) -> Self {
-        Self {
-            message_id: message.id,
-            speaker_id: message.speaker_id,
-            speaker_name: message.speaker_name,
-            text: message.text,
-        }
-    }
+/// What a line sent again once a turn took it is refused with: the
+/// message it was committed as.
+pub(crate) fn duplicate(client_message_id: &ClientStamp, message_id: &MessageId) -> String {
+    format!(
+        "clientMessageId \"{client_message_id}\" is already on this conversation as message \
+         {message_id}; read the thread for its reply."
+    )
 }
 
 /// What came of opening a character's thread with the person.
@@ -183,8 +135,6 @@ pub enum OpenOutcome {
     Opened {
         conversation_id: ConversationId,
         character_id: Identifier,
-        /// Who the caller is in the thread: the sender a delivery names.
-        user_participant_id: Identifier,
     },
     Refused {
         reason: OpenRefusal,
@@ -470,9 +420,9 @@ pub struct ConnectorPresence {
     pub connected: bool,
 }
 
-/// A turn in progress, as the stream has told it so far: the submission it
-/// runs for, its character, and each open draft's text.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
+/// A turn as it runs: the line that started it, her character, and her
+/// drafts so far, each its whole text, in the order they opened.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningTurn {
     pub character_id: Identifier,
@@ -482,12 +432,113 @@ pub struct RunningTurn {
     pub drafts: Vec<RunningDraft>,
 }
 
-/// One open draft: the reply's text so far under its id.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
+/// A reply she is still writing: its text so far, under its draft's id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RunningDraft {
     pub draft_id: String,
     pub text: String,
+}
+
+impl RunningTurn {
+    /// The turn of `line` on `character`, before anything of it is told.
+    pub(crate) fn of(character: Identifier, line: &QueuedLine) -> Self {
+        Self {
+            character_id: character,
+            conversation_id: line.conversation_id.clone(),
+            source: line.source.clone(),
+            client_message_id: line.client_message_id.clone(),
+            drafts: Vec::new(),
+        }
+    }
+
+    /// What the stream is told of `progress`, in order: the message or the
+    /// tool calls it says, then the turn as it now runs when that changed.
+    /// A commit comes before the turn without its draft, so a surface that
+    /// shows the draft ends it as the message rather than taking it back.
+    pub(crate) fn told(&mut self, progress: Progress) -> Vec<Event> {
+        let (said, changed) = match progress {
+            Progress::UserMessage {
+                message,
+                source,
+                client_message_id,
+            } => (
+                Some(TurnProgress::UserMessage {
+                    message_id: message.id,
+                    speaker_id: message.speaker_id,
+                    speaker_name: message.speaker_name,
+                    text: message.text,
+                    source,
+                    client_message_id,
+                }),
+                true,
+            ),
+            Progress::VisibleReply { message, draft } => {
+                let draft_id = draft.to_string();
+
+                self.drafts.retain(|open| open.draft_id != draft_id);
+                (
+                    Some(TurnProgress::VisibleReply {
+                        message_id: message.id,
+                        speaker_id: message.speaker_id,
+                        speaker_name: message.speaker_name,
+                        text: message.text,
+                        draft_id,
+                    }),
+                    true,
+                )
+            }
+            Progress::ReplyDelta { draft, text } => {
+                let draft_id = draft.to_string();
+
+                match self
+                    .drafts
+                    .iter_mut()
+                    .find(|open| open.draft_id == draft_id)
+                {
+                    Some(open) => open.text.push_str(&text),
+                    None => self.drafts.push(RunningDraft { draft_id, text }),
+                }
+
+                (None, true)
+            }
+            Progress::ReplyWithdrawn { draft } => {
+                let draft_id = draft.to_string();
+
+                self.drafts.retain(|open| open.draft_id != draft_id);
+                (None, true)
+            }
+            Progress::ToolCallsRequested { round, tool_names } => (
+                Some(TurnProgress::ToolCallsRequested { round, tool_names }),
+                false,
+            ),
+            Progress::ToolCallCompleted {
+                round,
+                tool_name,
+                accepted,
+            } => (
+                Some(TurnProgress::ToolCallCompleted {
+                    round,
+                    status: if accepted {
+                        ToolCallStatus::Accepted
+                    } else {
+                        ToolCallStatus::Rejected
+                    },
+                    tool_name,
+                }),
+                false,
+            ),
+        };
+
+        said.map(|progress| Event::TurnProgress {
+            character_id: self.character_id.clone(),
+            conversation_id: self.conversation_id.clone(),
+            progress,
+        })
+        .into_iter()
+        .chain(changed.then(|| Event::TurnRunning(self.clone())))
+        .collect()
+    }
 }
 
 /// An account a connector asks to let in, waiting for the person's answer
@@ -578,15 +629,18 @@ pub enum PairingDecision {
 #[ts(rename = "GatewayEvent", optional_fields)]
 #[schemars(rename = "GatewayEvent")]
 pub enum Event {
-    /// A turn's progress: each message once it is durable, and a reply's
-    /// draft before its commit, which its kind marks as such.
+    /// A turn's progress: each message once it is durable, and the tool
+    /// calls of its rounds.
     TurnProgress {
         character_id: Identifier,
         conversation_id: ConversationId,
         progress: TurnProgress,
     },
-    /// How a delivery ended, with its submission's stamps, so that a surface
-    /// knows whose turn ended and whether its line is in the log.
+    /// A turn as it runs now, said whenever that changes, from the commit
+    /// of her line until the completion that ends it.
+    TurnRunning(RunningTurn),
+    /// How a turn ended, with its line's stamps, so that a surface knows
+    /// whose turn ended and whether its line is in the log.
     TurnCompleted {
         character_id: Identifier,
         conversation_id: ConversationId,
@@ -633,48 +687,7 @@ pub enum Event {
     },
 }
 
-impl Event {
-    /// How `outcome` ended the delivery `stamp` made to `character`.
-    pub(crate) fn turn_completed(
-        character: Identifier,
-        stamp: TurnStamp,
-        outcome: &TurnOutcome,
-    ) -> Self {
-        let committed = outcome.committed();
-        let (status, reason, message) = match outcome {
-            TurnOutcome::Completed { .. } => (TurnStatus::Completed, None, None),
-            TurnOutcome::Rejected {
-                reason, message, ..
-            } => (
-                TurnStatus::Rejected,
-                Some(reason.clone()),
-                Some(message.clone()),
-            ),
-            TurnOutcome::Refused { reason, message } => (
-                TurnStatus::Refused,
-                Some(reason.as_str().to_owned()),
-                Some(message.clone()),
-            ),
-            TurnOutcome::Failed { message, .. } => {
-                (TurnStatus::Failed, None, Some(message.clone()))
-            }
-        };
-
-        Self::TurnCompleted {
-            character_id: character,
-            conversation_id: stamp.conversation_id,
-            source: stamp.source,
-            client_message_id: stamp.client_message_id,
-            status,
-            committed,
-            reason,
-            message,
-        }
-    }
-}
-
-/// How a delivery ended, as the frame announcing it says: the status of
-/// its outcome.
+/// How a turn ended, as the frame announcing it says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
@@ -682,6 +695,24 @@ pub enum TurnStatus {
     Rejected,
     Refused,
     Failed,
+}
+
+impl Event {
+    /// Whether this ends `turn`: its completion, never another line's.
+    #[must_use]
+    pub fn ends(&self, turn: &RunningTurn) -> bool {
+        matches!(
+            self,
+            Self::TurnCompleted {
+                conversation_id,
+                source,
+                client_message_id,
+                ..
+            } if *conversation_id == turn.conversation_id
+                && *source == turn.source
+                && *client_message_id == turn.client_message_id
+        )
+    }
 }
 
 /// What a turn says as it goes, in order.
@@ -709,13 +740,6 @@ pub enum TurnProgress {
         /// The draft this message replaces.
         draft_id: String,
     },
-    ReplyDelta {
-        draft_id: String,
-        text: String,
-    },
-    ReplyWithdrawn {
-        draft_id: String,
-    },
     ToolCallsRequested {
         round: NonZeroU32,
         tool_names: Vec<Identifier>,
@@ -733,164 +757,4 @@ pub enum TurnProgress {
 pub enum ToolCallStatus {
     Accepted,
     Rejected,
-}
-
-impl From<Progress> for TurnProgress {
-    fn from(progress: Progress) -> Self {
-        match progress {
-            Progress::UserMessage {
-                message,
-                source,
-                client_message_id,
-            } => Self::UserMessage {
-                message_id: message.id,
-                speaker_id: message.speaker_id,
-                speaker_name: message.speaker_name,
-                text: message.text,
-                source,
-                client_message_id,
-            },
-            Progress::VisibleReply { message, draft } => Self::VisibleReply {
-                message_id: message.id,
-                speaker_id: message.speaker_id,
-                speaker_name: message.speaker_name,
-                text: message.text,
-                draft_id: draft.to_string(),
-            },
-            Progress::ReplyDelta { draft, text } => Self::ReplyDelta {
-                draft_id: draft.to_string(),
-                text,
-            },
-            Progress::ReplyWithdrawn { draft } => Self::ReplyWithdrawn {
-                draft_id: draft.to_string(),
-            },
-            Progress::ToolCallsRequested { round, tool_names } => {
-                Self::ToolCallsRequested { round, tool_names }
-            }
-            Progress::ToolCallCompleted {
-                round,
-                tool_name,
-                accepted,
-            } => Self::ToolCallCompleted {
-                round,
-                status: if accepted {
-                    ToolCallStatus::Accepted
-                } else {
-                    ToolCallStatus::Rejected
-                },
-                tool_name,
-            },
-        }
-    }
-}
-
-/// The turns in progress, folded from the events in the order they were
-/// announced: a turn begins at the stamped line that names its submission,
-/// each delta extends a draft, a draft ends at its commit or its
-/// withdrawal, and the turn ends at the completion that names the same
-/// submission, never at another's, since a submission refused on the spot
-/// completes while the turn ahead of it still runs. A conversation runs one
-/// turn at a time. The one definition of a running turn: what a surface
-/// that had heard every event would hold.
-#[derive(Clone, Debug, Default)]
-pub struct RunningTurns(BTreeMap<ConversationId, RunningTurn>);
-
-/// The turns a snapshot carries, from which a surface folds on.
-impl FromIterator<RunningTurn> for RunningTurns {
-    fn from_iter<I: IntoIterator<Item = RunningTurn>>(turns: I) -> Self {
-        Self(
-            turns
-                .into_iter()
-                .map(|turn| (turn.conversation_id.clone(), turn))
-                .collect(),
-        )
-    }
-}
-
-impl RunningTurns {
-    pub fn fold(&mut self, event: &Event) {
-        match event {
-            Event::TurnProgress {
-                character_id,
-                conversation_id,
-                progress,
-            } => self.progressed(character_id, conversation_id, progress),
-            Event::TurnCompleted {
-                conversation_id,
-                source,
-                client_message_id,
-                ..
-            } => {
-                let ends = self.0.get(conversation_id).is_some_and(|turn| {
-                    turn.source == *source && turn.client_message_id == *client_message_id
-                });
-
-                if ends {
-                    self.0.remove(conversation_id);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn progressed(
-        &mut self,
-        character: &Identifier,
-        conversation: &ConversationId,
-        progress: &TurnProgress,
-    ) {
-        match progress {
-            TurnProgress::UserMessage {
-                source,
-                client_message_id,
-                ..
-            } => {
-                self.0.insert(
-                    conversation.clone(),
-                    RunningTurn {
-                        character_id: character.clone(),
-                        conversation_id: conversation.clone(),
-                        source: source.clone(),
-                        client_message_id: client_message_id.clone(),
-                        drafts: Vec::new(),
-                    },
-                );
-            }
-            TurnProgress::ReplyDelta { draft_id, text } => {
-                let Some(turn) = self.0.get_mut(conversation) else {
-                    return;
-                };
-
-                match turn
-                    .drafts
-                    .iter_mut()
-                    .find(|draft| draft.draft_id == *draft_id)
-                {
-                    Some(draft) => draft.text.push_str(text),
-                    None => turn.drafts.push(RunningDraft {
-                        draft_id: draft_id.clone(),
-                        text: text.clone(),
-                    }),
-                }
-            }
-            TurnProgress::VisibleReply { draft_id, .. }
-            | TurnProgress::ReplyWithdrawn { draft_id } => {
-                if let Some(turn) = self.0.get_mut(conversation) {
-                    turn.drafts.retain(|draft| draft.draft_id != *draft_id);
-                }
-            }
-            TurnProgress::ToolCallsRequested { .. } | TurnProgress::ToolCallCompleted { .. } => {}
-        }
-    }
-
-    #[must_use]
-    pub fn turns(&self) -> Vec<RunningTurn> {
-        self.0.values().cloned().collect()
-    }
-
-    /// The turn running in `conversation`, if one is.
-    #[must_use]
-    pub fn get(&self, conversation: &ConversationId) -> Option<&RunningTurn> {
-        self.0.get(conversation)
-    }
 }
