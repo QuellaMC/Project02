@@ -384,27 +384,6 @@ impl RuntimePlugin for Failing {
     }
 }
 
-/// Fails its before-call hook the way a plugin's store call fails: with
-/// the store's refusal beneath the failure.
-#[derive(Debug)]
-pub(crate) struct FailingWithCause;
-
-#[async_trait]
-impl RuntimePlugin for FailingWithCause {
-    async fn before_role_model_call(
-        &self,
-        _context: &HookContext,
-    ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        Err(PluginError::with_source(
-            "the plugin store call failed",
-            std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "the store's lease was refused",
-            ),
-        ))
-    }
-}
-
 /// Fails every hook with more words than any record keeps.
 #[derive(Debug, Default)]
 pub(crate) struct Verbose {
@@ -568,37 +547,6 @@ impl RuntimePlugin for Stalling {
     }
 }
 
-/// Waits in its hook for the host to cancel it, as a plugin on a silent
-/// backend does, then answers with what it gave up.
-#[derive(Debug)]
-pub(crate) struct GivingUp {
-    tools: Vec<ProvidedTool>,
-}
-
-impl GivingUp {
-    pub(crate) const WORD: &'static str = "gave the backend up; whether it wrote is unknown";
-
-    pub(crate) fn new(tools: Vec<ProvidedTool>) -> Arc<Self> {
-        Arc::new(Self { tools })
-    }
-}
-
-#[async_trait]
-impl RuntimePlugin for GivingUp {
-    fn provided_tools(&self) -> &[ProvidedTool] {
-        &self.tools
-    }
-
-    async fn handle_tool_call(
-        &self,
-        _call: &ToolCall,
-        context: &HookContext,
-    ) -> Result<ToolCallOutcome, PluginError> {
-        context.cancellation().cancelled().await;
-        Err(PluginError::new(Self::WORD))
-    }
-}
-
 /// What a hook's context carried: the turn's message, the store and how it
 /// may be used, the session history, and the databases.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -743,14 +691,12 @@ impl RuntimePlugin for SlowTools {
 const SETTINGS: &str = "settings.json";
 
 /// `settings.update` asks the person first. Its preparation refuses a tone
-/// it does not know; otherwise it reads the settings saved now, keeps what
-/// its context carried, trying its store, as no preparation should, with a
-/// write, and answers with `notes`. Its effect saves the new settings.
+/// it does not know; otherwise it reads the settings saved now and answers
+/// with `notes`. Its effect saves the new settings.
 #[derive(Debug)]
 pub(crate) struct Settings {
     tools: Vec<ProvidedTool>,
     notes: Vec<EvidenceNote>,
-    pub(crate) prepared_with: Mutex<Vec<Seen>>,
 }
 
 impl Settings {
@@ -758,7 +704,6 @@ impl Settings {
         Self {
             tools: vec![tool("settings.update").with_confirmation(Confirmation::Required)],
             notes,
-            prepared_with: Mutex::new(Vec::new()),
         }
     }
 }
@@ -793,8 +738,6 @@ impl RuntimePlugin for Settings {
             .ok_or_else(|| PluginError::new("the store was not granted"))?;
         let settings = Value::Object(call.input().clone());
         let saved = store.with_lease(|leased| leased.read_json(SETTINGS))?;
-
-        self.prepared_with.lock().unwrap().push(Seen::of(context));
 
         Ok(ToolPreparation::Prepared {
             preview: [

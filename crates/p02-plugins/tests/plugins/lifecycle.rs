@@ -22,8 +22,8 @@ fn committed() -> CommittedTurn {
     CommittedTurn::new(Timestamp::new("2026-10-18T00:00:01.000Z").unwrap())
 }
 
-/// The host's half of plugins.after-turn-hooks; the turn's half, the
-/// follow-up record in the log, waits for the runtime.
+/// The after-turn and session-end hooks' failures, timeouts and panics
+/// are collected and reported with the phase, never thrown.
 #[tokio::test(start_paused = true)]
 async fn after_turn_failures_are_collected_and_reported_never_thrown() {
     let after = |id| Spec {

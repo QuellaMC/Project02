@@ -34,13 +34,11 @@ export type ChatMessage = {
 
 /** How the server answers one request. */
 export type Answer =
-  /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut or left hanging. */
-  | {readonly chunks: readonly unknown[]; readonly end?: 'cut' | 'hang'}
+  /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut. */
+  | {readonly chunks: readonly unknown[]; readonly end?: 'cut'}
   /** Whole, in one JSON body: how `stream: false` is answered. */
   | {readonly completion: unknown}
-  | {readonly status: number; readonly body?: unknown}
-  /** The connection closed before any byte of an answer. */
-  | {readonly drop: true};
+  | {readonly status: number; readonly body?: unknown};
 
 export type Held = {
   /** The request, once it reached the server. */
@@ -243,9 +241,7 @@ function give(
   request: IncomingMessage,
   response: ServerResponse,
 ): void {
-  if ('drop' in answer) {
-    request.socket.destroy();
-  } else if ('status' in answer) {
+  if ('status' in answer) {
     response
       .writeHead(answer.status, {'content-type': 'application/json'})
       .end(
@@ -259,7 +255,7 @@ function give(
       .end(JSON.stringify(answer.completion));
   } else {
     response.writeHead(200, {'content-type': 'text/event-stream'});
-    // Out now, so a stream that then hangs or is cut had opened.
+    // Out now, so a stream that is then cut had opened.
     response.flushHeaders();
     response.write(eventStream(answer.chunks), () => {
       // Cut once the response has handed the chunks to the socket, which it
@@ -360,13 +356,13 @@ export function reply(words: string): Answer {
 }
 
 /** A whole completion, as a `stream: false` request is answered. */
-export function completion(words: string, finishReason = 'stop'): Answer {
+export function completion(words: string): Answer {
   return {
     completion: {
       choices: [
         {
           index: 0,
-          finish_reason: finishReason,
+          finish_reason: 'stop',
           message: {role: 'assistant', content: words},
         },
       ],

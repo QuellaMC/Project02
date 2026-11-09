@@ -121,16 +121,6 @@ impl MiraHome {
     /// with the values they give it, `asking` asking the person, and her
     /// settings handed to the host's own plugin.
     pub(crate) fn mira(&self, asking: Arc<dyn Confirmer>) -> PluginHost {
-        self.mira_building(asking, |plugin| bundled(plugin).1)
-    }
-
-    /// Mira's host as [`MiraHome::mira`] builds it, each plugin by the
-    /// factory `factory_of` gives its id.
-    pub(crate) fn mira_building(
-        &self,
-        asking: Arc<dyn Confirmer>,
-        factory_of: impl Fn(&str) -> PluginFactory,
-    ) -> PluginHost {
         let discovery = discover(self.home.root());
         let mira = discovery.find("mira").unwrap();
         let data = materialize(&self.home, &self.sections, mira, SETTINGS_WAIT).unwrap();
@@ -143,11 +133,9 @@ impl MiraHome {
             .fold(
                 PluginHost::builder(Arc::new(data)),
                 |builder, (plugin, values)| {
-                    builder.plugin(
-                        bundled(plugin.as_str()).0.clone(),
-                        values.clone(),
-                        factory_of(plugin.as_str()),
-                    )
+                    let (manifest, factory) = bundled(plugin.as_str());
+
+                    builder.plugin(manifest.clone(), values.clone(), *factory)
                 },
             )
             .confirmer(asking)

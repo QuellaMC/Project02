@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, CommittedTurn, ConversationTurn, HealthReport, HookContext,
-    HookReport, InputEnvelope, Invocation, Manifest, PluginError, ProvidedTool, ProviderAnswer,
-    RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, TextCompletion, TextCompletionRequest,
-    ToolCall, ToolCallOutcome, ToolInputContract,
+    BeforeRoleModelCallOutput, ConversationTurn, HealthReport, HookContext, HookReport,
+    InputEnvelope, Invocation, Manifest, PluginError, ProvidedTool, ProviderAnswer, RawOutput,
+    ReplyDelta, RoleModelAdapter, RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall,
+    ToolCallOutcome, ToolInputContract,
 };
 use p02_core::{ClientStamp, ConversationId, SessionId, SpeakerName};
 use p02_plugins::PluginHost;
@@ -418,12 +418,10 @@ type Handler = Box<dyn Fn(&ToolCall) -> ToolCallOutcome + Send + Sync>;
 pub(crate) struct Toy {
     id: &'static str,
     access: Value,
-    rejects_turn: bool,
     tools: Vec<ProvidedTool>,
     before: Option<Hook<BeforeRoleModelCallOutput>>,
     tool: Option<Handler>,
     health: Option<HealthReport>,
-    after: Option<Hook<HookReport>>,
     end: Option<Hook<HookReport>>,
     pub(crate) ended: Mutex<Vec<SessionId>>,
 }
@@ -433,12 +431,10 @@ impl Toy {
         Self {
             id,
             access: json!({}),
-            rejects_turn: false,
             tools: Vec::new(),
             before: None,
             tool: None,
             health: None,
-            after: None,
             end: None,
             ended: Mutex::new(Vec::new()),
         }
@@ -446,13 +442,6 @@ impl Toy {
 
     pub(crate) fn access(mut self, access: Value) -> Self {
         self.access = access;
-        self
-    }
-
-    /// A failure of its before-call hook or its health rejects the turn,
-    /// rather than degrading it.
-    pub(crate) fn rejecting_turns(mut self) -> Self {
-        self.rejects_turn = true;
         self
     }
 
@@ -490,14 +479,6 @@ impl Toy {
         self
     }
 
-    pub(crate) fn after(
-        mut self,
-        hook: impl Fn(&HookContext) -> Result<HookReport, PluginError> + Send + Sync + 'static,
-    ) -> Self {
-        self.after = Some(Box::new(hook));
-        self
-    }
-
     pub(crate) fn end(
         mut self,
         hook: impl Fn(&HookContext) -> Result<HookReport, PluginError> + Send + Sync + 'static,
@@ -521,19 +502,9 @@ impl Toy {
             declared.push("health");
         }
 
-        if self.after.is_some() {
-            declared.push("after_turn_committed");
-        }
-
         if self.end.is_some() {
             declared.push("on_session_end");
         }
-
-        let failing = if self.rejects_turn {
-            "reject_turn"
-        } else {
-            "degrade"
-        };
 
         Manifest::from_value(&json!({
             "id": self.id,
@@ -550,9 +521,9 @@ impl Toy {
                 "timeoutMs": 10_000,
                 "redactionLabels": [],
                 "failureBehavior": {
-                    "beforeRoleModelCall": failing,
+                    "beforeRoleModelCall": "degrade",
                     "handleToolCall": "reject_tool_call",
-                    "health": failing,
+                    "health": "degrade",
                 },
             },
             "activation": {"defaultEnabled": false, "reasons": ["test"]},
@@ -598,16 +569,6 @@ impl RuntimePlugin for Toy {
         self.tool
             .as_ref()
             .map_or_else(|| unscripted("handleToolCall"), |handler| Ok(handler(call)))
-    }
-
-    async fn after_turn_committed(
-        &self,
-        _turn: &CommittedTurn,
-        context: &HookContext,
-    ) -> Result<HookReport, PluginError> {
-        self.after
-            .as_ref()
-            .map_or_else(|| unscripted("afterTurnCommitted"), |hook| hook(context))
     }
 
     async fn on_session_end(&self, context: &HookContext) -> Result<HookReport, PluginError> {

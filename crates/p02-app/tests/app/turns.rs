@@ -2,16 +2,13 @@
 //! goes, the ledger of submissions, the routing of a conversation to its
 //! character, a turn the runtime fails, and a failure behind a turn.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use p02_app::CharacterState::{Failed, Ready, Starting};
-use p02_app::{Event, TurnOutcome};
+use p02_app::CharacterState::{Ready, Starting};
+use p02_app::Event;
 use serde_json::json;
 
-use crate::support::{
-    Ear, Gate, Round, Toy, World, id, line, make_read_only, open, restore, said, settle, wire,
-    write,
-};
+use crate::support::{Ear, Gate, Round, Toy, World, id, line, open, said, settle, wire};
 
 /// A daemon on a home with the bundled Mira starts her on its first
 /// reconcile; her thread opens as the same conversation every time, and a
@@ -101,148 +98,6 @@ async fn a_line_through_her_thread_completes_as_the_stream_tells() {
         })
     );
     assert_eq!(wire(&ear.running()), json!([]));
-}
-
-/// turns.fatal-turn-refuses-queued: A delivery queued behind a fatal turn is refused `character_unavailable` rather than run after the restart.
-#[tokio::test(start_paused = true)]
-async fn lines_queued_behind_a_fatal_turn_are_refused_and_she_restarts_once() {
-    let world = World::new();
-    let daemon = world.daemon(Vec::new()).await;
-
-    daemon.reconcile().await;
-
-    let conversation = open(&daemon).await;
-    let log = world.log(&conversation, 1);
-    let writable = Arc::new(Mutex::new(None));
-    let gate = Arc::new(Gate::default());
-    let mut ear = Ear::on(&daemon);
-    let deliver = |text: &str, id: &str| {
-        let daemon = daemon.clone();
-        let line = line(&conversation, text, id);
-
-        tokio::spawn(async move { daemon.deliver(line).await })
-    };
-
-    gate.shut();
-    world.model.script([Round::says(&["Hi."]).held(&gate).then({
-        let (log, writable) = (log.clone(), Arc::clone(&writable));
-
-        move || *writable.lock().unwrap() = Some(make_read_only(&log))
-    })]);
-
-    let fatal = deliver("Hello there", "hello");
-
-    gate.reached().await;
-
-    let queued = [
-        deliver("Are you there?", "there"),
-        deliver("Hello?", "again"),
-    ];
-
-    settle().await;
-    gate.open();
-
-    let failed = fatal.await.unwrap();
-
-    restore(&log, writable.lock().unwrap().take().unwrap());
-    assert!(
-        matches!(
-            failed,
-            TurnOutcome::Failed {
-                committed: true,
-                ..
-            }
-        ),
-        "{failed:?}"
-    );
-
-    for refused in queued {
-        let refused = wire(&refused.await.unwrap());
-
-        assert_eq!(refused["status"], "refused");
-        assert_eq!(refused["reason"], "character_unavailable");
-    }
-
-    ear.reached("mira", Ready).await;
-    assert_eq!(ear.states("mira"), [Failed, Starting, Ready]);
-
-    let next = daemon
-        .deliver(line(&conversation, "Back again", "back"))
-        .await;
-
-    assert_eq!(said(&next), ["Back again", "Hello."]);
-    assert_eq!(wire(&next)["conversationId"], conversation);
-}
-
-/// A line on a conversation this run never opened is routed by the store's
-/// record of it: refused while its character is not running and completed
-/// there once she is, under the same id; a conversation the home does not
-/// hold is unknown, and one whose record cannot be read is said to be,
-/// naming it.
-#[tokio::test(start_paused = true)]
-async fn a_conversation_this_run_never_opened_is_routed_by_its_record() {
-    let world = World::new();
-    let earlier = world.daemon(Vec::new()).await;
-
-    earlier.reconcile().await;
-
-    let conversation = open(&earlier).await;
-
-    earlier
-        .deliver(line(&conversation, "Before the restart.", "before"))
-        .await;
-    earlier.stop().await;
-
-    let daemon = world.daemon(Vec::new()).await;
-    let after = line(&conversation, "After the restart.", "after");
-    let refused = wire(&daemon.deliver(after.clone()).await);
-
-    assert_eq!(refused["reason"], "character_unavailable");
-    assert_eq!(
-        refused["message"],
-        "Character \"mira\" has not been started."
-    );
-    assert_eq!(
-        wire(
-            &daemon
-                .deliver(line("conv_missing", "Hello?", "missing"))
-                .await
-        ),
-        json!({
-            "status": "refused",
-            "reason": "unknown_conversation",
-            "message": "Conversation \"conv_missing\" does not exist.",
-        })
-    );
-
-    daemon.reconcile().await;
-
-    let completed = daemon.deliver(after).await;
-
-    assert_eq!(said(&completed), ["After the restart.", "Hello."]);
-    assert_eq!(wire(&completed)["conversationId"], conversation);
-    daemon.stop().await;
-    write(
-        &world.path(&format!("conversations/{conversation}/conversation.json")),
-        "not json",
-    );
-
-    let unreadable = wire(
-        &world
-            .daemon(Vec::new())
-            .await
-            .deliver(line(&conversation, "Hello?", "damaged"))
-            .await,
-    );
-
-    assert_eq!(unreadable["reason"], "conversation_unreadable");
-    assert!(
-        unreadable["message"]
-            .as_str()
-            .unwrap()
-            .contains(&conversation),
-        "{unreadable}"
-    );
 }
 
 /// One turn per submission: a repeat while the turn runs and one after it

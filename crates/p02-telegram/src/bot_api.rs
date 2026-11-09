@@ -7,7 +7,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use p02_shared::{BaseUrl, error_sentence, http_client};
 use reqwest::header::CONTENT_TYPE;
 use serde::de::{DeserializeOwned, IgnoredAny};
@@ -76,19 +75,6 @@ impl fmt::Debug for BotToken {
     }
 }
 
-/// How a bot's calls reach the Bot API: a call's JSON posted to its path,
-/// answered within `bound` with the status and the body Telegram sent.
-/// The path holds the bot's token, so no failure names it.
-#[async_trait]
-pub(crate) trait Transport: Send + Sync + fmt::Debug {
-    async fn post(
-        &self,
-        path: &str,
-        body: Vec<u8>,
-        bound: Duration,
-    ) -> Result<(u16, Vec<u8>), Failure>;
-}
-
 /// Where the Bot API is, and the one client every bot's calls ride.
 #[derive(Debug)]
 pub(crate) struct Telegram {
@@ -106,10 +92,10 @@ impl Telegram {
             base,
         })
     }
-}
 
-#[async_trait]
-impl Transport for Telegram {
+    /// How a bot's calls reach the Bot API: a call's JSON posted to its
+    /// path, answered within `bound` with the status and the body Telegram
+    /// sent. The path holds the bot's token, so no failure names it.
     async fn post(
         &self,
         path: &str,
@@ -135,7 +121,7 @@ impl Transport for Telegram {
 /// One bot's calls to Telegram.
 #[derive(Clone, Debug)]
 pub(crate) struct BotApi {
-    telegram: Arc<dyn Transport>,
+    telegram: Arc<Telegram>,
     token: BotToken,
 }
 
@@ -325,7 +311,7 @@ struct Parameters {
 }
 
 impl BotApi {
-    pub(crate) fn new(telegram: Arc<dyn Transport>, token: BotToken) -> Self {
+    pub(crate) fn new(telegram: Arc<Telegram>, token: BotToken) -> Self {
         Self { telegram, token }
     }
 

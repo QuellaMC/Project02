@@ -68,7 +68,7 @@ pub(crate) async fn run(
     let claim = match Claim::take(&home) {
         Ok(ClaimOutcome::Claimed(claim)) => claim,
         Ok(ClaimOutcome::Held { record }) => {
-            match handover::hand_over(&home, record, &switches, &stop, console).await {
+            match handover::hand_over(&home, record, &stop, console).await {
                 HandedOver::Claimed(claim) => claim,
                 HandedOver::Ended(code) => return code,
             }

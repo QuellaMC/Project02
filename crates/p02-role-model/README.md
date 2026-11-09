@@ -46,20 +46,3 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   conversation.
 - **The test provider** answers with fixed sentences, and only a test
   harness's switch reaches it: no setting names it.
-
-## The prompt fixtures
-
-`tests/fixtures/prompts/` holds what the TypeScript daemon of commit
-`6e1e9fdc4f0a05d03233889fa08356f3360c658e` rendered and sent for four
-turns, with the summarizer's two requests, the day notes and the notes about
-an unusable reply; `prompt::parity` renders the same and compares the
-bytes. The turns are a first turn offering the bundled tools, with curated
-sections and runtime notes; a continued session that names the person, with
-its summary, two earlier turns, one with a tool round, recalled memory,
-untrusted context, an untrusted plugin's runtime note, and tool names that
-collide once made provider-safe; a turn in its third round, with two rounds
-of its own and the note about an unusable reply; and a turn offering
-`visible_reply` alone. That daemon is retired, so the fixtures are the
-prompt's record: a change to what a prompt says rewrites its fixture in
-the same commit, from what `prompt::parity` renders, and is reviewed as
-the change of intent it is.

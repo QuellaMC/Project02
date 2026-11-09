@@ -21,10 +21,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Console;
 use crate::serve::{address_line, failed};
-use crate::switches::Switches;
 
 /// Between two tries of the lease.
 const RETRY: Duration = Duration::from_millis(500);
+
+/// How long a second serve waits for a holder that does not answer.
+const HOLD: Duration = Duration::from_secs(30);
+
+/// How long one question to that holder waits for its answer.
+const PROBE: Duration = Duration::from_secs(5);
 
 /// How a second serve ended, or the home it took over.
 #[derive(Debug)]
@@ -51,7 +56,6 @@ enum Asked {
 pub(crate) async fn hand_over(
     home: &Home,
     mut record: Option<DaemonRecord>,
-    switches: &Switches,
     stop: &CancellationToken,
     console: &mut Console,
 ) -> HandedOver {
@@ -59,11 +63,11 @@ pub(crate) async fn hand_over(
         Ok(client) => client,
         Err(error) => return HandedOver::Ended(failed(console, &error)),
     };
-    let deadline = Instant::now() + switches.hold;
+    let deadline = Instant::now() + HOLD;
     let mut waiting = false;
 
     loop {
-        let why = match ask(&client, home, record.as_ref(), switches.probe, stop).await {
+        let why = match ask(&client, home, record.as_ref(), stop).await {
             Asked::Running { line, pid } => {
                 console.say(&match pid {
                     Some(pid) => format!("Already running on this home (pid {pid})."),
@@ -114,7 +118,6 @@ async fn ask(
     client: &reqwest::Client,
     home: &Home,
     record: Option<&DaemonRecord>,
-    probe: Duration,
     stop: &CancellationToken,
 ) -> Asked {
     let Some(record) = record else {
@@ -125,7 +128,7 @@ async fn ask(
         let response = client
             .get(format!("{origin}api/health"))
             .bearer_auth(record.token.as_str())
-            .timeout(probe)
+            .timeout(PROBE)
             .send()
             .await?;
         let status = response.status();
@@ -141,7 +144,7 @@ async fn ask(
     match answered {
         Err(error) if error.is_timeout() => Asked::Silent(format!(
             "did not answer at {origin} within {} seconds",
-            seconds(probe)
+            PROBE.as_secs()
         )),
         Err(error) => Asked::Silent(format!("did not answer at {origin}: {}", innermost(&error))),
         Ok((status, _)) if status.as_u16() == 503 => Asked::Silent("is stopping".to_owned()),
@@ -179,18 +182,4 @@ fn innermost(error: &(dyn Error + 'static)) -> String {
     }
 
     deepest.to_string()
-}
-
-/// `wait` in seconds as a person writes them: `0.5`, `5`, `1.25`.
-fn seconds(wait: Duration) -> String {
-    let millis = wait.as_millis();
-    let (whole, part) = (millis / 1000, millis % 1000);
-
-    if part == 0 {
-        whole.to_string()
-    } else {
-        format!("{whole}.{part:03}")
-            .trim_end_matches('0')
-            .to_owned()
-    }
 }

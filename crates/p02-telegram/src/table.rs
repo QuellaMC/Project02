@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::bot::{Bot, Inbox, Start};
-use crate::bot_api::{BotToken, Transport};
+use crate::bot_api::{BotToken, Telegram};
 use crate::daemon::Daemon;
 use crate::{Lines, Notice, backoff, lenient};
 
@@ -170,7 +170,7 @@ type Answer = (u64, ConnectorConfigView);
 /// they wait for while a read is under way.
 #[derive(Debug)]
 pub(crate) struct Table {
-    telegram: Arc<dyn Transport>,
+    telegram: Arc<Telegram>,
     draft_edits: Duration,
     lines: Arc<dyn Lines>,
     stop: CancellationToken,
@@ -205,7 +205,7 @@ pub(crate) struct Table {
 
 impl Table {
     pub(crate) fn new(
-        telegram: Arc<dyn Transport>,
+        telegram: Arc<Telegram>,
         draft_edits: Duration,
         lines: Arc<dyn Lines>,
         stop: &CancellationToken,

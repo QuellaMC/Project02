@@ -114,10 +114,6 @@ pub(crate) struct Files {
 struct Leased<'a>(MutexGuard<'a, BTreeMap<String, Value>>);
 
 impl Files {
-    pub(crate) fn get(&self, path: &str) -> Option<Value> {
-        self.documents.lock().unwrap().get(path).cloned()
-    }
-
     /// The deadline the last lease was waited for by, on the real clock.
     pub(crate) fn waited_until(&self) -> Option<std::time::Instant> {
         *self.waited_until.lock().unwrap()

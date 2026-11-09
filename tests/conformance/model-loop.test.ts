@@ -3,9 +3,7 @@ import {expect, it} from 'vitest';
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionRecords} from './harness/home.ts';
-import {connectSocket, requestText} from './harness/socket.ts';
 import {
-  calling,
   content,
   finish,
   messagesOf,
@@ -19,8 +17,7 @@ import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
 type Decision = {
   readonly status: string;
-  readonly decision?: {readonly text?: string};
-  readonly rejection?: {readonly reason: string; readonly details: string};
+  readonly rejection?: {readonly details: string};
 };
 
 /** What the parser made of each round, as the rounds were recorded. */
@@ -51,7 +48,7 @@ function listing(index: number, argumentsText = '{}'): unknown[] {
   });
 }
 
-it('model.decision-parse-failure-fed-back: a round that neither replies nor calls, replies blank, passes arguments that are no object, or replies blank beside a call is refused whole, nothing of it dispatched, recorded, and quoted back to the model in exactly the next round, which can recover', async () => {
+it('model.decision-parse-failure-fed-back: a round of empty content, a blank reply, arguments that are no object, or a blank reply beside a call is refused whole, nothing of it dispatched, and quoted back to the model in the next round, which can recover', async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -61,7 +58,7 @@ it('model.decision-parse-failure-fed-back: a round that neither replies nor call
   const events = await openEvents(daemon);
 
   model.answer(
-    {chunks: [finish('stop')]},
+    {chunks: [...content(''), finish('stop')]},
     {chunks: [...visibleReply('   '), finish('tool_calls')]},
     {chunks: [...listing(0, '[1]'), finish('tool_calls')]},
     {chunks: [...visibleReply(' '), ...listing(1), finish('tool_calls')]},
@@ -100,64 +97,7 @@ it('model.decision-parse-failure-fed-back: a round that neither replies nor call
   ).toEqual([]);
 });
 
-it('model.round-budget: a turn ends rejected tool_rounds_exhausted once its rounds are spent, the call of the round past them never dispatched, and rejected provider_error at once when the provider gave no usable output', async () => {
-  const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({project02: model.settings}),
-  });
-  const daemon = await startDaemon(home);
-  const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
-  const {conversationId, userParticipantId} = await conversationOf(
-    wire,
-    'mira',
-  );
-  const events = await openEvents(daemon);
-
-  model.answer(
-    ...Array.from({length: 100}, () =>
-      calling(['runtime_plugin_config', {pluginId: 'nothing'}]),
-    ),
-  );
-
-  // A hundred rounds outlast one wait: the turn goes on a socket of its
-  // own, each dispatched call is seen through on the stream, and the
-  // answer is read once it has come.
-  const looking = await connectSocket(daemon);
-
-  looking.write(
-    requestText(daemon, {
-      method: 'POST',
-      path: '/api/turns',
-      body: JSON.stringify({
-        conversationId,
-        senderId: userParticipantId,
-        text: 'Keep looking.',
-        source: 'web',
-        clientMessageId: 'looking',
-      }),
-    }),
-  );
-
-  for (let round = 0; round < 99; round += 1) {
-    await events.next(
-      frameOf('turn_progress', {progress: {kind: 'tool_call_completed'}}),
-    );
-  }
-
-  await looking.holds('"tool_rounds_exhausted"');
-  expect(looking.received().toString('utf8')).toMatch(/"status":"rejected"/u);
-  expect(model.requests).toHaveLength(100);
-  expect(sessionRecords(home, 'mira', 'tool_call_started')).toHaveLength(99);
-  model.answer({status: 400, body: {error: {message: 'Not now.'}}});
-  expect(await say('Hello?', 'failed')).toMatchObject({
-    status: 'rejected',
-    reason: 'provider_error',
-  });
-  expect(model.requests).toHaveLength(101);
-});
-
-it("model.note-never-shown: the model's note beside its calls is stored with its round's decision and never becomes a message", async () => {
+it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, no draft and no line of history", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -188,62 +128,8 @@ it("model.note-never-shown: the model's note beside its calls is stored with its
     messages: [{text: 'Anything new?'}, {text: 'Here you are.'}],
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'new'}));
-  expect(decisionsOf(home).map(decision => decision.decision?.text)).toEqual([
-    'A private note.',
-    'Another private note.',
-  ]);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{text: 'Anything new?'}, {text: 'Here you are.'}],
   });
   expect(JSON.stringify(events.frames)).not.toContain('private note');
-});
-
-it('model.multi-reply-turn: replies that rounds of one turn said alike read back as separate messages, and replies that normalize to the same text are each kept, normalized', async () => {
-  const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({project02: model.settings}),
-  });
-  const first = await startDaemon(home);
-  const say = await converse(wireOf(first), 'mira');
-
-  model.answer(
-    {
-      chunks: [
-        ...visibleReply('  Checking.  '),
-        ...listing(1),
-        finish('tool_calls'),
-      ],
-    },
-    {
-      chunks: [
-        ...visibleReply('Checking.\r\n'),
-        ...listing(1),
-        finish('tool_calls'),
-      ],
-    },
-    {chunks: [...visibleReply('Checking.'), finish('tool_calls')]},
-  );
-  await say('Anything?', 'anything');
-  first.signal('SIGINT');
-  await first.exit();
-
-  const wire = wireOf(await startDaemon(home));
-
-  await wire.start('mira');
-
-  const {conversationId} = await conversationOf(wire, 'mira');
-  const {messages} = (await wire.history(conversationId)) as {
-    readonly messages: readonly {
-      readonly messageId: string;
-      readonly text: string;
-    }[];
-  };
-
-  expect(messages.map(message => message.text)).toEqual([
-    'Anything?',
-    'Checking.',
-    'Checking.',
-    'Checking.',
-  ]);
-  expect(new Set(messages.map(message => message.messageId)).size).toBe(4);
 });

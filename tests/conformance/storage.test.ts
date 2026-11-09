@@ -74,7 +74,11 @@ function contentsOf(path: string): string | string[] {
     : readFileSync(path, 'utf8');
 }
 
-/** The session ids a character's catalog names, in its order. */
+/**
+ * The session ids a character's catalog names, by segment: the catalog
+ * orders its rows by when each was made, which the wall clock decides, and
+ * a clock that steps back reorders them.
+ */
 function catalogOf(home: string, characterId: string): string[] {
   return readFileSync(
     join(home, 'character-data', characterId, 'sessions.jsonl'),
@@ -82,7 +86,8 @@ function catalogOf(home: string, characterId: string): string[] {
   )
     .trimEnd()
     .split('\n')
-    .map(row => (JSON.parse(row) as {readonly sessionId: string}).sessionId);
+    .map(row => (JSON.parse(row) as {readonly sessionId: string}).sessionId)
+    .sort((left, right) => left.localeCompare(right, 'en', {numeric: true}));
 }
 
 it("storage.layout: a character's history lives under character-data/<id>: the sessions catalog, a directory per segment <conversationId>.N holding its raw events, the taken-lines record and the locks; the conversation lives at conversations/<id>/conversation.json", async () => {

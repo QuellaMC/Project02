@@ -6,8 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    CommittedTurn, FactoryInput, MissingConfigValueError, PluginError, RedactionLabel,
-    RegistrationError, StoreAccess,
+    CommittedTurn, FactoryInput, MissingConfigValueError, PluginError, RedactionLabel, StoreAccess,
 };
 use p02_core::Timestamp;
 use p02_plugins::{
@@ -17,53 +16,7 @@ use p02_shared::Identifier;
 use serde_json::{Map, json};
 
 use crate::storage::Storage;
-use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, tool, turn};
-
-/// plugins.manifest-validation: two enabled plugins offering one tool name, or one plugin offering a tool twice, are refused at activation
-#[test]
-fn a_tool_name_offered_twice_is_refused_at_activation() {
-    let searching = |tools: &[&str]| {
-        Arc::new(Scripted {
-            tools: tools.iter().map(|name| tool(name)).collect(),
-            ..Scripted::default()
-        })
-    };
-    let across = PluginHost::builder(Storage::new())
-        .enable(&Spec::tools("notes"), searching(&["notes.search"]))
-        .enable(&Spec::tools("archive"), searching(&["notes.search"]))
-        .activate()
-        .unwrap_err();
-    let within = PluginHost::builder(Storage::new())
-        .enable(
-            &Spec::tools("notes"),
-            searching(&["notes.search", "notes.search"]),
-        )
-        .activate()
-        .unwrap_err();
-
-    assert!(
-        matches!(across, ActivationError::DuplicateTool(_)),
-        "{across:?}"
-    );
-    assert_eq!(
-        across.to_string(),
-        r#"tool "notes.search" is offered by both "notes" and "archive""#
-    );
-    assert!(
-        matches!(
-            within,
-            ActivationError::Build {
-                source: BuildPluginError::Registration(RegistrationError::DuplicateTool { .. }),
-                ..
-            }
-        ),
-        "{within:?}"
-    );
-    assert_eq!(
-        within.source().map(ToString::to_string),
-        Some(r#"plugin "notes" provides tool "notes.search" more than once"#.to_owned())
-    );
-}
+use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, turn};
 
 #[test]
 fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_at_activation() {

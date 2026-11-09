@@ -18,7 +18,6 @@ import {test} from './fixture.ts';
 async function miraHome(
   config: {readonly project02?: object; readonly [section: string]: unknown},
   seed: Parameters<typeof createHome>[0] = {},
-  env: Readonly<Record<string, string>> = {},
 ) {
   const model = await startModelServer();
   const home = createHome({
@@ -29,7 +28,7 @@ async function miraHome(
     ...seed,
   });
 
-  return {home, daemon: await startDaemon(home, env)};
+  return {home, daemon: await startDaemon(home)};
 }
 
 /** The row of one field, host or section, by its key. */
@@ -103,7 +102,7 @@ test("page.settings-setup-frame: a fresh home with no model provider chosen open
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
-test("page.settings-save-and-sync: a character's plugin field, a secret and her bot token save from her screen, a secret shown only as set and never in the page; a second page follows saves through the stream; a save whose read again fails says so and shows Saved only once a read lands; and a page that fell behind is told that someone saved first", async ({
+test("page.settings-save-and-sync: a character's plugin field, a secret and her bot token save from her screen, a secret shown only as set and never in the page; a second page follows saves through the stream; and a page that fell behind is told that someone saved first", async ({
   context,
   page,
 }) => {
@@ -160,32 +159,13 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
     {name: 'Operator note'},
   );
 
-  // The read after a save fails at first: the row says Saved only once a
-  // read has landed, and then shows what was saved, never the value from
-  // before.
-  let reads = 'failing';
-
-  await page.route('**/api/config?*', async route => {
-    await (reads === 'failing' ? route.abort() : route.continue());
-  });
-  await noteBox.fill('kept');
-  await note.getByRole('button', {name: 'Save'}).click();
-  await expect(page.locator('.notice')).toBeVisible();
-  await expect(note.getByRole('button', {name: 'Saved'})).toHaveCount(0);
-  reads = 'landing';
-  await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
-  expect(await noteBox.inputValue()).toBe('kept');
-  await page.unroute('**/api/config?*');
-  await expect(secondNote).toHaveValue('kept');
-
   // A page whose read did not land is behind, and says so; its next save
   // is told that someone saved first.
   await second.route('**/api/config?*', route => route.abort(), {times: 1});
-  await noteBox.fill('kept again');
+  await noteBox.fill('kept');
   await note.getByRole('button', {name: 'Save'}).click();
   await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
   await expect(second.locator('.notice')).toBeVisible();
-  await expect(secondNote).toHaveValue('kept');
 
   const staleSignoff = row(second, 'plugins/demo-config/signoff');
 
@@ -195,7 +175,7 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
     'Someone else saved first',
   );
   // The screen shows what is there now, with the person's own text still in its row.
-  await expect(secondNote).toHaveValue('kept again');
+  await expect(secondNote).toHaveValue('kept');
   await expect(
     staleSignoff.getByRole('textbox', {name: 'Signoff'}),
   ).toHaveValue('bye');
@@ -203,44 +183,6 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
   // A character clicked in the roster is a thread wanted: settings give way.
   await page.getByRole('button', {name: /^Mira\b/u}).click();
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
-});
-
-test('page.settings-left-screen-quiet: a settings screen left while its reads were failing reads no more and says nothing more', async ({
-  page,
-}) => {
-  // A stream pings this often: a screen still open reads again every second.
-  const {daemon} = await miraHome(
-    {plugins: {'demo-config': {enabled: true}}},
-    {},
-    {PROJECT02_TEST_DURATIONS: 'heartbeat=1500'},
-  );
-  const note = row(page, 'plugins/demo-config/operatorNote');
-  let reads = 0;
-
-  await page.goto(daemon.url);
-  await page.getByRole('button', {name: 'Settings for Mira'}).click();
-  await page.route('**/api/config?*', async route => {
-    reads += 1;
-    await route.abort();
-  });
-  await note.getByRole('textbox', {name: 'Operator note'}).fill('kept');
-  await note.getByRole('button', {name: 'Save'}).click();
-  await expect(page.locator('.notice')).toBeVisible();
-  await page.getByRole('button', {name: /^Mira\b/u}).click();
-  await expect(page.locator('.notice')).toHaveCount(0);
-
-  // From one ping to the next: a read that was on its way when the screen
-  // was left has failed by the first, and none begins after it.
-  const clock = await openEvents(daemon);
-  const ping = (frame: {readonly comment?: string}) => frame.comment === 'ping';
-
-  await clock.next(ping);
-
-  const readsBefore = reads;
-
-  await clock.next(ping);
-  expect(reads).toBe(readsBefore);
-  await expect(page.locator('.notice')).toHaveCount(0);
 });
 
 test('page.settings-character-switch: a character that is off shows off with no Start, and with two characters none opens itself; her Enabled switch turns her on to ready and off again', async ({

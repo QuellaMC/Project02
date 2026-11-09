@@ -31,8 +31,8 @@ and `ADDRESS_PREFIX`, which begins the line the address is said on.
   `PROJECT02_TEST_PROVIDER=deterministic` runs every character on the
   test provider, and `PROJECT02_TEST_DURATIONS` shortens the waits,
   `key=milliseconds` pairs over `confirmation`, `pairing`, `silence`,
-  `heartbeat`, `grace`, `hold` and `probe`. Any other value refuses the
-  start, saying why, before anything is bound or written.
+  `heartbeat` and `grace`. Any other value refuses the start, saying why,
+  before anything is bound or written.
 - **The run.** The home is claimed, the daemon opened on it and its
   socket bound on the home's port, or on a free one when another program
   holds that one, which is said; the record is published, and then

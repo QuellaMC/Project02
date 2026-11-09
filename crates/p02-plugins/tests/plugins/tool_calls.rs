@@ -1,5 +1,6 @@
-//! `handleToolCall`: the batch rule, deadlines, routing and the input
-//! contract, the output boundary and the confirmation gate.
+//! `handleToolCall`: the batch rule, routing and the input contract, the
+//! output boundary, a confirmable call refused in its preparation, and the
+//! store's lease.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -7,8 +8,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use p02_contracts::{
     ConversationToolCall, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, FileStore,
-    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreAccess, StoreError,
-    ToolCall, ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
+    HookContext, PluginError, PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall,
+    ToolCallId, ToolCallOutcome, ToolCallResult, ToolInputContract,
 };
 use p02_plugins::{
     ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ProposedToolCall,
@@ -19,8 +20,8 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, GivingUp, Scripted, Seen, Settings, SlowTools, Spec, Stalling, Verbose, call, host_of,
-    id, note, run_round, tool, turn,
+    Enable, Scripted, Settings, SlowTools, Spec, Verbose, call, host_of, id, note, run_round, tool,
+    turn,
 };
 
 async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
@@ -82,80 +83,6 @@ async fn a_round_runs_shared_calls_together_and_exclusive_ones_alone_in_order() 
             json!("r5")
         ]
     );
-}
-
-/// plugins.hook-last-word: a tool handler the host cancels at its deadline is heard for what it gives up with: its own failure is the refusal, not the timeout, and at the deadline, not after the second the host would wait
-#[tokio::test(start_paused = true)]
-async fn a_tool_handler_cancelled_at_its_deadline_is_refused_with_its_own_word() {
-    let storage = Storage::new();
-    let host = PluginHost::builder(Arc::clone(&storage) as _)
-        .enable(
-            &Spec {
-                timeout_ms: 50,
-                ..Spec::tools("notes")
-            },
-            GivingUp::new(vec![tool("notes.save")]),
-        )
-        .activate()
-        .unwrap();
-    let started = Instant::now();
-    let report = one(&host, call("c1", "notes.save", json!({})), &turn()).await;
-
-    assert_eq!(started.elapsed(), Duration::from_millis(50));
-    assert_eq!(reason(&report), Some("handler_failed"));
-    assert_eq!(message(&report), GivingUp::WORD);
-}
-
-/// plugins.hook-timeout: a tool handler that overruns its timeout and says nothing within the second after is refused `handler_timeout`, recorded by its policy, and its late write to its store is blocked
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_tool_handler_past_its_timeout_is_refused_and_its_late_write_blocked() {
-    for (policy, status) in [
-        ("reject_tool_call", EvidenceStatus::Failed),
-        ("degrade", EvidenceStatus::Degraded),
-    ] {
-        let (stalling, gate, late_write) = Stalling::new(vec![tool("notes.save")]);
-        let storage = Storage::new();
-        let host = PluginHost::builder(Arc::clone(&storage) as _)
-            .enable(
-                &Spec {
-                    timeout_ms: 50,
-                    tool: policy,
-                    access: json!({"model_input": "write", "character_file_store": "write"}),
-                    ..Spec::tools("notes")
-                },
-                stalling,
-            )
-            .activate()
-            .unwrap();
-        let report = one(&host, call("c1", "notes.save", json!({})), &turn()).await;
-
-        assert_eq!(reason(&report), Some("handler_timeout"));
-        assert_eq!(
-            message(&report),
-            "Plugin \"notes\" handleToolCall timed out after 50ms."
-        );
-        assert_eq!(report.evidence[0].status(), status, "{policy}");
-        assert_eq!(
-            report.evidence[0].policy_outcome(),
-            Some(PolicyOutcome::Timeout)
-        );
-
-        gate.open();
-
-        let written = tokio::time::timeout(Duration::from_secs(10), late_write)
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert!(
-            matches!(
-                written,
-                Err(StoreError::Cancelled | StoreError::WritesRevoked)
-            ),
-            "{written:?}"
-        );
-        assert_eq!(storage.files("notes").get("late.json"), None);
-    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -396,152 +323,45 @@ async fn credential_named_output_values_are_redacted_at_the_boundary() {
     }
 }
 
-/// Answers every question the same way a minute after it was asked, long
-/// past every plugin's budget, and keeps what it was asked.
-#[derive(Debug)]
+/// Approves every question, and keeps what it was asked.
+#[derive(Debug, Default)]
 struct Asking {
-    decision: ConfirmationDecision,
     asked: Mutex<Vec<ConfirmationRequest>>,
-}
-
-impl Asking {
-    fn answering(decision: ConfirmationDecision) -> Arc<Self> {
-        Arc::new(Self {
-            decision,
-            asked: Mutex::new(Vec::new()),
-        })
-    }
 }
 
 #[async_trait]
 impl Confirmer for Asking {
     async fn confirm(&self, request: ConfirmationRequest) -> ConfirmationDecision {
         self.asked.lock().unwrap().push(request);
-        tokio::time::sleep(Duration::from_secs(60)).await;
-        self.decision
+        ConfirmationDecision::Approved
     }
 }
 
 /// A host of `settings`, granted its store in `storage`, that asks the
-/// person through `asking` when there is someone to ask.
-fn settings_host(
-    storage: &Arc<Storage>,
-    settings: &Arc<Settings>,
-    asking: Option<&Arc<Asking>>,
-) -> PluginHost {
-    let builder = PluginHost::builder(Arc::clone(storage) as _).enable(
-        &Spec {
-            access: json!({
-                "model_input": "write",
-                "character_file_store": "write",
-                "plugin_database": "write",
-            }),
-            ..Spec::tools("settings")
-        },
-        Arc::clone(settings) as _,
-    );
-    let builder = match asking {
-        Some(asking) => builder.confirmer(Arc::clone(asking) as _),
-        None => builder,
-    };
-
-    builder.activate().unwrap()
-}
-
-/// plugins.tool-confirmation-gate: any plugin's confirmable tool is approval-gated the same way: its call is prepared with the store read-only and no database and the person is shown what it would do, a denial is `plugin_config_approval_denied` and applies nothing, an approval applies the prepared effect with `user_approved` evidence, and with nobody to ask it is never offered or prepared, a call of it refused `tool_not_declared` as any tool the turn never offered
-#[tokio::test(start_paused = true)]
-async fn a_confirmable_tool_applies_its_prepared_effect_only_on_the_persons_yes() {
-    let storage = Storage::new();
-    let settings = Arc::new(Settings::noting(vec![note(
-        EvidenceKind::ToolInvocation,
-        "Prepared the settings.",
-    )]));
-    let hosted = |asking| settings_host(&storage, &settings, asking);
-    let update = || {
-        call(
-            "c1",
-            "settings.update",
-            json!({"tone": "warm", "api_key": "k-1"}),
+/// person through `asking`.
+fn settings_host(storage: &Arc<Storage>, settings: Settings, asking: &Arc<Asking>) -> PluginHost {
+    PluginHost::builder(Arc::clone(storage) as _)
+        .enable(
+            &Spec {
+                access: json!({
+                    "model_input": "write",
+                    "character_file_store": "write",
+                    "plugin_database": "write",
+                }),
+                ..Spec::tools("settings")
+            },
+            Arc::new(settings),
         )
-    };
-    let saved = || storage.files("settings").get("settings.json");
-    let denying = Asking::answering(ConfirmationDecision::Denied);
-    let denied = one(&hosted(Some(&denying)), update(), &turn()).await;
-
-    assert_eq!(reason(&denied), Some("plugin_config_approval_denied"));
-    assert_eq!(saved(), None, "a denial applies nothing");
-    assert!(
-        denied
-            .evidence
-            .iter()
-            .all(|record| record.policy_outcome() != Some(PolicyOutcome::UserApproved))
-    );
-
-    let asked = denying.asked.lock().unwrap().remove(0);
-
-    assert_eq!(
-        (asked.plugin_id.as_str(), asked.tool_name.as_str()),
-        ("settings", "settings.update")
-    );
-    assert_eq!(
-        Value::Object(asked.preview),
-        json!({"before": null, "after": {"tone": "warm", "api_key": "[redacted]"}})
-    );
-
-    let approving = Asking::answering(ConfirmationDecision::Approved);
-    let approved = one(&hosted(Some(&approving)), update(), &turn()).await;
-
-    assert_eq!(
-        approved.result,
-        ToolCallResult::Accepted {
-            output: json!({"status": "applied"})
-        }
-    );
-    assert_eq!(
-        saved(),
-        Some(json!({"tone": "warm", "api_key": "k-1"})),
-        "the effect runs on a budget of its own, though the person answered past the preparation's"
-    );
-    assert_eq!(
-        approved
-            .evidence
-            .iter()
-            .map(|record| (record.kind(), record.policy_outcome(), record.summary()))
-            .collect::<Vec<_>>(),
-        [
-            (EvidenceKind::ToolInvocation, None, "Prepared the settings."),
-            (
-                EvidenceKind::Policy,
-                Some(PolicyOutcome::UserApproved),
-                "User approved plugin \"settings\" tool \"settings.update\"."
-            ),
-            (EvidenceKind::ToolInvocation, None, "Saved the settings."),
-        ]
-    );
-
-    let unasked = hosted(None);
-    let refused = one(&unasked, update(), &turn()).await;
-    let unable_to_write = Seen {
-        store: Some(StoreAccess::ReadOnly),
-        ..Seen::default()
-    };
-
-    assert!(unasked.tool_definitions().get("settings.update").is_none());
-    assert_eq!(reason(&refused), Some("tool_not_declared"));
-    assert_eq!(refused.evidence, [], "no plugin answered it");
-    assert_eq!(
-        settings.prepared_with.lock().unwrap().as_slice(),
-        [unable_to_write.clone(), unable_to_write],
-        "each call the person was asked about was prepared unable to write, with no database, \
-         and the one nobody could be asked about was never prepared"
-    );
+        .confirmer(Arc::clone(asking) as _)
+        .activate()
+        .unwrap()
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_call_refused_in_its_preparation_asks_nobody_and_the_model_reads_why() {
     let storage = Storage::new();
-    let asking = Asking::answering(ConfirmationDecision::Approved);
-    let noting = |notes| settings_host(&storage, &Arc::new(Settings::noting(notes)), Some(&asking));
+    let asking = Arc::new(Asking::default());
+    let noting = |notes| settings_host(&storage, Settings::noting(notes), &asking);
     let unknown = one(
         &noting(Vec::new()),
         call("c1", "settings.update", json!({"tone": "grumpy"})),

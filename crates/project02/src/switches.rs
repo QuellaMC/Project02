@@ -22,42 +22,19 @@ pub(crate) const TEST_DURATIONS: &str = "PROJECT02_TEST_DURATIONS";
 pub(crate) const TEST_TELEGRAM_API: &str = "PROJECT02_TEST_TELEGRAM_API";
 
 /// The waits serve reads, in the order a refusal lists them.
-const SERVE_KEYS: [&str; 7] = [
-    "confirmation",
-    "pairing",
-    "silence",
-    "heartbeat",
-    "grace",
-    "hold",
-    "probe",
-];
+const SERVE_KEYS: [&str; 5] = ["confirmation", "pairing", "silence", "heartbeat", "grace"];
 
 /// The one wait the connector reads: between two edits of a draft.
 const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
-/// through, the daemon's waits, and the two a second serve keeps itself.
-/// The default is a run no switch touched, the one a program that runs the
-/// daemon starts, since no switch is a setting a person sees.
-#[derive(Debug)]
+/// through, and the daemon's waits. The default is a run no switch touched,
+/// the one a program that runs the daemon starts, since no switch is a
+/// setting a person sees.
+#[derive(Debug, Default)]
 pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
     pub(crate) durations: Durations,
-    /// How long a second serve waits for a holder that does not answer.
-    pub(crate) hold: Duration,
-    /// How long one question to that holder waits for its answer.
-    pub(crate) probe: Duration,
-}
-
-impl Default for Switches {
-    fn default() -> Self {
-        Self {
-            test_provider: None,
-            durations: Durations::default(),
-            hold: Duration::from_secs(30),
-            probe: Duration::from_secs(5),
-        }
-    }
 }
 
 /// A switch the command cannot use, and why.
@@ -88,9 +65,7 @@ pub(crate) fn read(
             "pairing" => switches.durations.pairing = wait,
             "silence" => switches.durations.model_silence = Some(wait),
             "heartbeat" => switches.durations.heartbeat = wait,
-            "grace" => switches.durations.grace = wait,
-            "hold" => switches.hold = wait,
-            _ => switches.probe = wait,
+            _ => switches.durations.grace = wait,
         }
     }
 
@@ -202,14 +177,10 @@ mod tests {
 
         assert_eq!(unset.test_provider, None);
         assert_eq!(unset.durations, Durations::default());
-        assert_eq!(
-            (unset.hold, unset.probe),
-            (Duration::from_secs(30), Duration::from_secs(5))
-        );
 
         let set = switched(
             Some("deterministic"),
-            Some("confirmation=1,pairing=2,silence=3,heartbeat=4,grace=5,hold=6,probe=7"),
+            Some("confirmation=1,pairing=2,silence=3,heartbeat=4,grace=5"),
         )
         .unwrap();
 
@@ -225,7 +196,6 @@ mod tests {
                 grace: ms(5),
             }
         );
-        assert_eq!((set.hold, set.probe), (ms(6), ms(7)));
         assert_eq!(
             switched(None, Some("grace=100")).unwrap().durations,
             Durations {
@@ -237,8 +207,7 @@ mod tests {
 
     #[test]
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
-        let keys =
-            "the keys here are confirmation, pairing, silence, heartbeat, grace, hold, probe.";
+        let keys = "the keys here are confirmation, pairing, silence, heartbeat, grace.";
 
         for (provider, durations, said) in [
             (
@@ -272,16 +241,16 @@ mod tests {
             ),
             (
                 None,
-                Some("hold"),
-                "PROJECT02_TEST_DURATIONS: key \"hold\" needs a whole number of milliseconds \
-                 above 0, not \"\"."
+                Some("heartbeat"),
+                "PROJECT02_TEST_DURATIONS: key \"heartbeat\" needs a whole number of \
+                 milliseconds above 0, not \"\"."
                     .to_owned(),
             ),
             (
                 None,
-                Some("probe=99999999999999999999"),
-                "PROJECT02_TEST_DURATIONS: key \"probe\" needs a whole number of milliseconds \
-                 above 0, not \"99999999999999999999\"."
+                Some("silence=99999999999999999999"),
+                "PROJECT02_TEST_DURATIONS: key \"silence\" needs a whole number of \
+                 milliseconds above 0, not \"99999999999999999999\"."
                     .to_owned(),
             ),
             (

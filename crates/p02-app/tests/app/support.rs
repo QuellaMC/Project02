@@ -155,13 +155,6 @@ impl World {
         .await
         .unwrap()
     }
-
-    /// Where segment `segment` of `conversation` keeps Mira's log.
-    pub(crate) fn log(&self, conversation: &str, segment: u64) -> PathBuf {
-        self.path(&format!(
-            "character-data/mira/sessions/{conversation}.{segment}/raw-events.jsonl"
-        ))
-    }
 }
 
 #[expect(
@@ -178,28 +171,6 @@ pub(crate) fn write(path: &Path, content: &str) {
 )]
 fn create_directories(path: &Path) {
     std::fs::create_dir_all(path).unwrap();
-}
-
-/// Makes `path` read-only, handing back what its permissions were.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test makes a home's files read-only as a failing disk would"
-)]
-pub(crate) fn make_read_only(path: &Path) -> std::fs::Permissions {
-    let before = std::fs::metadata(path).unwrap().permissions();
-    let mut read_only = before.clone();
-
-    read_only.set_readonly(true);
-    std::fs::set_permissions(path, read_only).unwrap();
-    before
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test gives a home's files back their permissions"
-)]
-pub(crate) fn restore(path: &Path, permissions: std::fs::Permissions) {
-    std::fs::set_permissions(path, permissions).unwrap();
 }
 
 /// Mira's thread, opened.
@@ -327,11 +298,10 @@ impl Gate {
 }
 
 /// One round of the scripted model: the pieces it drafts of its reply, a
-/// gate it waits at, what it does then, and its answer.
+/// gate it waits at, and its answer.
 pub(crate) struct Round {
     drafts: Vec<String>,
     gate: Option<Arc<Gate>>,
-    then: Option<Box<dyn FnOnce() + Send>>,
     answer: String,
 }
 
@@ -353,7 +323,6 @@ impl Round {
         Self {
             drafts: Vec::new(),
             gate: None,
-            then: None,
             answer: answer.to_string(),
         }
     }
@@ -367,12 +336,6 @@ impl Round {
     /// Waits at `gate` once it drafted.
     pub(crate) fn held(mut self, gate: &Arc<Gate>) -> Self {
         self.gate = Some(Arc::clone(gate));
-        self
-    }
-
-    /// Does `act` just before it answers.
-    pub(crate) fn then(mut self, act: impl FnOnce() + Send + 'static) -> Self {
-        self.then = Some(Box::new(act));
         self
     }
 }
@@ -422,10 +385,6 @@ impl RoleModelAdapter for Model {
 
         if let Some(gate) = round.gate {
             gate.pass_async().await;
-        }
-
-        if let Some(act) = round.then {
-            act();
         }
 
         RawOutput::text(round.answer)

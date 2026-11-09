@@ -27,8 +27,9 @@ fn reporting(status: HealthStatus, summary: &str) -> Arc<dyn RuntimePlugin> {
     })
 }
 
-/// The host's half of plugins.health-gate; the turn's half, failing the
-/// turn after delivery with the reply kept, waits for the runtime.
+/// A plugin whose health is unavailable under `reject_turn` rejects the turn
+/// with its reason; every other report, a failed or a timed-out check among
+/// them, is recorded by its policy and rejects nothing.
 #[tokio::test(start_paused = true)]
 async fn a_plugin_whose_health_rejects_the_turn_rejects_it_with_its_reason() {
     let host = host_of(vec![

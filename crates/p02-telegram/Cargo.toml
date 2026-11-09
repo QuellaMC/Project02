@@ -5,7 +5,6 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-async-trait.workspace = true
 p02-app.workspace = true
 p02-config.workspace = true
 p02-core.workspace = true

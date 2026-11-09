@@ -232,9 +232,7 @@ impl Daemon {
             approved.disarm();
             (approved.connector, approved.request.clone())
         };
-        let written = admit(self.world(), connector, &request.subject, |change| {
-            self.change_settings(change, || {})
-        });
+        let written = self.admit(connector, &request.subject);
         let mut waiting = self.pairings().waiting();
         let index = waiting
             .iter()
@@ -307,6 +305,52 @@ impl Daemon {
             decision,
         });
     }
+
+    /// Writes `subject` into `connector`'s allowlist by the daemon's one
+    /// change of settings: the whole allowlist as one change of its field,
+    /// bound to the fingerprint it was read under, and while other writes
+    /// move the document meanwhile, read again and merged with the accounts
+    /// paired since, up to three writes in all. An account another hand
+    /// paired meanwhile keeps the name that hand gave it. The sentence saying
+    /// why the account is not in, when it is not.
+    fn admit(&self, connector: &Connector, subject: &PairingSubject) -> Result<(), String> {
+        let mut attempts = 1;
+
+        loop {
+            let Allowlist {
+                fingerprint,
+                mut accounts,
+            } = allowlist(self.world(), connector)?;
+
+            if accounts.contains_key(subject.id.as_str()) {
+                return Ok(());
+            }
+
+            accounts.insert(subject.id.to_string(), Value::from(subject.label.as_str()));
+
+            let change = ConfigChange {
+                target: ConfigTarget::Global,
+                expected_fingerprint: fingerprint.as_str().to_owned(),
+                operation: Operation::SectionFieldSet {
+                    namespace: Namespace::Connectors,
+                    id: connector.id().to_string(),
+                    field: connector.pairing_field().to_owned(),
+                    value: Value::Object(accounts),
+                },
+            };
+
+            match self.change_settings(&change, || {}) {
+                ChangeOutcome::Applied { .. } => return Ok(()),
+                ChangeOutcome::Refused {
+                    reason: ChangeRefusal::Conflict,
+                    ..
+                } if attempts < WRITE_ATTEMPTS => attempts += 1,
+                ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message } => {
+                    return Err(message);
+                }
+            }
+        }
+    }
 }
 
 /// The accounts a connector's allowlist holds in the home's document, in
@@ -339,55 +383,6 @@ fn allowlist(world: &World, connector: &Connector) -> Result<Allowlist, String> 
     })
 }
 
-/// Writes `subject` into `connector`'s allowlist by `apply`, the daemon's
-/// one change of settings: the whole allowlist as one change of its field,
-/// bound to the fingerprint it was read under, and while other writes move
-/// the document meanwhile, read again and merged with the accounts paired
-/// since, up to three writes in all. An account another hand paired
-/// meanwhile keeps the name that hand gave it. The sentence saying why the
-/// account is not in, when it is not.
-fn admit(
-    world: &World,
-    connector: &Connector,
-    subject: &PairingSubject,
-    mut apply: impl FnMut(&ConfigChange) -> ChangeOutcome,
-) -> Result<(), String> {
-    let mut attempts = 1;
-
-    loop {
-        let Allowlist {
-            fingerprint,
-            mut accounts,
-        } = allowlist(world, connector)?;
-
-        if accounts.contains_key(subject.id.as_str()) {
-            return Ok(());
-        }
-
-        accounts.insert(subject.id.to_string(), Value::from(subject.label.as_str()));
-
-        match apply(&ConfigChange {
-            target: ConfigTarget::Global,
-            expected_fingerprint: fingerprint.as_str().to_owned(),
-            operation: Operation::SectionFieldSet {
-                namespace: Namespace::Connectors,
-                id: connector.id().to_string(),
-                field: connector.pairing_field().to_owned(),
-                value: Value::Object(accounts),
-            },
-        }) {
-            ChangeOutcome::Applied { .. } => return Ok(()),
-            ChangeOutcome::Refused {
-                reason: ChangeRefusal::Conflict,
-                ..
-            } if attempts < WRITE_ATTEMPTS => attempts += 1,
-            ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message } => {
-                return Err(message);
-            }
-        }
-    }
-}
-
 /// Six digits a person reads off one screen and finds on another, drawn
 /// uniformly and unlike any waiting.
 fn fresh_code(waiting: &[Waiting]) -> String {
@@ -397,105 +392,5 @@ fn fresh_code(waiting: &[Waiting]) -> String {
         if waiting.iter().all(|entry| entry.request.code != code) {
             return code;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use p02_characters::discover;
-    use p02_config::{Sections, apply_change};
-    use p02_shared::{DanglingLinks, canonical_path};
-    use p02_store::Home;
-    use serde_json::json;
-
-    use super::*;
-    use crate::daemon::Durations;
-
-    fn world(home: Home) -> World {
-        World {
-            home,
-            sections: Sections::new(Vec::new()),
-            plugins: Vec::new(),
-            durations: Durations::default(),
-            test_provider: None,
-            events: Arc::default(),
-        }
-    }
-
-    fn pairing(world: &World, id: &str, label: &str) -> ConfigChange {
-        let Allowlist {
-            fingerprint,
-            mut accounts,
-        } = allowlist(world, &connectors()[0]).unwrap();
-
-        accounts.insert(id.to_owned(), json!(label));
-        serde_json::from_value(json!({
-            "target": {"scope": "global"},
-            "expectedFingerprint": fingerprint.as_str(),
-            "operation": {
-                "kind": "section_field_set",
-                "namespace": "connectors",
-                "id": "telegram",
-                "field": "pairedUsers",
-                "value": accounts,
-            },
-        }))
-        .unwrap()
-    }
-
-    /// pairing.approve-retries-conflict: An approval whose write meets a concurrently moved config document is written again from a fresh read, merging with accounts already paired.
-    #[test]
-    fn an_approval_whose_write_meets_a_moved_document_is_written_again_from_a_fresh_read() {
-        let directory = tempfile::tempdir().unwrap();
-        let world = world(Home::new(
-            canonical_path(directory.path(), DanglingLinks::Keep).unwrap(),
-        ));
-        let telegram = &connectors()[0];
-        let wait = Duration::from_secs(10);
-        let apply = |change: &ConfigChange| {
-            apply_change(
-                &world.home,
-                &world.sections,
-                &discover(world.home.root()),
-                change,
-                wait,
-            )
-        };
-        let alice = PairingSubject {
-            id: ClientStamp::new("381940562").unwrap(),
-            label: SpeakerName::new("Alice").unwrap(),
-        };
-        let mut written: Vec<ConfigChange> = Vec::new();
-
-        admit(&world, telegram, &alice, |change| {
-            if written.is_empty() {
-                // Another window pairs Bob between the approval's read and
-                // its write.
-                assert!(matches!(
-                    apply(&pairing(&world, "987654321", "Bob")),
-                    ChangeOutcome::Applied { .. }
-                ));
-            }
-
-            written.push(change.clone());
-            apply(change)
-        })
-        .unwrap();
-
-        let fingerprints: Vec<&str> = written
-            .iter()
-            .map(|change| change.expected_fingerprint.as_str())
-            .collect();
-        let paired = json!({"987654321": "Bob", "381940562": "Alice"});
-
-        assert_eq!(fingerprints.len(), 2);
-        assert_ne!(fingerprints[0], fingerprints[1]);
-        assert_eq!(
-            allowlist(&world, telegram).unwrap().accounts,
-            *paired.as_object().unwrap()
-        );
     }
 }

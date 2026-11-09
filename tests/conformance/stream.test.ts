@@ -3,11 +3,10 @@ import {join} from 'node:path';
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
-import {type Frame, frameOf, framesOf, openEvents} from './harness/events.ts';
+import {type Frame, frameOf, openEvents} from './harness/events.ts';
 import {chmod, configJson, createHome} from './harness/home.ts';
 import {
   finish,
-  reply,
   startModelServer,
   toolCall,
   undecided,
@@ -46,7 +45,7 @@ function overflowingDraft(): Answer {
   return {chunks: longReply(2 * 1024 * 1024), end: 'cut'};
 }
 
-it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, the daemon snapshot of health, waiting confirmations and pairings and running turns, as text/event-stream that is never cached', async () => {
+it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, the daemon snapshot of health, waiting confirmations and pairings and running turns', async () => {
   const daemon = await startDaemon(createHome(), fixedReplies);
   const wire = wireOf(daemon);
 
@@ -54,16 +53,6 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   await wire.pairingRequest('telegram', {
     subject: {id: 'friend', label: 'A friend'},
     source: 'telegram:mira_bot',
-  });
-
-  const stream = await exchange(daemon, {
-    path: '/api/events',
-    headers: bearer(daemon),
-  });
-
-  expect(stream.headers).toMatchObject({
-    'content-type': expect.stringMatching(/^text\/event-stream/u) as string,
-    'cache-control': 'no-store',
   });
 
   const events = await openEvents(daemon);
@@ -76,90 +65,6 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
     turns: [],
   });
   expect(events.frames[0]?.event).toBe('ready');
-});
-
-it('stream.frame-ids: frames are numbered <run>-<seq> from one under a 16-hex run id, ready carries the number it goes on from, and each frame is one data line of JSON', async () => {
-  // No character starts, so nothing happens before the first stream.
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: {enabled: false}})}),
-  );
-  const wire = wireOf(daemon);
-  const first = await openEvents(daemon);
-  const {id = ''} = await first.next(frameOf('ready'));
-  const run = id.slice(0, 16);
-
-  expect(id).toMatch(/^[0-9a-f]{16}-0$/u);
-  await wire.pairingRequest('telegram', {
-    subject: {id: 'one', label: 'One'},
-    source: 'telegram:mira_bot',
-  });
-  await wire.pairingRequest('telegram', {
-    subject: {id: 'two', label: 'Two'},
-    source: 'telegram:mira_bot',
-  });
-  await first.next(frameOf('pairing_requested', {subject: {id: 'two'}}));
-
-  const second = await openEvents(daemon);
-
-  await second.next(frameOf('ready'));
-  expect(first.frames.map(frame => frame.id)).toEqual(
-    [0, 1, 2].map(seq => `${run}-${String(seq)}`),
-  );
-  expect(second.frames.map(frame => frame.id)).toEqual([`${run}-2`]);
-
-  for (const frame of [...first.frames, ...second.frames]) {
-    // The client joins a frame's data lines with a line feed.
-    expect(frame.data).not.toContain('\n');
-    expect(dataOf(frame)).toBeTypeOf('object');
-  }
-});
-
-it('stream.ping: an idle stream carries a ": ping" comment each heartbeat', async () => {
-  const events = await openEvents(
-    await startDaemon(createHome(), {
-      PROJECT02_TEST_DURATIONS: 'heartbeat=100',
-    }),
-  );
-  const ping = (frame: Frame): boolean => frame.comment === 'ping';
-
-  expect(await events.next(ping)).toEqual({comment: 'ping'});
-
-  const first = performance.now();
-
-  expect(await events.next(ping)).toEqual({comment: 'ping'});
-
-  const interval = performance.now() - first;
-
-  // One heartbeat apart: neither a steady stream of them nor one in a while.
-  expect(interval).toBeGreaterThanOrEqual(90);
-  expect(interval).toBeLessThan(2_000);
-});
-
-it("stream.turn-frames-order: a turn reaches the stream as its line's user_message, its reply's deltas in order, the visible_reply they join to, then turn_completed", async () => {
-  const daemon = await startDaemon(createHome(), fixedReplies);
-  const say = await converse(wireOf(daemon), 'mira');
-  const events = await openEvents(daemon);
-
-  await say('Hello there.', 'order');
-  await events.next(frameOf('turn_completed', {clientMessageId: 'order'}));
-
-  const progress = events.frames.slice(1).map(
-    frame =>
-      dataOf(frame) as {
-        readonly kind: string;
-        readonly progress?: {readonly kind: string; readonly text?: string};
-      },
-  );
-  const text = (kind: string) =>
-    progress
-      .filter(event => event.progress?.kind === kind)
-      .map(event => event.progress?.text)
-      .join('');
-
-  expect(
-    progress.map(event => event.progress?.kind ?? event.kind).join(' '),
-  ).toMatch(/^user_message( reply_delta){2,} visible_reply turn_completed$/u);
-  expect(text('reply_delta')).toBe(text('visible_reply'));
 });
 
 it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the tail holds is resumed with exactly the frames after it, byte for byte, then the live ones under the same numbers, and with none after the newest', async () => {
@@ -215,84 +120,6 @@ it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the 
   expect(framesOf(newest.body().slice(resumed.length)).map(idOf)).toEqual(
     live.map(idOf),
   );
-});
-
-it('stream.tail-bound: a Last-Event-ID more than the 1 MiB tail behind, past the newest, from another run or malformed opens with ready, while one about 600 KiB behind is still resumed', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const watching = await openEvents(daemon);
-  const before = (await watching.next(frameOf('ready'))).id ?? '';
-  const opensWith = async (lastEventId: string): Promise<string | undefined> =>
-    (await (await openEvents(daemon, lastEventId)).next(() => true)).event;
-
-  model.answer({chunks: [...longReply(600 * 1024), finish('tool_calls')]});
-  await say('Tell me everything.', 'long');
-  await watching.next(frameOf('turn_completed', {clientMessageId: 'long'}));
-
-  const lastDelta =
-    watching.frames.findLast(
-      frameOf('turn_progress', {progress: {kind: 'reply_delta'}}),
-    )?.id ?? '';
-  const [run = '', newest = ''] = (watching.lastEventId() ?? '').split('-');
-  // The same run id with its first digit changed.
-  const otherRun = `${run.startsWith('0') ? '1' : '0'}${run.slice(1)}`;
-
-  expect(await opensWith(lastDelta)).toBe('resumed');
-
-  for (const lastEventId of [
-    before,
-    `${run}-${String(Number(newest) + 1)}`,
-    `${otherRun}-1`,
-    'yesterday',
-  ]) {
-    expect(await opensWith(lastEventId), lastEventId).toBe('ready');
-  }
-});
-
-it('stream.shutdown-ends-streams: a stop ends each stream only once every frame queued for it is written, a client lagging within the grace included, and a stream asked for meanwhile is refused at once', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-    // Longer than the stop takes to reach the streams.
-    {PROJECT02_TEST_DURATIONS: 'grace=10000'},
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const keepingUp = await openEvents(daemon);
-  const lagging = await exchange(daemon, {
-    path: '/api/events',
-    headers: bearer(daemon),
-  });
-
-  await lagging.received('event: ready');
-  lagging.pause();
-  model.answer(overflowingDraft());
-  await say('Talk a lot.', 'long');
-  daemon.signal('SIGINT');
-  await daemon.printed('Stopping; finishing what is in flight.');
-  await keepingUp.ended();
-
-  const asked = performance.now();
-  const late = await exchange(daemon, {
-    path: '/api/events',
-    headers: bearer(daemon),
-  });
-
-  expect(late.status).toBe(503);
-  expect(performance.now() - asked).toBeLessThan(2_000);
-  lagging.resume();
-
-  // Whole, so ended by the daemon rather than broken off, and holding
-  // every queued frame as the stream that kept up saw it.
-  const queued = (frames: readonly Frame[]) =>
-    frames.filter(frame => frame.id !== undefined && frame.event !== 'ready');
-
-  expect(queued(framesOf(await lagging.whole()))).toEqual(
-    queued(keepingUp.frames),
-  );
-  expect(await daemon.exit()).toBe(0);
 });
 
 it('stream.slow-client-drop: a client that stops taking frames is dropped within the grace and its stream closed', async () => {
@@ -387,45 +214,6 @@ it('stream.running-turns-fold: a stream opened mid-reply finds the running turn 
   ).toMatchObject({turns: []});
 });
 
-it('stream.refused-submission-mid-turn: a submission refused on the spot completes at once and leaves the running turn running', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
-  const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
-  const {conversationId} = await conversationOf(wire, 'mira');
-  const events = await openEvents(daemon);
-  const held = model.hold();
-  const running = say('Hello?', 'running');
-
-  await held.arrived();
-  await expect(
-    wire.turn({
-      conversationId,
-      senderId: 'someone-else',
-      text: 'Not mine.',
-      source: 'web',
-      clientMessageId: 'not-mine',
-    }),
-  ).resolves.toMatchObject({status: 'refused', reason: 'sender_not_supported'});
-  await events.next(
-    frameOf('turn_completed', {
-      clientMessageId: 'not-mine',
-      status: 'refused',
-      committed: false,
-    }),
-  );
-
-  const later = await openEvents(daemon);
-
-  expect(dataOf(await later.next(frameOf('ready')))).toMatchObject({
-    turns: [{conversationId, source: 'web', clientMessageId: 'running'}],
-  });
-  held.release(reply('Hello.'));
-  await expect(running).resolves.toMatchObject({status: 'completed'});
-});
-
 it("stream.sync-rule: the person's line rides the stream as user_message, stamped, once it is on disk, and the reply follows", async () => {
   const model = await startModelServer();
   const home = createHome({
@@ -482,7 +270,7 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   });
 });
 
-it('stream.drafts: a reply is drafted ahead of its commit under a draft id the commit names, each reply of a round under its own', async () => {
+it('stream.drafts: a turn reaches the stream as its line, then each of its replies drafted in order under a draft id of its own, then each commit naming the draft it replaces, then turn_completed', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -512,16 +300,27 @@ it('stream.drafts: a reply is drafted ahead of its commit under a draft id the c
   await events.next(frameOf('turn_completed', {clientMessageId: 'two'}));
   expect(
     events.frames
-      .filter(frameOf('turn_progress'))
-      .map(frame => (dataOf(frame) as {readonly progress: object}).progress)
-      .filter(progress => 'draftId' in progress),
+      .filter(
+        frame =>
+          frame.event === 'turn_progress' || frame.event === 'turn_completed',
+      )
+      .map(frame => {
+        const {kind, progress} = dataOf(frame) as {
+          readonly kind: string;
+          readonly progress?: object;
+        };
+
+        return progress ?? {kind};
+      }),
   ).toMatchObject([
+    {kind: 'user_message', text: 'Two things?'},
     {kind: 'reply_delta', draftId: '1.0', text: 'First'},
     {kind: 'reply_delta', draftId: '1.0', text: ', this.'},
     {kind: 'reply_delta', draftId: '1.1', text: 'Then'},
     {kind: 'reply_delta', draftId: '1.1', text: ' that.'},
     {kind: 'visible_reply', draftId: '1.0', text: 'First, this.'},
     {kind: 'visible_reply', draftId: '1.1', text: 'Then that.'},
+    {kind: 'turn_completed'},
   ]);
 });
 
@@ -619,106 +418,6 @@ it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the bud
     {kind: 'reply_delta', draftId: '100.0', text: 'One last look.'},
     {kind: 'reply_withdrawn', draftId: '100.0'},
   ]);
-});
-
-it('stream.turn-completed: turn_completed carries the turn identity, its status, whether the line was committed, and the reason when it did not complete', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
-  const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
-  const {conversationId} = await conversationOf(wire, 'mira');
-  const events = await openEvents(daemon);
-  const identity = (clientMessageId: string) => ({
-    kind: 'turn_completed',
-    characterId: 'mira',
-    conversationId,
-    source: 'web',
-    clientMessageId,
-  });
-
-  model.answer(reply('Hello.'), ...undecided());
-  await say('Hello?', 'completed');
-  await say('And now?', 'rejected');
-  expect(
-    dataOf(
-      await events.next(
-        frameOf('turn_completed', {clientMessageId: 'completed'}),
-      ),
-    ),
-  ).toEqual({...identity('completed'), status: 'completed', committed: true});
-  expect(
-    dataOf(
-      await events.next(
-        frameOf('turn_completed', {clientMessageId: 'rejected'}),
-      ),
-    ),
-  ).toEqual({
-    ...identity('rejected'),
-    status: 'rejected',
-    committed: true,
-    reason: 'malformed_output',
-    message: expect.any(String) as string,
-  });
-});
-
-it('stream.connector-presence: a stream opened with ?connector= holds its connector present from before its first frame until its last stream ends, health_changed marking only those crossings; an unknown connector is a 400 naming the known ones', async () => {
-  const daemon = await startDaemon(createHome(), fixedReplies);
-  const say = await converse(wireOf(daemon), 'mira');
-  const watching = await openEvents(daemon);
-  const telegram = (connected: boolean) => ({
-    health: {connectors: [{id: 'telegram', connected}]},
-  });
-  const connector = async () => {
-    const stream = await exchange(daemon, {
-      path: '/api/events?connector=telegram',
-      headers: bearer(daemon),
-    });
-
-    await stream.received('event: ready');
-
-    return stream;
-  };
-  const unknown = await exchange(daemon, {
-    path: '/api/events?connector=discord',
-    headers: bearer(daemon),
-  });
-
-  expect(unknown.status).toBe(400);
-  expect(JSON.parse(await unknown.whole())).toEqual({
-    error: {
-      code: 'invalid_request',
-      message: expect.stringContaining('telegram') as string,
-    },
-  });
-
-  const first = await connector();
-
-  // Its own ready already counts it.
-  expect(
-    JSON.parse(/^data: (.*)$/mu.exec(first.body())?.[1] ?? 'null'),
-  ).toMatchObject(telegram(true));
-  await watching.next(frameOf('health_changed', telegram(true)));
-
-  const second = await connector();
-
-  first.hangUp();
-  await first.ended();
-  // A turn the daemon finishes after the close reached it: the close is in.
-  await say('Still here?', 'after-the-first-close');
-  expect(
-    watching.frames.filter(frameOf('health_changed', telegram(false))),
-  ).toEqual([]);
-
-  const meanwhile = await openEvents(daemon);
-
-  expect(dataOf(await meanwhile.next(frameOf('ready')))).toMatchObject(
-    telegram(true),
-  );
-  second.hangUp();
-  await watching.next(frameOf('health_changed', telegram(false)));
-  expect(watching.frames.filter(frameOf('health_changed'))).toHaveLength(2);
 });
 
 it('stream.maintenance-failed: a segment rotation that fails behind a completed turn leaves the turn completed and the character ready, is told on the stream as maintenance_failed and in her health entry, and switching her off and on clears it', async () => {

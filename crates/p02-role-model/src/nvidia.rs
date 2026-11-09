@@ -478,11 +478,6 @@ impl TurnRequest {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
     /// The exchange as far as the request: what the answer adds comes on
     /// top of it.
     fn exchange(&self, model: &str, endpoint: &Url) -> ExchangeRecord {
