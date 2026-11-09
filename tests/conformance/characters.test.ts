@@ -1,4 +1,4 @@
-import {readFileSync, writeFileSync} from 'node:fs';
+import {readFileSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
@@ -39,6 +39,45 @@ it('characters.broken-package-diagnostic: a broken package is reported at its pa
       ],
     },
   });
+});
+
+it('characters.package-discovery-symlinks: a package that is a link, its folder or its descriptor, is never read: it is reported at its own path and cannot be started, nothing of what the link names reaches the daemon, and the real package beside it is served', async () => {
+  const outside = createHome({
+    linked: {
+      'project02.character.json': characterJson('linked', 'Kept Outside'),
+    },
+    'pointer.json': characterJson('pointer', 'Kept Outside'),
+  });
+  const home = createHome({
+    characters: {
+      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
+      pointer: {},
+    },
+  });
+
+  symlinkSync(join(outside, 'linked'), join(home, 'characters', 'linked'));
+  symlinkSync(join(outside, 'pointer.json'), descriptor(home, 'pointer'));
+
+  const wire = wireOf(await startDaemon(home, fixedReplies));
+  const health = await wire.health();
+
+  expect(health).toMatchObject({
+    characters: [{id: 'mira'}, {id: 'zeta'}],
+    packages: {
+      diagnostics: [
+        {path: join(home, 'characters', 'linked')},
+        {path: descriptor(home, 'pointer')},
+      ],
+    },
+  });
+  expect(JSON.stringify(health)).not.toContain('Kept Outside');
+
+  for (const id of ['linked', 'pointer']) {
+    expect(await wire.start(id), id).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+  }
 });
 
 it('characters.package-version-upgrade: her first start and each new version of her package fill in only the settings she lacks, so what the person set on her screen, before her first start or after, stays', async () => {

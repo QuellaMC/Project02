@@ -111,6 +111,11 @@ pub(crate) fn plugins() -> Vec<Manifest> {
                     "redactionLabels": [],
                 },
                 {
+                    "name": "baseUrl", "description": "Where memories are sent.",
+                    "required": false, "secret": false, "valueType": "url",
+                    "redactionLabels": [],
+                },
+                {
                     "name": "apiKey", "description": "The key.", "required": false,
                     "secret": true, "valueType": "string", "redactionLabels": ["memory"],
                 },

@@ -1,6 +1,6 @@
 //! The one way settings change: a change bound to the fingerprint its
-//! author read, made in the target's own document, judged as the document
-//! it makes over the documents beside it, and written whole.
+//! author read, judged by its own rules alone, made in the target's own
+//! document, and written whole.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -19,10 +19,9 @@ use crate::declaration::{
     Declared, HostField, Namespace, Sections, Target, expectation, host_field, host_fields,
     outside_scope,
 };
-use crate::diagnostic::Diagnostic;
-use crate::document::{Document, Read, encode};
+use crate::document::{Document, Read};
 use crate::materialize::merged_overlay;
-use crate::resolve::{Layers, Overlay, Resolution, Written, WrittenOverlay, target_fingerprint};
+use crate::resolve::{Layers, Overlay, Written, WrittenOverlay, target_fingerprint};
 use crate::transaction::{settle, with_character, with_home, write};
 
 /// Whose settings a view reads or a change writes: the home's, or one
@@ -167,14 +166,15 @@ pub enum ChangeRefusal {
 
 /// Makes `change`, waiting for a document another writer holds as long as
 /// `wait` while it changes hands. The fingerprint presented is the
-/// target's, or for a change to one section that section's: a secret's
-/// presence counts in either, its value never, so two people replacing one
-/// secret at once both succeed and the later value stands. A refused
-/// change writes nothing, and makes no data directory for a character who
-/// has none; a character's first change makes hers, as her first start
-/// does, and is made in her settings as her view shows them, with her
-/// package's settings merged in while they are still to be, as her start
-/// merges them, so her start finds nothing left to merge. What a running
+/// target's: a secret's presence counts in it, its value never, so two
+/// people replacing one secret at once both succeed and the later value
+/// stands. A change is refused for its own faults alone, never for
+/// something else its documents hold. A refused change writes nothing, and
+/// makes no data directory for a character who has none; a character's
+/// first change makes hers, as her first start does, and is made in her
+/// settings as her view shows them, with her package's settings merged in
+/// while they are still to be, as her start merges them, so her start
+/// finds nothing left to merge. What a running
 /// character does about it is the runtime's to judge, by comparing what
 /// she would now run on with what she runs on.
 #[must_use]
@@ -272,7 +272,7 @@ fn refused(reason: ChangeRefusal, message: String) -> ChangeOutcome {
 /// A change, its own rules met: a field that exists, a target its scope
 /// lets write it, and a value it takes.
 #[derive(Debug)]
-enum Edit<'s> {
+pub(crate) enum Edit<'s> {
     Host {
         field: &'static HostField,
         value: Option<Value>,
@@ -289,7 +289,13 @@ enum Edit<'s> {
 }
 
 impl<'s> Edit<'s> {
-    fn new(sections: &'s Sections, target: &Target, operation: &Operation) -> Result<Self, String> {
+    /// `operation` on `target`'s own document, or the sentence saying why
+    /// it breaks its own rules.
+    pub(crate) fn new(
+        sections: &'s Sections,
+        target: &Target,
+        operation: &Operation,
+    ) -> Result<Self, String> {
         match operation {
             Operation::Set { path, value } => host_edit(path, Some(value)),
             Operation::Unset { path } => host_edit(path, None),
@@ -323,15 +329,8 @@ impl<'s> Edit<'s> {
         }
     }
 
-    fn section(&self) -> Option<Declared<'s>> {
-        match self {
-            Self::Host { .. } => None,
-            Self::Switch { declared, .. } | Self::Field { declared, .. } => Some(*declared),
-        }
-    }
-
     /// Makes the change in `document`, leaving no object empty behind it.
-    fn apply(&self, document: &mut Map<String, Value>) -> Result<(), String> {
+    pub(crate) fn apply(&self, document: &mut Map<String, Value>) -> Result<(), String> {
         match self {
             Self::Host { field, value } => {
                 edit(document, &["project02"], field.name(), value.as_ref())
@@ -495,10 +494,8 @@ fn edit(
     }
 }
 
-/// The change, made under the locks: the documents must load; the
-/// fingerprint must still be the one read; and the document made must be
-/// valid, and leave the section it changes without an error over the
-/// documents beside it.
+/// The change, made under the locks: the documents must be readable, and
+/// the fingerprint still the one read.
 fn commit(
     home: &Home,
     sections: &Sections,
@@ -510,15 +507,9 @@ fn commit(
         Ok(loaded) => loaded,
         Err(message) => return Ok(refused(ChangeRefusal::Invalid, message)),
     };
-    let current = Resolution::new(sections, loaded.layers(), Vec::new());
-    let bound = current.fingerprint().as_str() == expected
-        || edit.section().is_some_and(|declared| {
-            current
-                .section(declared.namespace(), declared.id().as_str())
-                .is_some_and(|section| section.fingerprint.as_str() == expected)
-        });
+    let current = target_fingerprint(sections, &loaded.layers());
 
-    if !bound {
+    if current.as_str() != expected {
         return Ok(refused(
             ChangeRefusal::Conflict,
             "The settings changed after they were read: read them again, then make the change."
@@ -532,39 +523,11 @@ fn commit(
         return Ok(refused(ChangeRefusal::Invalid, message));
     }
 
-    let made = match Read::bytes(&encode(&raw)).usable() {
-        Ok(made) => made,
-        Err(problems) => {
-            return Ok(refused(
-                ChangeRefusal::Invalid,
-                format!(
-                    "The change would leave the settings invalid: {}",
-                    problems
-                        .first()
-                        .map(Diagnostic::message)
-                        .unwrap_or_default()
-                ),
-            ));
-        }
-    };
-
-    if let Some(declared) = edit.section() {
-        let judged = Resolution::new(sections, loaded.layers_with(&made), Vec::new());
-        let error = judged
-            .section(declared.namespace(), declared.id().as_str())
-            .and_then(|section| section.diagnostics.iter().find(|found| found.is_error()));
-
-        if let Some(error) = error {
-            return Ok(refused(
-                ChangeRefusal::Invalid,
-                format!("Cannot change \"{}\": {}", declared.id(), error.message()),
-            ));
-        }
-    }
+    let made = Document::parse(raw);
 
     if loaded.holds(&made) {
         return Ok(ChangeOutcome::Applied {
-            fingerprint: current.fingerprint().clone(),
+            fingerprint: current,
         });
     }
 
@@ -583,30 +546,27 @@ struct Loaded {
 }
 
 impl Loaded {
-    /// The home's document, which must load, as its view must.
+    /// The home's document, which must be readable, as its view must.
     fn home(written: Written) -> Result<Self, String> {
         Ok(Self {
-            home: loads(written.read, "The home's settings")?,
+            home: loads(written.read)?,
             home_path: written.path,
             overlay: None,
         })
     }
 
-    /// The home's document and her overlay, which must load, as her view
-    /// must, her overlay as her view shows it: with her package's settings
-    /// merged in while they are still to be.
+    /// The home's document and her overlay, which must be readable, as her
+    /// view must, her overlay as her view shows it: with her package's
+    /// settings merged in while they are still to be.
     fn character(
         sections: &Sections,
         written: Written,
         character: &CharacterDefinition,
         overlay: WrittenOverlay,
     ) -> Result<Self, String> {
-        let home = loads(written.read, "The home's settings")?;
+        let home = loads(written.read)?;
         let absent = matches!(overlay.read, Read::Absent);
-        let document = loads(
-            overlay.read,
-            &format!("The settings of \"{}\"", character.profile.id),
-        )?;
+        let document = loads(overlay.read)?;
         let (merged, _) = merged_overlay(
             sections,
             character,
@@ -682,16 +642,10 @@ impl Loaded {
     }
 }
 
-/// The document a change starts from, `read` as its file was found: a
-/// document that does not load is refused, as its view is, with the first
-/// thing that keeps it from loading, and is left for a person to repair.
-fn loads(read: Read, settings: &str) -> Result<Document, String> {
-    read.usable().map_err(|diagnostics| {
-        let reason = diagnostics
-            .first()
-            .map(|diagnostic| diagnostic.message().to_owned())
-            .unwrap_or_default();
-
-        format!("{settings} failed to load: {reason}")
-    })
+/// The document a change starts from, `read` as its file was found: one
+/// that cannot be read is refused, as its view is, saying why, and is left
+/// for a person to repair.
+fn loads(read: Read) -> Result<Document, String> {
+    read.usable()
+        .map_err(|diagnostic| diagnostic.message().to_owned())
 }

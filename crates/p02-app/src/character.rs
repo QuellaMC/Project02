@@ -973,11 +973,11 @@ fn interrupted(error: &JoinError) -> String {
 }
 
 /// Assembles character `id` from what the disk holds now: her package, her
-/// settings, which must load and switch her on before anything is written
-/// for her, her package's settings merged into her overlay, nothing in her
-/// settings stopping her, her model, and her host built with `broker` to
-/// ask the person and her settings for its own plugin to read and change,
-/// through `daemon`.
+/// settings, which must be readable, hold nothing that stops her, and
+/// switch her on before anything is written for her, her package's
+/// settings merged into her overlay, her model, and her host built with
+/// `broker` to ask the person and her settings for its own plugin to read
+/// and change, through `daemon`.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -990,6 +990,12 @@ fn assemble(
         .map_err(|error| error_sentence(&error))?;
     let resolution = Resolution::character(&world.home, &world.sections, definition)
         .map_err(|error| unresolved(id, error))?;
+    let stopping: Vec<&str> = resolution.stopping().map(Diagnostic::message).collect();
+
+    if !stopping.is_empty() {
+        return Err(stopping.join(" "));
+    }
+
     let settings = resolution.settings();
 
     if !settings.host().enabled {
@@ -1006,12 +1012,6 @@ fn assemble(
         world.durations.settings_lock,
     )
     .map_err(|error| unmaterialized(id, error))?;
-    let stopping: Vec<&str> = resolution.stopping().map(Diagnostic::message).collect();
-
-    if !stopping.is_empty() {
-        return Err(stopping.join(" "));
-    }
-
     let adapter = model(world, settings.host())?;
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let host = settings
@@ -1077,12 +1077,7 @@ fn model(world: &World, host: &HostSettings) -> Result<Arc<dyn RoleModelAdapter>
 /// Why her settings cannot be resolved, naming what does not load.
 pub(crate) fn unresolved(id: &Identifier, error: ReadSettingsError) -> String {
     match error {
-        ReadSettingsError::Unloadable { diagnostics } => {
-            format!(
-                "Character \"{id}\"'s settings do not load: {}",
-                messages(&diagnostics)
-            )
-        }
+        ReadSettingsError::Unreadable(diagnostic) => unreadable(id, &diagnostic),
         other => error_sentence(&other),
     }
 }
@@ -1090,22 +1085,14 @@ pub(crate) fn unresolved(id: &Identifier, error: ReadSettingsError) -> String {
 /// Why her package's settings were not merged into her overlay.
 fn unmaterialized(id: &Identifier, error: MaterializeError) -> String {
     match error {
-        MaterializeError::Package { diagnostics } => format!(
-            "Character \"{id}\"'s package settings are refused: {}",
-            messages(&diagnostics)
-        ),
-        MaterializeError::Unloadable { diagnostics } => format!(
-            "Character \"{id}\"'s settings do not load: {}",
-            messages(&diagnostics)
-        ),
+        MaterializeError::Unreadable(diagnostic) => unreadable(id, &diagnostic),
         MaterializeError::Storage(error) => error_sentence(&error),
     }
 }
 
-fn messages(diagnostics: &[Diagnostic]) -> String {
-    diagnostics
-        .iter()
-        .map(Diagnostic::message)
-        .collect::<Vec<_>>()
-        .join(" ")
+fn unreadable(id: &Identifier, diagnostic: &Diagnostic) -> String {
+    format!(
+        "Character \"{id}\"'s settings cannot be read: {}",
+        diagnostic.message()
+    )
 }

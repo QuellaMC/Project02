@@ -123,8 +123,6 @@ pub struct SectionView {
     activation: SectionActivation,
     fields: Vec<FieldView>,
     diagnostics: Vec<Diagnostic>,
-    /// What a change to this section alone may present.
-    fingerprint: Fingerprint,
 }
 
 /// Whether a section runs, as its settings decide it, and why.
@@ -173,7 +171,7 @@ impl ConfigView {
 fn refusal(error: &ReadSettingsError) -> (ViewRefusal, String) {
     let reason = match error {
         ReadSettingsError::UnknownCharacter(_) => ViewRefusal::UnknownCharacter,
-        ReadSettingsError::Storage(_) | ReadSettingsError::Unloadable { .. } => {
+        ReadSettingsError::Storage(_) | ReadSettingsError::Unreadable(_) => {
             ViewRefusal::ConfigUnloadable
         }
     };
@@ -183,17 +181,13 @@ fn refusal(error: &ReadSettingsError) -> (ViewRefusal, String) {
 
 impl ReadSettingsError {
     /// What keeps the settings from being read, as the sentence a person
-    /// is shown: the first thing keeping a document from loading, which
-    /// never repeats a value.
+    /// is shown, which never repeats a value.
     #[must_use]
     pub fn sentence(&self) -> String {
         match self {
             Self::UnknownCharacter(reason) => sentence(reason),
             Self::Storage(error) => error_sentence(error),
-            Self::Unloadable { diagnostics } => diagnostics
-                .first()
-                .map(|diagnostic| diagnostic.message().to_owned())
-                .unwrap_or_default(),
+            Self::Unreadable(diagnostic) => diagnostic.message().to_owned(),
         }
     }
 }
@@ -250,7 +244,6 @@ impl Resolution<'_> {
                     .map(field_view)
                     .collect(),
                 diagnostics: section.diagnostics.clone(),
-                fingerprint: section.fingerprint.clone(),
             })
     }
 }
@@ -306,7 +299,7 @@ fn effective_view(field: &Field<'_>) -> EffectiveView {
             (!secret).then(|| shown(value)).flatten(),
         ),
         Effective::Default(value) => (ValueSource::Default, true, shown(value)),
-        Effective::Missing => (ValueSource::Missing, !field.required, None),
+        Effective::Missing => (ValueSource::Missing, true, None),
     };
 
     EffectiveView {
@@ -523,7 +516,7 @@ pub struct ConfigReport {
 }
 
 /// Where the home's settings come from, the host's values in effect, a
-/// secret's as `[redacted]`, the diagnostics, and the fingerprint.
+/// secret's as `[redacted]`, and the fingerprint.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfigReport {
@@ -531,7 +524,6 @@ pub struct RuntimeConfigReport {
     source: &'static str,
     path: String,
     project02: HostReport,
-    diagnostics: Vec<Diagnostic>,
     fingerprint: Fingerprint,
 }
 
@@ -557,9 +549,8 @@ pub struct HostReport {
 }
 
 /// A plugin as `inspect` reports it: its kind, whether her settings run it
-/// and why, the access its manifest asks for and the access running it
-/// grants, which is that and nothing else, the findings about it, and each
-/// field's value in effect.
+/// and why, the access its manifest asks for, which running it grants and
+/// nothing else, the findings about it, and each field's value in effect.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginReport {
@@ -567,7 +558,6 @@ pub struct PluginReport {
     kind: PluginKind,
     enabled: bool,
     requested_access: AccessMap,
-    granted_access: AccessMap,
     activation_status: ActivationStatus,
     activation_reasons: Vec<String>,
     diagnostics: Vec<Diagnostic>,
@@ -626,13 +616,12 @@ impl Resolution<'_> {
                         .map(|base| base.as_str().to_owned()),
                     context_window_tokens: host.context_window_tokens,
                 },
-                diagnostics: self.diagnostics().to_vec(),
                 fingerprint: self.fingerprint().clone(),
             },
             activation_diagnostics: self
                 .diagnostics()
                 .iter()
-                .filter(|diagnostic| !diagnostic.about_connector())
+                .filter(|diagnostic| !diagnostic.about(Namespace::Connectors))
                 .cloned()
                 .collect(),
             plugins: self
@@ -673,11 +662,6 @@ impl Resolution<'_> {
             kind: manifest.kind(),
             enabled,
             requested_access: manifest.requested_access().clone(),
-            granted_access: if enabled {
-                manifest.requested_access().clone()
-            } else {
-                AccessMap::default()
-            },
             activation_status: status,
             activation_reasons: reasons,
             diagnostics: self

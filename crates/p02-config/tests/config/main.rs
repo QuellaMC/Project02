@@ -11,7 +11,6 @@
 
 mod changes;
 mod documents;
-mod generated;
 mod packages;
 mod resolution;
 mod support;

@@ -61,7 +61,7 @@ export type ClientStamp = string;
 /**
  * What a finding is, in the one spelling clients read.
  */
-export type Code = "runtime_config_read_failed" | "runtime_config_malformed_json" | "runtime_config_not_object" | "runtime_config_limit_exceeded" | "runtime_config_version_unsupported" | "runtime_config_unknown_top_level_field" | "runtime_config_project02_not_object" | "runtime_config_unknown_project02_field" | "runtime_config_plugins_not_object" | "runtime_config_connectors_not_object" | "runtime_config_unknown_plugin" | "runtime_config_unknown_connector" | "runtime_config_plugin_not_object" | "runtime_config_unknown_plugin_wrapper_field" | "runtime_config_boolean_invalid" | "runtime_config_plugin_config_not_object" | "runtime_config_unknown_plugin_config_field" | "runtime_config_string_invalid" | "runtime_config_role_model_provider_invalid" | "runtime_config_secret_value_invalid" | "runtime_config_nvidia_base_url_invalid" | "runtime_config_context_window_tokens_invalid" | "runtime_config_value_type_invalid" | "runtime_config_required_value_missing" | "runtime_config_required_secret_missing" | "runtime_config_authored_outside_scope" | "character_package_plugin_config_invalid" | "default_memory_provider_unavailable" | "default_memory_provider_not_memory_provider" | "ambiguous_memory_provider_selection" | "character_required_plugin_missing" | "character_required_plugin_disabled" | "character_recommended_plugin_missing" | "character_recommended_plugin_disabled";
+export type Code = "runtime_config_unreadable" | "runtime_config_ignored" | "runtime_config_unknown_plugin" | "runtime_config_unknown_connector" | "runtime_config_value_invalid" | "runtime_config_authored_outside_scope" | "character_package_value_skipped" | "default_memory_provider_unavailable" | "character_plugin_not_running";
 
 /**
  * One change to one document, bound to the fingerprint its author read.
@@ -88,7 +88,7 @@ export type ConfigTarget = { "scope": "global" } | { "scope": "character", chara
  * The kind of value a config field holds. Whether it holds a
  * credential is the field's `secret` flag alone to say.
  */
-export type ConfigValueType = "string" | "number" | "boolean" | "object" | "array" | "path" | "enum";
+export type ConfigValueType = "string" | "number" | "boolean" | "object" | "array" | "path" | "url" | "enum";
 
 /**
  * What a settings screen renders: the fingerprint a change must present,
@@ -289,7 +289,7 @@ export type PackageReport = {
 /**
  * Always an error: the package is not in the roster.
  */
-severity: Severity, code: string, message: string, path: string, provenance: PackageProvenance, 
+severity: Severity, message: string, path: string, provenance: PackageProvenance, 
 /**
  * The folder the package was found in.
  */
@@ -426,11 +426,7 @@ export type RuntimeConfigSectionInspectShape = { namespace: RuntimeConfigSection
 /**
  * Which document decides `enabled`, or the declaration's default.
  */
-enabledSource: Source, activation: RuntimeConfigSectionActivationShape, fields: ReadonlyArray<RuntimeConfigFieldInspectShape>, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, 
-/**
- * What a change to this section alone may present.
- */
-fingerprint: Fingerprint, };
+enabledSource: Source, activation: RuntimeConfigSectionActivationShape, fields: ReadonlyArray<RuntimeConfigFieldInspectShape>, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, };
 
 /**
  * The two stanzas of a document that hold declared sections by id. A

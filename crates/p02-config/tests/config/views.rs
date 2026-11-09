@@ -433,10 +433,7 @@ fn a_view_of_an_unknown_or_broken_character_or_of_a_document_that_does_not_load_
     );
     assert_eq!(broken["reason"], "unknown_character");
     assert!(
-        broken["message"]
-            .as_str()
-            .unwrap()
-            .contains("invalid_descriptor"),
+        broken["message"].as_str().unwrap().contains("valid JSON"),
         "{broken}"
     );
 

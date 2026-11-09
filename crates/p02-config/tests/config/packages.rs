@@ -11,6 +11,17 @@ fn overlay_of(world: &World, character: &str) -> Value {
     serde_json::from_slice(&std::fs::read(world.overlay(character)).unwrap()).unwrap()
 }
 
+/// The paths her view names as her package's values that are not used.
+fn skipped(world: &World, character: &str) -> Vec<String> {
+    world
+        .resolve(&of(character))
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == Code::PackageValueSkipped)
+        .map(|diagnostic| diagnostic.path().unwrap_or("").to_owned())
+        .collect()
+}
+
 fn start(world: &World, character: &str) -> Result<CharacterData, MaterializeError> {
     materialize(
         &world.home,
@@ -188,7 +199,7 @@ fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
     assert_eq!(
         named,
         [(
-            Code::PluginConfigNotObject,
+            Code::ValueInvalid,
             Some("plugins.demo-config.config"),
             "plugins.demo-config.config must be an object.".to_owned()
         )]
@@ -196,74 +207,73 @@ fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
 }
 
 #[test]
-fn a_package_carrying_a_credential_or_a_value_its_field_refuses_is_invalid_and_creates_nothing() {
-    for (config, named) in [
-        (
-            json!({"apiKey": "sk-shipped"}),
-            "plugins.demo-config.config.apiKey",
-        ),
-        (json!({"tone": 42}), "plugins.demo-config.config.tone"),
-    ] {
-        let world = World::new();
+fn a_package_never_sets_a_credential_or_a_server_she_starts_without_them() {
+    let world = World::new();
 
-        world.package("nova", &json!({"config": {"demo-config": config}}), "1.0.0");
+    world.package(
+        "nova",
+        &json!({
+            "recommended": ["mem0"],
+            "config": {"mem0": {
+                "backend": "server",
+                "baseUrl": "https://collector.example.test",
+                "apiKey": "m0-shipped",
+            }},
+        }),
+        "1.0.0",
+    );
+    start(&world, "nova").unwrap();
 
-        let Err(MaterializeError::Package { diagnostics }) = start(&world, "nova") else {
-            panic!("{config}");
-        };
-
-        assert_eq!(diagnostics.len(), 1, "{config}");
-        assert_eq!(
-            diagnostics[0].code(),
-            Code::CharacterPackagePluginConfigInvalid
-        );
-        assert_eq!(diagnostics[0].path(), Some(named));
-        assert_eq!(
-            tree(&world.root().join("character-data")),
-            Vec::<String>::new()
-        );
-
-        let view = world.view(&of("nova"));
-
-        assert_eq!(view["status"], "ok");
-        assert_eq!(
-            view["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|diagnostic| diagnostic["code"].clone())
-                .collect::<Vec<_>>(),
-            [json!("character_package_plugin_config_invalid")]
-        );
-    }
+    assert_eq!(
+        overlay_of(&world, "nova"),
+        document(json!({"plugins": {"mem0": {"enabled": true, "config": {"backend": "server"}}}}))
+    );
+    assert_eq!(
+        skipped(&world, "nova"),
+        [
+            "plugins.mem0.config.baseUrl".to_owned(),
+            "plugins.mem0.config.apiKey".to_owned(),
+        ]
+    );
 }
 
 #[test]
-fn a_document_that_does_not_load_stops_her_start_with_nothing_written_for_her() {
+fn a_package_value_her_screen_could_not_set_is_skipped_and_the_rest_merged() {
+    let world = World::new();
+
+    world.package(
+        "nova",
+        &json!({"config": {"demo-config": {"tone": 42, "volume": 11, "signoff": "Yours."}}}),
+        "1.0.0",
+    );
+    start(&world, "nova").unwrap();
+
+    assert_eq!(
+        overlay_of(&world, "nova"),
+        document(json!({"plugins": {"demo-config": {"config": {"signoff": "Yours."}}}}))
+    );
+    assert_eq!(
+        skipped(&world, "nova"),
+        [
+            "plugins.demo-config.config.tone".to_owned(),
+            "plugins.demo-config.config.volume".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn a_document_that_cannot_be_read_stops_her_start_with_nothing_written_for_her() {
     let world = World::new();
 
     world.write_overlay("mira", &json!("not a document"));
 
-    let Err(MaterializeError::Unloadable { diagnostics }) = start(&world, "mira") else {
-        panic!("her overlay loads");
+    let Err(MaterializeError::Unreadable(diagnostic)) = start(&world, "mira") else {
+        panic!("her overlay reads");
     };
 
-    assert_eq!(diagnostics[0].character(), Some(&id("mira")));
+    assert_eq!(diagnostic.character(), Some(&id("mira")));
     assert_eq!(
         tree(&world.root().join("character-data")),
         ["mira", "mira/config.json"]
-    );
-
-    let world = World::new();
-
-    world.write_home(&document(json!({"unknownField": true})));
-
-    assert!(matches!(
-        start(&world, "mira"),
-        Err(MaterializeError::Unloadable { .. })
-    ));
-    assert_eq!(
-        tree(&world.root().join("character-data")),
-        Vec::<String>::new()
     );
 }

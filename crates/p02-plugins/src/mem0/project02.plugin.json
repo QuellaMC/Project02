@@ -44,7 +44,7 @@
           "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
@@ -85,7 +85,7 @@
           "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
@@ -115,7 +115,7 @@
           "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true

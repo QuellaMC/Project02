@@ -126,7 +126,6 @@ function view(fingerprint = 'f1'): OkView {
           ),
         ],
         diagnostics: [],
-        fingerprint,
       },
     ],
   };
@@ -515,12 +514,11 @@ describe('web settings', () => {
         defaulted('mirror', true, {valueType: 'boolean'}),
       ],
       diagnostics: [],
-      fingerprint: 'f1',
     };
     const unknownField: RuntimeConfigDiagnostic = {
       severity: 'warning',
-      code: 'runtime_config_unknown_top_level_field',
-      message: 'Unknown runtime config field "theme".',
+      code: 'runtime_config_ignored',
+      message: '"theme" is not a setting, so it is not used.',
       path: 'theme',
       scope: 'global',
     };

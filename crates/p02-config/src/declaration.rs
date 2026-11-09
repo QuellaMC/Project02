@@ -15,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
-use crate::diagnostic::Code;
-
-/// The version every settings document names, and the only one read.
+/// The version a document this build writes names. A document's version is
+/// never judged when it is read.
 pub(crate) const VERSION: &str = "project02.config.v2";
 
 /// The two stanzas of a document that hold declared sections by id. A
@@ -157,7 +156,12 @@ pub(crate) fn expectation(field: &ConfigField) -> String {
     }
 
     match field.value_type() {
-        Some(ConfigValueType::String | ConfigValueType::Path | ConfigValueType::Enum) => "a string",
+        Some(
+            ConfigValueType::String
+            | ConfigValueType::Path
+            | ConfigValueType::Url
+            | ConfigValueType::Enum,
+        ) => "a string",
         Some(ConfigValueType::Number) => "a number",
         Some(ConfigValueType::Boolean) => "a boolean",
         Some(ConfigValueType::Object) => "an object",
@@ -196,13 +200,12 @@ impl RoleModelProvider {
 }
 
 /// One of the host's own fields: its declaration, as a plugin's field is
-/// declared, and the rule its values meet beyond their type, with the code
-/// and the sentence a value that breaks it is reported by.
+/// declared, and the rule its values meet beyond their type, with the
+/// sentence a value that breaks it is reported by.
 #[derive(Debug)]
 pub(crate) struct HostField {
     pub(crate) declaration: ConfigField,
     rule: fn(&Value) -> bool,
-    pub(crate) code: Code,
     pub(crate) sentence: String,
 }
 
@@ -251,7 +254,6 @@ pub(crate) fn text(value: &Value) -> Option<&str> {
 struct HostRule {
     name: &'static str,
     accepts: fn(&Value) -> bool,
-    code: Code,
     must_be: Option<&'static str>,
 }
 
@@ -259,49 +261,41 @@ const HOST_RULES: [HostRule; 8] = [
     HostRule {
         name: "userDisplayName",
         accepts: |value| user_display_name(value).is_some(),
-        code: Code::StringInvalid,
         must_be: Some("a non-empty single-line string of at most 128 characters"),
     },
     HostRule {
         name: "roleModelProvider",
         accepts: |value| role_model_provider(value).is_some(),
-        code: Code::RoleModelProviderInvalid,
         must_be: None,
     },
     HostRule {
         name: "nvidiaApiKey",
         accepts: |_| true,
-        code: Code::SecretValueInvalid,
         must_be: Some("a non-empty string"),
     },
     HostRule {
         name: "nvidiaModel",
         accepts: |value| text(value).is_some(),
-        code: Code::StringInvalid,
         must_be: Some("a non-empty string"),
     },
     HostRule {
         name: "nvidiaBaseUrl",
         accepts: |value| base_url(value).is_some(),
-        code: Code::NvidiaBaseUrlInvalid,
         must_be: Some(BASE_URL_RULE),
     },
     HostRule {
         name: "contextWindowTokens",
         accepts: |value| context_window_tokens(value).is_some(),
-        code: Code::ContextWindowTokensInvalid,
         must_be: Some("a positive whole number of tokens"),
     },
     HostRule {
         name: "defaultMemoryProvider",
         accepts: |value| text(value).is_some(),
-        code: Code::StringInvalid,
         must_be: Some("a non-empty string"),
     },
     HostRule {
         name: "enabled",
         accepts: |_| true,
-        code: Code::BooleanInvalid,
         must_be: None,
     },
 ];
@@ -364,7 +358,7 @@ fn host_declaration() -> Value {
                     sends the key and the conversation in the clear.",
                 "required": false,
                 "secret": false,
-                "valueType": "string",
+                "valueType": "url",
                 "redactionLabels": [],
             },
             {
@@ -422,7 +416,6 @@ static HOST: LazyLock<Vec<HostField>> = LazyLock::new(|| {
                 sentence: format!("Project02 {} must be {must_be}.", declaration.name()),
                 declaration: declaration.clone(),
                 rule: rule.accepts,
-                code: rule.code,
             }
         })
         .collect()
@@ -544,23 +537,13 @@ pub struct Sections {
 }
 
 impl Sections {
-    /// The sections of `plugins` and of every connector. A later manifest
-    /// of an id stands for it, in its place: a section has one declaration.
+    /// The sections of `plugins`, the build's list, and of every
+    /// connector.
     #[must_use]
     pub fn new(plugins: impl IntoIterator<Item = Manifest>) -> Self {
-        let mut listed: Vec<Manifest> = Vec::new();
-
-        for manifest in plugins {
-            match listed
-                .iter_mut()
-                .find(|earlier| earlier.id() == manifest.id())
-            {
-                Some(earlier) => *earlier = manifest,
-                None => listed.push(manifest),
-            }
+        Self {
+            plugins: plugins.into_iter().collect(),
         }
-
-        Self { plugins: listed }
     }
 
     /// Every section, the plugins' in the order listed and then the

@@ -29,27 +29,27 @@ tokio's blocking pool.
   to say. She lives from her start to her stop, and a stop is read between
   two steps: a boot, a reload or a recovery in flight is overtaken, a turn
   in flight finishes, and from then on she publishes only `stopping` and
-  `stopped`. Her start reads her package, her settings, which must load
-  and switch her on before anything is written for her, merges her
-  package's settings into her overlay, is refused while anything in her
-  settings stops her, a plugin her package recommends missing only
-  warning, chooses her model, and builds her plugins with her confirmer. A
-  start sent while one is in flight, a boot or a reload, joins it and is
-  answered when it settles, and one that failed stays failed until the
-  next start or settings change. Her thread with the person is opened the
-  first time a client opens it or a line comes for it, and opened again
-  after a reload or a recovery, so no client reopens it. A turn the
-  runtime itself fails leaves her failed and earns one restart: the lines
-  queued behind it are refused, her thread is closed and her plugins shut
-  down, and she starts again. She hears what she is asked while a turn
-  runs, so a reload is said the moment her package or her settings come
-  to differ from those she was built from; it happens once no turn runs,
-  before her next line, and lines sent meanwhile wait and land on her
-  thread opened again. Her stop cancels her
-  parked confirmations first, closes her thread, and shuts her plugins
-  down, saying what failed of that. Her
-  host is handed her settings, which its own plugin reads and changes in
-  her overlay alone, by the one change of settings below.
+  `stopped`. Her start reads her package, her settings, which must be
+  readable, hold nothing that stops her and switch her on before anything
+  is written for her, merges her package's settings into her overlay,
+  warns of a plugin her package expects that she does not run or one her
+  settings block, chooses her model, and builds her plugins with her
+  confirmer. A start sent while one is in flight, a boot or a reload,
+  joins it and is answered when it settles, and one that failed stays
+  failed until the next start or settings change. Her thread with the
+  person is opened the first time a client opens it or a line comes for
+  it, and opened again after a reload or a recovery, so no client reopens
+  it. A turn the runtime itself fails leaves her failed and earns one
+  restart: the lines queued behind it are refused, her thread is closed
+  and her plugins shut down, and she starts again. She hears what she is
+  asked while a turn runs, so a reload is said the moment her package or
+  her settings come to differ from those she was built from; it happens
+  once no turn runs, before her next line, and lines sent meanwhile wait
+  and land on her thread opened again. Her stop cancels her parked
+  confirmations first, closes her thread, and shuts her plugins down,
+  saying what failed of that. Her host is handed her settings, which its
+  own plugin reads and changes in her overlay alone, by the one change of
+  settings below.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her

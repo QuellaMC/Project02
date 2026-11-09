@@ -30,7 +30,7 @@ impl Roster {
         let discovery = discover(world.home.root());
         let home_diagnostics = match Resolution::home(&world.home, &world.sections) {
             Ok(resolution) => resolution.diagnostics().to_vec(),
-            Err(ReadSettingsError::Unloadable { diagnostics }) => diagnostics,
+            Err(ReadSettingsError::Unreadable(diagnostic)) => vec![*diagnostic],
             Err(ReadSettingsError::Storage(_) | ReadSettingsError::UnknownCharacter(_)) => {
                 Vec::new()
             }

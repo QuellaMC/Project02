@@ -183,7 +183,10 @@ vocabulary! {
         Boolean = "boolean",
         Object = "object",
         Array = "array",
+        /// A place on the person's machine.
         Path = "path",
+        /// A server the plugin sends to.
+        Url = "url",
         Enum = "enum",
     }
 }

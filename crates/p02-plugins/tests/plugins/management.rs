@@ -85,8 +85,13 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 
     assert_eq!(
         listed(&running),
-        [runs("runtime.plugin")],
-        "a setting in error stops her: no plugin of hers runs"
+        [
+            runs("runtime.plugin"),
+            runs("character-memory"),
+            runs("character-state"),
+            runs("session-history"),
+        ],
+        "a setting in error blocks its own plugin alone"
     );
     let own = &output(&running)["plugins"][0];
     let tools: Vec<(&str, &str, bool)> = own["providedTools"]
@@ -127,16 +132,16 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
         listed(&everything),
         [
             runs("runtime.plugin"),
-            not("character-memory", "blocked"),
-            not("character-state", "blocked"),
+            runs("character-memory"),
+            runs("character-state"),
+            runs("session-history"),
             not("demo-config", "blocked"),
             not("mem0", "disabled"),
-            not("session-history", "blocked"),
         ],
         "a plugin her settings block is listed blocked"
     );
     assert_eq!(
-        output(&everything)["plugins"][3]["grantedAccess"],
+        output(&everything)["plugins"][4]["grantedAccess"],
         json!({})
     );
     assert_eq!(output(&everything)["truncated"], false);

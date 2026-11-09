@@ -175,42 +175,41 @@
       "description": "What a client stamps on a line it carries: the surface it came from, or\nthe id it submitted the line under, which a repeat of the line reuses. An\nASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`\nor `-`."
     },
     "Code": {
-      "type": "string",
-      "enum": [
-        "runtime_config_read_failed",
-        "runtime_config_malformed_json",
-        "runtime_config_not_object",
-        "runtime_config_limit_exceeded",
-        "runtime_config_version_unsupported",
-        "runtime_config_unknown_top_level_field",
-        "runtime_config_project02_not_object",
-        "runtime_config_unknown_project02_field",
-        "runtime_config_plugins_not_object",
-        "runtime_config_connectors_not_object",
-        "runtime_config_unknown_plugin",
-        "runtime_config_unknown_connector",
-        "runtime_config_plugin_not_object",
-        "runtime_config_unknown_plugin_wrapper_field",
-        "runtime_config_boolean_invalid",
-        "runtime_config_plugin_config_not_object",
-        "runtime_config_unknown_plugin_config_field",
-        "runtime_config_string_invalid",
-        "runtime_config_role_model_provider_invalid",
-        "runtime_config_secret_value_invalid",
-        "runtime_config_nvidia_base_url_invalid",
-        "runtime_config_context_window_tokens_invalid",
-        "runtime_config_value_type_invalid",
-        "runtime_config_required_value_missing",
-        "runtime_config_required_secret_missing",
-        "runtime_config_authored_outside_scope",
-        "character_package_plugin_config_invalid",
-        "default_memory_provider_unavailable",
-        "default_memory_provider_not_memory_provider",
-        "ambiguous_memory_provider_selection",
-        "character_required_plugin_missing",
-        "character_required_plugin_disabled",
-        "character_recommended_plugin_missing",
-        "character_recommended_plugin_disabled"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "runtime_config_unknown_plugin",
+            "runtime_config_unknown_connector",
+            "runtime_config_authored_outside_scope",
+            "default_memory_provider_unavailable"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_unreadable",
+          "description": "A document that cannot be read, is not JSON, or is no object."
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_ignored",
+          "description": "A key the settings do not know, or a namespace that is no\nobject: not used."
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_value_invalid",
+          "description": "A value its field does not take: not used, and nothing stands in\nfor it."
+        },
+        {
+          "type": "string",
+          "const": "character_package_value_skipped",
+          "description": "A value her package gives that a package may not set."
+        },
+        {
+          "type": "string",
+          "const": "character_plugin_not_running",
+          "description": "A plugin her package expects that she does not run."
+        }
       ],
       "description": "What a finding is, in the one spelling clients read."
     },
@@ -342,15 +341,28 @@
       "description": "Whose settings a view reads or a change writes: the home's, or one\ncharacter's."
     },
     "ConfigValueType": {
-      "type": "string",
-      "enum": [
-        "string",
-        "number",
-        "boolean",
-        "object",
-        "array",
-        "path",
-        "enum"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "enum"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "path",
+          "description": "A place on the person's machine."
+        },
+        {
+          "type": "string",
+          "const": "url",
+          "description": "A server the plugin sends to."
+        }
       ],
       "description": "The kind of value a config field holds. Whether it holds a\ncredential is the field's `secret` flag alone to say."
     },
@@ -1425,9 +1437,6 @@
           "$ref": "#/$defs/Severity",
           "description": "Always an error: the package is not in the roster."
         },
-        "code": {
-          "type": "string"
-        },
         "message": {
           "type": "string"
         },
@@ -1448,7 +1457,6 @@
       },
       "required": [
         "severity",
-        "code",
         "message",
         "path",
         "provenance"
@@ -1968,10 +1976,6 @@
           "items": {
             "$ref": "#/$defs/RuntimeConfigDiagnostic"
           }
-        },
-        "fingerprint": {
-          "$ref": "#/$defs/Fingerprint",
-          "description": "What a change to this section alone may present."
         }
       },
       "required": [
@@ -1983,8 +1987,7 @@
         "enabledSource",
         "activation",
         "fields",
-        "diagnostics",
-        "fingerprint"
+        "diagnostics"
       ],
       "description": "One section as a screen shows it."
     },

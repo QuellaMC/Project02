@@ -181,7 +181,7 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
 }
 
 #[test]
-fn a_section_this_build_lacks_warns_for_its_id_unless_the_nearest_switch_turns_it_off() {
+fn a_section_this_build_lacks_warns_for_its_id_in_each_document_naming_it() {
     let world = World::new();
 
     world
@@ -195,26 +195,24 @@ fn a_section_this_build_lacks_warns_for_its_id_unless_the_nearest_switch_turns_i
         );
 
     let unknown = |view: &serde_json::Value| findings(&view["diagnostics"]);
+    let warned = |code: &str, path: &str| (code.to_owned(), path.to_owned());
 
     assert_eq!(
         unknown(&world.view(&home())),
         [
-            (
-                "runtime_config_unknown_plugin".to_owned(),
-                "plugins.ghost".to_owned()
-            ),
-            (
-                "runtime_config_unknown_connector".to_owned(),
-                "connectors.discord".to_owned()
-            ),
+            warned("runtime_config_unknown_plugin", "plugins.ghost"),
+            warned("runtime_config_unknown_plugin", "plugins.spirit"),
+            warned("runtime_config_unknown_connector", "connectors.discord"),
         ]
     );
     assert_eq!(
         unknown(&world.view(&of("mira"))),
-        [(
-            "runtime_config_unknown_connector".to_owned(),
-            "connectors.discord".to_owned()
-        )]
+        [
+            warned("runtime_config_unknown_plugin", "plugins.ghost"),
+            warned("runtime_config_unknown_plugin", "plugins.ghost"),
+            warned("runtime_config_unknown_plugin", "plugins.spirit"),
+            warned("runtime_config_unknown_connector", "connectors.discord"),
+        ]
     );
 }
 
@@ -251,11 +249,11 @@ fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switc
         demo(&of("mira")).0,
         [
             (
-                "runtime_config_unknown_plugin_config_field".to_owned(),
+                "runtime_config_ignored".to_owned(),
                 "plugins.demo-config.config.nope".to_owned()
             ),
             (
-                "runtime_config_value_type_invalid".to_owned(),
+                "runtime_config_value_invalid".to_owned(),
                 "plugins.demo-config.config.tone".to_owned()
             ),
         ]
@@ -269,7 +267,7 @@ fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switc
         demo(&home()),
         (
             vec![(
-                "runtime_config_boolean_invalid".to_owned(),
+                "runtime_config_value_invalid".to_owned(),
                 "plugins.demo-config.enabled".to_owned()
             )],
             json!(["blocked_by_config_errors"])
@@ -320,7 +318,7 @@ fn a_memory_provider_the_settings_do_not_choose_never_runs_and_is_never_judged()
     assert_eq!(
         findings(&world.view(&home())["diagnostics"]),
         [(
-            "runtime_config_value_type_invalid".to_owned(),
+            "runtime_config_value_invalid".to_owned(),
             "plugins.mem0.config.backend".to_owned()
         )]
     );
@@ -364,17 +362,17 @@ fn a_finding_in_her_overlay_names_her_and_one_in_the_homes_document_no_one() {
                 Some("mira")
             ),
             (
-                "runtime_config_unknown_plugin_config_field",
+                "runtime_config_ignored",
                 "plugins.demo-config.config.nope",
                 Some("mira")
             ),
             (
-                "runtime_config_value_type_invalid",
+                "runtime_config_value_invalid",
                 "plugins.demo-config.config.tone",
                 Some("mira")
             ),
             (
-                "runtime_config_value_type_invalid",
+                "runtime_config_value_invalid",
                 "plugins.demo-config.config.signoff",
                 None
             ),
@@ -417,7 +415,7 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
     assert_eq!(
         findings(&view["diagnostics"]),
         [(
-            "runtime_config_value_type_invalid".to_owned(),
+            "runtime_config_value_invalid".to_owned(),
             "connectors.telegram.config.mirror".to_owned()
         )]
     );

@@ -62,23 +62,13 @@ pub enum PackageProblem {
     Descriptor(#[from] ParseDescriptorError),
     #[error("character package folder must match its identity.id \"{claimed}\"")]
     IdMismatch { claimed: Identifier },
-    #[error("{}", duplicated(.ids))]
-    DuplicateId { ids: Vec<Identifier> },
-}
-
-impl PackageProblem {
-    /// The code the problem is reported under.
-    #[must_use]
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::SourceUnavailable(_) => "package_source_unavailable",
-            Self::LinkedDirectory | Self::UnreadableDirectory(_) => "invalid_package_directory",
-            Self::DescriptorNotAFile | Self::UnreadableDescriptor(_) => "invalid_descriptor",
-            Self::Descriptor(error) => error.code(),
-            Self::IdMismatch { .. } => "package_id_mismatch",
-            Self::DuplicateId { .. } => "duplicate_character_id",
-        }
-    }
+    /// Another package already has her id, or one differing from it only
+    /// by case: the two would share one data directory.
+    #[error(
+        "another character package, \"{taken}\", already has this id or one differing from it \
+         only by case; rename or remove this package"
+    )]
+    DuplicateId { taken: Identifier },
 }
 
 /// Why no published character answers to an id.
@@ -120,58 +110,55 @@ fn described(problems: &[&PackageDiagnostic]) -> String {
                 PackageLocation::Home(path) => path.display().to_string(),
             };
 
-            format!(
-                "{} ({} at {location})",
-                diagnostic.problem,
-                diagnostic.problem.code()
-            )
+            format!("{} (at {location})", diagnostic.problem)
         })
         .collect::<Vec<_>>()
         .join("; ")
 }
 
 impl Discovery {
-    /// The character published as `id`, unless a package meant to be her
-    /// was not published, or the folder that might hold one could not be
-    /// read: a person who asks for her is told why, rather than handed a
-    /// character discovery could not vouch for.
+    /// The character published as `id`, or why there is none.
     ///
     /// # Errors
     ///
     /// [`FindCharacterError`] saying why there is no such character.
     pub fn find(&self, id: &str) -> Result<&CharacterDefinition, FindCharacterError<'_>> {
+        if let Some(character) = self
+            .characters
+            .iter()
+            .find(|character| character.profile.id.as_str() == id)
+        {
+            return Ok(character);
+        }
+
         let problems: Vec<&PackageDiagnostic> = self
             .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.concerns(id))
             .collect();
-        let published = self
-            .characters
-            .iter()
-            .find(|character| character.profile.id.as_str() == id);
 
-        match published {
-            Some(character) if problems.is_empty() => Ok(character),
-            None if problems.is_empty() => Err(FindCharacterError::NotFound {
+        Err(if problems.is_empty() {
+            FindCharacterError::NotFound {
                 id: id.to_owned(),
                 published: self
                     .characters
                     .iter()
                     .map(|character| &character.profile.id)
                     .collect(),
-            }),
-            _ => Err(FindCharacterError::Unpublished {
+            }
+        } else {
+            FindCharacterError::Unpublished {
                 id: id.to_owned(),
                 problems,
-            }),
-        }
+            }
+        })
     }
 }
 
 impl PackageDiagnostic {
-    /// Whether the diagnostic stands between a person and character `id`:
-    /// her folder's, a package claiming her id from another folder, or a
-    /// home packages folder that could not be listed.
+    /// Whether the diagnostic may say why character `id` is missing: her
+    /// folder's, a package claiming her id from another folder, or a home
+    /// packages folder that could not be listed.
     fn concerns(&self, id: &str) -> bool {
         self.folder.is_none()
             || self.folder.as_deref() == Some(id)
@@ -179,31 +166,11 @@ impl PackageDiagnostic {
     }
 }
 
-fn duplicated(ids: &[Identifier]) -> String {
-    let quoted = ids
-        .iter()
-        .map(|id| format!("\"{id}\""))
-        .collect::<Vec<_>>()
-        .join(" and ");
-
-    if ids.len() == 1 {
-        format!(
-            "character package id {quoted} is defined in more than one place; remove or rename \
-             one of the packages"
-        )
-    } else {
-        format!(
-            "character package ids {quoted} differ only by case and would share one \
-             character-data directory; remove or rename one of the packages"
-        )
-    }
-}
-
 /// The character packages of `home`: those compiled into the daemon, and
 /// those the person put in folders under `<home>/characters/`. A package is
 /// published when its descriptor reads, its folder is named by her id, and
-/// no other package has her id, or one differing only by case: the two
-/// would share one data directory, so neither is published.
+/// no package before it, the bundled ones first and then the home's in
+/// name order, has her id or one differing from it only by case.
 #[must_use]
 pub fn discover(home: &Path) -> Discovery {
     let mut diagnostics = Vec::new();
@@ -340,44 +307,36 @@ fn judge(
     })
 }
 
-/// Each candidate whose id no other candidate shares, even by case, in id
-/// order; the others are diagnosed together.
+/// The first candidate of each id, ids differing only by case being one,
+/// in id order; each later one is diagnosed.
 fn publish(
     candidates: Vec<Candidate>,
     diagnostics: &mut Vec<PackageDiagnostic>,
 ) -> Vec<CharacterDefinition> {
-    let mut by_key: BTreeMap<String, Vec<Candidate>> = BTreeMap::new();
+    let mut published: BTreeMap<String, CharacterDefinition> = BTreeMap::new();
 
-    for candidate in candidates {
-        by_key
-            .entry(candidate.definition.profile.id.collision_key())
-            .or_default()
-            .push(candidate);
-    }
+    for Candidate {
+        location,
+        definition,
+    } in candidates
+    {
+        let id = &definition.profile.id;
 
-    let mut characters = Vec::new();
-
-    for group in by_key.into_values() {
-        match <[Candidate; 1]>::try_from(group) {
-            Ok([sole]) => characters.push(sole.definition),
-            Err(group) => {
-                let mut ids: Vec<Identifier> = group
-                    .iter()
-                    .map(|candidate| candidate.definition.profile.id.clone())
-                    .collect();
-
-                ids.sort();
-                ids.dedup();
-                diagnostics.extend(group.into_iter().map(|candidate| PackageDiagnostic {
-                    location: candidate.location,
-                    folder: Some(candidate.definition.profile.id.to_string()),
-                    problem: PackageProblem::DuplicateId { ids: ids.clone() },
-                }));
+        match published.get(&id.collision_key()) {
+            Some(taken) => diagnostics.push(PackageDiagnostic {
+                location,
+                folder: Some(id.to_string()),
+                problem: PackageProblem::DuplicateId {
+                    taken: taken.profile.id.clone(),
+                },
+            }),
+            None => {
+                published.insert(id.collision_key(), definition);
             }
         }
     }
 
-    characters
+    published.into_values().collect()
 }
 
 #[cfg(test)]
@@ -481,17 +440,19 @@ mod tests {
             .collect()
     }
 
-    fn reported(discovery: &Discovery) -> Vec<(PackageLocation, Option<&str>, &'static str)> {
+    fn reported(discovery: &Discovery) -> Vec<(PackageLocation, Option<&str>)> {
         discovery
             .diagnostics
             .iter()
-            .map(|diagnostic| {
-                (
-                    diagnostic.location.clone(),
-                    diagnostic.folder.as_deref(),
-                    diagnostic.problem.code(),
-                )
-            })
+            .map(|diagnostic| (diagnostic.location.clone(), diagnostic.folder.as_deref()))
+            .collect()
+    }
+
+    fn said(discovery: &Discovery) -> Vec<String> {
+        discovery
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.problem.to_string())
             .collect()
     }
 
@@ -548,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn a_broken_package_is_diagnosed_with_its_code_its_folder_and_where_it_lies() {
+    fn a_broken_package_is_diagnosed_with_its_folder_and_where_it_lies() {
         let home = Home::new();
 
         home.write(
@@ -570,123 +531,62 @@ mod tests {
         assert_eq!(
             reported(&discovery),
             [
-                (
-                    home.descriptor("empty"),
-                    Some("empty"),
-                    "invalid_descriptor"
-                ),
-                (home.descriptor("huge"), Some("huge"), "invalid_descriptor"),
-                (
-                    home.descriptor("malformed"),
-                    Some("malformed"),
-                    "invalid_descriptor"
-                ),
-                (
-                    home.descriptor("misfiled"),
-                    Some("misfiled"),
-                    "package_id_mismatch"
-                ),
-                (
-                    home.descriptor("nameless"),
-                    Some("nameless"),
-                    "invalid_identity"
-                ),
-                (
-                    home.descriptor("nested"),
-                    Some("nested"),
-                    "invalid_descriptor"
-                ),
+                "empty",
+                "huge",
+                "malformed",
+                "misfiled",
+                "nameless",
+                "nested"
             ]
+            .map(|folder| (home.descriptor(folder), Some(folder)))
         );
 
-        let said: Vec<String> = discovery
-            .diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.problem.to_string())
-            .collect();
+        let said = said(&discovery);
 
         assert_eq!(
             said[0],
             "character package descriptor must be a regular file"
         );
         assert!(said[1].contains("size limit"), "{}", said[1]);
+        assert!(said[2].contains("valid JSON"), "{}", said[2]);
         assert!(said[3].contains("\"elsewhere\""), "{}", said[3]);
         assert!(said[4].contains("identity.displayName"), "{}", said[4]);
     }
 
     #[test]
-    fn one_id_in_two_places_or_two_differing_only_by_case_are_both_refused() {
-        for (id, shared) in [
-            ("mira", "id \"mira\" is defined in more than one place"),
-            ("Mira", "ids \"Mira\" and \"mira\" differ only by case"),
-        ] {
+    fn the_first_package_of_an_id_is_served_and_one_sharing_it_even_by_case_is_reported() {
+        for id in ["mira", "Mira"] {
             let home = Home::new();
 
             home.package(id, id, "Mira Two");
 
             let discovery = discover(&home.root);
 
-            assert!(discovery.characters.is_empty(), "{id}");
+            assert_eq!(ids(&discovery), ["mira"], "{id}");
             assert_eq!(
-                reported(&discovery),
-                [
-                    (
-                        PackageLocation::Bundled,
-                        Some("mira"),
-                        "duplicate_character_id"
-                    ),
-                    (home.descriptor(id), Some(id), "duplicate_character_id"),
-                ]
+                discovery.characters[0].profile.display_name.as_str(),
+                "Mira"
             );
-
-            for diagnostic in &discovery.diagnostics {
-                let said = diagnostic.problem.to_string();
-
-                assert!(
-                    said.contains(shared) && said.ends_with("remove or rename one of the packages"),
-                    "{said}"
-                );
-            }
+            assert_eq!(reported(&discovery), [(home.descriptor(id), Some(id))]);
+            assert!(
+                said(&discovery)[0].contains("\"mira\", already has this id"),
+                "{id}"
+            );
         }
     }
 
     #[test]
-    fn a_linked_folder_of_packages_is_followed_but_a_linked_package_or_descriptor_is_refused() {
-        let elsewhere = Home::new();
+    fn a_linked_folder_of_packages_is_followed() {
         let shelf = Home::new();
         let home = Home::new();
 
-        elsewhere
-            .package("linked", "linked", "Linked")
-            .package("pointer", "pointer", "Pointer");
-        shelf
-            .package("zeta", "zeta", "Zeta")
-            .link("characters/linked", &elsewhere.path("characters/linked"))
-            .folder("characters/pointer")
-            .link(
-                "characters/pointer/project02.character.json",
-                &elsewhere.path("characters/pointer/project02.character.json"),
-            );
+        shelf.package("zeta", "zeta", "Zeta");
         home.link("characters", &shelf.path("characters"));
 
         let discovery = discover(&home.root);
 
         assert_eq!(ids(&discovery), ["mira", "zeta"]);
-        assert_eq!(
-            reported(&discovery),
-            [
-                (
-                    PackageLocation::Home(home.path("characters/linked")),
-                    Some("linked"),
-                    "invalid_package_directory"
-                ),
-                (
-                    home.descriptor("pointer"),
-                    Some("pointer"),
-                    "invalid_descriptor"
-                ),
-            ]
-        );
+        assert!(discovery.diagnostics.is_empty());
     }
 
     #[test]
@@ -705,18 +605,22 @@ mod tests {
             refusal("ghost"),
             "character \"ghost\" was not found; the characters are mira, zeta"
         );
-        assert!(refusal("broken").contains("(invalid_descriptor at "));
-        assert!(refusal("nova").contains("(package_id_mismatch at "));
+        assert!(refusal("broken").contains("valid JSON (at "));
+        assert!(refusal("nova").contains("identity.id \"nova\" (at "));
 
         let unlisted = Home::new();
 
         unlisted.write("characters", b"not a folder");
+
+        let discovery = discover(&unlisted.root);
+
+        assert_eq!(discovery.find("mira").unwrap().profile.id.as_str(), "mira");
         assert!(
-            discover(&unlisted.root)
-                .find("mira")
+            discovery
+                .find("zeta")
                 .unwrap_err()
                 .to_string()
-                .contains("package_source_unavailable")
+                .contains("source is unavailable")
         );
     }
 
@@ -734,12 +638,9 @@ mod tests {
             assert_eq!(ids(&discovery), ["mira"]);
             assert_eq!(
                 reported(&discovery),
-                [(
-                    PackageLocation::Home(home.path("characters")),
-                    None,
-                    "package_source_unavailable"
-                )]
+                [(PackageLocation::Home(home.path("characters")), None)]
             );
+            assert!(said(&discovery)[0].contains("source is unavailable"));
         }
     }
 }

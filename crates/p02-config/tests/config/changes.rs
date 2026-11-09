@@ -4,11 +4,11 @@
 use std::sync::Barrier;
 
 use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, Namespace, Operation, create_home_document,
+    ChangeOutcome, ChangeRefusal, Code, ConfigChange, Namespace, Operation, create_home_document,
 };
 use serde_json::{Value, json};
 
-use crate::support::{WAIT, World, document, field, home, of, section, tree};
+use crate::support::{WAIT, World, document, home, of, section, tree};
 
 fn fingerprint(view: &Value) -> String {
     view["fingerprint"].as_str().unwrap().to_owned()
@@ -216,41 +216,6 @@ fn a_change_bound_to_a_fingerprint_the_documents_moved_past_is_a_conflict_and_wr
 }
 
 #[test]
-fn a_change_to_one_section_may_present_that_sections_fingerprint() {
-    let world = World::new();
-    let read = world.view(&of("mira"));
-    let demo = fingerprint(section(&read, "plugins", "demo-config").unwrap());
-    let tone = |value: &str| {
-        json!({
-            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
-            "field": "tone", "value": value,
-        })
-    };
-
-    world.save(
-        &home(),
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Robin"}),
-    );
-
-    assert!(matches!(
-        world.change_bound(&of("mira"), &demo, tone("warm")),
-        ChangeOutcome::Applied { .. }
-    ));
-    assert_eq!(
-        refusal(&world.change_bound(&of("mira"), &demo, tone("formal"))),
-        Some(ChangeRefusal::Conflict)
-    );
-    assert_eq!(
-        refusal(&world.change_bound(
-            &of("mira"),
-            &demo,
-            json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"}),
-        )),
-        Some(ChangeRefusal::Conflict)
-    );
-}
-
-#[test]
 fn a_secrets_presence_moves_the_fingerprint_and_its_value_never_does() {
     let world = World::new();
     let unset = fingerprint(&world.view(&home()));
@@ -362,29 +327,6 @@ fn a_host_value_its_rule_refuses_is_refused_and_the_refusal_never_repeats_it() {
             &home(),
             json!({"kind": "set", "path": "project02.nvidiaBaseUrl", "value": "http://127.0.0.1:1234/v1"}),
         );
-}
-
-#[test]
-fn a_change_that_would_leave_a_document_its_reader_refuses_is_refused_and_writes_nothing() {
-    let world = World::new();
-    let long = "x".repeat(17 * 1_024);
-    let outcome = world.change(
-        &home(),
-        json!({
-            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
-            "field": "signoff", "value": long,
-        }),
-    );
-
-    assert_eq!(
-        refusal(&outcome),
-        Some(ChangeRefusal::Invalid),
-        "{outcome:?}"
-    );
-    assert!(format!("{outcome:?}").contains("limit"), "{outcome:?}");
-    assert!(!format!("{outcome:?}").contains(&long));
-    assert!(!world.home_document().exists());
-    assert_eq!(world.view(&home())["status"], "ok");
 }
 
 #[test]
@@ -543,88 +485,76 @@ fn a_change_on_her_screen_is_written_into_her_overlay_alone_secrets_too() {
 }
 
 #[test]
-fn a_change_over_a_document_that_does_not_load_is_refused_saying_why_and_writes_nothing() {
+fn a_change_over_a_document_that_cannot_be_read_is_refused_saying_why_and_writes_nothing() {
     let world = World::new();
-    let name = json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"});
-    let tokens = json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096});
-    let refused_saying = |outcome: &ChangeOutcome, why: &str| {
-        assert_eq!(
-            refusal(outcome),
-            Some(ChangeRefusal::Invalid),
-            "{outcome:?}"
-        );
-        assert!(format!("{outcome:?}").contains(why), "{why} in {outcome:?}");
-    };
     let read = fingerprint(&world.view(&of("mira")));
 
     std::fs::write(world.home_document(), "{not json").unwrap();
-    refused_saying(
-        &world.change_bound(&of("mira"), &read, name.clone()),
-        "not valid JSON",
+
+    let outcome = world.change_bound(
+        &of("mira"),
+        &read,
+        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"}),
+    );
+
+    assert_eq!(
+        refusal(&outcome),
+        Some(ChangeRefusal::Invalid),
+        "{outcome:?}"
+    );
+    assert!(
+        format!("{outcome:?}").contains("not valid JSON"),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(world.home_document()).unwrap(),
+        "{not json"
     );
     assert!(!world.overlay("mira").exists());
-
-    let broken = document(json!({"project02": {"contextWindowTokens": -5}}));
-
-    world.write_home(&document(json!({})));
-
-    let read = fingerprint(&world.view(&home()));
-
-    world.write_home(&broken);
-    refused_saying(
-        &world.change_bound(&home(), &read, tokens.clone()),
-        "contextWindowTokens",
-    );
-    assert_eq!(
-        serde_json::from_slice::<Value>(&std::fs::read(world.home_document()).unwrap()).unwrap(),
-        broken
-    );
-
-    world.write_home(&document(json!({})));
-
-    let read = fingerprint(&world.view(&of("mira")));
-
-    world.write_overlay("mira", &broken);
-    refused_saying(
-        &world.change_bound(&of("mira"), &read, tokens),
-        "contextWindowTokens",
-    );
-    assert_eq!(
-        serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap()).unwrap(),
-        broken
-    );
 }
 
 #[test]
-fn an_edit_to_one_of_her_section_values_leaves_her_section_valid_or_is_refused() {
+fn a_change_applies_beside_values_a_document_refuses_so_each_is_put_right_in_turn() {
     let world = World::new();
 
-    world.write_overlay(
-        "mira",
-        &document(json!({"plugins": {"demo-config": {"enabled": true, "config": {"nope": 1}}}})),
-    );
+    world
+        .write_home(&document(json!({"project02": {"contextWindowTokens": -5}})))
+        .write_overlay(
+            "mira",
+            &document(json!({"plugins": {"demo-config": {
+                "enabled": true,
+                "config": {"nope": 1, "tone": "shouty", "signoff": 7},
+            }}})),
+        );
 
-    let tone = json!({
-        "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
-        "field": "tone", "value": "warm",
-    });
+    let demo = |field: &str, value: Value| {
+        json!({
+            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
+            "field": field, "value": value,
+        })
+    };
+
+    world
+        .save(&of("mira"), demo("tone", json!("warm")))
+        .save(&of("mira"), demo("signoff", json!("Yours.")))
+        .save(
+            &home(),
+            json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096}),
+        );
+
+    let resolution = world.resolve(&of("mira"));
 
     assert_eq!(
-        refusal(&world.change(&of("mira"), tone.clone())),
-        Some(ChangeRefusal::Invalid)
+        resolution
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| (diagnostic.code(), diagnostic.path()))
+            .collect::<Vec<_>>(),
+        [(Code::Ignored, Some("plugins.demo-config.config.nope"))]
     );
-
-    world.write_overlay(
-        "mira",
-        &document(json!({"plugins": {"demo-config": {"enabled": true}}})),
-    );
-    world.save(&of("mira"), tone);
-
-    let view = world.view(&of("mira"));
-
     assert_eq!(
-        field(section(&view, "plugins", "demo-config").unwrap(), "tone").unwrap()["authored"],
-        json!({"configured": true, "value": "warm"})
+        resolution.settings().host().context_window_tokens.get(),
+        4096
     );
 }
 

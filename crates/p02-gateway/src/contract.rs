@@ -358,7 +358,6 @@ fn written() -> Vec<(&'static str, Value)> {
         packages: PackagesHealth {
             diagnostics: vec![PackageReport {
                 severity: Severity::Error,
-                code: "package_id_mismatch".to_owned(),
                 message: "The package's id is not its folder's.".to_owned(),
                 path: "/home/person/.project02/characters/nova".to_owned(),
                 provenance: PackageProvenance::Operator,

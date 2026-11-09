@@ -484,7 +484,6 @@ pub struct PackagesHealth {
 pub struct PackageReport {
     /// Always an error: the package is not in the roster.
     pub severity: Severity,
-    pub code: String,
     pub message: String,
     pub path: String,
     pub provenance: PackageProvenance,
@@ -507,7 +506,6 @@ impl From<&PackageDiagnostic> for PackageReport {
 
         Self {
             severity: Severity::Error,
-            code: diagnostic.problem.code().to_owned(),
             // As a refused start embeds it, so the one reads in the other.
             message: diagnostic.problem.to_string(),
             path,
