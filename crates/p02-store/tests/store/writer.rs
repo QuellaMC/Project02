@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 use p02_store::{Judgement, LogRecord, RecordBody, StorageError, TurnCompleted};
 use serde_json::json;
 
-use crate::support::{ECHOED_CREDENTIAL, Script, World, answer, lines_of};
+use crate::support::{Script, World, answer, lines_of, written};
 
 #[test]
 fn a_session_has_one_writer_at_a_time() {
@@ -115,23 +115,23 @@ fn a_writer_reads_its_log_again_when_it_changed_beneath_it_and_cuts_a_torn_line(
 }
 
 #[test]
-fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
+fn a_log_never_holds_a_credential_and_is_made_owner_only() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
     let mut writer = world.first_segment(&world.conversation).unwrap();
 
-    let written = "model-written-credential";
+    let credential = "model-written-credential";
 
     script
         .turn("Patch?")
         .user("patch")
-        .round(Some(
-            json!({"toolCalls": [{
-                "name": "character_state.patch",
-                "input": {"mood": "curious", "api_key": written},
-            }]})
-            .to_string(),
-        ))
+        .round(Some(written(
+            [(
+                "character_state.patch",
+                json!({"mood": "curious", "api_key": credential}),
+            )],
+            None,
+        )))
         .start_calls()
         .finish_calls()
         .round(Some(answer(&["Done."], &[], None)))
@@ -147,8 +147,7 @@ fn a_log_never_holds_a_credential_echoed_or_sent_and_is_made_owner_only() {
     let path = world.path_of(&world.segment(1));
     let log = std::fs::read_to_string(&path).unwrap();
 
-    assert!(!log.contains(ECHOED_CREDENTIAL));
-    assert!(!log.contains(written));
+    assert!(!log.contains(credential));
     assert!(!log.contains("kept-secret"));
     assert!(log.contains(r#""api_key":"[redacted]""#));
     #[cfg(unix)]

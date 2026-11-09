@@ -960,7 +960,6 @@ fn assemble(
             character: Character {
                 profile: definition.profile.clone(),
                 persona: definition.persona.clone(),
-                character_ref: definition.character_ref(),
             },
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,

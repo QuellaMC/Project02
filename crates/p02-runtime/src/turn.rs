@@ -10,8 +10,8 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     BlankContextTextError, CharacterDecision, CommittedTurn, ConversationToolCall,
-    ConversationTurn, DecisionContext, Evidence, ModelToolCall, ProviderAnswer, ToolCallId,
-    ToolCallResult, TurnIdentity, TurnText,
+    ConversationTurn, DecisionContext, Evidence, ModelToolCall, ToolCallId, ToolCallResult,
+    TurnIdentity, TurnText,
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, Participant, SpeakerName, Timestamp,
@@ -27,9 +27,9 @@ use p02_role_model::{
 use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
-    PayloadSummary, RecordBody, RecordError, RoundRecord, RoundSnapshot, RuntimeRejection,
-    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected,
-    TurnRejection, TurnStatus,
+    PayloadSummary, RecordBody, RecordError, RoundRecord, RuntimeRejection, StorageError,
+    ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection,
+    TurnStatus,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinError;
@@ -459,12 +459,9 @@ impl OpenTurn<'_> {
             .into_iter()
             .chain(runtime_notes)
             .collect();
-        let mut context = DecisionContext::new(
-            self.hooks.identity().session_id.clone(),
-            self.cast.character.clone(),
-        )
-        .with_runtime_notes(notes)
-        .with_plugin_context(context_items, curated_sections);
+        let mut context = DecisionContext::new(self.cast.character.clone())
+            .with_runtime_notes(notes)
+            .with_plugin_context(context_items, curated_sections);
 
         if let Some(summary) = &self.summary {
             context = context.with_summary(summary)?;
@@ -646,24 +643,9 @@ impl TurnSink for OpenTurn<'_> {
     type Error = RunTurnError;
 
     async fn record_round(&self, round: &ModelRound) -> Result<(), RunTurnError> {
-        let raw_output_text = match &round.output.answer {
-            ProviderAnswer::Text(raw) => Some(raw.clone()),
-            ProviderAnswer::Failed { .. } => None,
-        };
-        let record = RoundRecord::new(
-            round.round,
-            RoundSnapshot {
-                input_envelope: round.envelope.clone(),
-                raw_output_text,
-                character_ref: self.cast.character_ref.clone(),
-                prompt_size: round.prompt_size.clone(),
-                provider_metadata: round.output.provider_metadata.clone(),
-                provider_exchange: round.output.provider_exchange.clone(),
-            },
-            round.result.clone(),
-        );
+        let record = RoundRecord::new(round.round, &round.answer, &round.result);
 
-        self.append(RecordBody::ModelRound(Box::new(record))).await
+        self.append(RecordBody::ModelRound(record)).await
     }
 
     async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, RunTurnError> {

@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use p02_contracts::ModelOutput;
 use p02_core::SessionId;
 use p02_store::{LogRecord, SessionLog};
 
@@ -103,7 +104,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                 script
                     .turn(&line)
                     .user(&client)
-                    .round(Some("I would rather not answer in JSON.".to_owned()))
+                    .round(Some(ModelOutput::default()))
                     .round(Some(answer(&replies, &[], None)))
                     .replies()
                     .completed();

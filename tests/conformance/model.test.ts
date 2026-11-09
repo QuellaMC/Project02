@@ -88,20 +88,15 @@ it("model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/comp
     status: 'rejected',
     reason: 'provider_error',
   });
-  expect(
-    sessionRecords(cloud.home, 'mira', 'role_model_round').map(
-      round =>
-        (
-          round['roleModelIOSnapshot'] as
-            {readonly providerMetadata: unknown} | undefined
-        )?.providerMetadata,
-    ),
-  ).toMatchObject([
+  expect(sessionRecords(cloud.home, 'mira', 'role_model_round')).toMatchObject([
     {
-      request: {
-        endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      failure: {
+        code: 'missing_api_key',
+        message: 'NVIDIA provider requires the nvidiaApiKey setting.',
       },
-      error: {code: 'missing_api_key'},
+      parsedRoleModelDecisionSnapshot: {
+        result: {status: 'rejected', rejection: {reason: 'provider_error'}},
+      },
     },
   ]);
   expect(model.requests).toHaveLength(2);

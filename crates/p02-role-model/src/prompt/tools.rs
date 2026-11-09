@@ -4,9 +4,16 @@
 
 use std::collections::HashSet;
 
-use p02_contracts::{ChatCompletionTool, ChatToolFunction, ModelToolDefinition, ToolNameMapping};
+use p02_contracts::{ChatCompletionTool, ChatToolFunction, ModelToolDefinition};
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
+
+/// The name a provider is shown for a tool whose own name it cannot take.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ToolNameMapping {
+    pub(crate) runtime_name: Identifier,
+    pub(crate) provider_name: String,
+}
 
 pub(crate) fn chat_tool(definition: &ModelToolDefinition) -> ChatCompletionTool {
     ChatCompletionTool::new(ChatToolFunction {

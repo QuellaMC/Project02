@@ -1,13 +1,13 @@
 //! A streamed chat completion, OpenAI's shape as the NVIDIA endpoint
-//! speaks it, read back into the one message the parser reads whole:
-//! content pieces joined, each tool call's pieces joined by index with the
-//! id and name its first pieces carried, the last finish reason and usage
-//! seen. Each named call's pieces are told as they arrive, so a draft can
-//! be shown while the model writes; the reassembled message is what is
-//! judged.
+//! speaks it, read back into one message: content pieces joined, each tool
+//! call's pieces joined by index under the name its first pieces carried,
+//! the last finish reason and token counts seen. Each named call's pieces
+//! are told as they arrive, so a draft can be shown while the model writes;
+//! the reassembled message is what is judged.
 
 use std::collections::BTreeMap;
 
+use p02_contracts::TokenUsage;
 use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
@@ -26,7 +26,6 @@ pub(super) struct Fragment<'a> {
 /// A tool call as its pieces left it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct StreamedCall {
-    pub(super) id: Option<String>,
     pub(super) name: Option<String>,
     pub(super) arguments: String,
 }
@@ -37,7 +36,7 @@ pub(super) struct Completion {
     pub(super) content: Option<String>,
     pub(super) finish_reason: Option<String>,
     pub(super) calls: Vec<StreamedCall>,
-    pub(super) usage: Option<Value>,
+    pub(super) usage: Option<TokenUsage>,
 }
 
 /// A chunk that is no part of a completion, or the provider's error.
@@ -59,7 +58,7 @@ pub(super) struct StreamFold {
     frames: SseFrameSplitter,
     content: Option<String>,
     finish_reason: Option<String>,
-    usage: Option<Value>,
+    usage: Option<TokenUsage>,
     calls: BTreeMap<u64, StreamedCall>,
 }
 
@@ -111,8 +110,8 @@ impl StreamFold {
             });
         }
 
-        if let Some(usage) = chunk.get("usage").filter(|usage| !usage.is_null()) {
-            self.usage = Some(usage.clone());
+        if let Some(usage) = chunk.get("usage").and_then(token_usage) {
+            self.usage = Some(usage);
         }
 
         let Some(Value::Array(choices)) = chunk.get("choices") else {
@@ -171,16 +170,6 @@ impl StreamFold {
             ));
         };
         let call = self.calls.entry(index).or_default();
-
-        if call.id.is_none()
-            && let Some(id) = piece
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-        {
-            call.id = Some(id.to_owned());
-        }
-
         let Some(function) = piece
             .get("function")
             .filter(|function| function.is_object())
@@ -221,6 +210,14 @@ impl StreamFold {
     }
 }
 
+/// The token counts of a chunk's usage, when it has both.
+fn token_usage(usage: &Value) -> Option<TokenUsage> {
+    Some(TokenUsage {
+        prompt_tokens: usage.get("prompt_tokens")?.as_u64()?,
+        completion_tokens: usage.get("completion_tokens")?.as_u64()?,
+    })
+}
+
 fn malformed(message: &str) -> StreamError {
     StreamError {
         code: FailureCode::MalformedResponse,
@@ -230,13 +227,11 @@ fn malformed(message: &str) -> StreamError {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     /// Written by hand after the endpoint's shape: content beside a ping
     /// and a reasoning chunk, two tool calls whose pieces interleave by
-    /// index with the id and name on their first, one named only after its
+    /// index with the name on their first, one named only after its
     /// arguments began, the finish reason, usage on a chunk without
     /// choices, the terminator, and a chunk after it that is never read.
     /// CRLF and LF both end lines, and the text is not all ASCII.
@@ -280,9 +275,8 @@ mod tests {
         (Ok(fold.finish()), heard)
     }
 
-    fn call(id: &str, name: &str, arguments: &str) -> StreamedCall {
+    fn call(name: &str, arguments: &str) -> StreamedCall {
         StreamedCall {
-            id: Some(id.to_owned()),
             name: Some(name.to_owned()),
             arguments: arguments.to_owned(),
         }
@@ -300,10 +294,13 @@ mod tests {
                     content: Some("ダーリン、一緒に".to_owned()),
                     finish_reason: Some("tool_calls".to_owned()),
                     calls: vec![
-                        call("call_a", "visible_reply", "{\"text\":\"ゼロツー💖\"}"),
-                        call("call_b", "memory_search", "{\"q\":\"sky\"}"),
+                        call("visible_reply", "{\"text\":\"ゼロツー💖\"}"),
+                        call("memory_search", "{\"q\":\"sky\"}"),
                     ],
-                    usage: Some(json!({"prompt_tokens": 42, "completion_tokens": 17})),
+                    usage: Some(TokenUsage {
+                        prompt_tokens: 42,
+                        completion_tokens: 17,
+                    }),
                 }),
                 vec![
                     (0, "visible_reply".to_owned(), String::new()),

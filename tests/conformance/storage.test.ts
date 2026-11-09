@@ -30,8 +30,10 @@ import {
   finish,
   reply,
   startModelServer,
+  toolCall,
   toolResults,
   undecided,
+  usage,
 } from './harness/model-server.ts';
 import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
@@ -337,7 +339,7 @@ it('storage.continuation-writer-failure: a rotation whose new segment cannot be 
   ]);
 });
 
-it("storage.round-records: each model round is its own role_model_round record of what the model was shown and wrote and the parser's verdict on it, named by number by its tool calls and by the terminal record, which carries the commit validation; the same tool in two turns gets two call ids, and a later refusal keeps the accepted call and its evidence", async () => {
+it('storage.round-records: each model round is its own role_model_round record of what the model wrote, how its answer ended, the tokens it took and the verdict on it, and never the prompt, named by number by its tool calls and by the terminal record, which carries the commit validation; the same tool in two turns gets two call ids, and a later refusal keeps the accepted call and its evidence', async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -348,7 +350,13 @@ it("storage.round-records: each model round is its own role_model_round record o
 
   model.answer(
     calling(['character_state_patch', {mood: 'curious'}]),
-    reply('Curious now.'),
+    {
+      chunks: [
+        ...content('Curious now.'),
+        finish('stop'),
+        usage({prompt_tokens: 1200, completion_tokens: 3}),
+      ],
+    },
     calling(['character_state_patch', {mood: 'playful'}]),
     ...undecided(99),
   );
@@ -363,27 +371,38 @@ it("storage.round-records: each model round is its own role_model_round record o
     (turn ?? []).filter(record => record['kind'] === kind);
   const [firstCall] = ofKind(completed, 'tool_call_started');
   const [secondCall] = ofKind(refused, 'tool_call_started');
+  const turn = {
+    eventId: completed?.[0]?.['eventId'],
+    traceId: completed?.[0]?.['traceId'],
+    createdAt: completed?.[0]?.['createdAt'],
+    kind: 'role_model_round',
+  };
+  const patch = {name: 'character_state.patch', input: {mood: 'curious'}};
 
-  expect(ofKind(completed, 'role_model_round')).toMatchObject([
+  expect(ofKind(completed, 'role_model_round')).toEqual([
     {
+      ...turn,
       round: 1,
-      roleModelIOSnapshot: {
-        inputEnvelope: {
-          event: {eventId: completed?.[0]?.['eventId']},
-          userMessage: 'How do you feel?',
-        },
-        rawOutputText: expect.stringContaining(
-          'character_state.patch',
-        ) as string,
+      output: {toolCalls: [patch]},
+      finishReason: 'tool_calls',
+      parsedRoleModelDecisionSnapshot: {
+        result: {status: 'accepted', decision: {toolCalls: [patch]}},
       },
-      parsedRoleModelDecisionSnapshot: {result: {status: 'accepted'}},
     },
     {
+      ...turn,
       round: 2,
-      roleModelIOSnapshot: {
-        rawOutputText: expect.stringContaining('Curious now.') as string,
+      output: {toolCalls: [], text: 'Curious now.'},
+      finishReason: 'stop',
+      usage: {promptTokens: 1200, completionTokens: 3},
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'accepted',
+          decision: {
+            toolCalls: [{name: 'visible_reply', input: {text: 'Curious now.'}}],
+          },
+        },
       },
-      parsedRoleModelDecisionSnapshot: {result: {status: 'accepted'}},
     },
   ]);
   expect(firstCall).toMatchObject({
@@ -403,7 +422,6 @@ it("storage.round-records: each model round is its own role_model_round record o
       },
     },
   ]);
-  expect(firstCall).not.toHaveProperty('roleModelIOSnapshot');
   expect(secondCall?.['toolCallId']).not.toBe(firstCall?.['toolCallId']);
   expect(ofKind(refused, 'runtime_turn_rejected')).toMatchObject([
     {
@@ -635,7 +653,7 @@ it("storage.marker-less-history: a character data directory holding history or a
   }
 });
 
-it('storage.no-secrets-in-logs: a credential under a credential-shaped key the model provider sends back is redacted in the session log, which never holds its value', async () => {
+it("storage.no-secrets-in-logs: a credential under a credential-shaped key the model provider sends back, in a call's input or beside the token counts, is redacted in the session log, which never holds its value", async () => {
   const credential = 'provider-echoed-credential';
   const model = await startModelServer();
   const home = createHome({
@@ -644,38 +662,43 @@ it('storage.no-secrets-in-logs: a credential under a credential-shaped key the m
   const wire = wireOf(await startDaemon(home));
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
-
-  model.answer({
-    chunks: [
-      ...content('Hello.'),
-      finish('stop'),
-      {
-        choices: [],
-        usage: {
-          prompt_tokens: 1,
-          completion_tokens: 1,
-          total_tokens: 2,
-          api_key: credential,
-          nested: {access_token: credential, kept: 'as is'},
-        },
-      },
-    ],
+  const input = (secret: string) => ({
+    mood: 'curious',
+    api_key: secret,
+    nested: {access_token: secret, kept: 'as is'},
   });
+
+  model.answer(
+    {
+      chunks: [
+        ...toolCall({
+          index: 0,
+          id: 'call_patch',
+          name: 'character_state_patch',
+          arguments: JSON.stringify(input(credential)),
+        }),
+        finish('tool_calls'),
+        {
+          choices: [],
+          usage: {prompt_tokens: 1, completion_tokens: 1, api_key: credential},
+        },
+      ],
+    },
+    reply('Hello.'),
+  );
   await say('Hello?', 'hello');
 
   const records = sessionLog(home, 'mira', `${conversationId}.1`);
+  const kept = input('[redacted]');
 
   expect(JSON.stringify(records)).not.toContain(credential);
   expect(
     records.find(record => record['kind'] === 'role_model_round'),
   ).toMatchObject({
-    roleModelIOSnapshot: {
-      providerExchange: {
-        usage: {
-          api_key: '[redacted]',
-          nested: {access_token: '[redacted]', kept: 'as is'},
-        },
-      },
+    output: {toolCalls: [{name: 'character_state.patch', input: kept}]},
+    usage: {promptTokens: 1, completionTokens: 1},
+    parsedRoleModelDecisionSnapshot: {
+      result: {decision: {toolCalls: [{input: kept}]}},
     },
   });
 });

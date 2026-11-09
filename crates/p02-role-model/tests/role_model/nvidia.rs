@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use p02_contracts::{
-    Invocation, ProviderAnswer, ProviderName, RawOutput, ReplyDelta, RoleModelAdapter,
-    TextCompletion, TextCompletionRequest,
+    Invocation, ModelOutput, ProviderAnswer, ProviderName, ReplyDelta, RoleModelAdapter,
+    TextCompletion, TextCompletionRequest, TokenUsage,
 };
 use p02_role_model::{NvidiaSettings, select_adapter};
 use serde_json::{Value, json};
@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::stub::{Answer, Stub};
-use crate::support::{DONE, call_piece, content, envelope, event_text, finish, usage, wire};
+use crate::support::{DONE, call_piece, content, event_text, finish, usage, wire};
 
 const KEY: &str = "nvapi-fixture-key";
 
@@ -41,41 +41,35 @@ fn adapter(stub: &Stub) -> Adapter {
 }
 
 /// A round of the loop with `tools` offered, and every draft it heard.
-async fn invoke(adapter: &Adapter, tools: &[&str]) -> (RawOutput, Vec<ReplyDelta>) {
+async fn invoke(adapter: &Adapter, tools: &[&str]) -> (ProviderAnswer, Vec<ReplyDelta>) {
     let heard = Mutex::new(Vec::new());
     let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta);
     let (messages, tools) = wire(tools);
     let invocation = Invocation::new(&messages, &tools).with_reply_listener(&listener);
-    let output = adapter.invoke(&envelope("Hello?"), &invocation).await;
+    let answer = adapter.invoke(&invocation).await;
 
-    (output, heard.into_inner().unwrap())
+    (answer, heard.into_inner().unwrap())
 }
 
-fn decision(output: &RawOutput) -> Value {
-    match &output.answer {
-        ProviderAnswer::Text(text) => serde_json::from_str(text).unwrap(),
-        ProviderAnswer::Failed { details } => panic!("the round failed: {details}"),
+/// What the model wrote, as a record keeps it.
+fn output(answer: &ProviderAnswer) -> Value {
+    match answer {
+        ProviderAnswer::Answered { output, .. } => serde_json::to_value(output).unwrap(),
+        ProviderAnswer::Failed(failure) => panic!("the round failed: {failure:?}"),
     }
 }
 
 /// How the round failed: its code, what it says, and the status that
 /// answered, if one did.
-fn failure(output: &RawOutput) -> (String, String, Option<u16>) {
-    let metadata = output.provider_metadata.clone().unwrap();
-    let error = metadata.error.unwrap();
-
-    assert_eq!(
-        output.answer,
-        ProviderAnswer::Failed {
-            details: error.message.clone()
-        }
-    );
-
-    (
-        error.code,
-        error.message,
-        metadata.response.and_then(|response| response.status),
-    )
+fn failure(answer: &ProviderAnswer) -> (String, String, Option<u16>) {
+    match answer {
+        ProviderAnswer::Failed(failure) => (
+            failure.code.clone(),
+            failure.message.clone(),
+            failure.status,
+        ),
+        ProviderAnswer::Answered { .. } => panic!("the round was answered: {answer:?}"),
+    }
 }
 
 fn delta(text: &str) -> ReplyDelta {
@@ -83,10 +77,6 @@ fn delta(text: &str) -> ReplyDelta {
         reply: 0,
         text: text.to_owned(),
     }
-}
-
-fn exchange(output: &RawOutput) -> Value {
-    output.provider_exchange.clone().unwrap().as_value().clone()
 }
 
 #[tokio::test]
@@ -101,7 +91,7 @@ async fn a_round_is_a_streamed_completion_at_the_endpoint_under_the_bearer_key()
         DONE.to_owned(),
     ]));
 
-    let (output, heard) = invoke(&adapter(&stub), &["visible_reply", "runtime.plugin.list"]).await;
+    let (answer, heard) = invoke(&adapter(&stub), &["visible_reply", "runtime.plugin.list"]).await;
     let [request] = stub.requests().try_into().unwrap();
     let body = String::from_utf8(request.body.to_vec()).unwrap();
 
@@ -123,43 +113,21 @@ async fn a_round_is_a_streamed_completion_at_the_endpoint_under_the_bearer_key()
             "\"chat_template_kwargs\":{\"enable_thinking\":true}}"
         )
     );
-    // Plain content is never drafted: it becomes the reply whole, at the commit.
+    // Plain content is never drafted: it is the reply whole, at the commit.
     assert_eq!(heard, []);
     assert_eq!(
-        decision(&output),
-        json!({"toolCalls": [{"name": "visible_reply", "input": {"text": "Hello from the model."}}]})
-    );
-    assert_eq!(
-        serde_json::to_value(output.provider_metadata.as_ref().unwrap()).unwrap(),
-        json!({
-            "provider": "nvidia",
-            "model": "fixture-model",
-            "request": {"endpoint": format!("{}/chat/completions", stub.base_url()), "messageCount": 2},
-            "response": {"status": 200},
-        })
-    );
-
-    let exchange = exchange(&output);
-
-    assert_eq!(
-        serde_json::to_string(&exchange["requestBody"]).unwrap(),
-        body
-    );
-    assert_eq!(exchange["finishReason"], json!("stop"));
-    assert_eq!(
-        exchange["usage"],
-        json!({"prompt_tokens": 12, "completion_tokens": 34})
-    );
-    assert_eq!(
-        exchange["toolNameMappings"],
-        json!([
-            {"runtimeName": "visible_reply", "providerName": "visible_reply"},
-            {"runtimeName": "runtime.plugin.list", "providerName": "runtime_plugin_list"},
-        ])
-    );
-    assert_eq!(
-        exchange["nativeAssistantMessage"],
-        json!({"role": "assistant", "content": "Hello from the model."})
+        answer,
+        ProviderAnswer::Answered {
+            output: ModelOutput {
+                tool_calls: Vec::new(),
+                text: Some("Hello from the model.".to_owned()),
+            },
+            finish_reason: Some("stop".to_owned()),
+            usage: Some(TokenUsage {
+                prompt_tokens: 12,
+                completion_tokens: 34,
+            }),
+        }
     );
 }
 
@@ -189,20 +157,15 @@ async fn a_server_of_one_s_own_needs_no_key_and_nvidia_s_cloud_is_not_asked_with
         json!("nvidia/nemotron-3-nano-30b-a3b")
     );
 
-    let (output, _) = invoke(&nvidia(&NvidiaSettings::default(), None), &[]).await;
-    let metadata = serde_json::to_value(output.provider_metadata.as_ref().unwrap()).unwrap();
+    let (answer, _) = invoke(&nvidia(&NvidiaSettings::default(), None), &[]).await;
 
     assert_eq!(
-        failure(&output),
+        failure(&answer),
         (
             "missing_api_key".to_owned(),
             "NVIDIA provider requires the nvidiaApiKey setting.".to_owned(),
             None
         )
-    );
-    assert_eq!(
-        metadata["request"],
-        json!({"endpoint": "https://integrate.api.nvidia.com/v1/chat/completions"})
     );
 }
 
@@ -215,9 +178,8 @@ async fn a_visible_reply_is_drafted_as_its_arguments_arrive_and_never_the_words_
     let listener = move |delta: ReplyDelta| drafted.send(delta).unwrap();
     let (messages, tools) = wire(&["visible_reply"]);
     let invocation = Invocation::new(&messages, &tools).with_reply_listener(&listener);
-    let envelope = envelope("Hello?");
     let write = |data: &str| writer.send(event_text(data)).unwrap();
-    let (output, heard) = tokio::join!(adapter.invoke(&envelope, &invocation), async {
+    let (answer, heard) = tokio::join!(adapter.invoke(&invocation), async {
         let mut heard = Vec::new();
 
         write(&content("A note to myself. "));
@@ -246,7 +208,7 @@ async fn a_visible_reply_is_drafted_as_its_arguments_arrive_and_never_the_words_
         [delta("Hi"), delta(" there! "), delta(" "), delta("<thin")]
     );
     assert_eq!(
-        decision(&output),
+        output(&answer),
         json!({
             "toolCalls": [{
                 "name": "visible_reply",
@@ -279,7 +241,7 @@ async fn calls_come_back_under_the_runtime_s_names_with_their_ids_and_arguments_
         DONE.to_owned(),
     ]));
 
-    let (output, _) = invoke(
+    let (answer, _) = invoke(
         &adapter(&stub),
         &[
             "visible_reply",
@@ -290,7 +252,7 @@ async fn calls_come_back_under_the_runtime_s_names_with_their_ids_and_arguments_
     .await;
 
     assert_eq!(
-        decision(&output),
+        output(&answer),
         json!({
             "toolCalls": [
                 {"name": "runtime.plugin.list", "input": {}},
@@ -301,20 +263,12 @@ async fn calls_come_back_under_the_runtime_s_names_with_their_ids_and_arguments_
             "text": "Checking.",
         })
     );
-    assert_eq!(
-        exchange(&output)["nativeAssistantMessage"]["tool_calls"][1],
-        json!({
-            "id": "call_patch",
-            "type": "function",
-            "function": {"name": "character_state_patch", "arguments": "{\"mood\": \"curious\"}"},
-        })
-    );
 }
 
 /// Reasoning never closed hides the rest of the text, so it says nothing,
-/// as empty content does: the parser refuses it and the model is told.
+/// as empty content does: the judge refuses it and the model is told.
 #[tokio::test]
-async fn an_answer_that_says_nothing_reaches_the_parser_as_no_call() {
+async fn an_answer_that_says_nothing_reaches_the_judge_as_nothing() {
     let stub = Stub::start().await;
     let adapter = adapter(&stub);
 
@@ -332,8 +286,8 @@ async fn an_answer_that_says_nothing_reaches_the_parser_as_no_call() {
     let (unterminated, _) = invoke(&adapter, &["visible_reply"]).await;
     let (empty, _) = invoke(&adapter, &["visible_reply"]).await;
 
-    assert_eq!(decision(&unterminated), json!({"toolCalls": []}));
-    assert_eq!(decision(&empty), json!({"toolCalls": []}));
+    assert_eq!(output(&unterminated), json!({"toolCalls": []}));
+    assert_eq!(output(&empty), json!({"toolCalls": []}));
 }
 
 #[tokio::test]
@@ -382,8 +336,8 @@ async fn the_provider_s_silence_is_bounded_before_the_headers_and_between_chunks
     });
 
     assert_eq!(
-        decision(&steady.0),
-        json!({"toolCalls": [{"name": "visible_reply", "input": {"text": "Slow and steady."}}]})
+        output(&steady.0),
+        json!({"toolCalls": [], "text": "Slow and steady."})
     );
 }
 
@@ -406,10 +360,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
     let (recovered, _) = invoke(&adapter, &["visible_reply"]).await;
     let [first, second] = stub.requests().try_into().unwrap();
 
-    assert_eq!(
-        decision(&recovered)["toolCalls"][0]["input"]["text"],
-        json!("After a 503.")
-    );
+    assert_eq!(output(&recovered)["text"], json!("After a 503."));
     assert_eq!(first.body, second.body);
 
     // A client of its own, so the round opens the connection that drops.
@@ -418,10 +369,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
 
     let (reconnected, _) = invoke(&self::adapter(&stub), &["visible_reply"]).await;
 
-    assert_eq!(
-        decision(&reconnected)["toolCalls"][0]["input"]["text"],
-        json!("After a drop.")
-    );
+    assert_eq!(output(&reconnected)["text"], json!("After a drop."));
     assert_eq!(stub.connections_still_to_drop(), 0);
 
     for attempt in 1..=3 {
@@ -504,14 +452,14 @@ async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key()
     for (frames, code, message) in cases {
         stub.answer(Answer::events(&frames));
 
-        let (output, _) = invoke(&adapter, &["visible_reply"]).await;
+        let (answer, _) = invoke(&adapter, &["visible_reply"]).await;
 
         assert_eq!(
-            failure(&output),
+            failure(&answer),
             (code.to_owned(), message, Some(200)),
             "{frames:?}"
         );
-        assert!(!format!("{output:?}").contains(KEY));
+        assert!(!format!("{answer:?}").contains(KEY));
     }
 }
 
@@ -611,11 +559,11 @@ async fn the_provider_s_silence_is_bounded_at_thirty_seconds_unless_shortened() 
         () = tokio::time::sleep(Duration::from_millis(29_999)) => {}
     }
 
-    let (output, _) = invoking.await;
+    let (answer, _) = invoking.await;
 
     assert_eq!(started.elapsed(), Duration::from_secs(30));
     assert_eq!(
-        failure(&output).1,
+        failure(&answer).1,
         "NVIDIA provider request timed out after 30000ms."
     );
 }

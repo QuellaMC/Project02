@@ -1,14 +1,12 @@
-//! The world the tests build: a turn's envelope, Mira, and the pieces of a
-//! streamed answer.
+//! The world the tests build: a turn's event and context, Mira, and the
+//! pieces of a streamed answer.
 
 use p02_characters::{Persona, discover};
 use p02_contracts::{
     ChatCompletionTool, ChatMessage, ChatToolFunction, ConversationTurn, DecisionContext,
-    InputEnvelope, PluginToolDefinition, PluginToolDefinitions, ProvidedTool, ToolInputContract,
+    PluginToolDefinition, ProvidedTool, ToolInputContract,
 };
-use p02_core::{
-    CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId, UserLine,
-};
+use p02_core::{CharacterProfile, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
 use serde_json::{Value, json};
 
@@ -38,13 +36,10 @@ pub(crate) fn event() -> EventIdentity {
 }
 
 pub(crate) fn context() -> DecisionContext {
-    DecisionContext::new(
-        SessionId::parse("conv_mira.1").unwrap(),
-        CharacterProfile {
-            id: id("mira"),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        },
-    )
+    DecisionContext::new(CharacterProfile {
+        id: id("mira"),
+        display_name: SpeakerName::new("Mira").unwrap(),
+    })
 }
 
 /// A tool `name` of `plugin`, taking anything an object holds.
@@ -58,15 +53,6 @@ pub(crate) fn plugin_tool(plugin: &str, name: &str) -> PluginToolDefinition {
         )
         .unwrap(),
     }
-}
-
-pub(crate) fn envelope(line: &str) -> InputEnvelope {
-    InputEnvelope::new(
-        event(),
-        UserLine::new(line).unwrap().into(),
-        context(),
-        PluginToolDefinitions::default(),
-    )
 }
 
 /// Messages and tools as a round of the loop would render them.

@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use p02_core::{EventId, EventIdentity, VisibleMessage};
+use p02_core::{EventIdentity, VisibleMessage};
 use p02_shared::{
     BoundJsonError, Credentials, Identifier, JsonLimits, bound_json, bound_json_object,
 };
@@ -160,38 +160,6 @@ impl ConversationToolCall {
     }
 }
 
-/// Which earlier turns a model call replayed, oldest first. The turns
-/// themselves are already durable in the session log.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryWindow {
-    pub turn_event_ids: Vec<EventId>,
-}
-
-impl HistoryWindow {
-    #[must_use]
-    pub fn of(turns: &[ConversationTurn]) -> Self {
-        Self {
-            turn_event_ids: turns
-                .iter()
-                .map(|turn| turn.identity.event_id().clone())
-                .collect(),
-        }
-    }
-
-    /// Whether `turns` are exactly the turns the window names, in its
-    /// order: a record that names other turns misstates the model's input.
-    #[must_use]
-    pub fn matches(&self, turns: &[ConversationTurn]) -> bool {
-        self.turn_event_ids.len() == turns.len()
-            && self
-                .turn_event_ids
-                .iter()
-                .zip(turns)
-                .all(|(event_id, turn)| turn.identity.event_id() == event_id)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -262,16 +230,6 @@ mod tests {
             }))
             .is_err()
         );
-    }
-
-    #[test]
-    fn a_window_matches_exactly_the_turns_it_names() {
-        let turns = [turn("evt_1", &json!([])), turn("evt_2", &json!([]))];
-        let window = HistoryWindow::of(&turns);
-
-        assert!(window.matches(&turns));
-        assert!(!window.matches(&turns[1..]));
-        assert!(!HistoryWindow::of(&[turns[1].clone(), turns[0].clone()]).matches(&turns));
     }
 
     #[test]

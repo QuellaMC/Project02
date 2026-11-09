@@ -2,7 +2,7 @@ use std::fmt;
 
 use async_trait::async_trait;
 use p02_shared::Identifier;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::context::HookContext;
@@ -13,10 +13,8 @@ use crate::schema::{ToolInputContract, ToolInputRejection};
 use crate::vocabulary::ToolConcurrency;
 
 /// A tool a plugin offers the model. Every plugin tool is shown to the
-/// model and has its input judged by the host against its contract. A
-/// record of it reads back as it was written.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// model and has its input judged by the host against its contract.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProvidedTool {
     name: Identifier,
     description: String,
@@ -116,22 +114,6 @@ impl ProvidedTool {
     #[must_use]
     pub fn is_approval_gated(&self) -> bool {
         self.requires_confirmation == Confirmation::Required
-    }
-}
-
-impl Serialize for Confirmation {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bool(*self == Self::Required)
-    }
-}
-
-impl<'de> Deserialize<'de> for Confirmation {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(if bool::deserialize(deserializer)? {
-            Self::Required
-        } else {
-            Self::NotRequired
-        })
     }
 }
 
@@ -329,35 +311,6 @@ mod tests {
                 .unwrap_err()
                 .sentence(),
             r#"notes.add input missing required field "text"."#
-        );
-    }
-
-    #[test]
-    fn a_tool_record_reads_back_as_written() {
-        let tool = ProvidedTool::new(
-            Identifier::new("settings.update").unwrap(),
-            "Change one setting after approval.",
-            contract(),
-        )
-        .unwrap()
-        .with_concurrency(ToolConcurrency::Shared)
-        .with_confirmation(Confirmation::Required);
-        let record = serde_json::to_value(&tool).unwrap();
-
-        assert!(tool.is_approval_gated());
-        assert_eq!(
-            record,
-            json!({
-                "name": "settings.update",
-                "description": "Change one setting after approval.",
-                "inputContract": {"type": "object", "additionalProperties": false},
-                "concurrency": "shared",
-                "requiresConfirmation": true,
-            })
-        );
-        assert_eq!(
-            serde_json::from_value::<ProvidedTool>(record).unwrap(),
-            tool
         );
     }
 }

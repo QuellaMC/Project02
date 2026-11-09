@@ -11,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, ConversationTurn, HookContext, InputEnvelope, Invocation, Manifest,
-    PluginError, ProvidedTool, ProviderAnswer, RawOutput, ReplyDelta, RoleModelAdapter,
-    RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall, ToolCallOutcome,
-    ToolInputContract,
+    BeforeRoleModelCallOutput, ChatMessage, ConversationTurn, HookContext, Invocation, Manifest,
+    ModelOutput, PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta,
+    RoleModelAdapter, RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall,
+    ToolCallOutcome, ToolInputContract, WrittenCall,
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
@@ -48,25 +48,35 @@ pub(crate) fn mira() -> Character {
         .unwrap();
 
     Character {
-        character_ref: definition.character_ref(),
         profile: definition.profile,
         persona: definition.persona,
     }
 }
 
 /// A model answer that says `replies`, in order.
-pub(crate) fn reply(replies: &[&str]) -> String {
-    let calls: Vec<Value> = replies
-        .iter()
-        .map(|text| json!({"name": "visible_reply", "input": {"text": text}}))
-        .collect();
-
-    json!({"toolCalls": calls}).to_string()
+pub(crate) fn reply(replies: &[&str]) -> ModelOutput {
+    ModelOutput {
+        tool_calls: replies
+            .iter()
+            .map(|text| written("visible_reply", json!({"text": text})))
+            .collect(),
+        text: None,
+    }
 }
 
 /// A model answer that calls `tool` with `input`.
-pub(crate) fn calling(tool: &str, input: &Value) -> String {
-    json!({"toolCalls": [{"name": tool, "input": input}]}).to_string()
+pub(crate) fn calling(tool: &str, input: &Value) -> ModelOutput {
+    ModelOutput {
+        tool_calls: vec![written(tool, input.clone())],
+        text: None,
+    }
+}
+
+pub(crate) fn written(tool: &str, input: Value) -> WrittenCall {
+    WrittenCall {
+        name: tool.to_owned(),
+        input,
+    }
 }
 
 /// A home of the test's own, spelled canonically as the daemon spells its
@@ -257,10 +267,14 @@ pub(crate) struct Round {
 }
 
 impl Round {
-    pub(crate) fn says(text: impl Into<String>) -> Self {
+    pub(crate) fn says(output: ModelOutput) -> Self {
         Self {
             drafts: Vec::new(),
-            answer: Some(ProviderAnswer::Text(text.into())),
+            answer: Some(ProviderAnswer::Answered {
+                output,
+                finish_reason: Some("stop".to_owned()),
+                usage: None,
+            }),
         }
     }
 
@@ -268,9 +282,11 @@ impl Round {
     pub(crate) fn fails(details: &str) -> Self {
         Self {
             drafts: Vec::new(),
-            answer: Some(ProviderAnswer::Failed {
-                details: details.to_owned(),
-            }),
+            answer: Some(ProviderAnswer::Failed(ProviderFailure {
+                code: "http_error".to_owned(),
+                message: details.to_owned(),
+                status: Some(503),
+            })),
         }
     }
 
@@ -296,10 +312,10 @@ impl Round {
     }
 }
 
-/// What a model round was asked: its envelope, and the turns it replayed.
+/// What a model round was asked: its messages, and the turns they replay.
 #[derive(Debug)]
 pub(crate) struct Asked {
-    pub(crate) envelope: InputEnvelope,
+    pub(crate) messages: Vec<ChatMessage>,
     pub(crate) history: Vec<ConversationTurn>,
 }
 
@@ -334,20 +350,14 @@ impl fmt::Debug for Model {
 
 #[async_trait]
 impl RoleModelAdapter for Model {
-    async fn invoke(&self, envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         self.asked.lock().unwrap().push(Asked {
-            envelope: envelope.clone(),
+            messages: invocation.messages().to_vec(),
             history: invocation.history().to_vec(),
         });
 
         let Some(round) = self.rounds.lock().unwrap().pop_front() else {
-            return RawOutput {
-                answer: ProviderAnswer::Failed {
-                    details: "No round was scripted.".to_owned(),
-                },
-                provider_metadata: None,
-                provider_exchange: None,
-            };
+            return Round::fails("No round was scripted.").answer.unwrap();
         };
 
         for delta in round.drafts {
@@ -358,11 +368,7 @@ impl RoleModelAdapter for Model {
             return std::future::pending().await;
         };
 
-        RawOutput {
-            answer,
-            provider_metadata: None,
-            provider_exchange: None,
-        }
+        answer
     }
 
     async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {

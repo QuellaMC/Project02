@@ -19,9 +19,9 @@ use p02_app::{
 use p02_config::ChangeOutcome;
 use p02_contracts::{
     CommittedTurn, Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
-    HookReport, HookStatus, InputEnvelope, Invocation, Manifest, PluginError, PreparedEffect,
-    ProvidedTool, RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
-    ToolCallOutcome, ToolInputContract, ToolPreparation,
+    HookReport, HookStatus, Invocation, Manifest, ModelOutput, PluginError, PreparedEffect,
+    ProvidedTool, ProviderAnswer, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
+    ToolCallOutcome, ToolInputContract, ToolPreparation, WrittenCall,
 };
 use p02_core::ClientStamp;
 use p02_plugins::list;
@@ -303,28 +303,34 @@ impl Gate {
 pub(crate) struct Round {
     drafts: Vec<String>,
     gate: Option<Arc<Gate>>,
-    answer: String,
+    calls: Vec<WrittenCall>,
 }
 
 impl Round {
     pub(crate) fn says(replies: &[&str]) -> Self {
-        let calls: Vec<Value> = replies
-            .iter()
-            .map(|text| json!({"name": "visible_reply", "input": {"text": text}}))
-            .collect();
-
-        Self::answering(&json!({"toolCalls": calls}))
+        Self::calling(
+            replies
+                .iter()
+                .map(|text| ("visible_reply", json!({"text": text})))
+                .collect(),
+        )
     }
 
     pub(crate) fn calls(tool: &str, input: &Value) -> Self {
-        Self::answering(&json!({"toolCalls": [{"name": tool, "input": input}]}))
+        Self::calling(vec![(tool, input.clone())])
     }
 
-    fn answering(answer: &Value) -> Self {
+    fn calling(calls: Vec<(&str, Value)>) -> Self {
         Self {
             drafts: Vec::new(),
             gate: None,
-            answer: answer.to_string(),
+            calls: calls
+                .into_iter()
+                .map(|(name, input)| WrittenCall {
+                    name: name.to_owned(),
+                    input,
+                })
+                .collect(),
         }
     }
 
@@ -370,7 +376,7 @@ impl std::fmt::Debug for Model {
 
 #[async_trait]
 impl RoleModelAdapter for Model {
-    async fn invoke(&self, _envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         self.asked.fetch_add(1, Ordering::SeqCst);
 
         let round = self
@@ -388,7 +394,14 @@ impl RoleModelAdapter for Model {
             gate.pass_async().await;
         }
 
-        RawOutput::text(round.answer)
+        ProviderAnswer::Answered {
+            output: ModelOutput {
+                tool_calls: round.calls,
+                text: None,
+            },
+            finish_reason: Some("stop".to_owned()),
+            usage: None,
+        }
     }
 }
 

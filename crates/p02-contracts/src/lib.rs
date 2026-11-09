@@ -37,15 +37,13 @@ pub use plugin::{
 };
 pub use role_model::{
     BlankContextTextError, CharacterDecision, ChatCompletionTool, ChatFunctionCall, ChatMessage,
-    ChatToolCall, ChatToolFunction, ConversationToolCall, ConversationTurn,
-    DECISION_CONTRACT_VERSION, DecisionContext, DecisionRejection, DecisionRejectionReason,
-    DecisionResult, DuplicateToolError, ExchangeProvider, ExchangeRecord, FrameSize, HistoryWindow,
-    InputEnvelope, Invocation, ModelToolCall, ModelToolDefinition, OutputContract,
-    PLUGIN_LIST_TOOL, ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions,
-    PromptSize, ProviderAnswer, ProviderExchange, ProviderFailure, ProviderMetadata, ProviderName,
-    ProviderRequest, ProviderResponse, RawOutput, ReasoningFilter, ReplyDelta, RoleModelAdapter,
-    RuntimeNote, TextCompletion, TextCompletionRequest, ToolCallResult, ToolNameMapping, ToolRound,
-    VISIBLE_REPLY, scrub_reasoning_blocks,
+    ChatToolCall, ChatToolFunction, ConversationToolCall, ConversationTurn, DecisionContext,
+    DecisionRejection, DecisionRejectionReason, DecisionResult, DuplicateToolError, Invocation,
+    ModelOutput, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL, ParseModelToolCallError,
+    PluginToolDefinition, PluginToolDefinitions, ProviderAnswer, ProviderFailure, ProviderName,
+    ReasoningFilter, ReplyDelta, RoleModelAdapter, RuntimeNote, TextCompletion,
+    TextCompletionRequest, TokenUsage, ToolCallResult, ToolRound, VISIBLE_REPLY, WrittenCall,
+    scrub_reasoning_blocks,
 };
 pub use schema::{InputContractError, ToolInputContract, ToolInputRejection};
 pub use tool::{

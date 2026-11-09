@@ -21,7 +21,7 @@ pub use commit::MessageCommitted;
 pub use continuation::{
     ContinuedFrom, MAX_SUMMARY_CHARS, SessionContinuation, Summarizer, SummaryProvider,
 };
-pub use round::{RoundRecord, RoundSnapshot};
+pub use round::RoundRecord;
 pub use terminal::{
     AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnRejected, TurnRejection,
     TurnStatus,
@@ -41,7 +41,7 @@ pub struct LogRecord {
 pub enum RecordBody {
     /// The event of a turn came in: the first record of every turn.
     EventReceived(EventReceived),
-    ModelRound(Box<RoundRecord>),
+    ModelRound(RoundRecord),
     ToolCallStarted(ToolCallStarted),
     ToolCallFinished(ToolCallFinished),
     MessageCommitted(MessageCommitted),
@@ -113,8 +113,6 @@ pub enum RecordError {
     ForeignEvidence,
     #[error("a finished tool call carries evidence of a plugin other than its own")]
     EvidenceOfAnotherPlugin,
-    #[error("a model round records another event's input")]
-    EnvelopeOfAnotherEvent,
     #[error("a tool call's input or result is past the JSON limits")]
     UnkeptToolCall(#[source] BoundJsonError),
     #[error("a call no plugin offers comes back as the runtime's refusal of it, never an answer")]
@@ -144,7 +142,7 @@ impl LogRecord {
     ///
     /// [`RecordError`] when the record speaks of another event than its own:
     /// evidence of another event or, for a finished call, of another
-    /// plugin; or a model round shown another event.
+    /// plugin.
     pub fn new(identity: EventIdentity, body: RecordBody) -> Result<Self, RecordError> {
         if body
             .evidence()
@@ -154,19 +152,13 @@ impl LogRecord {
             return Err(RecordError::ForeignEvidence);
         }
 
-        match &body {
-            RecordBody::ToolCallFinished(call)
-                if call
-                    .evidence()
-                    .iter()
-                    .any(|evidence| evidence.plugin_id() != call.tool_plugin_id()) =>
-            {
-                return Err(RecordError::EvidenceOfAnotherPlugin);
-            }
-            RecordBody::ModelRound(round) if round.snapshot().input_envelope.event != identity => {
-                return Err(RecordError::EnvelopeOfAnotherEvent);
-            }
-            _ => {}
+        if let RecordBody::ToolCallFinished(call) = &body
+            && call
+                .evidence()
+                .iter()
+                .any(|evidence| evidence.plugin_id() != call.tool_plugin_id())
+        {
+            return Err(RecordError::EvidenceOfAnotherPlugin);
         }
 
         Ok(Self { identity, body })

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use jsonschema::ValidationError;
 use jsonschema::error::ValidationErrorKind;
@@ -8,19 +8,15 @@ use jsonschema::paths::{Location, LocationSegment};
 use p02_shared::{
     BoundJsonError, Credentials, Identifier, JsonLimits, bound_json, bound_json_object,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 /// What a tool takes, as one self-contained JSON Schema document (draft 7)
-/// whose root is an object: the one declaration a provider is shown, a
-/// proposed call is judged by, and the turn records. A contract a plugin
-/// offers is compiled when it is made; one read back from a record is kept
-/// as it was written, and compiled only if it is ever asked to judge.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(from = "Map<String, Value>", into = "Value")]
+/// whose root is an object: the one declaration a provider is shown and a
+/// proposed call is judged by, compiled when it is made.
+#[derive(Clone)]
 pub struct ToolInputContract {
     schema: Map<String, Value>,
-    validator: Arc<OnceLock<Option<jsonschema::Validator>>>,
+    validator: Arc<jsonschema::Validator>,
 }
 
 /// Why a tool input contract was refused.
@@ -59,12 +55,9 @@ impl ToolInputContract {
             return Err(InputContractError::RootNotObject);
         }
 
-        let validator = compile(&schema)?;
+        let validator = Arc::new(compile(&schema)?);
 
-        Ok(Self {
-            schema,
-            validator: Arc::new(OnceLock::from(Some(validator))),
-        })
+        Ok(Self { schema, validator })
     }
 
     #[must_use]
@@ -94,13 +87,8 @@ impl ToolInputContract {
             Credentials::Keep,
         )
         .map_err(|error| rejection(InputProblem::Bounds(error)))?;
-        let validator = self
-            .validator
-            .get_or_init(|| compile(&self.schema).ok())
-            .as_ref()
-            .ok_or_else(|| rejection(InputProblem::Uncompiled))?;
 
-        match first_problem(validator, &instance) {
+        match first_problem(&self.validator, &instance) {
             Some(problem) => Err(rejection(problem)),
             None => Ok(()),
         }
@@ -200,21 +188,6 @@ fn field_path(at: &Location, key: Option<&str>) -> String {
     }
 }
 
-impl From<Map<String, Value>> for ToolInputContract {
-    fn from(schema: Map<String, Value>) -> Self {
-        Self {
-            schema,
-            validator: Arc::default(),
-        }
-    }
-}
-
-impl From<ToolInputContract> for Value {
-    fn from(contract: ToolInputContract) -> Self {
-        Value::Object(contract.schema)
-    }
-}
-
 impl PartialEq for ToolInputContract {
     fn eq(&self, other: &Self) -> bool {
         self.schema == other.schema
@@ -252,18 +225,9 @@ impl fmt::Display for ToolInputRejection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum InputProblem {
     Bounds(BoundJsonError),
-    Missing {
-        path: String,
-    },
-    Unsupported {
-        paths: Vec<String>,
-    },
-    Field {
-        path: String,
-        rule: String,
-    },
-    /// A contract read back from a record that no longer compiles.
-    Uncompiled,
+    Missing { path: String },
+    Unsupported { paths: Vec<String> },
+    Field { path: String, rule: String },
 }
 
 impl fmt::Display for InputProblem {
@@ -279,9 +243,6 @@ impl fmt::Display for InputProblem {
                 )
             }
             Self::Field { path, rule } => write!(formatter, "field \"{path}\" is refused: {rule}"),
-            Self::Uncompiled => {
-                formatter.write_str("cannot be judged: its contract does not compile")
-            }
         }
     }
 }
@@ -316,7 +277,7 @@ mod tests {
             "required": ["mood"],
             "additionalProperties": false,
         });
-        let contract = ToolInputContract::new(schema.clone()).unwrap();
+        let contract = ToolInputContract::new(schema).unwrap();
         let tool = Identifier::new("state.patch").unwrap();
         let refused = |value: Value| {
             contract
@@ -340,18 +301,6 @@ mod tests {
         assert!(
             refused(json!({"mood": "angry"}))
                 .starts_with(r#"state.patch input field "mood" is refused: "#)
-        );
-
-        let read: ToolInputContract = serde_json::from_value(schema.clone()).unwrap();
-
-        assert_eq!(read, contract);
-        assert_eq!(Value::from(read.clone()), schema);
-        assert_eq!(
-            read.validate(&tool, &input(&json!({})))
-                .unwrap_err()
-                .sentence(),
-            r#"state.patch input missing required field "mood"."#,
-            "a contract read back judges once it is asked to"
         );
     }
 

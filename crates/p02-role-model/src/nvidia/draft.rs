@@ -1,21 +1,21 @@
 //! What the adapter speaks while the model writes: each native
 //! `visible_reply` call's text, decoded from its arguments as they stream,
-//! behind the reasoning filter the parser will scrub the whole with.
+//! behind the reasoning filter the judge will scrub the whole with.
 //! Content is never spoken: alone it is the reply and arrives whole at the
 //! commit, and beside a tool call it is the model's note to itself, which
 //! the prompt promises the person never hears; which of the two it is
 //! cannot be known while it arrives.
 
-use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, ToolNameMapping, VISIBLE_REPLY};
+use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, VISIBLE_REPLY};
 
 use super::stream::Fragment;
-use crate::prompt::runtime_name;
+use crate::prompt::{ToolNameMapping, runtime_name};
 
 /// Follows one string field of a flat JSON object as its text arrives in
 /// pieces, `{"text": "…"}`, decoding the value as far as the pieces reach:
 /// an escape is decoded whole, a high surrogate waits for its pair, and
 /// what is not that object, or comes after the value's closing quote, is
-/// silence. The parser judges the whole object later; this reads ahead.
+/// silence. The judge reads the whole object later; this reads ahead.
 #[derive(Debug)]
 pub(super) struct FieldScanner {
     field: &'static str,

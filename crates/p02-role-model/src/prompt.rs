@@ -6,71 +6,77 @@ mod history;
 mod text;
 mod tools;
 
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU32;
 
 use p02_characters::Persona;
 use p02_contracts::{
     ChatCompletionTool, ChatMessage, ContextItemKind, ConversationTurn, CuratedSection,
-    DecisionContext, FrameSize, InputEnvelope, PLUGIN_LIST_TOOL, PromptSize,
+    DecisionContext, ModelToolDefinition, PLUGIN_LIST_TOOL, PluginToolDefinitions, ToolRound,
 };
+use p02_core::{EventIdentity, VisibleText};
 
-pub use history::{estimated_tokens, newest_turns_within, select_history_window};
 pub(crate) use history::{json_text, round_messages};
+pub use history::{newest_turns_within, select_history_window};
 pub(crate) use text::unusable_reply_note;
 pub use text::{Person, Recollection, summarizer_instructions, today_note};
-pub(crate) use tools::{provider_name, provider_names, runtime_name};
+pub(crate) use tools::{ToolNameMapping, provider_name, provider_names, runtime_name};
 
 use fence::{bullets, fenced, neutralize};
-use history::{turn_messages, wire_chars};
+use history::turn_messages;
 use text::{
     EARLIER_CONVERSATION_FENCE, Inventory, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
     curated_context_header, earlier_conversation_preamble, recalled_memory_preamble,
     runtime_context_header, system_protocol_tail, tool_protocol, untrusted_plugin_context_preamble,
 };
 
-/// What a part of the prompt is, as its size is recorded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FrameKind {
-    SystemProtocol,
-    DeveloperProtocol,
-    CuratedContext,
-    ContextSummary,
-    RuntimeContext,
-    ConversationHistory,
-    CurrentUserMessage,
-    RecalledMemory,
-    UntrustedPluginContext,
-    ToolRoundAssistantMessage,
-    ToolRoundResultMessage,
-    UnusableReplyNote,
+/// Everything one model call is given: the person's message and the event
+/// it came in on, what the runtime and the plugins prepared, the plugin
+/// tools, and this turn's finished tool rounds.
+#[derive(Debug)]
+pub(crate) struct InputEnvelope {
+    pub(crate) event: EventIdentity,
+    pub(crate) user_message: VisibleText,
+    pub(crate) decision_context: DecisionContext,
+    pub(crate) plugin_tool_definitions: PluginToolDefinitions,
+    pub(crate) tool_rounds: Vec<ToolRound>,
 }
 
-impl FrameKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::SystemProtocol => "system_protocol",
-            Self::DeveloperProtocol => "developer_protocol",
-            Self::CuratedContext => "curated_context",
-            Self::ContextSummary => "context_summary",
-            Self::RuntimeContext => "model_only_runtime_context",
-            Self::ConversationHistory => "conversation_history",
-            Self::CurrentUserMessage => "current_user_message",
-            Self::RecalledMemory => "recalled_memory",
-            Self::UntrustedPluginContext => "untrusted_plugin_context",
-            Self::ToolRoundAssistantMessage => "tool_round_assistant_message",
-            Self::ToolRoundResultMessage => "tool_round_result_message",
-            Self::UnusableReplyNote => "unusable_reply_note",
+impl InputEnvelope {
+    /// An envelope for the first round of a turn.
+    pub(crate) fn new(
+        event: EventIdentity,
+        user_message: VisibleText,
+        decision_context: DecisionContext,
+        plugin_tool_definitions: PluginToolDefinitions,
+    ) -> Self {
+        Self {
+            event,
+            user_message,
+            decision_context,
+            plugin_tool_definitions,
+            tool_rounds: Vec::new(),
         }
+    }
+
+    /// The tools the model is offered: the built-in reply first, then
+    /// every plugin tool.
+    fn tool_definitions(&self) -> Vec<ModelToolDefinition> {
+        std::iter::once(ModelToolDefinition::visible_reply())
+            .chain(
+                self.plugin_tool_definitions
+                    .definitions()
+                    .iter()
+                    .map(|definition| ModelToolDefinition::from(&definition.tool)),
+            )
+            .collect()
     }
 }
 
-/// A rendered model call: the wire messages, the tools, and how big each
-/// kind of frame was.
+/// A rendered model call: the wire messages and the tools.
 #[derive(Debug)]
 pub(crate) struct Prompt {
     messages: Vec<ChatMessage>,
     tools: Vec<ChatCompletionTool>,
-    size: PromptSize,
 }
 
 impl Prompt {
@@ -80,10 +86,6 @@ impl Prompt {
 
     pub(crate) fn tools(&self) -> &[ChatCompletionTool] {
         &self.tools
-    }
-
-    pub(crate) fn size(&self) -> &PromptSize {
-        &self.size
     }
 }
 
@@ -113,76 +115,49 @@ pub(crate) fn render(
     } else {
         Inventory::Absent
     };
-    let mut wire = Wire::default();
-
-    wire.push(
-        FrameKind::SystemProtocol,
+    let mut messages = vec![
         system(format!(
             "{}\n\n{}",
             persona.sections().join("\n\n"),
             system_protocol_tail(&prepared.character().display_name, person)
         )),
-    );
-    wire.push(
-        FrameKind::DeveloperProtocol,
         system(tool_protocol(person, inventory)),
-    );
+    ];
 
-    if let Some(curated) = curated_context(prepared, person) {
-        wire.push(FrameKind::CuratedContext, system(curated));
-    }
-
-    if let Some(notes) = runtime_context(prepared, person) {
-        wire.push(FrameKind::RuntimeContext, system(notes));
-    }
+    messages.extend(curated_context(prepared, person).map(system));
+    messages.extend(runtime_context(prepared, person).map(system));
 
     if let Some(summary) = prepared.context_summary() {
-        wire.push(
-            FrameKind::ContextSummary,
-            ChatMessage::User {
-                content: fenced(
-                    EARLIER_CONVERSATION_FENCE,
-                    [earlier_conversation_preamble(person), neutralize(summary)],
-                ),
-            },
-        );
+        messages.push(ChatMessage::User {
+            content: fenced(
+                EARLIER_CONVERSATION_FENCE,
+                [earlier_conversation_preamble(person), neutralize(summary)],
+            ),
+        });
     }
 
-    for message in history.iter().flat_map(turn_messages) {
-        wire.push(FrameKind::ConversationHistory, message);
-    }
+    messages.extend(history.iter().flat_map(turn_messages));
 
     let (recalled, untrusted) = plugin_context(prepared, person);
 
-    wire.push_user(
-        envelope.user_message.as_str(),
-        [
-            (FrameKind::RecalledMemory, recalled),
-            (FrameKind::UntrustedPluginContext, untrusted),
-        ],
-    );
+    messages.push(ChatMessage::User {
+        content: std::iter::once(envelope.user_message.as_str().to_owned())
+            .chain(recalled)
+            .chain(untrusted)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    });
+    messages.extend(envelope.tool_rounds.iter().flat_map(round_messages));
+    messages.extend(unusable_reply.map(|note| system(note.to_owned())));
 
-    for message in envelope.tool_rounds.iter().flat_map(round_messages) {
-        let kind = if matches!(message, ChatMessage::Tool { .. }) {
-            FrameKind::ToolRoundResultMessage
-        } else {
-            FrameKind::ToolRoundAssistantMessage
-        };
-
-        wire.push(kind, message);
-    }
-
-    if let Some(note) = unusable_reply {
-        wire.push(FrameKind::UnusableReplyNote, system(note.to_owned()));
-    }
-
-    wire.finish(
-        envelope
+    Prompt {
+        messages,
+        tools: envelope
             .tool_definitions()
             .iter()
             .map(tools::chat_tool)
             .collect(),
-    )
+    }
 }
 
 /// The notes the character's trusted plugins keep for it, section by
@@ -294,85 +269,14 @@ fn curated_block(section: &CuratedSection) -> String {
     format!("{MARKER} {}{capacity} {MARKER}\n{body}", section.title())
 }
 
-/// The messages as they go on the wire, each frame's size counted as it
-/// is added: a frame of its own costs its serialized message, and a part
-/// folded into the person's message the characters it adds to it.
-#[derive(Default)]
-struct Wire {
-    messages: Vec<ChatMessage>,
-    sizes: Vec<(FrameKind, u64, u64)>,
-}
-
-impl Wire {
-    fn push(&mut self, kind: FrameKind, message: ChatMessage) {
-        self.count(kind, wire_chars(&message));
-        self.messages.push(message);
-    }
-
-    /// The person's message, with the fenced parts it carries after it.
-    fn push_user(&mut self, line: &str, parts: [(FrameKind, Option<String>); 2]) {
-        let mut content = line.to_owned();
-        let mut chars = user_chars(&content);
-
-        self.count(FrameKind::CurrentUserMessage, chars);
-
-        for (kind, part) in parts {
-            if let Some(part) = part {
-                content.push_str("\n\n");
-                content.push_str(&part);
-
-                let grown = user_chars(&content);
-
-                self.count(kind, grown - chars);
-                chars = grown;
-            }
-        }
-
-        self.messages.push(ChatMessage::User { content });
-    }
-
-    fn count(&mut self, kind: FrameKind, chars: u64) {
-        match self.sizes.iter_mut().find(|(seen, ..)| *seen == kind) {
-            Some((_, count, total)) => {
-                *count += 1;
-                *total += chars;
-            }
-            None => self.sizes.push((kind, 1, chars)),
-        }
-    }
-
-    fn finish(self, tools: Vec<ChatCompletionTool>) -> Prompt {
-        let frames = self
-            .sizes
-            .into_iter()
-            .map(|(kind, count, chars)| FrameSize {
-                kind: kind.as_str().to_owned(),
-                count: NonZeroU64::new(count).expect("a kind is counted once it is sent"),
-                chars: NonZeroU64::new(chars).expect("every frame puts characters on the wire"),
-            })
-            .collect();
-        Prompt {
-            messages: self.messages,
-            size: PromptSize::new(frames, wire_chars(&tools)),
-            tools,
-        }
-    }
-}
-
-fn user_chars(content: &str) -> u64 {
-    wire_chars(&ChatMessage::User {
-        content: content.to_owned(),
-    })
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use p02_characters::discover;
-    use p02_contracts::{ContextItem, PluginContextItem, PluginToolDefinitions, RuntimeNote};
-    use p02_core::{
-        CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId,
-        UserLine,
+    use p02_contracts::{
+        ContextItem, PluginContextItem, PluginToolDefinition, ProvidedTool, RuntimeNote,
+        ToolInputContract, VISIBLE_REPLY,
     };
+    use p02_core::{CharacterProfile, EventId, SpeakerName, Timestamp, TraceId, UserLine};
     use p02_shared::Identifier;
 
     use super::*;
@@ -408,13 +312,10 @@ pub(crate) mod tests {
     }
 
     fn context() -> DecisionContext {
-        DecisionContext::new(
-            SessionId::parse("conv_mira.1").unwrap(),
-            CharacterProfile {
-                id: id("mira"),
-                display_name: SpeakerName::new("Mira").unwrap(),
-            },
-        )
+        DecisionContext::new(CharacterProfile {
+            id: id("mira"),
+            display_name: SpeakerName::new("Mira").unwrap(),
+        })
     }
 
     fn item(plugin: &str, item: &str, kind: ContextItemKind, text: &str) -> PluginContextItem {
@@ -528,22 +429,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_frame_is_measured_in_characters_not_bytes() {
-        let plain = render(
-            &envelope("aaaa", context()),
-            &[],
-            &mira(),
-            Person::Unnamed,
-            None,
-        );
-        let emoji = render(
-            &envelope("\u{1f331}\u{1f331}\u{1f331}\u{1f331}", context()),
-            &[],
-            &mira(),
-            Person::Unnamed,
-            None,
-        );
+    fn the_reply_is_offered_first_and_every_plugin_tool_after_it() {
+        let tool = |name: &str| PluginToolDefinition {
+            plugin_id: id("runtime.plugin"),
+            tool: ProvidedTool::new(
+                id(name),
+                "A tool.",
+                ToolInputContract::new(serde_json::json!({"type": "object"})).unwrap(),
+            )
+            .unwrap(),
+        };
+        let mut envelope = envelope("Hello.", context());
 
-        assert_eq!(plain.size(), emoji.size());
+        envelope.plugin_tool_definitions = PluginToolDefinitions::new(vec![
+            tool("runtime.plugin.list"),
+            tool("character_state.patch"),
+        ])
+        .unwrap();
+
+        let prompt = render(&envelope, &[], &mira(), Person::Unnamed, None);
+        let names: Vec<&str> = prompt
+            .tools()
+            .iter()
+            .map(|tool| tool.function().name.as_str())
+            .collect();
+
+        assert_eq!(
+            names,
+            [
+                VISIBLE_REPLY,
+                "runtime.plugin.list",
+                "character_state.patch"
+            ]
+        );
     }
 }

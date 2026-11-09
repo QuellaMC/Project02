@@ -100,10 +100,6 @@ async fn continues(summary: Option<&str>) {
 
     assert_eq!(rotation, None);
     assert_eq!(turn.messages[0].id.to_string(), format!("{id}.2:message-1"));
-    assert_eq!(
-        asked[3].envelope.decision_context.context_summary(),
-        Some(written.as_str())
-    );
     assert_eq!(said(&asked[3].history), ["Line 3."]);
     assert_eq!(
         TakenLines::read(&chat.world.data(), &id).taken(&stamp("line-1")),

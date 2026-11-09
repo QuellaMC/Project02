@@ -3,12 +3,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use p02_contracts::{ConversationToolCall, DecisionResult, ToolCallOutcome, ToolCallResult};
+use p02_contracts::{ChatMessage, DecisionResult, ModelOutput, ToolCallOutcome};
 use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
 use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch, TurnRejected};
-use serde_json::json;
+use serde_json::{Value, json};
 
-use crate::support::{Chat, Round, Toy, calling, reply, stamp, told};
+use crate::support::{Chat, Round, Toy, calling, reply, stamp, told, written};
 
 const RECEIVED: RecordKind = RecordKind::RuntimeEventReceived;
 const COMMITTED: RecordKind = RecordKind::VisibleMessageCommitted;
@@ -105,12 +105,6 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
         chat.kinds(1),
         [RECEIVED, COMMITTED, ROUND, COMMITTED, COMPLETED]
     );
-
-    let asked = chat.model.asked.lock().unwrap();
-    let context = &asked[0].envelope.decision_context;
-
-    assert_eq!(asked[0].envelope.user_message.as_str(), "Hello?");
-    assert_eq!(context.runtime_notes()[0].id().as_str(), "today");
 }
 
 /// A blank text is refused with its event and the refusal recorded,
@@ -167,7 +161,7 @@ async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keep
     ));
 
     chat.model
-        .script((0..100).map(|_| Round::says("I am not a decision.")));
+        .script((0..100).map(|_| Round::says(ModelOutput::default())));
 
     let Delivery::Rejected { turn } = chat.say("Hello again?", "second").await else {
         panic!("a malformed last answer rejects its turn");
@@ -221,14 +215,14 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
     let mut chat = Chat::new(&[Arc::new(notes)]);
 
     chat.model.script([
-        Round::says(
-            json!({"toolCalls": [
-                {"name": "notes.add", "input": {"note": "tea"}},
-                {"name": "notes.burn", "input": {"note": "all"}},
-                {"name": "notes.add", "input": {"note": "cake"}},
-            ], "text": "Noting both."})
-            .to_string(),
-        ),
+        Round::says(ModelOutput {
+            tool_calls: vec![
+                written("notes.add", json!({"note": "tea"})),
+                written("notes.burn", json!({"note": "all"})),
+                written("notes.add", json!({"note": "cake"})),
+            ],
+            text: Some("Noting both.".to_owned()),
+        }),
         Round::says(reply(&["Noted."])),
     ]);
 
@@ -253,10 +247,13 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
         })
         .collect();
     let asked = chat.model.asked.lock().unwrap();
-    let shown: Vec<&ToolCallResult> = asked[1].envelope.tool_rounds[0]
-        .tool_calls
+    let shown: Vec<Value> = asked[1]
+        .messages
         .iter()
-        .map(ConversationToolCall::result)
+        .filter_map(|message| match message {
+            ChatMessage::Tool { content, .. } => Some(serde_json::from_str(content).unwrap()),
+            _ => None,
+        })
         .collect();
 
     assert_eq!(texts(&turn), ["Remember tea and cake.", "Noted."]);
@@ -279,16 +276,15 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
     assert_eq!(
         shown,
         [
-            &ToolCallResult::Accepted {
-                output: json!({"added": "tea"})
-            },
-            &ToolCallResult::Rejected {
-                reason: "tool_not_declared".to_owned(),
-                message: "Tool \"notes.burn\" is not declared for this turn.".to_owned(),
-            },
-            &ToolCallResult::Accepted {
-                output: json!({"added": "cake"})
-            },
+            json!({"status": "accepted", "pluginId": "notes", "toolName": "notes.add", "output": {"added": "tea"}}),
+            json!({
+                "status": "rejected",
+                "pluginId": "undeclared.notes.burn",
+                "toolName": "notes.burn",
+                "reason": "tool_not_declared",
+                "message": "Tool \"notes.burn\" is not declared for this turn.",
+            }),
+            json!({"status": "accepted", "pluginId": "notes", "toolName": "notes.add", "output": {"added": "cake"}}),
         ]
     );
     assert_eq!(

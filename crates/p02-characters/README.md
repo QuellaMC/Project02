@@ -12,9 +12,7 @@ p02-shared.
   JSON of at most 64 KiB, and what it holds that a descriptor does not
   know is not read; a refusal names the first rule it breaks. Whether her
   plugins are installed, and whether their values fit, is judged against
-  the installed plugins when she starts. Which content of hers a model
-  round ran, recorded with every round, is her package's version and the
-  fingerprint of her persona.
+  the installed plugins when she starts.
 - **Discovery.** The bundled packages are compiled into the daemon, and a
   person adds a character by putting her folder in `<home>/characters/`.
   That folder may be a link; a package folder in it may not, nor a

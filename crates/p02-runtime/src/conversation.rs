@@ -4,7 +4,7 @@
 
 use std::num::{NonZeroU32, NonZeroU64};
 
-use p02_characters::{CharacterRef, Persona};
+use p02_characters::Persona;
 use p02_contracts::{ConversationTurn, RoleModelAdapter};
 use p02_core::{
     CharacterProfile, ClientStamp, ConversationId, EventIdentity, MessageId, Participant,
@@ -21,16 +21,13 @@ use p02_store::{
 use crate::continuation;
 use crate::turn::{self, CompletedTurn, Ended, Progress, RejectedTurn, RunTurnError};
 
-/// A character as a thread runs her: who she is, the persona her model is
-/// given, and which content of hers that is.
+/// A character as a thread runs her: who she is, and the persona her model
+/// is given.
 #[derive(Clone, Debug)]
 pub struct Character {
     /// Her id, and the name a thread made now gives her.
     pub profile: CharacterProfile,
     pub persona: Persona,
-    /// Her package's version and her persona's fingerprint, recorded with
-    /// every round she runs.
-    pub character_ref: CharacterRef,
 }
 
 /// A line as the person's client sent it, with the stamps it put on it.
@@ -115,7 +112,6 @@ pub(crate) struct Cast {
     pub(crate) character: CharacterProfile,
     pub(crate) person: SpeakerName,
     pub(crate) persona: Persona,
-    pub(crate) character_ref: CharacterRef,
 }
 
 /// What a line is answered with: the character's model, her plugins, and
@@ -205,7 +201,6 @@ impl Conversation {
                 character: current.character,
                 person: current.person,
                 persona: character.persona,
-                character_ref: character.character_ref,
             },
             disk: Some(Disk {
                 data,

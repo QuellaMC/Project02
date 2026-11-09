@@ -26,8 +26,9 @@ thread.
   one holder per conversation, one writer per session, one lessee per
   plugin's files, and short waits for catalogs and settings. Every
   credential-named value a round wrote or a call carried is redacted
-  before it is recorded, and again as it is read. A line a client
-  submitted under an id its conversation already took is not run again.
+  before it is recorded, and a round keeps what the model wrote and the
+  tokens it took, never its prompt. A line a client submitted under an id
+  its conversation already took is not run again.
   A plugin's writes are journaled, so the next lease finishes or takes
   back one a crash cut short. Its databases are views it builds again:
   one at another version, or one SQLite finds damaged, is made anew. This

@@ -20,7 +20,7 @@ type Decision = {
   readonly rejection?: {readonly details: string};
 };
 
-/** What the parser made of each round, as the rounds were recorded. */
+/** The verdict on each round, as the rounds were recorded. */
 function decisionsOf(home: string): Decision[] {
   return sessionRecords(home, 'mira', 'role_model_round').map(
     record =>

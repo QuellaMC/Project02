@@ -324,7 +324,7 @@ it('stream.drafts: a turn reaches the stream as its line, then each of its repli
   ]);
 });
 
-it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the budget refuses are withdrawn before the round moves on, and the next round drafts afresh', async () => {
+it('stream.drafts-withdrawn: the drafts of a round whose answer is refused, or that the budget refuses, are withdrawn before the round moves on, and the next round drafts afresh', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),

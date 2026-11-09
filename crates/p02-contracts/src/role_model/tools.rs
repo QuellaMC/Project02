@@ -1,5 +1,8 @@
 use p02_core::VisibleText;
-use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json_object};
+use p02_shared::{
+    BoundJsonError, Credentials, Identifier, JsonLimits, bound_json_object,
+    redact_object_credentials,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -105,20 +108,36 @@ impl ModelToolCall {
     }
 
     /// A call of a plugin tool whose input crosses the JSON boundary, its
-    /// credential-named values kept to run the call or redacted to record it.
+    /// credential-named values kept to run the call.
     pub(crate) fn plugin(
         name: Identifier,
         input: Map<String, Value>,
-        credentials: Credentials,
     ) -> Result<Self, BoundJsonError> {
         let input = bound_json_object(
             Value::Object(input),
             &format!("Model tool \"{name}\" input"),
             JsonLimits::default(),
-            credentials,
+            Credentials::Keep,
         )?;
 
         Ok(Self::Plugin { name, input })
+    }
+
+    /// The call as a record keeps it: every credential-named value in its
+    /// input redacted.
+    pub(crate) fn redacted(&self) -> Self {
+        match self {
+            Self::VisibleReply { .. } => self.clone(),
+            Self::Plugin { name, input } => {
+                let mut input = input.clone();
+
+                redact_object_credentials(&mut input);
+                Self::Plugin {
+                    name: name.clone(),
+                    input,
+                }
+            }
+        }
     }
 
     #[must_use]
@@ -169,18 +188,14 @@ impl TryFrom<WireCall> for ModelToolCall {
 }
 
 /// A plugin tool as the model is offered it, under the plugin that answers it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PluginToolDefinition {
     pub plugin_id: Identifier,
-    #[serde(flatten)]
     pub tool: ProvidedTool,
 }
 
-/// The plugin tools of one model call, each name offered once. A record of
-/// them reads back as it was written.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
+/// The plugin tools of one model call, each name offered once.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PluginToolDefinitions(Vec<PluginToolDefinition>);
 
 /// Two plugin tools share a name, so a call could not say which it meant.

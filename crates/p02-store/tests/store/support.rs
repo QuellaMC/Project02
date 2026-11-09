@@ -5,24 +5,21 @@
 use std::num::{NonZeroU32, NonZeroU64};
 use std::path::{Path, PathBuf};
 
-use p02_characters::{CharacterRef, CharacterVersion};
 use p02_contracts::{
-    DecisionContext, DecisionRejection, DecisionRejectionReason, DecisionResult, Evidence,
-    EvidenceKind, EvidenceNote, EvidenceStatus, ExchangeProvider, ExchangeRecord, FrameSize,
-    InputEnvelope, PluginToolDefinitions, PromptSize, ProviderExchange, ProviderMetadata,
-    ProviderName, ToolCallId, ToolCallResult,
+    DecisionRejectionReason, DecisionResult, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
+    ModelOutput, ProviderAnswer, ProviderFailure, ToolCallId, ToolCallResult, WrittenCall,
 };
 use p02_core::{
     CharacterProfile, ClientStamp, Conversation, ConversationId, EventId, EventIdentity, MessageId,
     Participant, SessionId, SpeakerName, Timestamp, TraceId, VisibleMessage, VisibleMessageRole,
     VisibleText,
 };
-use p02_shared::{Credentials, DanglingLinks, Fingerprint, Identifier, canonical_path};
+use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{
     CharacterData, EventReceived, Home, Judgement, LogRecord, MessageCommitted, PayloadSummary,
-    RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionLog, SessionWriter,
-    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected,
-    TurnRejection, TurnStatus,
+    RecordBody, RoundRecord, RuntimeRejection, SessionLog, SessionWriter, StorageError,
+    ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection,
+    TurnStatus,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -298,25 +295,34 @@ impl Script {
 }
 
 /// A model's answer: replies, then calls of the character-state tool.
-pub(crate) fn answer(replies: &[&str], moods: &[&str], note: Option<&str>) -> String {
-    let mut calls: Vec<Value> = replies
+pub(crate) fn answer(replies: &[&str], moods: &[&str], note: Option<&str>) -> ModelOutput {
+    let calls = replies
         .iter()
-        .map(|text| json!({"name": "visible_reply", "input": {"text": text}}))
-        .collect();
+        .map(|text| ("visible_reply", json!({"text": text})))
+        .chain(
+            moods
+                .iter()
+                .map(|mood| ("character_state.patch", json!({"mood": mood}))),
+        );
 
-    calls.extend(
-        moods
-            .iter()
-            .map(|mood| json!({"name": "character_state.patch", "input": {"mood": mood}})),
-    );
+    written(calls, note)
+}
 
-    let mut answer = json!({"toolCalls": calls});
-
-    if let Some(note) = note {
-        answer["text"] = json!(note);
+/// What a model wrote: these calls, each a tool and its input, and `text`.
+pub(crate) fn written<'a>(
+    calls: impl IntoIterator<Item = (&'a str, Value)>,
+    text: Option<&str>,
+) -> ModelOutput {
+    ModelOutput {
+        tool_calls: calls
+            .into_iter()
+            .map(|(name, input)| WrittenCall {
+                name: name.to_owned(),
+                input,
+            })
+            .collect(),
+        text: text.map(str::to_owned),
     }
-
-    answer.to_string()
 }
 
 pub(crate) fn evidence(identity: &EventIdentity, plugin: &str, kind: EvidenceKind) -> Evidence {
@@ -326,60 +332,6 @@ pub(crate) fn evidence(identity: &EventIdentity, plugin: &str, kind: EvidenceKin
         EvidenceNote::new(kind, EvidenceStatus::Accepted, "Done."),
         Vec::new(),
     )
-    .unwrap()
-}
-
-/// What a round recorded beside what it was shown: Mira's content, the
-/// prompt's size, and an exchange whose provider echoed a credential.
-fn snapshot(envelope: InputEnvelope, raw: Option<String>) -> RoundSnapshot {
-    RoundSnapshot {
-        input_envelope: envelope,
-        raw_output_text: raw,
-        character_ref: CharacterRef {
-            version: CharacterVersion::new("1.1.0").unwrap(),
-            persona_fingerprint: Fingerprint::new(&json!({"persona": {"system": ["Kind."]}})),
-        },
-        prompt_size: PromptSize::new(
-            vec![FrameSize {
-                kind: "system_protocol".to_owned(),
-                count: NonZeroU64::MIN,
-                chars: NonZeroU64::new(2_048).unwrap(),
-            }],
-            0,
-        ),
-        provider_metadata: Some(ProviderMetadata {
-            provider: ProviderName::Nvidia,
-            model: Some("nvidia/fixture-model".to_owned()),
-            request: None,
-            response: None,
-            error: None,
-        }),
-        provider_exchange: Some(exchange()),
-    }
-}
-
-pub(crate) const ECHOED_CREDENTIAL: &str = "provider-echoed-credential";
-
-fn exchange() -> ProviderExchange {
-    ProviderExchange::new(ExchangeRecord {
-        provider: ExchangeProvider {
-            name: ProviderName::Nvidia,
-            model: Some("nvidia/fixture-model".to_owned()),
-            endpoint: None,
-        },
-        reasoning_params: json!({}),
-        rendered_messages: Vec::new(),
-        rendered_tools: Vec::new(),
-        tool_name_mappings: Vec::new(),
-        request_body: json!({"model": "nvidia/fixture-model", "stream": true}),
-        finish_reason: Some("stop".to_owned()),
-        usage: Some(json!({
-            "prompt_tokens": 1,
-            "api_key": ECHOED_CREDENTIAL,
-            "nested": {"access_token": ECHOED_CREDENTIAL, "kept": "as is"},
-        })),
-        native_assistant_message: None,
-    })
     .unwrap()
 }
 
@@ -400,32 +352,28 @@ impl TurnScript<'_> {
         self
     }
 
-    /// A model round that answered `raw`, or nothing when its provider
+    /// A model round that answered `output`, or nothing when its provider
     /// failed.
-    pub(crate) fn round(&mut self, raw: Option<String>) -> &mut Self {
+    pub(crate) fn round(&mut self, output: Option<ModelOutput>) -> &mut Self {
         let round = NonZeroU32::new(u32::try_from(self.rounds.len() + 1).unwrap()).unwrap();
-        let result = match &raw {
-            Some(raw) => DecisionResult::parse(raw, Credentials::Redact),
-            None => DecisionResult::Rejected {
-                rejection: DecisionRejection {
-                    reason: DecisionRejectionReason::ProviderError,
-                    details: Some("The provider answered 503.".to_owned()),
-                },
+        let answer = match output {
+            Some(output) => ProviderAnswer::Answered {
+                output,
+                finish_reason: Some("stop".to_owned()),
+                usage: None,
             },
+            None => ProviderAnswer::Failed(ProviderFailure {
+                code: "http_error".to_owned(),
+                message: "The provider answered 503.".to_owned(),
+                status: Some(503),
+            }),
         };
-        let envelope = InputEnvelope::new(
-            self.identity.clone(),
-            self.line.clone(),
-            DecisionContext::new(self.script.session.clone(), mira()),
-            PluginToolDefinitions::default(),
-        );
+        let result = DecisionResult::judge(&answer);
 
         self.rounds.push(result.clone());
-        self.push(RecordBody::ModelRound(Box::new(RoundRecord::new(
-            round,
-            snapshot(envelope, raw),
-            result,
-        ))));
+        self.push(RecordBody::ModelRound(RoundRecord::new(
+            round, &answer, &result,
+        )));
         self
     }
 
