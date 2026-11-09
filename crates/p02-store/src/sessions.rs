@@ -507,7 +507,9 @@ mod tests {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777
     }
 
-    /// storage.atomic-writes: the files the store replaces appear whole and owner-only with no temporary left beside them, also when a write fails, and a failed catalog rewrite, like a conversation's failed make, takes back the directory it made
+    /// No temporary is left beside a replaced file, also when its write
+    /// fails, and a failed catalog rewrite takes back the directory it made,
+    /// as a conversation's failed make does.
     #[test]
     fn replaced_files_appear_whole_owner_only_and_a_failed_make_takes_its_directory_back() {
         let directory = tempfile::tempdir().unwrap();

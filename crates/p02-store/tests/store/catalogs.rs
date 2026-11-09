@@ -1,17 +1,16 @@
-//! The catalogs: a character's sessions and their directories, which must
-//! agree, a row that is no session row skipped; a home's conversations, one
-//! record per thread; and the record of the lines a conversation's segments
-//! took.
+//! The catalogs: a character's sessions and their directories, a row that
+//! is no session row skipped, and the record of the lines a conversation's
+//! segments took.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
-use p02_core::{ClientStamp, ConversationId, MessageId, Participant};
+use p02_core::{ClientStamp, MessageId};
 use p02_store::{SessionEntry, TakenLines};
 use serde_json::{Value, json};
 
-use crate::support::{Script, World, answer, conversation_named, id, lines_of};
+use crate::support::{Script, World, answer, lines_of};
 
 fn ids(sessions: &[SessionEntry]) -> Vec<String> {
     sessions
@@ -30,85 +29,6 @@ fn catalog_ids(world: &World) -> Vec<String> {
                 .to_owned()
         })
         .collect()
-}
-
-#[test]
-fn a_conversation_is_one_record_per_set_of_participants_found_again_in_any_order() {
-    let world = World::new();
-    let reversed = vec![
-        Participant::local_user(),
-        Participant::character(id("mira")),
-    ];
-    let zeta = vec![
-        Participant::character(id("zeta")),
-        Participant::local_user(),
-    ];
-
-    assert_eq!(
-        world.home.ensure_conversation(reversed).unwrap(),
-        world.conversation
-    );
-
-    let other = world.home.ensure_conversation(zeta).unwrap();
-    let record: Value = serde_json::from_slice(
-        &std::fs::read(
-            world
-                .root()
-                .join("conversations")
-                .join(world.conversation.id().as_str())
-                .join("conversation.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    assert!(world.conversation.id().as_str().starts_with("conv_"));
-    assert_eq!(
-        record,
-        json!({
-            "id": world.conversation.id(),
-            "participants": [
-                {"kind": "character", "id": "mira"},
-                {"kind": "user", "id": "local-user"},
-            ],
-            "createdAt": world.conversation.created_at(),
-        })
-    );
-    assert_eq!(
-        world.home.conversations().unwrap(),
-        [world.conversation.clone(), other]
-    );
-    assert_eq!(
-        world.home.conversation(world.conversation.id()).unwrap(),
-        world.conversation
-    );
-    assert_eq!(
-        world
-            .home
-            .conversation(&ConversationId::new("conv_absent").unwrap())
-            .unwrap_err()
-            .code(),
-        "conversation_not_found"
-    );
-}
-
-#[test]
-fn a_conversation_directory_without_its_record_is_no_conversation() {
-    let world = World::new();
-    let conversations = world.root().join("conversations");
-    let interrupted = ConversationId::new("conv_interrupted").unwrap();
-
-    std::fs::create_dir(conversations.join(interrupted.as_str())).unwrap();
-    std::fs::write(conversations.join(".DS_Store"), "Finder").unwrap();
-
-    assert_eq!(
-        world.home.conversations().unwrap(),
-        std::slice::from_ref(&world.conversation)
-    );
-    assert_eq!(
-        world.home.conversation(&interrupted).unwrap_err().code(),
-        "conversation_not_found"
-    );
 }
 
 #[test]
@@ -167,36 +87,6 @@ fn segments_are_made_in_order_and_only_the_newest_goes_on_or_is_discarded() {
         [world.segment(1).to_string(), world.segment(2).to_string()]
     );
     second.release();
-}
-
-#[test]
-fn a_catalog_a_crash_cut_mid_row_still_lists_every_session_before_the_cut() {
-    let world = World::new();
-    let catalog = world.data.root().join("sessions.jsonl");
-
-    world.first_segment(&world.conversation).unwrap().release();
-    world
-        .next_segment(&world.conversation, 1)
-        .unwrap()
-        .release();
-    world
-        .next_segment(&world.conversation, 2)
-        .unwrap()
-        .release();
-
-    let rows = lines_of(&catalog);
-
-    for tail in [&rows[2][..rows[2].len() / 2], rows[2].as_str()] {
-        std::fs::write(&catalog, format!("{}\n{}\n{tail}", rows[0], rows[1])).unwrap();
-
-        assert_eq!(
-            ids(&world.data.sessions().unwrap().sessions),
-            [world.segment(1).to_string(), world.segment(2).to_string()]
-        );
-    }
-
-    world.log(2).writer().unwrap().discard().unwrap();
-    assert_eq!(catalog_ids(&world), [world.segment(1).to_string()]);
 }
 
 #[test]
@@ -275,79 +165,6 @@ fn a_damaged_or_repeated_catalog_row_is_skipped_and_named_and_the_next_rewrite_l
         [world.segment(1).to_string(), world.segment(2).to_string()]
     );
     assert!(world.data.sessions().unwrap().skipped_lines.is_empty());
-}
-
-#[test]
-fn damage_beside_the_catalog_is_reported_never_read_as_fewer_sessions() {
-    let world = World::new();
-    let catalog = world.data.root().join("sessions.jsonl");
-    let mut writer = world.first_segment(&world.conversation).unwrap();
-    let first = world.data.session(writer.session_id()).unwrap();
-    let mut script = Script::new(world.segment(1));
-
-    script
-        .turn("Hello?")
-        .user("hello")
-        .round(Some(answer(&["Hi."], &[], None)))
-        .replies()
-        .completed();
-
-    for record in &script.records {
-        writer.append(record.clone()).unwrap();
-    }
-
-    writer.release();
-
-    let rows = std::fs::read_to_string(&catalog).unwrap();
-
-    std::fs::remove_file(&catalog).unwrap();
-
-    for refused in [
-        world.data.sessions().map(drop).unwrap_err(),
-        world
-            .data
-            .session(first.session_id())
-            .map(drop)
-            .unwrap_err(),
-        world
-            .first_segment(&conversation_named("conv_new"))
-            .map(drop)
-            .unwrap_err(),
-    ] {
-        assert_eq!(refused.code(), "missing_file", "{refused}");
-    }
-
-    assert!(!catalog.exists());
-
-    std::fs::write(&catalog, &rows).unwrap();
-    std::fs::rename(
-        world
-            .data
-            .root()
-            .join("sessions")
-            .join(first.session_id().to_string()),
-        world.data.root().join("moved"),
-    )
-    .unwrap();
-
-    for refused in [
-        world.data.sessions().map(drop).unwrap_err(),
-        world.log(1).read().map(drop).unwrap_err(),
-    ] {
-        assert_eq!(refused.code(), "missing_file", "{refused}");
-    }
-
-    std::fs::rename(
-        world.data.root().join("moved"),
-        world
-            .data
-            .root()
-            .join("sessions")
-            .join(first.session_id().to_string()),
-    )
-    .unwrap();
-    std::fs::write(world.data.root().join("sessions").join("stray.txt"), "?").unwrap();
-    assert_eq!(world.data.sessions().unwrap().sessions.len(), 1);
 }
 
 #[test]

@@ -15,8 +15,5 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "test-util", "time"] }
-
 [lints]
 workspace = true

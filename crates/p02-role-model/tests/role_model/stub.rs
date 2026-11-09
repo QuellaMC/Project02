@@ -3,38 +3,30 @@
 //! and keeps every request it read.
 
 use std::collections::VecDeque;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use axum::Router;
-use axum::body::{Body, Bytes};
+use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::serve::Listener;
 use p02_shared::BaseUrl;
 use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::support::event_text;
 
 /// A request as the stub read it.
 #[derive(Clone, Debug)]
 pub(crate) struct Request {
-    pub(crate) path: String,
-    pub(crate) headers: HeaderMap,
     pub(crate) body: Bytes,
 }
 
 impl Request {
-    pub(crate) fn header(&self, name: &str) -> Option<&str> {
-        self.headers.get(name).and_then(|value| value.to_str().ok())
-    }
-
     pub(crate) fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap()
     }
@@ -44,12 +36,6 @@ impl Request {
 pub(crate) enum Answer {
     /// A whole body under a status.
     Whole { status: u16, body: String },
-    /// A 200 event stream whose headers go after `delay`, and whose pieces
-    /// go as the test sends them, until it lets go of the sender.
-    Stream {
-        delay: Duration,
-        pieces: mpsc::UnboundedReceiver<String>,
-    },
     /// Nothing, until the test lets go of the sender.
     Hold(oneshot::Receiver<()>),
 }
@@ -102,14 +88,6 @@ impl Stub {
     /// The next request gets `answer`, after those scripted before it.
     pub(crate) fn answer(&self, answer: Answer) {
         self.shared.answers.lock().unwrap().push_back(answer);
-    }
-
-    /// The next request is answered piece by piece through the sender.
-    pub(crate) fn stream(&self, delay: Duration) -> mpsc::UnboundedSender<String> {
-        let (sender, pieces) = mpsc::unbounded_channel();
-
-        self.answer(Answer::Stream { delay, pieces });
-        sender
     }
 
     /// The next request is answered never, while the sender lives.
@@ -169,17 +147,8 @@ impl Listener for Dropping {
     }
 }
 
-async fn respond(
-    State(shared): State<Arc<Shared>>,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    shared.requests.lock().unwrap().push(Request {
-        path: uri.path().to_owned(),
-        headers,
-        body,
-    });
+async fn respond(State(shared): State<Arc<Shared>>, body: Bytes) -> Response {
+    shared.requests.lock().unwrap().push(Request { body });
 
     let answer = shared.answers.lock().unwrap().pop_front();
 
@@ -187,22 +156,6 @@ async fn respond(
         None => (StatusCode::INTERNAL_SERVER_ERROR, "unscripted").into_response(),
         Some(Answer::Whole { status, body }) => {
             (StatusCode::from_u16(status).unwrap(), body).into_response()
-        }
-        Some(Answer::Stream { delay, pieces }) => {
-            tokio::time::sleep(delay).await;
-
-            let stream = futures_util::stream::unfold(pieces, |mut pieces| async move {
-                pieces
-                    .recv()
-                    .await
-                    .map(|piece| (Ok::<_, Infallible>(piece), pieces))
-            });
-
-            (
-                [(header::CONTENT_TYPE, "text/event-stream")],
-                Body::from_stream(stream),
-            )
-                .into_response()
         }
         Some(Answer::Hold(held)) => {
             let _ = held.await;

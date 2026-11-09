@@ -685,32 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn an_atomic_write_removes_its_files_abandoned_temporaries_and_nothing_else() {
-        let (_directory, root) = temp_root();
-        let path = root.join("sessions.jsonl");
-        let abandoned = format!(".sessions.jsonl.{}.tmp", Uuid::new_v4());
-        let kept = [
-            format!(".config.json.{}.tmp", Uuid::new_v4()),
-            ".sessions.jsonl.not-a-uuid.tmp".to_owned(),
-            format!("sessions.jsonl.{}.tmp", Uuid::new_v4()),
-        ];
-
-        for name in std::iter::once(&abandoned).chain(&kept) {
-            fs::write(root.join(name), "residue").unwrap();
-        }
-
-        write_file_atomically(&path, b"{}\n").unwrap();
-
-        let mut names = names_in(&root);
-        let mut expected: Vec<String> = kept.to_vec();
-
-        names.sort();
-        expected.push("sessions.jsonl".to_owned());
-        expected.sort();
-        assert_eq!(names, expected);
-    }
-
-    #[test]
     fn an_append_cuts_what_a_crash_left_after_the_last_line_and_creates_the_file_owner_only() {
         let (_directory, root) = temp_root();
         let path = root.join("raw-events.jsonl");

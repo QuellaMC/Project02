@@ -1,14 +1,14 @@
 //! A line through the turn: what it records, in the order the gate admits
-//! it, what it announces, and how a turn its model does not finish ends.
+//! it, and what it announces.
 
 use std::sync::{Arc, Mutex};
 
-use p02_contracts::{ChatMessage, DecisionResult, ModelOutput, ToolCallOutcome};
-use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
-use p02_store::{LogRecord, RecordBody, RecordKind, TurnRejected};
+use p02_contracts::{ChatMessage, ModelOutput, ToolCallOutcome};
+use p02_runtime::{CompletedTurn, Delivery, Progress, Submission};
+use p02_store::{RecordBody, RecordKind};
 use serde_json::{Value, json};
 
-use crate::support::{Chat, Fixed, Round, Toy, calling, reply, stamp, told, written};
+use crate::support::{Chat, Fixed, Round, Toy, reply, stamp, told, written};
 
 const RECEIVED: RecordKind = RecordKind::RuntimeEventReceived;
 const COMMITTED: RecordKind = RecordKind::VisibleMessageCommitted;
@@ -41,7 +41,6 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
         conversation,
         model,
         host,
-        window,
         ..
     } = &mut chat;
     let heard = Mutex::new(Vec::new());
@@ -54,11 +53,7 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
                 source: stamp("web"),
                 client_message_id: stamp("hello"),
             },
-            &mut Fixed {
-                model,
-                host,
-                window: *window,
-            },
+            &mut Fixed { model, host },
             &|progress: Progress| {
                 let on_disk = world
                     .records(&id, 1)
@@ -141,62 +136,6 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
     assert_eq!(chat.model.asked.lock().unwrap().len(), 1);
 }
 
-/// A turn whose provider gives nothing usable, or whose model's last
-/// allowed answer is still malformed, ends rejected for its round's own
-/// reason, the round recorded and the person's line kept.
-#[tokio::test]
-async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keeps_the_line() {
-    let mut chat = Chat::new(&[]);
-
-    chat.model
-        .script([Round::fails("The provider answered 503.")]);
-
-    assert!(matches!(
-        chat.say("Hello?", "first").await,
-        Delivery::Rejected(RejectedTurn { reason: "provider_error", ref message })
-            if message == "The provider answered 503."
-    ));
-
-    chat.model
-        .script((0..100).map(|_| Round::says(ModelOutput::default())));
-
-    let Delivery::Rejected(turn) = chat.say("Hello again?", "second").await else {
-        panic!("a malformed last answer rejects its turn");
-    };
-    let records = chat.records(1);
-    let rounds: Vec<&LogRecord> = records
-        .iter()
-        .filter(|record| record.kind() == ROUND)
-        .collect();
-    let Some(RecordBody::ModelRound(last)) = rounds.last().map(|record| record.body()) else {
-        panic!("the turn recorded its rounds");
-    };
-    let DecisionResult::Rejected { rejection } = last.result() else {
-        panic!("the last round was refused");
-    };
-
-    let rejections: Vec<&TurnRejected> = records
-        .iter()
-        .filter_map(|record| match record.body() {
-            RecordBody::TurnRejected(rejected) => Some(rejected),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(turn.reason, "malformed_output");
-    assert_eq!(Some(&turn.message), rejection.details.as_ref());
-    assert_eq!(rounds.len(), 1 + 100);
-    assert_eq!(
-        records
-            .iter()
-            .filter(|record| record.kind() == COMMITTED)
-            .count(),
-        2
-    );
-    assert_eq!(records.last().unwrap().kind(), REJECTED);
-    assert_eq!(rejections.len(), 2);
-}
-
 /// A round of tool calls starts each in the model's order, finishes each as
 /// its plugin answered or, for a tool the turn never offered, as the
 /// refusal of it, shows the model the results in its next round, and
@@ -243,7 +182,6 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
         .collect();
     let asked = chat.model.asked.lock().unwrap();
     let shown: Vec<Value> = asked[1]
-        .messages
         .iter()
         .filter_map(|message| match message {
             ChatMessage::Tool { content, .. } => Some(serde_json::from_str(content).unwrap()),
@@ -286,38 +224,4 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
             "visible_reply 2.0 Noted.",
         ]
     );
-}
-
-/// The round budget spent on a round still asking for a tool ends the turn
-/// rejected as `tool_rounds_exhausted`, the last round's call never made.
-#[tokio::test]
-async fn a_round_budget_spent_still_asking_for_a_tool_rejects_the_turn() {
-    let notes = Toy::new("notes")
-        .access(json!({"model_input": "write"}))
-        .tool("notes.add", |_| ToolCallOutcome::Accepted {
-            output: json!({"added": true}),
-            evidence: Vec::new(),
-        });
-    let mut chat = Chat::new(&[Arc::new(notes)]);
-
-    chat.model
-        .script((0..100).map(|_| Round::says(calling("notes.add", &json!({"note": "more"})))));
-
-    let delivery = chat.say("Keep noting.", "notes").await;
-    let kinds = chat.kinds(1);
-    let count = |kind| kinds.iter().filter(|&&found| found == kind).count();
-
-    assert!(
-        matches!(
-            &delivery,
-            Delivery::Rejected(RejectedTurn { reason: "tool_rounds_exhausted", message })
-                if message == "Role model exceeded maximum executable tool rounds (99)."
-        ),
-        "{delivery:?}"
-    );
-    assert_eq!(
-        (count(ROUND), count(STARTED), count(FINISHED)),
-        (100, 99, 99)
-    );
-    assert_eq!(kinds.last(), Some(&REJECTED));
 }

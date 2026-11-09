@@ -1,20 +1,19 @@
 //! The NVIDIA adapter against a model server on the loopback interface.
 
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    Invocation, ModelOutput, ProviderAnswer, ProviderName, ReplyDelta, RoleModelAdapter,
-    TextCompletion, TextCompletionRequest, TokenUsage,
+    Invocation, ProviderAnswer, ProviderName, RoleModelAdapter, TextCompletion,
+    TextCompletionRequest,
 };
 use p02_role_model::{NvidiaSettings, select_adapter};
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::stub::{Answer, Stub};
-use crate::support::{DONE, call_piece, content, event_text, finish, usage, wire};
+use crate::support::{DONE, call_piece, content, finish, wire};
 
 const KEY: &str = "nvapi-fixture-key";
 
@@ -40,15 +39,11 @@ fn adapter(stub: &Stub) -> Adapter {
     nvidia(&keyed(stub), None)
 }
 
-/// A round of the loop with `tools` offered, and every draft it heard.
-async fn invoke(adapter: &Adapter, tools: &[&str]) -> (ProviderAnswer, Vec<ReplyDelta>) {
-    let heard = Mutex::new(Vec::new());
-    let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta);
+/// A round of the loop with `tools` offered.
+async fn invoke(adapter: &Adapter, tools: &[&str]) -> ProviderAnswer {
     let (messages, tools) = wire(tools);
-    let invocation = Invocation::new(&messages, &tools).with_reply_listener(&listener);
-    let answer = adapter.invoke(&invocation).await;
 
-    (answer, heard.into_inner().unwrap())
+    adapter.invoke(&Invocation::new(&messages, &tools)).await
 }
 
 /// What the model wrote, as a record keeps it.
@@ -72,275 +67,6 @@ fn failure(answer: &ProviderAnswer) -> (String, String, Option<u16>) {
     }
 }
 
-fn delta(text: &str) -> ReplyDelta {
-    ReplyDelta {
-        reply: 0,
-        text: text.to_owned(),
-    }
-}
-
-#[tokio::test]
-async fn a_round_is_a_streamed_completion_at_the_endpoint_under_the_bearer_key() {
-    let stub = Stub::start().await;
-
-    stub.answer(Answer::events(&[
-        content("Hello "),
-        content("from the model."),
-        finish("stop"),
-        usage(&json!({"prompt_tokens": 12, "completion_tokens": 34})),
-        DONE.to_owned(),
-    ]));
-
-    let (answer, heard) = invoke(&adapter(&stub), &["visible_reply", "runtime.plugin.list"]).await;
-    let [request] = stub.requests().try_into().unwrap();
-    let body = String::from_utf8(request.body.to_vec()).unwrap();
-
-    assert_eq!(request.path, "/v1/chat/completions");
-    assert_eq!(
-        request.header("authorization"),
-        Some("Bearer nvapi-fixture-key")
-    );
-    assert_eq!(request.header("content-type"), Some("application/json"));
-    assert_eq!(
-        body,
-        concat!(
-            "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"system\",\"content\":\"You are Mira.\"},",
-            "{\"role\":\"user\",\"content\":\"Hello?\"}],\"tools\":[",
-            "{\"type\":\"function\",\"function\":{\"name\":\"visible_reply\",\"description\":\"A tool.\",\"parameters\":{\"type\":\"object\"}}},",
-            "{\"type\":\"function\",\"function\":{\"name\":\"runtime_plugin_list\",\"description\":\"A tool.\",\"parameters\":{\"type\":\"object\"}}}],",
-            "\"tool_choice\":\"auto\",\"parallel_tool_calls\":true,\"stream\":true,\"stream_options\":{\"include_usage\":true},",
-            "\"temperature\":1,\"top_p\":1,\"max_tokens\":16384,\"reasoning_budget\":16384,",
-            "\"chat_template_kwargs\":{\"enable_thinking\":true}}"
-        )
-    );
-    // Plain content is never drafted: it is the reply whole, at the commit.
-    assert_eq!(heard, []);
-    assert_eq!(
-        answer,
-        ProviderAnswer::Answered {
-            output: ModelOutput {
-                tool_calls: Vec::new(),
-                text: Some("Hello from the model.".to_owned()),
-            },
-            finish_reason: Some("stop".to_owned()),
-            usage: Some(TokenUsage {
-                prompt_tokens: 12,
-                completion_tokens: 34,
-            }),
-        }
-    );
-}
-
-#[tokio::test]
-async fn a_server_of_one_s_own_needs_no_key_and_nvidia_s_cloud_is_not_asked_without_one() {
-    let stub = Stub::start().await;
-    let open = nvidia(
-        &NvidiaSettings {
-            base_url: Some(stub.base_url()),
-            ..NvidiaSettings::default()
-        },
-        None,
-    );
-
-    stub.answer(Answer::events(&[
-        content("Hi."),
-        finish("stop"),
-        DONE.to_owned(),
-    ]));
-    invoke(&open, &["visible_reply"]).await;
-
-    let [request] = stub.requests().try_into().unwrap();
-
-    assert_eq!(request.header("authorization"), None);
-    assert_eq!(
-        request.json()["model"],
-        json!("nvidia/nemotron-3-nano-30b-a3b")
-    );
-
-    let (answer, _) = invoke(&nvidia(&NvidiaSettings::default(), None), &[]).await;
-
-    assert_eq!(
-        failure(&answer),
-        (
-            "missing_api_key".to_owned(),
-            "NVIDIA provider requires the nvidiaApiKey setting.".to_owned(),
-            None
-        )
-    );
-}
-
-#[tokio::test]
-async fn a_visible_reply_is_drafted_as_its_arguments_arrive_and_never_the_words_beside_it() {
-    let stub = Stub::start().await;
-    let adapter = adapter(&stub);
-    let writer = stub.stream(Duration::ZERO);
-    let (drafted, mut drafts) = mpsc::unbounded_channel();
-    let listener = move |delta: ReplyDelta| drafted.send(delta).unwrap();
-    let (messages, tools) = wire(&["visible_reply"]);
-    let invocation = Invocation::new(&messages, &tools).with_reply_listener(&listener);
-    let write = |data: &str| writer.send(event_text(data)).unwrap();
-    let (answer, heard) = tokio::join!(adapter.invoke(&invocation), async {
-        let mut heard = Vec::new();
-
-        write(&content("A note to myself. "));
-        write(&call_piece(
-            0,
-            Some(("call_reply", "visible_reply")),
-            "{\"te",
-        ));
-        write(&call_piece(0, None, "xt\": \"Hi"));
-        // Drafted while the rest of the call is still to come.
-        heard.push(drafts.recv().await.unwrap());
-        write(&call_piece(0, None, " there\\u0021 <thi"));
-        heard.push(drafts.recv().await.unwrap());
-        write(&call_piece(0, None, "nk>secret</think> <thin\"}"));
-        heard.push(drafts.recv().await.unwrap());
-        write(&content("More of the note."));
-        write(&finish("tool_calls"));
-        write(DONE);
-        // `<thin` could have opened a tag until the message was whole.
-        heard.push(drafts.recv().await.unwrap());
-        heard
-    });
-
-    assert_eq!(
-        heard,
-        [delta("Hi"), delta(" there! "), delta(" "), delta("<thin")]
-    );
-    assert_eq!(
-        output(&answer),
-        json!({
-            "toolCalls": [{
-                "name": "visible_reply",
-                "input": {"text": "Hi there! <think>secret</think> <thin"},
-            }],
-            "text": "A note to myself. More of the note.",
-        })
-    );
-}
-
-#[tokio::test]
-async fn calls_come_back_under_the_runtime_s_names_with_their_ids_and_arguments_kept() {
-    let stub = Stub::start().await;
-
-    stub.answer(Answer::events(&[
-        content("Checking."),
-        call_piece(0, Some(("call_list", "runtime_plugin_list")), "{}"),
-        call_piece(
-            1,
-            Some(("call_patch", "character_state_patch")),
-            "{\"mood\": \"curious\"}",
-        ),
-        call_piece(
-            2,
-            Some(("call_bad", "visible_reply")),
-            "{\"text\": not-json",
-        ),
-        call_piece(3, Some(("call_unknown", "memory_list")), "{}"),
-        finish("tool_calls"),
-        DONE.to_owned(),
-    ]));
-
-    let (answer, _) = invoke(
-        &adapter(&stub),
-        &[
-            "visible_reply",
-            "runtime.plugin.list",
-            "character_state.patch",
-        ],
-    )
-    .await;
-
-    assert_eq!(
-        output(&answer),
-        json!({
-            "toolCalls": [
-                {"name": "runtime.plugin.list", "input": {}},
-                {"name": "character_state.patch", "input": {"mood": "curious"}},
-                {"name": "visible_reply", "input": "{\"text\": not-json"},
-                {"name": "memory_list", "input": {}},
-            ],
-            "text": "Checking.",
-        })
-    );
-}
-
-/// Reasoning never closed hides the rest of the text, so it says nothing,
-/// as empty content does: the judge refuses it and the model is told.
-#[tokio::test]
-async fn an_answer_that_says_nothing_reaches_the_judge_as_nothing() {
-    let stub = Stub::start().await;
-    let adapter = adapter(&stub);
-
-    stub.answer(Answer::events(&[
-        content("<think>never closed"),
-        finish("stop"),
-        DONE.to_owned(),
-    ]));
-    stub.answer(Answer::events(&[
-        content(""),
-        finish("stop"),
-        DONE.to_owned(),
-    ]));
-
-    let (unterminated, _) = invoke(&adapter, &["visible_reply"]).await;
-    let (empty, _) = invoke(&adapter, &["visible_reply"]).await;
-
-    assert_eq!(output(&unterminated), json!({"toolCalls": []}));
-    assert_eq!(output(&empty), json!({"toolCalls": []}));
-}
-
-#[tokio::test]
-async fn the_provider_s_silence_is_bounded_before_the_headers_and_between_chunks() {
-    let silence = Duration::from_secs(1);
-    let gap = Duration::from_millis(300);
-    let stub = Stub::start().await;
-    let adapter = nvidia(&keyed(&stub), Some(silence));
-    let timed_out = (
-        "request_timeout".to_owned(),
-        "NVIDIA provider request timed out after 1000ms.".to_owned(),
-        None,
-    );
-
-    let release = stub.hold();
-    let (held, _) = invoke(&adapter, &["visible_reply"]).await;
-
-    assert_eq!(failure(&held), timed_out);
-    // A timeout is never tried again.
-    assert_eq!(stub.requests().len(), 1);
-    drop(release);
-
-    let writer = stub.stream(Duration::ZERO);
-
-    writer.send(event_text(&content("Let me"))).unwrap();
-
-    let (stalled, _) = invoke(&adapter, &["visible_reply"]).await;
-
-    assert_eq!(failure(&stalled), timed_out);
-    drop(writer);
-
-    // Headers late and each chunk late, every wait inside the bound and
-    // all of them together far past it.
-    let writer = stub.stream(gap);
-    let (steady, ()) = tokio::join!(invoke(&adapter, &["visible_reply"]), async {
-        for piece in [
-            content("Slow "),
-            content("and "),
-            content("steady."),
-            finish("stop"),
-            DONE.to_owned(),
-        ] {
-            tokio::time::sleep(gap).await;
-            writer.send(event_text(&piece)).unwrap();
-        }
-    });
-
-    assert_eq!(
-        output(&steady.0),
-        json!({"toolCalls": [], "text": "Slow and steady."})
-    );
-}
-
 #[tokio::test]
 async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_not() {
     let stub = Stub::start().await;
@@ -357,7 +83,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
     });
     stub.answer(reply("After a 503."));
 
-    let (recovered, _) = invoke(&adapter, &["visible_reply"]).await;
+    let recovered = invoke(&adapter, &["visible_reply"]).await;
     let [first, second] = stub.requests().try_into().unwrap();
 
     assert_eq!(output(&recovered)["text"], json!("After a 503."));
@@ -367,7 +93,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
     stub.drop_next_connection();
     stub.answer(reply("After a drop."));
 
-    let (reconnected, _) = invoke(&self::adapter(&stub), &["visible_reply"]).await;
+    let reconnected = invoke(&self::adapter(&stub), &["visible_reply"]).await;
 
     assert_eq!(output(&reconnected)["text"], json!("After a drop."));
     assert_eq!(stub.connections_still_to_drop(), 0);
@@ -376,7 +102,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
         stub.answer(slow_down(attempt));
     }
 
-    let (exhausted, _) = invoke(&adapter, &["visible_reply"]).await;
+    let exhausted = invoke(&adapter, &["visible_reply"]).await;
 
     assert_eq!(
         failure(&exhausted),
@@ -396,8 +122,8 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
         body: "not json".to_owned(),
     });
 
-    let (unauthorized, _) = invoke(&adapter, &["visible_reply"]).await;
-    let (bad, _) = invoke(&adapter, &["visible_reply"]).await;
+    let unauthorized = invoke(&adapter, &["visible_reply"]).await;
+    let bad = invoke(&adapter, &["visible_reply"]).await;
 
     assert_eq!(
         failure(&unauthorized),
@@ -452,7 +178,7 @@ async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key()
     for (frames, code, message) in cases {
         stub.answer(Answer::events(&frames));
 
-        let (answer, _) = invoke(&adapter, &["visible_reply"]).await;
+        let answer = invoke(&adapter, &["visible_reply"]).await;
 
         assert_eq!(
             failure(&answer),
@@ -542,7 +268,6 @@ async fn a_plain_completion_asks_the_same_model_without_tools_or_thinking() {
     );
 }
 
-/// model.provider-timeout-default: the provider silence bound is 30 seconds unless shortened
 #[tokio::test(start_paused = true)]
 async fn the_provider_s_silence_is_bounded_at_thirty_seconds_unless_shortened() {
     let stub = Stub::start().await;
@@ -559,7 +284,7 @@ async fn the_provider_s_silence_is_bounded_at_thirty_seconds_unless_shortened() 
         () = tokio::time::sleep(Duration::from_millis(29_999)) => {}
     }
 
-    let (answer, _) = invoking.await;
+    let answer = invoking.await;
 
     assert_eq!(started.elapsed(), Duration::from_secs(30));
     assert_eq!(

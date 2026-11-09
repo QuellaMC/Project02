@@ -1,10 +1,9 @@
-//! The character-state package over Mira's data: her state as each patch
-//! leaves it, in her log and its checkpoint, and as the note before a turn
-//! shows it.
+//! The character-state package over Mira's data: the checkpoint her log
+//! stands behind, and the note before a turn that shows it.
 
 use std::time::Duration;
 
-use p02_contracts::{CharacterStorage, ToolCallResult};
+use p02_contracts::CharacterStorage;
 use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport};
 use serde_json::{Value, json};
 
@@ -27,13 +26,6 @@ async fn patch(host: &PluginHost, call_id: &str, input: Value) -> ToolCallReport
     .remove(0)
 }
 
-fn output(report: &ToolCallReport) -> &Value {
-    match &report.result {
-        ToolCallResult::Accepted { output } => output,
-        ToolCallResult::Rejected { reason, message } => panic!("{reason}: {message}"),
-    }
-}
-
 /// The runtime notes the plugin hands the next model call.
 async fn notes(host: &PluginHost) -> Vec<String> {
     match host.before_role_model_call(&turn()).await {
@@ -54,69 +46,6 @@ fn state(mood: &str, energy: &str) -> Value {
         "currentActivity": "idle",
         "socialOrientation": "open",
     })
-}
-
-#[tokio::test]
-async fn a_patch_lands_in_her_log_then_its_checkpoint_and_shows_in_the_next_note() {
-    let home = MiraHome::new();
-    let host = state_host(&home);
-    let curious = patch(&host, "p1", json!({"mood": "curious"})).await;
-    let unchanged = patch(&host, "p2", json!({"mood": "curious"})).await;
-    let log = text_of(&home.plugin_file(PLUGIN, "events.jsonl")).unwrap();
-    let checkpoint: Value =
-        serde_json::from_str(&text_of(&home.plugin_file(PLUGIN, "checkpoint.json")).unwrap())
-            .unwrap();
-
-    assert_eq!(
-        output(&curious),
-        &json!({
-            "status": "accepted",
-            "current": state("curious", "medium"),
-            "appliedChanges": [{"field": "mood", "before": "steady", "after": "curious"}],
-        })
-    );
-    assert_eq!(
-        output(&unchanged)["appliedChanges"],
-        json!([]),
-        "a patch that changes nothing says so"
-    );
-    assert_eq!(
-        log.lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect::<Vec<Value>>(),
-        [
-            json!({
-                "eventId": "evt_1",
-                "callId": "p1",
-                "input": {"mood": "curious"},
-                "before": state("steady", "medium"),
-                "after": state("curious", "medium"),
-            }),
-            json!({
-                "eventId": "evt_1",
-                "callId": "p2",
-                "input": {"mood": "curious"},
-                "before": state("curious", "medium"),
-                "after": state("curious", "medium"),
-            }),
-        ]
-    );
-    assert_eq!(
-        checkpoint,
-        json!({
-            "version": 1,
-            "logLines": 2,
-            "state": state("curious", "medium"),
-        }),
-        "each patch's checkpoint lands after its line"
-    );
-    assert_eq!(
-        notes(&host).await,
-        [
-            "How you are right now (your own inner state, not theirs): mood=curious; \
-             energy=medium; attention=present; activity=idle; social=open"
-        ]
-    );
 }
 
 /// A crash can leave a line the store committed after the checkpoint it

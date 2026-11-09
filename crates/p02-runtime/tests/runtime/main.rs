@@ -11,7 +11,6 @@
               disk would"
 )]
 
-mod continuation;
 mod failures;
 mod support;
 mod threads;

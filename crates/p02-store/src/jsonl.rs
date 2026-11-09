@@ -113,7 +113,6 @@ mod tests {
 
     use super::*;
 
-    /// storage.coherent-read: a read that meets a change to its file is tried once more, and one whose two attempts both race is refused `concurrent_write`
     #[test]
     fn a_read_the_file_changes_beneath_is_tried_again_once_then_refused() {
         let directory = tempfile::tempdir().unwrap();

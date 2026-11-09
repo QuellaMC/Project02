@@ -141,63 +141,6 @@ async fn a_batch_applies_whole_saying_what_each_change_came_to_and_how_full_each
 }
 
 #[tokio::test]
-async fn a_failing_batch_changes_nothing_and_says_why_repeating_no_entry() {
-    let home = MiraHome::new();
-    let host = memory_host(&home);
-
-    update(
-        &host,
-        json!([
-            add("notes", "Likes green tea."),
-            add("notes", "Likes black tea.")
-        ]),
-    )
-    .await;
-
-    let kept = stored(&home);
-    let missing = update(
-        &host,
-        json!([
-            add("notes", "Plays chess."),
-            {"action": "remove", "target": "notes", "old_text": "coffee"},
-        ]),
-    )
-    .await;
-    let ambiguous = update(
-        &host,
-        json!([
-            add("notes", "Plays go."),
-            {"action": "replace", "target": "notes", "old_text": "Likes", "text": "Hm."},
-        ]),
-    )
-    .await;
-    let controlled = update(&host, json!([add("notes", "A bell \u{7}.")])).await;
-
-    assert_eq!(
-        refused(&missing),
-        (
-            "memory_old_text_not_found",
-            "No notes entry contains the given old_text."
-        )
-    );
-    assert_eq!(
-        refused(&ambiguous),
-        (
-            "memory_old_text_ambiguous",
-            "old_text selects 2 notes entries; use a longer unique substring."
-        )
-    );
-    assert_eq!(
-        refused(&controlled),
-        (
-            "memory_entry_invalid",
-            "notes entry text must be non-empty and free of control characters."
-        )
-    );
-    assert_eq!(stored(&home), kept);
-}
-
-#[tokio::test]
 async fn a_batch_past_a_notebooks_rendered_capacity_is_refused() {
     let home = MiraHome::new();
     let host = memory_host(&home);

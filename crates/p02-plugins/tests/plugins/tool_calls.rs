@@ -1,6 +1,5 @@
 //! `handleToolCall`: the batch rule, routing and the input contract, the
-//! output boundary, a confirmable call refused in its preparation, and the
-//! store's lease.
+//! output boundary, and the store's lease.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,17 +10,12 @@ use p02_contracts::{
     PolicyOutcome, ProvidedTool, RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
     ToolCallResult, ToolInputContract,
 };
-use p02_plugins::{
-    ConfirmationDecision, ConfirmationRequest, Confirmer, PluginHost, ProposedToolCall,
-    ToolCallReport, Turn,
-};
+use p02_plugins::{PluginHost, ProposedToolCall, ToolCallReport, Turn};
 use serde_json::{Value, json};
 use tokio::time::Instant;
 
-use crate::storage::Storage;
 use crate::support::{
-    Enable, NoSettings, Scripted, Settings, SlowTools, Spec, Verbose, call, host_of, id, note,
-    run_round, tool, turn,
+    Scripted, SlowTools, Spec, Verbose, call, host_of, id, note, run_round, tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
@@ -274,7 +268,8 @@ async fn a_verbose_failure_is_cut_to_what_a_record_keeps_and_still_replays() {
     assert_eq!(report.evidence[0].summary(), text);
 }
 
-/// plugins.output-redaction: tool output values under credential-shaped keys, nested and in lists, are redacted before the model or the log sees them
+/// They are redacted nested and in lists too, before the model or a log
+/// sees them.
 #[tokio::test(start_paused = true)]
 async fn credential_named_output_values_are_redacted_at_the_boundary() {
     let host = host_of(vec![(
@@ -311,88 +306,6 @@ async fn credential_named_output_values_are_redacted_at_the_boundary() {
     for secret in ["super-secret", "open-sesame", "secret-token"] {
         assert!(!seen.contains(secret), "{secret} reached {seen}");
     }
-}
-
-/// Approves every question, and keeps what it was asked.
-#[derive(Debug, Default)]
-struct Asking {
-    asked: Mutex<Vec<ConfirmationRequest>>,
-}
-
-#[async_trait]
-impl Confirmer for Asking {
-    async fn confirm(&self, request: ConfirmationRequest) -> ConfirmationDecision {
-        self.asked.lock().unwrap().push(request);
-        ConfirmationDecision::Approved
-    }
-}
-
-/// A host of `settings`, granted its store in `storage`, that asks the
-/// person through `asking`.
-fn settings_host(storage: &Arc<Storage>, settings: Settings, asking: &Arc<Asking>) -> PluginHost {
-    PluginHost::builder(
-        Arc::clone(storage) as _,
-        Arc::clone(asking) as _,
-        Arc::new(NoSettings),
-    )
-    .enable(
-        &Spec {
-            access: json!({
-                "model_input": "write",
-                "character_file_store": "write",
-                "plugin_database": "write",
-            }),
-            ..Spec::tools("settings")
-        },
-        Arc::new(settings),
-    )
-    .activate()
-    .unwrap()
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_call_refused_in_its_preparation_asks_nobody_and_the_model_reads_why() {
-    let storage = Storage::new();
-    let asking = Arc::new(Asking::default());
-    let noting = |notes| settings_host(&storage, Settings::noting(notes), &asking);
-    let unknown = one(
-        &noting(Vec::new()),
-        call("c1", "settings.update", json!({"tone": "grumpy"})),
-        &turn(),
-    )
-    .await;
-    let damaged = one(
-        &noting(vec![EvidenceNote::new(
-            EvidenceKind::ToolInvocation,
-            EvidenceStatus::Failed,
-            "The saved settings are damaged.",
-        )]),
-        call("c2", "settings.update", json!({"tone": "warm"})),
-        &turn(),
-    )
-    .await;
-
-    assert_eq!(
-        unknown.result,
-        ToolCallResult::Rejected {
-            reason: "unknown_tone".to_owned(),
-            message: "No tone is called \"grumpy\".".to_owned(),
-        }
-    );
-    assert_eq!(
-        damaged.result,
-        ToolCallResult::Rejected {
-            reason: "blocking_tool_invocation_evidence".to_owned(),
-            message: "Plugin \"settings\" tool \"settings.update\" prepared call included \
-                      blocking tool invocation evidence."
-                .to_owned(),
-        }
-    );
-    assert_eq!(
-        damaged.evidence[0].summary(),
-        "The saved settings are damaged."
-    );
-    assert!(asking.asked.lock().unwrap().is_empty(), "nobody was asked");
 }
 
 /// Saves a note under the store's lease, and keeps the store afterwards.

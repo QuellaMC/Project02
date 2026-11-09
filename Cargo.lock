@@ -2989,7 +2989,6 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "axum",
- "futures-util",
  "jiff",
  "p02-characters",
  "p02-contracts",

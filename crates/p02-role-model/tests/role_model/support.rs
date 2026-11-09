@@ -8,7 +8,7 @@ use p02_contracts::{
 };
 use p02_core::{CharacterProfile, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
-use serde_json::{Value, json};
+use serde_json::json;
 
 pub(crate) fn id(text: &str) -> Identifier {
     Identifier::new(text).unwrap()
@@ -133,10 +133,6 @@ pub(crate) fn call_piece(index: u64, first: Option<(&str, &str)>, arguments: &st
 
 pub(crate) fn finish(reason: &str) -> String {
     json!({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]}).to_string()
-}
-
-pub(crate) fn usage(usage: &Value) -> String {
-    json!({"choices": [], "usage": usage}).to_string()
 }
 
 pub(crate) const DONE: &str = "[DONE]";

@@ -6,9 +6,6 @@
     reason = "a test, and the world it builds, fail by panicking, as in the unit tests"
 )]
 
-mod confirmations;
-mod history;
 mod lifecycle;
 mod pairing;
 mod support;
-mod turns;

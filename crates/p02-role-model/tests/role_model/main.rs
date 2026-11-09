@@ -8,4 +8,3 @@ mod nvidia;
 mod rounds;
 mod stub;
 mod support;
-mod test_provider;

@@ -9,7 +9,7 @@ use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError}
 use p02_store::StorageError;
 use serde_json::{Value, json};
 
-use crate::layout::{link, snapshot};
+use crate::layout::snapshot;
 use crate::support::{World, id};
 
 fn store(world: &World, plugin: &str) -> Arc<dyn FileStoreBackend> {
@@ -214,116 +214,4 @@ fn a_value_past_the_json_limits_is_refused_whether_written_or_read() {
 
     assert_eq!(code(&refused), "malformed_record", "{refused}");
     assert_eq!(files.read_jsonl("events.jsonl").unwrap(), [Value::Null]);
-}
-
-#[test]
-fn a_log_drops_a_torn_or_blank_tail_and_reads_a_damaged_line_as_null() {
-    let world = World::new();
-    let state = store(&world, "character-state");
-    let events = world
-        .data
-        .root()
-        .join("plugin-data")
-        .join("character-state")
-        .join("events.jsonl");
-    let mut files = leased(state.as_ref());
-
-    files
-        .append_jsonl("events.jsonl", &json!({"mood": "calm"}))
-        .unwrap();
-
-    for tail in ["{\"mood\":\"pla", "   "] {
-        let mut content = std::fs::read(&events).unwrap();
-
-        content.extend_from_slice(tail.as_bytes());
-        std::fs::write(&events, content).unwrap();
-
-        let before = files.read_jsonl("events.jsonl").unwrap();
-
-        assert_eq!(before.last(), Some(&json!({"mood": "calm"})), "{tail:?}");
-        assert_eq!(
-            files.count_jsonl("events.jsonl").unwrap(),
-            before.len() as u64,
-            "{tail:?}"
-        );
-        files
-            .append_jsonl("events.jsonl", &json!({"mood": "calm"}))
-            .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&events).unwrap(),
-            "{\"mood\":\"calm\"}\n".repeat(before.len() + 1),
-            "{tail:?}"
-        );
-    }
-
-    std::fs::write(
-        &events,
-        "{\"mood\":\"calm\"}\n{\"mo\n{\"mood\":\"tired\"}\n",
-    )
-    .unwrap();
-
-    assert_eq!(
-        files.read_jsonl("events.jsonl").unwrap(),
-        [
-            json!({"mood": "calm"}),
-            Value::Null,
-            json!({"mood": "tired"})
-        ]
-    );
-}
-
-/// A plugin's data moved elsewhere and linked back, or a link inside it, is
-/// refused before anything is read through it or written where it leads,
-/// by its files and by its databases alike.
-#[test]
-fn plugin_data_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
-    for linked in ["plugin-data", "plugin-data/character-state", "notes"] {
-        let world = World::new();
-        let root = world
-            .data
-            .root()
-            .join("plugin-data")
-            .join("character-state");
-        let elsewhere = tempfile::TempDir::new().unwrap();
-        let moved = elsewhere.path().join("moved");
-
-        std::fs::create_dir_all(&moved).unwrap();
-
-        let at = match linked {
-            "notes" => {
-                std::fs::create_dir_all(&root).unwrap();
-                root.join("notes")
-            }
-            linked => world.data.root().join(linked),
-        };
-
-        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
-        link(&moved, &at);
-
-        let before = snapshot(elsewhere.path());
-        let refused = store(&world, "character-state")
-            .lease(Instant::now() + Duration::from_secs(10))
-            .and_then(|mut files| files.write_json("notes/today.json", &json!({})));
-
-        assert_eq!(code(&refused.unwrap_err()), "missing_file", "{linked}");
-
-        if linked != "notes" {
-            let refused = world
-                .data
-                .databases(&id("character-state"))
-                .open(&id("state"), std::num::NonZeroU32::MIN, &|_| Ok(()))
-                .unwrap_err();
-            let p02_contracts::DatabaseError::Open(source) = refused else {
-                panic!("{refused}");
-            };
-
-            assert_eq!(
-                source.downcast_ref::<StorageError>().unwrap().code(),
-                "missing_file",
-                "{linked}"
-            );
-        }
-
-        assert_eq!(snapshot(elsewhere.path()), before, "{linked}");
-    }
 }

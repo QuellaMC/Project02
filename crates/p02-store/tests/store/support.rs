@@ -72,10 +72,6 @@ impl World {
         (directory, home)
     }
 
-    pub(crate) fn root(&self) -> &Path {
-        self.home.root()
-    }
-
     /// Segment `segment` of Mira's conversation with Sam.
     pub(crate) fn segment(&self, segment: u64) -> SessionId {
         SessionId::new(

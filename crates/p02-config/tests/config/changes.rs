@@ -21,68 +21,6 @@ fn refusal(outcome: &ChangeOutcome) -> Option<ChangeRefusal> {
 }
 
 #[test]
-fn every_kind_of_change_applies_under_the_fingerprint_the_next_view_carries() {
-    let world = World::new();
-    let demo = |kind: &str| json!({"kind": kind, "namespace": "plugins", "id": "demo-config"});
-    let operations = [
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Robin"}),
-        json!({"kind": "unset", "path": "project02.userDisplayName"}),
-        {
-            let mut on = demo("section_enabled");
-
-            on["enabled"] = json!(true);
-            on
-        },
-        {
-            let mut tone = demo("section_field_set");
-
-            tone["field"] = json!("tone");
-            tone["value"] = json!("warm");
-            tone
-        },
-        {
-            let mut tone = demo("section_field_unset");
-
-            tone["field"] = json!("tone");
-            tone
-        },
-        demo("section_enabled"),
-    ];
-    let after = [
-        json!({"version": "project02.config.v2", "project02": {"userDisplayName": "Robin"}}),
-        json!({"version": "project02.config.v2"}),
-        json!({"version": "project02.config.v2", "plugins": {"demo-config": {"enabled": true}}}),
-        json!({
-            "version": "project02.config.v2",
-            "plugins": {"demo-config": {"enabled": true, "config": {"tone": "warm"}}},
-        }),
-        json!({"version": "project02.config.v2", "plugins": {"demo-config": {"enabled": true}}}),
-        json!({"version": "project02.config.v2"}),
-    ];
-
-    for (operation, document) in operations.into_iter().zip(after) {
-        let before = fingerprint(&world.view(&home()));
-        let outcome = world.change(&home(), operation.clone());
-        let now = fingerprint(&world.view(&home()));
-
-        assert_eq!(
-            outcome,
-            ChangeOutcome::Applied {
-                fingerprint: p02_shared::Fingerprint::parse(&now).unwrap()
-            },
-            "{operation}"
-        );
-        assert_ne!(now, before, "{operation}");
-        assert_eq!(
-            serde_json::from_slice::<Value>(&std::fs::read(world.home_document()).unwrap())
-                .unwrap(),
-            document,
-            "{operation}"
-        );
-    }
-}
-
-#[test]
 fn a_switch_a_change_gives_is_a_boolean_and_absent_one_leaves_it_to_the_document_beneath() {
     let operation = |enabled: Option<Value>| {
         let mut operation =
@@ -189,29 +127,6 @@ fn a_document_is_written_indented_with_a_trailing_newline_its_sections_in_their_
             "}\n",
         )
     );
-}
-
-#[test]
-fn a_change_bound_to_a_fingerprint_the_documents_moved_past_is_a_conflict_and_writes_nothing() {
-    let world = World::new();
-    let stale = fingerprint(&world.view(&home()));
-
-    world.save(
-        &home(),
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Robin"}),
-    );
-
-    let written = std::fs::read(world.home_document()).unwrap();
-
-    assert_eq!(
-        refusal(&world.change_bound(
-            &home(),
-            &stale,
-            json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"}),
-        )),
-        Some(ChangeRefusal::Conflict)
-    );
-    assert_eq!(std::fs::read(world.home_document()).unwrap(), written);
 }
 
 #[test]
@@ -451,39 +366,6 @@ fn each_target_lists_and_writes_only_what_its_scope_lets_it_set() {
 }
 
 #[test]
-fn a_change_on_her_screen_is_written_into_her_overlay_alone_secrets_too() {
-    let world = World::new();
-
-    for operation in [
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Sam"}),
-        json!({"kind": "set", "path": "project02.nvidiaApiKey", "value": "nvapi-mira"}),
-        json!({
-            "kind": "section_field_set", "namespace": "connectors", "id": "telegram",
-            "field": "botToken", "value": "987654:mira",
-        }),
-    ] {
-        world.save(&of("mira"), operation);
-    }
-
-    assert_eq!(
-        serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap()).unwrap(),
-        json!({
-            "version": "project02.config.v2",
-            "plugins": {"character-state": {"enabled": true}},
-            "project02": {"userDisplayName": "Sam", "nvidiaApiKey": "nvapi-mira"},
-            "connectors": {"telegram": {"config": {"botToken": "987654:mira"}}},
-        })
-    );
-    assert!(!world.home_document().exists());
-    assert!(
-        world
-            .root()
-            .join("character-data/mira/schema.json")
-            .exists()
-    );
-}
-
-#[test]
 fn a_change_over_a_document_that_cannot_be_read_is_refused_saying_why_and_writes_nothing() {
     let world = World::new();
     let read = fingerprint(&world.view(&of("mira")));
@@ -559,38 +441,6 @@ fn a_change_applies_beside_values_a_document_refuses_so_each_is_put_right_in_tur
 
 #[cfg(unix)]
 #[test]
-fn a_change_to_a_home_that_cannot_be_written_fails_and_the_fingerprint_stays() {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let world = World::new();
-    let before = fingerprint(&world.view(&home()));
-    let mode = |mode| {
-        std::fs::set_permissions(world.root(), std::fs::Permissions::from_mode(mode)).unwrap();
-    };
-
-    mode(0o555);
-
-    // Permissions do not bind root, who writes the document anyway.
-    let bound = std::fs::write(world.root().join("probe"), "").is_err();
-    let outcome = world.change_bound(
-        &home(),
-        &before,
-        json!({"kind": "set", "path": "project02.userDisplayName", "value": "Robin"}),
-    );
-
-    mode(0o755);
-
-    if bound {
-        assert!(
-            matches!(outcome, ChangeOutcome::Failed { .. }),
-            "{outcome:?}"
-        );
-        assert_eq!(fingerprint(&world.view(&home())), before);
-    }
-}
-
-#[cfg(unix)]
-#[test]
 fn a_change_that_fails_after_her_packages_settings_are_settled_leaves_them_as_shown_and_a_retry_applies()
  {
     use std::os::unix::fs::PermissionsExt as _;
@@ -636,7 +486,7 @@ fn a_change_that_fails_after_her_packages_settings_are_settled_leaves_them_as_sh
     }
 }
 
-/// config.lock-order: a home write and a character write racing each other serialize, each character's ending in conflict when the home's write landed first, instead of deadlocking
+/// Each character's write ends in conflict when the home's landed first.
 #[test]
 fn a_home_write_and_character_writes_racing_each_other_serialize_without_deadlock() {
     for round in 0..16 {

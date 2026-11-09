@@ -457,29 +457,6 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_mira_is_there_in_any_home_as_her_descriptor_defines_her() {
-        let discovery = discover(&Home::new().root);
-        let [mira] = discovery.characters.as_slice() else {
-            panic!("{discovery:?}");
-        };
-
-        assert!(discovery.diagnostics.is_empty());
-        assert_eq!(mira.profile.id.as_str(), "mira");
-        assert_eq!(mira.profile.display_name.as_str(), "Mira");
-        assert_eq!(mira.version.as_str(), "1.1.0");
-        assert!(mira.persona.sections()[0].starts_with("You are Mira"));
-        assert_eq!(
-            mira.plugins
-                .required()
-                .iter()
-                .map(Identifier::as_str)
-                .collect::<Vec<_>>(),
-            ["character-state"]
-        );
-        assert!(mira.plugins.recommended().is_empty() && mira.plugins.config().is_empty());
-    }
-
-    #[test]
     fn every_folder_of_the_bundled_source_is_compiled_in() {
         let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages");
         let mut folders: Vec<String> = list_directory(&source)

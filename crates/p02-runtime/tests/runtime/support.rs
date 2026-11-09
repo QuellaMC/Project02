@@ -11,10 +11,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, ChatMessage, ConversationTurn, HookContext, Invocation, Manifest,
-    ModelOutput, PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta,
-    RoleModelAdapter, RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall,
-    ToolCallOutcome, ToolInputContract, WrittenCall,
+    BeforeRoleModelCallOutput, ChatMessage, HookContext, Invocation, Manifest, ModelOutput,
+    PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta, RoleModelAdapter,
+    RuntimePlugin, ToolCall, ToolCallOutcome, ToolInputContract, WrittenCall,
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
@@ -61,14 +60,6 @@ pub(crate) fn reply(replies: &[&str]) -> ModelOutput {
             .iter()
             .map(|text| written("visible_reply", json!({"text": text})))
             .collect(),
-        text: None,
-    }
-}
-
-/// A model answer that calls `tool` with `input`.
-pub(crate) fn calling(tool: &str, input: &Value) -> ModelOutput {
-    ModelOutput {
-        tool_calls: vec![written(tool, input.clone())],
         text: None,
     }
 }
@@ -173,11 +164,11 @@ impl World {
 /// The name the person goes by in the thread's tests.
 static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unwrap());
 
-/// What the thread's tests answer a line with: settings never change it.
+/// What the thread's tests answer a line with: settings never change it,
+/// and its turns never outgrow its window.
 pub(crate) struct Fixed<'c> {
     pub(crate) model: &'c Model,
     pub(crate) host: &'c PluginHost,
-    pub(crate) window: NonZeroU64,
 }
 
 #[async_trait]
@@ -195,7 +186,7 @@ impl Mind for Fixed<'_> {
     }
 
     fn context_window(&self) -> NonZeroU64 {
-        self.window
+        ROOMY
     }
 
     async fn refresh(&mut self) -> Result<bool, String> {
@@ -211,12 +202,10 @@ pub(crate) struct Chat {
     pub(crate) model: Model,
     pub(crate) host: PluginHost,
     pub(crate) heard: Heard,
-    pub(crate) window: NonZeroU64,
 }
 
 impl Chat {
-    /// A fresh thread, its plugins `plugins`, in a window the turns never
-    /// outgrow.
+    /// A fresh thread, its plugins `plugins`.
     pub(crate) fn new(plugins: &[Arc<Toy>]) -> Self {
         let world = World::new();
         let conversation = world.open();
@@ -228,7 +217,6 @@ impl Chat {
             model: Model::default(),
             host,
             heard: Heard::default(),
-            window: ROOMY,
         }
     }
 
@@ -259,7 +247,6 @@ impl Chat {
                 &mut Fixed {
                     model: &self.model,
                     host: &self.host,
-                    window: self.window,
                 },
                 &|progress| {
                     hearing(&progress);
@@ -348,30 +335,17 @@ impl Round {
     }
 }
 
-/// What a model round was asked: its messages, and the turns they replay.
-#[derive(Debug)]
-pub(crate) struct Asked {
-    pub(crate) messages: Vec<ChatMessage>,
-    pub(crate) history: Vec<ConversationTurn>,
-}
-
-/// A model that answers each round, and each plain completion, as scripted,
-/// and keeps what it was asked. A round it has no answer for fails.
+/// A model that answers each round as scripted, and keeps the messages
+/// each round was given. A round it has no answer for fails.
 #[derive(Default)]
 pub(crate) struct Model {
     rounds: Mutex<VecDeque<Round>>,
-    completions: Mutex<VecDeque<TextCompletion>>,
-    pub(crate) asked: Mutex<Vec<Asked>>,
-    pub(crate) summarized: Mutex<Vec<TextCompletionRequest>>,
+    pub(crate) asked: Mutex<Vec<Vec<ChatMessage>>>,
 }
 
 impl Model {
     pub(crate) fn script(&self, rounds: impl IntoIterator<Item = Round>) {
         self.rounds.lock().unwrap().extend(rounds);
-    }
-
-    pub(crate) fn complete(&self, completion: TextCompletion) {
-        self.completions.lock().unwrap().push_back(completion);
     }
 }
 
@@ -387,10 +361,10 @@ impl fmt::Debug for Model {
 #[async_trait]
 impl RoleModelAdapter for Model {
     async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
-        self.asked.lock().unwrap().push(Asked {
-            messages: invocation.messages().to_vec(),
-            history: invocation.history().to_vec(),
-        });
+        self.asked
+            .lock()
+            .unwrap()
+            .push(invocation.messages().to_vec());
 
         let Some(round) = self.rounds.lock().unwrap().pop_front() else {
             return Round::fails("No round was scripted.").answer.unwrap();
@@ -405,15 +379,6 @@ impl RoleModelAdapter for Model {
         };
 
         answer
-    }
-
-    async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {
-        self.summarized.lock().unwrap().push(request.clone());
-        self.completions
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or(TextCompletion::Unsupported)
     }
 }
 

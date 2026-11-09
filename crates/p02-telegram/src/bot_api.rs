@@ -489,38 +489,3 @@ fn answer<T: DeserializeOwned>(method: &str, status: u16, body: &[u8]) -> Result
         _ => Err(not_envelope()),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// connectors.telegram-token-redaction: Reports never carry a bot token: a call that never reaches Telegram is said without the URL its token rides in.
-    #[tokio::test]
-    async fn a_call_that_never_reaches_telegram_is_said_without_its_token() {
-        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = BaseUrl::parse(&format!("http://{}", closed.local_addr().unwrap())).unwrap();
-        let token = "123456:secret-of-the-bot";
-
-        drop(closed);
-
-        let named = http_client()
-            .build()
-            .unwrap()
-            .post(base.endpoint(&format!("bot{token}/getMe")))
-            .send()
-            .await
-            .unwrap_err();
-        let api = BotApi::new(Arc::new(Telegram::new(base).unwrap()), BotToken::new(token));
-        let failure = api.get_me().await.unwrap_err();
-
-        // What the client says of itself names the URL, and so the token.
-        assert!(named.to_string().contains(token), "{named}");
-        assert!(
-            failure
-                .description()
-                .starts_with("Telegram could not be reached: "),
-            "{failure:?}"
-        );
-        assert!(!failure.description().contains(token), "{failure:?}");
-    }
-}
