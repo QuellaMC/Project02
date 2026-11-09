@@ -28,9 +28,6 @@ reaches the disk only through the SQLite connection its caller opens.
 - **Recall** ranks a person and character's memories by cosine similarity
   to the query and keeps those at least 0.1 alike; the score is the
   cosine.
-- **Readiness.** The engine says whether the model and the embedder each
-  last answered something usable since it opened, and how many memories
-  wait for a vector.
 
 ## Live check
 

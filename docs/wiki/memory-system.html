@@ -243,8 +243,9 @@
             Platform and server speak REST; the embedded engine runs in-process
             against any OpenAI-compatible endpoint and keeps its files under the
             plugin's data directory. Capture lets the backend extract.
-            <code>mem0.add</code> submits the text the model supplies, bounded
-            like every provider memory item; a self-hosted server or the
+            <code>mem0.add</code> submits the text the model supplies, which
+            recall bounds like every provider memory item; a self-hosted
+            server or the
             embedded engine answers with the stored row, while the hosted
             platform answers with a receipt and stores asynchronously, which the
             tool reports as queued rather than saved.

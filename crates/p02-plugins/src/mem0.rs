@@ -27,18 +27,12 @@ use p02_shared::Identifier;
 use serde_json::{Value, json};
 
 use self::backend::{BackendError, Failure, Found, Operation, RECALL_LIMIT, Write, Written};
-use self::captures::{Captures, Queued};
+use self::captures::Captures;
 use self::settings::Setup;
 use crate::text::excerpt;
 
-/// How much of a memory's text the model reads, and an added memory keeps.
+/// How much of a memory's text the model reads.
 const MEMORY_CHARS: usize = 600;
-
-/// How much of a memory's id a search result repeats.
-const ID_CHARS: usize = 120;
-
-/// How much of a summary the records keep.
-const SUMMARY_CHARS: usize = 160;
 
 static MEMORY_LABEL: LazyLock<RedactionLabel> =
     LazyLock::new(|| RedactionLabel::new("memory").expect("memory is a redaction label"));
@@ -89,10 +83,10 @@ impl RuntimePlugin for Mem0Plugin {
         let items: Vec<ContextItem> = found.iter().take(RECALL_LIMIT).map(recalled).collect();
 
         Ok(BeforeRoleModelCallOutput {
-            evidence: vec![note(
+            evidence: vec![EvidenceNote::new(
                 EvidenceKind::BeforeRoleModelCall,
                 EvidenceStatus::Accepted,
-                &format!("Provided {} memory item(s).", items.len()),
+                format!("Provided {} memory item(s).", items.len()),
             )],
             context_items: items,
             curated_sections: Vec::new(),
@@ -108,7 +102,8 @@ impl RuntimePlugin for Mem0Plugin {
         let report = |status, summary: &str, source| HookReport {
             status: HookStatus::Completed,
             evidence: vec![
-                note(EvidenceKind::AfterTurnCommitted, status, summary).with_source(source),
+                EvidenceNote::new(EvidenceKind::AfterTurnCommitted, status, summary)
+                    .with_source(source),
             ],
         };
         let setup = match &self.setup {
@@ -142,36 +137,30 @@ impl RuntimePlugin for Mem0Plugin {
         if let Err(error) = setup.backend.open(context.plugin_database()).await {
             let why = error.to_string();
 
-            self.captures.lose(&why);
+            self.captures.lose(why.clone());
             return Ok(report(EvidenceStatus::Degraded, &why, this_turn(context)));
         }
 
+        let summary = match self.captures.failure() {
+            Some(why) => {
+                format!(
+                    "Queued turn for memory extraction; the last capture did not complete: {why}"
+                )
+            }
+            None => "Queued turn for memory extraction.".to_owned(),
+        };
         let scope = setup.scope(context);
-        let job =
-            Box::pin(async move { setup.backend.write(&scope, Write::Turn(turn), None).await });
-        let queue = SourceReference::new(SourceKind::ExternalContract, "mem0.capture_queue")
-            .with_title("Queued memory capture");
 
-        Ok(match self.captures.queue(job) {
-            Queued::Accepted { earlier_losses: 0 } => report(
-                EvidenceStatus::Accepted,
-                "Queued turn for memory extraction.",
-                queue,
-            ),
-            Queued::Accepted { earlier_losses } => report(
-                EvidenceStatus::Accepted,
-                &format!(
-                    "Queued turn for memory extraction. {earlier_losses} earlier capture(s) did \
-                     not complete."
-                ),
-                queue,
-            ),
-            Queued::Refused => report(
-                EvidenceStatus::Degraded,
-                "Memory extraction is behind; this turn was not queued for capture.",
-                this_turn(context),
-            ),
-        })
+        self.captures.queue(Box::pin(async move {
+            setup.backend.write(&scope, Write::Turn(turn), None).await
+        }));
+
+        Ok(report(
+            EvidenceStatus::Accepted,
+            &summary,
+            SourceReference::new(SourceKind::ExternalContract, "mem0.capture_queue")
+                .with_title("Queued memory capture"),
+        ))
     }
 
     async fn handle_tool_call(
@@ -194,11 +183,11 @@ impl RuntimePlugin for Mem0Plugin {
                     .await
                     .map_err(|error| failed(&error))?;
 
-                Ok(searched(&found, context))
+                Ok(searched(&found))
             }
             tools::ADD => {
                 let write = Write::Fact {
-                    text: excerpt(text_input(call, "text")?, MEMORY_CHARS).into_owned(),
+                    text: text_input(call, "text")?.to_owned(),
                     sources: vec![context.turn().event.event_id().to_string()],
                 };
                 let written = tokio::select! {
@@ -212,7 +201,7 @@ impl RuntimePlugin for Mem0Plugin {
                 }
                 .map_err(|error| failed(&error))?;
 
-                added(written, context)
+                Ok(added(written, context))
             }
             other => Err(PluginError::new(format!(
                 "Memory provider does not handle \"{other}\"."
@@ -221,15 +210,13 @@ impl RuntimePlugin for Mem0Plugin {
     }
 
     /// Drains the queued captures until the host cancels the hook at its
-    /// deadline, then abandons the rest. Nothing runs after this, and the
-    /// next launch counts from nothing, so a capture lost to now is
-    /// recorded here alone.
+    /// deadline, then abandons the rest, and records why the last capture
+    /// did not complete, if it did not.
     async fn on_shutdown(&self, context: &HookContext) -> Result<HookReport, PluginError> {
-        let outcomes = self.captures.drain(context.cancellation()).await;
-        let (status, summary) = match &outcomes.loss {
-            Some(loss) => (
+        let (status, summary) = match self.captures.drain(context.cancellation()).await {
+            Some(why) => (
                 EvidenceStatus::Degraded,
-                format!("Closed memory provider. {loss}"),
+                format!("Closed memory provider. {why}"),
             ),
             None => (
                 EvidenceStatus::Accepted,
@@ -239,7 +226,7 @@ impl RuntimePlugin for Mem0Plugin {
 
         Ok(HookReport {
             status: HookStatus::Completed,
-            evidence: vec![note(EvidenceKind::Shutdown, status, &summary)],
+            evidence: vec![EvidenceNote::new(EvidenceKind::Shutdown, status, summary)],
         })
     }
 }
@@ -275,13 +262,13 @@ fn recalled(found: &Found) -> ContextItem {
     }
 }
 
-fn searched(found: &[Found], context: &HookContext) -> ToolCallOutcome {
+fn searched(found: &[Found]) -> ToolCallOutcome {
     let found = &found[..found.len().min(RECALL_LIMIT)];
     let items: Vec<Value> = found
         .iter()
         .map(|found| {
             let mut item = json!({
-                "id": excerpt(&found.id, ID_CHARS),
+                "id": found.id,
                 "text": excerpt(&found.text, MEMORY_CHARS),
                 "sourceReferences": [memory_source(&found.id)],
             });
@@ -293,84 +280,64 @@ fn searched(found: &[Found], context: &HookContext) -> ToolCallOutcome {
             item
         })
         .collect();
-    let sources = if found.is_empty() {
-        vec![
-            SourceReference::new(
-                SourceKind::Runtime,
-                format!(
-                    "{}:{}.no_results",
-                    context.turn().event.event_id(),
-                    tools::SEARCH
-                ),
-            )
-            .with_title("Memory search completed with no results"),
-        ]
-    } else {
-        found.iter().map(|found| memory_source(&found.id)).collect()
-    };
-    let summary = format!("Returned {} memory search result(s).", items.len());
 
     ToolCallOutcome::Accepted {
-        output: json!({"items": items}),
         evidence: vec![sourced(
-            note(
+            EvidenceNote::new(
                 EvidenceKind::ToolInvocation,
                 EvidenceStatus::Accepted,
-                &summary,
+                format!("Returned {} memory search result(s).", items.len()),
             ),
-            sources,
+            found.iter().map(|found| memory_source(&found.id)),
         )],
+        output: json!({"items": items}),
     }
 }
 
-/// An add that stored something, or that the platform queued; an add that
-/// stored nothing failed.
-fn added(written: Written, context: &HookContext) -> Result<ToolCallOutcome, PluginError> {
+/// An add as the model is told it: the memory it stored, none when the
+/// person and character keep that text already, or the receipt of a write
+/// the platform stores later, which is never called stored.
+fn added(written: Written, context: &HookContext) -> ToolCallOutcome {
     let (output, summary, kept) = match written {
-        Written::Stored(stored) => {
-            let Some(first) = stored.first() else {
-                return Err(failed(&BackendError::new(
-                    Operation::Add,
-                    Failure::NothingStored,
-                )));
-            };
-            let kept: Vec<SourceReference> = stored
-                .iter()
-                .take(SourceReference::MAX_PER_RECORD)
-                .map(|id| memory_source(id))
-                .collect();
+        Written::Stored(stored) => match stored.into_iter().next() {
+            Some(id) => {
+                let kept = memory_source(&id);
 
-            (
-                json!({"id": first, "sourceReferences": kept}),
-                "Added one memory item.",
-                kept,
-            )
-        }
+                (
+                    json!({"id": id, "sourceReferences": [kept]}),
+                    "Added one memory item.",
+                    Some(kept),
+                )
+            }
+            None => (
+                json!({"alreadyKept": true}),
+                "The memory was kept already.",
+                None,
+            ),
+        },
         Written::Queued(receipt) => {
-            let kept = vec![
-                SourceReference::new(SourceKind::ExternalContract, receipt)
-                    .with_title("Queued mem0 memory write"),
-            ];
+            let kept = SourceReference::new(SourceKind::ExternalContract, receipt)
+                .with_title("Queued mem0 memory write");
 
             (
-                json!({"queued": true, "sourceReferences": kept}),
+                json!({"queued": true, "sourceReferences": [kept]}),
                 "Queued one memory item for the backend to store.",
-                kept,
+                Some(kept),
             )
         }
     };
 
-    Ok(ToolCallOutcome::Accepted {
+    ToolCallOutcome::Accepted {
         output,
         evidence: vec![sourced(
-            note(
+            EvidenceNote::new(
                 EvidenceKind::ToolInvocation,
                 EvidenceStatus::Accepted,
                 summary,
             ),
-            std::iter::once(this_turn(context)).chain(kept).collect(),
+            std::iter::once(this_turn(context)).chain(kept),
         )],
-    })
+    }
 }
 
 /// The turn as the backend is to read it: the person's line and the
@@ -429,17 +396,8 @@ fn this_turn(context: &HookContext) -> SourceReference {
     .with_title("Current conversation turn")
 }
 
-/// A record of the plugin's, its summary cut as every memory record's is.
-fn note(kind: EvidenceKind, status: EvidenceStatus, summary: &str) -> EvidenceNote {
-    EvidenceNote::new(kind, status, excerpt(summary, SUMMARY_CHARS))
-}
-
-/// `note` with the sources a record has room for, the leading ones kept.
-fn sourced(note: EvidenceNote, sources: Vec<SourceReference>) -> EvidenceNote {
-    sources
-        .into_iter()
-        .take(SourceReference::MAX_PER_RECORD)
-        .fold(note, EvidenceNote::with_source)
+fn sourced(note: EvidenceNote, sources: impl Iterator<Item = SourceReference>) -> EvidenceNote {
+    sources.fold(note, EvidenceNote::with_source)
 }
 
 fn turn_text(context: &HookContext) -> Result<&TurnText, PluginError> {

@@ -1,5 +1,6 @@
 //! The seam every Mem0 deployment is reached through: search and write,
-//! over the hosted platform, a self-hosted server, or the embedded engine. A failure is told in one fixed sentence per kind, so neither a
+//! over the hosted platform, a self-hosted server, or the embedded engine.
+//! A failure is told in one fixed sentence per kind, so neither a
 //! credential nor an address ever leaves through it.
 
 use std::error::Error;
@@ -59,7 +60,6 @@ pub(super) enum Failure {
     Http(u16),
     Unreachable,
     Unreadable,
-    NothingStored,
     /// The caller stopped waiting: the write may have landed all the same.
     Abandoned,
     /// The embedded engine's own account of what failed.
@@ -139,10 +139,6 @@ impl fmt::Display for BackendError {
             Failure::Unreadable => write!(
                 formatter,
                 "mem0 {operation} failed: backend returned an unreadable response body."
-            ),
-            Failure::NothingStored => write!(
-                formatter,
-                "mem0 {operation} failed: the backend created no memory for it."
             ),
             Failure::Abandoned => write!(
                 formatter,

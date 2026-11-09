@@ -66,7 +66,6 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
                 session_id: entry.session_id().clone(),
                 created_at: entry.created_at().clone(),
             }],
-            damaged_entry_count: 0,
         }
     );
 
@@ -84,7 +83,6 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
 
         batches += 1;
         assert!(!batch.reset);
-        assert_eq!(batch.damaged_record_count, 0);
         read.extend(batch.messages);
 
         if cursor.as_ref() == Some(&batch.next_cursor) {
@@ -134,10 +132,10 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
 }
 
 /// A session damaged by a line that is no record and a round torn in two:
-/// each is skipped and counted as damage, and every message around them is
-/// read; a catalog row that is no session row is counted as a damaged entry.
+/// each is skipped, and every message around them is read; a catalog row
+/// that is no session row is passed over.
 #[test]
-fn damage_is_counted_and_read_past() {
+fn damage_is_read_past() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
@@ -185,10 +183,7 @@ fn damage_is_counted_and_read_past() {
         .unwrap();
     let listing = feed.list_sessions().unwrap();
 
-    assert_eq!(
-        (listing.sessions.len(), listing.damaged_entry_count),
-        (2, 1)
-    );
+    assert_eq!(listing.sessions.len(), 2);
     assert_eq!(
         texts(&older),
         [
@@ -200,13 +195,12 @@ fn damage_is_counted_and_read_past() {
             "Fine."
         ]
     );
-    assert_eq!((older.damaged_record_count, older.reset), (2, false));
+    assert!(!older.reset);
     assert_eq!(
         current,
         MessageBatch {
             messages: Vec::new(),
             next_cursor: HistoryCursor::new("0"),
-            damaged_record_count: 0,
             reset: false,
         }
     );

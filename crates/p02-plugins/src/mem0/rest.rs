@@ -1,12 +1,12 @@
-//! The hosted platform and a self-hosted server: the same three requests,
+//! The hosted platform and a self-hosted server: the same two requests,
 //! each in its own dialect. An answer is read only as its own backend
-//! shapes it: anything else is unreadable, never an empty result.
+//! shapes it, anything else unreadable, never an empty result; a row of
+//! it that names no memory is passed over.
 
 use p02_memory::{Message, Role, Scope};
 use p02_shared::{BaseUrl, credential_header, http_client};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderName, HeaderValue};
-use reqwest::{Method, Response};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use super::backend::{BackendError, Failure, Found, Operation, RECALL_LIMIT, Write, Written};
 
@@ -92,108 +92,73 @@ impl Rest {
             ),
         };
         let answer = self.document(Operation::Search, path, &body).await?;
-        let unreadable = || BackendError::new(Operation::Search, Failure::Unreadable);
 
-        rows(&answer)
-            .ok_or_else(unreadable)?
+        Ok(rows(&answer)
+            .ok_or_else(|| BackendError::new(Operation::Search, Failure::Unreadable))?
             .iter()
-            .map(|row| found(row).ok_or_else(unreadable))
-            .collect()
+            .filter_map(found)
+            .collect())
     }
 
     pub(super) async fn write(&self, scope: &Scope, write: Write) -> Result<Written, BackendError> {
-        let (messages, session, infer, sources) = match write {
-            Write::Turn(turn) => (turn.messages, Some(turn.session), true, turn.sources),
-            Write::Fact { text, sources } => (
+        let (messages, infer) = match write {
+            Write::Turn(turn) => (turn.messages, true),
+            Write::Fact { text, .. } => (
                 vec![Message {
                     role: Role::User,
                     content: text,
                 }],
-                None,
                 false,
-                sources,
             ),
         };
-        let mut body = Map::new();
-
-        body.insert(
-            "messages".to_owned(),
-            messages
+        let body = json!({
+            "messages": messages
                 .iter()
                 .map(|message| json!({"role": message.role.as_str(), "content": message.content}))
-                .collect(),
-        );
-        body.insert("user_id".to_owned(), Value::from(scope.user()));
-        body.insert("agent_id".to_owned(), Value::from(scope.agent()));
-
-        if let Some(session) = session {
-            body.insert("run_id".to_owned(), Value::from(session));
-        }
-
-        body.insert("infer".to_owned(), Value::Bool(infer));
-
-        if !sources.is_empty() {
-            body.insert("metadata".to_owned(), json!({"project02_sources": sources}));
-        }
-
+                .collect::<Vec<_>>(),
+            "user_id": scope.user(),
+            "agent_id": scope.agent(),
+            "infer": infer,
+        });
         let path = match self.dialect {
             Dialect::Platform => "v3/memories/add/",
             Dialect::Server => "memories",
         };
-        let answer = self
-            .document(Operation::Add, path, &Value::Object(body))
-            .await?;
+        let answer = self.document(Operation::Add, path, &body).await?;
         let written = match self.dialect {
             Dialect::Platform => answer
                 .get("event_id")
                 .and_then(identifier)
                 .map(Written::Queued),
-            Dialect::Server => rows(&answer).and_then(|rows| {
-                rows.iter()
-                    .map(|row| row.get("id").and_then(identifier))
-                    .collect::<Option<Vec<_>>>()
-                    .map(Written::Stored)
+            Dialect::Server => rows(&answer).map(|rows| {
+                Written::Stored(
+                    rows.iter()
+                        .filter_map(|row| row.get("id").and_then(identifier))
+                        .collect(),
+                )
             }),
         };
 
         written.ok_or_else(|| BackendError::new(Operation::Add, Failure::Unreadable))
     }
 
-    /// The JSON document a successful request answered with.
+    /// The JSON document a successful POST of `body` to `path` answered
+    /// with. A transport error is never repeated, since it can name the
+    /// address; a redirect is refused as the status it is.
     async fn document(
         &self,
         operation: Operation,
         path: &str,
         body: &Value,
     ) -> Result<Value, BackendError> {
-        let response = self.send(operation, Method::POST, path, Some(body)).await?;
-        let unreadable = BackendError::new(operation, Failure::Unreadable);
-        let bytes = response.bytes().await.map_err(|_| unreadable.clone())?;
-
-        serde_json::from_slice(&bytes).map_err(|_| unreadable)
-    }
-
-    /// A response with a success status. A transport error is never
-    /// repeated, since it can name the address; a redirect is refused as
-    /// the status it is.
-    async fn send(
-        &self,
-        operation: Operation,
-        method: Method,
-        path: &str,
-        body: Option<&Value>,
-    ) -> Result<Response, BackendError> {
         let mut request = self
             .http
-            .request(method, self.base.endpoint(path))
-            .header(ACCEPT, "application/json");
+            .post(self.base.endpoint(path))
+            .header(ACCEPT, "application/json")
+            .json(body);
 
         if let Some((name, value)) = &self.credential {
             request = request.header(name, value.clone());
-        }
-
-        if let Some(body) = body {
-            request = request.json(body);
         }
 
         let response = request
@@ -202,11 +167,14 @@ impl Rest {
             .map_err(|_| BackendError::new(operation, Failure::Unreachable))?;
         let status = response.status();
 
-        if status.is_success() {
-            Ok(response)
-        } else {
-            Err(BackendError::new(operation, Failure::Http(status.as_u16())))
+        if !status.is_success() {
+            return Err(BackendError::new(operation, Failure::Http(status.as_u16())));
         }
+
+        let unreadable = || BackendError::new(operation, Failure::Unreadable);
+        let bytes = response.bytes().await.map_err(|_| unreadable())?;
+
+        serde_json::from_slice(&bytes).map_err(|_| unreadable())
     }
 }
 

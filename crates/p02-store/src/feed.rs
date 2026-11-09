@@ -1,7 +1,7 @@
 //! A character's committed conversations as her plugins read them: the
 //! sessions her catalog lists, and the visible messages each session's log
-//! committed, from a cursor, a batch at a time. A line the log's read skips
-//! is counted as damage, and a catalog row it skips as a damaged entry.
+//! committed, from a cursor, a batch at a time; a line or a row the read
+//! skips is passed over.
 //!
 //! A cursor is the place in the log just past a line, in bytes. A log is
 //! only ever appended to, so a place once read stays where it was, and one
@@ -58,7 +58,6 @@ impl HistoryFeed {
         };
         let budget = request.max_bytes().map_or(usize::MAX, NonZeroUsize::get);
         let mut messages = Vec::new();
-        let mut damaged_record_count = 0;
         let mut end = start;
 
         for (line_end, record) in &lines[first..] {
@@ -70,12 +69,9 @@ impl HistoryFeed {
 
             end = *line_end;
 
-            let Some(record) = record else {
-                damaged_record_count += 1;
-                continue;
-            };
-
-            if let RecordBody::MessageCommitted(commit) = record.body() {
+            if let Some(record) = record
+                && let RecordBody::MessageCommitted(commit) = record.body()
+            {
                 messages.push(HistoryMessage {
                     message: commit.message().clone(),
                     committed_at: record.identity().created_at().clone(),
@@ -86,7 +82,6 @@ impl HistoryFeed {
         Ok(MessageBatch {
             messages,
             next_cursor: HistoryCursor::new(end.to_string()),
-            damaged_record_count,
             reset,
         })
     }
@@ -107,8 +102,6 @@ impl SessionHistoryFeed for HistoryFeed {
                     created_at: entry.created_at().clone(),
                 })
                 .collect(),
-            damaged_entry_count: u64::try_from(catalog.skipped_lines.numbers().len())
-                .unwrap_or(u64::MAX),
         })
     }
 

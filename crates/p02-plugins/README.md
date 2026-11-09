@@ -85,23 +85,24 @@ the character's storage grants through the contracts.
   never to a session. Before a turn the five memories most like the
   person's line come to the model, each cut to 600 characters, sourced to
   its memory, its score a confidence from 0 to 1; after it the turn is
-  queued for extraction behind the answer, eight at most waiting and each
-  within a minute, and what is queued drains at shutdown until its
-  deadline. A backend that fails costs the turn its memory, never the
-  turn. A redirect, an unreadable answer, or one shaped for the other
-  backend fails the call, a platform's queued write is never called
-  stored, an add abandoned at its deadline says it may have landed, and
-  no failure carries a credential. A change of embedder re-embeds every
-  memory behind the hooks, and a run that stopped on a failure goes on
-  with the next recall or capture.
+  queued for extraction behind the answer, one capture at a time and each
+  within a minute, why the last one did not complete is recorded until
+  one does, and what is queued drains at shutdown until its deadline. A
+  backend that fails costs the turn its memory, never the turn. A
+  redirect, an unreadable answer, or one shaped for the other backend
+  fails the call, a row that names no memory is passed over, a
+  platform's queued write is never called stored, an add abandoned at its
+  deadline says it may have landed, and no failure carries a credential.
+  A change of embedder re-embeds every memory behind the hooks, and a run
+  that stopped on a failure goes on with the next recall or capture.
 - **Character state.** How the character is right now, five aspects of
   her own inner state shown to her before each turn and patched by her
   through one tool whose contract enumerates every value. Each accepted
   patch is a line of her log, the state's one truth, then a checkpoint of
-  what the log folds to; a read takes the checkpoint while nothing was
-  written after it, folds the log anew otherwise, a line a crash left
-  twice counting once, and fails closed on a checkpoint of another
-  version, leaving it as it is.
+  what the log folds to; a read takes the checkpoint while it reads and
+  nothing was written after it, and folds the log anew otherwise, passing
+  over a line that is no patch and saying so. Only a checkpoint of a
+  newer version fails closed, left as it is.
 - **Character memory.** Two notebooks the character keeps herself, notes
   to herself and what she knows about the person, changed by her a batch
   at a time, every operation or none: an entry is trimmed text the trusted

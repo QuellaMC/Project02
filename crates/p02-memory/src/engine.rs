@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use rusqlite::Connection;
@@ -38,29 +37,6 @@ struct Shared {
     client: Client,
     settings: Settings,
     generation: Generation,
-    model_answered: AtomicBool,
-    embedder_answered: AtomicBool,
-}
-
-/// What the engine can say of itself without contacting anything.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Status {
-    /// Whether the extraction model's last answer since the engine opened
-    /// was one it could use.
-    pub model_answered: bool,
-    /// Whether the embedder's last answer since the engine opened was.
-    pub embedder_answered: bool,
-    /// Memories with no vector of the current embedder yet, which no
-    /// search finds until re-embedding reaches them.
-    pub unembedded: u64,
-}
-
-impl Status {
-    /// Both endpoints answered, and every memory can be found.
-    #[must_use]
-    pub fn ready(self) -> bool {
-        self.model_answered && self.embedder_answered && self.unembedded == 0
-    }
 }
 
 /// Why the engine did not open.
@@ -87,8 +63,6 @@ pub enum EngineError {
     WidthChanged { expected: usize, found: usize },
     #[error("the memory store failed")]
     Storage(#[source] rusqlite::Error),
-    #[error("the memory store holds a vector of the wrong width")]
-    Damaged,
     #[error("a newer embedder took over the memory store")]
     Superseded,
     #[error("the memory store's job stopped before it finished")]
@@ -120,8 +94,6 @@ impl Engine {
                 client,
                 settings,
                 generation,
-                model_answered: AtomicBool::new(false),
-                embedder_answered: AtomicBool::new(false),
             }),
         })
     }
@@ -200,18 +172,13 @@ impl Engine {
             .shared
             .client
             .complete_json(&self.shared.settings.model, SYSTEM_PROMPT, &user_message)
-            .await;
-        let texts = answer.map_err(EngineError::Model).and_then(|answer| {
-            extraction::extracted_memories(&answer).map_err(|_| EngineError::UnreadableExtraction)
-        });
-
-        self.shared
-            .model_answered
-            .store(texts.is_ok(), Ordering::SeqCst);
-
+            .await
+            .map_err(EngineError::Model)?;
+        let texts = extraction::extracted_memories(&answer)
+            .map_err(|_| EngineError::UnreadableExtraction)?;
         let mut memories = Vec::new();
 
-        for text in texts? {
+        for text in texts {
             let vector = self.embed(&text).await?;
 
             memories.push((text, vector));
@@ -294,33 +261,12 @@ impl Engine {
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// [`EngineError::Storage`] when the store cannot be read.
-    pub async fn status(&self) -> Result<Status, EngineError> {
-        let generation = self.shared.generation;
-        let unembedded = self
-            .with_store(move |connection| Ok(store::unembedded(connection, generation)?))
-            .await?;
-
-        Ok(Status {
-            model_answered: self.shared.model_answered.load(Ordering::SeqCst),
-            embedder_answered: self.shared.embedder_answered.load(Ordering::SeqCst),
-            unembedded,
-        })
-    }
-
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EngineError> {
-        let vector = self
-            .shared
+        self.shared
             .client
             .embed(&self.shared.settings.embedder, text)
-            .await;
-
-        self.shared
-            .embedder_answered
-            .store(vector.is_ok(), Ordering::SeqCst);
-        vector.map_err(EngineError::Embedder)
+            .await
+            .map_err(EngineError::Embedder)
     }
 
     /// Runs `work` on the store on the blocking pool.
@@ -343,10 +289,8 @@ impl Engine {
         done.map_err(|error| match error {
             StoreError::Sqlite(error) => EngineError::Storage(error),
             StoreError::WidthChanged { expected, found } => {
-                self.shared.embedder_answered.store(false, Ordering::SeqCst);
                 EngineError::WidthChanged { expected, found }
             }
-            StoreError::Damaged => EngineError::Damaged,
             StoreError::Superseded => EngineError::Superseded,
         })
     }

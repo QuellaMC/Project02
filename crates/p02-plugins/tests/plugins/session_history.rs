@@ -211,8 +211,6 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
     }
 
     history.exchange("chat.1", "Tell me a story.", &story);
-    history.damage("chat.1");
-    history.damage_catalog();
 
     let now = turn_in("chat.2", "evt_2", &[]);
     let host = history_host(&storage, 5_000);
@@ -249,12 +247,8 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
         "a window written 2.0 is the whole number its contract admitted"
     );
     assert_eq!(
-        (
-            &output(&around)["hasBefore"],
-            &output(&around)["hasAfter"],
-            &output(&around)["damagedRecordsSkipped"],
-        ),
-        (&json!(true), &json!(true), &json!(2))
+        (&output(&around)["hasBefore"], &output(&around)["hasAfter"]),
+        (&json!(true), &json!(true))
     );
     assert_eq!(
         numbers(&output(&latest)["messages"]),
@@ -385,10 +379,6 @@ async fn the_index_holds_what_the_history_committed_and_is_rebuilt_from_it() {
         version,
         "rebuilt at the plugin's version"
     );
-
-    opener.corrupt(INDEX);
-    assert_eq!(kraken(&history_host(&storage, 5_000)).await, ["chat.2"]);
-    assert_eq!(opener.version(INDEX), version);
 
     let off = Storage::new();
     let without = builder(Arc::clone(&off) as _)

@@ -384,6 +384,46 @@ it("connectors.telegram-mirror: another surface's turn is shown in each paired c
   }
 });
 
+it('connectors.telegram-mirror-before-open: a web line that opens her thread after a restart, while her bot starts, is shown in the chat once that turn is done', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': homeSettings(model, [alice]),
+    'character-data': {mira: {'config.json': botSettings(miraBot)}},
+  });
+  const first = await startDaemon(home);
+  const before = wireOf(first);
+
+  await before.start('mira');
+
+  const {conversationId, userParticipantId} = await conversationOf(
+    before,
+    'mira',
+  );
+
+  first.signal('SIGINT');
+  await first.exit();
+
+  const wire = wireOf(await startDaemon(home));
+  const held = model.hold();
+  const inFlight = wire.turn({
+    conversationId,
+    senderId: userParticipantId,
+    text: 'From the web.',
+    source: 'web',
+    clientMessageId: 'web-1',
+  });
+
+  await held.arrived();
+
+  const telegram = await startTelegramServer([miraBot]);
+  const run = connector(['--store', home], telegram.env);
+
+  await run.printed(miraAnswers);
+  held.release(reply('Hello, web.'));
+  await inFlight;
+  await telegram.shows(miraBot.token, alice.id, 'Hello, web.');
+});
+
 it('connectors.telegram-split-4096: a reply longer than one Telegram message arrives whole in as many messages as it takes, in order', async () => {
   const model = await startModelServer();
   const home = createHome({

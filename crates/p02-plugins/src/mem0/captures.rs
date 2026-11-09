@@ -1,8 +1,7 @@
 //! Capture behind the turn: each committed turn is queued for its backend
 //! to extract while the turn's answer goes out, one capture at a time and
-//! each within its bound. What did not complete is counted for the
-//! plugin's life, since a capture has no retry and no later success brings
-//! the lost turn back.
+//! each within its bound. A capture has no retry, so why the last one did
+//! not complete is kept until one does.
 
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -16,11 +15,6 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::backend::{BackendError, Failure, Operation, Written};
-
-/// How many turns may wait on extraction at once: deep enough to ride out
-/// a slow local model, shallow enough that a session cannot grow a queue
-/// it will never finish.
-const BACKLOG: usize = 8;
 
 /// How long one capture may take. A local model can take tens of seconds
 /// to extract; past a minute the request is stuck, and settling it is what
@@ -40,15 +34,8 @@ pub(super) struct Captures {
 struct Shared {
     /// Captures queued or running.
     pending: watch::Sender<usize>,
-    record: Mutex<Outcomes>,
-}
-
-/// What the captures that did not complete came to.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct Outcomes {
-    pub(super) incomplete: u64,
-    /// The most recent loss, said with the count of every loss.
-    pub(super) loss: Option<String>,
+    /// Why the last capture to settle did not complete, until one does.
+    failure: Mutex<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -57,69 +44,43 @@ struct Worker {
     task: JoinHandle<()>,
 }
 
-/// Whether a turn was queued.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Queued {
-    Accepted { earlier_losses: u64 },
-    Refused,
-}
-
 impl Default for Shared {
     fn default() -> Self {
         Self {
             pending: watch::Sender::new(0),
-            record: Mutex::default(),
+            failure: Mutex::default(),
         }
     }
 }
 
 impl Captures {
-    /// Queues `job` behind the captures before it, or refuses it, as a
-    /// loss, when the backlog is full.
-    pub(super) fn queue(&self, job: Job) -> Queued {
-        let accepted = self.shared.pending.send_if_modified(|pending| {
-            let room = *pending < BACKLOG;
-
-            if room {
-                *pending += 1;
-            }
-
-            room
-        });
-
-        if !accepted {
-            self.lose(&format!(
-                "extraction backlog is full ({BACKLOG} queued), so the turn was never sent."
-            ));
-            return Queued::Refused;
-        }
+    /// Queues `job` behind the captures before it.
+    pub(super) fn queue(&self, job: Job) {
+        self.shared.pending.send_modify(|pending| *pending += 1);
 
         let mut worker = self.worker.lock().unwrap_or_else(PoisonError::into_inner);
 
         drop(worker.get_or_insert_with(|| self.start()).jobs.send(job));
-        drop(worker);
-
-        Queued::Accepted {
-            earlier_losses: self.outcomes().incomplete,
-        }
     }
 
-    /// Counts a capture that did not complete, and why.
-    pub(super) fn lose(&self, why: &str) {
-        self.shared.lose(1, why);
+    /// Notes a capture that did not complete, and why.
+    pub(super) fn lose(&self, why: String) {
+        self.shared.settle(Some(why));
     }
 
-    pub(super) fn outcomes(&self) -> Outcomes {
+    /// Why the last capture to settle did not complete, until one does.
+    pub(super) fn failure(&self) -> Option<String> {
         self.shared
-            .record
+            .failure
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
 
-    /// Waits until every queued capture is done or `stop` is cancelled;
-    /// then abandons what is left, whose outcome nobody will learn.
-    pub(super) async fn drain(&self, stop: &CancellationToken) -> Outcomes {
+    /// Waits until every queued capture is done or `stop` is cancelled,
+    /// then abandons what is left, whose outcome nobody will learn; answers
+    /// why the last capture did not complete, if it did not.
+    pub(super) async fn drain(&self, stop: &CancellationToken) -> Option<String> {
         let mut pending = self.shared.pending.subscribe();
         let drained = tokio::select! {
             biased;
@@ -139,17 +100,12 @@ impl Captures {
                 drop(worker.task.await);
             }
 
-            let left = self.shared.pending.send_replace(0);
-
-            if left > 0 {
-                self.shared.lose(
-                    u64::try_from(left).unwrap_or(u64::MAX),
-                    &BackendError::new(Operation::Add, Failure::Abandoned).to_string(),
-                );
+            if self.shared.pending.send_replace(0) > 0 {
+                self.lose(abandoned());
             }
         }
 
-        self.outcomes()
+        self.failure()
     }
 
     fn start(&self) -> Worker {
@@ -159,18 +115,17 @@ impl Captures {
             while let Some(job) = queued.recv().await {
                 // A capture that panics is lost like one that failed, so
                 // the worker, and the captures queued behind it, go on.
-                match tokio::time::timeout(BOUND, AssertUnwindSafe(job).catch_unwind()).await {
-                    Ok(Ok(Ok(_))) => {}
-                    Ok(Ok(Err(error))) => shared.lose(1, &error.to_string()),
-                    Ok(Err(_)) => {
-                        shared.lose(1, "mem0 add panicked; whether it completed is unknown.");
-                    }
-                    Err(_) => shared.lose(
-                        1,
-                        &BackendError::new(Operation::Add, Failure::Abandoned).to_string(),
-                    ),
-                }
+                let failure =
+                    match tokio::time::timeout(BOUND, AssertUnwindSafe(job).catch_unwind()).await {
+                        Ok(Ok(Ok(_))) => None,
+                        Ok(Ok(Err(error))) => Some(error.to_string()),
+                        Ok(Err(_)) => {
+                            Some("mem0 add panicked; whether it completed is unknown.".to_owned())
+                        }
+                        Err(_) => Some(abandoned()),
+                    };
 
+                shared.settle(failure);
                 shared
                     .pending
                     .send_modify(|pending| *pending = pending.saturating_sub(1));
@@ -182,15 +137,13 @@ impl Captures {
 }
 
 impl Shared {
-    fn lose(&self, count: u64, why: &str) {
-        let mut record = self.record.lock().unwrap_or_else(PoisonError::into_inner);
-
-        record.incomplete = record.incomplete.saturating_add(count);
-        record.loss = Some(format!(
-            "{} capture(s) did not complete; most recent: {why}",
-            record.incomplete
-        ));
+    fn settle(&self, failure: Option<String>) {
+        *self.failure.lock().unwrap_or_else(PoisonError::into_inner) = failure;
     }
+}
+
+fn abandoned() -> String {
+    BackendError::new(Operation::Add, Failure::Abandoned).to_string()
 }
 
 #[cfg(test)]
@@ -200,22 +153,19 @@ mod tests {
     #[tokio::test]
     async fn a_capture_that_panics_is_lost_and_the_captures_behind_it_go_on() {
         let captures = Captures::default();
+        let stop = CancellationToken::new();
+        let panicking = || -> Job { Box::pin(async { panic!("a capture's own fault") }) };
 
-        captures.queue(Box::pin(async { panic!("a capture's own fault") }));
+        captures.queue(panicking());
         captures.queue(Box::pin(async {
             Ok(Written::Stored(vec!["mem-1".to_owned()]))
         }));
+        assert_eq!(captures.drain(&stop).await, None);
 
+        captures.queue(panicking());
         assert_eq!(
-            captures.drain(&CancellationToken::new()).await,
-            Outcomes {
-                incomplete: 1,
-                loss: Some(
-                    "1 capture(s) did not complete; most recent: mem0 add panicked; whether it \
-                     completed is unknown."
-                        .to_owned()
-                ),
-            }
+            captures.drain(&stop).await.as_deref(),
+            Some("mem0 add panicked; whether it completed is unknown.")
         );
     }
 }

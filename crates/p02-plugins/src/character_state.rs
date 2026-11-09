@@ -2,10 +2,11 @@
 //! aspects of her own inner state, shown to her before each turn and
 //! changed by her alone through one tool. Each accepted patch is a line of
 //! her log, `events.jsonl`, the one truth of the state; `checkpoint.json`
-//! holds what the log folds to, so a read folds nothing, and a checkpoint
-//! the log has outgrown, or none, is folded anew from the log.
+//! holds what the log folds to, so a read folds nothing. The checkpoint is
+//! a cache: one the log has outgrown, none, or one that does not read is
+//! folded anew from the log, and a line of the log that is no patch is
+//! passed over and said.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,15 +18,15 @@ use p02_contracts::{
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
 
-use crate::package::{FilesError, leased, rejected, tool};
+use crate::package::{FilesError, leased, tool};
 
 const TOOL: &str = "character_state.patch";
 const EVENTS: &str = "events.jsonl";
 const CHECKPOINT: &str = "checkpoint.json";
 
-/// The version of `checkpoint.json` this build writes and reads. One of
-/// another version fails closed and is left as it is, since a newer build
-/// may still read it.
+/// The version of `checkpoint.json` this build writes. One of a newer
+/// version fails closed and is left as it is, since its build may write a
+/// log this one cannot fold.
 const CHECKPOINT_VERSION: u64 = 1;
 
 const DESCRIPTION: &str = "Adjust how you are right now — your own mood, energy, attention, \
@@ -124,19 +125,12 @@ struct State([&'static str; 5]);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Patch([Option<&'static str>; 5]);
 
-/// Where folding the log ends: the state, and how many patches it folds.
+/// Where folding the log ends: the state, and how many of its lines were
+/// no patch.
 #[derive(Clone, Copy, Debug)]
 struct Folded {
     state: State,
-    events: u64,
-}
-
-/// The call a patch came from, which names its line in the log once
-/// however often a crash wrote it there.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Identity {
-    event: String,
-    call: String,
+    passed_over: usize,
 }
 
 #[async_trait]
@@ -149,31 +143,42 @@ impl RuntimePlugin for CharacterStatePlugin {
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let state = leased(store(context)?, |files| {
+        let folded = leased(store(context)?, |files| {
             let (folded, checkpointed) = current(files)?;
 
             if !checkpointed {
-                write_checkpoint(files, folded)?;
+                write_checkpoint(files, folded.state)?;
             }
 
-            Ok(folded.state)
+            Ok(folded)
         })
         .await?;
         let note = Identifier::new("current")
             .map_err(|error| PluginError::with_source("the state note needs an id", error))?;
+        let evidence = match folded.passed_over {
+            0 => EvidenceNote::new(
+                EvidenceKind::BeforeRoleModelCall,
+                EvidenceStatus::Accepted,
+                "Provided current Character State context.",
+            ),
+            lines => EvidenceNote::new(
+                EvidenceKind::BeforeRoleModelCall,
+                EvidenceStatus::Degraded,
+                format!(
+                    "Provided current Character State context, passing over {lines} line(s) of \
+                     {EVENTS} that are no patch."
+                ),
+            ),
+        };
 
         Ok(BeforeRoleModelCallOutput {
             context_items: vec![ContextItem::new(
                 note,
                 ContextItemKind::RuntimeNote,
-                state.note(),
+                folded.state.note(),
             )],
             curated_sections: Vec::new(),
-            evidence: vec![EvidenceNote::new(
-                EvidenceKind::BeforeRoleModelCall,
-                EvidenceStatus::Accepted,
-                "Provided current Character State context.",
-            )],
+            evidence: vec![evidence],
         })
     }
 
@@ -182,26 +187,17 @@ impl RuntimePlugin for CharacterStatePlugin {
         call: &ToolCall,
         context: &HookContext,
     ) -> Result<ToolCallOutcome, PluginError> {
-        let patch = match Patch::from_input(call.input()) {
-            Ok(patch) => patch,
-            Err(message) => return Ok(rejected("invalid_state_value", message.clone(), &message)),
-        };
-        let identity = Identity {
-            event: context.turn().event.event_id().to_string(),
-            call: call.call_id().to_string(),
-        };
+        let patch = Patch::from_input(call.input()).map_err(PluginError::new)?;
+        let (event, call_id) = (
+            context.turn().event.event_id().to_string(),
+            call.call_id().to_string(),
+        );
         let (before, after) = leased(store(context)?, move |files| {
             let (folded, _) = current(files)?;
             let after = folded.state.patched(patch);
 
-            files.append_jsonl(EVENTS, &line(&identity, patch, folded.state, after))?;
-            write_checkpoint(
-                files,
-                Folded {
-                    state: after,
-                    events: folded.events + 1,
-                },
-            )?;
+            files.append_jsonl(EVENTS, &line(&event, &call_id, patch, folded.state, after))?;
+            write_checkpoint(files, after)?;
             Ok((folded.state, after))
         })
         .await?;
@@ -233,135 +229,100 @@ fn store(context: &HookContext) -> Result<FileStore, PluginError> {
     })
 }
 
-/// What the log folds to now: the checkpoint's, while nothing was written
-/// after it, or else the log folded anew; and whether the checkpoint said
-/// it.
+/// What the log folds to now: the checkpoint's, while it reads and nothing
+/// was written after it, or else the log folded anew; and whether the
+/// checkpoint said it.
 fn current(files: &LeasedStore<'_>) -> Result<(Folded, bool), FilesError> {
-    let revision = files.revision()?;
-
-    if let Some(document) = files.read_json(CHECKPOINT)? {
-        let (folded, written_at) = checkpoint(&document)?;
-
-        if written_at == revision {
-            return Ok((folded, true));
-        }
+    if let Some(state) = checkpointed(files)? {
+        return Ok((
+            Folded {
+                state,
+                passed_over: 0,
+            },
+            true,
+        ));
     }
 
-    Ok((fold(&files.read_jsonl(EVENTS)?)?, false))
+    Ok((fold(&files.read_jsonl(EVENTS)?), false))
+}
+
+/// The state the checkpoint holds, while it reads and was written at the
+/// store's revision; it is refused only when a newer build wrote it.
+fn checkpointed(files: &LeasedStore<'_>) -> Result<Option<State>, FilesError> {
+    let Ok(Some(checkpoint)) = files.read_json(CHECKPOINT) else {
+        return Ok(None);
+    };
+
+    if checkpoint
+        .get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|version| version > CHECKPOINT_VERSION)
+    {
+        return Err(FilesError::Damaged(format!(
+            "Character State {CHECKPOINT} is of a version this build does not read, so it is \
+             left as it is."
+        )));
+    }
+
+    let written_at = checkpoint.get("storeRevision").and_then(Value::as_u64);
+
+    Ok(if written_at == Some(files.revision()?) {
+        checkpoint.get("state").and_then(State::from_value)
+    } else {
+        None
+    })
 }
 
 /// The log folded line by line, each patch onto the state before it in the
-/// order the lines were written; a patch whose call an earlier line already
-/// named counts once, where it first stands.
-fn fold(lines: &[Value]) -> Result<Folded, FilesError> {
-    let mut seen = BTreeSet::new();
+/// order the lines were written; a line that is no patch is passed over,
+/// and counted.
+fn fold(lines: &[Value]) -> Folded {
     let mut folded = Folded {
         state: State::initial(),
-        events: 0,
+        passed_over: 0,
     };
 
-    for (at, line) in lines.iter().enumerate() {
-        let (identity, patch) = event(line).ok_or_else(|| {
-            FilesError::Damaged(format!(
-                "Character State {EVENTS} line {} is not a patch it wrote.",
-                at + 1
-            ))
-        })?;
-
-        if seen.insert(identity) {
-            folded.state = folded.state.patched(patch);
-            folded.events += 1;
+    for line in lines {
+        match patch_of(line) {
+            Some(patch) => folded.state = folded.state.patched(patch),
+            None => folded.passed_over += 1,
         }
     }
 
-    Ok(folded)
+    folded
+}
+
+/// The patch a line of the log records.
+fn patch_of(line: &Value) -> Option<Patch> {
+    Patch::from_input(line.get("input")?.as_object()?).ok()
 }
 
 /// A patch's line: the call it came from, the patch as the call gave it,
 /// and the state it found and left.
-fn line(identity: &Identity, patch: Patch, before: State, after: State) -> Value {
+fn line(event: &str, call: &str, patch: Patch, before: State, after: State) -> Value {
     json!({
-        "eventId": identity.event,
-        "callId": identity.call,
+        "eventId": event,
+        "callId": call,
         "input": patch.to_value(),
         "before": before.to_value(),
         "after": after.to_value(),
     })
 }
 
-/// The call and the patch of a line, when it is one the plugin writes:
-/// every key, and a state left that is the state found with the patch.
-fn event(line: &Value) -> Option<(Identity, Patch)> {
-    let fields = line.as_object().filter(|fields| fields.len() == 5)?;
-    let text = |key: &str| {
-        fields
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    };
-    let identity = Identity {
-        event: text("eventId")?,
-        call: text("callId")?,
-    };
-    let patch = Patch::from_input(fields.get("input")?.as_object()?).ok()?;
-    let before = State::from_value(fields.get("before")?)?;
-    let after = State::from_value(fields.get("after")?)?;
-
-    (before.patched(patch) == after).then_some((identity, patch))
-}
-
-/// Writes the checkpoint of `folded`, naming the store's revision once it
+/// Writes the checkpoint of `state`, naming the store's revision once it
 /// lands, which any later write moves on.
-fn write_checkpoint(files: &mut LeasedStore<'_>, folded: Folded) -> Result<(), FilesError> {
+fn write_checkpoint(files: &mut LeasedStore<'_>, state: State) -> Result<(), FilesError> {
     let revision = files.revision()? + 1;
 
-    // The state sits under `current.current`, where the conformance suite
-    // reads it in the files of either daemon.
     files.write_json(
         CHECKPOINT,
         &json!({
             "version": CHECKPOINT_VERSION,
-            "eventCount": folded.events,
             "storeRevision": revision,
-            "current": {"current": folded.state.to_value()},
+            "state": state.to_value(),
         }),
     )?;
     Ok(())
-}
-
-/// What a checkpoint holds, and the store's revision it was written at.
-fn checkpoint(document: &Value) -> Result<(Folded, u64), FilesError> {
-    let damaged = || FilesError::Damaged(format!("Character State {CHECKPOINT} is damaged."));
-    let fields = document.as_object().ok_or_else(damaged)?;
-
-    match fields.get("version").and_then(Value::as_u64) {
-        Some(CHECKPOINT_VERSION) => {}
-        _ => {
-            return Err(FilesError::Damaged(format!(
-                "Character State {CHECKPOINT} is of a version this build does not read, so it \
-                 is left as it is."
-            )));
-        }
-    }
-
-    let number = |key: &str| fields.get(key).and_then(Value::as_u64);
-    let state = fields
-        .get("current")
-        .and_then(Value::as_object)
-        .filter(|current| current.len() == 1)
-        .and_then(|current| current.get("current"))
-        .and_then(State::from_value);
-
-    match (
-        fields.len(),
-        number("eventCount"),
-        number("storeRevision"),
-        state,
-    ) {
-        (4, Some(events), Some(revision), Some(state)) => Ok((Folded { state, events }, revision)),
-        _ => Err(damaged()),
-    }
 }
 
 impl Aspect {
@@ -428,11 +389,9 @@ impl State {
         )
     }
 
-    /// A state as the files keep it: each aspect once, at a value it takes.
+    /// A state as the checkpoint keeps it: every aspect at a value it takes.
     fn from_value(value: &Value) -> Option<Self> {
-        let fields = value
-            .as_object()
-            .filter(|fields| fields.len() == ASPECTS.len())?;
+        let fields = value.as_object()?;
         let mut state = Self::initial();
 
         for (value, aspect) in state.0.iter_mut().zip(&ASPECTS) {

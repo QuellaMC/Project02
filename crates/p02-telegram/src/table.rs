@@ -179,22 +179,17 @@ pub(crate) struct Table {
     tracker: TaskTracker,
     /// The daemon followed now, which every bot reaches.
     daemon: watch::Sender<Option<Daemon>>,
-    /// Whether the bots wait for a settings read: their updates, their
-    /// writes to paired accounts, and the frames since the hold.
+    /// Whether the bots wait for a settings read: their updates and the
+    /// daemon's frames wait with them.
     held: watch::Sender<bool>,
     latest: watch::Sender<Option<Latest>>,
     /// Health as last said, whose names the bots go by.
     health: Option<Health>,
     /// The frames counted since the start, each frame's number.
     seq: u64,
-    /// A `ready` not handed on yet, as it came.
-    unread: Option<(u64, Arc<Snapshot>)>,
-    /// The frames since the hold, handed on in order once it ends.
-    waiting: Vec<(u64, Arc<Event>)>,
-    /// The ticket of the newest read, and the one a hold must be outlived
-    /// by: only a read begun after the hold ends it.
+    /// The ticket of the newest read, which every hold moves on: only the
+    /// answer to a read begun since the last hold is applied, and ends it.
     newest: u64,
-    hold_after: u64,
     reading: Option<AbortHandle>,
     answers: mpsc::UnboundedReceiver<Answer>,
     answer: mpsc::UnboundedSender<Answer>,
@@ -224,10 +219,7 @@ impl Table {
             latest: watch::Sender::new(None),
             health: None,
             seq: 0,
-            unread: None,
-            waiting: Vec::new(),
             newest: 0,
-            hold_after: 0,
             reading: None,
             answers,
             answer,
@@ -260,8 +252,8 @@ impl Table {
         self.daemon.send_replace(Some(daemon));
     }
 
-    /// A stream that cannot be caught up: its snapshot supersedes every
-    /// frame held, and is installed by the bots once its settings are read.
+    /// A stream that cannot be caught up: its snapshot goes to every bot,
+    /// which installs it once its settings are read.
     pub(crate) fn ready(&mut self, ready: Ready) {
         let Ready {
             health,
@@ -278,14 +270,20 @@ impl Table {
 
         self.seq += 1;
         self.health = Some(health);
-
         self.latest.send_replace(Some(Latest {
             seq: self.seq,
             snapshot: snapshot.clone(),
         }));
-        self.unread = Some((self.seq, Arc::new(snapshot)));
-        self.waiting.clear();
         self.read();
+
+        let snapshot = Arc::new(snapshot);
+
+        for running in &self.bots {
+            running.bot.send(Inbox::Install {
+                seq: self.seq,
+                snapshot: Arc::clone(&snapshot),
+            });
+        }
     }
 
     /// A stream the daemon resumed: what waited since the loss is read for.
@@ -314,15 +312,11 @@ impl Table {
         };
         let event = Arc::new(event);
 
-        if *self.held.borrow() {
-            self.waiting.push((seq, event));
-        } else {
-            for running in &self.bots {
-                running.bot.send(Inbox::Frame {
-                    seq,
-                    event: Arc::clone(&event),
-                });
-            }
+        for running in &self.bots {
+            running.bot.send(Inbox::Frame {
+                seq,
+                event: Arc::clone(&event),
+            });
         }
 
         if changed {
@@ -331,10 +325,15 @@ impl Table {
     }
 
     /// Holds the bots until a read begun from now lands: the stream is
-    /// lost, and the settings may change before it is back.
+    /// lost, and the settings may change before it is back. A read under
+    /// way is dropped.
     pub(crate) fn hold(&mut self) {
         self.held.send_replace(true);
-        self.hold_after = self.newest;
+        self.newest += 1;
+
+        if let Some(reading) = self.reading.take() {
+            reading.abort();
+        }
     }
 
     /// Reads the settings under a ticket of its own, holding the bots until
@@ -342,11 +341,6 @@ impl Table {
     /// is answered or a newer one starts.
     fn read(&mut self) {
         self.hold();
-        self.newest += 1;
-
-        if let Some(reading) = self.reading.take() {
-            reading.abort();
-        }
 
         let Some(daemon) = self.daemon.borrow().clone() else {
             return;
@@ -378,18 +372,14 @@ impl Table {
         );
     }
 
-    /// Applies the newest read's answer; one that began after the hold ends
-    /// it.
+    /// Applies the newest read's answer, and ends the hold.
     fn answered(&mut self, (ticket, view): Answer) {
         if ticket != self.newest {
             return;
         }
 
         self.apply(&view);
-
-        if ticket > self.hold_after {
-            self.release();
-        }
+        self.held.send_replace(false);
     }
 
     /// Makes the running bots the ones the answer asks for: a bot whose
@@ -523,31 +513,6 @@ impl Table {
 
         self.shared = shared;
         wanted
-    }
-
-    /// Ends the hold: the snapshot of a `ready` is handed on first, then
-    /// the frames since, in order, and then the bots go on.
-    fn release(&mut self) {
-        let unread = self.unread.take();
-        let waiting = std::mem::take(&mut self.waiting);
-
-        for running in &self.bots {
-            if let Some((seq, snapshot)) = &unread {
-                running.bot.send(Inbox::Install {
-                    seq: *seq,
-                    snapshot: Arc::clone(snapshot),
-                });
-            }
-
-            for (seq, event) in &waiting {
-                running.bot.send(Inbox::Frame {
-                    seq: *seq,
-                    event: Arc::clone(event),
-                });
-            }
-        }
-
-        self.held.send_replace(false);
     }
 
     /// Stops every bot, and answers once each has ended.

@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 /// One character's committed visible messages, read a batch at a time;
 /// never the raw events. A torn tail is invisible, a damaged record is
-/// counted and skipped, and every batch agrees with a prefix of the log.
+/// skipped, and every batch agrees with a prefix of the log.
 /// The store crate implements it.
 pub trait SessionHistoryFeed: Send + Sync + fmt::Debug {
     /// # Errors
@@ -75,11 +75,10 @@ impl SessionHistory {
     }
 }
 
-/// The sessions a character has, and how many catalog entries were damaged.
+/// The sessions a character has.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionListing {
     pub sessions: Vec<SessionSummary>,
-    pub damaged_entry_count: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -144,7 +143,6 @@ impl ReadMessages {
 pub struct MessageBatch {
     pub messages: Vec<HistoryMessage>,
     pub next_cursor: HistoryCursor,
-    pub damaged_record_count: u64,
     /// The session no longer matches the cursor: it shrank, was replaced,
     /// or the cursor is unreadable. Everything consumed for it before is
     /// stale and is discarded before this batch, which starts at the top.

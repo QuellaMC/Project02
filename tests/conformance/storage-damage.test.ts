@@ -15,7 +15,13 @@ import {expect, it} from 'vitest';
 
 import {inspect, serve, startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
-import {configJson, createHome, sessionLog, snapshot} from './harness/home.ts';
+import {
+  configJson,
+  createHome,
+  sessionLog,
+  sessionRecords,
+  snapshot,
+} from './harness/home.ts';
 import {
   calling,
   messagesOf,
@@ -458,7 +464,7 @@ it('storage.damaged-segment-tolerance: a committed line that is no record, in an
   );
 });
 
-it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never read as empty or folded around: a line of character-state's log that is no patch it wrote, met as the log is folded once its checkpoint is gone, an event whose states disagree with its patch, or a checkpoint value out of range rejects the turn before the model is asked and writes nothing, and a memory document that is no document leaves the curated memory out of the prompt while memory.update is refused and the document stays as it was", async () => {
+it("storage.plugin-store-damage: a plugin's damaged state is passed over and said, and her turns go on: a line of character-state's log that is no patch, met as the log is folded once its checkpoint is gone, is passed over and the turn's record says so, an event whose states disagree with its patch counts for its patch, and a checkpoint value out of range is folded anew from the log; while a memory document that is no document leaves the curated memory out of the prompt, memory.update is refused, and the document stays as it was", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -478,6 +484,24 @@ it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never
 
     return outcome;
   };
+  // What the last turn's record says of character-state's note.
+  const noted = () =>
+    (
+      sessionRecords(home, 'mira', 'runtime_turn_completed').at(-1)?.[
+        'runtimePluginEvidence'
+      ] as
+        | readonly {
+            readonly pluginId: string;
+            readonly evidenceKind: string;
+            readonly status: string;
+            readonly summary: string;
+          }[]
+        | undefined
+    )?.find(
+      entry =>
+        entry.pluginId === 'character-state' &&
+        entry.evidenceKind === 'before_role_model_call',
+    );
 
   model.answer(
     calling(['character_state_patch', {mood: 'curious'}]),
@@ -498,30 +522,43 @@ it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never
     readonly after: Record<string, string>;
   };
   const outOfRange = JSON.parse(kept) as {
-    readonly current: {readonly current: Record<string, string>};
+    readonly state: Record<string, string>;
   };
+  // The checkpoint first, while it still names the store's revision, so it
+  // is read and not merely outgrown.
   const damages = [
-    [
-      'a line that is no patch',
-      `${first}\n{"note": "hand-written"}\n${second}\n`,
-      undefined,
-    ],
-    [
-      'states that disagree with the patch',
-      `${JSON.stringify({...disagreeing, after: {...disagreeing.after, mood: 'tired'}})}\n${second}\n`,
-      undefined,
-    ],
     [
       'a checkpoint value out of range',
       `${first}\n${second}\n`,
       JSON.stringify({
         ...outOfRange,
-        current: {current: {...outOfRange.current.current, mood: 'angry'}},
+        state: {...outOfRange.state, mood: 'angry'},
       }),
+      {status: 'accepted'},
+    ],
+    [
+      'a line that is no patch',
+      `${first}\n{"note": "hand-written"}\n${second}\n`,
+      undefined,
+      {
+        status: 'degraded',
+        summary: expect.stringContaining(
+          'passing over 1 line(s) of events.jsonl',
+        ) as string,
+      },
+    ],
+    [
+      'states that disagree with the patch',
+      `${JSON.stringify({...disagreeing, after: {...disagreeing.after, mood: 'tired'}})}\n${second}\n`,
+      undefined,
+      {status: 'accepted'},
     ],
   ] as const;
 
-  for (const [index, [damage, log, damagedCheckpoint]] of damages.entries()) {
+  for (const [
+    index,
+    [damage, log, damagedCheckpoint, said],
+  ] of damages.entries()) {
     writeFileSync(events, log);
     rmSync(checkpoint, {force: true});
 
@@ -529,18 +566,19 @@ it("storage.plugin-store-damage: a plugin's damaged state fails it closed, never
       writeFileSync(checkpoint, damagedCheckpoint);
     }
 
-    const asked = model.requests.length;
-    const left = snapshot(state);
-
+    model.answer(reply('Fine.'));
     expect(
       await run('How are you?', `damaged-${String(index)}`),
       damage,
-    ).toMatchObject({
-      status: 'rejected',
-      reason: 'plugin_before_role_model_call_rejected',
-    });
-    expect(model.requests, damage).toHaveLength(asked);
-    expect(snapshot(state), damage).toEqual(left);
+    ).toMatchObject({status: 'completed'});
+    expect(
+      messagesOf(model.requests.at(-1)).some(
+        message =>
+          message.content?.includes('mood=curious; energy=high') === true,
+      ),
+      damage,
+    ).toBe(true);
+    expect(noted(), damage).toMatchObject(said);
   }
 
   writeFileSync(events, `${first}\n${second}\n`);

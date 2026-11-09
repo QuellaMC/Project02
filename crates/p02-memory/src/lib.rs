@@ -7,7 +7,7 @@ mod record;
 mod store;
 mod wire;
 
-pub use engine::{Engine, EngineError, OpenEngineError, RECALL_THRESHOLD, Settings, Status};
+pub use engine::{Engine, EngineError, OpenEngineError, RECALL_THRESHOLD, Settings};
 pub use record::{
     Hit, Memory, MemoryId, Message, ObservedOn, ParseObservedOnError, Role, Scope, Turn,
 };

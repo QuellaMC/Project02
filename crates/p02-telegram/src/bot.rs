@@ -11,7 +11,7 @@ use p02_app::Event;
 use p02_core::ClientStamp;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
-use tokio::time::{Instant, sleep, sleep_until};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -32,7 +32,7 @@ pub(crate) const DAEMON_DOWN: &str =
     "The daemon is not running right now; send that again in a moment.";
 
 /// What the table hands a bot of the daemon's stream, each under its frame's
-/// number, so a bot that caught up from a later snapshot skips it.
+/// number, so a bot that began from a later snapshot skips it.
 #[derive(Debug)]
 pub(crate) enum Inbox {
     /// A `ready` the daemon could not resume from, as it came.
@@ -44,14 +44,6 @@ pub(crate) enum Inbox {
         seq: u64,
         event: Arc<Event>,
     },
-}
-
-/// Whether a bot may act now: no settings read is in doubt, and the
-/// token's polls are its own, as its poll last found.
-#[derive(Clone, Debug)]
-pub(crate) struct Leave {
-    pub(crate) held: watch::Receiver<bool>,
-    pub(crate) claimed: watch::Receiver<bool>,
 }
 
 /// What a bot is started with.
@@ -176,12 +168,10 @@ async fn run(api: BotApi, parts: Parts) {
     let quiet = stop.child_token();
     let tasks = TaskTracker::new();
     let (polled, polls) = mpsc::unbounded_channel();
-    let (claim, claimed) = watch::channel(false);
-    let leave = Leave { held, claimed };
     let outbox = Outbox::start(
         api.clone(),
         settings.clone(),
-        leave.clone(),
+        held.clone(),
         draft_edits,
         Arc::clone(&lines),
         quiet.clone(),
@@ -201,7 +191,7 @@ async fn run(api: BotApi, parts: Parts) {
     let intake = Intake {
         frames,
         polls,
-        leave,
+        held,
         latest,
     };
 
@@ -214,7 +204,6 @@ async fn run(api: BotApi, parts: Parts) {
     let ended = poll(
         &api,
         &polled,
-        &claim,
         &settings,
         lines.as_ref(),
         &mut problems,
@@ -339,16 +328,13 @@ enum PollEnd {
 }
 
 /// Long-polls until the stop or the token refused, handing each update on
-/// in order and asking past a batch only once all of it was handed on.
-/// The token's polls are this bot's, `claim` says, from each poll it
-/// sends, since Telegram hands them to the newest, until a 409 says
-/// another program's took them. A webhook left on the token is removed;
-/// another program's polls are waited out; a pause Telegram asks for is
-/// kept; anything else is Telegram out of reach, backed off from.
+/// in order and asking past a batch only once all of it was handed on. A
+/// webhook left on the token is removed; another program's polls (409)
+/// are waited out; a pause Telegram asks for is kept; anything else is
+/// Telegram out of reach, backed off from.
 async fn poll(
     api: &BotApi,
     rules: &mpsc::UnboundedSender<Polled>,
-    claim: &watch::Sender<bool>,
     settings: &watch::Receiver<Arc<BotSettings>>,
     lines: &dyn Lines,
     problems: &mut Problems,
@@ -358,10 +344,6 @@ async fn poll(
     let mut failures = 0;
 
     loop {
-        if !*claim.borrow() {
-            claim.send_replace(true);
-        }
-
         let outcome = tokio::select! {
             biased;
             () = stop.cancelled() => return PollEnd::Stopped,
@@ -420,7 +402,6 @@ async fn poll(
                     &bot,
                     lines,
                 );
-                claim.send_replace(false);
                 CONFLICT_PAUSE
             }
             Err(failure) => failure.retry_after().unwrap_or_else(|| {
@@ -549,60 +530,41 @@ pub(crate) trait Rules: Send {
     fn frame(&mut self, chat: &mut Chat, event: &Event);
 
     fn done(&mut self, chat: &mut Chat, done: Done);
-
-    /// When something of their own is due next.
-    fn due(&self) -> Option<Instant> {
-        None
-    }
-
-    fn at_due(&mut self, _chat: &mut Chat) {}
 }
 
 /// What a bot's rules take in.
 struct Intake {
     frames: mpsc::UnboundedReceiver<Inbox>,
     polls: mpsc::UnboundedReceiver<Polled>,
-    leave: Leave,
+    held: watch::Receiver<bool>,
     latest: watch::Receiver<Option<Latest>>,
 }
 
 /// Runs a bot's rules until the stop. They act only while no settings
-/// read is in doubt, on a frame, an update, an answer or a wait of their
-/// own, so nothing is shown or judged by settings a change may have left
-/// behind; meanwhile they follow only the token's polls. Only an owner of
-/// those reads frames, so two connectors on one token do not both answer:
-/// the rules drop them from the 409 that says another program took the
-/// polls, and once the polls are theirs again catch up from the latest
-/// snapshot, skipping every frame it already holds.
+/// read is in doubt, on a frame, an update or an answer, so nothing is
+/// shown or judged by settings a change may have left behind. They begin
+/// from the latest snapshot, skipping every frame it already holds.
 async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
     let Intake {
         mut frames,
         mut polls,
-        leave: Leave {
-            mut held,
-            mut claimed,
-        },
+        mut held,
         latest,
     } = intake;
-    let mut caught_up = false;
+    let mut installed = false;
     let mut seen = 0;
 
     rules.started(&mut chat);
 
     loop {
         let free = !*held.borrow_and_update();
-        let ours = *claimed.borrow_and_update();
-        let due = rules.due();
-
-        caught_up &= ours;
 
         tokio::select! {
             biased;
             () = chat.stop.cancelled() => return,
-            Ok(()) = claimed.changed() => {}
             Ok(()) = held.changed() => {}
-            () = std::future::ready(()), if free && ours && !caught_up => {
-                caught_up = true;
+            () = std::future::ready(()), if free && !installed => {
+                installed = true;
 
                 let newest = latest.borrow().clone();
 
@@ -612,11 +574,11 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 }
             }
             Some(message) = frames.recv(), if free => match message {
-                Inbox::Install { seq, snapshot } if caught_up && seq > seen => {
+                Inbox::Install { seq, snapshot } if seq > seen => {
                     seen = seq;
                     rules.install(&mut chat, &snapshot);
                 }
-                Inbox::Frame { seq, event } if caught_up && seq > seen => {
+                Inbox::Frame { seq, event } if seq > seen => {
                     seen = seq;
                     rules.frame(&mut chat, &event);
                 }
@@ -630,9 +592,6 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 if let Ok(done) = done {
                     rules.done(&mut chat, done);
                 }
-            }
-            () = sleep_until(due.unwrap_or_else(Instant::now)), if free && due.is_some() => {
-                rules.at_due(&mut chat);
             }
         }
     }

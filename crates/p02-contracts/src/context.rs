@@ -237,7 +237,6 @@ mod tests {
             self.reads.fetch_add(1, Ordering::SeqCst);
             Ok(SessionListing {
                 sessions: Vec::new(),
-                damaged_entry_count: 0,
             })
         }
 

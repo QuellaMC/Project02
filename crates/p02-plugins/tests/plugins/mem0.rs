@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    CommittedTurn, ContextItemKind, EvidenceStatus, SourceKind, ToolCallResult, TurnIdentity,
-    TurnText,
+    CommittedTurn, ContextItemKind, EvidenceStatus, SourceKind, SourceReference, ToolCallResult,
+    TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
@@ -245,7 +245,7 @@ fn cosine(left: &[f32], right: &[f32]) -> f64 {
 }
 
 #[tokio::test]
-async fn the_server_backend_asks_its_base_url_and_hands_it_each_turn_under_its_session() {
+async fn the_server_backend_asks_its_base_url_and_hands_it_each_turn() {
     let mem0 = Stub::mem0().await;
     let storage = Storage::new();
     let (turn, committed) = exchange("chat.1", "evt_1", "Remember the lighthouse.", "I will.");
@@ -280,9 +280,7 @@ async fn the_server_backend_asks_its_base_url_and_hands_it_each_turn_under_its_s
                 ],
                 "user_id": "project02-user",
                 "agent_id": "mira",
-                "run_id": "chat.1",
                 "infer": true,
-                "metadata": {"project02_sources": ["evt_1"]},
             })
         )
     );
@@ -370,9 +368,7 @@ async fn the_platform_backend_speaks_version_3_under_token_auth() {
             ],
             "user_id": "project02-user",
             "agent_id": "mira",
-            "run_id": "chat.1",
             "infer": true,
-            "metadata": {"project02_sources": ["evt_1"]},
         })
     );
 
@@ -407,13 +403,6 @@ async fn a_redirect_an_unreadable_answer_or_another_backends_answer_fails_the_ca
     );
     to_server_stub.answer("/search", Answer::text(200, "not json"));
     to_server_stub.answer(
-        "/search",
-        Answer::json(
-            200,
-            &json!({"results": [{"memory": "A row without an id."}]}),
-        ),
-    );
-    to_server_stub.answer(
         "/memories",
         Answer::json(200, &json!({"event_id": "evt-queued", "status": "PENDING"})),
     );
@@ -424,7 +413,7 @@ async fn a_redirect_an_unreadable_answer_or_another_backends_answer_fails_the_ca
 
     let mut reports = Vec::new();
 
-    for _ in 0..4 {
+    for _ in 0..3 {
         reports.push(
             ask(
                 &to_server,
@@ -465,7 +454,6 @@ async fn a_redirect_an_unreadable_answer_or_another_backends_answer_fails_the_ca
             ("handler_failed", "mem0 search failed: HTTP 302."),
             ("handler_failed", "mem0 search failed: HTTP 401."),
             ("handler_failed", unreadable("search").as_str()),
-            ("handler_failed", unreadable("search").as_str()),
             ("handler_failed", unreadable("add").as_str()),
             ("handler_failed", unreadable("add").as_str()),
         ]
@@ -473,129 +461,6 @@ async fn a_redirect_an_unreadable_answer_or_another_backends_answer_fails_the_ca
     assert!(!format!("{reports:?}").contains(SERVER_KEY));
     assert!(!format!("{reports:?}").contains(PLATFORM_KEY));
     assert!(to_server_stub.requests_to("/elsewhere").is_empty());
-}
-
-#[tokio::test]
-async fn a_turn_is_captured_behind_the_turn_under_the_names_its_session_recorded() {
-    let mem0 = Stub::mem0().await;
-    let host = host(&Storage::new(), &server(&mem0));
-    let mut held = mem0.hold("/memories");
-    let (turn, committed) = spoken(
-        "chat.1",
-        "evt_1",
-        ("Samuel", "Line 1."),
-        ("Mira the Bold", "Reply 1."),
-    );
-    let report = host.after_turn_committed(&turn, &committed).await;
-    let record = &report.evidence[0];
-
-    assert_eq!(
-        (record.status(), record.summary()),
-        (
-            EvidenceStatus::Accepted,
-            "Queued turn for memory extraction."
-        )
-    );
-    assert_eq!(
-        (
-            record.source_references()[0].kind(),
-            record.source_references()[0].id()
-        ),
-        (SourceKind::ExternalContract, "mem0.capture_queue")
-    );
-    assert_eq!(
-        held.arrived().await.body["messages"],
-        json!([
-            {"role": "user", "content": "Samuel: Line 1."},
-            {"role": "assistant", "content": "Mira the Bold: Reply 1."},
-        ])
-    );
-
-    held.release(Answer::json(200, &json!({"results": [{"id": "mem-1"}]})));
-}
-
-#[tokio::test]
-async fn once_eight_captures_wait_the_next_turn_is_not_queued_and_the_one_after_counts_it() {
-    let mem0 = Stub::mem0().await;
-    let host = host(&Storage::new(), &server(&mem0));
-    let mut held = mem0.hold("/memories");
-    let mut recorded = Vec::new();
-
-    for number in 1..=10 {
-        let (turn, committed) = exchange(
-            "chat.1",
-            &format!("evt_{number}"),
-            &format!("Line {number}."),
-            "Noted.",
-        );
-
-        recorded.push(capture(&host, &turn, &committed).await);
-    }
-
-    held.arrived().await;
-
-    let not_queued = (
-        EvidenceStatus::Degraded,
-        "Memory extraction is behind; this turn was not queued for capture.".to_owned(),
-    );
-
-    assert!(
-        recorded[..8]
-            .iter()
-            .all(|(status, _)| *status == EvidenceStatus::Accepted)
-    );
-    assert_eq!(recorded[8..], [not_queued.clone(), not_queued]);
-
-    held.release(Answer::json(200, &json!({"results": []})));
-    mem0.requests_once("/memories", 2).await;
-
-    let (turn, committed) = exchange("chat.1", "evt_11", "Line 11.", "Noted.");
-
-    assert_eq!(
-        capture(&host, &turn, &committed).await,
-        (
-            EvidenceStatus::Accepted,
-            "Queued turn for memory extraction. 2 earlier capture(s) did not complete.".to_owned()
-        )
-    );
-}
-
-#[tokio::test]
-async fn what_is_queued_reaches_the_backend_before_shutdown_ends() {
-    let mem0 = Stub::mem0().await;
-    let host = host(&Storage::new(), &server(&mem0));
-    let mut held = mem0.hold("/memories");
-
-    for number in 1..=3 {
-        let (turn, committed) = exchange(
-            "chat.1",
-            &format!("evt_{number}"),
-            &format!("Line {number}."),
-            "Noted.",
-        );
-
-        capture(&host, &turn, &committed).await;
-    }
-
-    held.arrived().await;
-
-    let shutdown = tokio::spawn(async move { host.shutdown(&line("bye")).await });
-
-    held.release(Answer::json(200, &json!({"results": [{"id": "mem-1"}]})));
-
-    let report = shutdown.await.unwrap();
-
-    assert_eq!(
-        (report.evidence[0].status(), report.evidence[0].summary()),
-        (EvidenceStatus::Accepted, "Closed memory provider.")
-    );
-    assert_eq!(
-        mem0.requests_to("/memories")
-            .iter()
-            .map(|request| request.body["messages"][0]["content"].clone())
-            .collect::<Vec<_>>(),
-        ["Sam: Line 1.", "Sam: Line 2.", "Sam: Line 3."]
-    );
 }
 
 #[tokio::test]
@@ -614,10 +479,31 @@ async fn a_capture_the_shutdown_could_not_wait_for_is_reported_lost() {
         (report.evidence[0].status(), report.evidence[0].summary()),
         (
             EvidenceStatus::Degraded,
-            "Closed memory provider. 1 capture(s) did not complete; most recent: mem0 add was \
-             abandoned before the backend answered; whether it completed is unknown."
+            "Closed memory provider. mem0 add was abandoned before the backend answered; \
+             whether it completed is unknown."
         )
     );
+}
+
+#[tokio::test]
+async fn a_failed_capture_is_forgotten_once_a_capture_after_it_completes() {
+    let mem0 = Stub::mem0().await;
+    let host = host(&Storage::new(), &server(&mem0));
+
+    mem0.answer("/memories", Answer::json(500, &json!({})));
+
+    for number in 1..=2 {
+        let (turn, committed) = exchange(
+            "chat.1",
+            &format!("evt_{number}"),
+            &format!("Line {number}."),
+            "Noted.",
+        );
+
+        capture(&host, &turn, &committed).await;
+    }
+
+    assert_eq!(drained(host, &line("bye")).await, "Closed memory provider.");
 }
 
 #[tokio::test]
@@ -751,61 +637,57 @@ async fn the_search_tool_answers_at_most_five_bounded_sourced_items_and_a_search
         })
     );
     assert_eq!(output(&none), &json!({"items": []}));
-
-    let no_results = &none.evidence[0].source_references()[0];
-
-    assert_eq!(
-        (no_results.kind(), no_results.id()),
-        (SourceKind::Runtime, "evt_1:mem0.search.no_results")
-    );
 }
 
 #[tokio::test]
-async fn the_add_tool_keeps_bounded_text_and_names_the_rows_it_stored_within_a_record() {
+async fn the_add_tool_keeps_the_text_as_written_and_names_the_memory_it_stored() {
     let mem0 = Stub::mem0().await;
     let host = host(&Storage::new(), &server(&mem0));
-    let stored: Vec<Value> = (0..40)
-        .map(|at| json!({"id": format!("mem-{at}")}))
-        .collect();
+    let text = "z".repeat(700);
 
-    mem0.answer("/memories", Answer::json(200, &json!({"results": stored})));
+    mem0.answer(
+        "/memories",
+        Answer::json(200, &json!({"results": [{"id": "mem-0"}, {"id": "mem-1"}]})),
+    );
 
     let report = ask(
         &host,
         "mem0.add",
-        json!({"text": "z".repeat(700)}),
+        json!({"text": text}),
         &line("Keep this."),
     )
     .await;
-    let added = output(&report);
     let record = &report.evidence[0];
 
     assert_eq!(
         mem0.requests_to("/memories")[0].body,
         json!({
-            "messages": [{"role": "user", "content": format!("{}...", "z".repeat(597))}],
+            "messages": [{"role": "user", "content": text}],
             "user_id": "project02-user",
             "agent_id": "mira",
             "infer": false,
-            "metadata": {"project02_sources": ["evt_1"]},
         })
     );
-    assert_eq!(added["id"], json!("mem-0"));
-    assert_eq!(added["sourceReferences"].as_array().unwrap().len(), 32);
     assert_eq!(
-        added["sourceReferences"][0],
-        json!({"kind": "memory", "id": "mem-0", "title": "Mem0 memory"})
+        output(&report),
+        &json!({
+            "id": "mem-0",
+            "sourceReferences": [{"kind": "memory", "id": "mem-0", "title": "Mem0 memory"}],
+        })
     );
     assert_eq!(record.summary(), "Added one memory item.");
-    assert_eq!(record.source_references().len(), 32);
     assert_eq!(
-        record.source_references()[0].kind(),
-        SourceKind::Conversation
+        record
+            .source_references()
+            .iter()
+            .map(SourceReference::kind)
+            .collect::<Vec<_>>(),
+        [SourceKind::Conversation, SourceKind::Memory]
     );
 }
 
 #[tokio::test]
-async fn an_add_that_stored_nothing_or_failed_is_a_failed_call() {
+async fn an_add_the_backend_keeps_already_says_so_and_one_it_failed_fails() {
     let mem0 = Stub::mem0().await;
     let host = host(&Storage::new(), &server(&mem0));
     let turn = line("Keep this.");
@@ -813,18 +695,13 @@ async fn an_add_that_stored_nothing_or_failed_is_a_failed_call() {
     mem0.answer("/memories", Answer::json(200, &json!({"results": []})));
     mem0.answer("/memories", Answer::json(500, &json!({})));
 
-    let nothing = ask(&host, "mem0.add", json!({"text": "Sam likes tea."}), &turn).await;
+    let kept = ask(&host, "mem0.add", json!({"text": "Sam likes tea."}), &turn).await;
     let failed = ask(&host, "mem0.add", json!({"text": "Sam likes tea."}), &turn).await;
 
+    assert_eq!(output(&kept), &json!({"alreadyKept": true}));
     assert_eq!(
-        [refusal(&nothing), refusal(&failed)],
-        [
-            (
-                "handler_failed",
-                "mem0 add failed: the backend created no memory for it."
-            ),
-            ("handler_failed", "mem0 add failed: HTTP 500."),
-        ]
+        refusal(&failed),
+        ("handler_failed", "mem0 add failed: HTTP 500.")
     );
 }
 
@@ -1178,8 +1055,8 @@ async fn an_extraction_with_no_memory_list_loses_the_capture_and_the_shutdown_sa
 
     assert_eq!(
         drained(host, &turn).await,
-        "Closed memory provider. 1 capture(s) did not complete; most recent: mem0 add failed: \
-         the extraction model's answer held no memory list."
+        "Closed memory provider. mem0 add failed: the extraction model's answer held no memory \
+         list."
     );
 }
 

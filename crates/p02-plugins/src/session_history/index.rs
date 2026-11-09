@@ -21,7 +21,7 @@ static NAME: LazyLock<Identifier> =
 
 /// A database at another version is rebuilt from the history, never
 /// migrated: raise it whenever the schema changes.
-const VERSION: NonZeroU32 = NonZeroU32::MIN;
+const VERSION: NonZeroU32 = NonZeroU32::new(2).expect("the version is not zero");
 
 /// What one catch-up slice reads of a session's log, so a long history
 /// is ingested a slice per transaction and a stopped hook stops between
@@ -40,15 +40,10 @@ const TRIGRAM_CHARS: usize = 3;
 /// holds each message's folded text with the tokenizer's own folding off,
 /// so a phrase and a substring read one folding.
 const SCHEMA: &str = "
-CREATE TABLE index_owner (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  character_id TEXT NOT NULL
-);
 CREATE TABLE sessions (
   session_id TEXT PRIMARY KEY,
   cursor TEXT NOT NULL,
-  message_count INTEGER NOT NULL,
-  damaged_records INTEGER NOT NULL
+  message_count INTEGER NOT NULL
 ) WITHOUT ROWID;
 CREATE TABLE messages (
   id INTEGER PRIMARY KEY,
@@ -154,41 +149,12 @@ struct Hit {
 }
 
 impl SessionIndex {
-    /// Opens the plugin's index and makes it the character's: an index
-    /// another character left is emptied before anything is read from it.
-    pub(super) fn open(
-        databases: &PluginDatabase,
-        character_id: &Identifier,
-    ) -> Result<Self, IndexError> {
-        let mut connection = databases.open(&NAME, VERSION, |connection| {
-            connection.execute_batch(SCHEMA)
-        })?;
-        let owner: Option<String> = connection
-            .query_row("SELECT character_id FROM index_owner", [], |row| row.get(0))
-            .optional()?;
-
-        match owner {
-            Some(owner) if owner == character_id.as_str() => {}
-            Some(_) => {
-                let transaction =
-                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-
-                transaction.execute("DELETE FROM sessions", [])?;
-                transaction.execute(
-                    "UPDATE index_owner SET character_id = ?1",
-                    [character_id.as_str()],
-                )?;
-                transaction.commit()?;
-            }
-            None => {
-                connection.execute(
-                    "INSERT INTO index_owner (id, character_id) VALUES (1, ?1)",
-                    [character_id.as_str()],
-                )?;
-            }
-        }
-
-        Ok(Self { connection })
+    pub(super) fn open(databases: &PluginDatabase) -> Result<Self, IndexError> {
+        Ok(Self {
+            connection: databases.open(&NAME, VERSION, |connection| {
+                connection.execute_batch(SCHEMA)
+            })?,
+        })
     }
 
     /// Brings the index to the history, whose listing is the authority: a
@@ -234,30 +200,30 @@ impl SessionIndex {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stored: Option<(String, i64, i64)> = transaction
+        let stored: Option<(String, i64)> = transaction
             .query_row(
-                "SELECT cursor, message_count, damaged_records FROM sessions WHERE session_id = ?1",
+                "SELECT cursor, message_count FROM sessions WHERE session_id = ?1",
                 [session.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
         let request = ReadMessages::from_start(session_id.clone()).within(SLICE);
         let request = match &stored {
-            Some((cursor, ..)) => request.after(HistoryCursor::new(cursor.as_str())),
+            Some((cursor, _)) => request.after(HistoryCursor::new(cursor.as_str())),
             None => request,
         };
         let batch = history.read_messages(&request)?;
         let moved = batch.reset
-            || stored.as_ref().map(|(cursor, ..)| cursor.as_str())
+            || stored.as_ref().map(|(cursor, _)| cursor.as_str())
                 != Some(batch.next_cursor.as_str());
 
         if !moved {
             return Ok(false);
         }
 
-        let (mut count, mut damaged) = match stored {
-            Some((_, count, damaged)) if !batch.reset => (count, damaged),
-            _ => (0, 0),
+        let mut count = match stored {
+            Some((_, count)) if !batch.reset => count,
+            _ => 0,
         };
 
         if batch.reset {
@@ -301,29 +267,16 @@ impl SessionIndex {
             }
         }
 
-        damaged = damaged.saturating_add_unsigned(batch.damaged_record_count);
         transaction.execute(
-            "INSERT INTO sessions (session_id, cursor, message_count, damaged_records)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO sessions (session_id, cursor, message_count)
+             VALUES (?1, ?2, ?3)
              ON CONFLICT (session_id) DO UPDATE SET
                cursor = excluded.cursor,
-               message_count = excluded.message_count,
-               damaged_records = excluded.damaged_records",
-            params![session, batch.next_cursor.as_str(), count, damaged],
+               message_count = excluded.message_count",
+            params![session, batch.next_cursor.as_str(), count],
         )?;
         transaction.commit()?;
         Ok(true)
-    }
-
-    /// The damaged records the history skipped, every session's together.
-    pub(super) fn damaged_records(&self) -> Result<u64, IndexError> {
-        let damaged: i64 = self.connection.query_row(
-            "SELECT COALESCE(SUM(damaged_records), 0) FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
-
-        Ok(damaged.try_into().unwrap_or_default())
     }
 
     /// The sessions whose messages hold `query` as written, case aside, the
