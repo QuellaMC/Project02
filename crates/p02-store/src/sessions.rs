@@ -282,14 +282,14 @@ impl CharacterData {
                 .is_some_and(|id| catalog.contains_key(&id));
 
             if !matches!(entry, PathEntry::Directory) {
-                return Err(if listed {
-                    StorageError::NotReal {
+                if listed {
+                    return Err(StorageError::NotReal {
                         path: directory,
                         expected: EntryKind::Directory,
-                    }
-                } else {
-                    StorageError::UnsupportedEntry { path: directory }
-                });
+                    });
+                }
+
+                continue;
             }
 
             if !listed && holds_evidence(&directory)? {
@@ -483,7 +483,7 @@ pub(crate) fn holds_evidence(directory: &Path) -> Result<bool, StorageError> {
     reason = "a test reads the files the store wrote, and puts a directory where one must fail"
 )]
 mod tests {
-    use p02_core::{CharacterProfile, Conversation, Participant, SpeakerName};
+    use p02_core::{Conversation, Participant};
     use p02_shared::{DanglingLinks, Identifier, canonical_path, temporary_target};
 
     use super::*;
@@ -507,20 +507,16 @@ mod tests {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777
     }
 
-    /// storage.atomic-writes: the files the store replaces appear whole and owner-only with no temporary left beside them, also when a write fails, and a failed catalog rewrite, like a conversation's failed make, takes back the directory it made
+    /// No temporary is left beside a replaced file, also when its write
+    /// fails, and a failed catalog rewrite takes back the directory it made,
+    /// as a conversation's failed make does.
     #[test]
     fn replaced_files_appear_whole_owner_only_and_a_failed_make_takes_its_directory_back() {
         let directory = tempfile::tempdir().unwrap();
         let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
-        let mira = CharacterProfile {
-            id: Identifier::new("mira").unwrap(),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        };
-        let data = CharacterData::ensure(&home, &mira.id).unwrap();
-        let participants = vec![
-            Participant::character(mira),
-            Participant::local_user(SpeakerName::new("Sam").unwrap()),
-        ];
+        let mira = Identifier::new("mira").unwrap();
+        let data = CharacterData::ensure(&home, &mira).unwrap();
+        let participants = vec![Participant::character(mira), Participant::local_user()];
         let conversation = home.ensure_conversation(participants.clone()).unwrap();
         let holder = home.conversation_writer(conversation.clone()).unwrap();
         let first = data.create_session(&holder).unwrap();

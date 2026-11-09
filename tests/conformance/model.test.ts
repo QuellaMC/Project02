@@ -20,13 +20,18 @@ import {
 } from './harness/model-server.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
 
-function progressOf(frames: readonly Frame[]): {readonly kind: string}[] {
-  return frames
-    .filter(frameOf('turn_progress'))
-    .map(
-      frame =>
-        (JSON.parse(frame.data ?? '') as {progress: {kind: string}}).progress,
-    );
+/** The drafts of each state of a running turn the stream told, in order. */
+function draftsOf(
+  frames: readonly Frame[],
+): (readonly {readonly draftId: string; readonly text: string}[])[] {
+  return frames.filter(frameOf('turn_running')).map(
+    frame =>
+      (
+        JSON.parse(frame.data ?? '') as {
+          drafts: readonly {readonly draftId: string; readonly text: string}[];
+        }
+      ).drafts,
+  );
 }
 
 it('model.provider-request-body: a round asks the model for a streamed completion with usage, automatic and parallel tool calls, and thinking on', async () => {
@@ -88,20 +93,15 @@ it("model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/comp
     status: 'rejected',
     reason: 'provider_error',
   });
-  expect(
-    sessionRecords(cloud.home, 'mira', 'role_model_round').map(
-      round =>
-        (
-          round['roleModelIOSnapshot'] as
-            {readonly providerMetadata: unknown} | undefined
-        )?.providerMetadata,
-    ),
-  ).toMatchObject([
+  expect(sessionRecords(cloud.home, 'mira', 'role_model_round')).toMatchObject([
     {
-      request: {
-        endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      failure: {
+        code: 'missing_api_key',
+        message: 'NVIDIA provider requires the nvidiaApiKey setting.',
       },
-      error: {code: 'missing_api_key'},
+      parsedRoleModelDecisionSnapshot: {
+        result: {status: 'rejected', rejection: {reason: 'provider_error'}},
+      },
     },
   ]);
   expect(model.requests).toHaveLength(2);
@@ -174,7 +174,8 @@ it('model.provider-streaming: an answer cut anywhere, inside a frame or a charac
 
     if (index > 0) {
       await events.next(
-        frameOf('turn_progress', {progress: {kind: 'reply_delta'}}),
+        frame =>
+          frameOf('turn_running')(frame) && draftsOf([frame])[0]?.length !== 0,
       );
     }
   }
@@ -251,11 +252,16 @@ it('model.provider-errors: an error the provider sends mid-stream fails the roun
     ) as string,
   });
   expect(carried.data).not.toContain(model.settings.nvidiaApiKey);
-  expect(progressOf(events.frames)).toMatchObject([
-    {kind: 'user_message'},
-    {kind: 'reply_delta', draftId: '1.0', text: 'Half a thought'},
-    {kind: 'reply_withdrawn', draftId: '1.0'},
+  expect(draftsOf(events.frames)).toEqual([
+    [],
+    [{draftId: '1.0', text: 'Half a thought'}],
+    [],
   ]);
+  expect(
+    events.frames.filter(
+      frameOf('turn_progress', {progress: {kind: 'visible_reply'}}),
+    ),
+  ).toEqual([]);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{role: 'user', text: 'Go on.'}],
   });
@@ -354,16 +360,15 @@ it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from t
     messages: [{}, {text: 'Hello there.'}],
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'split'}));
-  expect(
-    events.frames
-      .filter(frameOf('turn_progress', {progress: {kind: 'reply_delta'}}))
-      .map(
-        frame =>
-          (JSON.parse(frame.data ?? '') as {progress: {text: string}}).progress
-            .text,
-      )
-      .join(''),
-  ).toBe('Hello there.');
+  const drafted = draftsOf(events.frames).flatMap(drafts =>
+    drafts.map(draft => draft.text),
+  );
+
+  expect(drafted.at(-1)).toBe('Hello there.');
+
+  for (const text of drafted) {
+    expect('Hello there.'.startsWith(text)).toBe(true);
+  }
   expect(JSON.stringify(await wire.history(conversationId))).not.toContain(
     'secret',
   );

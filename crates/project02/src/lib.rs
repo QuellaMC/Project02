@@ -18,9 +18,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use p02_app::PackageReport;
 use p02_shared::{DEFAULT_HOME, DanglingLinks, ResolvePathError, canonical_path};
 use p02_store::Home;
+use p02_wire::PackageReport;
 use tokio_util::sync::CancellationToken;
 
 use crate::flags::Command;
@@ -40,6 +40,10 @@ pub fn run(args: &[OsString]) -> ExitCode {
         Ok(Command::Serve(flags)) => serve_until_signalled(flags, &mut console),
         Ok(Command::Inspect(flags)) => inspect::run(flags, &mut console),
         Ok(Command::Telegram(flags)) => telegram::run(flags, &mut console),
+        Ok(Command::Help(usage)) => {
+            console.say(&usage);
+            ExitCode::SUCCESS
+        }
         Err(usage) => console.failed(&usage),
     }
 }
@@ -168,7 +172,9 @@ mod tests {
 
     use super::*;
 
-    /// lifecycle.serve-in-a-program: A program that runs the daemon in its own process, on a console and a stop token of its own, finds the address on that console's out, on the line that begins with `ADDRESS_PREFIX`, and the daemon answers there with its token; cancelling the token ends serve with exit 0, daemon.json no longer naming a running process.
+    /// The address is on the console's out, the daemon answers there, and
+    /// cancelling the stop ends serve with exit 0 and no running process in
+    /// daemon.json.
     #[test]
     fn a_program_runs_the_daemon_on_its_own_console_until_it_cancels_the_stop() {
         let home = tempfile::tempdir().unwrap();

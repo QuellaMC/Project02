@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use p02_core::{CharacterProfile, SpeakerName};
-use p02_shared::{Fingerprint, Identifier};
+use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 const FORMAT: &str = "project02.character.v1";
 
@@ -22,28 +22,6 @@ pub struct CharacterDefinition {
     pub plugins: PluginExpectations,
 }
 
-/// Which content of a character a model round ran: her package's version
-/// and the fingerprint of her persona, recorded with every round.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CharacterRef {
-    pub version: CharacterVersion,
-    pub persona_fingerprint: Fingerprint,
-}
-
-impl CharacterDefinition {
-    /// The content of hers a round runs, as every round records it.
-    #[must_use]
-    pub fn character_ref(&self) -> CharacterRef {
-        CharacterRef {
-            version: self.version.clone(),
-            persona_fingerprint: Fingerprint::new(
-                &json!({"persona": {"system": self.persona.sections()}}),
-            ),
-        }
-    }
-}
-
 /// A character's persona: one section or more, in order, none blank.
 /// Persona only: the runtime's own instructions are not a package's to
 /// change.
@@ -58,9 +36,9 @@ impl Persona {
 }
 
 /// The version of a character's content, three numbers of 1 to 9 digits
-/// such as `1.0.0` as her package states it. It is recorded with what she
-/// says, read back as it was recorded, and compared as written: any other
-/// version is an upgrade.
+/// such as `1.0.0` as her package states it. It is recorded in her data,
+/// read back as it was recorded, and compared as written: any other version
+/// is an upgrade.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CharacterVersion(String);

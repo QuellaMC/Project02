@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 use std::time::Duration;
 
 use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json};
+use p02_wire::ConfigValueType;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -11,8 +12,8 @@ use crate::access::{AccessMap, AccessMapError};
 use crate::config::{ConfigField, ConfigSection};
 use crate::label::RedactionLabel;
 use crate::vocabulary::{
-    BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope, ConfigValueType, Declaration,
-    HandleToolCallFailure, PluginKind,
+    BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope, Declaration, HandleToolCallFailure,
+    PluginKind,
 };
 
 /// A plugin's manifest, validated: it exists only once every rule holds.
@@ -96,11 +97,6 @@ pub enum ManifestError {
          never ships in a manifest"
     )]
     SecretDefault(Identifier),
-    #[error(
-        "plugin config field \"{0}\" is required and cannot declare a defaultValue: a required \
-         field is one its operator must set"
-    )]
-    RequiredDefault(Identifier),
     #[error(
         "plugin config field \"{0}\" allowedValues must name one value at least, each a value of \
          its valueType"
@@ -391,14 +387,12 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
             &[
                 "name",
                 "description",
-                "required",
                 "secret",
                 "scope",
                 "valueType",
                 "defaultValue",
                 "allowedValues",
                 "agentMutable",
-                "reloadRequired",
                 "redactionLabels",
             ],
         )?)?;
@@ -433,7 +427,6 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
 fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     let name = fields.identifier("name")?;
     let description = fields.text("description")?;
-    let required = fields.boolean("required")?;
     let secret = fields.boolean("secret")?;
     let scope = fields.optional_vocabulary("scope", ConfigScope::ALL)?;
     let value_type = fields.optional_vocabulary("valueType", ConfigValueType::ALL)?;
@@ -457,7 +450,6 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         .map(|_| fields.strings("allowedValues"))
         .transpose()?;
     let agent_mutable = fields.optional_boolean("agentMutable")?.unwrap_or(false);
-    let reload_required = fields.optional_boolean("reloadRequired")? != Some(false);
     let redaction_labels = fields.labels("redactionLabels")?;
 
     if secret && agent_mutable {
@@ -467,23 +459,21 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     Ok(ConfigField {
         name,
         description,
-        required,
         secret,
         scope,
         value_type,
         default_value,
         allowed_values,
         agent_mutable,
-        reload_required,
         redaction_labels,
     })
 }
 
 /// Every value a manifest names for a field is one the field accepts: each
 /// allowed value, of which there is one at least, and the default, which is
-/// what the field takes wherever nothing sets it. A credential, or a value
-/// its operator must choose, is never a default a manifest decides, and a
-/// secret's type is one that holds a string, since a credential is one.
+/// what the field takes wherever nothing sets it. A credential is never a
+/// default a manifest decides, and a secret's type is one that holds a
+/// string, since a credential is one.
 fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
     if field.secret && !field.of_its_type(&Value::from("")) {
         return Err(ManifestError::SecretNotText(field.name.clone()));
@@ -504,8 +494,6 @@ fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
 
     if field.secret {
         Err(ManifestError::SecretDefault(field.name.clone()))
-    } else if field.required {
-        Err(ManifestError::RequiredDefault(field.name.clone()))
     } else if field.accepts(default_value) {
         Ok(())
     } else {
@@ -704,7 +692,6 @@ mod tests {
                     {
                         "name": "tone",
                         "description": "Reply tone.",
-                        "required": false,
                         "secret": false,
                         "valueType": "string",
                         "allowedValues": ["warm", "formal"],
@@ -713,7 +700,6 @@ mod tests {
                     {
                         "name": "apiKey",
                         "description": "A credential.",
-                        "required": false,
                         "secret": true,
                         "valueType": "string",
                         "redactionLabels": ["secret"],
@@ -824,13 +810,6 @@ mod tests {
             (
                 |m| m["config"]["fields"][1]["valueType"] = json!("number"),
                 ManifestError::SecretNotText(name("apiKey")),
-            ),
-            (
-                |m| {
-                    m["config"]["fields"][0]["required"] = json!(true);
-                    m["config"]["fields"][0]["defaultValue"] = json!("warm");
-                },
-                ManifestError::RequiredDefault(name("tone")),
             ),
             (
                 |m| m["config"]["fields"][0]["valueType"] = json!("number"),
@@ -945,7 +924,6 @@ mod tests {
         manifest["config"]["fields"][0]["scope"] = json!("character_only");
         manifest["config"]["fields"][0]["defaultValue"] = json!("warm");
         manifest["config"]["fields"][0]["agentMutable"] = json!(true);
-        manifest["config"]["fields"][0]["reloadRequired"] = json!(false);
         manifest["config"]["fields"][1]["scope"] = json!("global_only");
         manifest["requestedAccess"] = json!({"model_input": "write", "trusted_context": "write"});
 
@@ -955,8 +933,7 @@ mod tests {
 
         assert_eq!(tone.scope(), Some(ConfigScope::CharacterOnly));
         assert_eq!(tone.default_value(), Some(&json!("warm")));
-        assert!(tone.agent_mutable() && !tone.reload_required());
-        assert!(!key.agent_mutable() && key.reload_required());
+        assert!(tone.agent_mutable() && !key.agent_mutable());
         assert!(
             accepted
                 .requested_access()

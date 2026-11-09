@@ -4,8 +4,6 @@ use p02_contracts::Evidence;
 use p02_core::{ClientStamp, MessageId, VisibleMessage, VisibleMessageRole};
 use serde::{Deserialize, Serialize};
 
-use super::RecordError;
-
 /// A visible message committed: the person's line, stamped by the client
 /// that carried it, or a character's reply, named by the round that said
 /// it.
@@ -18,6 +16,7 @@ pub struct MessageCommitted {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Said {
+    /// A line an earlier build wrote may lack its stamps.
     ByPerson {
         source: Option<ClientStamp>,
         client_message_id: Option<ClientStamp>,
@@ -44,76 +43,31 @@ struct WireCommit {
 }
 
 impl MessageCommitted {
-    /// The person's line, `message`.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::Commit`] when `message` is not the person's.
-    pub fn user(message: VisibleMessage) -> Result<Self, RecordError> {
-        if message.role != VisibleMessageRole::User {
-            return Err(RecordError::Commit);
-        }
-
-        Ok(Self {
+    /// The person's line, `message`, as the surface `source` carried it
+    /// and its client submitted it, under `client_message_id`.
+    #[must_use]
+    pub fn user(
+        message: VisibleMessage,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
+    ) -> Self {
+        Self {
             message,
             said: Said::ByPerson {
-                source: None,
-                client_message_id: None,
+                source: Some(source),
+                client_message_id: Some(client_message_id),
             },
-        })
+        }
     }
 
     /// A character's reply, `message`, said in round `round`, with the
     /// evidence that came with it.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::Commit`] when `message` is not a character's.
-    pub fn character(
-        message: VisibleMessage,
-        round: NonZeroU32,
-        evidence: Vec<Evidence>,
-    ) -> Result<Self, RecordError> {
-        if message.role != VisibleMessageRole::Character {
-            return Err(RecordError::Commit);
-        }
-
-        Ok(Self {
+    #[must_use]
+    pub fn character(message: VisibleMessage, round: NonZeroU32, evidence: Vec<Evidence>) -> Self {
+        Self {
             message,
             said: Said::ByCharacter { round, evidence },
-        })
-    }
-
-    /// The person's line as the surface `source` carried it.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::Commit`] for a character's reply, which no client
-    /// stamps.
-    pub fn with_source(mut self, stamp: ClientStamp) -> Result<Self, RecordError> {
-        match &mut self.said {
-            Said::ByPerson { source, .. } => *source = Some(stamp),
-            Said::ByCharacter { .. } => return Err(RecordError::Commit),
         }
-
-        Ok(self)
-    }
-
-    /// The person's line as its client submitted it, under `stamp`.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::Commit`] for a character's reply, which no client
-    /// stamps.
-    pub fn with_client_message_id(mut self, stamp: ClientStamp) -> Result<Self, RecordError> {
-        match &mut self.said {
-            Said::ByPerson {
-                client_message_id, ..
-            } => *client_message_id = Some(stamp),
-            Said::ByCharacter { .. } => return Err(RecordError::Commit),
-        }
-
-        Ok(self)
     }
 
     #[must_use]
@@ -147,41 +101,27 @@ impl MessageCommitted {
             Said::ByCharacter { .. } => None,
         }
     }
-
-    #[must_use]
-    pub fn evidence(&self) -> &[Evidence] {
-        match &self.said {
-            Said::ByCharacter { evidence, .. } => evidence,
-            Said::ByPerson { .. } => &[],
-        }
-    }
 }
 
 impl TryFrom<WireCommit> for MessageCommitted {
-    type Error = RecordError;
+    type Error = &'static str;
 
     fn try_from(wire: WireCommit) -> Result<Self, Self::Error> {
-        if wire.visible_message_ids != [wire.visible_message.id.clone()] {
-            return Err(RecordError::Commit);
-        }
-
-        match (wire.round, wire.visible_message.role) {
-            (None, VisibleMessageRole::User) if wire.runtime_plugin_evidence.is_empty() => {
-                Ok(Self {
-                    message: wire.visible_message,
-                    said: Said::ByPerson {
-                        source: wire.source,
-                        client_message_id: wire.client_message_id,
-                    },
-                })
-            }
-            (Some(round), VisibleMessageRole::Character)
-                if wire.source.is_none() && wire.client_message_id.is_none() =>
-            {
+        Ok(match (wire.visible_message.role, wire.round) {
+            (VisibleMessageRole::User, _) => Self {
+                message: wire.visible_message,
+                said: Said::ByPerson {
+                    source: wire.source,
+                    client_message_id: wire.client_message_id,
+                },
+            },
+            (VisibleMessageRole::Character, Some(round)) => {
                 Self::character(wire.visible_message, round, wire.runtime_plugin_evidence)
             }
-            _ => Err(RecordError::Commit),
-        }
+            (VisibleMessageRole::Character, None) => {
+                return Err("a character's reply names the round that said it");
+            }
+        })
     }
 }
 

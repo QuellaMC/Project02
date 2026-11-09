@@ -1,13 +1,10 @@
 use std::num::NonZeroU32;
 
-use p02_core::{EventId, EventIdentity, VisibleMessage};
-use p02_shared::{
-    BoundJsonError, Credentials, Identifier, JsonLimits, bound_json, bound_json_object,
-};
+use p02_core::{EventIdentity, VisibleMessage};
+use p02_shared::{Identifier, redact_credentials, redact_object_credentials};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::output::within_limits;
 use crate::tool::ToolCallId;
 
 /// A finished turn as the model replays it: the person's message, every
@@ -74,63 +71,42 @@ impl ConversationToolCall {
     /// A finished call as the model is shown it again: its input and its
     /// result as [`ConversationToolCall::kept_input`] and
     /// [`ConversationToolCall::kept_result`] keep them.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the input or the result breaks a limit.
+    #[must_use]
     pub fn new(
         tool_call_id: ToolCallId,
         plugin_id: Identifier,
         tool_name: Identifier,
         input: Map<String, Value>,
         result: ToolCallResult,
-    ) -> Result<Self, BoundJsonError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             tool_call_id,
             plugin_id,
             tool_name,
-            input: Self::kept_input(input)?,
-            result: Self::kept_result(result)?,
-        })
+            input: Self::kept_input(input),
+            result: Self::kept_result(result),
+        }
     }
 
     /// A call's input as the model is shown it again and its session keeps
-    /// it: held to the JSON limits, with credential-named values redacted.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the input breaks a limit.
-    pub fn kept_input(input: Map<String, Value>) -> Result<Map<String, Value>, BoundJsonError> {
-        bound_json_object(
-            Value::Object(input),
-            "Conversation tool call input",
-            JsonLimits::default(),
-            Credentials::Redact,
-        )
+    /// it: every credential-named value redacted.
+    #[must_use]
+    pub fn kept_input(mut input: Map<String, Value>) -> Map<String, Value> {
+        redact_object_credentials(&mut input);
+        input
     }
 
     /// A call's result as the model is shown it again and its session keeps
-    /// it: an output held to the JSON limits with credential-named values
-    /// redacted, or a rejection's reason and message held to the same
-    /// limits.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the result breaks a limit.
-    pub fn kept_result(result: ToolCallResult) -> Result<ToolCallResult, BoundJsonError> {
+    /// it: an output with every credential-named value redacted, or a
+    /// rejection as it was.
+    #[must_use]
+    pub fn kept_result(result: ToolCallResult) -> ToolCallResult {
         match result {
-            ToolCallResult::Accepted { output } => Ok(ToolCallResult::Accepted {
-                output: bound_json(
-                    output,
-                    "Conversation tool call output",
-                    JsonLimits::default(),
-                    Credentials::Redact,
-                )?,
-            }),
-            rejected @ ToolCallResult::Rejected { .. } => {
-                within_limits(&rejected, "Conversation tool call rejection")?;
-                Ok(rejected)
+            ToolCallResult::Accepted { mut output } => {
+                redact_credentials(&mut output);
+                ToolCallResult::Accepted { output }
             }
+            rejected @ ToolCallResult::Rejected { .. } => rejected,
         }
     }
 
@@ -157,38 +133,6 @@ impl ConversationToolCall {
     #[must_use]
     pub fn result(&self) -> &ToolCallResult {
         &self.result
-    }
-}
-
-/// Which earlier turns a model call replayed, oldest first. The turns
-/// themselves are already durable in the session log.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryWindow {
-    pub turn_event_ids: Vec<EventId>,
-}
-
-impl HistoryWindow {
-    #[must_use]
-    pub fn of(turns: &[ConversationTurn]) -> Self {
-        Self {
-            turn_event_ids: turns
-                .iter()
-                .map(|turn| turn.identity.event_id().clone())
-                .collect(),
-        }
-    }
-
-    /// Whether `turns` are exactly the turns the window names, in its
-    /// order: a record that names other turns misstates the model's input.
-    #[must_use]
-    pub fn matches(&self, turns: &[ConversationTurn]) -> bool {
-        self.turn_event_ids.len() == turns.len()
-            && self
-                .turn_event_ids
-                .iter()
-                .zip(turns)
-                .all(|(event_id, turn)| turn.identity.event_id() == event_id)
     }
 }
 
@@ -265,16 +209,6 @@ mod tests {
     }
 
     #[test]
-    fn a_window_matches_exactly_the_turns_it_names() {
-        let turns = [turn("evt_1", &json!([])), turn("evt_2", &json!([]))];
-        let window = HistoryWindow::of(&turns);
-
-        assert!(window.matches(&turns));
-        assert!(!window.matches(&turns[1..]));
-        assert!(!HistoryWindow::of(&[turns[1].clone(), turns[0].clone()]).matches(&turns));
-    }
-
-    #[test]
     fn a_replayed_tool_call_never_shows_a_credential() {
         let call = ConversationToolCall::new(
             ToolCallId::new("call-1").unwrap(),
@@ -287,8 +221,7 @@ mod tests {
             ToolCallResult::Accepted {
                 output: json!({"stored": 1, "session": {"access_token": "t0k"}}),
             },
-        )
-        .unwrap();
+        );
 
         assert_eq!(call.input()["api_key"], json!("[redacted]"));
         assert_eq!(
@@ -296,34 +229,6 @@ mod tests {
             &ToolCallResult::Accepted {
                 output: json!({"stored": 1, "session": {"access_token": "[redacted]"}})
             }
-        );
-    }
-
-    #[test]
-    fn a_replayed_tool_call_is_held_to_the_json_limits_however_it_ended() {
-        let call = |result| {
-            ConversationToolCall::new(
-                ToolCallId::new("call-1").unwrap(),
-                Identifier::new("mem0").unwrap(),
-                Identifier::new("memory.add").unwrap(),
-                Map::new(),
-                result,
-            )
-        };
-        let oversized = "x".repeat(16 * 1_024 + 1);
-
-        assert!(
-            call(ToolCallResult::Accepted {
-                output: json!(oversized),
-            })
-            .is_err()
-        );
-        assert!(
-            call(ToolCallResult::Rejected {
-                reason: "handler_failed".to_owned(),
-                message: oversized,
-            })
-            .is_err()
         );
     }
 }

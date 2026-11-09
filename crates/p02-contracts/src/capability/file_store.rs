@@ -33,6 +33,15 @@ pub trait LeasedFiles: fmt::Debug {
     /// [`StoreError::Store`] for an unsafe path or a damaged log.
     fn read_jsonl(&self, path: &str) -> Result<Vec<Value>, StoreError>;
 
+    /// How many lines `read_jsonl` reads of the log, counted without
+    /// reading them as values. A log is only appended to, so its count
+    /// grows with every line and never falls back.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Store`] for an unsafe path or a log that cannot be read.
+    fn count_jsonl(&self, path: &str) -> Result<u64, StoreError>;
+
     /// Replaces a document whole, so a crash leaves the old one or the new.
     ///
     /// # Errors
@@ -44,13 +53,6 @@ pub trait LeasedFiles: fmt::Debug {
     ///
     /// [`StoreError::Store`] for an unsafe path or a failed write.
     fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError>;
-
-    /// How many writes the store has committed.
-    ///
-    /// # Errors
-    ///
-    /// [`StoreError::Store`] when the count cannot be read.
-    fn revision(&self) -> Result<u64, StoreError>;
 }
 
 /// Whether a hook may change the store it reads.
@@ -193,6 +195,14 @@ impl LeasedStore<'_> {
 
     /// # Errors
     ///
+    /// [`StoreError::Cancelled`], or the store's own error.
+    pub fn count_jsonl(&self, path: &str) -> Result<u64, StoreError> {
+        self.store.check_open()?;
+        self.files.count_jsonl(path)
+    }
+
+    /// # Errors
+    ///
     /// [`StoreError::Cancelled`], [`StoreError::ReadOnly`],
     /// [`StoreError::WritesRevoked`], or the store's own error.
     pub fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
@@ -207,13 +217,5 @@ impl LeasedStore<'_> {
     pub fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.store.check_writable()?;
         self.files.append_jsonl(path, value)
-    }
-
-    /// # Errors
-    ///
-    /// [`StoreError::Cancelled`], or the store's own error.
-    pub fn revision(&self) -> Result<u64, StoreError> {
-        self.store.check_open()?;
-        self.files.revision()
     }
 }

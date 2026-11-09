@@ -16,6 +16,11 @@ export type Events = {
   readonly frames: readonly Frame[];
   /** The first frame after the one `next` last returned that matches, as soon as it is here. */
   readonly next: (match: (frame: Frame) => boolean) => Promise<Frame>;
+  /** What `find` finds in every frame so far, as soon as they hold `what`; unlike `next`, it moves nothing. */
+  readonly holding: <T>(
+    what: string,
+    find: (frames: readonly Frame[]) => T | undefined,
+  ) => Promise<T>;
   /** Settles when the daemon ends the stream, and fails if it breaks off instead. */
   readonly ended: () => Promise<void>;
 };
@@ -100,36 +105,49 @@ export async function openEvents(daemon: Address): Promise<Events> {
       `events from ${daemon.origin}:\n${frames.map(describeFrame).join('\n')}`,
   );
 
+  /** What `find` finds in the frames once they hold it, unless the stream breaks or ends first. */
+  const held = async <T>(
+    what: string,
+    find: (frames: readonly Frame[]) => T | undefined,
+  ): Promise<T> => {
+    for (;;) {
+      const found = find(frames);
+
+      if (found !== undefined) {
+        return found;
+      }
+
+      if (mismatch !== undefined) {
+        throw mismatch;
+      }
+
+      if (over) {
+        throw failure(`The stream ended before ${what}.`);
+      }
+
+      await arrival.promise;
+    }
+  };
+
   return {
     frames,
     next: match =>
       within(
         'the next matching frame',
-        (async () => {
-          for (;;) {
-            const index = frames.findIndex(
-              (frame, at) => at >= taken && match(frame),
-            );
-            const frame = frames[index];
+        held('the next matching frame', () => {
+          const index = frames.findIndex(
+            (frame, at) => at >= taken && match(frame),
+          );
+          const frame = frames[index];
 
-            if (frame !== undefined) {
-              taken = index + 1;
-
-              return frame;
-            }
-
-            if (mismatch !== undefined) {
-              throw mismatch;
-            }
-
-            if (over) {
-              throw failure('The stream ended before the next matching frame.');
-            }
-
-            await arrival.promise;
+          if (frame !== undefined) {
+            taken = index + 1;
           }
-        })(),
+
+          return frame;
+        }),
       ),
+    holding: (what, find) => within(what, held(what, find)),
     ended: () => within('the stream to end', reading),
   };
 }

@@ -12,7 +12,10 @@ use tokio::sync::Notify;
 
 use crate::support::{Chat, Round, Toy, id, make_read_only, reply, restore};
 
-/// storage.append-failure-recovery: when a reply's write fails after the reply before it was shown, that reply was only ever a draft, withdrawn and never announced as a message, the turn fails and its rejection anchors the shown reply, and the thread a restarted character opens reads back valid, its next line completes, and what a plugin wrote to its store before the failure is still there
+/// A reply whose write fails after the reply before it was shown was only
+/// ever a draft: it is withdrawn and never announced, the turn's rejection
+/// names the shown reply, and what a plugin wrote to its store before the
+/// failure stays.
 #[tokio::test]
 async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     let keeper = Toy::new("keeper")
@@ -49,7 +52,7 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         })
         .await;
 
-    assert!(matches!(failed, Delivery::Failed { .. }), "{failed:?}");
+    assert!(matches!(failed, Delivery::Failed(_)), "{failed:?}");
     assert_eq!(
         chat.heard.take(),
         [
@@ -62,7 +65,7 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     );
     assert_eq!(chat.reopen().await, None);
 
-    let Delivery::Completed { turn, .. } = chat.say("hello again", "again").await else {
+    let Delivery::Completed(turn) = chat.say("hello again", "again").await else {
         panic!("the reopened thread takes the next line");
     };
     let store = chat.world.data().file_store(&id("keeper"));
@@ -141,23 +144,14 @@ async fn a_thread_whose_delivery_was_dropped_opens_again_and_goes_on() {
     let reopened = chat.say("Hello?", "third").await;
 
     assert!(
-        matches!(
-            lost,
-            Delivery::Failed {
-                error: RunTurnError::StateLost,
-                ..
-            }
-        ),
+        matches!(lost, Delivery::Failed(RunTurnError::StateLost)),
         "{lost:?}"
     );
     assert_eq!(
         closed.as_deref(),
         Some("the conversation lost its hold on the disk to an earlier failure")
     );
-    assert!(
-        matches!(reopened, Delivery::Completed { .. }),
-        "{reopened:?}"
-    );
+    assert!(matches!(reopened, Delivery::Completed(_)), "{reopened:?}");
     assert_eq!(
         chat.kinds(1),
         [

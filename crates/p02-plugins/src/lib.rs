@@ -24,11 +24,10 @@ mod turn;
 pub use before_call::{BeforeCallOutcome, PreparedContext, TurnRejection};
 pub use boundary::RecordLabelsError;
 pub use config_control::{
-    ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError, Rebuild,
+    ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, ReadConfigError,
 };
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
-pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder, ReloadError};
+pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder};
 pub use lifecycle::{HookPhaseReport, PhaseStatus};
 pub use tool_call::{ProposedToolCall, ToolCallReport};
 pub use turn::Turn;

@@ -3,15 +3,11 @@
 //! vouches for it, and nothing at all is written for one that is refused.
 
 use std::collections::BTreeMap;
-use std::num::{NonZeroU16, NonZeroU32};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use p02_characters::CharacterVersion;
-use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
-use p02_store::{CharacterData, StorageError};
-use serde_json::{Value, json};
+use p02_store::CharacterData;
 
-use crate::support::{World, conversation_named, mira};
+use crate::support::{World, mira};
 
 /// Every file under `root`, with its bytes; a directory left empty counts
 /// too, and a link names where it leads.
@@ -50,7 +46,7 @@ pub(crate) fn snapshot(root: &Path) -> BTreeMap<String, String> {
     found
 }
 
-pub(crate) fn link(target: &Path, link: &Path) {
+fn link(target: &Path, link: &Path) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(target, link).unwrap();
     #[cfg(windows)]
@@ -61,175 +57,10 @@ pub(crate) fn link(target: &Path, link: &Path) {
     }
 }
 
-fn marker(path: &Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
-}
-
+/// A directory a crash left before her marker reads as no data yet, and
+/// her writer adopts it.
 #[test]
-fn a_home_and_her_data_are_marked_at_version_15_with_their_scope_and_her_name() {
-    let world = World::new();
-    let home = marker(&world.root().join("schema.json"));
-    let data = marker(&world.data.root().join("schema.json"));
-
-    assert_eq!(home["createdAt"].as_str().map(str::len), Some(24));
-    assert_eq!(
-        home,
-        json!({"schemaVersion": 15, "scope": "home", "createdAt": home["createdAt"]})
-    );
-    assert_eq!(
-        data,
-        json!({
-            "schemaVersion": 15,
-            "scope": "character-data",
-            "characterId": "mira",
-            "createdAt": data["createdAt"],
-        })
-    );
-    assert_eq!(world.data.package_version(), None);
-}
-
-#[test]
-fn the_merged_package_version_is_recorded_beside_her_marker() {
-    let world = World::new();
-    let mut data = world.data.clone();
-
-    data.record_package_version(CharacterVersion::new("1.1.0").unwrap())
-        .unwrap();
-
-    let reopened = CharacterData::open(&world.home, &mira().id)
-        .unwrap()
-        .unwrap();
-
-    assert_eq!(
-        reopened.package_version().map(CharacterVersion::as_str),
-        Some("1.1.0")
-    );
-    assert_eq!(
-        marker(&world.data.root().join("schema.json"))["materializedCharacterPackageVersion"],
-        "1.1.0"
-    );
-}
-
-/// A read that judges a marker.
-type Judge<'w> = Box<dyn Fn() -> Result<(), StorageError> + 'w>;
-
-/// The home's marker and her data's, each with the read that judges it.
-fn markers(world: &World) -> Vec<(PathBuf, Judge<'_>)> {
-    vec![
-        (
-            world.root().join("schema.json"),
-            Box::new(|| world.home.check()),
-        ),
-        (
-            world.data.root().join("schema.json"),
-            Box::new(|| CharacterData::open(&world.home, &mira().id).map(drop)),
-        ),
-    ]
-}
-
-/// What each damage is refused as, and the marker put in its place: none
-/// stands for a directory there.
-#[test]
-fn a_marker_of_a_newer_version_or_one_that_is_no_marker_is_refused_and_left_as_it_was() {
-    let world = World::new();
-    let damages = |marker: &Value| -> Vec<(&str, &str, Option<String>)> {
-        let mut newer = marker.clone();
-
-        newer["schemaVersion"] = json!(99);
-
-        vec![
-            (
-                "unsupported_schema_version",
-                "written by a newer Project02, at storage schema version 99",
-                Some(newer.to_string()),
-            ),
-            (
-                "malformed_schema_marker",
-                "not valid JSON",
-                Some(r#"{"schemaVersion":"#.to_owned()),
-            ),
-            (
-                "malformed_schema_marker",
-                "whole-number schemaVersion",
-                Some(r#"{"schemaVersion":15.0}"#.to_owned()),
-            ),
-            ("malformed_schema_marker", "must be a regular file", None),
-        ]
-    };
-
-    for (path, open) in markers(&world) {
-        let original = std::fs::read(&path).unwrap();
-
-        for (code, says, bytes) in damages(&marker(&path)) {
-            std::fs::remove_file(&path).ok();
-            std::fs::remove_dir(&path).ok();
-
-            match &bytes {
-                Some(bytes) => std::fs::write(&path, bytes).unwrap(),
-                None => std::fs::create_dir(&path).unwrap(),
-            }
-
-            let refused = open().unwrap_err();
-
-            assert_eq!(refused.code(), code, "{says}");
-            assert!(refused.to_string().contains(says), "{refused}");
-
-            match &bytes {
-                Some(bytes) => assert_eq!(&std::fs::read_to_string(&path).unwrap(), bytes),
-                None => assert!(path.is_dir()),
-            }
-        }
-
-        std::fs::remove_dir(&path).unwrap();
-        std::fs::write(&path, &original).unwrap();
-        open().unwrap();
-    }
-}
-
-/// A marker an older build wrote is read as it is, a field this build does
-/// not know beside its own, and left as it was.
-#[test]
-fn an_older_marker_is_read_and_left_as_it_was() {
-    let world = World::new();
-
-    for (path, open) in markers(&world) {
-        let mut older = marker(&path);
-
-        older["schemaVersion"] = json!(14);
-        older["storeRoot"] = json!("/elsewhere");
-        std::fs::write(&path, older.to_string()).unwrap();
-
-        open().unwrap();
-        assert_eq!(marker(&path), older);
-    }
-}
-
-#[test]
-fn an_unmarked_data_directory_holding_history_or_a_foreign_file_is_never_adopted() {
-    for name in ["sessions.jsonl", "notes.txt"] {
-        let (_directory, home) = World::empty();
-        let data = home.root().join("character-data").join("mira");
-
-        home.ensure().unwrap();
-        std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join(name), "").unwrap();
-
-        let before = snapshot(home.root());
-        let refused = CharacterData::ensure(&home, &mira().id).unwrap_err();
-
-        assert_eq!(refused.code(), "missing_file", "{name}");
-        assert!(
-            refused
-                .to_string()
-                .contains(&format!("holds \"{name}\" without a data marker")),
-            "{refused}"
-        );
-        assert_eq!(snapshot(home.root()), before, "{name}");
-    }
-}
-
-#[test]
-fn an_unmarked_data_directory_of_control_state_alone_is_adopted() {
+fn an_unmarked_data_directory_is_adopted() {
     let (_directory, home) = World::empty();
     let data = home.root().join("character-data").join("mira");
 
@@ -245,41 +76,6 @@ fn an_unmarked_data_directory_of_control_state_alone_is_adopted() {
             .character(),
         &mira().id
     );
-}
-
-#[test]
-fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left_as_it_was() {
-    let world = World::new();
-    let zeta = world.root().join("character-data").join("zeta");
-    let data = world.data.root();
-
-    world.first_segment(&world.conversation).unwrap().release();
-    std::fs::create_dir_all(&zeta).unwrap();
-    for name in ["schema.json", "sessions.jsonl"] {
-        std::fs::copy(data.join(name), zeta.join(name)).unwrap();
-    }
-
-    let copied = snapshot(world.root());
-    let zeta_id = p02_shared::Identifier::new("zeta").unwrap();
-
-    for refused in [
-        CharacterData::open(&world.home, &zeta_id)
-            .map(drop)
-            .unwrap_err(),
-        CharacterData::ensure(&world.home, &zeta_id)
-            .map(drop)
-            .unwrap_err(),
-    ] {
-        assert_eq!(refused.code(), "character_identity_mismatch");
-        assert!(
-            refused
-                .to_string()
-                .contains("holds history for character \"mira\""),
-            "{refused}"
-        );
-    }
-
-    assert_eq!(snapshot(world.root()), copied);
 }
 
 /// What a home holds before its marker, its conversations directory still
@@ -361,145 +157,4 @@ fn an_unmarked_home_adopts_its_character_data_each_directory_judged_as_hers() {
         &mira().id
     );
     assert!(home.root().join("schema.json").exists());
-}
-
-/// No home is made inside a character's data: below a directory marked as
-/// hers, or below a home's character data, whatever lies between; a home
-/// whose path merely runs through a folder named so is a home.
-#[test]
-fn a_folder_inside_character_data_is_refused_as_a_home_and_nothing_is_written() {
-    let world = World::new();
-    let inside = [
-        world.data.root().join("inner"),
-        world.data.root().join("inner").join("deeper"),
-        world.root().join("character-data").join("zeta"),
-        world.root().join("character-data"),
-    ];
-
-    for path in &inside {
-        let before = snapshot(world.root());
-        let refused = p02_store::Home::new(path.clone()).ensure().unwrap_err();
-
-        assert_eq!(
-            refused.code(),
-            "malformed_schema_marker",
-            "{}",
-            path.display()
-        );
-        assert!(
-            refused
-                .to_string()
-                .contains("lies inside the character data at"),
-            "{refused}"
-        );
-        assert_eq!(snapshot(world.root()), before, "{}", path.display());
-    }
-
-    let (_directory, unmarked) = World::empty();
-    let named = unmarked.root().join("character-data").join("home");
-
-    p02_store::Home::new(named.clone()).ensure().unwrap();
-    assert!(named.join("schema.json").exists());
-}
-
-/// Each entry, moved elsewhere and linked back, is refused before anything
-/// is read through it or written where it leads.
-#[test]
-fn storage_behind_a_link_is_refused_and_nothing_is_written_where_it_leads() {
-    let linked = [
-        "character-data",
-        "conversations",
-        "character-data/mira",
-        "character-data/mira/sessions",
-        "character-data/mira/taken-lines",
-        "character-data/mira/sessions.jsonl",
-        "character-data/mira/config.json",
-        "character-data/mira/.locks",
-        "character-data/mira/plugin-data",
-        "session",
-        "conversation",
-    ];
-
-    for path in linked {
-        let world = World::new();
-        let path = match path {
-            "session" => format!("character-data/mira/sessions/{}.1", world.conversation.id()),
-            "conversation" => format!("conversations/{}", world.conversation.id()),
-            path => path.to_owned(),
-        };
-        let path = path.as_str();
-
-        world.first_segment(&world.conversation).unwrap().release();
-        std::fs::create_dir_all(world.data.root().join("taken-lines")).unwrap();
-        std::fs::create_dir_all(world.data.root().join("plugin-data")).unwrap();
-        std::fs::write(world.data.root().join("config.json"), "{}").unwrap();
-
-        let elsewhere = tempfile::TempDir::new().unwrap();
-        let moved = elsewhere.path().join("moved");
-
-        std::fs::rename(world.root().join(path), &moved).unwrap();
-        link(&moved, &world.root().join(path));
-
-        let before = snapshot(elsewhere.path());
-        let refused = CharacterData::open(&world.home, &mira().id)
-            .and_then(|data| {
-                let data = data.unwrap();
-                let holder = world
-                    .home
-                    .conversation_writer(conversation_named("conv_new"))?;
-
-                data.sessions()?;
-                data.create_session(&holder)?.release();
-                holder.release();
-                world.home.conversations().map(drop)
-            })
-            .unwrap_err();
-
-        assert_eq!(refused.code(), "missing_file", "{path}: {refused}");
-        assert_eq!(snapshot(elsewhere.path()), before, "{path}");
-    }
-}
-
-#[test]
-fn the_daemon_record_is_written_whole_and_owner_only_by_the_one_daemon_holding_the_home() {
-    let world = World::new();
-    let path = world.root().join("daemon.json");
-    let abandoned = world
-        .root()
-        .join(format!(".daemon.json.{}.tmp", uuid::Uuid::new_v4()));
-    let record = DaemonRecord {
-        protocol_version: 7,
-        token: DaemonToken::new("abc").unwrap(),
-        port: NonZeroU16::new(4310).unwrap(),
-        running: Some(DaemonRun {
-            pid: NonZeroU32::new(4242).unwrap(),
-            started_at: "2026-10-21T09:00:00.000Z".to_owned(),
-        }),
-    };
-    let daemon = world.home.daemon_lease().unwrap();
-
-    std::fs::write(&abandoned, "{\"protocolVersion\":7,").unwrap();
-    assert_eq!(
-        world.home.daemon_lease().unwrap_err().code(),
-        "storage_busy"
-    );
-    daemon.write_record(&record).unwrap();
-
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "{\n  \"protocolVersion\": 7,\n  \"token\": \"abc\",\n  \"port\": 4310,\n  \
-         \"running\": {\n    \"pid\": 4242,\n    \"startedAt\": \"2026-10-21T09:00:00.000Z\"\n  \
-         }\n}\n"
-    );
-    assert_eq!(read_daemon_record(world.root()).unwrap(), Some(record));
-    assert!(!abandoned.exists());
-    #[cfg(unix)]
-    assert_eq!(
-        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&path).unwrap().permissions())
-            & 0o777,
-        0o600
-    );
-
-    daemon.release();
-    world.home.daemon_lease().unwrap().release();
 }

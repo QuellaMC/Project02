@@ -3,7 +3,6 @@
 //! by, until the person answers, its deadline passes or the character
 //! stops.
 
-use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -11,53 +10,15 @@ use async_trait::async_trait;
 use p02_core::Timestamp;
 use p02_plugins::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use p02_shared::Identifier;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use p02_wire::{
+    Answer, CancelReason, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, Event,
+    PendingConfirmation, Settlement, TurnStamp,
+};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
-use ts_rs::TS;
-use uuid::Uuid;
 
 use crate::daemon::Events;
-use crate::outcome::{
-    CancelReason, ConfirmationAnswer, ConfirmationQuestion, Event, PendingConfirmation, Settlement,
-    TurnStamp,
-};
-
-/// A parked confirmation's id: a fresh UUID, unique across the daemon, by
-/// which any surface answers it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(transparent)]
-#[ts(as = "String")]
-pub struct ConfirmationId(String);
-
-impl ConfirmationId {
-    /// A fresh id: the one way one is minted.
-    #[must_use]
-    pub fn mint() -> Self {
-        Self(Uuid::new_v4().to_string())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ConfirmationId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-/// The person's answer to a parked confirmation or a pairing request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum Answer {
-    Approved,
-    Denied,
-}
 
 /// One character's confirmations: the turn running now, which every
 /// question it raises is stamped with, and the questions parked, oldest
@@ -253,10 +214,7 @@ impl Drop for Abandoned<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU64;
-
-    use p02_contracts::{ToolCallId, TurnIdentity};
-    use p02_core::{CharacterProfile, ConversationId, EventIdentity, SessionId, SpeakerName};
+    use p02_contracts::ToolCallId;
     use serde_json::Map;
 
     use super::*;
@@ -267,14 +225,6 @@ mod tests {
 
     fn request() -> ConfirmationRequest {
         ConfirmationRequest {
-            turn: TurnIdentity {
-                session_id: SessionId::new(ConversationId::mint(), NonZeroU64::MIN),
-                event: EventIdentity::mint(),
-                character: CharacterProfile {
-                    id: mira(),
-                    display_name: SpeakerName::new("Mira").unwrap(),
-                },
-            },
             plugin_id: Identifier::new("notes").unwrap(),
             tool_name: Identifier::new("notes.save").unwrap(),
             call_id: ToolCallId::new("call-1").unwrap(),

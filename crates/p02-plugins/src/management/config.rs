@@ -1,7 +1,8 @@
 //! `runtime.plugin.config` and `runtime.plugin.config.update`: one plugin's
 //! settings as the character's settings screen shows them, and a change of
 //! one field of them, prepared against the fingerprint the model read and
-//! made only on the person's yes, in her own settings.
+//! made only on the person's yes, in her own settings, which she runs on
+//! from her next request.
 
 use std::sync::Arc;
 
@@ -15,10 +16,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
-use crate::config_control::{
-    ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, Rebuild,
-};
-use crate::host::HostLink;
+use crate::config_control::{ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings};
 use crate::package::{blocking, rejected};
 
 const UNKNOWN_PLUGIN: &str = "plugin_config_unknown_plugin";
@@ -55,7 +53,6 @@ pub(super) async fn inspect(
 
 pub(super) async fn prepare(
     control: Arc<dyn ConfigControl>,
-    host: HostLink,
     call: &ToolCall,
 ) -> Result<ToolPreparation, PluginError> {
     let request = match Request::of(call)? {
@@ -119,11 +116,7 @@ pub(super) async fn prepare(
             ("before".to_owned(), before),
             ("after".to_owned(), after),
         ]),
-        effect: Box::new(Change {
-            control,
-            host,
-            request,
-        }),
+        effect: Box::new(Change { control, request }),
         evidence: vec![accepted(summary)],
     })
 }
@@ -245,27 +238,10 @@ impl Request {
         }
     }
 
-    /// Writes the change, its plugin rebuilt live as part of it when its
-    /// field takes effect so and the host runs it. A change written is
-    /// told as applied, live or at the next launch, whatever keeps it from
-    /// being live.
-    fn apply(self, control: &dyn ConfigControl, host: &HostLink) -> ToolCallOutcome {
-        let live = !self.field.reload_required();
-        let mut rebuild_live = |values: &Map<String, Value>| -> Result<(), String> {
-            host.core()
-                .map_err(|stopped| stopped.to_string())?
-                .reload(&self.plugin, values)
-                .map_err(|error| error_chain(&error))
-        };
-        let outcome = control.change(
-            &self.change(),
-            live.then_some(&mut rebuild_live as Rebuild<'_>),
-        );
-        let (fingerprint, rebuilt) = match outcome {
-            FieldChangeOutcome::Applied {
-                fingerprint,
-                rebuilt,
-            } => (fingerprint, rebuilt),
+    /// Writes the change.
+    fn apply(self, control: &dyn ConfigControl) -> ToolCallOutcome {
+        let fingerprint = match control.change(&self.change()) {
+            FieldChangeOutcome::Applied { fingerprint } => fingerprint,
             FieldChangeOutcome::Conflict => {
                 return rejected(CONFLICT, CONFLICT_SENTENCE.to_owned(), CONFLICT_SENTENCE);
             }
@@ -276,51 +252,15 @@ impl Request {
                 return rejected(UPDATE_FAILED, message.clone(), &message);
             }
         };
-        let waiting = match rebuilt {
-            Some(Ok(())) => None,
-            Some(Err(why)) => Some(why),
-            None if live => Some("her settings do not run the plugin".to_owned()),
-            None => {
-                Some("the field takes effect only when the plugin is built at launch".to_owned())
-            }
-        };
-        let mut output = Map::from_iter([
-            ("status".to_owned(), Value::from("applied")),
-            (
-                "appliesTo".to_owned(),
-                Value::from(if waiting.is_some() {
-                    "next_launch"
-                } else {
-                    "now"
-                }),
-            ),
-        ]);
-
-        if let Some(reason) = waiting {
-            output.insert(
-                "appliesToNote".to_owned(),
-                Value::from(format!(
-                    "Applies at the next launch instead of live: {reason}."
-                )),
-            );
-        }
-
-        output.extend([
-            ("pluginId".to_owned(), Value::from(self.plugin.as_str())),
-            (
-                "fieldName".to_owned(),
-                Value::from(self.field.name().as_str()),
-            ),
-            ("operation".to_owned(), Value::from(self.operation())),
-            ("fingerprint".to_owned(), Value::from(fingerprint.as_str())),
-            (
-                "reloadRequired".to_owned(),
-                Value::from(self.field.reload_required()),
-            ),
-        ]);
 
         ToolCallOutcome::Accepted {
-            output: Value::Object(output),
+            output: json!({
+                "status": "applied",
+                "pluginId": self.plugin.as_str(),
+                "fieldName": self.field.name().as_str(),
+                "operation": self.operation(),
+                "fingerprint": fingerprint.as_str(),
+            }),
             evidence: vec![accepted(format!(
                 "Changed plugin \"{}\" field \"{}\".",
                 self.plugin,
@@ -334,7 +274,6 @@ impl Request {
 #[derive(Debug)]
 struct Change {
     control: Arc<dyn ConfigControl>,
-    host: HostLink,
     request: Request,
 }
 
@@ -344,13 +283,9 @@ impl PreparedEffect for Change {
         self: Box<Self>,
         _context: &HookContext,
     ) -> Result<ToolCallOutcome, PluginError> {
-        let Self {
-            control,
-            host,
-            request,
-        } = *self;
+        let Self { control, request } = *self;
 
-        blocking(move || request.apply(control.as_ref(), &host)).await
+        blocking(move || request.apply(control.as_ref())).await
     }
 }
 

@@ -30,6 +30,7 @@ import type {
   HistoryOutcome,
   PairingRequest,
   PendingConfirmation,
+  RunningDraft,
   RunningTurn,
 } from '@project02/wire/contract';
 
@@ -43,7 +44,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 7,
+    protocolVersion: 8,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -57,7 +58,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 7,
+    protocolVersion: 8,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -71,7 +72,6 @@ function opened(): WebState {
     status: 'opened',
     conversationId,
     characterId: 'mira',
-    userParticipantId: 'local-user',
   });
 }
 
@@ -90,7 +90,7 @@ function progress(
 function userMessage(
   messageId: string,
   text: string,
-  clientMessageId?: string,
+  clientMessageId: string,
   conversation = conversationId,
 ): GatewayEvent {
   return progress(
@@ -101,10 +101,26 @@ function userMessage(
       speakerName: 'You',
       text,
       source: 'web',
-      ...(clientMessageId === undefined ? {} : {clientMessageId}),
+      clientMessageId,
     },
     conversation,
   );
+}
+
+/** Mira's turn of the line `clientMessageId` as the daemon says it runs now. */
+function running(
+  clientMessageId: string,
+  drafts: readonly RunningDraft[] = [],
+  conversation = conversationId,
+): GatewayEvent {
+  return {
+    kind: 'turn_running',
+    characterId: 'mira',
+    conversationId: conversation,
+    source: 'web',
+    clientMessageId,
+    drafts,
+  };
 }
 
 /** A turn's end as the daemon sends it: `committed` is its word on the line. */
@@ -212,7 +228,7 @@ describe('web store', () => {
 
     state = applyEvent(
       state,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'I rem'}),
+      running('line-1', [{draftId: '1.0', text: 'I rem'}]),
     );
     expect(state.turns.get(conversationId)?.drafts).toEqual([
       {draftId: '1.0', text: 'I rem'},
@@ -281,7 +297,6 @@ describe('web store', () => {
       status: 'opened',
       conversationId,
       characterId: 'mira',
-      userParticipantId: 'local-user',
     });
 
     expect(again.thread?.stale?.map(message => message.messageId)).toEqual([
@@ -294,7 +309,6 @@ describe('web store', () => {
       status: 'opened',
       conversationId: 'conv-2',
       characterId: 'nova',
-      userParticipantId: 'local-user',
     });
 
     expect(nova.thread?.stale).toEqual([]);
@@ -310,7 +324,6 @@ describe('web store', () => {
         {
           conversationId,
           characterId: 'mira',
-          senderId: 'local-user',
           text: 'hello there',
         },
       ],
@@ -320,11 +333,10 @@ describe('web store', () => {
     state = applyEvent(state, userMessage('m-1', 'hello there', 'line-1'));
 
     expect(state.pending.size).toBe(0);
-    expect(state.turns.get(conversationId)).toBeDefined();
     expect(state.thread?.messages).toEqual([
       {
         messageId: 'm-1',
-        speakerId: 'local-user',
+        role: 'user',
         speakerName: 'You',
         text: 'hello there',
         clientMessageId: 'line-1',
@@ -332,20 +344,15 @@ describe('web store', () => {
     ]);
   });
 
-  it('fills a draft bubble per draft id, replaces it with its commit, and removes one withdrawn', () => {
+  it("holds each turn as the daemon last said it, drafts whole, and ends it at its own line's end, never at another's", () => {
     let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
 
     state = applyEvent(
       state,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'I remember '}),
-    );
-    state = applyEvent(
-      state,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'you'}),
-    );
-    state = applyEvent(
-      state,
-      progress({kind: 'reply_delta', draftId: '1.1', text: 'and'}),
+      running('line-1', [
+        {draftId: '1.0', text: 'I remember you'},
+        {draftId: '1.1', text: 'and'},
+      ]),
     );
 
     expect(state.turns.get(conversationId)?.drafts).toEqual([
@@ -353,6 +360,8 @@ describe('web store', () => {
       {draftId: '1.1', text: 'and'},
     ]);
 
+    // The commit joins the thread, and the turn the daemon says next has
+    // neither the committed draft nor the one withdrawn.
     state = applyEvent(
       state,
       progress({
@@ -364,10 +373,7 @@ describe('web store', () => {
         draftId: '1.0',
       }),
     );
-    state = applyEvent(
-      state,
-      progress({kind: 'reply_withdrawn', draftId: '1.1'}),
-    );
+    state = applyEvent(state, running('line-1'));
 
     expect(state.turns.get(conversationId)?.drafts).toEqual([]);
     expect(state.thread?.messages.map(message => message.text)).toEqual([
@@ -375,19 +381,11 @@ describe('web store', () => {
       'I remember you',
     ]);
 
-    const unchanged = applyEvent(
-      state,
-      progress({kind: 'reply_withdrawn', draftId: 'never-opened'}),
-    );
-
-    expect(unchanged).toBe(state);
-
     // A turn ends at its own completion; another submission's ending on
-    // the same conversation — one the daemon refused on the spot — leaves
-    // it running, drafts and all.
+    // the same conversation leaves it running, drafts and all.
     state = applyEvent(
       state,
-      progress({kind: 'reply_delta', draftId: '2.0', text: 'and then'}),
+      running('line-1', [{draftId: '2.0', text: 'and then'}]),
     );
 
     const other = applyEvent(
@@ -404,24 +402,22 @@ describe('web store', () => {
       status: 'opened' as const,
       conversationId: 'conv-2',
       characterId: 'nova',
-      userParticipantId: 'local-user',
     };
     const mira = {
       status: 'opened' as const,
       conversationId,
       characterId: 'mira',
-      userParticipantId: 'local-user',
     };
     let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
 
     state = applyEvent(
       state,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'I remember '}),
+      running('line-1', [{draftId: '1.0', text: 'I remember '}]),
     );
     state = threadOpened(state, nova);
     state = applyEvent(
       state,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'you'}),
+      running('line-1', [{draftId: '1.0', text: 'I remember you'}]),
     );
     state = threadOpened(state, mira);
 
@@ -433,8 +429,8 @@ describe('web store', () => {
       drafts: [{draftId: '1.0', text: 'I remember you'}],
     });
 
-    // The commit takes the draft wherever the person is, and the turn's
-    // end takes the rest.
+    // The turn without its committed draft reaches the tab wherever the
+    // person is, and the turn's end takes the rest.
     state = applyEvent(
       threadOpened(state, nova),
       progress({
@@ -446,6 +442,7 @@ describe('web store', () => {
         draftId: '1.0',
       }),
     );
+    state = applyEvent(state, running('line-1'));
 
     expect(state.turns.get(conversationId)?.drafts).toEqual([]);
 
@@ -683,20 +680,17 @@ describe('web store', () => {
       status: 'opened' as const,
       conversationId: 'conv-2',
       characterId: 'nova',
-      userParticipantId: 'local-user',
     };
     const mira = {
       status: 'opened' as const,
       conversationId,
       characterId: 'mira',
-      userParticipantId: 'local-user',
     };
     let state = threadOpened(sent(opened(), 'hello mira', 'line-1'), nova);
 
     expect(state.pending.get('line-1')).toEqual({
       conversationId,
       characterId: 'mira',
-      senderId: 'local-user',
       text: 'hello mira',
     });
 
@@ -766,7 +760,6 @@ describe('web store', () => {
         status: 'opened',
         conversationId: 'conv-2',
         characterId: 'nova',
-        userParticipantId: 'local-user',
       }),
       page([committed('m-1', 'hello', 'line-1')]),
     );
@@ -785,7 +778,6 @@ describe('web store', () => {
       expect(read.pending.get('line-1')).toEqual({
         conversationId,
         characterId: 'mira',
-        senderId: 'local-user',
         text: 'hello',
       });
       expect(composerText(read)).toBe('');
@@ -811,13 +803,11 @@ describe('web store', () => {
       status: 'opened' as const,
       conversationId: 'conv-2',
       characterId: 'nova',
-      userParticipantId: 'local-user',
     };
     const mira = {
       status: 'opened' as const,
       conversationId,
       characterId: 'mira',
-      userParticipantId: 'local-user',
     };
     let state = composerChanged(opened(), 'half a thought');
 
@@ -840,7 +830,7 @@ describe('web store', () => {
     });
     live = applyEvent(
       live,
-      progress({kind: 'reply_delta', draftId: '1.0', text: 'half a thought'}),
+      running('line-1', [{draftId: '1.0', text: 'half a thought'}]),
     );
     live = composerChanged(live, 'and this is unsent');
 
@@ -948,7 +938,6 @@ describe('web store', () => {
         status: 'opened',
         conversationId: 'conv-2',
         characterId: 'nova',
-        userParticipantId: 'local-user',
       }),
       {
         kind: 'confirmation_settled',
@@ -1125,10 +1114,7 @@ describe('web store', () => {
     );
     const elsewhere = applyEvent(
       away,
-      progress(
-        {kind: 'reply_delta', draftId: '1.0', text: 'not here'},
-        'conv-2',
-      ),
+      running('line-9', [{draftId: '1.0', text: 'not here'}], 'conv-2'),
     );
 
     expect(elsewhere.thread).toBe(state.thread);
@@ -1200,7 +1186,6 @@ describe('web store', () => {
       status: 'opened',
       conversationId: 'conv-2',
       characterId: 'nova',
-      userParticipantId: 'local-user',
     });
 
     expect(historyPageRead(switched, conversationId, {}, unreadable)).toBe(

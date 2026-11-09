@@ -12,7 +12,9 @@ use p02_contracts::{
 use p02_shared::{Identifier, error_chain};
 use serde_json::{Value, json};
 
-use crate::config_control::{ActivationStatus, ConfigControl};
+use p02_wire::ActivationStatus;
+
+use crate::config_control::ConfigControl;
 use crate::host::Core;
 use crate::package::blocking;
 use crate::text::excerpt;

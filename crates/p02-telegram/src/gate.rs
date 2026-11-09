@@ -6,9 +6,8 @@
 
 use std::collections::HashMap;
 
-use p02_app::{Event, PairingDecision, PairingOutcome};
 use p02_core::{ClientStamp, SpeakerName};
-use p02_gateway::{PairingSubjectBody, Short};
+use p02_wire::{Event, PairingDecision, PairingOutcome, PairingSubjectBody, Short};
 
 use crate::bot::{Chat, DAEMON_DOWN, capitalized};
 use crate::bot_api::User;

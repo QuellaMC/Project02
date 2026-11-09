@@ -52,8 +52,9 @@
         speaks HTTP plus server-sent events on a loopback port. Every surface —
         the web page, a messaging connector — is a client of this API and
         nothing else, so what one surface sends, every surface sees. The
-        contract's types are generated from the Rust types the socket carries
-        into <code>packages/wire/src/contract/generated/</code>, as TypeScript
+        contract's types are generated from the Rust types the socket carries,
+        <code>crates/p02-wire</code>, into
+        <code>packages/wire/src/contract/generated/</code>, as TypeScript
         declarations and as a JSON Schema; this page is the wire.
       </p>
 
@@ -89,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 7,
+  "protocolVersion": 8,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -155,8 +156,9 @@
         Ctrl-C, SIGTERM, or SIGHUP — a closed terminal — is a stop: the daemon
         prints <em>Stopping; finishing what is in flight</em>, requests the stop
         at once (a boot still under way is joined, and its late
-        <code>ready</code> suppressed), finishes the turns it accepted, ends
-        each stream once every frame queued for it is written, closes the
+        <code>ready</code> suppressed), finishes the turn each character has
+        in flight, the lines behind it waiting in her inbox for her next start,
+        ends each stream once every frame queued for it is written, closes the
         socket and gives each exchange still in flight two seconds to finish,
         then rewrites the record without <code>running</code> and releases the
         lease.
@@ -231,15 +233,15 @@
             <td>Every submission has an identity</td>
             <td>
               <code>clientMessageId</code> is required on a turn. A repeat with
-              the same <code>(conversationId, clientMessageId)</code> joins the
-              turn in flight or returns the recent outcome; and an id the
-              character already holds from an earlier run of the daemon, on any
-              segment of the conversation, is refused as
-              <code>duplicate_submission</code>. That is what lets a client
-              whose answer was lost send the line again under the same id, at
-              once or after the daemon came back, without saying it twice;
-              history returns the id too, for a surface that wants to know
-              whether a line landed.
+              the same <code>(conversationId, clientMessageId)</code> while the
+              line waits in her inbox or runs is answered
+              <code>already_queued</code>; once a turn took it, in this run of
+              the daemon or an earlier one, on any segment of the conversation,
+              it is refused as <code>duplicate_submission</code>, naming the
+              message it became. That is what lets a client whose answer was
+              lost send the line again under the same id, at once or after the
+              daemon came back, without saying it twice; history returns the id
+              too, for a surface that wants to know whether a line landed.
             </td>
           </tr>
         </tbody>
@@ -342,19 +344,24 @@
             <td><code>POST /api/conversations/open</code></td>
             <td>
               <code>{characterId}</code> → <code>OpenOutcome</code>:
-              <code>opened</code> with the conversation and user participant
-              ids, <code>refused</code> (<code>character_unavailable</code>), or
-              a storage failure.
+              <code>opened</code> with the conversation and character ids,
+              <code>refused</code> (<code>character_unavailable</code>), or a
+              storage failure.
             </td>
           </tr>
           <tr>
             <td>turn</td>
             <td><code>POST /api/turns</code></td>
             <td>
-              <code>GatewayMessage</code> → <code>TurnOutcome</code>. Blocks
-              until the turn ends — a turn waiting on a confirmation can take
-              minutes. A browser's fetch waits without limit, and so does the
-              Telegram connector, whose HTTP client gives the call no timeout.
+              <code>GatewayMessage</code> → <code>SubmitOutcome</code>, at once:
+              <code>queued</code> once the line is in her inbox, which keeps it
+              across a crash until a turn of hers takes it,
+              <code>already_queued</code>, <code>refused</code>
+              (<code>unknown_conversation</code>,
+              <code>character_unavailable</code>,
+              <code>duplicate_submission</code>), or a storage failure. She
+              takes her lines one at a time, in the order they came, and the
+              stream tells each turn and how it ended.
             </td>
           </tr>
           <tr>
@@ -502,7 +509,6 @@ Content-Type: application/json
 
 {
   "conversationId": "conv_…",
-  "senderId": "local-user",
   "text": "hello there",
   "source": "web",
   "clientMessageId": "8b1f…"
@@ -539,41 +545,49 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":7,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":8,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"user_message",…}}
 
 id: 5f1c9a02b7e4d310-63
-event: turn_progress
-data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"I remember "}}
+event: turn_running
+data: {"kind":"turn_running","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","drafts":[]}
 
 id: 5f1c9a02b7e4d310-64
-event: turn_progress
-data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"reply_delta","draftId":"1.0","text":"you said "}}
+event: turn_running
+data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember "}]}
 
 id: 5f1c9a02b7e4d310-65
+event: turn_running
+data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember you said "}]}
+
+id: 5f1c9a02b7e4d310-66
 event: turn_progress
 data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
 
-id: 5f1c9a02b7e4d310-66
+id: 5f1c9a02b7e4d310-67
+event: turn_running
+data: {"kind":"turn_running",…,"drafts":[]}
+
+id: 5f1c9a02b7e4d310-68
 event: turn_completed
 data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed","committed":true}</code></pre>
 
       <p>
-        The same stream to a client that returns after frame 63, with
-        <code>Last-Event-ID: 5f1c9a02b7e4d310-63</code>:
+        The same stream to a client that returns after frame 64, with
+        <code>Last-Event-ID: 5f1c9a02b7e4d310-64</code>:
       </p>
 
       <pre><code>event: resumed
 data: {}
 
-id: 5f1c9a02b7e4d310-64
-event: turn_progress
-data: {…"progress":{"kind":"reply_delta","draftId":"1.0","text":"you said "}}
-
 id: 5f1c9a02b7e4d310-65
+event: turn_running
+data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember you said "}]}
+
+id: 5f1c9a02b7e4d310-66
 event: turn_progress
 data: {…}</code></pre>
 
@@ -612,13 +626,21 @@ data: {…}</code></pre>
             <td>
               A turn's progress: both committed roles —
               <code>user_message</code> (with <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code> — and
-              the reply's draft ahead of its commit:
-              <code>reply_delta</code> (one fragment of a draft, in order) and
-              <code>reply_withdrawn</code>. A committed
-              <code>visible_reply</code> names the <code>draftId</code> it
-              replaces. Drafts are the one thing the stream says before the log,
-              and they say so by their kind.
+              <code>clientMessageId</code>) and <code>visible_reply</code>,
+              which names the <code>draftId</code> it replaces — and its rounds'
+              tool calls.
+            </td>
+          </tr>
+          <tr>
+            <td><code>turn_running</code></td>
+            <td>
+              A turn as it runs now, whenever that changes, from the commit of
+              its line until its completion: its line's
+              <code>conversationId</code>, <code>source</code> and
+              <code>clientMessageId</code>, its character, and her
+              <code>drafts</code> so far, each its whole text — a reply the
+              model is still writing, the one thing the stream says before the
+              log. A client replaces its copy of the turn with each.
             </td>
           </tr>
           <tr>
@@ -687,10 +709,8 @@ data: {…}</code></pre>
             <td><code>state_changed</code></td>
             <td>
               A character's runtime state, with a message when something went
-              wrong. <code>reloading</code> is a pause, not an outage: the
-              character is assembling afresh from the config on disk between
-              turns, and a delivery sent meanwhile waits for it and lands on the
-              same conversation.
+              wrong. A character built afresh on changed config before a request
+              to her model says <code>ready</code> again.
             </td>
           </tr>
           <tr>
@@ -826,11 +846,13 @@ data: {…}</code></pre>
         <code>project02 telegram</code>. A line it carries is stamped
         <code>telegram:&lt;bot username&gt;</code>, with
         <code>&lt;bot id&gt;.&lt;chat id&gt;.&lt;message id&gt;</code> as its
-        <code>clientMessageId</code>, so the same message carried again joins
-        its turn. It answers private chats only, keeps nothing between runs —
-        each starts from the record, its <code>ready</code> and its config read
-        — and paces a draft by editing its message in each chat at most every
-        1.5 seconds. <code>crates/p02-telegram/README.md</code> has the rest.
+        <code>clientMessageId</code>, so a message Telegram hands on again is
+        the line it was. It hands each line to her inbox and asks Telegram past
+        the message only once the line is queued. It answers private chats
+        only, keeps nothing between runs — each starts from the record, its
+        <code>ready</code> and its config read — and edits a draft's message in
+        each chat at most every 1.5 seconds, to her turn as the daemon last
+        said it. <code>crates/p02-telegram/README.md</code> has the rest.
       </p>
 
       <h2>The sync rule</h2>
@@ -856,22 +878,22 @@ data: {…}</code></pre>
 
       <p class="rule">
         The reply reaches every surface as the model writes it, as a draft: a
-        draft is not a message, every draft ends exactly once, and the parser
-        stays the only judge.
+        draft is not a message, the daemon says what she is writing, and a
+        client works nothing out.
       </p>
 
       <p>
-        A <code>reply_delta {draftId, text}</code> is a fragment of the
-        character's reply, appended to what came before under the same
-        <code>draftId</code>. It has no message id, it is never persisted, and
-        no surface treats it as history. The draft ends in one of two ways: the
-        <code>visible_reply</code> that names its <code>draftId</code> replaces
-        it with the committed message, or a
-        <code>reply_withdrawn {draftId}</code> ends it with nothing said — a
-        round the parser refused, a reply whose write failed. The daemon closes
-        every draft a round opened before the round moves on, so none is open at
-        <code>turn_completed</code>, and a client never infers an ending from
-        another event.
+        While a turn runs, every change of it — her line committed, a draft
+        that grows, a draft committed or withdrawn — is told as the
+        <code>turn_running</code> frame of the whole turn: each open draft
+        under its <code>draftId</code>, with all its text so far. A draft has
+        no message id, is never persisted, and no surface treats it as
+        history. It ends in one of two ways: the <code>visible_reply</code>
+        that names its <code>draftId</code> comes first, then the turn without
+        that draft; or the turn without it comes alone, a draft withdrawn — a
+        round the parser refused, a reply whose write failed. The daemon
+        closes every draft a round opened before the round moves on, so none
+        is open at <code>turn_completed</code>.
       </p>
 
       <table>
@@ -883,51 +905,48 @@ data: {…}</code></pre>
         </thead>
         <tbody>
           <tr>
-            <td><code>reply_delta {draftId, text}</code></td>
+            <td><code>turn_running</code></td>
             <td>
-              Opens a bubble for the character keyed by
-              <code>conversationId</code> and <code>draftId</code> on the first
-              delta; appends <code>text</code> on every one.
+              Replaces its copy of the turn under its
+              <code>conversationId</code>: a bubble per draft with its text, or
+              a typing indicator while there is none.
             </td>
           </tr>
           <tr>
             <td><code>visible_reply {…, draftId}</code></td>
-            <td>
-              Replaces the bubble keyed <code>draftId</code> with the message
-              keyed <code>messageId</code>, text from the event. No open bubble
-              with that id: shows the message, as always.
-            </td>
+            <td>Shows the message, keyed <code>messageId</code>.</td>
           </tr>
           <tr>
-            <td><code>reply_withdrawn {draftId}</code></td>
-            <td>Removes the bubble.</td>
+            <td><code>turn_completed</code></td>
+            <td>
+              Drops the turn when it names the turn's own line, never another
+              line's.
+            </td>
           </tr>
           <tr>
             <td><code>ready</code></td>
             <td>
-              Replaces every open draft with the ones the snapshot carries,
-              under their conversations: what a tab that never left would hold.
-              The truth about the thread stays on the newest history page.
+              Replaces every turn with the ones the snapshot carries: what a tab
+              that never left would hold. The truth about the thread stays on
+              the newest history page.
             </td>
           </tr>
           <tr>
             <td><code>resumed</code></td>
-            <td>
-              Nothing: the deltas that follow continue the drafts on screen.
-            </td>
+            <td>Nothing: the frames that follow carry on from what it holds.</td>
           </tr>
         </tbody>
       </table>
 
       <p>
         Draft ids are <code>round.reply</code>, unique within the turn; a
-        conversation runs one turn at a time, so a surface keys drafts by
-        conversation. The committed text is the draft after the runtime's
-        normalization (line endings, trim), which is why the commit replaces the
-        draft rather than confirming it. Only the reply is ever drafted: what a
-        model writes to itself beside a tool call is never on the stream. Pacing
-        is each surface's own: a page renders every delta, a connector edits its
-        message on a timer.
+        conversation runs one turn at a time. The committed text is the draft
+        after the runtime's normalization (line endings, trim), which is why
+        the commit replaces the draft rather than confirming it. Only the
+        reply is ever drafted: what a model writes to itself beside a tool call
+        is never on the stream. Pacing is each surface's own: a page renders
+        every frame, a connector edits its message on a timer to the turn as
+        it was last told.
       </p>
 
       <h2>What a client never has to notice</h2>
@@ -945,24 +964,23 @@ data: {…}</code></pre>
         the message saying which. A reconnect gets its whole world in the
         <code>ready</code> frame, or exactly what it missed after
         <code>resumed</code>. A confirmation names the turn that raised it. And
-        a turn whose answer was lost is safe to send again under its id.
+        a line whose answer was lost is safe to send again under its id.
       </p>
 
       <h2>Config</h2>
 
       <p class="rule">
         The daemon owns config: every write goes through its one control
-        transaction, and a change reaches a running character by a reload
-        between that character's turns.
+        transaction, and a running character runs on a change from her next
+        request to her model.
       </p>
 
       <p>
         A view is what a settings page renders. Its
         <code>project02</code> fields, in the order a page shows them, and each
         plugin's fields share one shape — what this scope authored, what is in
-        effect and which layer put it there, whether a change reloads the
-        character; a plugin's switch says the same of itself as
-        <code>enabledSource</code>. Whatever a view offers, the scope can save:
+        effect and which layer put it there; a plugin's switch says the same of
+        itself as <code>enabledSource</code>. Whatever a view offers, the scope can save:
         every host field is authorable at the home and per character, a plugin
         or field that belongs to a character (<code>"character_only"</code>) is
         absent from the home's view, and one that belongs to the home
@@ -1003,16 +1021,18 @@ data: {…}</code></pre>
 
       <p>
         <code>applied</code> means the bytes are on disk. What the change does
-        to the roster arrives as <code>health_changed</code> at once, and what
-        it does to running characters as <code>state_changed</code>: the daemon
-        reconciles behind the answer, and a ready character whose assembly would
-        now differ — its effective config, its plugin values including secrets,
-        its package version — publishes <code>reloading</code>, finishes the
-        turn in flight, assembles afresh, and publishes <code>ready</code>. A
-        global change a character overrides costs it nothing, and so does a
-        change to a connector's section, from which no character is built. A
-        reload that cannot assemble lands in <code>failed</code> with the
-        diagnostic, and the next change or start retries it.
+        to the roster arrives as <code>health_changed</code> at once, and the
+        daemon reconciles behind the answer: a character it switches on starts,
+        and one it switches off stops once her reply in flight ends. Every
+        other change a running character meets at her next request to her
+        model, her reply in flight included: when what she would be built from
+        differs — her effective config, her plugin values including secrets —
+        she assembles afresh before that request, on the same conversation, and
+        publishes <code>ready</code>. A global change a character overrides
+        costs it nothing, and so does a change to a connector's section, from
+        which no character is built. Config she cannot assemble from lands her
+        in <code>failed</code> with the diagnostic, the line refused or the
+        reply in flight failed, and the next change or start retries her.
       </p>
 
       <h2>Storage failures are outcomes</h2>

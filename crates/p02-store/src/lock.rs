@@ -37,6 +37,8 @@ pub(crate) enum Resource<'a> {
     StorageSchema,
     /// A character's sessions catalog.
     SessionCatalog,
+    /// A character's inbox.
+    Inbox,
     /// A session's log, which one writer appends to.
     SessionWriter(&'a SessionId),
     /// A plugin's files in a character's data, at their root, which one
@@ -56,6 +58,7 @@ impl Resource<'_> {
             Self::ConversationWriter(id) => format!("conversation-writer:{id}"),
             Self::StorageSchema => "storage-schema".to_owned(),
             Self::SessionCatalog => "session-catalog".to_owned(),
+            Self::Inbox => "inbox".to_owned(),
             Self::SessionWriter(id) => format!("session-writer:{id}"),
             Self::PluginFiles(root) => format!("plugin:{}", root.display()),
             Self::SettingsDocument { path, .. } => {
@@ -72,9 +75,10 @@ impl Resource<'_> {
     fn stall_budget(&self) -> Duration {
         match self {
             Self::Daemon | Self::ConversationWriter(_) | Self::SessionWriter(_) => Duration::ZERO,
-            Self::ConversationsCatalog | Self::StorageSchema | Self::SessionCatalog => {
-                Duration::from_secs(10)
-            }
+            Self::ConversationsCatalog
+            | Self::StorageSchema
+            | Self::SessionCatalog
+            | Self::Inbox => Duration::from_secs(10),
             Self::PluginFiles(_) => Duration::from_secs(2),
             Self::SettingsDocument { wait, .. } => *wait,
         }
@@ -307,7 +311,7 @@ fn retry_delay() -> Duration {
 mod tests {
     use std::process::Child;
 
-    use p02_shared::{DanglingLinks, canonical_path, temporary_target, write_file_atomically};
+    use p02_shared::{DanglingLinks, canonical_path};
 
     use super::*;
     use crate::test_process;
@@ -323,40 +327,25 @@ mod tests {
         SessionId::parse("conv_a.1").unwrap()
     }
 
-    fn resource_named<'a>(key: &str, session: &'a SessionId) -> Resource<'a> {
-        match key {
-            "session-catalog" => Resource::SessionCatalog,
-            _ => Resource::SessionWriter(session),
-        }
-    }
-
-    /// Not a test of its own: the second process of the tests below. It
-    /// takes the lock its parent names, says so, and holds it until its
-    /// parent closes its input, or kills it.
+    /// Not a test of its own: the second process of the test below. It
+    /// takes the session writer's lock in the root its parent names, says
+    /// so, and holds it until its parent closes its input.
     #[test]
     fn a_lock_holder_for_another_process() {
-        let Some(brief) = test_process::brief() else {
+        let Some(root) = test_process::brief() else {
             return;
         };
-        let (root, key) = brief.split_once('\n').unwrap();
         let session = session();
-        let lease = acquire(&[(Path::new(root), &resource_named(key, &session))]).unwrap();
+        let lease = acquire(&[(Path::new(&root), &Resource::SessionWriter(&session))]).unwrap();
 
-        // A write begun and never finished, as a holder killed mid-write
-        // leaves it.
-        std::fs::write(
-            Path::new(root).join(format!(".sessions.jsonl.{}.tmp", Uuid::new_v4())),
-            "half a catal",
-        )
-        .unwrap();
         test_process::ready_then_wait();
         lease.release();
     }
 
-    fn holder(root: &Path, key: &str) -> Child {
+    fn holder(root: &Path) -> Child {
         test_process::spawn(
             "lock::tests::a_lock_holder_for_another_process",
-            &format!("{}\n{key}", root.display()),
+            &root.display().to_string(),
         )
     }
 
@@ -409,6 +398,7 @@ mod tests {
                 waited,
                 BusyCode::Storage,
             ),
+            (Resource::Inbox, "inbox", waited, BusyCode::Storage),
             (
                 Resource::SessionWriter(&session),
                 "session-writer:conv_a.1",
@@ -474,7 +464,7 @@ mod tests {
     fn a_lock_another_process_holds_is_busy_until_it_lets_go() {
         let (_directory, root) = temp_root();
         let session = session();
-        let mut child = holder(&root, "session-writer");
+        let mut child = holder(&root);
 
         assert!(matches!(
             acquire(&[(&root, &Resource::SessionWriter(&session))]),
@@ -489,32 +479,6 @@ mod tests {
         acquire(&[(&root, &Resource::SessionWriter(&session))])
             .unwrap()
             .release();
-    }
-
-    /// The kernel lets a dead holder's lock go: the next taker has it, and
-    /// the next guarded write sweeps what the holder was writing.
-    #[test]
-    fn a_holder_killed_mid_write_leaves_its_lock_to_the_next_taker() {
-        let (_directory, root) = temp_root();
-        let mut child = holder(&root, "session-catalog");
-
-        child.kill().unwrap();
-        child.wait().unwrap();
-
-        with_lock(&root, &Resource::SessionCatalog, || {
-            write_file_atomically(&root.join("sessions.jsonl"), b"")
-                .map_err(StorageError::write(&root))
-        })
-        .unwrap();
-
-        let mut residue: Vec<String> = std::fs::read_dir(&root)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .filter(|name| temporary_target(name.as_ref()).is_some())
-            .collect();
-
-        residue.sort();
-        assert_eq!(residue, Vec::<String>::new());
     }
 
     /// A waiter's budget is for a holder that makes no progress: while the

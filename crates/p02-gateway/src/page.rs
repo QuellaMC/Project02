@@ -9,7 +9,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
-use crate::http::Refusal;
+use crate::http::Refused;
 
 /// What `pnpm build:web` left in `packages/page/dist` when the binary was
 /// built, or nothing when it had not run.
@@ -53,7 +53,7 @@ pub(crate) fn answer(method: &Method, path: &str) -> Response {
             "No web page is built here: run `pnpm build`. The API is under /api.",
         )
             .into_response(),
-        None => Refusal::new(
+        None => Refused::new(
             StatusCode::NOT_FOUND,
             "not_found",
             format!("Nothing is served at {path}."),

@@ -7,9 +7,7 @@
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 
-use p02_core::{
-    CharacterProfile, Conversation, Session, SessionId, SpeakerName, VisibleMessageRole,
-};
+use p02_core::{Conversation, Participant, Session, SessionId};
 use p02_shared::{FileStamp, PathEntry, append_line, describe_entry, file_stamp};
 
 use crate::character_data::CharacterData;
@@ -20,15 +18,12 @@ use crate::lock::{Lease, Resource, acquire};
 use crate::record::LogRecord;
 use crate::replay::SessionReplay;
 
-/// One session's log, as one character keeps it, bound to the names its
-/// conversation's participants had when it began: each of its messages is
-/// said by that character or that person.
+/// One session's log, as one character keeps it: each of its messages is
+/// said by her or by the person.
 #[derive(Clone, Debug)]
 pub struct SessionLog {
     data: CharacterData,
     session: SessionId,
-    character: CharacterProfile,
-    user_name: SpeakerName,
 }
 
 /// A session's log while its writer lease is held: what has replayed so
@@ -73,27 +68,19 @@ impl CharacterData {
         segment: NonZeroU64,
     ) -> Result<SessionLog, StorageError> {
         let participants = conversation.participants();
-        let character = participants.iter().find(|participant| {
-            participant.kind == VisibleMessageRole::Character && participant.id == *self.character()
-        });
-        let person = participants
-            .iter()
-            .find(|participant| participant.is_local_user());
-        let (Some(character), Some(person)) = (character, person) else {
+        let hers = participants.contains(&Participant::character(self.character().clone()));
+        let theirs = participants.iter().any(Participant::is_local_user);
+
+        if !(hers && theirs) {
             return Err(StorageError::NotAParticipant {
                 conversation: conversation.id().clone(),
                 participant: self.character().clone(),
             });
-        };
+        }
 
         Ok(SessionLog {
             data: self.clone(),
             session: SessionId::new(conversation.id().clone(), segment),
-            character: CharacterProfile {
-                id: character.id.clone(),
-                display_name: character.display_name.clone(),
-            },
-            user_name: person.display_name.clone(),
         })
     }
 }
@@ -221,8 +208,7 @@ impl SessionLog {
     fn replay(&self, content: &[u8]) -> ReadLog {
         let mut replay = SessionReplay::new(Session::new(
             self.session.clone(),
-            self.character.clone(),
-            self.user_name.clone(),
+            self.data.character().clone(),
         ));
         let mut lines = Vec::new();
         let mut end = 0;

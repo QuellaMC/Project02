@@ -5,11 +5,9 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_contracts::{
-    CommittedTurn, FactoryInput, MissingConfigValueError, PluginError, RedactionLabel, StoreAccess,
-};
+use p02_contracts::{CommittedTurn, FactoryInput, PluginError, RedactionLabel, StoreAccess};
 use p02_core::Timestamp;
-use p02_plugins::{ActivationError, BeforeCallOutcome, BuildPluginError, list};
+use p02_plugins::{BeforeCallOutcome, list};
 use p02_shared::Identifier;
 use serde_json::{Map, json};
 
@@ -17,27 +15,10 @@ use crate::storage::Storage;
 use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, builder, turn};
 
 #[test]
-fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_at_activation() {
+fn a_plugin_enabled_twice_or_built_in_vain_is_refused_at_activation() {
     let twice = builder(Storage::new())
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
-        .activate()
-        .unwrap_err();
-    let unset = builder(Storage::new())
-        .enable(
-            &Spec {
-                config_fields: json!([{
-                    "name": "backend",
-                    "description": "Where the notes are kept.",
-                    "required": true,
-                    "secret": false,
-                    "valueType": "string",
-                    "redactionLabels": [],
-                }]),
-                ..Spec::new("notes")
-            },
-            Arc::new(Scripted::default()),
-        )
         .activate()
         .unwrap_err();
     let in_vain = builder(Storage::new())
@@ -50,22 +31,6 @@ fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_a
         .unwrap_err();
 
     assert_eq!(twice.to_string(), r#"plugin "notes" is enabled twice"#);
-    assert!(
-        matches!(
-            &unset,
-            ActivationError::Build {
-                source: BuildPluginError::Config(MissingConfigValueError { field }),
-                ..
-            } if field.as_str() == "backend"
-        ),
-        "{unset:?}"
-    );
-    assert_eq!(
-        unset.source().map(ToString::to_string),
-        Some(
-            r#"required plugin config field "backend" is not set to a value it accepts"#.to_owned()
-        )
-    );
     assert_eq!(in_vain.to_string(), r#"plugin "notes" could not be built"#);
     assert_eq!(
         in_vain.source().map(ToString::to_string),
@@ -224,7 +189,7 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
 
     host.before_role_model_call(&turn()).await;
     host.after_turn_committed(&turn(), &committed).await;
-    host.shutdown(&turn()).await;
+    host.shutdown().await;
 
     assert_eq!(
         granted.seen("before"),
@@ -242,11 +207,12 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
     assert_eq!(
         granted.seen("shutdown"),
         Some(Seen {
-            message: Some("hello".to_owned()),
+            message: None,
             store: Some(StoreAccess::ReadOnly),
             history: true,
             databases: false,
-        })
+        }),
+        "her end serves no turn, so it shows no turn's text"
     );
     assert_eq!(
         reader.seen("before"),

@@ -13,8 +13,6 @@ use p02_contracts::{
 use p02_shared::Identifier;
 use serde_json::Value;
 
-/// The package's factory, run again when a change to its settings is
-/// applied live.
 pub(crate) fn create(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
     let text = |field: &str| {
         input

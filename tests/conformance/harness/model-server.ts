@@ -395,9 +395,8 @@ function pieces(whole: string, cuts: readonly number[]): string[] {
 
 /**
  * A model that never decides, for as many rounds as one turn gives it:
- * each answer neither replies nor calls a tool, so the parser refuses it,
- * and the turn ends rejected once its rounds — the first and 99 more — are
- * spent.
+ * each answer neither replies nor calls a tool, so it is refused, and the
+ * turn ends rejected once its rounds — the first and 99 more — are spent.
  */
 export function undecided(rounds = 100): Answer[] {
   return Array.from({length: rounds}, () => ({chunks: [finish('stop')]}));

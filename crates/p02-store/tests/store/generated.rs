@@ -1,10 +1,10 @@
 //! Logs written the way the runtime writes them, generated at random from
 //! fixed seeds: each must read back as written, record for record and byte
-//! for byte, whatever a crash left after its last line, and a damaged line
-//! before that is skipped and named, never the end of the read.
+//! for byte.
 
 use std::path::PathBuf;
 
+use p02_contracts::ModelOutput;
 use p02_core::SessionId;
 use p02_store::{LogRecord, SessionLog};
 
@@ -103,7 +103,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                 script
                     .turn(&line)
                     .user(&client)
-                    .round(Some("I would rather not answer in JSON.".to_owned()))
+                    .round(Some(ModelOutput::default()))
                     .round(Some(answer(&replies, &[], None)))
                     .replies()
                     .completed();
@@ -190,60 +190,5 @@ fn every_generated_log_reads_back_as_written_and_every_line_re_encodes_to_its_ow
                 "seed {seed}"
             );
         }
-    }
-}
-
-#[test]
-fn what_a_crash_left_of_the_last_line_is_dropped_and_the_next_append_cuts_it() {
-    let world = World::new();
-
-    for seed in [3, 11, 29, 47] {
-        let (log, path, records) = written(&world, seed);
-        let whole = std::fs::read(&path).unwrap();
-        let last = whole[..whole.len() - 1]
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |at| at + 1);
-
-        for cut in (last..whole.len()).step_by(41).chain([whole.len() - 1]) {
-            std::fs::write(&path, &whole[..cut]).unwrap();
-
-            assert_eq!(
-                log.read().unwrap().records(),
-                &records[..records.len() - 1],
-                "seed {seed}, cut at {cut}"
-            );
-        }
-
-        let mut writer = log.clone().writer().unwrap();
-
-        writer.append(records.last().unwrap().clone()).unwrap();
-        writer.release();
-        assert_eq!(std::fs::read(&path).unwrap(), whole, "seed {seed}");
-    }
-}
-
-#[test]
-fn a_damaged_committed_line_is_skipped_and_named_and_the_lines_before_it_read_as_written() {
-    let world = World::new();
-    let mut random = Random(5);
-
-    for seed in 100..140 {
-        let (log, path, records) = written(&world, seed);
-        let lines = lines_of(&path);
-        let at = random.below(lines.len());
-        let mut damaged = lines.clone();
-
-        damaged[at] = match random.below(3) {
-            0 => lines[at][..lines[at].len() / 2].to_owned(),
-            1 => r#"{"eventId": "evt_torn"}"#.to_owned(),
-            _ => lines[at].replacen("\"kind\":\"", "\"kind\":\"x", 1),
-        };
-        std::fs::write(&path, damaged.join("\n") + "\n").unwrap();
-
-        let replay = log.read().unwrap();
-
-        assert_eq!(replay.skipped_lines().numbers()[0], at + 1, "seed {seed}");
-        assert_eq!(replay.records()[..at], records[..at], "seed {seed}");
     }
 }

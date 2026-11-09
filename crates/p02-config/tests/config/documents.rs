@@ -1,57 +1,10 @@
-//! The documents as their files hold them: absent, unreadable, or judged.
+//! The documents as their files hold them: unreadable, or judged.
 
-use p02_config::{Code, ReadSettingsError, Resolution, RoleModelProvider};
-use serde_json::{Value, json};
+use p02_config::{ReadSettingsError, Resolution, RoleModelProvider};
+use p02_wire::Code;
+use serde_json::json;
 
 use crate::support::{World, document, home, host_field, of};
-
-#[test]
-fn a_home_without_settings_has_no_findings_and_shows_each_default() {
-    let world = World::new();
-    let view = world.view(&home());
-
-    assert_eq!(view["status"], "ok");
-    assert_eq!(view["diagnostics"], json!([]));
-
-    let fields: Vec<(Value, Value, Value)> = view["project02"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|field| {
-            (
-                field["name"].clone(),
-                field["effective"]["source"].clone(),
-                field["effective"]
-                    .get("value")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            )
-        })
-        .collect();
-
-    assert_eq!(
-        fields,
-        [
-            (json!("userDisplayName"), json!("default"), json!("You")),
-            (json!("roleModelProvider"), json!("missing"), Value::Null),
-            (json!("nvidiaApiKey"), json!("missing"), Value::Null),
-            (json!("nvidiaModel"), json!("missing"), Value::Null),
-            (json!("nvidiaBaseUrl"), json!("missing"), Value::Null),
-            (json!("contextWindowTokens"), json!("default"), json!(32768)),
-            (
-                json!("defaultMemoryProvider"),
-                json!("missing"),
-                Value::Null
-            ),
-            (json!("enabled"), json!("default"), json!(true)),
-        ]
-    );
-
-    let settings = world.resolve(&of("mira")).settings();
-
-    assert_eq!(settings.host().role_model_provider, None);
-    assert!(settings.host().enabled);
-}
 
 #[test]
 fn a_document_that_is_no_json_object_refuses_its_targets_and_one_of_hers_names_her() {

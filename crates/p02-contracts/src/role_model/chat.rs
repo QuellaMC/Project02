@@ -1,4 +1,3 @@
-use p02_shared::Identifier;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -125,14 +124,6 @@ impl<'de> Deserialize<'de> for Function {
             ))
         }
     }
-}
-
-/// The name a provider is shown for a tool whose own name it cannot take.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolNameMapping {
-    pub runtime_name: Identifier,
-    pub provider_name: String,
 }
 
 #[cfg(test)]

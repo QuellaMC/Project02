@@ -12,13 +12,14 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use p02_wire::RunningDraft;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::Lines;
-use crate::bot::capitalized;
+use crate::bot::unwritten;
 use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
@@ -72,12 +73,12 @@ enum Command {
     Started {
         mirrored: Option<String>,
     },
-    /// A draft's text so far: a new one is posted in every paired chat
-    /// when `post` and it has words, and one already posted is edited at
-    /// most once an interval.
-    Draft {
-        id: String,
-        text: String,
+    /// Her drafts, each its text so far: one held that is not among them
+    /// is withdrawn, a new one is posted in every paired chat when `post`
+    /// and it has words, and one already posted is edited at most once an
+    /// interval, to the text it has then.
+    Drafts {
+        drafts: Vec<RunningDraft>,
         post: bool,
     },
     /// The committed text replaces its draft; with none posted, `post`
@@ -86,13 +87,6 @@ enum Command {
         id: String,
         text: String,
         post: bool,
-    },
-    Withdraw {
-        id: String,
-    },
-    /// Withdraws every draft but those named.
-    WithdrawExcept {
-        kept: Vec<String>,
     },
     Card {
         kind: CardKind,
@@ -198,12 +192,8 @@ impl Outbox {
         self.send(Command::Started { mirrored });
     }
 
-    pub(crate) fn draft(&self, id: &str, text: String, post: bool) {
-        self.send(Command::Draft {
-            id: id.to_owned(),
-            text,
-            post,
-        });
+    pub(crate) fn drafts(&self, drafts: Vec<RunningDraft>, post: bool) {
+        self.send(Command::Drafts { drafts, post });
     }
 
     pub(crate) fn commit(&self, id: &str, text: String, post: bool) {
@@ -212,14 +202,6 @@ impl Outbox {
             text,
             post,
         });
-    }
-
-    pub(crate) fn withdraw(&self, id: &str) {
-        self.send(Command::Withdraw { id: id.to_owned() });
-    }
-
-    pub(crate) fn withdraw_except(&self, kept: Vec<String>) {
-        self.send(Command::WithdrawExcept { kept });
     }
 
     pub(crate) fn card(&self, kind: CardKind, key: String, text: CardText, to: Target) {
@@ -383,7 +365,7 @@ impl Writer {
             .filter(|key| !key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit()))
             .filter_map(|key| key.parse::<i64>().ok())
             .chain(self.admitted.iter().copied())
-            .filter(|chat| *chat > 0 && !self.silent.contains(chat))
+            .filter(|chat| !self.silent.contains(chat))
             .collect::<BTreeSet<i64>>()
             .into_iter()
             .collect()
@@ -408,21 +390,23 @@ impl Writer {
                     self.jobs.push_back(Job::Typing { chat });
                 }
             }
-            Command::Draft { id, text, post } => self.drafted(id, text, post),
-            Command::Commit { id, text, post } => self.committed(&id, text, post),
-            Command::Withdraw { id } => self.withdraw(&id),
-            Command::WithdrawExcept { kept } => {
+            Command::Drafts { drafts, post } => {
                 let gone: Vec<String> = self
                     .drafts
                     .keys()
-                    .filter(|id| !kept.contains(id))
+                    .filter(|id| !drafts.iter().any(|draft| draft.draft_id == **id))
                     .cloned()
                     .collect();
 
                 for id in gone {
                     self.withdraw(&id);
                 }
+
+                for draft in drafts {
+                    self.drafted(draft.draft_id, draft.text, post);
+                }
             }
+            Command::Commit { id, text, post } => self.committed(&id, text, post),
             Command::Card {
                 kind,
                 key,
@@ -452,7 +436,7 @@ impl Writer {
 
     fn drafted(&mut self, id: String, text: String, post: bool) {
         match self.drafts.get_mut(&id) {
-            Some(draft) => {
+            Some(draft) if draft.text != text => {
                 draft.text = text;
                 draft
                     .edit_due
@@ -462,7 +446,7 @@ impl Writer {
                 self.drafts.insert(id.clone(), Draft::new(text));
                 self.jobs.push_back(Job::Render { id });
             }
-            None => {}
+            Some(_) | None => {}
         }
     }
 
@@ -739,11 +723,8 @@ impl Writer {
                 None
             }
             Err(failure) => {
-                self.lines.report(&format!(
-                    "{} could not write to chat {chat}: {}",
-                    capitalized(&self.settings.borrow().owner.bot()),
-                    failure.description()
-                ));
+                self.lines
+                    .report(&unwritten(&self.settings.borrow().owner, chat, &failure));
                 None
             }
         }

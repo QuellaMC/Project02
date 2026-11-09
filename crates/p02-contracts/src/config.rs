@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use p02_shared::Identifier;
+use p02_wire::ConfigValueType;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::label::RedactionLabel;
-use crate::vocabulary::{ConfigScope, ConfigValueType};
+use crate::vocabulary::ConfigScope;
 
 /// A plugin's section of the config document, `plugins.<id>`: where it may
 /// be set, and the fields it declares in the order they are shown.
@@ -21,14 +22,9 @@ pub struct ConfigSection {
 /// settings page and the model's config tools.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each flag is one authored key of the declaration"
-)]
 pub struct ConfigField {
     pub(crate) name: Identifier,
     pub(crate) description: String,
-    pub(crate) required: bool,
     pub(crate) secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) scope: Option<ConfigScope>,
@@ -39,7 +35,6 @@ pub struct ConfigField {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) allowed_values: Option<Vec<String>>,
     pub(crate) agent_mutable: bool,
-    pub(crate) reload_required: bool,
     pub(crate) redaction_labels: Vec<RedactionLabel>,
 }
 
@@ -69,12 +64,6 @@ impl ConfigField {
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
-    }
-
-    /// Whether the operator must set it before the plugin can run.
-    #[must_use]
-    pub fn required(&self) -> bool {
-        self.required
     }
 
     /// Whether it holds a credential: read redacted everywhere but by its
@@ -111,13 +100,6 @@ impl ConfigField {
     #[must_use]
     pub fn agent_mutable(&self) -> bool {
         self.agent_mutable
-    }
-
-    /// Whether an approved change waits for the next launch rather than
-    /// rebuilding the plugin at once; only an authored `false` applies live.
-    #[must_use]
-    pub fn reload_required(&self) -> bool {
-        self.reload_required
     }
 
     #[must_use]
@@ -167,48 +149,28 @@ impl ConfigField {
 
 /// The values a plugin's config resolved to, by field name: an authored
 /// value its field accepts, or the field's default. A field with neither is
-/// absent, and a required field is never absent.
+/// absent.
 #[derive(Clone, PartialEq)]
 pub struct ResolvedConfig(BTreeMap<String, Value>);
-
-/// A required field the settings leave without a value it accepts, so its
-/// plugin cannot run.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("required plugin config field \"{field}\" is not set to a value it accepts")]
-pub struct MissingConfigValueError {
-    pub field: Identifier,
-}
 
 impl ResolvedConfig {
     /// What `section` resolves to from `authored`, the values the settings
     /// set by field name. A name the section does not declare reaches no
     /// plugin.
-    pub(crate) fn resolve(
-        section: &ConfigSection,
-        authored: &Map<String, Value>,
-    ) -> Result<Self, MissingConfigValueError> {
-        let mut values = BTreeMap::new();
-
-        for field in section.fields() {
-            let value = authored
-                .get(field.name().as_str())
-                .filter(|value| field.accepts(value))
-                .or_else(|| field.default_value());
-
-            match value {
-                Some(value) => {
-                    values.insert(field.name().as_str().to_owned(), value.clone());
-                }
-                None if field.required() => {
-                    return Err(MissingConfigValueError {
-                        field: field.name().clone(),
-                    });
-                }
-                None => {}
-            }
-        }
-
-        Ok(Self(values))
+    pub(crate) fn resolve(section: &ConfigSection, authored: &Map<String, Value>) -> Self {
+        Self(
+            section
+                .fields()
+                .iter()
+                .filter_map(|field| {
+                    authored
+                        .get(field.name().as_str())
+                        .filter(|value| field.accepts(value))
+                        .or_else(|| field.default_value())
+                        .map(|value| (field.name().as_str().to_owned(), value.clone()))
+                })
+                .collect(),
+        )
     }
 
     #[must_use]
@@ -238,14 +200,12 @@ mod tests {
         ConfigField {
             name: Identifier::new("tone").unwrap(),
             description: "Reply tone.".to_owned(),
-            required: false,
             secret: false,
             scope: None,
             value_type,
             default_value: None,
             allowed_values: allowed.map(|values| values.iter().map(|&v| v.to_owned()).collect()),
             agent_mutable: false,
-            reload_required: true,
             redaction_labels: Vec::new(),
         }
     }
@@ -315,7 +275,6 @@ mod tests {
             "fields": [{
                 "name": "botToken",
                 "description": "A bot.",
-                "required": false,
                 "secret": true,
                 "scope": "character_only",
                 "valueType": "string",
@@ -334,7 +293,6 @@ mod tests {
                 "fields": [{
                     "name": "botToken",
                     "description": "A bot.",
-                    "required": false,
                     "secret": true,
                     "scope": "global_only",
                     "redactionLabels": [],
@@ -351,7 +309,6 @@ mod tests {
 
         tone.default_value = Some(json!("warm"));
         key.name = Identifier::new("apiKey").unwrap();
-        key.required = true;
         key.secret = true;
 
         let section = ConfigSection {
@@ -362,8 +319,7 @@ mod tests {
         let config = ResolvedConfig::resolve(
             &section,
             &authored(json!({"tone": "sarcastic", "apiKey": "m0sk_secret", "baseUrl": "x"})),
-        )
-        .unwrap();
+        );
 
         assert_eq!(config.value("tone"), Some(&json!("warm")));
         assert_eq!(config.value("apiKey"), Some(&json!("m0sk_secret")));
@@ -371,12 +327,6 @@ mod tests {
         assert_eq!(
             format!("{config:?}"),
             r#"ResolvedConfig(["apiKey", "tone"])"#
-        );
-        assert_eq!(
-            ResolvedConfig::resolve(&section, &authored(json!({"apiKey": 7}))),
-            Err(MissingConfigValueError {
-                field: Identifier::new("apiKey").unwrap(),
-            })
         );
     }
 }

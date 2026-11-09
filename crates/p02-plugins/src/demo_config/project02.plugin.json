@@ -14,28 +14,23 @@
         {
           "name": "tone",
           "description": "Reply tone directive injected into every turn. Agent-adjustable; an approved change takes effect at once.",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
           "agentMutable": true,
-          "redactionLabels": [],
-          "reloadRequired": false
+          "redactionLabels": []
         },
         {
           "name": "signoff",
           "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; an approved change takes effect at once; unset means no signoff.",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": true,
-          "redactionLabels": [],
-          "reloadRequired": false
+          "redactionLabels": []
         },
         {
           "name": "operatorNote",
           "description": "Operator-owned note. Not agent-mutable: agent-initiated updates must be rejected.",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
@@ -44,7 +39,6 @@
         {
           "name": "apiKey",
           "description": "Secret demo credential; config reads must show it redacted, never the raw value.",
-          "required": false,
           "secret": true,
           "valueType": "string",
           "agentMutable": false,

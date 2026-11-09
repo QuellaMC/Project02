@@ -19,7 +19,7 @@ use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, EvidenceKind,
     EvidenceNote, EvidenceStatus, FactoryInput, HookContext, HookReport, HookStatus, PluginError,
     ProvidedTool, RedactionLabel, RuntimePlugin, SourceKind, SourceReference, ToolCall,
-    ToolCallOutcome, TurnText,
+    ToolCallOutcome, TurnIdentity, TurnText,
 };
 use p02_core::VisibleMessageRole;
 use p02_memory::{Message, ObservedOn, Role, Scope, Turn};
@@ -74,7 +74,7 @@ impl RuntimePlugin for Mem0Plugin {
         let found = setup
             .backend
             .search(
-                &setup.scope(context),
+                &setup.scope(context.turn()?),
                 turn_text(context)?.current_user_message.as_str(),
                 context.plugin_database(),
             )
@@ -99,6 +99,7 @@ impl RuntimePlugin for Mem0Plugin {
         committed: &CommittedTurn,
         context: &HookContext,
     ) -> Result<HookReport, PluginError> {
+        let identity = context.turn()?;
         let report = |status, summary: &str, source| HookReport {
             status: HookStatus::Completed,
             evidence: vec![
@@ -112,11 +113,10 @@ impl RuntimePlugin for Mem0Plugin {
                 return Ok(report(
                     EvidenceStatus::Degraded,
                     message,
-                    this_turn(context),
+                    this_turn(identity),
                 ));
             }
         };
-        let identity = context.turn();
         let observed_on = ObservedOn::parse(
             committed
                 .committed_at()
@@ -138,7 +138,7 @@ impl RuntimePlugin for Mem0Plugin {
             let why = error.to_string();
 
             self.captures.lose(why.clone());
-            return Ok(report(EvidenceStatus::Degraded, &why, this_turn(context)));
+            return Ok(report(EvidenceStatus::Degraded, &why, this_turn(identity)));
         }
 
         let summary = match self.captures.failure() {
@@ -149,7 +149,7 @@ impl RuntimePlugin for Mem0Plugin {
             }
             None => "Queued turn for memory extraction.".to_owned(),
         };
-        let scope = setup.scope(context);
+        let scope = setup.scope(identity);
 
         self.captures.queue(Box::pin(async move {
             setup.backend.write(&scope, Write::Turn(turn), None).await
@@ -169,7 +169,8 @@ impl RuntimePlugin for Mem0Plugin {
         context: &HookContext,
     ) -> Result<ToolCallOutcome, PluginError> {
         let setup = self.setup()?;
-        let scope = setup.scope(context);
+        let turn = context.turn()?;
+        let scope = setup.scope(turn);
 
         match call.tool_name().as_str() {
             tools::SEARCH => {
@@ -188,7 +189,7 @@ impl RuntimePlugin for Mem0Plugin {
             tools::ADD => {
                 let write = Write::Fact {
                     text: text_input(call, "text")?.to_owned(),
-                    sources: vec![context.turn().event.event_id().to_string()],
+                    sources: vec![turn.event.event_id().to_string()],
                 };
                 let written = tokio::select! {
                     biased;
@@ -201,7 +202,7 @@ impl RuntimePlugin for Mem0Plugin {
                 }
                 .map_err(|error| failed(&error))?;
 
-                Ok(added(written, context))
+                Ok(added(written, turn))
             }
             other => Err(PluginError::new(format!(
                 "Memory provider does not handle \"{other}\"."
@@ -241,8 +242,8 @@ impl Mem0Plugin {
 
 impl Setup {
     /// The person's and the turn's character's memories.
-    fn scope(&self, context: &HookContext) -> Scope {
-        Scope::new(&self.user, context.turn().character.id.as_str())
+    fn scope(&self, turn: &TurnIdentity) -> Scope {
+        Scope::new(&self.user, turn.character.id.as_str())
     }
 }
 
@@ -297,7 +298,7 @@ fn searched(found: &[Found]) -> ToolCallOutcome {
 /// An add as the model is told it: the memory it stored, none when the
 /// person and character keep that text already, or the receipt of a write
 /// the platform stores later, which is never called stored.
-fn added(written: Written, context: &HookContext) -> ToolCallOutcome {
+fn added(written: Written, turn: &TurnIdentity) -> ToolCallOutcome {
     let (output, summary, kept) = match written {
         Written::Stored(stored) => match stored.into_iter().next() {
             Some(id) => {
@@ -335,7 +336,7 @@ fn added(written: Written, context: &HookContext) -> ToolCallOutcome {
                 EvidenceStatus::Accepted,
                 summary,
             ),
-            std::iter::once(this_turn(context)).chain(kept),
+            std::iter::once(this_turn(turn)).chain(kept),
         )],
     }
 }
@@ -388,12 +389,9 @@ fn memory_source(id: &str) -> SourceReference {
     SourceReference::new(SourceKind::Memory, id).with_title("Mem0 memory")
 }
 
-fn this_turn(context: &HookContext) -> SourceReference {
-    SourceReference::new(
-        SourceKind::Conversation,
-        context.turn().event.event_id().as_str(),
-    )
-    .with_title("Current conversation turn")
+fn this_turn(turn: &TurnIdentity) -> SourceReference {
+    SourceReference::new(SourceKind::Conversation, turn.event.event_id().as_str())
+        .with_title("Current conversation turn")
 }
 
 fn sourced(note: EvidenceNote, sources: impl Iterator<Item = SourceReference>) -> EvidenceNote {

@@ -6,19 +6,15 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_app::{
-    Answer, ConfirmationAnswer, Event, Health, OpenOutcome, PROTOCOL_VERSION, PairingAnswer,
-    PairingOutcome, TurnOutcome,
-};
-use p02_config::ConnectorConfigView;
 use p02_core::ClientStamp;
-use p02_gateway::{
-    AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody,
-    PairingSubjectBody, Ready, Short,
-};
 use p02_shared::{
     DaemonRecord, DaemonToken, Identifier, SseFrame, SseFrameSplitter, error_sentence, http_client,
     read_daemon_record,
+};
+use p02_wire::{
+    Answer, AnswerBody, ConfirmationAnswer, ConnectorConfigView, ErrorBody, Event, GatewayMessage,
+    Health, OpenConversationBody, OpenOutcome, PROTOCOL_VERSION, PairingAnswer, PairingOutcome,
+    PairingRequestBody, PairingSubjectBody, Ready, Short, SubmitOutcome,
 };
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
@@ -39,8 +35,8 @@ const STREAM_RETRY: Duration = Duration::from_secs(1);
 pub(crate) const CONNECTOR: &str = "telegram";
 
 /// The daemon a record names, as the connector reaches it: plain HTTP on
-/// loopback, its token as the bearer, and no timeout, since a delivery
-/// waits for its turn and a turn parked on a confirmation waits minutes.
+/// loopback, its token as the bearer, and no timeout, since an open waits
+/// for her start however long it takes.
 #[derive(Clone, Debug)]
 pub(crate) struct Daemon {
     client: reqwest::Client,
@@ -62,15 +58,6 @@ pub(crate) enum Unanswered {
     Refused { status: u16, message: String },
     #[error("the daemon's answer could not be read")]
     Unreadable(#[source] serde_json::Error),
-}
-
-impl Unanswered {
-    fn status(&self) -> Option<u16> {
-        match self {
-            Self::Refused { status, .. } => Some(*status),
-            Self::Unreachable { .. } | Self::Unreadable(_) => None,
-        }
-    }
 }
 
 impl Daemon {
@@ -102,8 +89,8 @@ impl Daemon {
         .await
     }
 
-    /// Waits for the line's turn, however long it is parked.
-    pub(crate) async fn deliver(&self, line: &GatewayMessage) -> Result<TurnOutcome, Unanswered> {
+    /// Hands the line to her inbox, and answers once it is there.
+    pub(crate) async fn deliver(&self, line: &GatewayMessage) -> Result<SubmitOutcome, Unanswered> {
         self.post("/api/turns", line).await
     }
 
@@ -207,7 +194,7 @@ impl Daemon {
         let body = response.bytes().await.unwrap_or_default();
         let message = serde_json::from_slice::<ErrorBody>(&body).map_or_else(
             |_| format!("The daemon answered {}.", status.as_u16()),
-            |envelope| envelope.error.message().to_owned(),
+            |envelope| envelope.error.message,
         );
 
         Err(Unanswered::Refused {
@@ -340,8 +327,7 @@ async fn follow(
                     Read::Failed(sentence) => return Following::Failed(sentence),
                 }
             }
-            Err(Unanswered::Unreachable { .. }) => {}
-            Err(stopping) if stopping.status() == Some(503) => {}
+            Err(Unanswered::Unreachable { .. } | Unanswered::Refused { status: 503, .. }) => {}
             Err(other) => {
                 return Following::Failed(format!(
                     "Telegram connector: the daemon refused its event stream: {}",

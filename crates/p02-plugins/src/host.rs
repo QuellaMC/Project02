@@ -1,12 +1,11 @@
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, PoisonError, RwLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use p02_contracts::{
     CharacterStorage, DatabaseOpener, Declaration, DuplicateToolError, FactoryInput,
-    FileStoreBackend, HOST_PLUGIN, Manifest, MissingConfigValueError, PluginError,
-    PluginToolDefinition, PluginToolDefinitions, ProvidedTool, Registration, RegistrationError,
-    RuntimePlugin, SessionHistoryFeed, StoreAccess,
+    FileStoreBackend, HOST_PLUGIN, Manifest, PluginError, PluginToolDefinition,
+    PluginToolDefinitions, ProvidedTool, Registration, RegistrationError, RuntimePlugin,
+    SessionHistoryFeed, StoreAccess,
 };
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
@@ -54,27 +53,14 @@ pub(crate) struct Core {
     /// The tools the model is offered, by which a call is routed.
     offered: PluginToolDefinitions,
     pub(crate) confirmer: Arc<dyn Confirmer>,
-    /// How many times a plugin was rebuilt live.
-    rebuilds: AtomicU64,
 }
 
-/// One enabled plugin: its manifest, how to build it again, the tools it
-/// was activated with, the instance serving now, and the handles its
+/// One enabled plugin: its manifest, its instance, and the handles its
 /// grants reach.
 pub(crate) struct Slot {
     pub(crate) manifest: Manifest,
-    factory: Box<Factory>,
-    /// The tools checked at activation; a rebuilt instance must provide
-    /// the same.
-    tools: Vec<ProvidedTool>,
-    live: RwLock<Serving>,
-    pub(crate) capabilities: Capabilities,
-}
-
-/// The instance serving now, and the values it was built from.
-struct Serving {
     plugin: Arc<dyn RuntimePlugin>,
-    authored: Map<String, Value>,
+    pub(crate) capabilities: Capabilities,
 }
 
 pub(crate) struct Capabilities {
@@ -116,31 +102,10 @@ pub enum ActivationError {
     DuplicateTool(DuplicateToolError),
 }
 
-/// Why a plugin was not rebuilt; the instance serving before serves on.
-#[derive(Debug, thiserror::Error)]
-pub enum ReloadError {
-    #[error("plugin \"{0}\" is not enabled in this host")]
-    NotEnabled(Identifier),
-    #[error("plugin \"{plugin_id}\" could not be rebuilt")]
-    Build {
-        plugin_id: Identifier,
-        #[source]
-        source: BuildPluginError,
-    },
-    #[error(
-        "plugin \"{0}\" was rebuilt with other tools than the model is offered, so it serves on \
-         as it was"
-    )]
-    ToolsChanged(Identifier),
-}
-
-/// Why a plugin gave the host no instance to serve: its settings leave a
-/// required field without a value it accepts, its factory failed, or the
-/// instance contradicts its manifest.
+/// Why a plugin gave the host no instance to serve: its factory failed, or
+/// the instance contradicts its manifest.
 #[derive(Debug, thiserror::Error)]
 pub enum BuildPluginError {
-    #[error(transparent)]
-    Config(#[from] MissingConfigValueError),
     #[error(transparent)]
     Factory(PluginError),
     #[error(transparent)]
@@ -177,64 +142,14 @@ impl PluginHost {
         self.core.offered()
     }
 
-    /// Whether the host serves exactly `plugins`, each built from the values
-    /// given beside it: a plugin rebuilt live serves the values it was
-    /// rebuilt from.
-    pub fn serves<'p>(
-        &self,
-        plugins: impl IntoIterator<Item = (&'p Identifier, &'p Map<String, Value>)>,
-    ) -> bool {
-        let mut named = 0;
-
-        for (plugin_id, authored) in plugins {
-            named += 1;
-
-            let served = self
-                .core
-                .slots
-                .iter()
-                .find(|slot| slot.manifest.id() == plugin_id)
-                .is_some_and(|slot| slot.serves(authored));
-
-            if !served {
-                return false;
-            }
-        }
-
-        named == self.core.slots.len()
-    }
-
-    /// How many times one of the host's plugins has been rebuilt live: what
-    /// prepared a turn at one count no longer all serves at another.
-    #[must_use]
-    pub fn rebuilds(&self) -> u64 {
-        self.core.rebuilds.load(Ordering::Acquire)
-    }
-
-    /// Builds the plugin again, as activation did, from `authored`, the
-    /// values its character's settings now give it, and serves every later
-    /// hook with the new instance. Hooks already running finish on the
-    /// instance they started with, and nothing waits for them: the old
-    /// instance ends when the last of them lets go of it.
-    ///
-    /// # Errors
-    ///
-    /// [`ReloadError`] when the plugin is not enabled here, cannot be
-    /// built, or would offer other tools than the model was shown.
-    pub fn reload(
-        &self,
-        plugin_id: &Identifier,
-        authored: &Map<String, Value>,
-    ) -> Result<(), ReloadError> {
-        self.core.reload(plugin_id, authored)
-    }
-
-    /// Ends every plugin: each `onShutdown` runs only reading, its store
-    /// read-only and no database open to it, and what failed is reported.
-    /// Work a hook left running is not waited for; the host is gone
-    /// afterwards, so nothing runs a hook again.
-    pub async fn shutdown(self, turn: &Turn) -> HookPhaseReport {
-        self.core.run_lifecycle(&Lifecycle::Shutdown, turn).await
+    /// Ends every plugin: each `onShutdown` serves no turn and runs only
+    /// reading, its store read-only and no database open to it, and what
+    /// failed is reported. Work a hook left running is not waited for; the
+    /// host is gone afterwards, so nothing runs a hook again.
+    pub async fn shutdown(self) -> HookPhaseReport {
+        self.core
+            .run_lifecycle(&Lifecycle::Shutdown, &Turn::end())
+            .await
     }
 
     pub(crate) fn core(&self) -> &Arc<Core> {
@@ -323,12 +238,7 @@ impl PluginHostBuilder {
             slots.push(Slot {
                 capabilities: Capabilities::reached(&manifest, self.storage.as_ref()),
                 manifest,
-                factory,
-                tools: registration.tools().to_vec(),
-                live: RwLock::new(Serving {
-                    plugin: Arc::clone(registration.plugin()),
-                    authored,
-                }),
+                plugin: Arc::clone(registration.plugin()),
             });
         }
 
@@ -337,7 +247,6 @@ impl PluginHostBuilder {
             offered: PluginToolDefinitions::new(definitions)
                 .map_err(ActivationError::DuplicateTool)?,
             confirmer: self.confirmer,
-            rebuilds: AtomicU64::new(0),
         });
 
         host.attach(&core);
@@ -346,15 +255,14 @@ impl PluginHostBuilder {
 }
 
 /// Builds `manifest`'s plugin with its config resolved from `authored`
-/// against that manifest, and checks the instance against it: the one way
-/// a plugin is built, at activation and at a reload.
+/// against that manifest, and checks the instance against it.
 fn build(
     manifest: &Manifest,
     authored: &Map<String, Value>,
     factory: &Factory,
 ) -> Result<Registration, BuildPluginError> {
     let plugin =
-        factory(&FactoryInput::new(manifest, authored)?).map_err(BuildPluginError::Factory)?;
+        factory(&FactoryInput::new(manifest, authored)).map_err(BuildPluginError::Factory)?;
 
     Ok(Registration::new(manifest.clone(), plugin)?)
 }
@@ -397,55 +305,12 @@ impl Core {
             tool: &definition.tool,
         })
     }
-
-    pub(crate) fn reload(
-        &self,
-        plugin_id: &Identifier,
-        authored: &Map<String, Value>,
-    ) -> Result<(), ReloadError> {
-        let slot = self
-            .slots
-            .iter()
-            .find(|slot| slot.manifest.id() == plugin_id)
-            .ok_or_else(|| ReloadError::NotEnabled(plugin_id.clone()))?;
-        let registration = build(&slot.manifest, authored, &slot.factory).map_err(|source| {
-            ReloadError::Build {
-                plugin_id: plugin_id.clone(),
-                source,
-            }
-        })?;
-
-        if registration.tools() != slot.tools.as_slice() {
-            return Err(ReloadError::ToolsChanged(plugin_id.clone()));
-        }
-
-        *slot.live.write().unwrap_or_else(PoisonError::into_inner) = Serving {
-            plugin: Arc::clone(registration.plugin()),
-            authored: authored.clone(),
-        };
-        self.rebuilds.fetch_add(1, Ordering::AcqRel);
-        Ok(())
-    }
 }
 
 impl Slot {
-    /// The instance serving now.
-    pub(crate) fn live(&self) -> Arc<dyn RuntimePlugin> {
-        Arc::clone(
-            &self
-                .live
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .plugin,
-        )
-    }
-
-    fn serves(&self, authored: &Map<String, Value>) -> bool {
-        self.live
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .authored
-            == *authored
+    /// The plugin's instance, for a hook to hold while it runs.
+    pub(crate) fn plugin(&self) -> Arc<dyn RuntimePlugin> {
+        Arc::clone(&self.plugin)
     }
 }
 

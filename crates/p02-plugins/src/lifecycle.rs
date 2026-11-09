@@ -157,7 +157,7 @@ impl Slot {
         turn: &Turn,
     ) -> Result<(HookStatus, Vec<Evidence>), HookFailure> {
         let hook = lifecycle.hook();
-        let plugin = self.live();
+        let plugin = self.plugin();
         let report = match lifecycle {
             Lifecycle::AfterTurnCommitted(committed) => {
                 let committed = if self.capabilities.turn_text {

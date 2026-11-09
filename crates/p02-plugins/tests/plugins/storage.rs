@@ -53,21 +53,6 @@ impl Storage {
         Arc::clone(self.files.lock().unwrap().entry(id(plugin_id)).or_default())
     }
 
-    /// The names of the files the databases left in the directory.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a test lists the directory the store crate will own"
-    )]
-    pub(crate) fn files_on_disk(&self) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(&self.root)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-
-        names.sort();
-        names
-    }
-
     /// The plugin's databases, as the host hands them out.
     pub(crate) fn opener(&self, plugin_id: &str) -> Arc<Opener> {
         let plugin_id = id(plugin_id);
@@ -136,6 +121,10 @@ impl LeasedFiles for Leased<'_> {
         Ok(Vec::new())
     }
 
+    fn count_jsonl(&self, _path: &str) -> Result<u64, StoreError> {
+        Ok(0)
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.0.insert(path.to_owned(), value.clone());
         Ok(())
@@ -143,10 +132,6 @@ impl LeasedFiles for Leased<'_> {
 
     fn append_jsonl(&mut self, _path: &str, _value: &Value) -> Result<(), StoreError> {
         Ok(())
-    }
-
-    fn revision(&self) -> Result<u64, StoreError> {
-        Ok(0)
     }
 }
 

@@ -245,8 +245,8 @@ fn skip_blank(buffer: &str, start: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// The grammar, whole: what the decision parser and the adapters rely
-    /// on, read the same at every split point.
+    /// The grammar, whole: what the judge and the adapters rely on, read
+    /// the same at every split point.
     const CASES: [(&str, &str); 17] = [
         ("<think>plan</think>Hello", "Hello"),
         ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", "a  b"),

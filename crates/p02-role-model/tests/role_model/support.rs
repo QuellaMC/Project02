@@ -1,16 +1,14 @@
-//! The world the tests build: a turn's envelope, Mira, and the pieces of a
-//! streamed answer.
+//! The world the tests build: a turn's event and context, Mira, and the
+//! pieces of a streamed answer.
 
 use p02_characters::{Persona, discover};
 use p02_contracts::{
     ChatCompletionTool, ChatMessage, ChatToolFunction, ConversationTurn, DecisionContext,
-    InputEnvelope, PluginToolDefinition, PluginToolDefinitions, ProvidedTool, ToolInputContract,
+    PluginToolDefinition, ProvidedTool, ToolInputContract,
 };
-use p02_core::{
-    CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId, UserLine,
-};
+use p02_core::{CharacterProfile, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
-use serde_json::{Value, json};
+use serde_json::json;
 
 pub(crate) fn id(text: &str) -> Identifier {
     Identifier::new(text).unwrap()
@@ -37,13 +35,15 @@ pub(crate) fn event() -> EventIdentity {
     .unwrap()
 }
 
+/// Mira's context, the person going by the name they have until they
+/// choose one.
 pub(crate) fn context() -> DecisionContext {
     DecisionContext::new(
-        SessionId::parse("conv_mira.1").unwrap(),
         CharacterProfile {
             id: id("mira"),
             display_name: SpeakerName::new("Mira").unwrap(),
         },
+        SpeakerName::new("You").unwrap(),
     )
 }
 
@@ -58,15 +58,6 @@ pub(crate) fn plugin_tool(plugin: &str, name: &str) -> PluginToolDefinition {
         )
         .unwrap(),
     }
-}
-
-pub(crate) fn envelope(line: &str) -> InputEnvelope {
-    InputEnvelope::new(
-        event(),
-        UserLine::new(line).unwrap().into(),
-        context(),
-        PluginToolDefinitions::default(),
-    )
 }
 
 /// Messages and tools as a round of the loop would render them.
@@ -142,10 +133,6 @@ pub(crate) fn call_piece(index: u64, first: Option<(&str, &str)>, arguments: &st
 
 pub(crate) fn finish(reason: &str) -> String {
     json!({"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]}).to_string()
-}
-
-pub(crate) fn usage(usage: &Value) -> String {
-    json!({"choices": [], "usage": usage}).to_string()
 }
 
 pub(crate) const DONE: &str = "[DONE]";

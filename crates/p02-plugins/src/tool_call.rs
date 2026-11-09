@@ -138,7 +138,7 @@ impl Core {
                 .await;
         }
 
-        let plugin = slot.live();
+        let plugin = slot.plugin();
         let answered = slot
             .invoke(Hook::HandleToolCall, turn, move |context| async move {
                 plugin.handle_tool_call(&call, &context).await
@@ -174,7 +174,6 @@ impl Slot {
             Err(unasked) => return unasked,
         };
         let request = ConfirmationRequest {
-            turn: turn.identity().clone(),
             plugin_id: plugin_id.clone(),
             tool_name: tool.name().clone(),
             call_id,
@@ -247,7 +246,7 @@ impl Slot {
         call: ToolCall,
         turn: &Turn,
     ) -> Result<Prepared, ToolCallReport> {
-        let plugin = self.live();
+        let plugin = self.plugin();
         let prepared = self
             .invoke(Invocation::Preparation, turn, move |context| async move {
                 plugin.prepare_tool_call(&call, &context).await

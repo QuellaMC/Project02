@@ -131,12 +131,11 @@
       "enum": [
         "starting",
         "ready",
-        "reloading",
         "stopping",
         "stopped",
         "failed"
       ],
-      "description": "Where a character's runtime stands. `reloading` is a pause: a\ndelivery sent meanwhile waits for it and lands on the same thread."
+      "description": "Where a character's runtime stands."
     },
     "CharacterSummary": {
       "type": "object",
@@ -678,7 +677,21 @@
             "conversationId",
             "progress"
           ],
-          "description": "A turn's progress: each message once it is durable, and a reply's\ndraft before its commit, which its kind marks as such."
+          "description": "A turn's progress: each message once it is durable, and the tool\ncalls of its rounds."
+        },
+        {
+          "$ref": "#/$defs/RunningTurn",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "turn_running"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "A turn as it runs now, said whenever that changes, from the commit\nof her line until the completion that ends it."
         },
         {
           "type": "object",
@@ -721,7 +734,7 @@
             "status",
             "committed"
           ],
-          "description": "How a delivery ended, with its submission's stamps, so that a surface\nknows whose turn ended and whether its line is in the log."
+          "description": "How a turn ended, with its line's stamps, so that a surface knows\nwhose turn ended and whether its line is in the log."
         },
         {
           "$ref": "#/$defs/PendingConfirmation",
@@ -913,7 +926,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 7
+          "const": 8
         },
         "homeRoot": {
           "type": "string"
@@ -956,9 +969,6 @@
         "conversationId": {
           "$ref": "#/$defs/Short"
         },
-        "senderId": {
-          "$ref": "#/$defs/Short"
-        },
         "text": {
           "$ref": "#/$defs/Text"
         },
@@ -971,18 +981,17 @@
       },
       "required": [
         "conversationId",
-        "senderId",
         "text",
         "source",
         "clientMessageId"
       ],
-      "description": "A line from one participant into one conversation, with the two stamps\nits client puts on it: which surface carried it, and the id a repeat of\nthe same submission reuses."
+      "description": "The person's line into one conversation, with the two stamps its client\nputs on it: which surface carried it, and the id a repeat of the same\nsubmission reuses."
     },
     "GatewayReady": {
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 7
+          "const": 8
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -1023,30 +1032,6 @@
         "duplicate_submission"
       ],
       "description": "Why a line was refused before any turn ran."
-    },
-    "GatewayVisibleMessage": {
-      "type": "object",
-      "properties": {
-        "messageId": {
-          "$ref": "#/$defs/MessageId"
-        },
-        "speakerId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "speakerName": {
-          "$ref": "#/$defs/SpeakerName"
-        },
-        "text": {
-          "$ref": "#/$defs/VisibleText"
-        }
-      },
-      "required": [
-        "messageId",
-        "speakerId",
-        "speakerName",
-        "text"
-      ],
-      "description": "A committed message as a client renders it."
     },
     "HistoryMessage": {
       "type": "object",
@@ -1209,10 +1194,6 @@
             "characterId": {
               "$ref": "#/$defs/Identifier"
             },
-            "userParticipantId": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Who the caller is in the thread: the sender a delivery names."
-            },
             "status": {
               "type": "string",
               "const": "opened"
@@ -1221,8 +1202,7 @@
           "required": [
             "status",
             "conversationId",
-            "characterId",
-            "userParticipantId"
+            "characterId"
           ]
         },
         {
@@ -1700,7 +1680,7 @@
         "code",
         "message"
       ],
-      "description": "A transport refusal: its status, and the envelope's code and sentence."
+      "description": "A transport refusal: the envelope's code and sentence."
     },
     "RosterState": {
       "type": "string",
@@ -1708,7 +1688,6 @@
         "not_started",
         "starting",
         "ready",
-        "reloading",
         "stopping",
         "stopped",
         "failed"
@@ -1729,7 +1708,7 @@
         "draftId",
         "text"
       ],
-      "description": "One open draft: the reply's text so far under its id."
+      "description": "A reply she is still writing: its text so far, under its draft's id."
     },
     "RunningTurn": {
       "type": "object",
@@ -1760,7 +1739,7 @@
         "clientMessageId",
         "drafts"
       ],
-      "description": "A turn in progress, as the stream has told it so far: the submission it\nruns for, its character, and each open draft's text."
+      "description": "A turn as it runs: the line that started it, her character, and her\ndrafts so far, each its whole text, in the order they opened."
     },
     "RuntimeConfigDiagnostic": {
       "type": "object",
@@ -1834,9 +1813,6 @@
         "description": {
           "type": "string"
         },
-        "required": {
-          "type": "boolean"
-        },
         "secret": {
           "type": "boolean"
         },
@@ -1852,9 +1828,6 @@
         "agentMutable": {
           "type": "boolean"
         },
-        "reloadRequired": {
-          "type": "boolean"
-        },
         "authored": {
           "$ref": "#/$defs/Authored"
         },
@@ -1868,10 +1841,8 @@
       "required": [
         "name",
         "description",
-        "required",
         "secret",
         "agentMutable",
-        "reloadRequired",
         "authored",
         "effectiveSource",
         "effective"
@@ -2049,6 +2020,72 @@
       ],
       "description": "An ordinary failure of the home's storage, a full disk, a permission or\na damaged record, which the person is told and which is no bug."
     },
+    "SubmitOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "queued"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "description": "In her inbox now, behind every line before it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "already_queued"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "description": "In her inbox already, under the same id."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/GatewayRefusalReason"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Refused before it was queued."
+        },
+        {
+          "$ref": "#/$defs/StorageFailure",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "description": "Her inbox could not take it."
+        }
+      ],
+      "description": "What became of a line sent to a character: queued in her inbox, where\nshe takes it in its turn and the stream tells how that ended, or\nrefused at once."
+    },
     "Text": {
       "type": "string",
       "description": "A line's text, as long as a line may be."
@@ -2085,122 +2122,6 @@
       ],
       "description": "The submission a turn runs for, which any surface can tell as its own."
     },
-    "TurnOutcome": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "characterId": {
-              "$ref": "#/$defs/Identifier"
-            },
-            "conversationId": {
-              "$ref": "#/$defs/ConversationId"
-            },
-            "messages": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/GatewayVisibleMessage"
-              },
-              "description": "What the turn committed, the person's line first."
-            },
-            "status": {
-              "type": "string",
-              "const": "completed"
-            }
-          },
-          "required": [
-            "status",
-            "characterId",
-            "conversationId",
-            "messages"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "characterId": {
-              "$ref": "#/$defs/Identifier"
-            },
-            "conversationId": {
-              "$ref": "#/$defs/ConversationId"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "committed": {
-              "type": "boolean"
-            },
-            "status": {
-              "type": "string",
-              "const": "rejected"
-            }
-          },
-          "required": [
-            "status",
-            "characterId",
-            "conversationId",
-            "reason",
-            "message",
-            "committed"
-          ],
-          "description": "The turn ended refused; `committed` says whether its line is in the\nlog."
-        },
-        {
-          "type": "object",
-          "properties": {
-            "reason": {
-              "$ref": "#/$defs/GatewayRefusalReason"
-            },
-            "message": {
-              "type": "string"
-            },
-            "status": {
-              "type": "string",
-              "const": "refused"
-            }
-          },
-          "required": [
-            "status",
-            "reason",
-            "message"
-          ],
-          "description": "Refused before any turn ran."
-        },
-        {
-          "type": "object",
-          "properties": {
-            "characterId": {
-              "$ref": "#/$defs/Identifier"
-            },
-            "conversationId": {
-              "$ref": "#/$defs/ConversationId"
-            },
-            "message": {
-              "type": "string"
-            },
-            "committed": {
-              "type": "boolean"
-            },
-            "status": {
-              "type": "string",
-              "const": "failed"
-            }
-          },
-          "required": [
-            "status",
-            "characterId",
-            "conversationId",
-            "message",
-            "committed"
-          ],
-          "description": "The runtime failed the turn; `committed` says whether its line is in\nthe log."
-        }
-      ],
-      "description": "What became of a delivered line."
-    },
     "TurnProgress": {
       "oneOf": [
         {
@@ -2234,7 +2155,9 @@
             "messageId",
             "speakerId",
             "speakerName",
-            "text"
+            "text",
+            "source",
+            "clientMessageId"
           ]
         },
         {
@@ -2267,42 +2190,6 @@
             "speakerId",
             "speakerName",
             "text",
-            "draftId"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "draftId": {
-              "type": "string"
-            },
-            "text": {
-              "type": "string"
-            },
-            "kind": {
-              "type": "string",
-              "const": "reply_delta"
-            }
-          },
-          "required": [
-            "kind",
-            "draftId",
-            "text"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "draftId": {
-              "type": "string"
-            },
-            "kind": {
-              "type": "string",
-              "const": "reply_withdrawn"
-            }
-          },
-          "required": [
-            "kind",
             "draftId"
           ]
         },
@@ -2368,7 +2255,7 @@
         "refused",
         "failed"
       ],
-      "description": "How a delivery ended, as the frame announcing it says: the status of\nits outcome."
+      "description": "How a turn ended, as the frame announcing it says."
     },
     "ValueSource": {
       "type": "string",

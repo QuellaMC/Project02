@@ -8,22 +8,22 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, CharacterStorage, CommittedTurn, Confirmation, ContextItem,
-    ContextItemKind, EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HookContext,
-    HookReport, HookStatus, Manifest, PluginError, PreparedEffect, ProvidedTool, RuntimePlugin,
-    StoreAccess, StoreError, ToolCall, ToolCallId, ToolCallOutcome, ToolConcurrency,
-    ToolInputContract, ToolPreparation, TurnIdentity, TurnText,
+    BeforeRoleModelCallOutput, CharacterStorage, CommittedTurn, ContextItem, ContextItemKind,
+    EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HookContext, HookReport, HookStatus,
+    Manifest, PluginError, ProvidedTool, RuntimePlugin, StoreAccess, StoreError, ToolCall,
+    ToolCallId, ToolCallOutcome, ToolConcurrency, ToolInputContract, TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
 use p02_plugins::{
-    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
-    ProposedToolCall, ReadConfigError, Rebuild, ToolCallReport, Turn, list,
+    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings, ProposedToolCall,
+    ReadConfigError, ToolCallReport, Turn, list,
 };
 use p02_shared::Identifier;
+use p02_wire::ActivationStatus;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
 
@@ -105,7 +105,6 @@ pub(crate) struct Spec {
     pub(crate) before: &'static str,
     pub(crate) tool: &'static str,
     pub(crate) access: Value,
-    pub(crate) config_fields: Value,
 }
 
 impl Spec {
@@ -118,7 +117,6 @@ impl Spec {
             before: "degrade",
             tool: "reject_tool_call",
             access: json!({"model_input": "write"}),
-            config_fields: json!([]),
         }
     }
 
@@ -139,7 +137,7 @@ impl Spec {
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
             "declaredPlugins": self.declared,
-            "config": {"scope": "global_with_character_overrides", "fields": self.config_fields},
+            "config": {"scope": "global_with_character_overrides", "fields": []},
             "runtimePolicy": {
                 "timeoutMs": self.timeout_ms,
                 "redactionLabels": self.labels,
@@ -187,7 +185,7 @@ impl Confirmer for Nobody {
 
 /// Settings that never load, for a host whose test asks nothing of them.
 #[derive(Debug)]
-pub(crate) struct NoSettings;
+struct NoSettings;
 
 const NO_SETTINGS: &str = "this test keeps no settings";
 
@@ -202,7 +200,7 @@ impl ConfigControl for NoSettings {
         Err(NO_SETTINGS.to_owned())
     }
 
-    fn change(&self, _change: &FieldChange, _rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+    fn change(&self, _change: &FieldChange) -> FieldChangeOutcome {
         FieldChangeOutcome::Failed {
             message: NO_SETTINGS.to_owned(),
         }
@@ -700,91 +698,6 @@ impl RuntimePlugin for SlowTools {
         Ok(ToolCallOutcome::Accepted {
             output: json!({"call": call.call_id().as_str()}),
             evidence: Vec::new(),
-        })
-    }
-}
-
-/// The document `settings.update` saves.
-const SETTINGS: &str = "settings.json";
-
-/// `settings.update` asks the person first. Its preparation refuses a tone
-/// it does not know; otherwise it reads the settings saved now and answers
-/// with `notes`. Its effect saves the new settings.
-#[derive(Debug)]
-pub(crate) struct Settings {
-    tools: Vec<ProvidedTool>,
-    notes: Vec<EvidenceNote>,
-}
-
-impl Settings {
-    pub(crate) fn noting(notes: Vec<EvidenceNote>) -> Self {
-        Self {
-            tools: vec![tool("settings.update").with_confirmation(Confirmation::Required)],
-            notes,
-        }
-    }
-}
-
-#[async_trait]
-impl RuntimePlugin for Settings {
-    fn provided_tools(&self) -> &[ProvidedTool] {
-        &self.tools
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: &ToolCall,
-        context: &HookContext,
-    ) -> Result<ToolPreparation, PluginError> {
-        let tone = call
-            .input()
-            .get("tone")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        if !["warm", "formal"].contains(&tone) {
-            return Ok(ToolPreparation::Rejected {
-                reason: "unknown_tone".to_owned(),
-                message: format!("No tone is called \"{tone}\"."),
-                evidence: Vec::new(),
-            });
-        }
-
-        let store = context
-            .character_file_store()
-            .ok_or_else(|| PluginError::new("the store was not granted"))?;
-        let settings = Value::Object(call.input().clone());
-        let saved = store.with_lease(|leased| leased.read_json(SETTINGS))?;
-
-        Ok(ToolPreparation::Prepared {
-            preview: [
-                ("before".to_owned(), saved.unwrap_or(Value::Null)),
-                ("after".to_owned(), settings.clone()),
-            ]
-            .into_iter()
-            .collect(),
-            effect: Box::new(SaveSettings(settings)),
-            evidence: self.notes.clone(),
-        })
-    }
-}
-
-/// Saves the settings a call prepared.
-#[derive(Debug)]
-struct SaveSettings(Value);
-
-#[async_trait]
-impl PreparedEffect for SaveSettings {
-    async fn apply(self: Box<Self>, context: &HookContext) -> Result<ToolCallOutcome, PluginError> {
-        let store = context
-            .character_file_store()
-            .ok_or_else(|| PluginError::new("the store was not granted"))?;
-
-        store.with_lease(|leased| leased.write_json(SETTINGS, &self.0))?;
-
-        Ok(ToolCallOutcome::Accepted {
-            output: json!({"status": "applied"}),
-            evidence: vec![note(EvidenceKind::ToolInvocation, "Saved the settings.")],
         })
     }
 }

@@ -45,11 +45,9 @@ function field(
   return {
     name,
     description: `${name}.`,
-    required: false,
     secret: false,
     valueType: 'string',
     agentMutable: false,
-    reloadRequired: true,
     authored: {configured: false},
     effectiveSource: 'default',
     effective: {name, secret: false, source: 'missing', resolved: true},
@@ -133,7 +131,7 @@ function view(fingerprint = 'f1'): OkView {
 
 /** The daemon as the tab heard it: Mira ready, and no Telegram process on the stream. */
 const health: GatewayHealth = {
-  protocolVersion: 7,
+  protocolVersion: 8,
   homeRoot: '/home/person/.project02',
   config: {diagnostics: []},
   packages: {diagnostics: []},
@@ -146,7 +144,7 @@ const health: GatewayHealth = {
 /** A live tab with Mira's thread open and her settings screen in front of it. */
 function opened(target: ConfigTarget = mira): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 7,
+    protocolVersion: 8,
     health,
     confirmations: [],
     pairings: [],
@@ -158,7 +156,6 @@ function opened(target: ConfigTarget = mira): WebState {
       status: 'opened',
       conversationId: 'conv-1',
       characterId: 'mira',
-      userParticipantId: 'local-user',
     }),
     target,
   );

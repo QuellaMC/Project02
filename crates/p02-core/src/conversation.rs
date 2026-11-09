@@ -3,16 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::Timestamp;
 use crate::id::ConversationId;
-use crate::message::{CharacterProfile, LOCAL_USER, SpeakerName, VisibleMessageRole};
+use crate::message::{LOCAL_USER, VisibleMessageRole};
 
-/// Someone a conversation is between, under the name they had when it
-/// began: a later rename never renames the thread.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// Someone a conversation is between, by kind and id: a name is no part of
+/// a thread, since each message carries its speaker's. Participants order
+/// by kind, characters first, then by id.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Participant {
     pub kind: VisibleMessageRole,
     pub id: Identifier,
-    pub display_name: SpeakerName,
 }
 
 impl Participant {
@@ -28,20 +27,18 @@ impl Participant {
 
     /// The person, who is the speaker `local-user` in every conversation.
     #[must_use]
-    pub fn local_user(display_name: SpeakerName) -> Self {
+    pub fn local_user() -> Self {
         Self {
             kind: VisibleMessageRole::User,
             id: LOCAL_USER.clone(),
-            display_name,
         }
     }
 
     #[must_use]
-    pub fn character(profile: CharacterProfile) -> Self {
+    pub fn character(id: Identifier) -> Self {
         Self {
             kind: VisibleMessageRole::Character,
-            id: profile.id,
-            display_name: profile.display_name,
+            id,
         }
     }
 
@@ -49,10 +46,6 @@ impl Participant {
     #[must_use]
     pub fn is_local_user(&self) -> bool {
         self.kind == VisibleMessageRole::User && self.id == *LOCAL_USER
-    }
-
-    fn key(&self) -> (VisibleMessageRole, &Identifier) {
-        (self.kind, &self.id)
     }
 }
 
@@ -90,18 +83,18 @@ struct UncheckedConversation {
 
 impl Conversation {
     /// A thread between `participants`, which it keeps in one order
-    /// whatever order they come in: by kind, characters first, then by id.
+    /// whatever order they come in.
     ///
     /// # Errors
     ///
     /// [`ParseConversationError`] when there are fewer than two
-    /// participants, or one kind and id is listed twice.
+    /// participants, or one is listed twice.
     pub fn new(
         id: ConversationId,
         mut participants: Vec<Participant>,
         created_at: Timestamp,
     ) -> Result<Self, ParseConversationError> {
-        participants.sort_by(|left, right| left.key().cmp(&right.key()));
+        participants.sort();
 
         if participants.len() < 2 {
             return Err(ParseConversationError::TooFewParticipants);
@@ -109,7 +102,7 @@ impl Conversation {
 
         if let Some([repeated, _]) = participants
             .array_windows()
-            .find(|[left, right]| left.key() == right.key())
+            .find(|[left, right]| left == right)
         {
             return Err(ParseConversationError::RepeatedParticipant {
                 kind: repeated.kind,
@@ -139,15 +132,14 @@ impl Conversation {
         &self.created_at
     }
 
-    /// Whether this is the thread between exactly `participants`, told
-    /// apart by kind and id alone: their names are what each was called
-    /// when it began.
+    /// Whether this is the thread between exactly `participants`, in
+    /// whatever order they come.
     #[must_use]
     pub fn is_between(&self, participants: &[Participant]) -> bool {
-        let mut keys: Vec<_> = participants.iter().map(Participant::key).collect();
+        let mut sorted = participants.to_vec();
 
-        keys.sort();
-        self.participants.iter().map(Participant::key).eq(keys)
+        sorted.sort();
+        self.participants == sorted
     }
 }
 
@@ -165,15 +157,8 @@ mod tests {
 
     use super::*;
 
-    fn name(text: &str) -> SpeakerName {
-        SpeakerName::new(text).unwrap()
-    }
-
-    fn character(id: &str, display_name: &str) -> Participant {
-        Participant::character(CharacterProfile {
-            id: Identifier::new(id).unwrap(),
-            display_name: name(display_name),
-        })
+    fn character(id: &str) -> Participant {
+        Participant::character(Identifier::new(id).unwrap())
     }
 
     fn conversation(
@@ -196,9 +181,9 @@ mod tests {
 
     #[test]
     fn a_conversation_keeps_its_participants_in_one_order_whatever_order_they_came_in() {
-        let user = Participant::local_user(name("You"));
-        let mira = character("mira", "Mira");
-        let kai = character("kai", "Kai");
+        let user = Participant::local_user();
+        let mira = character("mira");
+        let kai = character("kai");
 
         let direct = conversation(vec![user.clone(), mira.clone()]).unwrap();
 
@@ -219,14 +204,14 @@ mod tests {
 
     #[test]
     fn a_conversation_needs_two_participants_each_listed_once() {
-        let mira = character("mira", "Mira");
+        let mira = character("mira");
 
         assert_eq!(
             conversation(vec![mira.clone()]),
             Err(ParseConversationError::TooFewParticipants)
         );
         assert_eq!(
-            conversation(vec![mira.clone(), character("mira", "Other Mira")]),
+            conversation(vec![mira.clone(), mira.clone()]),
             Err(ParseConversationError::RepeatedParticipant {
                 kind: VisibleMessageRole::Character,
                 id: Identifier::new("mira").unwrap(),
@@ -246,8 +231,8 @@ mod tests {
         let record = json!({
             "id": "conv_a",
             "participants": [
-                {"kind": "character", "id": "mira", "displayName": "Mira"},
-                {"kind": "user", "id": "local-user", "displayName": "You"},
+                {"kind": "character", "id": "mira"},
+                {"kind": "user", "id": "local-user"},
             ],
             "createdAt": "2026-08-20T00:00:00.000Z",
         });
@@ -255,24 +240,30 @@ mod tests {
 
         assert_eq!(serde_json::to_value(&parsed).unwrap(), record);
 
+        // An earlier build named each participant; its record reads the same.
+        let mut named = record.clone();
+
+        named["participants"][0]["displayName"] = json!("Mira");
+        assert_eq!(
+            serde_json::from_value::<Conversation>(named).unwrap(),
+            parsed
+        );
+
         let mut alone = record;
-        alone["participants"] = json!([{"kind": "user", "id": "local-user", "displayName": "You"}]);
+        alone["participants"] = json!([{"kind": "user", "id": "local-user"}]);
 
         assert!(serde_json::from_value::<Conversation>(alone).is_err());
     }
 
     #[test]
-    fn a_conversation_is_between_the_same_kinds_and_ids_whatever_their_names_or_order() {
-        let user = Participant::local_user(name("You"));
-        let mira = character("mira", "Mira");
+    fn a_conversation_is_between_the_same_participants_whatever_their_order() {
+        let user = Participant::local_user();
+        let mira = character("mira");
         let thread = conversation(vec![user.clone(), mira.clone()]).unwrap();
 
-        assert!(thread.is_between(&[
-            character("mira", "Renamed"),
-            Participant::local_user(name("Sam"))
-        ]));
-        assert!(!thread.is_between(&[user.clone(), character("kai", "Kai")]));
-        assert!(!thread.is_between(&[user.clone(), mira.clone(), character("kai", "Kai")]));
+        assert!(thread.is_between(&[mira.clone(), user.clone()]));
+        assert!(!thread.is_between(&[user.clone(), character("kai")]));
+        assert!(!thread.is_between(&[user.clone(), mira.clone(), character("kai")]));
         assert!(!thread.is_between(&[
             user,
             Participant {

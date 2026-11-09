@@ -4,13 +4,10 @@
 
 use async_trait::async_trait;
 use p02_contracts::{
-    ConversationTurn, InputEnvelope, Invocation, RawOutput, ReplyDelta, RoleModelAdapter,
-    VISIBLE_REPLY, scrub_reasoning_blocks,
+    ConversationTurn, Invocation, ModelOutput, ProviderAnswer, ReplyDelta, RoleModelAdapter,
+    scrub_reasoning_blocks,
 };
 use p02_core::VisibleMessageRole;
-use serde_json::json;
-
-use crate::prompt::json_text;
 
 /// Answers the first line it hears with the same sentence, and every later
 /// one by quoting the line before it.
@@ -19,7 +16,7 @@ pub(crate) struct DeterministicAdapter;
 
 #[async_trait]
 impl RoleModelAdapter for DeterministicAdapter {
-    async fn invoke(&self, _envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         let previous = invocation
             .history()
             .iter()
@@ -35,7 +32,7 @@ impl RoleModelAdapter for DeterministicAdapter {
         };
 
         // Spoken in word-sized pieces first, so the reply streams the way a
-        // model's does, after the scrub the parser gives the whole, so a
+        // model's does, after the scrub the judge gives the whole, so a
         // draft never shows what the commit will not.
         for piece in word_pieces(&scrub_reasoning_blocks(&reply)) {
             invocation.hear(ReplyDelta {
@@ -44,9 +41,14 @@ impl RoleModelAdapter for DeterministicAdapter {
             });
         }
 
-        RawOutput::text(json_text(
-            &json!({"toolCalls": [{"name": VISIBLE_REPLY, "input": {"text": reply}}]}),
-        ))
+        ProviderAnswer::Answered {
+            output: ModelOutput {
+                tool_calls: Vec::new(),
+                text: Some(reply),
+            },
+            finish_reason: None,
+            usage: None,
+        }
     }
 }
 

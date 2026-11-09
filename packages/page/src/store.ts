@@ -6,23 +6,23 @@
  * value it was given. Nothing here touches the DOM, so the rules a page
  * follows are tested in Node with the rest of the suite.
  */
-import {
-  foldRunningTurns,
-  type AnswerOutcome,
-  type CharacterSummary,
-  type ConfigTarget,
-  type ConfigView,
-  type ConfirmationCancelReason,
-  type GatewayEvent,
-  type GatewayHealth,
-  type GatewayReady,
-  type HistoryOutcome,
-  type OpenOutcome,
-  type PairingRequest,
-  type PairingSettleOutcome,
-  type PendingConfirmation,
-  type RunningTurns,
-  type TurnOutcome,
+import type {
+  AnswerOutcome,
+  CharacterSummary,
+  ConfigTarget,
+  ConfigView,
+  ConfirmationCancelReason,
+  GatewayEvent,
+  GatewayHealth,
+  GatewayReady,
+  HistoryOutcome,
+  OpenOutcome,
+  PairingRequest,
+  PairingSettleOutcome,
+  PendingConfirmation,
+  RunningTurn,
+  TurnStatus,
+  VisibleMessageRole,
 } from '@project02/wire/contract';
 import type {HistoryPage} from '@project02/wire/client';
 
@@ -32,10 +32,10 @@ export type Connection =
   /** The address will never work: a dead token, a wrong protocol, no token. */
   | {readonly status: 'refused'; readonly message: string};
 
-/** A committed message as the page shows it; a person's own is told by its speaker. */
+/** A committed message as the page shows it; a person's own is told by its role. */
 export type Message = {
   readonly messageId: string;
-  readonly speakerId: string;
+  readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
   readonly clientMessageId?: string;
@@ -49,7 +49,6 @@ export type Message = {
 export type PendingLine = {
   readonly conversationId: string;
   readonly characterId: string;
-  readonly senderId: string;
   readonly text: string;
 };
 
@@ -57,7 +56,6 @@ export type PendingLine = {
 export type Thread = {
   readonly characterId: string;
   readonly conversationId: string;
-  readonly userParticipantId: string;
   /**
    * What was shown before the newest page this thread is waiting for:
    * still on screen, stitched to nothing that comes, until that page
@@ -120,12 +118,12 @@ export type WebState = {
    */
   readonly composers: ReadonlyMap<string, string>;
   /**
-   * The turns in progress, for every conversation and not only the one on
-   * screen, folded by the contract's one rule from the frames and installed
-   * from the snapshot: the typing indicator until the first delta or the
-   * end, and each draft's text so far.
+   * Conversation id → the turn in progress there, for every conversation
+   * and not only the one on screen, as the daemon last said it: the typing
+   * indicator until her first draft or the end, and each draft's text so
+   * far.
    */
-  readonly turns: RunningTurns;
+  readonly turns: ReadonlyMap<string, RunningTurn>;
   /**
    * What the page has to say that belongs to no thread: how a turn did
    * not complete, a confirmation that expired, a verb the daemon refused.
@@ -139,10 +137,10 @@ export type WebState = {
   readonly notices: readonly string[];
 };
 
-/** How a line's turn ended, from the answer or the stream. */
+/** How a line ended, from the daemon's answer to it or from the stream. */
 export type LineEnding = {
-  readonly status: TurnOutcome['status'];
-  /** Whether the turn put the line in the log; the daemon says, and only it knows. */
+  readonly status: TurnStatus;
+  /** Whether the line is in the log; the daemon says, and only it knows. */
   readonly committed: boolean;
   readonly message?: string;
 };
@@ -318,7 +316,6 @@ export function threadOpened(state: WebState, opened: Opened): WebState {
         : {
             characterId: opened.characterId,
             conversationId,
-            userParticipantId: opened.userParticipantId,
             stale: [],
             messages: [],
           },
@@ -475,7 +472,6 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
   pending.set(clientMessageId, {
     conversationId: thread.conversationId,
     characterId: thread.characterId,
-    senderId: thread.userParticipantId,
     text,
   });
 
@@ -486,17 +482,17 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 }
 
 /**
- * A turn's end, however it reaches the tab — the answer to a send, or the
- * stream — said at once, naming its character, this tab's turn or
- * another surface's. The end says whether the turn put the line in the
- * log: one it did not is the person's to write again and goes back to
- * the thread it was written in, open or not; one it did is the thread's,
- * settled here, and the page or the frame shows it where it landed —
- * which may be far back, for a line the daemon took in an earlier run.
- * The page works none of this out — an answer can beat the frame that
- * would show the line, a stream is ordered only within one connection,
- * and a page of the log is a hundred messages, not the whole of it — the
- * daemon says. `completed` says only that.
+ * A line's end, however it reaches the tab — the daemon's refusal of a
+ * send, or the stream's word on its turn — said at once, naming its
+ * character, this tab's line or another surface's. The end says whether
+ * the line is in the log: one that is not is the person's to write again
+ * and goes back to the thread it was written in, open or not; one that is
+ * is the thread's, settled here, and the page or the frame shows it where
+ * it landed — which may be far back, for a line the daemon took long
+ * before. The page works none of this out — an answer can beat the frame
+ * that would show the line, a stream is ordered only within one
+ * connection, and a page of the log is a hundred messages, not the whole
+ * of it — the daemon says. `completed` says only that.
  */
 export function lineEnded(
   state: WebState,
@@ -676,21 +672,24 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       // The daemon took the line, whichever thread it went to.
       const taken =
         progress.kind === 'user_message' &&
-        progress.clientMessageId !== undefined &&
         state.pending.has(progress.clientMessageId)
           ? settled(state, progress.clientMessageId)
           : state;
-      const shown = withThread(taken, thread =>
+      return withThread(taken, thread =>
         thread.conversationId === event.conversationId
           ? committed(thread, progress)
           : thread,
       );
-
-      return withTurns(shown, event);
     }
+    case 'turn_running':
+      // The daemon's word on the turn replaces the tab's copy whole.
+      return {
+        ...state,
+        turns: new Map(state.turns).set(event.conversationId, runningOf(event)),
+      };
     case 'turn_completed':
       return lineEnded(
-        withTurns(state, event),
+        withoutTurnEnded(state, event),
         event.characterId,
         event.clientMessageId,
         {
@@ -712,7 +711,16 @@ function committed(
   progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
 ): Thread {
   return progress.kind === 'user_message' || progress.kind === 'visible_reply'
-    ? {...thread, messages: appendMessage(thread.messages, messageOf(progress))}
+    ? {
+        ...thread,
+        messages: appendMessage(
+          thread.messages,
+          messageOf({
+            ...progress,
+            role: progress.kind === 'user_message' ? 'user' : 'character',
+          }),
+        ),
+      }
     : thread;
 }
 
@@ -729,11 +737,40 @@ function withThread(
   return thread === state.thread ? state : {...state, thread};
 }
 
-/** The turns in progress after one frame, by the contract's rule; no change is no new value. */
-function withTurns(state: WebState, event: GatewayEvent): WebState {
-  const turns = foldRunningTurns(state.turns, event);
+function runningOf(
+  event: Extract<GatewayEvent, {kind: 'turn_running'}>,
+): RunningTurn {
+  return {
+    characterId: event.characterId,
+    conversationId: event.conversationId,
+    source: event.source,
+    clientMessageId: event.clientMessageId,
+    drafts: event.drafts,
+  };
+}
 
-  return turns === state.turns ? state : {...state, turns};
+/**
+ * A turn ends at the completion of its own line, never at another's: a
+ * line's end that names another submission leaves the turn running.
+ */
+function withoutTurnEnded(
+  state: WebState,
+  ended: Extract<GatewayEvent, {kind: 'turn_completed'}>,
+): WebState {
+  const turn = state.turns.get(ended.conversationId);
+
+  if (
+    turn?.source !== ended.source ||
+    turn.clientMessageId !== ended.clientMessageId
+  ) {
+    return state;
+  }
+
+  const turns = new Map(state.turns);
+
+  turns.delete(ended.conversationId);
+
+  return {...state, turns};
 }
 
 /** The daemon took the line, whichever thread it went to; what its ending said stands. */
@@ -853,14 +890,14 @@ function pairingOf(
 
 function messageOf(source: {
   readonly messageId: string;
-  readonly speakerId: string;
+  readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
   readonly clientMessageId?: string;
 }): Message {
   return {
     messageId: source.messageId,
-    speakerId: source.speakerId,
+    role: source.role,
     speakerName: source.speakerName,
     text: source.text,
     ...(source.clientMessageId === undefined

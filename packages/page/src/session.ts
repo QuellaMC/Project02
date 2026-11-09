@@ -4,7 +4,7 @@
  * page reads the store, never the client. The address is the page's own,
  * so this runs only in a browser: the browser suite is its cover.
  */
-import {turnCommittedTheLine, type Answer} from '@project02/wire/contract';
+import type {Answer} from '@project02/wire/contract';
 import {
   createGatewayClient,
   GatewayClientError,
@@ -116,10 +116,10 @@ export function createSession(address: string): Session {
     }
   };
   /**
-   * An open can wait on a start or a reload, minutes when a turn is
-   * parked on a confirmation; the latest character asked for wins, and an
-   * earlier open that settles later is let go. Asking for the character
-   * already on screen is a refresh: its thread stays until the page comes.
+   * An open can wait on her start; the latest character asked for wins,
+   * and an earlier open that settles later is let go. Asking for the
+   * character already on screen is a refresh: its thread stays until the
+   * page comes.
    */
   const open = async (characterId: string): Promise<void> => {
     const mine = (opens += 1);
@@ -213,8 +213,8 @@ export function createSession(address: string): Session {
           }
 
           writtenFor(snapshot.health.homeRoot);
-          // Not awaited: a line that parks on a confirmation would wait
-          // for a frame this stream cannot send until the bootstrap ends.
+          // Not awaited: a line's open can wait on her start, and the
+          // stream goes on meanwhile.
           void accountForPending(accounting());
           openTheOnlyCharacter();
           await settings.ready();
@@ -268,12 +268,12 @@ export function createSession(address: string): Session {
         return;
       }
 
-      // Silence says nothing of the turn, so the log is asked; a line it
-      // does not carry was never taken, or was taken and is running. The
-      // same line goes again under the same id, which the daemon's
-      // ledger joins if the first one did arrive: the person's words are
-      // either in the thread or on their way, never left in a bubble
-      // nothing will ever settle.
+      // Silence says nothing of the line, so the log is asked; a line it
+      // does not carry was never queued, or is queued and waits or runs.
+      // The same line goes again under the same id, which the daemon
+      // answers as queued already if the first one did arrive: the
+      // person's words are either in the thread or on their way, never
+      // left in a bubble nothing will ever settle.
       if (!(await deliverOnce(sending(), line, clientMessageId))) {
         return;
       }
@@ -284,9 +284,9 @@ export function createSession(address: string): Session {
       await accountForPending(accounting());
 
       // Nothing answered, so the log is asked; a line it does not carry
-      // goes again under the same id, which the daemon's ledger joins if
-      // the first one did arrive. One that nothing answers either waits
-      // for the next connection, which sends it again.
+      // goes again under the same id, which the daemon answers as queued
+      // already if the first one did arrive. One that nothing answers
+      // either waits for the next connection, which sends it again.
       await readPage(line.conversationId, {});
 
       if (getState().pending.has(clientMessageId)) {
@@ -360,8 +360,8 @@ type Accounting = Sending & {
 /**
  * Every line this tab is still holding, accounted for: the log first,
  * which settles one it carries whoever wrote it. What remains goes again
- * under its own id, whether this tab or a gone one wrote it: the daemon's
- * ledger joins a turn still running, and the daemon refuses a line it
+ * under its own id, whether this tab or a gone one wrote it: the daemon
+ * answers one still in her inbox as queued already, and refuses one she
  * took anywhere in the conversation, in this run or an earlier one — so a
  * line goes twice only if the person sends it twice. Each line's
  * conversation is opened first: a daemon that has restarted holds no
@@ -461,7 +461,8 @@ type Sending = {
 /**
  * One attempt at a line, and what the daemon answered: `true` when
  * nothing answered at all, which is the only thing the tab can act on
- * further. A refusal and a verdict are the daemon's word on the line.
+ * further. A line in her inbox waits for the stream to say how its turn
+ * ended; a refusal is the daemon's word on the line.
  */
 async function deliverOnce(
   sending: Sending,
@@ -471,26 +472,24 @@ async function deliverOnce(
   try {
     const outcome = await sending.client.deliver({
       conversationId: line.conversationId,
-      senderId: line.senderId,
       text: line.text,
       source: webSource,
       clientMessageId,
     });
 
-    sending.apply(current =>
-      lineEnded(
-        current,
-        line.characterId,
-        clientMessageId,
-        outcome.status === 'completed'
-          ? {status: 'completed', committed: true}
-          : {
-              status: outcome.status,
-              committed: turnCommittedTheLine(outcome),
-              message: outcome.message,
-            },
-      ),
-    );
+    if (outcome.status === 'refused' || outcome.status === 'failed') {
+      sending.apply(current =>
+        lineEnded(current, line.characterId, clientMessageId, {
+          status: outcome.status,
+          // A duplicate is the one refusal whose line is in the log: a
+          // turn took it under this same id.
+          committed:
+            outcome.status === 'refused' &&
+            outcome.reason === 'duplicate_submission',
+          message: outcome.message,
+        }),
+      );
+    }
 
     return false;
   } catch (error: unknown) {
@@ -577,7 +576,7 @@ function isPendingLine(value: unknown): boolean {
   return (
     typeof value === 'object' &&
     value !== null &&
-    ['conversationId', 'characterId', 'senderId', 'text'].every(
+    ['conversationId', 'characterId', 'text'].every(
       field => typeof (value as Record<string, unknown>)[field] === 'string',
     )
   );

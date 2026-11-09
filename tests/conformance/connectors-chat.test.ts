@@ -384,7 +384,7 @@ it("connectors.telegram-mirror: another surface's turn is shown in each paired c
   }
 });
 
-it('connectors.telegram-mirror-before-open: a web line that opens her thread after a restart, while her bot starts, is shown in the chat once that turn is done', async () => {
+it('connectors.telegram-mirror-before-open: a web line that opens her thread after a restart, while her bot starts, is shown in the chat once that turn is done, her thread answering an open while the turn runs', async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': homeSettings(model, [alice]),
@@ -395,32 +395,33 @@ it('connectors.telegram-mirror-before-open: a web line that opens her thread aft
 
   await before.start('mira');
 
-  const {conversationId, userParticipantId} = await conversationOf(
-    before,
-    'mira',
-  );
+  const {conversationId} = await conversationOf(before, 'mira');
 
   first.signal('SIGINT');
   await first.exit();
 
   const wire = wireOf(await startDaemon(home));
   const held = model.hold();
-  const inFlight = wire.turn({
-    conversationId,
-    senderId: userParticipantId,
-    text: 'From the web.',
-    source: 'web',
-    clientMessageId: 'web-1',
-  });
 
+  await expect(
+    wire.turn({
+      conversationId,
+      text: 'From the web.',
+      source: 'web',
+      clientMessageId: 'web-1',
+    }),
+  ).resolves.toEqual({status: 'queued'});
   await held.arrived();
+  await expect(wire.open('mira')).resolves.toMatchObject({
+    status: 'opened',
+    conversationId,
+  });
 
   const telegram = await startTelegramServer([miraBot]);
   const run = connector(['--store', home], telegram.env);
 
   await run.printed(miraAnswers);
   held.release(reply('Hello, web.'));
-  await inFlight;
   await telegram.shows(miraBot.token, alice.id, 'Hello, web.');
 });
 

@@ -22,7 +22,7 @@ pub use capability::{
     SessionHistory, SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary,
     StoreAccess, StoreError, WriteHold,
 };
-pub use config::{ConfigField, ConfigSection, MissingConfigValueError, ResolvedConfig};
+pub use config::{ConfigField, ConfigSection, ResolvedConfig};
 pub use context::{HookContext, TurnIdentity, TurnText};
 pub use evidence::{Evidence, EvidenceError, EvidenceNote};
 pub use label::{ParseRedactionLabelError, RedactionLabel};
@@ -37,15 +37,13 @@ pub use plugin::{
 };
 pub use role_model::{
     BlankContextTextError, CharacterDecision, ChatCompletionTool, ChatFunctionCall, ChatMessage,
-    ChatToolCall, ChatToolFunction, ConversationToolCall, ConversationTurn,
-    DECISION_CONTRACT_VERSION, DecisionContext, DecisionRejection, DecisionRejectionReason,
-    DecisionResult, DuplicateToolError, ExchangeProvider, ExchangeRecord, FrameSize, HistoryWindow,
-    InputEnvelope, Invocation, ModelToolCall, ModelToolDefinition, OutputContract,
-    PLUGIN_LIST_TOOL, ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions,
-    PromptSize, ProviderAnswer, ProviderExchange, ProviderFailure, ProviderMetadata, ProviderName,
-    ProviderRequest, ProviderResponse, RawOutput, ReasoningFilter, ReplyDelta, RoleModelAdapter,
-    RuntimeNote, TextCompletion, TextCompletionRequest, ToolCallResult, ToolNameMapping, ToolRound,
-    VISIBLE_REPLY, scrub_reasoning_blocks,
+    ChatToolCall, ChatToolFunction, ConversationToolCall, ConversationTurn, DecisionContext,
+    DecisionRejection, DecisionRejectionReason, DecisionResult, DuplicateToolError, Invocation,
+    ModelOutput, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL, ParseModelToolCallError,
+    PluginToolDefinition, PluginToolDefinitions, ProviderAnswer, ProviderFailure, ProviderName,
+    ReasoningFilter, ReplyDelta, RoleModelAdapter, RuntimeNote, TextCompletion,
+    TextCompletionRequest, TokenUsage, ToolCallResult, ToolRound, VISIBLE_REPLY, WrittenCall,
+    scrub_reasoning_blocks,
 };
 pub use schema::{InputContractError, ToolInputContract, ToolInputRejection};
 pub use tool::{
@@ -54,7 +52,6 @@ pub use tool::{
 };
 pub use vocabulary::{
     AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,
-    CONTRACT_VERSION, ConfigScope, ConfigValueType, ContextItemKind, Declaration, EvidenceKind,
-    EvidenceStatus, HOST_PLUGIN, HandleToolCallFailure, PluginKind, PolicyOutcome, SourceKind,
-    ToolConcurrency,
+    CONTRACT_VERSION, ConfigScope, ContextItemKind, Declaration, EvidenceKind, EvidenceStatus,
+    HOST_PLUGIN, HandleToolCallFailure, PluginKind, PolicyOutcome, SourceKind, ToolConcurrency,
 };

@@ -9,10 +9,11 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_app::{Event, Health, PairingRequest, PendingConfirmation, RunningTurns};
-use p02_config::{ConnectorConfigView, ConnectorEntry};
-use p02_gateway::Ready;
 use p02_shared::{Identifier, error_sentence};
+use p02_wire::{
+    ConnectorConfigView, ConnectorEntry, Event, Health, PairingRequest, PendingConfirmation, Ready,
+    RunningTurn,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, watch};
@@ -88,7 +89,7 @@ impl Owner {
 pub(crate) struct Snapshot {
     pub(crate) confirmations: Vec<PendingConfirmation>,
     pub(crate) pairings: Vec<PairingRequest>,
-    pub(crate) turns: RunningTurns,
+    pub(crate) turns: Vec<RunningTurn>,
 }
 
 /// The snapshot as of the frame numbered `seq`, the one a bot that catches
@@ -100,12 +101,17 @@ pub(crate) struct Latest {
 }
 
 impl Snapshot {
-    /// The turns folded by the contract's one rule; what waits added as it
-    /// is raised, announced again or not, and dropped as it is settled.
+    /// Each turn as its newest frame says it, until the completion that
+    /// ends it; what waits added as it is raised, announced again or not,
+    /// and dropped as it is settled.
     fn move_on(&mut self, event: &Event) {
-        self.turns.fold(event);
-
         match event {
+            Event::TurnRunning(turn) => {
+                self.turns
+                    .retain(|running| running.conversation_id != turn.conversation_id);
+                self.turns.push(turn.clone());
+            }
+            Event::TurnCompleted { .. } => self.turns.retain(|turn| !event.ends(turn)),
             Event::ConfirmationRequested(pending) => {
                 self.confirmations
                     .retain(|waiting| waiting.id != pending.id);
@@ -142,11 +148,9 @@ struct Values {
 }
 
 impl Values {
-    /// The entry's values while it is active; none while it is not.
-    fn of(entry: &ConnectorEntry) -> Option<Self> {
-        entry
-            .values()
-            .map(|values| serde_json::from_value(Value::Object(values.clone())).unwrap_or_default())
+    /// The entry's values: an entry that is not active holds none.
+    fn of(entry: &ConnectorEntry) -> Self {
+        serde_json::from_value(Value::Object(entry.values.clone())).unwrap_or_default()
     }
 
     fn paired(&self) -> BTreeSet<String> {
@@ -265,7 +269,7 @@ impl Table {
         let snapshot = Snapshot {
             confirmations,
             pairings,
-            turns: turns.into_iter().collect(),
+            turns,
         };
 
         self.seq += 1;
@@ -409,7 +413,6 @@ impl Table {
                     Start {
                         telegram: Arc::clone(&self.telegram),
                         token: token.clone(),
-                        settings,
                         draft_edits: self.draft_edits,
                         daemon: self.daemon.subscribe(),
                         held: self.held.subscribe(),
@@ -417,6 +420,7 @@ impl Table {
                         lines: Arc::clone(&self.lines),
                         stop: self.stop.child_token(),
                     },
+                    settings,
                     &self.tracker,
                 );
 
@@ -454,7 +458,8 @@ impl Table {
             .flat_map(|health| &health.characters)
             .map(|character| (character.id.clone(), character.display_name.to_string()))
             .collect();
-        let home_bot = Values::of(home).and_then(|values| {
+        let home_bot = {
+            let values = Values::of(home);
             let paired = values.paired();
 
             values.management_bot_token.map(|token| {
@@ -468,11 +473,11 @@ impl Table {
                     },
                 )
             })
-        });
+        };
         let character_bots = characters.iter().filter_map(|entry| {
-            let values = Values::of(entry.entry())?;
+            let values = Values::of(&entry.entry);
             let paired = values.paired();
-            let id = entry.character_id();
+            let id = &entry.character_id;
 
             values.bot_token.map(|token| {
                 (

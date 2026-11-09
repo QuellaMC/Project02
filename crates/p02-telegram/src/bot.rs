@@ -1,23 +1,26 @@
 //! One token's bot: it asks Telegram who it is and says so, long-polls
 //! until it is stopped or Telegram refuses its token, and hands each
-//! update to its rules, which follow the daemon's frames too; trouble is
-//! said once per change, naming the bot, while the bot keeps trying.
+//! update past the pairing gate to its rules, which follow the daemon's
+//! frames too; trouble is said once per change, naming the bot, while the
+//! bot keeps trying.
 
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_app::Event;
 use p02_core::ClientStamp;
+use p02_wire::{Event, OpenOutcome};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::bot_api::{BotApi, BotToken, CallbackQuery, Telegram, Update, User};
+use crate::bot_api::{BotApi, BotToken, CallbackQuery, Failure, Message, Telegram, Update, User};
+use crate::cards::Press;
 use crate::character::Character;
 use crate::daemon::{Daemon, Unanswered};
+use crate::gate::Gate;
 use crate::management::Management;
 use crate::outbox::Outbox;
 use crate::table::{BotSettings, Latest, Owner, Snapshot};
@@ -46,12 +49,11 @@ pub(crate) enum Inbox {
     },
 }
 
-/// What a bot is started with.
+/// What a bot is started with, beside its settings.
 #[derive(Debug)]
 pub(crate) struct Start {
     pub(crate) telegram: Arc<Telegram>,
     pub(crate) token: BotToken,
-    pub(crate) settings: BotSettings,
     pub(crate) draft_edits: Duration,
     pub(crate) daemon: watch::Receiver<Option<Daemon>>,
     pub(crate) held: watch::Receiver<bool>,
@@ -76,24 +78,12 @@ pub(crate) struct Bot {
 }
 
 impl Bot {
-    pub(crate) fn start(start: Start, tracker: &TaskTracker) -> Self {
-        let (settings, read) = watch::channel(Arc::new(start.settings));
+    pub(crate) fn start(start: Start, settings: BotSettings, tracker: &TaskTracker) -> Self {
+        let (settings, read) = watch::channel(Arc::new(settings));
         let (inbox, frames) = mpsc::unbounded_channel();
         let stop = start.stop.clone();
 
-        tracker.spawn(run(
-            BotApi::new(start.telegram, start.token),
-            Parts {
-                settings: read,
-                frames,
-                draft_edits: start.draft_edits,
-                daemon: start.daemon,
-                held: start.held,
-                latest: start.latest,
-                lines: start.lines,
-                stop: start.stop,
-            },
-        ));
+        tracker.spawn(run(start, read, frames));
 
         Self {
             settings,
@@ -121,33 +111,26 @@ impl Bot {
     }
 }
 
-/// What a bot's tasks share.
-struct Parts {
-    settings: watch::Receiver<Arc<BotSettings>>,
-    frames: mpsc::UnboundedReceiver<Inbox>,
-    draft_edits: Duration,
-    daemon: watch::Receiver<Option<Daemon>>,
-    held: watch::Receiver<bool>,
-    latest: watch::Receiver<Option<Latest>>,
-    lines: Arc<dyn Lines>,
-    stop: CancellationToken,
-}
-
 /// The bot from its start to its stop. Once Telegram said who it is, its
 /// rules and its outbox run beside its poll; a token refused ends them and
 /// leaves the bot quiet until it is stopped, so the table does not start
 /// it again.
-async fn run(api: BotApi, parts: Parts) {
-    let Parts {
-        settings,
-        frames,
+async fn run(
+    start: Start,
+    settings: watch::Receiver<Arc<BotSettings>>,
+    frames: mpsc::UnboundedReceiver<Inbox>,
+) {
+    let Start {
+        telegram,
+        token,
         draft_edits,
         daemon,
         held,
         latest,
         lines,
         stop,
-    } = parts;
+    } = start;
+    let api = BotApi::new(telegram, token);
     let mut problems = Problems::default();
     let Some(me) = identify(&api, &settings, lines.as_ref(), &mut problems, &stop).await else {
         stop.cancelled().await;
@@ -197,7 +180,7 @@ async fn run(api: BotApi, parts: Parts) {
 
     match character {
         Some(id) => tasks.spawn(follow(Character::new(id), chat, intake)),
-        None => tasks.spawn(follow(Management::default(), chat, intake)),
+        None => tasks.spawn(follow(Management, chat, intake)),
     };
     tasks.close();
 
@@ -222,6 +205,15 @@ async fn run(api: BotApi, parts: Parts) {
         "Telegram: stopped @{username} ({}).",
         settings.borrow().owner.name()
     ));
+}
+
+/// What a write to `chat` that Telegram refused is said as.
+pub(crate) fn unwritten(owner: &Owner, chat: i64, failure: &Failure) -> String {
+    format!(
+        "{} could not write to chat {chat}: {}",
+        capitalized(&owner.bot()),
+        failure.description()
+    )
 }
 
 fn refused(owner: &Owner) -> String {
@@ -428,14 +420,7 @@ async fn poll(
 #[derive(Debug)]
 pub(crate) enum Done {
     Toasted,
-    Opened(Result<p02_app::OpenOutcome, Unanswered>),
-    /// A line's delivery, answered once its turn ended: the chat it came
-    /// from, its id, and the outcome.
-    Delivered {
-        chat: i64,
-        id: ClientStamp,
-        outcome: Result<p02_app::TurnOutcome, Unanswered>,
-    },
+    Opened(Result<OpenOutcome, Unanswered>),
 }
 
 /// What a bot's rules run on: the bot as Telegram knows it, the daemon and
@@ -489,16 +474,12 @@ impl Chat {
     pub(crate) fn toast(&mut self, press: &CallbackQuery, toast: Option<String>) {
         let api = self.api.clone();
         let lines = Arc::clone(&self.lines);
-        let bot = self.settings().owner.bot();
+        let settings = self.settings();
         let (id, from) = (press.id.clone(), press.from.id);
 
         self.spawn(async move {
             if let Err(failure) = api.answer_callback_query(&id, toast.as_deref()).await {
-                lines.report(&format!(
-                    "{} could not write to chat {from}: {}",
-                    capitalized(&bot),
-                    failure.description()
-                ));
+                lines.report(&unwritten(&settings.owner, from, &failure));
             }
 
             Done::Toasted
@@ -516,20 +497,29 @@ pub(crate) fn capitalized(text: &str) -> String {
         .unwrap_or_default()
 }
 
-/// What a bot does with an update, and with the daemon's frames and
-/// snapshots: a character's bot, or the home's.
+/// What a bot does with what a paired account sends it, and with the
+/// daemon's frames and snapshots: a character's bot, or the home's.
 pub(crate) trait Rules: Send {
     /// Runs once, as the rules begin.
     fn started(&mut self, _chat: &mut Chat) {}
 
-    /// Handles one update; it is handed on once this answers.
-    fn update(&mut self, chat: &mut Chat, update: Update) -> impl Future<Output = ()> + Send;
+    /// Handles a message from a paired account's private chat; its update
+    /// is handed on once this answers.
+    fn message(&mut self, chat: &mut Chat, message: Message) -> impl Future<Output = ()> + Send;
+
+    /// Answers a paired account's press of a card's button with the toast
+    /// that says how it went, if any.
+    fn press(
+        &mut self,
+        chat: &mut Chat,
+        press: &Press,
+    ) -> impl Future<Output = Option<String>> + Send;
 
     fn install(&mut self, chat: &mut Chat, snapshot: &Snapshot);
 
     fn frame(&mut self, chat: &mut Chat, event: &Event);
 
-    fn done(&mut self, chat: &mut Chat, done: Done);
+    fn done(&mut self, _chat: &mut Chat, _done: Done) {}
 }
 
 /// What a bot's rules take in.
@@ -551,6 +541,7 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
         mut held,
         latest,
     } = intake;
+    let mut gate = Gate::default();
     let mut installed = false;
     let mut seen = 0;
 
@@ -580,12 +571,13 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 }
                 Inbox::Frame { seq, event } if seq > seen => {
                     seen = seq;
+                    gate.settled(&chat, &event);
                     rules.frame(&mut chat, &event);
                 }
                 _ => {}
             },
             Some((update, handed)) = polls.recv(), if free => {
-                rules.update(&mut chat, update).await;
+                take(&mut rules, &mut gate, &mut chat, update).await;
                 let _ = handed.send(());
             }
             Some(done) = chat.work.join_next(), if free && !chat.work.is_empty() => {
@@ -594,5 +586,43 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 }
             }
         }
+    }
+}
+
+/// Hands an update to the rules once the gate lets its account in: a
+/// press of a card's button, answered at once with how it went, or a
+/// message in a private chat. A chat that writes is written to again.
+async fn take(rules: &mut impl Rules, gate: &mut Gate, chat: &mut Chat, update: Update) {
+    if let Some(press) = update.callback_query {
+        chat.outbox.heard_from(press.from.id);
+
+        let mut toast = None;
+
+        if let Some(asked) = Press::parse(press.data.as_deref())
+            && gate.admit(chat, press.from.id, &press.from).await
+        {
+            toast = rules.press(chat, &asked).await;
+        }
+
+        chat.toast(&press, toast);
+        return;
+    }
+
+    let Some(message) = update.message else {
+        return;
+    };
+    let Some(from) = message
+        .from
+        .as_ref()
+        .filter(|_| message.chat.kind == "private")
+    else {
+        return;
+    };
+    let account = message.chat.id;
+
+    chat.outbox.heard_from(account);
+
+    if gate.admit(chat, account, from).await {
+        rules.message(chat, message).await;
     }
 }

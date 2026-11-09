@@ -9,35 +9,29 @@ use std::collections::{BTreeMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use p02_app::{
-    Answer, CancelReason, CharacterState, CharacterSummary, ConfigHealth, ConfirmationAnswer,
-    ConfirmationId, ConfirmationQuestion, ConnectorPresence, Event, Health, HistoryMessage,
-    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingSubject, PendingConfirmation, ProtocolVersion, RosterState, RunningDraft, RunningTurn,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, ToolCallStatus, TurnMessage,
-    TurnOutcome, TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
-};
 use p02_characters::discover;
-use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, ConfigView, ConnectorConfigView,
-    ConnectorRefusal, Sections, ViewRefusal,
-};
+use p02_config::{Sections, config_view, connector_config_view};
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
 };
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
+use p02_wire::{
+    Answer, AnswerBody, CancelReason, ChangeOutcome, ChangeRefusal, CharacterState,
+    CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer,
+    ConfirmationId, ConfirmationQuestion, ConnectorConfigView, ConnectorPresence, ConnectorRefusal,
+    ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
+    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
+    RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal, StorageFailure,
+    SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+};
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
 use schemars::{JsonSchema, Schema};
 use serde_json::{Map, Value, json};
 use ts_rs::{Config, TS, TypeVisitor};
-
-use crate::events::Ready;
-use crate::http::{
-    AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
-};
 
 const REGENERATE: &str = "cargo test -p p02-gateway contract";
 
@@ -53,7 +47,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<Health>();
     wire.written::<StartOutcome>();
     wire.written::<OpenOutcome>();
-    wire.written::<TurnOutcome>();
+    wire.written::<SubmitOutcome>();
     wire.written::<HistoryOutcome>();
     wire.written::<PendingConfirmation>();
     wire.written::<ConfirmationAnswer>();
@@ -304,7 +298,6 @@ fn read() -> Vec<(&'static str, Value)> {
             "GatewayMessage",
             json!({
                 "conversationId": "conv_1",
-                "senderId": "local-user",
                 "text": "Hello.",
                 "source": "web",
                 "clientMessageId": "line-1",
@@ -402,6 +395,16 @@ fn written() -> Vec<(&'static str, Value)> {
         requested_at: at.clone(),
         expires_at: 1_793_000_000_000,
     };
+    let running = RunningTurn {
+        character_id: id("mira"),
+        conversation_id: conversation.clone(),
+        source: stamp("web"),
+        client_message_id: stamp("line-1"),
+        drafts: vec![RunningDraft {
+            draft_id: "1.1".to_owned(),
+            text: "Hel".to_owned(),
+        }],
+    };
     let events = [
         Event::TurnProgress {
             character_id: id("mira"),
@@ -411,8 +414,8 @@ fn written() -> Vec<(&'static str, Value)> {
                 speaker_id: id("local-user"),
                 speaker_name: SpeakerName::new("You").unwrap(),
                 text: text.clone(),
-                source: Some(stamp("web")),
-                client_message_id: None,
+                source: stamp("web"),
+                client_message_id: stamp("line-1"),
             },
         },
         Event::TurnProgress {
@@ -424,6 +427,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 tool_name: id("notes.add"),
             },
         },
+        Event::TurnRunning(running.clone()),
         Event::TurnCompleted {
             character_id: id("mira"),
             conversation_id: conversation.clone(),
@@ -476,25 +480,20 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "Mira is not ready.".to_owned(),
             },
         ),
+        read_back("SubmitOutcome", &SubmitOutcome::AlreadyQueued),
         read_back(
-            "TurnOutcome",
-            &TurnOutcome::Completed {
-                character_id: id("mira"),
-                conversation_id: conversation.clone(),
-                messages: vec![TurnMessage {
-                    message_id: message_id.clone(),
-                    speaker_id: id("mira"),
-                    speaker_name: mira.clone(),
-                    text: text.clone(),
-                }],
-            },
-        ),
-        read_back(
-            "TurnOutcome",
-            &TurnOutcome::Refused {
+            "SubmitOutcome",
+            &SubmitOutcome::Refused {
                 reason: TurnRefusal::DuplicateSubmission,
                 message: "The line is taken already.".to_owned(),
             },
+        ),
+        read_back(
+            "SubmitOutcome",
+            &SubmitOutcome::Failed(StorageFailure {
+                code: "write_failed".to_owned(),
+                message: "The disk is full.".to_owned(),
+            }),
         ),
         value(
             "HistoryOutcome",
@@ -551,7 +550,7 @@ fn written() -> Vec<(&'static str, Value)> {
             "ConnectorConfigView",
             &ConnectorConfigView::Refused {
                 reason: ConnectorRefusal::UnknownConnector,
-                message: "Unknown connector \"discord\".".to_owned(),
+                message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
             },
         ),
         read_back(
@@ -564,7 +563,7 @@ fn written() -> Vec<(&'static str, Value)> {
             "PairingRequestOutcome",
             &PairingOutcome::Refused {
                 reason: PairingRefusal::UnknownConnector,
-                message: "Connector \"discord\" does not pair.".to_owned(),
+                message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
             },
         ),
         read_back(
@@ -576,11 +575,10 @@ fn written() -> Vec<(&'static str, Value)> {
         read_back(
             "GatewayErrorBody",
             &ErrorBody {
-                error: Refusal::new(
-                    axum::http::StatusCode::UNAUTHORIZED,
-                    "unauthorized",
-                    "A bearer token is required.".to_owned(),
-                ),
+                error: Refusal {
+                    code: "unauthorized".to_owned(),
+                    message: "A bearer token is required.".to_owned(),
+                },
             },
         ),
         read_back(
@@ -590,16 +588,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 health,
                 confirmations: vec![pending],
                 pairings: vec![request],
-                turns: vec![RunningTurn {
-                    character_id: id("mira"),
-                    conversation_id: conversation,
-                    source: stamp("web"),
-                    client_message_id: stamp("line-1"),
-                    drafts: vec![RunningDraft {
-                        draft_id: "1.1".to_owned(),
-                        text: "Hel".to_owned(),
-                    }],
-                }],
+                turns: vec![running],
             },
         ),
     ];
@@ -637,8 +626,8 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let discovery = discover(home.root());
 
     (
-        ConfigView::read(&home, &sections, &discovery, &ConfigTarget::Global),
-        ConfigView::read(
+        config_view(&home, &sections, &discovery, &ConfigTarget::Global),
+        config_view(
             &home,
             &sections,
             &discovery,
@@ -646,6 +635,6 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
                 character_id: mira.to_string(),
             },
         ),
-        ConnectorConfigView::read(&home, &sections, &discovery, "telegram"),
+        connector_config_view(&home, &sections, &discovery, "telegram"),
     )
 }

@@ -1,6 +1,7 @@
 //! A turn's model rounds: one after another until the model replies or the
-//! rounds run out. Every round is judged by the decision parser and handed
-//! to the turn as soon as it is judged, before anything it decided happens.
+//! rounds run out, each made with what the character runs on when it
+//! starts. Every round is judged once and handed to the turn as soon as it
+//! is judged, before anything it decided happens.
 
 mod drafts;
 
@@ -10,15 +11,14 @@ use async_trait::async_trait;
 use p02_characters::Persona;
 use p02_contracts::{
     CharacterDecision, ConversationToolCall, ConversationTurn, DecisionContext, DecisionRejection,
-    DecisionRejectionReason, DecisionResult, HistoryWindow, InputEnvelope, Invocation,
-    ModelToolCall, PluginToolDefinitions, PromptSize, ProviderAnswer, RawOutput, ReplyDelta,
-    RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
+    DecisionRejectionReason, DecisionResult, Invocation, ModelToolCall, PluginToolDefinitions,
+    ProviderAnswer, ReplyDelta, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
 };
 use p02_core::{EventIdentity, VisibleMessage, VisibleText};
-use p02_shared::{BoundJsonError, Credentials, Identifier};
+use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
-use crate::prompt::{Person, render, unusable_reply_note};
+use crate::prompt::{InputEnvelope, render, unusable_reply_note};
 use drafts::Drafts;
 pub use drafts::{DraftEvent, DraftId};
 
@@ -32,28 +32,22 @@ const MAX_TOOL_ROUNDS: u32 = 99;
 pub struct TurnInput<'a> {
     pub event: EventIdentity,
     pub user_message: VisibleText,
-    /// What the runtime and the plugins prepared for the model. Its history
-    /// window is the loop's to set: the turns it replays are `history`.
+    /// What the runtime and the plugins prepared for the model's first
+    /// round.
     pub context: DecisionContext,
     pub plugin_tools: PluginToolDefinitions,
     /// The earlier turns to replay, oldest first.
     pub history: &'a [ConversationTurn],
     pub persona: &'a Persona,
-    pub person: Person<'a>,
 }
 
-/// A model round as it is recorded, before anything it decided happens.
+/// A model round to record before anything it decided happens: what its
+/// provider answered and the verdict on it, a call's input as the model
+/// sent it, credentials and all.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelRound {
     pub round: NonZeroU32,
-    /// What the model was given, this turn's finished rounds included.
-    pub envelope: InputEnvelope,
-    pub prompt_size: PromptSize,
-    /// What the provider answered.
-    pub output: RawOutput,
-    /// The judgement of the answer: the parser's, or the provider's
-    /// failure when nothing usable arrived. A tool call's input has its
-    /// credential-named values redacted.
+    pub answer: ProviderAnswer,
     pub result: DecisionResult,
 }
 
@@ -105,11 +99,8 @@ impl RoutedToolCall {
     }
 
     /// The call finished with `result`, as the model is shown it again.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundJsonError`] when the result breaks the JSON limits.
-    pub fn finish(self, result: ToolCallResult) -> Result<ConversationToolCall, BoundJsonError> {
+    #[must_use]
+    pub fn finish(self, result: ToolCallResult) -> ConversationToolCall {
         ConversationToolCall::new(
             self.call_id,
             self.plugin_id,
@@ -142,13 +133,6 @@ pub trait TurnSink: Send + Sync {
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, Self::Error>;
 
-    /// What the rounds after a round of tool calls are shown in place of
-    /// the turn's context, when a call changed what prepared it; none
-    /// while nothing did, as for a sink whose plugins never change.
-    async fn prepared_again(&self) -> Result<Option<DecisionContext>, Self::Error> {
-        Ok(None)
-    }
-
     /// Hears a draft, which is never awaited: the model writes on
     /// meanwhile.
     fn draft(&self, event: DraftEvent);
@@ -170,62 +154,73 @@ pub enum TurnOutcome {
     },
 }
 
-/// Runs a turn's rounds to their end. A round the parser refuses goes back
-/// to the model as part of its next round, counted like any other; a
-/// provider that gave nothing usable ends the turn. The only refusal of the
-/// loop's own is the round budget, recorded against the commit while the
-/// round stays what the model said.
-///
-/// # Errors
-///
-/// The sink's error, as soon as one of its calls fails: what the round had
-/// drafted and not committed is withdrawn first.
-pub async fn run_turn<S: TurnSink>(
-    adapter: &dyn RoleModelAdapter,
-    sink: &S,
-    input: TurnInput<'_>,
-) -> Result<TurnOutcome, S::Error> {
-    let context = input
-        .context
-        .with_history_window(HistoryWindow::of(input.history));
-    let mut turn = Turn {
-        envelope: InputEnvelope::new(input.event, input.user_message, context, input.plugin_tools),
-        history: input.history,
-        persona: input.persona,
-        person: input.person,
-        refusal_note: None,
-        spent: 0,
-    };
-    let mut round = NonZeroU32::MIN;
-
-    loop {
-        // Every draft a round opens ends with it, whichever way it ends.
-        let drafts = Drafts::new(round, sink);
-        let ended = turn.round(adapter, sink, &drafts).await;
-
-        drafts.close();
-
-        if let Some(outcome) = ended? {
-            return Ok(outcome);
-        }
-
-        round = round.saturating_add(1);
-    }
-}
-
-struct Turn<'a> {
+/// A turn's rounds, run one at a time by its caller, who makes each round's
+/// request with the model the character runs on as it starts, and between
+/// two rounds may prepare again what the model is shown and offered. A
+/// round whose output is refused goes back to the model as part of its
+/// next round, counted like any other; a provider that gave nothing usable
+/// ends the turn. The only refusal of the rounds' own is their budget,
+/// recorded against the commit while the round stays what the model said.
+#[derive(Debug)]
+pub struct Rounds<'a> {
     envelope: InputEnvelope,
     history: &'a [ConversationTurn],
     persona: &'a Persona,
-    person: Person<'a>,
     /// What the runtime could not use of the last reply, which the next
     /// round alone carries.
     refusal_note: Option<String>,
     /// Rounds spent against [`MAX_TOOL_ROUNDS`].
     spent: u32,
+    /// The round to run next.
+    next: NonZeroU32,
 }
 
-impl Turn<'_> {
+impl<'a> Rounds<'a> {
+    #[must_use]
+    pub fn new(input: TurnInput<'a>) -> Self {
+        Self {
+            envelope: InputEnvelope::new(
+                input.event,
+                input.user_message,
+                input.context,
+                input.plugin_tools,
+            ),
+            history: input.history,
+            persona: input.persona,
+            refusal_note: None,
+            spent: 0,
+            next: NonZeroU32::MIN,
+        }
+    }
+
+    /// What the model is shown and offered from the next round on: what
+    /// the runtime and the plugins prepared again.
+    pub fn prepared(&mut self, context: DecisionContext, tools: PluginToolDefinitions) {
+        self.envelope.decision_context = context;
+        self.envelope.plugin_tool_definitions = tools;
+    }
+
+    /// Runs the next round, its request made with `adapter`: how the turn
+    /// ended, once a round ends it, and none while another round follows.
+    ///
+    /// # Errors
+    ///
+    /// The sink's error, as soon as one of its calls fails: what the round
+    /// had drafted and not committed is withdrawn first.
+    pub async fn run<S: TurnSink>(
+        &mut self,
+        adapter: &dyn RoleModelAdapter,
+        sink: &S,
+    ) -> Result<Option<TurnOutcome>, S::Error> {
+        // Every draft a round opens ends with it, whichever way it ends.
+        let drafts = Drafts::new(self.next, sink);
+        let ended = self.round(adapter, sink, &drafts).await;
+
+        drafts.close();
+        self.next = self.next.saturating_add(1);
+        ended
+    }
+
     async fn round<S: TurnSink>(
         &mut self,
         adapter: &dyn RoleModelAdapter,
@@ -234,35 +229,27 @@ impl Turn<'_> {
     ) -> Result<Option<TurnOutcome>, S::Error> {
         let round = drafts.round();
         let note = self.refusal_note.take();
-        let prompt = render(
-            &self.envelope,
-            self.history,
-            self.persona,
-            self.person,
-            note.as_deref(),
-        );
+        let prompt = render(&self.envelope, self.history, self.persona, note.as_deref());
         let listener = |delta: ReplyDelta| drafts.speak(delta);
         let invocation = Invocation::new(prompt.messages(), prompt.tools())
             .with_history(self.history)
             .with_reply_listener(&listener);
-        let output = adapter.invoke(&self.envelope, &invocation).await;
-        let (recorded, decided) = judge(&output);
-
-        sink.record_round(&ModelRound {
+        let answer = adapter.invoke(&invocation).await;
+        let result = DecisionResult::judge(&answer);
+        let recorded = ModelRound {
             round,
-            envelope: self.envelope.clone(),
-            prompt_size: prompt.size().clone(),
-            output,
-            result: recorded,
-        })
-        .await?;
+            answer,
+            result,
+        };
 
-        let decision = match decided {
-            Judged::Unusable(rejection) => {
-                if self.spent >= MAX_TOOL_ROUNDS {
-                    return Ok(Some(TurnOutcome::Refused { round, rejection }));
-                }
+        sink.record_round(&recorded).await?;
 
+        let decision = match recorded.result {
+            DecisionResult::Accepted { decision } => decision,
+            DecisionResult::Rejected { rejection }
+                if rejection.reason == DecisionRejectionReason::MalformedOutput
+                    && self.spent < MAX_TOOL_ROUNDS =>
+            {
                 let details = rejection
                     .details
                     .as_deref()
@@ -272,10 +259,9 @@ impl Turn<'_> {
                 self.spent += 1;
                 return Ok(None);
             }
-            Judged::Nothing(rejection) => {
+            DecisionResult::Rejected { rejection } => {
                 return Ok(Some(TurnOutcome::Refused { round, rejection }));
             }
-            Judged::Decided(decision) => decision,
         };
         let calls: Vec<(&Identifier, &Map<String, Value>)> = decision
             .tool_calls()
@@ -318,12 +304,6 @@ impl Turn<'_> {
             interim_replies,
             tool_calls,
         });
-
-        if let Some(context) = sink.prepared_again().await? {
-            self.envelope.decision_context =
-                context.with_history_window(HistoryWindow::of(self.history));
-        }
-
         Ok(None)
     }
 
@@ -393,43 +373,4 @@ async fn commit_replies<S: TurnSink>(
 
     drafts.close();
     Ok(committed)
-}
-
-/// A round's answer as the loop acts on it.
-enum Judged {
-    /// The model's decision, its tool inputs as it sent them.
-    Decided(CharacterDecision),
-    /// The model wrote what the decision contract does not allow.
-    Unusable(DecisionRejection),
-    /// Nothing usable arrived.
-    Nothing(DecisionRejection),
-}
-
-/// The round's verdict twice: as recorded, with credentials redacted, and
-/// as acted on. Credentials count against the JSON limits before they are
-/// redacted, so the two verdicts are one.
-fn judge(output: &RawOutput) -> (DecisionResult, Judged) {
-    match &output.answer {
-        ProviderAnswer::Text(raw) => {
-            let decided = match DecisionResult::parse(raw, Credentials::Keep) {
-                DecisionResult::Accepted { decision } => Judged::Decided(decision),
-                DecisionResult::Rejected { rejection } => Judged::Unusable(rejection),
-            };
-
-            (DecisionResult::parse(raw, Credentials::Redact), decided)
-        }
-        ProviderAnswer::Failed { details } => {
-            let rejection = DecisionRejection {
-                reason: DecisionRejectionReason::ProviderError,
-                details: Some(details.clone()),
-            };
-
-            (
-                DecisionResult::Rejected {
-                    rejection: rejection.clone(),
-                },
-                Judged::Nothing(rejection),
-            )
-        }
-    }
 }

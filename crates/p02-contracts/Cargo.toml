@@ -9,6 +9,7 @@ async-trait.workspace = true
 jsonschema.workspace = true
 p02-core.workspace = true
 p02-shared.workspace = true
+p02-wire.workspace = true
 rusqlite.workspace = true
 schemars.workspace = true
 serde.workspace = true

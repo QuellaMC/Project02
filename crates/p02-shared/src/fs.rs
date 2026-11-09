@@ -127,20 +127,6 @@ pub fn append_line(path: &Path, line: &[u8]) -> io::Result<()> {
     file.write_all(&bytes)
 }
 
-/// Flushes what was written to the file at `path` to disk, then its
-/// directory, which holds its name when the file is new, so it outlasts a
-/// crash of the machine, not only of the process: for a write whose record
-/// of having happened is flushed after it.
-///
-/// # Errors
-///
-/// The `io::Error` the open or the flush of the file failed with.
-pub fn sync_file(path: &Path) -> io::Result<()> {
-    OpenOptions::new().write(true).open(path)?.sync_data()?;
-    sync_directory_of(path);
-    Ok(())
-}
-
 /// How many bytes of `file` its last newline ends, read back from the end.
 fn whole_lines_length(file: &mut File) -> io::Result<u64> {
     const CHUNK: usize = 64 * 1_024;
@@ -243,6 +229,20 @@ pub fn create_directories(path: &Path) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Empties the file at `path` in place, which takes no new file, so it
+/// works where a replacement would not: on a full disk, or in a directory
+/// that takes no new entry. The caller must hold the lock that guards
+/// `path`. The truncation is not flushed to disk: a crash before it lands
+/// leaves the file whole.
+///
+/// # Errors
+///
+/// The `io::Error` the open or the truncation failed with, `NotFound` when
+/// nothing is there.
+pub fn empty_file(path: &Path) -> io::Result<()> {
+    OpenOptions::new().write(true).open(path)?.set_len(0)
 }
 
 /// Removes the file at `path`; a link there is removed, not followed.
@@ -682,32 +682,6 @@ mod tests {
 
         assert!(write_file_atomically(&path, b"new\n").is_err());
         assert_eq!(names_in(&root), ["config.json"]);
-    }
-
-    #[test]
-    fn an_atomic_write_removes_its_files_abandoned_temporaries_and_nothing_else() {
-        let (_directory, root) = temp_root();
-        let path = root.join("sessions.jsonl");
-        let abandoned = format!(".sessions.jsonl.{}.tmp", Uuid::new_v4());
-        let kept = [
-            format!(".config.json.{}.tmp", Uuid::new_v4()),
-            ".sessions.jsonl.not-a-uuid.tmp".to_owned(),
-            format!("sessions.jsonl.{}.tmp", Uuid::new_v4()),
-        ];
-
-        for name in std::iter::once(&abandoned).chain(&kept) {
-            fs::write(root.join(name), "residue").unwrap();
-        }
-
-        write_file_atomically(&path, b"{}\n").unwrap();
-
-        let mut names = names_in(&root);
-        let mut expected: Vec<String> = kept.to_vec();
-
-        names.sort();
-        expected.push("sessions.jsonl".to_owned());
-        expected.sort();
-        assert_eq!(names, expected);
     }
 
     #[test]

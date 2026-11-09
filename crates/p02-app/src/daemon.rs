@@ -1,7 +1,7 @@
 //! The daemon: the one object every surface reaches the characters
 //! through. It holds the actors, the routes from conversations to them, the
-//! ledger of submissions, the reconciler and the events, and answers every
-//! condition a client can reach with an outcome, never an error.
+//! reconciler and the events, and answers every condition a client can
+//! reach with an outcome, never an error.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -13,26 +13,25 @@ use futures_util::FutureExt;
 use futures_util::future::join_all;
 use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
-    ChangeOutcome, ConfigChange, ConfigTarget, ConfigView, Connector, ConnectorConfigView,
-    Sections, apply_change, connectors,
+    Connector, Sections, apply_change, config_view, connector_config_view, connectors,
 };
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
-use p02_store::{Home, StorageError};
+use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
+use p02_wire::{
+    Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
+    ConfirmationAnswer, ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome,
+    OpenOutcome, OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome,
+    StartRefusal, SubmitOutcome, TurnRefusal,
+};
 use tokio::sync::mpsc;
 
-use crate::character::{CharacterHandle, Request};
-use crate::confirmation::Answer;
+use crate::character::CharacterHandle;
 use crate::history::{self, HistoryPage};
-use crate::outcome::{
-    CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
-    HistoryOutcome, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PendingConfirmation,
-    ProtocolVersion, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal, TurnStamp,
-};
+use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
-use crate::submissions::Ledger;
 
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
@@ -139,7 +138,6 @@ pub struct DaemonSettings {
 #[derive(Clone, Debug)]
 pub struct Message {
     pub conversation_id: String,
-    pub sender_id: String,
     pub text: String,
     /// The surface the line came from.
     pub source: ClientStamp,
@@ -226,10 +224,9 @@ struct Inner {
     world: Arc<World>,
     characters: Mutex<Characters>,
     /// Which character each conversation this run routed belongs to. A
-    /// delivery holds it from its routing until its line is in her queue,
+    /// delivery holds it from its routing until its line is in her inbox,
     /// and deliveries take it in the order they came.
     routes: tokio::sync::Mutex<HashMap<ConversationId, Identifier>>,
-    ledger: Arc<Ledger>,
     reconciler: Arc<Reconciler>,
     /// How many streams of each connector are open.
     presence: Mutex<BTreeMap<Identifier, usize>>,
@@ -336,7 +333,6 @@ impl Daemon {
                 }),
                 characters: Mutex::default(),
                 routes: tokio::sync::Mutex::default(),
-                ledger: Arc::default(),
                 reconciler: Arc::default(),
                 presence: Mutex::default(),
                 pairings: Pairings::default(),
@@ -375,7 +371,7 @@ impl Daemon {
                     .discovery
                     .diagnostics
                     .iter()
-                    .map(PackageReport::from)
+                    .map(package_report)
                     .collect(),
             },
             characters: roster
@@ -440,32 +436,64 @@ impl Daemon {
         opened
     }
 
-    /// Takes `message` to the character its conversation belongs to, once
-    /// per submission, and announces how the delivery ended. Its routing
-    /// and its place in her queue are one step, which lines take in the
-    /// order they came, so they reach her in that order.
-    pub async fn deliver(&self, message: Message) -> TurnOutcome {
-        let outcome = {
-            let mut routes = self.inner.routes.lock().await;
-            let (conversation, character) =
-                match self.route(&mut routes, &message.conversation_id).await {
-                    Ok(found) => found,
-                    Err(refused) => return refused,
-                };
-            let stamp = TurnStamp {
-                conversation_id: conversation.clone(),
-                source: message.source,
-                client_message_id: message.client_message_id,
+    /// Queues `message` in the inbox of the character its conversation
+    /// belongs to, and answers once it is there: she takes it in its turn,
+    /// and the stream tells how that ended. A line sent again is answered
+    /// as her inbox has it, queued already or taken as the message it
+    /// became, whether or not she takes lines now. Its routing and its
+    /// place in her inbox are one step, which lines take in the order they
+    /// came, so they reach her in that order; a new line for a character
+    /// that is starting waits for her, and one for a character who failed
+    /// or does not run is refused, saying why.
+    pub async fn deliver(&self, message: Message) -> SubmitOutcome {
+        let mut routes = self.inner.routes.lock().await;
+        let (conversation, character) =
+            match self.route(&mut routes, &message.conversation_id).await {
+                Ok(found) => found,
+                Err(refused) => return refused,
             };
-
-            self.inner.ledger.submit(
-                stamp.conversation_id.clone(),
-                stamp.client_message_id.clone(),
-                || self.take(character, stamp, message.text),
-            )
+        let taker = self.live(&character).filter(|handle| handle.takes_lines());
+        let line = QueuedLine {
+            conversation_id: conversation,
+            source: message.source,
+            client_message_id: message.client_message_id,
+            text: message.text,
         };
+        let home = self.inner.world.home.clone();
+        let id = line.client_message_id.clone();
+        let her = character.clone();
+        // The line and the word to her that it waits are one piece of work,
+        // which a client that hangs up meanwhile does not cut in two.
+        let queued = blocking(move || {
+            let data = CharacterData::ensure(&home, &her)?;
+            let Some(taker) = taker else {
+                return data.sent_before(&line);
+            };
+            let queued = data.queue(&line)?;
 
-        outcome.await
+            if queued == Queueing::Queued {
+                taker.queued();
+            }
+
+            Ok(Some(queued))
+        })
+        .await;
+
+        drop(routes);
+
+        match queued {
+            Ok(Some(Queueing::Queued)) => SubmitOutcome::Queued,
+            Ok(Some(Queueing::AlreadyQueued)) => SubmitOutcome::AlreadyQueued,
+            Ok(Some(Queueing::Taken(message_id))) => SubmitOutcome::Refused {
+                reason: TurnRefusal::DuplicateSubmission,
+                message: duplicate(&id, &message_id),
+            },
+            Ok(None) => SubmitOutcome::Refused {
+                reason: TurnRefusal::CharacterUnavailable,
+                message: self.unavailable(character.as_str()),
+            },
+            Err(error) => SubmitOutcome::Failed(storage_failure(&error)),
+        }
     }
 
     /// The confirmations parked now, by character, oldest first.
@@ -570,7 +598,7 @@ impl Daemon {
         let world = Arc::clone(&self.inner.world);
 
         blocking(move || {
-            ConfigView::read(
+            config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),
@@ -586,7 +614,7 @@ impl Daemon {
     pub async fn apply_change(&self, change: ConfigChange) -> ChangeOutcome {
         let daemon = self.clone();
 
-        blocking(move || daemon.change_settings(&change, || {})).await
+        blocking(move || daemon.change_settings(&change)).await
     }
 
     /// What connector `connector` runs on, for the home and for each
@@ -596,7 +624,7 @@ impl Daemon {
         let connector = connector.to_owned();
 
         blocking(move || {
-            ConnectorConfigView::read(
+            connector_config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),
@@ -608,18 +636,12 @@ impl Daemon {
 
     /// The one way the settings change, a client's change and a
     /// character's own plugin's alike: made as p02-config makes every
-    /// change, under the documents' locks; once it lands, `settled` makes
-    /// true what the change carries beyond the documents, a plugin
-    /// rebuilt live on the values they now hold, so that nothing judges
-    /// her against them before she runs them; then health as it now
+    /// change, under the documents' locks; once it lands, health as it now
     /// stands goes out to every surface before the answer does, and a
     /// reconcile pass acts on it behind the answer, on a task of its own,
-    /// so the characters running come to match it. It waits on the disk.
-    pub(crate) fn change_settings(
-        &self,
-        change: &ConfigChange,
-        settled: impl FnOnce(),
-    ) -> ChangeOutcome {
+    /// so the characters it switches on or off start or stop. A running
+    /// character meets it at her next request. It waits on the disk.
+    pub(crate) fn change_settings(&self, change: &ConfigChange) -> ChangeOutcome {
         let world = &self.inner.world;
         let outcome = apply_change(
             &world.home,
@@ -630,7 +652,6 @@ impl Daemon {
         );
 
         if matches!(outcome, ChangeOutcome::Applied { .. }) {
-            settled();
             self.announce_health();
             tokio::spawn(self.reconcile());
         }
@@ -662,10 +683,11 @@ impl Daemon {
         presence
     }
 
-    /// Stops every character, for good: no start follows. A boot, a reload
-    /// or a recovery in flight is overtaken, a turn in flight finishes and
-    /// is announced, and the reconcile pass in flight is waited for; once
-    /// it answers, everything the stop ended has been announced.
+    /// Stops every character, for good: no start follows. A boot or a
+    /// recovery in flight is overtaken, a turn in flight finishes and is
+    /// announced, the lines queued behind it wait in her inbox, and the
+    /// reconcile pass in flight is waited for; once it answers, everything
+    /// the stop ended has been announced.
     pub async fn stop(&self) {
         self.inner.pairings.stop();
 
@@ -682,7 +704,6 @@ impl Daemon {
 
         self.inner.reconciler.settled().await;
         join_all(handles.iter().map(|handle| handle.stopped())).await;
-        self.inner.ledger.settled().await;
     }
 
     pub(crate) fn downgrade(&self) -> WeakDaemon {
@@ -787,37 +808,6 @@ impl Daemon {
         self.handle(id).filter(|handle| !handle.ended())
     }
 
-    /// A new submission's line put in her queue at once, unless she takes
-    /// none now, and how its delivery ended, announced to every surface.
-    fn take(
-        &self,
-        character: Identifier,
-        stamp: TurnStamp,
-        text: String,
-    ) -> impl Future<Output = TurnOutcome> + Send + 'static {
-        let answer = match self.live(&character) {
-            Some(handle) => handle
-                .deliver(Request {
-                    stamp: stamp.clone(),
-                    text,
-                })
-                .boxed(),
-            None => std::future::ready(TurnOutcome::refused(
-                TurnRefusal::CharacterUnavailable,
-                self.unavailable(character.as_str()),
-            ))
-            .boxed(),
-        };
-        let events = Arc::clone(&self.inner.world.events);
-
-        async move {
-            let outcome = answer.await;
-
-            events.emit(Event::turn_completed(character, stamp, &outcome));
-            outcome
-        }
-    }
-
     /// The sentence `character` answers with while she takes nothing.
     fn unavailable(&self, character: &str) -> String {
         Identifier::new(character)
@@ -836,12 +826,10 @@ impl Daemon {
         &self,
         routes: &mut HashMap<ConversationId, Identifier>,
         conversation: &str,
-    ) -> Result<(ConversationId, Identifier), TurnOutcome> {
-        let unknown = || {
-            TurnOutcome::refused(
-                TurnRefusal::UnknownConversation,
-                format!("Conversation \"{conversation}\" does not exist."),
-            )
+    ) -> Result<(ConversationId, Identifier), SubmitOutcome> {
+        let unknown = || SubmitOutcome::Refused {
+            reason: TurnRefusal::UnknownConversation,
+            message: format!("Conversation \"{conversation}\" does not exist."),
         };
         let Ok(id) = ConversationId::new(conversation) else {
             return Err(unknown());
@@ -857,13 +845,13 @@ impl Daemon {
             Ok(record) => character_of(&record).ok_or_else(unknown)?,
             Err(StorageError::ConversationNotFound(_)) => return Err(unknown()),
             Err(error) => {
-                return Err(TurnOutcome::refused(
-                    TurnRefusal::UnknownConversation,
-                    format!(
+                return Err(SubmitOutcome::Refused {
+                    reason: TurnRefusal::UnknownConversation,
+                    message: format!(
                         "Conversation \"{id}\" cannot be read: {}",
                         error_sentence(&error)
                     ),
-                ));
+                });
             }
         };
 

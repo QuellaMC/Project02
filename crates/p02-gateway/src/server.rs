@@ -126,12 +126,11 @@ impl Server {
     }
 
     /// Stops in the order that loses nothing. From the call on, new API
-    /// requests answer 503; the daemon stops, its turns draining with the
-    /// socket and the streams open, so an accepted turn still receives its
-    /// answer and the stream its reply; then each stream ends once the
-    /// frames queued for it are written; then the listener closes, each
-    /// connection gets the grace to finish the exchange it holds, and
-    /// whatever remains is cut.
+    /// requests answer 503; the daemon stops, its turns in flight draining
+    /// with the socket and the streams open, so the stream tells each one's
+    /// reply and end; then each stream ends once the frames queued for it
+    /// are written; then the listener closes, each connection gets the
+    /// grace to finish the exchange it holds, and whatever remains is cut.
     pub fn close(self) -> impl Future<Output = ()> + Send + 'static {
         self.stopping.cancel();
 

@@ -103,7 +103,7 @@ export function ThreadPane({
         {shown.map(message => (
           <Bubble
             key={message.messageId}
-            own={message.speakerId === thread.userParticipantId}
+            own={message.role === 'user'}
             name={message.speakerName}
             text={message.text}
           />

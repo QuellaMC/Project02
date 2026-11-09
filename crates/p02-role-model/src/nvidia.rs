@@ -1,6 +1,6 @@
 //! The NVIDIA provider: OpenAI's chat completion wire at NVIDIA's cloud, or
 //! at the server the base URL setting names, streamed and read back into
-//! the one answer the decision parser judges.
+//! the model's answer: its calls and its text.
 
 mod draft;
 mod stream;
@@ -11,19 +11,17 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction,
-    ExchangeProvider, ExchangeRecord, InputEnvelope, Invocation, ProviderAnswer, ProviderExchange,
-    ProviderFailure, ProviderMetadata, ProviderName, ProviderRequest, ProviderResponse, RawOutput,
-    RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId, ToolNameMapping,
-    VISIBLE_REPLY, scrub_reasoning_blocks,
+    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction, Invocation,
+    ModelOutput, ProviderAnswer, ProviderFailure, ProviderName, RoleModelAdapter, TextCompletion,
+    TextCompletionRequest, WrittenCall, scrub_reasoning_blocks,
 };
 use p02_shared::{BaseUrl, credential_header, http_client};
 use reqwest::Url;
 use reqwest::header::HeaderValue;
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use crate::prompt::{json_text, provider_name, provider_names, runtime_name};
+use crate::prompt::{ToolNameMapping, json_text, provider_name, provider_names, runtime_name};
 use draft::ReplyDrafts;
 use stream::{Completion, Flow, StreamFold};
 use transport::{Answer, Failure, Silence};
@@ -172,39 +170,20 @@ impl NvidiaAdapter {
         self
     }
 
-    fn failed(&self, fault: Fault, exchange: Option<ExchangeRecord>) -> RawOutput {
-        let message = self.access.redact(fault.message);
-
-        RawOutput {
-            answer: ProviderAnswer::Failed {
-                details: message.clone(),
-            },
-            provider_metadata: Some(ProviderMetadata {
-                provider: ProviderName::Nvidia,
-                model: Some(self.model.clone()),
-                request: Some(ProviderRequest {
-                    endpoint: Some(self.endpoint.to_string()),
-                    message_count: None,
-                }),
-                response: fault.status.map(|status| ProviderResponse {
-                    status: Some(status),
-                }),
-                error: Some(ProviderFailure {
-                    code: fault.code.as_str().to_owned(),
-                    message,
-                }),
-            }),
-            provider_exchange: exchange.and_then(|record| ProviderExchange::new(record).ok()),
-        }
+    fn failed(&self, fault: Fault) -> ProviderAnswer {
+        ProviderAnswer::Failed(ProviderFailure {
+            code: fault.code.as_str().to_owned(),
+            message: self.access.redact(fault.message),
+            status: fault.status,
+        })
     }
 
-    /// Sends a round and reads its answer to the end: the status that
-    /// answered, and the answer judged as far as the provider's part goes.
+    /// Sends a round and reads its answer to the end.
     async fn exchange(
         &self,
         request: &TurnRequest,
         drafts: &mut ReplyDrafts<'_>,
-    ) -> Result<(u16, Judged), Fault> {
+    ) -> Result<ProviderAnswer, Fault> {
         let mut silence = Silence::start(self.silence);
         let mut response = match transport::send(
             &self.http,
@@ -242,9 +221,7 @@ impl NvidiaAdapter {
             }
         }
 
-        judge(fold.finish(), &request.mappings)
-            .map(|judged| (status, judged))
-            .map_err(|(code, message)| refused(code, message))
+        answer(fold.finish(), &request.mappings).map_err(|(code, message)| refused(code, message))
     }
 
     /// A plain completion's text, or why there is none.
@@ -272,7 +249,7 @@ impl NvidiaAdapter {
     }
 }
 
-/// How a round ended without an answer to hand the parser.
+/// How a round ended without an answer.
 struct Fault {
     code: FailureCode,
     message: String,
@@ -297,48 +274,24 @@ impl From<Failure> for Fault {
 
 #[async_trait]
 impl RoleModelAdapter for NvidiaAdapter {
-    async fn invoke(&self, _envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         if matches!(self.access, Access::Missing) {
-            let fault = Fault {
+            return self.failed(Fault {
                 code: FailureCode::MissingApiKey,
                 message: "NVIDIA provider requires the nvidiaApiKey setting.".to_owned(),
                 status: None,
-            };
-
-            return self.failed(fault, None);
+            });
         }
 
         let request = TurnRequest::new(&self.model, invocation.messages(), invocation.tools());
-        let base = request.exchange(&self.model, &self.endpoint);
         let mut drafts = ReplyDrafts::new(*invocation, &request.mappings);
-        let (status, judged) = match self.exchange(&request, &mut drafts).await {
-            Ok(answered) => answered,
-            Err(fault) => return self.failed(fault, Some(base)),
-        };
 
-        drafts.finish();
-
-        let mut exchange = base;
-
-        exchange.finish_reason = Some(judged.finish_reason);
-        exchange.usage = judged.usage;
-        exchange.native_assistant_message = Some(judged.native);
-
-        RawOutput {
-            answer: ProviderAnswer::Text(judged.raw_output),
-            provider_metadata: Some(ProviderMetadata {
-                provider: ProviderName::Nvidia,
-                model: Some(self.model.clone()),
-                request: Some(ProviderRequest {
-                    endpoint: Some(self.endpoint.to_string()),
-                    message_count: Some(request.messages.len() as u64),
-                }),
-                response: Some(ProviderResponse {
-                    status: Some(status),
-                }),
-                error: None,
-            }),
-            provider_exchange: ProviderExchange::new(exchange).ok(),
+        match self.exchange(&request, &mut drafts).await {
+            Ok(answer) => {
+                drafts.finish();
+                answer
+            }
+            Err(fault) => self.failed(fault),
         }
     }
 
@@ -362,14 +315,11 @@ impl RoleModelAdapter for NvidiaAdapter {
     }
 }
 
-/// A round as sent: the messages and tools under the names the provider
-/// takes, the mapping back, and the body exactly as it goes on the wire.
+/// A round as sent: the body exactly as it goes on the wire, the tools in it
+/// under the names the provider takes, and the mapping back.
 #[derive(Debug)]
 pub(crate) struct TurnRequest {
-    messages: Vec<ChatMessage>,
-    tools: Vec<ChatCompletionTool>,
     mappings: Vec<ToolNameMapping>,
-    body: Value,
     bytes: Vec<u8>,
 }
 
@@ -436,7 +386,7 @@ impl TurnRequest {
                 })
             })
             .collect();
-        let body = serde_json::to_value(TurnBody {
+        let bytes = json_text(&TurnBody {
             model,
             messages: &messages,
             offered: Offered {
@@ -453,36 +403,9 @@ impl TurnRequest {
             max_tokens: MAX_TOKENS,
             reasoning: THINKING,
         })
-        .expect("plain data always serializes");
-        let bytes = json_text(&body).into_bytes();
+        .into_bytes();
 
-        Self {
-            messages,
-            tools,
-            mappings,
-            body,
-            bytes,
-        }
-    }
-
-    /// The exchange as far as the request: what the answer adds comes on
-    /// top of it.
-    fn exchange(&self, model: &str, endpoint: &Url) -> ExchangeRecord {
-        ExchangeRecord {
-            provider: ExchangeProvider {
-                name: ProviderName::Nvidia,
-                model: Some(model.to_owned()),
-                endpoint: Some(endpoint.to_string()),
-            },
-            reasoning_params: serde_json::to_value(THINKING).expect("plain data always serializes"),
-            rendered_messages: self.messages.clone(),
-            rendered_tools: self.tools.clone(),
-            tool_name_mappings: self.mappings.clone(),
-            request_body: self.body.clone(),
-            finish_reason: None,
-            usage: None,
-            native_assistant_message: None,
-        }
+        Self { mappings, bytes }
     }
 }
 
@@ -567,60 +490,36 @@ fn completion_text(body: &Value) -> Result<String, String> {
         .ok_or_else(no_text)
 }
 
-/// A whole answer, judged as far as the provider's part goes.
-struct Judged {
-    raw_output: String,
-    finish_reason: String,
-    usage: Option<Value>,
-    /// The message as the provider returned it.
-    native: ChatMessage,
-}
-
-/// The streamed message as a decision for the parser: content alone is
-/// the character speaking, so it becomes `visible_reply`; native calls
-/// become tool calls under the runtime's names, and content beside them is
-/// the model's note. Arguments go as the model wrote them, parsed when they
-/// parse and as the text otherwise, so a bad call is refused where every
-/// other is.
-fn judge(
+/// The streamed message as the model's answer, once it ended whole: its
+/// calls under the runtime's names, each call's arguments as JSON when they
+/// parse and as their text when they do not, so a bad call is refused where
+/// every other is, and its content with leaked reasoning taken out.
+fn answer(
     completion: Completion,
     mappings: &[ToolNameMapping],
-) -> Result<Judged, (FailureCode, String)> {
-    let refused = |code, message: String| (code, message);
+) -> Result<ProviderAnswer, (FailureCode, String)> {
     let finish_reason = match completion.finish_reason {
         None => {
-            return Err(refused(
+            return Err((
                 FailureCode::MalformedResponse,
                 "NVIDIA response choice.finish_reason is required.".to_owned(),
             ));
         }
         Some(reason) if TERMINAL_FINISH_REASONS.contains(&reason.as_str()) => reason,
         Some(reason) => {
-            return Err(refused(
+            return Err((
                 FailureCode::ProviderError,
                 format!("NVIDIA response finish_reason \"{reason}\" is not terminal."),
             ));
         }
     };
-    let content = completion
-        .content
-        .map(|content| scrub_reasoning_blocks(&content));
-    let calls = completion
+    let tool_calls = completion
         .calls
         .into_iter()
         .enumerate()
         .map(|(index, call)| {
-            let id = call
-                .id
-                .and_then(|id| ToolCallId::new(&id).ok())
-                .ok_or_else(|| {
-                    refused(
-                        FailureCode::MalformedResponse,
-                        format!("NVIDIA response message.tool_calls[{index}].id must be a string."),
-                    )
-                })?;
             let name = call.name.ok_or_else(|| {
-                refused(
+                (
                     FailureCode::MalformedResponse,
                     format!(
                         "NVIDIA response message.tool_calls[{index}].function.name must be a \
@@ -629,62 +528,21 @@ fn judge(
                 )
             })?;
 
-            Ok(ChatToolCall::new(
-                id,
-                ChatFunctionCall {
-                    name,
-                    arguments: call.arguments,
-                },
-            ))
+            Ok(WrittenCall {
+                name: runtime_name(&name, mappings),
+                input: serde_json::from_str(&call.arguments)
+                    .unwrap_or(Value::String(call.arguments)),
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let text = completion
+        .content
+        .map(|content| scrub_reasoning_blocks(&content))
+        .filter(|text| !text.is_empty());
 
-    Ok(Judged {
-        raw_output: raw_decision(content.as_deref(), &calls, mappings),
-        finish_reason,
+    Ok(ProviderAnswer::Answered {
+        output: ModelOutput { tool_calls, text },
+        finish_reason: Some(finish_reason),
         usage: completion.usage,
-        native: ChatMessage::Assistant {
-            content,
-            tool_calls: calls,
-        },
     })
-}
-
-fn raw_decision(
-    content: Option<&str>,
-    calls: &[ChatToolCall],
-    mappings: &[ToolNameMapping],
-) -> String {
-    let content = content.filter(|content| !content.is_empty());
-    let mut decision = Map::new();
-
-    if calls.is_empty() {
-        let replies: Vec<Value> = content
-            .map(|text| json!({"name": VISIBLE_REPLY, "input": {"text": text}}))
-            .into_iter()
-            .collect();
-
-        decision.insert("toolCalls".to_owned(), Value::Array(replies));
-    } else {
-        let calls: Vec<Value> = calls
-            .iter()
-            .map(|call| {
-                let arguments = &call.function().arguments;
-
-                json!({
-                    "name": runtime_name(&call.function().name, mappings),
-                    "input": serde_json::from_str::<Value>(arguments)
-                        .unwrap_or_else(|_| Value::from(arguments.as_str())),
-                })
-            })
-            .collect();
-
-        decision.insert("toolCalls".to_owned(), Value::Array(calls));
-
-        if let Some(text) = content {
-            decision.insert("text".to_owned(), Value::from(text));
-        }
-    }
-
-    json_text(&decision)
 }

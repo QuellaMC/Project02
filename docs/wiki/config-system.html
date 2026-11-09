@@ -101,7 +101,7 @@
       section is declared the same way, and a plugin manifest is such a declaration as it
       stands. Plugin fields come from <code>RuntimePluginManifest.config.fields</code>, which
       is likewise the single source for value types, allowed values, default values, secret
-      handling, reload requirements, and whether an ordinary non-secret field is agent-mutable.
+      handling, and whether an ordinary non-secret field is agent-mutable.
       A secret field is never agent-mutable. The resolver applies a field's declared default
       value wherever no permitted layer authored the field, and the settings page shows it as
       the field's effective value.
@@ -205,14 +205,15 @@
       The daemon is the config owner. <code>GET /api/config</code> renders a scope's settings
       from the declared fields — the home's, or one character's — and <code>POST /api/config</code>
       writes one change through the one control transaction, bound to the fingerprint the view
-      handed out, and applies it to the running character by a reload between turns
+      handed out; a running character runs on it from her next request to her model
       (<a href="gateway-api.html">Gateway API</a>). The web page's settings screen is the
       operator's surface over those verbs: one screen for the home and for each character,
       every row the field shape the view carries, one field per save. A fresh home opens on
       it, framed as setup, until a provider is chosen; until then no character starts, and
       each says to choose one on the settings page. A hand edit made while the daemon runs
-      is reflected on the next read and applied at the next change from the page or the
-      next start; nothing watches the file.
+      is reflected on the next read and in a running character's next request; who runs is
+      judged again at the next change from the page or the next start, since nothing watches
+      the file.
     </p>
 
     <p>
@@ -254,7 +255,7 @@
       character that is switched on, the section's activation and the values that entry runs
       on, resolved by the same rules as its settings screen, with secrets in the clear, since
       a token is what a connector exists to use (<a href="gateway-api.html">Gateway API</a>).
-      No character is built from a connector's section, so a change to it reloads none; the
+      No character is built from a connector's section, so a change to it rebuilds none; the
       connector reads its values again.
     </p>
 
@@ -298,13 +299,8 @@
       stale approval fails closed. The plugin manifest declares the maximum
       <code>runtime_config_write</code> capability, while list and config inspection retain their
       per-tool <code>runtime_read</code> classification and only config update requires confirmation.
-      An approved change is written at once, inside the tool call. A field declared
-      <code>reloadRequired: false</code> takes effect right away: the host rebuilds the plugin from
-      the freshly authored config and swaps the instance before the tool answers, and the rounds
-      after it in the same turn already see the new value. A restart-only field, a live field of a
-      plugin her settings do not run, or one its plugin cannot be rebuilt with, is written and takes
-      effect at the next launch. The tool result tells the model which happened as
-      <code>appliesTo</code>, and why.
+      An approved change is written at once, inside the tool call, and like any change it is in
+      effect from her next request: the rounds after it in the same turn already run on it.
     </p>
 
     <p>

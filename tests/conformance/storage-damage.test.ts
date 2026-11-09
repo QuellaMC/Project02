@@ -29,7 +29,13 @@ import {
   startModelServer,
   toolResults,
 } from './harness/model-server.ts';
-import {conversationOf, converse, wireOf, type Wire} from './harness/wire.ts';
+import {
+  conversationOf,
+  converse,
+  sender,
+  wireOf,
+  type Wire,
+} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 // A window this small rotates the segment after every turn.
@@ -73,16 +79,17 @@ async function threeSegments(): Promise<{
   };
 }
 
-/** A turn of the local user on the conversation. */
-function lineOn(
+/** A line of the local user on the conversation, answered as its turn ended. */
+async function lineOn(
   wire: Wire,
   conversationId: string,
   text: string,
   clientMessageId: string,
-) {
-  return wire.turn({
+): Promise<unknown> {
+  const send = await sender(wire);
+
+  return send({
     conversationId,
-    senderId: 'local-user',
     text,
     source: 'web',
     clientMessageId,
@@ -416,7 +423,7 @@ it('storage.damaged-record: damage that would lose history is reported, never re
   }
 });
 
-it('storage.damaged-segment-tolerance: a committed line that is no record, in an older segment or the current one, and a sessions catalog row that is no session row are skipped and said: serve warns once on stderr as the thread opens past them, inspect --session warns of the lines and --sessions of the row, the character chats on, history reads every message around them, and a line the damaged segment took is still refused duplicate_submission', async () => {
+it('storage.damaged-segment-tolerance: a committed line that is no record, in an older segment or the current one, a sessions catalog row that is no session row, and a line of her inbox that is no line are skipped and said: serve warns once on stderr as the thread opens past them, and once as she reads her inbox, inspect --session warns of the lines and --sessions of the row, the character chats on, history reads every message around them, and a line the damaged segment took is still refused duplicate_submission', async () => {
   const {home, conversationId, segment} = await threeSegments();
   const data = join(home, 'character-data', 'mira');
   const current = `${conversationId}.3`;
@@ -425,6 +432,7 @@ it('storage.damaged-segment-tolerance: a committed line that is no record, in an
   appendFileSync(join(segment(1), 'raw-events.jsonl'), damagedRecord);
   appendFileSync(join(segment(3), 'raw-events.jsonl'), damagedRecord);
   appendFileSync(join(data, 'sessions.jsonl'), '{"session": "lost"}\n');
+  appendFileSync(join(data, 'inbox.jsonl'), '{"text": "No stamps."}\n');
 
   const daemon = await startDaemon(home, fixedReplies);
   const wire = wireOf(daemon);
@@ -434,12 +442,21 @@ it('storage.damaged-segment-tolerance: a committed line that is no record, in an
   await daemon.printedOnStderr(
     `mira: Skipped what could not be read, line 4 of her sessions catalog and line 2 of session ${current}; the rest was read.`,
   );
+  await daemon.printedOnStderr(
+    'mira: Skipped what could not be read, line 1 of her inbox; the rest was read.',
+  );
   await expect(
     lineOn(wire, conversationId, 'One.', 'one'),
   ).resolves.toMatchObject({status: 'refused', reason: 'duplicate_submission'});
   await expect(
     lineOn(wire, conversationId, 'Three.', 'three'),
   ).resolves.toMatchObject({status: 'completed'});
+  expect(
+    daemon
+      .stderr()
+      .split('\n')
+      .filter(line => line.includes('of her inbox')),
+  ).toHaveLength(1);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [
       {text: 'One.'},
@@ -526,8 +543,8 @@ it("storage.plugin-store-damage: a plugin's damaged state is passed over and sai
   const outOfRange = JSON.parse(kept) as {
     readonly state: Record<string, string>;
   };
-  // The checkpoint first, while it still names the store's revision, so it
-  // is read and not merely outgrown.
+  // The checkpoint first, while the log still holds the lines it counts,
+  // so it is read and not merely outgrown.
   const damages = [
     [
       'a checkpoint value out of range',
@@ -610,7 +627,7 @@ it("storage.plugin-store-damage: a plugin's damaged state is passed over and sai
   expect(readFileSync(memory, 'utf8')).toBe('{"notes": [');
 });
 
-it('storage.symlink-guards: storage behind a symbolic link is refused, never followed: the character-data, conversations, character data, sessions and taken-lines directories, a segment or conversation directory, the catalog, the overlay and a plugin store, nothing written where the link points', async () => {
+it('storage.symlink-guards: storage behind a symbolic link is refused, never followed: the character-data, conversations, character data, sessions and taken-lines directories, a segment or conversation directory, the catalog, her inbox, the overlay and a plugin store, nothing written where the link points', async () => {
   const {home: stopped, conversationId} = await threeSegments();
   const data = join('character-data', 'mira');
   const linked = [
@@ -622,6 +639,7 @@ it('storage.symlink-guards: storage behind a symbolic link is refused, never fol
     join(data, 'sessions', `${conversationId}.1`),
     join('conversations', conversationId),
     join(data, 'sessions.jsonl'),
+    join(data, 'inbox.jsonl'),
     join(data, 'config.json'),
     join(data, 'plugin-data', 'character-state'),
   ];

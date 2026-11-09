@@ -1,8 +1,8 @@
 //! The command line, `project02 serve [--store <dir>] [--init]`,
 //! `project02 inspect [--store <dir>] [--character <id>] [<report>]` or
-//! `project02 telegram [--store <dir>]`, read by hand: a parser would bring
-//! a help flag and sentences of its own, where a person who mistypes is
-//! owed these.
+//! `project02 telegram [--store <dir>]`, each with `--help`, read by hand:
+//! a parser would bring sentences of its own, where a person who mistypes
+//! is owed these.
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
@@ -10,10 +10,30 @@ use std::path::PathBuf;
 use p02_core::{ConversationId, SessionId};
 use p02_shared::Identifier;
 
-const USAGE: &str = "The commands are: project02 serve [--store <dir>] [--init], project02 \
-                     inspect [--store <dir>] [--character <id>] [--sessions | --session <id> | \
-                     --conversations | --conversation <id>], and project02 telegram [--store \
-                     <dir>].";
+const SERVE: &str = "project02 serve [--store <dir>] [--init]";
+const INSPECT: &str = "project02 inspect [--store <dir>] [--character <id>] [--sessions | \
+                       --session <id> | --conversations | --conversation <id>]";
+const TELEGRAM: &str = "project02 telegram [--store <dir>]";
+
+const SERVE_HELP: &str = "\
+Runs the daemon on a home and prints the address of its page.
+
+  --store <dir>  the home, .project02 in the working directory by default
+  --init         make a store there without asking";
+const INSPECT_HELP: &str = "\
+Prints a home's settings as JSON, and beside them the report asked for.
+It writes nothing.
+
+  --store <dir>        the home, .project02 in the working directory by default
+  --character <id>     the character, the one switched on by default
+  --sessions           her sessions
+  --session <id>       one session's records, one JSON object a line
+  --conversations      the home's conversations
+  --conversation <id>  one conversation, and her segments of it";
+const TELEGRAM_HELP: &str = "\
+Runs the Telegram connector beside the daemon of a home.
+
+  --store <dir>  the home, .project02 in the working directory by default";
 
 /// What the person asked the binary to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -21,6 +41,8 @@ pub(crate) enum Command {
     Serve(ServeFlags),
     Inspect(InspectFlags),
     Telegram(TelegramFlags),
+    /// A command's usage, asked for with `--help`.
+    Help(String),
 }
 
 /// What `serve` is asked: the home's directory as the person named it,
@@ -67,22 +89,33 @@ pub(crate) enum Report {
 pub(crate) struct UsageError(String);
 
 /// What follows the program's name: a command and its flags, a flag given
-/// twice taking its last value.
+/// twice taking its last value, or `--help` among them for its usage.
 pub(crate) fn read(args: &[OsString]) -> Result<Command, UsageError> {
-    match args.split_first() {
-        Some((command, flags)) if command == "serve" => serve_flags(flags).map(Command::Serve),
-        Some((command, flags)) if command == "inspect" => {
-            inspect_flags(flags).map(Command::Inspect)
-        }
-        Some((command, flags)) if command == "telegram" => {
-            telegram_flags(flags).map(Command::Telegram)
-        }
-        Some((command, _)) => Err(UsageError(format!(
-            "Unknown command: {}. {USAGE}",
-            command.to_string_lossy()
+    let Some((command, flags)) = args.split_first() else {
+        return Err(UsageError(format!("No command given. {}", usage())));
+    };
+    let help = flags.iter().any(|flag| flag == "--help");
+
+    match command.to_str() {
+        Some("serve") if help => Ok(Command::Help(format!("Usage: {SERVE}\n\n{SERVE_HELP}"))),
+        Some("serve") => serve_flags(flags).map(Command::Serve),
+        Some("inspect") if help => Ok(Command::Help(format!("Usage: {INSPECT}\n\n{INSPECT_HELP}"))),
+        Some("inspect") => inspect_flags(flags).map(Command::Inspect),
+        Some("telegram") if help => Ok(Command::Help(format!(
+            "Usage: {TELEGRAM}\n\n{TELEGRAM_HELP}"
         ))),
-        None => Err(UsageError(format!("No command given. {USAGE}"))),
+        Some("telegram") => telegram_flags(flags).map(Command::Telegram),
+        _ => Err(UsageError(format!(
+            "Unknown command: {}. {}",
+            command.to_string_lossy(),
+            usage()
+        ))),
     }
+}
+
+/// The commands, as a usage error lists them.
+fn usage() -> String {
+    format!("The commands are: {SERVE}, {INSPECT}, and {TELEGRAM}.")
 }
 
 /// The daemon runs every character, so choosing one, as `--character`
@@ -291,12 +324,8 @@ mod tests {
     #[test]
     fn every_other_command_line_is_refused_with_the_sentence_a_person_reads() {
         for (words, said) in [
-            (&[][..], format!("No command given. {USAGE}")),
-            (&["chat"], format!("Unknown command: chat. {USAGE}")),
-            (
-                &["serve", "--help"],
-                "Unknown serve option: --help.".to_owned(),
-            ),
+            (&[][..], format!("No command given. {}", usage())),
+            (&["chat"], format!("Unknown command: chat. {}", usage())),
             (
                 &["serve", "--character", "mira"],
                 "Unknown serve option: --character.".to_owned(),

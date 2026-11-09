@@ -1,8 +1,8 @@
 //! A file of JSON lines: a line counts once its newline is on disk, so text
 //! after the last newline is an append a crash cut short and is no line,
 //! while a line before it that is not what it should be is damage, which a
-//! session's log and catalog skip and a plugin's log refuses. A file of
-//! lines is read as it was at one moment, with what lies beside it.
+//! session's log and catalog skip and a plugin's log reads as null. A file
+//! of lines is read as it was at one moment, with what lies beside it.
 
 use std::fmt;
 use std::io;
@@ -56,7 +56,7 @@ pub(crate) fn committed_lines(bytes: &[u8]) -> impl Iterator<Item = (usize, &[u8
 
 /// How many of `bytes` the committed lines take up: everything up to the
 /// last newline, and none of what follows it.
-pub(crate) fn committed_length(bytes: &[u8]) -> usize {
+fn committed_length(bytes: &[u8]) -> usize {
     bytes
         .iter()
         .rposition(|byte| *byte == b'\n')
@@ -113,7 +113,6 @@ mod tests {
 
     use super::*;
 
-    /// storage.coherent-read: a read that meets a change to its file is tried once more, and one whose two attempts both race is refused `concurrent_write`
     #[test]
     fn a_read_the_file_changes_beneath_is_tried_again_once_then_refused() {
         let directory = tempfile::tempdir().unwrap();

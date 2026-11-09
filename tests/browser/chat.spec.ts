@@ -24,6 +24,7 @@ import {
   conversationOf,
   converse,
   saveConfig,
+  sender,
   wireOf,
   type Wire,
 } from '../conformance/harness/wire.ts';
@@ -324,16 +325,13 @@ test("page.notices: another surface's turn that failed, a page of the thread tha
   await send(page, 'Hello.');
   await expect(texts).toHaveText(['Hello.', 'Hi.']);
 
-  const {conversationId, userParticipantId} = await conversationOf(
-    wire,
-    'mira',
-  );
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const fromThePhone = await sender(wire);
 
   model.answer(...undecided());
 
-  const elsewhere = (await wire.turn({
+  const elsewhere = (await fromThePhone({
     conversationId,
-    senderId: userParticipantId,
     text: 'From the phone.',
     source: 'telegram',
     clientMessageId: 'phone',

@@ -1,34 +1,33 @@
-//! The home's management bot, roster-shaped as the web page is: the same
-//! pairing gate as a character's bot; for a paired account, who is on,
-//! what waits, and an answer to a pairing request; and every confirmation
-//! and pairing request of the home shown in every paired chat as a card
-//! with Approve and Deny, naming the surface a confirmation was raised on
-//! and the source a pairing request's account wrote to.
+//! The home's management bot, roster-shaped as the web page is: for a
+//! paired account, who is on, what waits, and an answer to a pairing
+//! request; and every confirmation and pairing request of the home shown
+//! in every paired chat as a card with Approve and Deny, naming the surface
+//! a confirmation was raised on and the source a pairing request's account
+//! wrote to.
 
-use p02_app::{Answer, Event, PairingAnswer, PairingRequest, PendingConfirmation, RosterState};
+use p02_wire::{Answer, Event, PairingAnswer, PairingRequest, PendingConfirmation, RosterState};
 
-use crate::bot::{Chat, DAEMON_DOWN, Done, Rules};
-use crate::bot_api::{CallbackQuery, Update};
+use crate::bot::{Chat, DAEMON_DOWN, Rules};
+use crate::bot_api::Message;
 use crate::cards::{
     ALREADY_ANSWERED, CardKind, CardText, EXPIRED, Press, answered, confirm, confirmation_ending,
     pairing_ending,
 };
-use crate::gate::Gate;
 use crate::outbox::Target;
 use crate::table::{Owner, Snapshot};
 
 const HELP: &str = "This is the home's management bot. /status says who is on; /pending shows \
                     what waits for you; /approve <code> and /deny <code> answer a pairing request.";
 
-#[derive(Debug, Default)]
-pub(crate) struct Management {
-    gate: Gate,
-}
+#[derive(Debug)]
+pub(crate) struct Management;
 
-impl Management {
-    /// A paired account's command, by the first word of its text; any
-    /// other text is answered with the help.
-    async fn command(chat: &Chat, account: i64, text: &str) {
+impl Rules for Management {
+    /// A command, by the first word of its text; any other text is answered
+    /// with the help.
+    async fn message(&mut self, chat: &mut Chat, message: Message) {
+        let account = message.chat.id;
+        let text = message.text.unwrap_or_default();
         let mut words = text.split_whitespace();
         let said = match (words.next(), words.next()) {
             (Some("/status"), _) => status(chat).await,
@@ -53,45 +52,10 @@ impl Management {
         }
     }
 
-    async fn press(&mut self, chat: &mut Chat, press: CallbackQuery) {
-        chat.outbox.heard_from(press.from.id);
-
-        let mut toast = None;
-
-        if let Some(asked) = Press::parse(press.data.as_deref())
-            && self.gate.admit(chat, press.from.id, &press.from).await
-        {
-            toast = match asked.kind {
-                CardKind::Confirmation => confirm(chat, &asked).await,
-                CardKind::Pairing => {
-                    settle(chat, &asked.key, asked.decision, ALREADY_ANSWERED).await
-                }
-            };
-        }
-
-        chat.toast(&press, toast);
-    }
-}
-
-impl Rules for Management {
-    async fn update(&mut self, chat: &mut Chat, update: Update) {
-        if let Some(press) = update.callback_query {
-            self.press(chat, press).await;
-            return;
-        }
-
-        let Some(message) = update.message else {
-            return;
-        };
-        let Some(from) = message.from.filter(|_| message.chat.kind == "private") else {
-            return;
-        };
-        let account = message.chat.id;
-
-        chat.outbox.heard_from(account);
-
-        if self.gate.admit(chat, account, &from).await {
-            Self::command(chat, account, message.text.as_deref().unwrap_or_default()).await;
+    async fn press(&mut self, chat: &mut Chat, press: &Press) -> Option<String> {
+        match press.kind {
+            CardKind::Confirmation => confirm(chat, press).await,
+            CardKind::Pairing => settle(chat, &press.key, press.decision, ALREADY_ANSWERED).await,
         }
     }
 
@@ -137,15 +101,12 @@ impl Rules for Management {
             // its card keeps it.
             Event::PairingRequested(request) => post_pairing(chat, request),
             Event::PairingSettled { code, decision, .. } => {
-                self.gate.settled(chat, event);
                 chat.outbox
                     .end_card(CardKind::Pairing, code.clone(), pairing_ending(*decision));
             }
             _ => {}
         }
     }
-
-    fn done(&mut self, _chat: &mut Chat, _done: Done) {}
 }
 
 fn post_confirmation(chat: &Chat, pending: &PendingConfirmation) {
@@ -214,7 +175,6 @@ fn words(state: RosterState) -> &'static str {
         RosterState::NotStarted => "not started",
         RosterState::Starting => "starting",
         RosterState::Ready => "ready",
-        RosterState::Reloading => "reloading",
         RosterState::Stopping => "stopping",
         RosterState::Stopped => "stopped",
         RosterState::Failed => "failed",

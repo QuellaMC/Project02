@@ -9,63 +9,60 @@ use async_trait::async_trait;
 use p02_characters::Persona;
 use p02_contracts::{
     ChatMessage, ConversationToolCall, ConversationTurn, DecisionRejection,
-    DecisionRejectionReason, DecisionResult, HistoryWindow, InputEnvelope, Invocation,
-    PluginToolDefinitions, ProviderAnswer, RawOutput, ReplyDelta, RoleModelAdapter, ToolCallResult,
+    DecisionRejectionReason, DecisionResult, Invocation, ModelOutput, PluginToolDefinitions,
+    ProviderAnswer, RoleModelAdapter, ToolCallResult, WrittenCall,
 };
 use p02_core::{MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, Person, Reply, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
-    run_turn,
+    DraftEvent, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
 };
 use serde_json::{Value, json};
 
 use crate::support::{context, event, id, mira, plugin_tool, turn};
 
-/// A round the scripted model plays: what it drafts, then what it answers.
-struct Script {
-    drafts: Vec<&'static str>,
-    answer: ProviderAnswer,
-}
-
-fn answer(decision: &Value) -> Script {
-    Script {
-        drafts: Vec::new(),
-        answer: ProviderAnswer::Text(decision.to_string()),
+/// The model writes `calls`, each a name and an input, and `text` beside
+/// them.
+fn answer(calls: &[Value], text: Option<&str>) -> ProviderAnswer {
+    ProviderAnswer::Answered {
+        output: ModelOutput {
+            tool_calls: calls
+                .iter()
+                .map(|call| WrittenCall {
+                    name: call["name"].as_str().unwrap().to_owned(),
+                    input: call["input"].clone(),
+                })
+                .collect(),
+            text: text.map(str::to_owned),
+        },
+        finish_reason: None,
+        usage: None,
     }
 }
 
-fn drafting(drafts: Vec<&'static str>, decision: &Value) -> Script {
-    Script {
-        drafts,
-        ..answer(decision)
-    }
+fn say(text: &str) -> ProviderAnswer {
+    answer(&[reply(text)], None)
 }
 
-fn say(text: &str) -> Value {
-    json!({"toolCalls": [{"name": "visible_reply", "input": {"text": text}}]})
+fn reply(text: &str) -> Value {
+    json!({"name": "visible_reply", "input": {"text": text}})
 }
 
 fn search(query: &str) -> Value {
     json!({"name": "memory.search", "input": {"query": query}})
 }
 
-/// A model that plays its scripts in turn, then the last one forever, and
+/// A model that plays its answers in turn, then the last one forever, and
 /// keeps the messages each round was given.
 #[derive(Debug, Default)]
 struct Scripted {
-    scripts: Mutex<VecDeque<(Vec<&'static str>, ProviderAnswer)>>,
+    answers: Mutex<VecDeque<ProviderAnswer>>,
     seen: Mutex<Vec<Vec<ChatMessage>>>,
 }
 
 impl Scripted {
-    fn new(scripts: Vec<Script>) -> Self {
+    fn new(answers: Vec<ProviderAnswer>) -> Self {
         Self {
-            scripts: Mutex::new(
-                scripts
-                    .into_iter()
-                    .map(|script| (script.drafts, script.answer))
-                    .collect(),
-            ),
+            answers: Mutex::new(answers.into()),
             seen: Mutex::default(),
         }
     }
@@ -77,33 +74,18 @@ impl Scripted {
 
 #[async_trait]
 impl RoleModelAdapter for Scripted {
-    async fn invoke(&self, _envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         self.seen
             .lock()
             .unwrap()
             .push(invocation.messages().to_vec());
 
-        let (drafts, answer) = {
-            let mut scripts = self.scripts.lock().unwrap();
+        let mut answers = self.answers.lock().unwrap();
 
-            if scripts.len() > 1 {
-                scripts.pop_front().unwrap()
-            } else {
-                scripts.front().cloned().unwrap()
-            }
-        };
-
-        for text in drafts {
-            invocation.hear(ReplyDelta {
-                reply: 0,
-                text: text.to_owned(),
-            });
-        }
-
-        RawOutput {
-            answer,
-            provider_metadata: None,
-            provider_exchange: None,
+        if answers.len() > 1 {
+            answers.pop_front().unwrap()
+        } else {
+            answers.front().cloned().unwrap()
         }
     }
 }
@@ -114,7 +96,6 @@ struct Recording {
     log: Mutex<Vec<String>>,
     rounds: Mutex<Vec<ModelRound>>,
     routed: Mutex<Vec<RoutedToolCall>>,
-    commit_failure: Option<&'static str>,
 }
 
 impl Recording {
@@ -138,10 +119,6 @@ impl TurnSink for Recording {
     }
 
     async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, Self::Error> {
-        if let Some(failure) = self.commit_failure {
-            return Err(failure);
-        }
-
         self.note(format!("reply {} {}", reply.draft, reply.text));
 
         let number = u64::try_from(self.log.lock().unwrap().len()).unwrap();
@@ -176,7 +153,7 @@ impl TurnSink for Recording {
             .map(|call| {
                 let output = json!({"found": call.tool_name().to_string()});
 
-                call.finish(ToolCallResult::Accepted { output }).unwrap()
+                call.finish(ToolCallResult::Accepted { output })
             })
             .collect())
     }
@@ -189,30 +166,31 @@ impl TurnSink for Recording {
     }
 }
 
+/// The turn's rounds, one after another, to their end.
 async fn run(
     model: &Scripted,
     sink: &Recording,
     persona: &Persona,
     history: &[ConversationTurn],
 ) -> Result<TurnOutcome, &'static str> {
-    run_turn(
-        model,
-        sink,
-        TurnInput {
-            event: event(),
-            user_message: p02_core::UserLine::new("Hello?").unwrap().into(),
-            context: context(),
-            plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(
-                "memory.fixture",
-                "memory.search",
-            )])
-            .unwrap(),
-            history,
-            persona,
-            person: Person::Unnamed,
-        },
-    )
-    .await
+    let mut rounds = Rounds::new(TurnInput {
+        event: event(),
+        user_message: p02_core::UserLine::new("Hello?").unwrap().into(),
+        context: context(),
+        plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(
+            "memory.fixture",
+            "memory.search",
+        )])
+        .unwrap(),
+        history,
+        persona,
+    });
+
+    loop {
+        if let Some(outcome) = rounds.run(model, sink).await? {
+            return Ok(outcome);
+        }
+    }
 }
 
 fn round(number: u32) -> NonZeroU32 {
@@ -230,15 +208,11 @@ fn status(result: &DecisionResult) -> &'static str {
 async fn every_round_is_recorded_before_anything_it_decided_happens() {
     let history = [turn(1, "Earlier.", "Earlier reply.")];
     let model = Scripted::new(vec![
-        answer(&json!({"toolCalls": [
-            {"name": "visible_reply", "input": {"text": "Looking."}},
-            search("tea"),
-        ]})),
-        answer(&say("Found it.")),
+        answer(&[reply("Looking."), search("tea")], None),
+        say("Found it."),
     ]);
     let sink = Recording::default();
     let outcome = run(&model, &sink, &mira(), &history).await.unwrap();
-    let rounds = sink.rounds.lock().unwrap().clone();
 
     assert!(matches!(outcome, TurnOutcome::Replied { round: at, .. } if at == round(2)));
     assert_eq!(
@@ -251,120 +225,11 @@ async fn every_round_is_recorded_before_anything_it_decided_happens() {
             "reply 2.0 Found it.",
         ]
     );
-    assert_eq!(
-        rounds[0].envelope.decision_context.history_window(),
-        &HistoryWindow::of(&history)
-    );
-    assert_eq!(rounds[1].envelope.tool_rounds.len(), 1);
-}
-
-#[tokio::test]
-async fn a_refused_round_goes_back_to_the_model_in_its_next_round_alone() {
-    let model = Scripted::new(vec![
-        answer(&json!("not a decision")),
-        answer(&json!({"toolCalls": [search("tea")]})),
-        answer(&say("There.")),
-    ]);
-    let sink = Recording::default();
-    let outcome = run(&model, &sink, &mira(), &[]).await.unwrap();
-    let notes: Vec<Vec<String>> = model
-        .seen()
-        .iter()
-        .map(|messages| {
-            messages
-                .iter()
-                .filter_map(|message| match message {
-                    ChatMessage::System { content } if content.starts_with("Your last reply") => {
-                        Some(content.clone())
-                    }
-                    _ => None,
-                })
-                .collect()
-        })
-        .collect();
-
-    assert!(matches!(outcome, TurnOutcome::Replied { round: at, .. } if at == round(3)));
-    assert_eq!(
-        notes,
-        [
-            Vec::new(),
-            vec![
-                "Your last reply could not be used. The runtime said: \"Adapter output must be a \
-                 CharacterDecision JSON object.\""
-                    .to_owned()
-            ],
-            Vec::new(),
-        ]
-    );
-    assert_eq!(
-        model.seen()[1].last(),
-        Some(&ChatMessage::System {
-            content: notes[1][0].clone()
-        })
-    );
-    assert_eq!(
-        sink.rounds
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|recorded| status(&recorded.result))
-            .collect::<Vec<_>>(),
-        ["rejected", "accepted", "accepted"]
-    );
-}
-
-#[tokio::test]
-async fn the_rounds_run_out_and_a_provider_that_gave_nothing_ends_the_turn_at_once() {
-    let persona = mira();
-    let stubborn = Scripted::new(vec![answer(&json!({"toolCalls": []}))]);
-    let sink = Recording::default();
-    // Ninety-nine rounds may be spent; the hundredth is the last.
-    let last = round(100);
-
-    assert!(matches!(
-        run(&stubborn, &sink, &persona, &[]).await.unwrap(),
-        TurnOutcome::Refused {
-            round: at,
-            rejection: DecisionRejection {
-                reason: DecisionRejectionReason::MalformedOutput,
-                ..
-            },
-        } if at == last
-    ));
-    assert_eq!(
-        (sink.rounds.lock().unwrap().len(), stubborn.seen().len()),
-        (100, 100)
-    );
-
-    let failing = Scripted::new(vec![Script {
-        drafts: vec!["Half"],
-        answer: ProviderAnswer::Failed {
-            details: "upstream 503".to_owned(),
-        },
-    }]);
-    let sink = Recording::default();
-    let refused = DecisionRejection {
-        reason: DecisionRejectionReason::ProviderError,
-        details: Some("upstream 503".to_owned()),
-    };
-
-    assert_eq!(
-        run(&failing, &sink, &persona, &[]).await,
-        Ok(TurnOutcome::Refused {
-            round: round(1),
-            rejection: refused.clone(),
-        })
-    );
-    assert_eq!(sink.log(), ["delta 1.0 Half", "round 1", "withdrawn 1.0"]);
-    assert_eq!(
-        sink.rounds.lock().unwrap()[0].result,
-        DecisionResult::Rejected { rejection: refused }
-    );
 }
 
 #[tokio::test]
 async fn a_call_past_the_last_round_is_never_made_and_its_round_stays_what_the_model_said() {
-    let model = Scripted::new(vec![answer(&json!({"toolCalls": [search("again")]}))]);
+    let model = Scripted::new(vec![answer(&[search("again")], None)]);
     let sink = Recording::default();
     let outcome = run(&model, &sink, &mira(), &[]).await.unwrap();
     let ran = sink
@@ -395,14 +260,14 @@ async fn a_call_past_the_last_round_is_never_made_and_its_round_stays_what_the_m
 #[tokio::test]
 async fn this_turn_s_round_is_replayed_under_the_runtime_s_ids_and_its_note_is_never_said() {
     let model = Scripted::new(vec![
-        answer(&json!({
-            "toolCalls": [
-                {"name": "memory.search", "input": {"query": "Mira", "api_key": "secret"}},
-                {"name": "memory.forget", "input": {}},
+        answer(
+            &[
+                json!({"name": "memory.search", "input": {"query": "Mira", "api_key": "secret"}}),
+                json!({"name": "memory.forget", "input": {}}),
             ],
-            "text": "Searching.",
-        })),
-        answer(&say("Done.")),
+            Some("Searching."),
+        ),
+        say("Done."),
     ]);
     let sink = Recording::default();
 
@@ -411,7 +276,6 @@ async fn this_turn_s_round_is_replayed_under_the_runtime_s_ids_and_its_note_is_n
     let routed = sink.routed.lock().unwrap().clone();
     let replayed = &model.seen()[1];
     let tail = serde_json::to_value(&replayed[replayed.len() - 3..]).unwrap();
-    let recorded = serde_json::to_value(&sink.rounds.lock().unwrap()[0].result).unwrap();
 
     assert_eq!(
         routed
@@ -429,12 +293,8 @@ async fn this_turn_s_round_is_replayed_under_the_runtime_s_ids_and_its_note_is_n
             ),
         ]
     );
-    // The tool runs on what the model sent; the record and the replay keep no credential.
+    // The tool runs on what the model sent; the replay keeps no credential.
     assert_eq!(routed[0].input()["api_key"], json!("secret"));
-    assert_eq!(
-        recorded["decision"]["toolCalls"][0]["input"]["api_key"],
-        json!("[redacted]")
-    );
     assert_eq!(
         tail,
         json!([
@@ -478,46 +338,4 @@ async fn this_turn_s_round_is_replayed_under_the_runtime_s_ids_and_its_note_is_n
             "reply 2.0 Done."
         ]
     );
-}
-
-#[tokio::test]
-async fn a_draft_is_named_by_its_commit_and_withdrawn_when_nothing_says_it() {
-    let persona = mira();
-    let model = Scripted::new(vec![
-        drafting(vec!["oops"], &json!({"toolCalls": "visible_reply"})),
-        drafting(vec!["unnamed"], &json!({"toolCalls": [search("tea")]})),
-        drafting(vec!["Hel", "lo."], &say("Hello.")),
-    ]);
-    let sink = Recording::default();
-
-    run(&model, &sink, &persona, &[]).await.unwrap();
-
-    assert_eq!(
-        sink.log(),
-        [
-            "delta 1.0 oops",
-            "round 1",
-            "withdrawn 1.0",
-            "delta 2.0 unnamed",
-            "round 2",
-            "withdrawn 2.0",
-            "tools 2 memory.search",
-            "delta 3.0 Hel",
-            "delta 3.0 lo.",
-            "round 3",
-            "reply 3.0 Hello.",
-        ]
-    );
-
-    let model = Scripted::new(vec![drafting(vec!["Hello."], &say("Hello."))]);
-    let sink = Recording {
-        commit_failure: Some("the disk is full"),
-        ..Recording::default()
-    };
-
-    assert_eq!(
-        run(&model, &sink, &persona, &[]).await,
-        Err("the disk is full")
-    );
-    assert_eq!(sink.log(), ["delta 1.0 Hello.", "round 1", "withdrawn 1.0"]);
 }

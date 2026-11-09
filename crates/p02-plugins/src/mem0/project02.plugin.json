@@ -20,105 +20,85 @@
         {
           "name": "backend",
           "description": "Which Mem0 deployment to talk to: the hosted platform API, a self-hosted server, or the embedded engine on this device (oss).",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "allowedValues": ["platform", "server", "oss"],
           "defaultValue": "platform",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "apiKey",
           "description": "Mem0 credential: the platform API key, or the server's JWT or m0sk_ API key.",
-          "required": false,
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "baseUrl",
           "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
-          "required": false,
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "userId",
           "description": "Mem0 user identity memories are stored under.",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "defaultValue": "project02-user",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossLlmModel",
           "description": "Embedded engine only: extraction model name; unset uses the engine default (gpt-5-mini). Some models return empty extractions for the engine's prompt even though the API works; test yours, and prefer small instruction-following models.",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossLlmApiKey",
           "description": "Embedded engine only: API key for the extraction endpoint. Required when ossLlmBaseUrl is unset (the OpenAI cloud); local servers ignore keys.",
-          "required": false,
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "ossLlmBaseUrl",
           "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
-          "required": false,
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossEmbedderModel",
           "description": "Embedded engine only: embedding model name; unset uses the engine default (text-embedding-3-small).",
-          "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossEmbedderApiKey",
           "description": "Embedded engine only: API key for the embedding endpoint; unset reuses ossLlmApiKey only while the embedding endpoint matches the extraction endpoint -- a separate endpoint needs its own key.",
-          "required": false,
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "ossEmbedderBaseUrl",
           "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
-          "required": false,
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         }
       ]
     },

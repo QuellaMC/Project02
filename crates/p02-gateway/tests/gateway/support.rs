@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_app::{Daemon, DaemonSettings, Durations, Plugin};
-use p02_contracts::{InputEnvelope, Invocation, RawOutput, RoleModelAdapter};
+use p02_contracts::{Invocation, ModelOutput, ProviderAnswer, RoleModelAdapter};
 use p02_gateway::Server;
 use p02_plugins::list;
 use p02_role_model::{TestProvider, select_adapter};
@@ -140,7 +140,6 @@ impl Gateway {
     pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Value {
         json!({
             "conversationId": conversation,
-            "senderId": "local-user",
             "text": text,
             "source": "web",
             "clientMessageId": id,
@@ -293,14 +292,19 @@ impl std::fmt::Debug for Model {
 
 #[async_trait]
 impl RoleModelAdapter for Model {
-    async fn invoke(&self, envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         let reply = self.replies.lock().unwrap().pop_front();
         let Some(reply) = reply else {
-            return self.fallback.invoke(envelope, invocation).await;
+            return self.fallback.invoke(invocation).await;
         };
 
-        RawOutput::text(
-            json!({"toolCalls": [{"name": "visible_reply", "input": {"text": reply}}]}).to_string(),
-        )
+        ProviderAnswer::Answered {
+            output: ModelOutput {
+                tool_calls: Vec::new(),
+                text: Some(reply),
+            },
+            finish_reason: Some("stop".to_owned()),
+            usage: None,
+        }
     }
 }

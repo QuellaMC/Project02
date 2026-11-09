@@ -200,7 +200,7 @@ function toast(
   );
 }
 
-it("connectors.telegram-cards: a confirmation a bot's line raised is a card with Approve and Deny in that line's chat; a press answers the daemon and is answered with the outcome, the turn goes on to its reply, and the card is edited to how it ended, its buttons gone", async () => {
+it("connectors.telegram-cards: a confirmation a bot's line raised is a card with Approve and Deny in that line's chat; a press answers the daemon, behind a line written while the card waits too, and is answered with the outcome; the turn goes on to its reply, the line after it is answered next, and the card is edited to how it ended, its buttons gone", async () => {
   const model = await startModelServer();
   const home = cardsHome(model, [alice]);
   const daemon = await startDaemon(home);
@@ -210,7 +210,11 @@ it("connectors.telegram-cards: a confirmation a bot's line raised is a card with
   const run = connector(['--store', home], telegram.env);
 
   await run.printed('Telegram: @mira_bot answers for Mira.');
-  model.answer(await asksToSet(wire, 'tone', 'pirate'), reply('Arr.'));
+  model.answer(
+    await asksToSet(wire, 'tone', 'pirate'),
+    reply('Arr.'),
+    reply('Yo ho ho.'),
+  );
   telegram.push(miraBot.token, messageFrom(alice, 1, 'Talk like a pirate.'));
 
   const pirate = await nextParked(events);
@@ -222,9 +226,10 @@ it("connectors.telegram-cards: a confirmation a bot's line raised is a card with
     reply_markup: buttons('c', pirate.id),
   });
 
+  const sing = messageFrom(alice, 2, 'And sing.');
   const approve = pressOn(alice, card?.messageId ?? 0, `c:${pirate.id}:a`);
 
-  telegram.push(miraBot.token, approve);
+  telegram.push(miraBot.token, sing, approve);
   expect((await toast(telegram, miraBot, approve)).body).toEqual({
     callback_query_id: String(approve.update_id),
     text: 'Approved.',
@@ -241,6 +246,7 @@ it("connectors.telegram-cards: a confirmation a bot's line raised is a card with
       )
     ).body,
   ).not.toHaveProperty('reply_markup');
+  await telegram.shows(miraBot.token, alice.id, 'Yo ho ho.');
 });
 
 it('connectors.telegram-management-bot: the management bot posts what waits when it starts, every confirmation of the home as a card naming the surface it was raised on and every pairing request as a card naming the source its account wrote to, whose Approve pairs the account', async () => {

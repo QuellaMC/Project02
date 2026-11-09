@@ -3,13 +3,12 @@
 
 use std::path::Path;
 
-use p02_contracts::vocabulary;
-use p02_shared::Identifier;
+use p02_shared::{Identifier, vocabulary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::declaration::Namespace;
+use crate::config::Namespace;
 
 /// How much a finding weighs: an error stops what it concerns, a warning
 /// only says so.
@@ -86,11 +85,13 @@ enum Origin {
 }
 
 impl Diagnostic {
-    pub(crate) fn error(code: Code, message: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn error(code: Code, message: impl Into<String>) -> Self {
         Self::new(Severity::Error, code, message.into())
     }
 
-    pub(crate) fn warning(code: Code, message: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn warning(code: Code, message: impl Into<String>) -> Self {
         Self::new(Severity::Warning, code, message.into())
     }
 
@@ -105,12 +106,14 @@ impl Diagnostic {
         }
     }
 
-    pub(crate) fn at(mut self, path: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn at(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self
     }
 
-    pub(crate) fn in_section(mut self, namespace: Namespace, id: &str) -> Self {
+    #[must_use]
+    pub fn in_section(mut self, namespace: Namespace, id: &str) -> Self {
         self.concerns = Concerns::Section {
             namespace,
             id: id.to_owned(),
@@ -119,7 +122,8 @@ impl Diagnostic {
         self
     }
 
-    pub(crate) fn on_field(mut self, namespace: Namespace, id: &str, field: &str) -> Self {
+    #[must_use]
+    pub fn on_field(mut self, namespace: Namespace, id: &str, field: &str) -> Self {
         self.concerns = Concerns::Section {
             namespace,
             id: id.to_owned(),
@@ -129,17 +133,13 @@ impl Diagnostic {
     }
 
     /// The finding as made in `character`'s overlay at `path`.
-    pub(crate) fn in_overlay(mut self, character: &Identifier, path: &Path) -> Self {
+    #[must_use]
+    pub fn in_overlay(mut self, character: &Identifier, path: &Path) -> Self {
         self.origin = Some(Origin::Character {
             character_id: character.clone(),
             path: path.display().to_string(),
         });
         self
-    }
-
-    #[must_use]
-    pub fn severity(&self) -> Severity {
-        self.severity
     }
 
     #[must_use]
@@ -167,19 +167,22 @@ impl Diagnostic {
             .map(|Origin::Character { character_id, .. }| character_id)
     }
 
-    pub(crate) fn is_error(&self) -> bool {
+    #[must_use]
+    pub fn is_error(&self) -> bool {
         self.severity == Severity::Error
     }
 
     /// Whether the finding stops the character whose settings hold it: an
     /// error about her settings as a whole. One about a section blocks that
     /// section alone.
-    pub(crate) fn stops_character(&self) -> bool {
+    #[must_use]
+    pub fn stops_character(&self) -> bool {
         self.is_error() && matches!(self.concerns, Concerns::Global)
     }
 
     /// Whether the finding concerns a section of `namespace`.
-    pub(crate) fn about(&self, namespace: Namespace) -> bool {
+    #[must_use]
+    pub fn about(&self, namespace: Namespace) -> bool {
         matches!(
             &self.concerns,
             Concerns::Section { namespace: found, .. } if *found == namespace

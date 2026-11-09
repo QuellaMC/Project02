@@ -58,7 +58,7 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   const events = await openEvents(daemon);
 
   expect(dataOf(await events.next(() => true))).toEqual({
-    protocolVersion: 7,
+    protocolVersion: 8,
     health: await wire.health(),
     confirmations: await wire.pending(),
     pairings: await wire.pendingPairings(),
@@ -166,7 +166,7 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
   expect(stalled.body()).not.toContain('event: turn_completed');
 });
 
-it('stream.running-turns-fold: a stream opened mid-reply finds the running turn in ready with its draft so far, a later one a longer draft, and one opened after the turn ends none', async () => {
+it('stream.running-turns: a stream opened mid-reply finds the running turn in ready with its draft so far, a later one a longer draft, and one opened after the turn ends none', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -191,9 +191,7 @@ it('stream.running-turns-fold: a stream opened mid-reply finds the running turn 
     ],
   });
   const drafted = (text: string) =>
-    watching.next(
-      frameOf('turn_progress', {progress: {kind: 'reply_delta', text}}),
-    );
+    watching.next(frameOf('turn_running', {drafts: [{text}]}));
 
   await driven.arrived();
   driven.write([head]);
@@ -202,7 +200,7 @@ it('stream.running-turns-fold: a stream opened mid-reply finds the running turn 
     dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
   ).toMatchObject(running('Hello'));
   driven.write([middle]);
-  await drafted(' there,');
+  await drafted('Hello there,');
   expect(
     dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
   ).toMatchObject(running('Hello there,'));
@@ -270,7 +268,7 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   });
 });
 
-it('stream.drafts: a turn reaches the stream as its line, then each of its replies drafted in order under a draft id of its own, then each commit naming the draft it replaces, then turn_completed', async () => {
+it('stream.drafts: a turn reaches the stream as its line, then the turn running with each of its replies drafted in order under a draft id of its own, whole each time it grows, then each commit naming the draft it replaces and the turn without that draft, then turn_completed', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -287,6 +285,8 @@ it('stream.drafts: a turn reaches the stream as its line, then each of its repli
       },
       cut,
     );
+  const first = {draftId: '1.0', text: 'First, this.'};
+  const then = {draftId: '1.1', text: 'Then that.'};
 
   model.answer({
     chunks: [
@@ -300,31 +300,32 @@ it('stream.drafts: a turn reaches the stream as its line, then each of its repli
   await events.next(frameOf('turn_completed', {clientMessageId: 'two'}));
   expect(
     events.frames
-      .filter(
-        frame =>
-          frame.event === 'turn_progress' || frame.event === 'turn_completed',
-      )
+      .filter(frame => frame.event?.startsWith('turn_') === true)
       .map(frame => {
-        const {kind, progress} = dataOf(frame) as {
+        const {kind, progress, drafts} = dataOf(frame) as {
           readonly kind: string;
           readonly progress?: object;
+          readonly drafts?: unknown;
         };
 
-        return progress ?? {kind};
+        return progress ?? (drafts === undefined ? {kind} : {kind, drafts});
       }),
   ).toMatchObject([
     {kind: 'user_message', text: 'Two things?'},
-    {kind: 'reply_delta', draftId: '1.0', text: 'First'},
-    {kind: 'reply_delta', draftId: '1.0', text: ', this.'},
-    {kind: 'reply_delta', draftId: '1.1', text: 'Then'},
-    {kind: 'reply_delta', draftId: '1.1', text: ' that.'},
-    {kind: 'visible_reply', draftId: '1.0', text: 'First, this.'},
-    {kind: 'visible_reply', draftId: '1.1', text: 'Then that.'},
+    {kind: 'turn_running', drafts: []},
+    {kind: 'turn_running', drafts: [{draftId: '1.0', text: 'First'}]},
+    {kind: 'turn_running', drafts: [first]},
+    {kind: 'turn_running', drafts: [first, {draftId: '1.1', text: 'Then'}]},
+    {kind: 'turn_running', drafts: [first, then]},
+    {kind: 'visible_reply', ...first},
+    {kind: 'turn_running', drafts: [then]},
+    {kind: 'visible_reply', ...then},
+    {kind: 'turn_running', drafts: []},
     {kind: 'turn_completed'},
   ]);
 });
 
-it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the budget refuses are withdrawn before the round moves on, and the next round drafts afresh', async () => {
+it('stream.drafts-withdrawn: the drafts of a round whose answer is refused, or that the budget refuses, are withdrawn before the round moves on, and the next round drafts afresh', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -375,49 +376,36 @@ it('stream.drafts-withdrawn: the drafts of a round the parser refuses or the bud
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'tea'}));
 
-  const progress = events.frames.filter(frameOf('turn_progress')).map(
-    frame =>
-      (
-        dataOf(frame) as {
-          readonly progress: {
-            readonly kind: string;
-            readonly draftId?: string;
-            readonly text?: string;
-          };
-        }
-      ).progress,
+  // Each state of the turn as it ran, its drafts as `<draftId> <text>`.
+  const states = events.frames.filter(frameOf('turn_running')).map(frame =>
+    (
+      dataOf(frame) as {
+        readonly drafts: readonly {
+          readonly draftId: string;
+          readonly text: string;
+        }[];
+      }
+    ).drafts.map(({draftId, text}) => `${draftId} ${text}`),
   );
-  const ofRound = (round: string) =>
-    progress.filter(step => step.draftId?.startsWith(`${round}.`) === true);
 
-  expect(progress[0]).toMatchObject({kind: 'user_message'});
-  expect(ofRound('1')).toMatchObject([
-    {kind: 'reply_delta', draftId: '1.0', text: 'Let me look.'},
-    {kind: 'reply_withdrawn', draftId: '1.0'},
+  expect(states.slice(0, 5)).toEqual([
+    [],
+    ['1.0 Let me look.'],
+    [],
+    ['2.0 Let me look again.'],
+    ['2.0 Let me look again.', '2.1 And again.'],
   ]);
-  // Both drafts of the second round are withdrawn, in whichever order, before anything of a later round.
-  expect(ofRound('2').slice(0, 2)).toMatchObject([
-    {kind: 'reply_delta', draftId: '2.0', text: 'Let me look again.'},
-    {kind: 'reply_delta', draftId: '2.1', text: 'And again.'},
-  ]);
-  expect(
-    ofRound('2')
-      .slice(2)
-      .map(step => [step.kind, step.draftId])
-      .sort(),
-  ).toEqual([
-    ['reply_withdrawn', '2.0'],
-    ['reply_withdrawn', '2.1'],
-  ]);
-  expect(
-    progress.findLastIndex(step => step.draftId?.startsWith('2.') === true),
-  ).toBeLessThan(
-    progress.findIndex(step => step.draftId?.startsWith('100.') === true),
+  // Both drafts of the second round go, in whichever order, before
+  // anything of a later round.
+  expect([['2.0 Let me look again.'], ['2.1 And again.']]).toContainEqual(
+    states[5],
   );
-  expect(ofRound('100')).toMatchObject([
-    {kind: 'reply_delta', draftId: '100.0', text: 'One last look.'},
-    {kind: 'reply_withdrawn', draftId: '100.0'},
-  ]);
+  expect(states.slice(6)).toEqual([[], ['100.0 One last look.'], []]);
+  expect(
+    events.frames.filter(
+      frameOf('turn_progress', {progress: {kind: 'visible_reply'}}),
+    ),
+  ).toEqual([]);
 });
 
 it('stream.maintenance-failed: a segment rotation that fails behind a completed turn leaves the turn completed and the character ready, is told on the stream as maintenance_failed and in her health entry, and switching her off and on clears it', async () => {

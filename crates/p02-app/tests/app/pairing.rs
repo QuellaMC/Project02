@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use p02_app::{Answer, Event, PairingAnswer, PairingOutcome};
 use p02_core::{ClientStamp, SpeakerName};
+use p02_wire::{Answer, Event, PairingAnswer, PairingOutcome};
 use serde_json::json;
 
 use crate::support::{Ear, World, wire};
@@ -13,7 +13,7 @@ use crate::support::{Ear, World, wire};
 #[tokio::test(start_paused = true)]
 async fn a_request_nobody_answers_expires_at_its_deadline() {
     let world = World::new();
-    let daemon = world.daemon(Vec::new()).await;
+    let daemon = world.daemon().await;
     let mut ear = Ear::on(&daemon);
     let PairingOutcome::Pending { request } = daemon
         .request_pairing(

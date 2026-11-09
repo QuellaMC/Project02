@@ -2,10 +2,11 @@
 
 use std::time::{Duration, Instant};
 
+use reqwest::{Method, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpSocket;
 
-use crate::support::{Gateway, PATIENCE, World, waits};
+use crate::support::{Answer, Gateway, PATIENCE, World, waits};
 
 /// A stop gives a client that stopped reading a large answer the grace,
 /// then cuts it, and lets go of nothing before.
@@ -23,10 +24,28 @@ async fn a_stop_gives_a_stalled_reader_the_grace_then_cuts_it() {
     let conversation = gateway.conversation().await;
     let mut events = gateway.events().await;
 
-    // JSON writes a control character in six bytes: the answer is several
-    // mebibytes, more than the sockets hold for a reader that takes
-    // nothing.
+    // JSON writes a control character in six bytes: the page holding the
+    // reply is several mebibytes, more than the sockets hold for a reader
+    // that takes nothing.
     gateway.model.says(&"\u{1}".repeat(1024 * 1024));
+
+    let queued = Answer::of(
+        gateway
+            .authorized(Method::POST, "/api/turns")
+            .json(&Gateway::line(
+                &conversation,
+                "Tell me everything.",
+                "everything",
+            )),
+    )
+    .await;
+
+    assert_eq!(queued.status, StatusCode::OK, "{queued:?}");
+    events
+        .event_where("turn_completed", |event| {
+            event["clientMessageId"] == "everything"
+        })
+        .await;
 
     let socket = TcpSocket::new_v4().unwrap();
 
@@ -36,37 +55,31 @@ async fn a_stop_gives_a_stalled_reader_the_grace_then_cuts_it() {
         .connect(([127, 0, 0, 1], gateway.port.get()).into())
         .await
         .unwrap();
-    let body = Gateway::line(&conversation, "Tell me everything.", "everything").to_string();
+    let mut received = vec![0];
 
     reader
         .write_all(
-            format!(
-                "{}{body}",
-                gateway.head_of(
-                    "POST",
-                    "/api/turns",
-                    &[
-                        ("content-type", "application/json"),
-                        ("content-length", &body.len().to_string()),
-                    ],
+            gateway
+                .head_of(
+                    "GET",
+                    &format!("/api/conversations/{conversation}/messages"),
+                    &[],
                 )
-            )
-            .as_bytes(),
+                .as_bytes(),
         )
         .await
         .unwrap();
-    events
-        .event_where("turn_completed", |event| {
-            event["clientMessageId"] == "everything"
-        })
-        .await;
+    // The answer has begun.
+    tokio::time::timeout(PATIENCE, reader.read_exact(&mut received))
+        .await
+        .unwrap()
+        .unwrap();
 
     let stopped = Instant::now();
 
     gateway.close().await;
 
     let took = stopped.elapsed();
-    let mut received = Vec::new();
 
     tokio::time::timeout(PATIENCE, reader.read_to_end(&mut received))
         .await

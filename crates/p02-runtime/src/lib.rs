@@ -5,5 +5,5 @@ mod continuation;
 mod conversation;
 mod turn;
 
-pub use conversation::{Character, Conversation, Delivery, Rotation, Submission};
+pub use conversation::{Character, Conversation, Delivery, Mind, Submission};
 pub use turn::{CompletedTurn, Progress, RejectedTurn, RunTurnError};

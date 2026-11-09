@@ -1,5 +1,6 @@
 import {checkAnswer, type Answer} from './schema.ts';
 import type {Address} from './daemon.ts';
+import {frameOf, openEvents, type Events, type Frame} from './events.ts';
 import {failure, within} from './wait.ts';
 
 type Decision = 'approved' | 'denied';
@@ -9,11 +10,18 @@ type OpenOutcome =
       readonly status: 'opened';
       readonly conversationId: string;
       readonly characterId: string;
-      readonly userParticipantId: string;
     }
   | {readonly status: 'refused' | 'failed'; readonly message: string};
 
 export type Wire = ReturnType<typeof wireOf>;
+
+/** A line as a client sends it. */
+export type Line = {
+  readonly conversationId: string;
+  readonly text: string;
+  readonly source: string;
+  readonly clientMessageId: string;
+};
 
 /**
  * The verbs of docs/wiki/gateway-api.html, one method each, answering the
@@ -55,6 +63,8 @@ export function wireOf(daemon: Address) {
   const segment = encodeURIComponent;
 
   return {
+    /** The daemon these verbs reach. */
+    address: daemon,
     health: () => call('GET', '/api/health', 'GatewayHealth'),
     start: (characterId: string) =>
       call(
@@ -66,13 +76,7 @@ export function wireOf(daemon: Address) {
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,
       })) as OpenOutcome,
-    turn: (message: {
-      readonly conversationId: string;
-      readonly senderId: string;
-      readonly text: string;
-      readonly source: string;
-      readonly clientMessageId: string;
-    }) => call('POST', '/api/turns', 'TurnOutcome', message),
+    turn: (line: Line) => call('POST', '/api/turns', 'SubmitOutcome', line),
     history: (
       conversationId: string,
       page: {readonly before?: string; readonly limit?: number} = {},
@@ -137,9 +141,10 @@ function query(fields: Readonly<Record<string, string | number>>): string {
 }
 
 /**
- * A conversation with the character, once it is ready: the turn verb with
- * all but the line and its client message id filled in. The start joins
- * the boot the daemon began itself and answers when it settles.
+ * A conversation with the character, once it is ready: a line sent as the
+ * page sends it, with all but its text and its client message id filled
+ * in, answered as `sender` answers it. The start joins the boot the daemon
+ * began itself and answers when it settles.
  */
 export async function converse(
   wire: Wire,
@@ -148,25 +153,95 @@ export async function converse(
   await wire.start(characterId);
 
   const opened = await conversationOf(wire, characterId);
+  const send = await sender(wire);
 
   return (text, clientMessageId) =>
-    wire.turn({
+    send({
       conversationId: opened.conversationId,
-      senderId: opened.userParticipantId,
       text,
       source: 'web',
       clientMessageId,
     });
 }
 
+/**
+ * Lines sent as a client sends them, each answered as the stream says its
+ * turn ended: its completion, with the messages it committed, the
+ * person's line first; a line the daemon refuses at once is answered with
+ * its refusal. The stream is opened first, so no turn's end is missed.
+ */
+export async function sender(
+  wire: Wire,
+): Promise<(line: Line) => Promise<unknown>> {
+  const events = await openEvents(wire.address);
+
+  return async line => {
+    const ends = (frames: readonly Frame[]) =>
+      frames.filter(
+        frameOf('turn_completed', {
+          conversationId: line.conversationId,
+          clientMessageId: line.clientMessageId,
+        }),
+      );
+    // A line sent again after its turn left it out of the log ends anew.
+    const before = ends(events.frames).length;
+    const answer = (await wire.turn(line)) as {readonly status: string};
+
+    if (answer.status !== 'queued' && answer.status !== 'already_queued') {
+      return answer;
+    }
+
+    const ended = await events.holding(
+      `the turn of line "${line.clientMessageId}" to end`,
+      frames => ends(frames)[before],
+    );
+
+    return turnOf(events, ended, line);
+  };
+}
+
+/** The turn `ended` ended, as the stream told it: its completion, and the messages it committed. */
+function turnOf(events: Events, ended: Frame, line: Line): unknown {
+  const end = events.frames.indexOf(ended);
+  const begun = events.frames.slice(0, end).findLastIndex(
+    frameOf('turn_progress', {
+      conversationId: line.conversationId,
+      progress: {kind: 'user_message', clientMessageId: line.clientMessageId},
+    }),
+  );
+  const messages =
+    begun === -1
+      ? []
+      : events.frames
+          .slice(begun, end)
+          .filter(
+            frameOf('turn_progress', {conversationId: line.conversationId}),
+          )
+          .map(frame => dataOf(frame)['progress'] as Record<string, unknown>)
+          .filter(
+            progress =>
+              progress['kind'] === 'user_message' ||
+              progress['kind'] === 'visible_reply',
+          )
+          .map(({messageId, speakerId, speakerName, text}) => ({
+            messageId,
+            speakerId,
+            speakerName,
+            text,
+          }));
+
+  return {...dataOf(ended), messages};
+}
+
+function dataOf(frame: Frame): Record<string, unknown> {
+  return JSON.parse(frame.data ?? '') as Record<string, unknown>;
+}
+
 /** The direct conversation of a running character, as an open answers it. */
 export async function conversationOf(
   wire: Wire,
   characterId: string,
-): Promise<{
-  readonly conversationId: string;
-  readonly userParticipantId: string;
-}> {
+): Promise<{readonly conversationId: string}> {
   const opened = await wire.open(characterId);
 
   if (opened.status !== 'opened') {

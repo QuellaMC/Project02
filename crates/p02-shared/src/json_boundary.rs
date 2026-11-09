@@ -181,16 +181,19 @@ impl Tally<'_> {
 pub fn redact_credentials(value: &mut Value) {
     match value {
         Value::Array(items) => items.iter_mut().for_each(redact_credentials),
-        Value::Object(entries) => {
-            for (key, item) in entries.iter_mut() {
-                if is_credential_key(key) {
-                    *item = Value::from("[redacted]");
-                } else {
-                    redact_credentials(item);
-                }
-            }
-        }
+        Value::Object(entries) => redact_object_credentials(entries),
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+/// [`redact_credentials`] for the entries of an object.
+pub fn redact_object_credentials(entries: &mut Map<String, Value>) {
+    for (key, item) in entries.iter_mut() {
+        if is_credential_key(key) {
+            *item = Value::from("[redacted]");
+        } else {
+            redact_credentials(item);
+        }
     }
 }
 

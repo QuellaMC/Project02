@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use p02_contracts::ConversationTurn;
 use p02_core::{
     AppendMessageError, ClientStamp, EventId, EventIdentity, MessageId, Session, TraceId,
 };
@@ -63,6 +64,19 @@ impl SessionReplay {
     #[must_use]
     pub fn history(&self) -> ConversationHistory {
         project(&self.records)
+    }
+
+    /// The turn of event `event` as the model replays it, projected from
+    /// its records alone; none before the person's line is committed.
+    #[must_use]
+    pub fn turn(&self, event: &EventIdentity) -> Option<ConversationTurn> {
+        project(
+            self.records
+                .iter()
+                .filter(|record| record.identity() == event),
+        )
+        .turns
+        .pop()
     }
 
     /// The lines the person's client submitted in this session, by the id

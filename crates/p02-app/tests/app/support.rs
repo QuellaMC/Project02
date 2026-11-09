@@ -1,42 +1,32 @@
 //! What the tests build a daemon from: a canonical temporary home, the
-//! bundled Mira, a model whose rounds are scripted, plugins whose parts are,
+//! bundled Mira, a model whose rounds are scripted, a plugin built behind
 //! a gate that holds a step in flight, and an ear on the events.
 
 use std::collections::VecDeque;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::task::Poll;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use p02_app::{
-    CharacterState, Daemon, DaemonSettings, Durations, Event, Message, OpenOutcome, Plugin,
-    RunningTurn, RunningTurns, TurnOutcome,
-};
-use p02_config::ChangeOutcome;
+use p02_app::{Daemon, DaemonSettings, Durations, Message, Plugin};
 use p02_contracts::{
-    CommittedTurn, Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
-    HookReport, HookStatus, InputEnvelope, Invocation, Manifest, PluginError, PreparedEffect,
-    ProvidedTool, RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
-    ToolCallOutcome, ToolInputContract, ToolPreparation,
+    HookContext, HookReport, HookStatus, Invocation, Manifest, ModelOutput, PluginError,
+    ProviderAnswer, RoleModelAdapter, RuntimePlugin, WrittenCall,
 };
 use p02_core::ClientStamp;
 use p02_plugins::list;
-use p02_shared::{DanglingLinks, Identifier, canonical_path};
+use p02_shared::{DanglingLinks, canonical_path};
 use p02_store::Home;
+use p02_wire::{CharacterState, Event, OpenOutcome, TurnProgress};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::{Notify, mpsc};
 
 /// How long a test waits for what it expects before it fails.
 const PATIENCE: Duration = Duration::from_secs(120);
-
-fn id(text: &str) -> Identifier {
-    Identifier::new(text).unwrap()
-}
 
 /// Lets every task that can run, run, the blocking pool's work included:
 /// a paused clock moves only once nothing else can, so this never returns
@@ -125,10 +115,10 @@ impl World {
     }
 
     /// A daemon on this home whose characters answer through the scripted
-    /// model, with the plugins of the daemon's list, the one built behind
-    /// the assembly gate, and `plugins`.
-    pub(crate) async fn daemon(&self, plugins: Vec<Plugin>) -> Daemon {
-        self.daemon_answering(Some(Arc::clone(&self.model) as _), plugins)
+    /// model, with the plugins of the daemon's list and the one built behind
+    /// the assembly gate.
+    pub(crate) async fn daemon(&self) -> Daemon {
+        self.daemon_answering(Some(Arc::clone(&self.model) as _))
             .await
     }
 
@@ -137,20 +127,19 @@ impl World {
     pub(crate) async fn daemon_answering(
         &self,
         model: Option<Arc<dyn RoleModelAdapter>>,
-        plugins: Vec<Plugin>,
     ) -> Daemon {
         let listed = list::plugins()
             .unwrap()
             .iter()
             .map(|(manifest, factory)| Plugin::new(manifest.clone(), *factory));
-        let gated = Toy::new("assembly").built_behind(&self.assembly).plugin();
+        let gated = Toy::built_behind("assembly", &self.assembly).plugin();
 
         Daemon::open(
             self.home.clone(),
             DaemonSettings {
                 test_provider: model,
                 durations: Durations::default(),
-                plugins: listed.chain([gated]).chain(plugins).collect(),
+                plugins: listed.chain([gated]).collect(),
             },
         )
         .await
@@ -188,55 +177,30 @@ pub(crate) async fn open(daemon: &Daemon) -> String {
 pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Message {
     Message {
         conversation_id: conversation.to_owned(),
-        sender_id: "local-user".to_owned(),
         text: text.to_owned(),
         source: ClientStamp::new("web").unwrap(),
         client_message_id: ClientStamp::new(id).unwrap(),
     }
 }
 
-/// What the person and the character said in a completed turn.
-pub(crate) fn said(outcome: &TurnOutcome) -> Vec<String> {
-    match outcome {
-        TurnOutcome::Completed { messages, .. } => messages
-            .iter()
-            .map(|message| message.text.to_string())
-            .collect(),
-        other => panic!("{other:?}"),
-    }
+/// Sends `line`, which her inbox takes at once, and hears its turn to its
+/// end: what it committed, the person's line first.
+pub(crate) async fn told(daemon: &Daemon, line: Message) -> Vec<String> {
+    let mut ear = Ear::on(daemon);
+    let id = line.client_message_id.clone();
+    let conversation = line.conversation_id.clone();
+
+    assert_eq!(
+        wire(&daemon.deliver(line).await),
+        json!({"status": "queued"})
+    );
+    ear.ended(id.as_str()).await;
+    ear.said(&conversation, id.as_str())
 }
 
 /// The JSON a client reads of `value`.
 pub(crate) fn wire(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).unwrap()
-}
-
-/// Makes `operation` on the settings of `target` as a settings screen
-/// does, bound to the fingerprint its view shows, and expects it applied.
-pub(crate) async fn change(daemon: &Daemon, target: Value, operation: Value) {
-    let view = daemon
-        .config_view(serde_json::from_value(target.clone()).unwrap())
-        .await;
-    let outcome = daemon
-        .apply_change(
-            serde_json::from_value(json!({
-                "target": target,
-                "expectedFingerprint": wire(&view)["fingerprint"],
-                "operation": operation,
-            }))
-            .unwrap(),
-        )
-        .await;
-
-    assert!(
-        matches!(outcome, ChangeOutcome::Applied { .. }),
-        "{outcome:?}"
-    );
-}
-
-/// The home's settings, as a change targets them.
-pub(crate) fn home() -> Value {
-    json!({"scope": "global"})
 }
 
 /// A gate a step stops at while it is shut, to hold it in flight: a
@@ -298,43 +262,28 @@ impl Gate {
     }
 }
 
-/// One round of the scripted model: the pieces it drafts of its reply, a
-/// gate it waits at, and its answer.
+/// One round of the scripted model: a gate it waits at, and its replies.
+#[derive(Debug)]
 pub(crate) struct Round {
-    drafts: Vec<String>,
     gate: Option<Arc<Gate>>,
-    answer: String,
+    calls: Vec<WrittenCall>,
 }
 
 impl Round {
     pub(crate) fn says(replies: &[&str]) -> Self {
-        let calls: Vec<Value> = replies
-            .iter()
-            .map(|text| json!({"name": "visible_reply", "input": {"text": text}}))
-            .collect();
-
-        Self::answering(&json!({"toolCalls": calls}))
-    }
-
-    pub(crate) fn calls(tool: &str, input: &Value) -> Self {
-        Self::answering(&json!({"toolCalls": [{"name": tool, "input": input}]}))
-    }
-
-    fn answering(answer: &Value) -> Self {
         Self {
-            drafts: Vec::new(),
             gate: None,
-            answer: answer.to_string(),
+            calls: replies
+                .iter()
+                .map(|text| WrittenCall {
+                    name: "visible_reply".to_owned(),
+                    input: json!({"text": text}),
+                })
+                .collect(),
         }
     }
 
-    /// Drafts its first reply in `pieces` before anything else.
-    pub(crate) fn drafting(mut self, pieces: &[&str]) -> Self {
-        self.drafts = pieces.iter().map(|piece| (*piece).to_owned()).collect();
-        self
-    }
-
-    /// Waits at `gate` once it drafted.
+    /// Waits at `gate` before it answers.
     pub(crate) fn held(mut self, gate: &Arc<Gate>) -> Self {
         self.gate = Some(Arc::clone(gate));
         self
@@ -342,37 +291,21 @@ impl Round {
 }
 
 /// A model that answers each round as scripted, and every other with a
-/// greeting, counting how often it was asked.
-#[derive(Default)]
+/// greeting.
+#[derive(Debug, Default)]
 pub(crate) struct Model {
     rounds: Mutex<VecDeque<Round>>,
-    asked: AtomicUsize,
 }
 
 impl Model {
     pub(crate) fn script(&self, rounds: impl IntoIterator<Item = Round>) {
         self.rounds.lock().unwrap().extend(rounds);
     }
-
-    pub(crate) fn asked(&self) -> usize {
-        self.asked.load(Ordering::SeqCst)
-    }
-}
-
-impl std::fmt::Debug for Model {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Model")
-            .field("asked", &self.asked())
-            .finish_non_exhaustive()
-    }
 }
 
 #[async_trait]
 impl RoleModelAdapter for Model {
-    async fn invoke(&self, _envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput {
-        self.asked.fetch_add(1, Ordering::SeqCst);
-
+    async fn invoke(&self, _invocation: &Invocation<'_>) -> ProviderAnswer {
         let round = self
             .rounds
             .lock()
@@ -380,81 +313,37 @@ impl RoleModelAdapter for Model {
             .pop_front()
             .unwrap_or_else(|| Round::says(&["Hello."]));
 
-        for text in round.drafts {
-            invocation.hear(ReplyDelta { reply: 0, text });
-        }
-
         if let Some(gate) = round.gate {
             gate.pass_async().await;
         }
 
-        RawOutput::text(round.answer)
+        ProviderAnswer::Answered {
+            output: ModelOutput {
+                tool_calls: round.calls,
+                text: None,
+            },
+            finish_reason: Some("stop".to_owned()),
+            usage: None,
+        }
     }
 }
 
-/// A plugin whose parts a test scripts: a gate its factory is built
-/// behind, an approval-gated tool, settings fields, and work after every
-/// committed turn that fails.
+/// A plugin built behind a gate, which holds her assembly in flight while
+/// it is shut.
 pub(crate) struct Toy {
     id: &'static str,
-    gate: Option<Arc<Gate>>,
-    gated_tool: Option<&'static str>,
-    fields: Vec<Value>,
-    failing_after_turns: bool,
+    gate: Arc<Gate>,
 }
 
 impl Toy {
-    pub(crate) fn new(id: &'static str) -> Self {
+    pub(crate) fn built_behind(id: &'static str, gate: &Arc<Gate>) -> Self {
         Self {
             id,
-            gate: None,
-            gated_tool: None,
-            fields: Vec::new(),
-            failing_after_turns: false,
+            gate: Arc::clone(gate),
         }
-    }
-
-    /// Fails its work after every committed turn: "The diary is full."
-    pub(crate) fn failing_after_turns(mut self) -> Self {
-        self.failing_after_turns = true;
-        self
-    }
-
-    pub(crate) fn built_behind(mut self, gate: &Arc<Gate>) -> Self {
-        self.gate = Some(Arc::clone(gate));
-        self
-    }
-
-    /// Offers tool `name`, which saves a note only on the person's yes.
-    pub(crate) fn asking(mut self, name: &'static str) -> Self {
-        self.gated_tool = Some(name);
-        self
-    }
-
-    /// Declares a text setting `name`.
-    pub(crate) fn setting(mut self, name: &str) -> Self {
-        self.fields.push(json!({
-            "name": name,
-            "description": "A toy setting.",
-            "required": false,
-            "secret": false,
-            "valueType": "string",
-            "redactionLabels": [],
-        }));
-        self
     }
 
     pub(crate) fn plugin(self) -> Plugin {
-        let mut declared = vec!["on_shutdown"];
-
-        if self.gated_tool.is_some() {
-            declared.extend(["tool_provider", "handle_tool_call"]);
-        }
-
-        if self.failing_after_turns {
-            declared.push("after_turn_committed");
-        }
-
         let manifest = Manifest::from_value(&json!({
             "id": self.id,
             "displayName": self.id,
@@ -462,8 +351,8 @@ impl Toy {
             "kind": "first_party",
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
-            "declaredPlugins": declared,
-            "config": {"scope": "global_with_character_overrides", "fields": self.fields},
+            "declaredPlugins": ["on_shutdown"],
+            "config": {"scope": "global_with_character_overrides", "fields": []},
             "runtimePolicy": {
                 "timeoutMs": 10_000,
                 "redactionLabels": [],
@@ -473,97 +362,29 @@ impl Toy {
                 },
             },
             "activation": {"defaultEnabled": true, "reasons": ["test"]},
-            "requestedAccess": if self.gated_tool.is_some() {
-                json!({"model_input": "write"})
-            } else {
-                json!({})
-            },
+            "requestedAccess": {},
         }))
         .unwrap();
-        let (gate, gated_tool) = (self.gate, self.gated_tool);
+        let gate = self.gate;
 
         Plugin::new(manifest, move |_| {
-            if let Some(gate) = &gate {
-                gate.pass();
-            }
+            gate.pass();
 
-            let tools = gated_tool
-                .map(|name| {
-                    ProvidedTool::new(
-                        id(name),
-                        "Saves a note the person approves.",
-                        ToolInputContract::new(json!({"type": "object"})).unwrap(),
-                    )
-                    .unwrap()
-                    .with_confirmation(Confirmation::Required)
-                })
-                .into_iter()
-                .collect();
-
-            Ok(Arc::new(Notes { tools }) as Arc<dyn RuntimePlugin>)
+            Ok(Arc::new(Ending) as Arc<dyn RuntimePlugin>)
         })
     }
 }
 
-/// What a toy runs as: an end that always completes, an approval-gated
-/// tool, if it offers one, whose call shows the note it would save and
-/// saves it on a yes, and work after a committed turn, if it declares any,
-/// that fails.
+/// What a toy runs as: an end that always completes.
 #[derive(Debug)]
-struct Notes {
-    tools: Vec<ProvidedTool>,
-}
+struct Ending;
 
 #[async_trait]
-impl RuntimePlugin for Notes {
-    fn provided_tools(&self) -> &[ProvidedTool] {
-        &self.tools
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: &ToolCall,
-        _context: &HookContext,
-    ) -> Result<ToolPreparation, PluginError> {
-        Ok(ToolPreparation::Prepared {
-            preview: call.input().clone(),
-            effect: Box::new(Save),
-            evidence: Vec::new(),
-        })
-    }
-
-    async fn after_turn_committed(
-        &self,
-        _turn: &CommittedTurn,
-        _context: &HookContext,
-    ) -> Result<HookReport, PluginError> {
-        Err(PluginError::new("The diary is full."))
-    }
-
+impl RuntimePlugin for Ending {
     async fn on_shutdown(&self, _context: &HookContext) -> Result<HookReport, PluginError> {
         Ok(HookReport {
             status: HookStatus::Completed,
             evidence: Vec::new(),
-        })
-    }
-}
-
-#[derive(Debug)]
-struct Save;
-
-#[async_trait]
-impl PreparedEffect for Save {
-    async fn apply(
-        self: Box<Self>,
-        _context: &HookContext,
-    ) -> Result<ToolCallOutcome, PluginError> {
-        Ok(ToolCallOutcome::Accepted {
-            output: json!({"saved": true}),
-            evidence: vec![EvidenceNote::new(
-                EvidenceKind::ToolInvocation,
-                EvidenceStatus::Accepted,
-                "Saved the note.",
-            )],
         })
     }
 }
@@ -599,6 +420,41 @@ impl Ear {
         .expect("the event comes")
     }
 
+    /// Hears events until the turn of the line `id` ends, and hands its
+    /// completion back.
+    pub(crate) async fn ended(&mut self, id: &str) -> Event {
+        self.until(|event| {
+            matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == id)
+        })
+        .await
+    }
+
+    /// What the turn of the line `id` on `conversation` committed, as
+    /// heard: the person's line, then each reply.
+    pub(crate) fn said(&self, conversation: &str, id: &str) -> Vec<String> {
+        self.heard
+            .iter()
+            .filter_map(|event| match event {
+                Event::TurnProgress {
+                    conversation_id,
+                    progress,
+                    ..
+                } if conversation_id.as_str() == conversation => match progress {
+                    TurnProgress::UserMessage {
+                        text,
+                        client_message_id,
+                        ..
+                    } => Some((Some(client_message_id.as_str()), text)),
+                    TurnProgress::VisibleReply { text, .. } => Some((None, text)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .skip_while(|(line, _)| *line != Some(id))
+            .map(|(_, text)| text.to_string())
+            .collect()
+    }
+
     /// Hears every event sent so far.
     pub(crate) fn drain(&mut self) {
         while let Ok(event) = self.events.try_recv() {
@@ -631,17 +487,6 @@ impl Ear {
                 _ => None,
             })
             .collect()
-    }
-
-    /// The turns running by what was heard.
-    pub(crate) fn running(&self) -> Vec<RunningTurn> {
-        let mut running = RunningTurns::default();
-
-        for event in &self.heard {
-            running.fold(event);
-        }
-
-        running.turns()
     }
 
     /// Every kind of event heard, in order, as the wire names it.

@@ -14,9 +14,9 @@ p02-config.workspace = true
 p02-core.workspace = true
 p02-shared.workspace = true
 p02-store.workspace = true
+p02-wire.workspace = true
 rand.workspace = true
 rust-embed.workspace = true
-schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -26,7 +26,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tower-service.workspace = true
-ts-rs.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
@@ -37,8 +36,10 @@ p02-plugins.workspace = true
 p02-role-model.workspace = true
 p02-shared = { workspace = true, features = ["http"] }
 reqwest.workspace = true
+schemars.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+ts-rs.workspace = true
 
 [lints]
 workspace = true

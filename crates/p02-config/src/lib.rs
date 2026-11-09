@@ -5,24 +5,19 @@ mod activation;
 mod change;
 mod conceal;
 mod declaration;
-mod diagnostic;
 mod document;
+mod host;
 mod materialize;
 mod resolve;
 mod transaction;
 mod view;
 
-pub use change::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Operation, apply_change,
-    check_change, create_home_document,
-};
-pub use declaration::{Connector, Namespace, RoleModelProvider, Sections, Source, connectors};
-pub use diagnostic::{Code, Diagnostic, Severity};
+pub use change::{apply_change, check_change, create_home_document};
+pub use declaration::{Connector, Sections, UnknownConnector, connector, connectors};
+pub use host::{HostSettings, RoleModelProvider};
 pub use materialize::{MaterializeError, materialize};
-pub use resolve::{CharacterSettings, HostSettings, ReadSettingsError, Resolution};
+pub use resolve::{CharacterSettings, ReadSettingsError, Resolution};
 pub use view::{
-    ActivationStatus, Authored, CharacterConnectorEntry, ConfigReport, ConfigView,
-    ConnectorConfigView, ConnectorEntry, ConnectorRefusal, ConnectorReport, EffectiveView,
-    FieldView, HostReport, PluginReport, RuntimeConfigReport, SectionActivation, SectionView,
-    ValueSource, ViewRefusal,
+    ConfigReport, ConnectorReport, HostReport, PluginReport, RuntimeConfigReport, config_view,
+    connector_config_view,
 };

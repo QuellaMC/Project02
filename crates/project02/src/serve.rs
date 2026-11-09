@@ -8,11 +8,12 @@ use std::io;
 use std::num::NonZeroU16;
 use std::process::ExitCode;
 
-use p02_app::{Daemon, DaemonSettings, Event, Health, Plugin};
+use p02_app::{Daemon, DaemonSettings, Plugin};
 use p02_gateway::{Claim, ClaimOutcome, Server};
 use p02_role_model::select_adapter;
 use p02_shared::{DaemonToken, error_sentence};
 use p02_store::Home;
+use p02_wire::{Event, Health};
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::{self, Unconsented};

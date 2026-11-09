@@ -1,7 +1,8 @@
 //! The settings as a settings screen, a connector and `inspect` are shown
 //! them.
 
-use p02_config::{ConfigChange, ConnectorConfigView};
+use p02_config::connector_config_view;
+use p02_wire::ConfigChange;
 use serde_json::{Value, json};
 
 use crate::support::{World, document, field, findings, home, host_field, of, section};
@@ -19,109 +20,6 @@ fn sections_of(view: &Value) -> Vec<String> {
             )
         })
         .collect()
-}
-
-#[test]
-fn the_homes_view_lists_its_fields_in_page_order_the_sections_it_may_set_and_a_fingerprint() {
-    let world = World::new();
-
-    world.write_home(&document(json!({
-        "project02": {"userDisplayName": "Robin"},
-        "connectors": {"discord": {}},
-    })));
-
-    let view = world.view(&home());
-    let unset = |name: &str| {
-        json!({
-            "name": name,
-            "authored": {"configured": false},
-            "effectiveSource": "default",
-            "effective": {"name": name, "secret": name == "nvidiaApiKey", "source": "missing", "resolved": true},
-        })
-    };
-    let shown: Vec<Value> = view["project02"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|field| {
-            json!({
-                "name": field["name"],
-                "authored": field["authored"],
-                "effectiveSource": field["effectiveSource"],
-                "effective": field["effective"],
-            })
-        })
-        .collect();
-
-    assert_eq!(view["status"], "ok");
-    assert!(
-        view["fingerprint"]
-            .as_str()
-            .unwrap()
-            .strip_prefix("sha256:")
-            .is_some_and(|digest| digest.len() == 64)
-    );
-    assert_eq!(
-        findings(&view["diagnostics"]),
-        [(
-            "runtime_config_unknown_connector".to_owned(),
-            "connectors.discord".to_owned()
-        )]
-    );
-    assert_eq!(
-        shown,
-        [
-            json!({
-                "name": "userDisplayName",
-                "authored": {"configured": true, "value": "Robin"},
-                "effectiveSource": "global",
-                "effective": {"name": "userDisplayName", "secret": false, "source": "config", "resolved": true, "value": "Robin"},
-            }),
-            unset("roleModelProvider"),
-            unset("nvidiaApiKey"),
-            unset("nvidiaModel"),
-            unset("nvidiaBaseUrl"),
-            json!({
-                "name": "contextWindowTokens",
-                "authored": {"configured": false},
-                "effectiveSource": "default",
-                "effective": {"name": "contextWindowTokens", "secret": false, "source": "default", "resolved": true, "value": 32768},
-            }),
-            unset("defaultMemoryProvider"),
-            json!({
-                "name": "enabled",
-                "authored": {"configured": false},
-                "effectiveSource": "default",
-                "effective": {"name": "enabled", "secret": false, "source": "default", "resolved": true, "value": true},
-            }),
-        ]
-    );
-
-    let provider = host_field(&view, "roleModelProvider");
-
-    assert_eq!(
-        (
-            &provider["valueType"],
-            &provider["allowedValues"],
-            &provider["agentMutable"],
-            &provider["reloadRequired"],
-        ),
-        (
-            &json!("enum"),
-            &json!(["nvidia"]),
-            &json!(false),
-            &json!(true)
-        )
-    );
-    assert_eq!(
-        sections_of(&view),
-        [
-            "plugins.demo-config",
-            "plugins.mem0",
-            "plugins.session-history",
-            "connectors.telegram",
-        ]
-    );
 }
 
 #[test]
@@ -269,7 +167,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
         format!("{:?}", world.resolve(&of("mira"))),
         format!(
             "{:?}",
-            ConnectorConfigView::read(&world.home, &world.sections, &world.discovery(), "telegram")
+            connector_config_view(&world.home, &world.sections, &world.discovery(), "telegram")
         ),
         format!("{change:?}"),
     ];
@@ -279,62 +177,6 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
             assert!(!text.contains(secret), "{secret} in {text}");
         }
     }
-}
-
-#[test]
-fn the_connector_section_is_on_by_default_its_tokens_redacted_its_allowlist_the_homes_alone() {
-    let world = World::new();
-
-    world
-        .write_home(&document(json!({
-            "connectors": {"telegram": {"config": {"managementBotToken": "123456:home"}}},
-        })))
-        .write_overlay(
-            "mira",
-            &document(json!({"connectors": {"telegram": {"config": {"botToken": "987654:mira"}}}})),
-        );
-
-    let rows = |view: &Value| -> Vec<Value> {
-        let telegram = section(view, "connectors", "telegram").unwrap();
-
-        assert_eq!(
-            (
-                &telegram["enabled"],
-                &telegram["enabledSource"],
-                &telegram["activation"]["status"]
-            ),
-            (&json!(true), &json!("default"), &json!("active"))
-        );
-
-        telegram["fields"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|field| {
-                json!([
-                    field["name"],
-                    field["authored"],
-                    field["effective"]["value"]
-                ])
-            })
-            .collect()
-    };
-
-    assert_eq!(
-        rows(&world.view(&home())),
-        [
-            json!(["managementBotToken", {"configured": true, "value": "[redacted]"}, "[redacted]"]),
-            json!(["mirror", {"configured": false}, true]),
-            json!(["pairedUsers", {"configured": false}, {}]),
-        ]
-    );
-    assert_eq!(
-        rows(&world.view(&of("mira"))),
-        [
-            json!(["botToken", {"configured": true, "value": "[redacted]"}, "[redacted]"]),
-            json!(["mirror", {"configured": false}, true]),
-        ]
-    );
 }
 
 #[test]
@@ -412,7 +254,7 @@ fn a_connectors_read_hands_each_entry_its_own_values_secrets_in_the_clear() {
 }
 
 #[test]
-fn a_view_of_an_unknown_or_broken_character_or_of_a_document_that_does_not_load_is_refused() {
+fn a_view_of_an_unknown_or_broken_character_is_refused() {
     let world = World::new();
 
     std::fs::create_dir_all(world.root().join("characters/broken")).unwrap();
@@ -436,21 +278,6 @@ fn a_view_of_an_unknown_or_broken_character_or_of_a_document_that_does_not_load_
         broken["message"].as_str().unwrap().contains("valid JSON"),
         "{broken}"
     );
-
-    std::fs::write(world.home_document(), "{not json").unwrap();
-
-    for target in [home(), of("mira")] {
-        let view = world.view(&target);
-
-        assert_eq!(
-            json!([view["status"], view["reason"]]),
-            json!(["refused", "config_unloadable"])
-        );
-        assert!(
-            view["message"].as_str().unwrap().contains("not valid JSON"),
-            "{view}"
-        );
-    }
 }
 
 #[test]

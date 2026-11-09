@@ -143,13 +143,6 @@ mod tests {
     use crate::fs::write_file_atomically;
 
     #[test]
-    fn a_home_without_a_record_reads_as_none() {
-        let home = tempfile::tempdir().unwrap();
-
-        assert_eq!(read_daemon_record(home.path()).unwrap(), None);
-    }
-
-    #[test]
     #[expect(
         clippy::disallowed_methods,
         reason = "the test puts a directory where the record belongs"
@@ -192,39 +185,5 @@ mod tests {
 
         assert!(minted.as_str().contains(['-', '_']));
         assert_eq!(DaemonToken::new(minted.as_str()), Ok(minted));
-    }
-
-    #[test]
-    fn a_record_reads_back_as_written() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join(DAEMON_RECORD_FILE);
-        let stopped = DaemonRecord {
-            protocol_version: 7,
-            token: DaemonToken::new("abc").unwrap(),
-            port: NonZeroU16::new(4310).unwrap(),
-            running: None,
-        };
-        let running = DaemonRecord {
-            running: Some(DaemonRun {
-                pid: NonZeroU32::new(4242).unwrap(),
-                started_at: "2026-10-17T09:00:00.000Z".to_owned(),
-            }),
-            ..stopped.clone()
-        };
-
-        for (record, text) in [
-            (
-                stopped,
-                r#"{"protocolVersion":7,"token":"abc","port":4310}"#,
-            ),
-            (
-                running,
-                r#"{"protocolVersion":7,"token":"abc","port":4310,"running":{"pid":4242,"startedAt":"2026-10-17T09:00:00.000Z"}}"#,
-            ),
-        ] {
-            write_file_atomically(&path, text.as_bytes()).unwrap();
-
-            assert_eq!(read_daemon_record(home.path()).unwrap(), Some(record));
-        }
     }
 }

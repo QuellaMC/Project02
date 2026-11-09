@@ -87,11 +87,9 @@ function inPieces(...words: readonly string[]): unknown[] {
   );
 }
 
-/** Settles once the stream carries a draft piece of these words. */
+/** Settles once the stream carries the reply drafted up to these words. */
 async function drafted(events: Events, text: string): Promise<void> {
-  await events.next(
-    frameOf('turn_progress', {progress: {kind: 'reply_delta', text}}),
-  );
+  await events.next(frameOf('turn_running', {drafts: [{text}]}));
 }
 
 it('connectors.telegram-draft-edits: a reply is posted with its first words and edited as it grows, far fewer times than its pieces come, each edit showing the reply so far, and ends as its committed text; an edit Telegram did not take is made again at the commit', async () => {
@@ -150,13 +148,13 @@ it('connectors.telegram-draft-edits: a reply is posted with its first words and 
   for (let at = 1; at < words.length - 1; at += 1) {
     await events.next(frame => frame.comment === 'ping');
     driven.write(pieces.slice(at, at + 1));
-    await drafted(events, words[at] ?? '');
+    await drafted(events, words.slice(0, at + 1).join(''));
   }
 
   await editTo(words.slice(0, -1).join(''));
   telegram.away();
   driven.write(pieces.slice(-1));
-  await drafted(events, '.');
+  await drafted(events, story);
 
   const dropped = await editTo(story);
 

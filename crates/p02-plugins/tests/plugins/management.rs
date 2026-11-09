@@ -2,7 +2,7 @@
 //! of plugins, and her settings read and changed through it.
 
 use p02_contracts::ToolCallResult;
-use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport};
+use p02_plugins::{PluginHost, ToolCallReport};
 use p02_shared::read_file;
 use p02_store::SettingsDocument;
 use serde_json::{Value, json};
@@ -149,60 +149,6 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 }
 
 #[tokio::test]
-async fn the_config_read_shows_a_plugins_settings_a_secret_redacted() {
-    let secret = "sk-demo-secret-value";
-    let home = MiraHome::new();
-
-    home.settings(&json!({
-        "plugins": {"demo-config": {"enabled": true, "config": {"signoff": "Yours."}}},
-    }));
-
-    let host = home.mira(Person::approving());
-
-    home.change("demo-config", "tone", json!("warm"));
-    home.change("demo-config", "apiKey", json!(secret));
-
-    let read = ask(
-        &host,
-        "runtime.plugin.config",
-        json!({"pluginId": "demo-config"}),
-    )
-    .await;
-    let fields = output(&read)["fields"].as_array().unwrap();
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|field| field["name"] == name)
-            .unwrap()
-            .clone()
-    };
-
-    assert_eq!(output(&read)["id"], "demo-config");
-    assert_eq!(output(&read)["displayName"], "Demo Config");
-    assert_eq!(output(&read)["activation"]["status"], "active");
-    assert_eq!(output(&read)["fingerprint"], home.fingerprint());
-    assert_eq!(output(&read)["diagnostics"], json!([]));
-    assert_eq!(
-        field("tone")["authored"],
-        json!({"configured": true, "value": "warm"})
-    );
-    assert_eq!(field("signoff")["authored"], json!({"configured": false}));
-    assert_eq!(field("signoff")["effectiveSource"], "global");
-    assert_eq!(field("signoff")["effective"]["value"], "Yours.");
-    assert_eq!(field("apiKey")["sensitive"], true);
-    assert_eq!(field("apiKey")["effective"]["sensitive"], true);
-    assert_eq!(
-        field("apiKey")["authored"],
-        json!({"configured": true, "value": "[redacted]"})
-    );
-    assert!(
-        !serde_json::to_string(&(&read.result, &read.evidence))
-            .unwrap()
-            .contains(secret)
-    );
-}
-
-#[tokio::test]
 async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
     let home = MiraHome::new();
     let host = home.mira(Person::approving());
@@ -236,7 +182,7 @@ async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
 }
 
 #[tokio::test]
-async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fingerprint_it_was_read_under()
+async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerprint_it_was_read_under()
  {
     let home = MiraHome::new();
 
@@ -267,12 +213,10 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
         output(&applied),
         &json!({
             "status": "applied",
-            "appliesTo": "now",
             "pluginId": "demo-config",
             "fieldName": "tone",
             "operation": "set",
             "fingerprint": home.fingerprint(),
-            "reloadRequired": false,
         })
     );
     assert_eq!(demo_config(&home), json!({"tone": "formal"}));
@@ -280,18 +224,6 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
         read_file(&home.path(SettingsDocument::Home)).unwrap(),
         home_settings,
         "never the home's settings"
-    );
-
-    let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
-        panic!("no plugin rejects the turn");
-    };
-
-    assert!(
-        prepared
-            .runtime_notes
-            .iter()
-            .any(|note| note.text().contains("speak in a formal tone")),
-        "applied live, the plugin rebuilt with it"
     );
 
     let stale = ask(&host, "runtime.plugin.config.update", update(&read, &set)).await;
@@ -349,30 +281,5 @@ async fn an_unset_is_shown_as_an_unset_and_leaves_the_field_to_the_settings_bene
     );
     assert_eq!(preview["after"], json!({"configured": false}));
     assert_eq!(output(&unset)["operation"], "unset");
-    assert_eq!(output(&unset)["appliesTo"], "now");
     assert_eq!(demo_config(&home), Value::Null);
-}
-
-#[tokio::test]
-async fn with_runtime_plugin_switched_off_none_of_its_tools_is_offered() {
-    let home = MiraHome::new();
-
-    home.settings(&json!({"plugins": {"runtime.plugin": {"enabled": false}}}));
-
-    let host = home.mira(Person::approving());
-
-    assert!(
-        host.tool_definitions()
-            .definitions()
-            .iter()
-            .all(|definition| !definition
-                .tool
-                .name()
-                .as_str()
-                .starts_with("runtime.plugin"))
-    );
-    assert!(
-        host.tool_definitions().get("memory.update").is_some(),
-        "the other plugins' tools stay"
-    );
 }

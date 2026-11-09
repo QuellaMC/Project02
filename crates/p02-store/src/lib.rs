@@ -10,6 +10,7 @@ mod error;
 mod feed;
 mod history;
 mod home;
+mod inbox;
 mod jsonl;
 mod layout;
 mod lock;
@@ -31,6 +32,7 @@ pub use database::OpenDatabaseError;
 pub use error::{BusyCode, StorageError};
 pub use history::ConversationHistory;
 pub use home::{Home, SettingsDocument};
+pub use inbox::{Inbox, QueuedLine, Queueing};
 pub use jsonl::SkippedLines;
 pub use layout::EntryKind;
 pub use lock::Lease;
@@ -38,11 +40,10 @@ pub use log::{SessionLog, SessionWriter};
 pub use marker::{MarkerProblem, Scope};
 pub use plugin_files::{FileKind, ValueProblem};
 pub use record::{
-    AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MAX_SUMMARY_CHARS,
-    MessageCommitted, PayloadSummary, RecordBody, RecordError, RecordKind, RoundRecord,
-    RoundSnapshot, RuntimeRejection, SessionContinuation, SessionContinued, Summarizer,
-    SummaryProvider, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected,
-    TurnRejection, TurnStatus,
+    AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MessageCommitted,
+    PayloadSummary, RecordBody, RecordError, RecordKind, RoundRecord, RuntimeRejection,
+    SessionContinuation, SessionContinued, Summarizer, SummaryProvider, ToolCallFinished,
+    ToolCallStarted, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
 };
 pub use replay::{ReplayError, SessionReplay};
 pub use sessions::{SessionCatalog, SessionEntry};

@@ -2,10 +2,10 @@ use std::fmt;
 use std::num::NonZeroUsize;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
+use crate::role_model::answer::ProviderAnswer;
 use crate::role_model::chat::{ChatCompletionTool, ChatMessage};
-use crate::role_model::decision::InputEnvelope;
-use crate::role_model::exchange::{ProviderExchange, ProviderMetadata, ProviderName};
 use crate::role_model::history::ConversationTurn;
 
 /// A model provider. The runtime chooses one by its settings when it
@@ -15,7 +15,7 @@ use crate::role_model::history::ConversationTurn;
 pub trait RoleModelAdapter: Send + Sync + fmt::Debug {
     /// Asks the model for one round. A provider failure is an answer too,
     /// [`ProviderAnswer::Failed`], never a panic.
-    async fn invoke(&self, envelope: &InputEnvelope, invocation: &Invocation<'_>) -> RawOutput;
+    async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer;
 
     /// A plain completion on the same model, without persona or tools, which
     /// the runtime condenses earlier conversation with.
@@ -110,36 +110,11 @@ pub struct ReplyDelta {
     pub text: String,
 }
 
-/// What a provider answered, before it is judged.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RawOutput {
-    pub answer: ProviderAnswer,
-    pub provider_metadata: Option<ProviderMetadata>,
-    pub provider_exchange: Option<ProviderExchange>,
-}
-
-/// What came back from the model, if anything usable did. An adapter says
-/// no more than this: every verdict on what the model wrote is the decision
-/// parser's, so a recorded round replays to the result it was given.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProviderAnswer {
-    /// What the model wrote.
-    Text(String),
-    /// Nothing usable arrived: the provider failed, as `details` says, and
-    /// the turn ends with `provider_error`.
-    Failed { details: String },
-}
-
-impl RawOutput {
-    /// Output the model wrote, with nothing else to say about it.
-    #[must_use]
-    pub fn text(raw_output_text: impl Into<String>) -> Self {
-        Self {
-            answer: ProviderAnswer::Text(raw_output_text.into()),
-            provider_metadata: None,
-            provider_exchange: None,
-        }
-    }
+/// A provider a model call can go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderName {
+    Nvidia,
 }
 
 /// A plain completion request.
@@ -169,18 +144,19 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::role_model::answer::ModelOutput;
 
     #[derive(Debug)]
     struct Silent;
 
     #[async_trait]
     impl RoleModelAdapter for Silent {
-        async fn invoke(
-            &self,
-            _envelope: &InputEnvelope,
-            _invocation: &Invocation<'_>,
-        ) -> RawOutput {
-            RawOutput::text("")
+        async fn invoke(&self, _invocation: &Invocation<'_>) -> ProviderAnswer {
+            ProviderAnswer::Answered {
+                output: ModelOutput::default(),
+                finish_reason: None,
+                usage: None,
+            }
         }
     }
 
