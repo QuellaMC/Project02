@@ -66,8 +66,8 @@ pub(crate) enum Report {
 #[error("{0}")]
 pub(crate) struct UsageError(String);
 
-/// What follows the program's name: a command and its flags, each at most
-/// once.
+/// What follows the program's name: a command and its flags, a flag given
+/// twice taking its last value.
 pub(crate) fn read(args: &[OsString]) -> Result<Command, UsageError> {
     match args.split_first() {
         Some((command, flags)) if command == "serve" => serve_flags(flags).map(Command::Serve),
@@ -93,12 +93,8 @@ fn serve_flags(args: &[OsString]) -> Result<ServeFlags, UsageError> {
 
     while let Some(arg) = args.next() {
         if arg == "--store" {
-            flags.store = Some(store(flags.store.is_some(), args.next())?);
+            flags.store = Some(store(args.next())?);
         } else if arg == "--init" {
-            if flags.init {
-                return Err(given_twice("--init"));
-            }
-
             flags.init = true;
         } else {
             return Err(UsageError(format!(
@@ -111,36 +107,15 @@ fn serve_flags(args: &[OsString]) -> Result<ServeFlags, UsageError> {
     Ok(flags)
 }
 
-/// A report is asked for once: a second, the same or another, leaves which
-/// one was meant unsaid.
 fn inspect_flags(args: &[OsString]) -> Result<InspectFlags, UsageError> {
     let mut flags = InspectFlags::default();
-    let mut chosen = false;
     let mut args = args.iter();
 
     while let Some(arg) = args.next() {
         match arg.to_str() {
-            Some("--store") => flags.store = Some(store(flags.store.is_some(), args.next())?),
-            Some("--character") => {
-                flags.character = Some(character(flags.character.is_some(), args.next())?);
-            }
-            Some("--init") => {
-                return Err(UsageError(
-                    "inspect never creates a store, so --init does not apply. Run serve with \
-                     --init to create one."
-                        .to_owned(),
-                ));
-            }
+            Some("--store") => flags.store = Some(store(args.next())?),
+            Some("--character") => flags.character = Some(character(args.next())?),
             Some(flag @ ("--sessions" | "--session" | "--conversations" | "--conversation")) => {
-                if chosen {
-                    return Err(UsageError(
-                        "Use exactly one of --sessions, --session, --conversations, or \
-                         --conversation."
-                            .to_owned(),
-                    ));
-                }
-
-                chosen = true;
                 flags.report = report(flag, &mut args)?;
             }
             _ => {
@@ -161,7 +136,7 @@ fn telegram_flags(args: &[OsString]) -> Result<TelegramFlags, UsageError> {
 
     while let Some(arg) = args.next() {
         if arg == "--store" {
-            flags.store = Some(store(flags.store.is_some(), args.next())?);
+            flags.store = Some(store(args.next())?);
         } else {
             return Err(UsageError(format!(
                 "Unknown telegram option: {}.",
@@ -199,28 +174,16 @@ fn report<'a>(
     }
 }
 
-fn store(given: bool, value: Option<&OsString>) -> Result<PathBuf, UsageError> {
-    if given {
-        return Err(given_twice("--store"));
-    }
-
+fn store(value: Option<&OsString>) -> Result<PathBuf, UsageError> {
     value_of("--store", value).map(PathBuf::from)
 }
 
 /// A character is named by her id, which a malformed word cannot be: the
 /// rule is said rather than a search for her that could not succeed.
-fn character(given: bool, value: Option<&OsString>) -> Result<Identifier, UsageError> {
-    if given {
-        return Err(given_twice("--character"));
-    }
+fn character(value: Option<&OsString>) -> Result<Identifier, UsageError> {
+    let value = value_of("--character", value)?.to_string_lossy();
 
-    Identifier::new(&value_of("--character", value)?.to_string_lossy()).map_err(|_| {
-        UsageError(
-            "--character must start with a letter and use only letters, numbers, dots, \
-             underscores, or hyphens."
-                .to_owned(),
-        )
-    })
+    Identifier::new(&value).map_err(|error| refused("--character", &value, &error))
 }
 
 /// A flag's value is a word of its own: a flag after the flag means its
@@ -237,10 +200,6 @@ fn is_value(word: &OsStr) -> bool {
 
 fn refused(flag: &str, value: &str, error: &dyn std::error::Error) -> UsageError {
     UsageError(format!("{flag} \"{value}\" is {error}."))
-}
-
-fn given_twice(flag: &str) -> UsageError {
-    UsageError(format!("{flag} can only be provided once."))
 }
 
 #[cfg(test)]
@@ -330,14 +289,7 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one table of every refusal, read top to bottom"
-    )]
     fn every_other_command_line_is_refused_with_the_sentence_a_person_reads() {
-        let one_report =
-            "Use exactly one of --sessions, --session, --conversations, or --conversation.";
-
         for (words, said) in [
             (&[][..], format!("No command given. {USAGE}")),
             (&["chat"], format!("Unknown command: chat. {USAGE}")),
@@ -363,36 +315,8 @@ mod tests {
                 "--store requires a value.".to_owned(),
             ),
             (
-                &["serve", "--store", "a", "--store", "b"],
-                "--store can only be provided once.".to_owned(),
-            ),
-            (
-                &["serve", "--init", "--init"],
-                "--init can only be provided once.".to_owned(),
-            ),
-            (
                 &["inspect", "--sessions", "--init"],
-                "inspect never creates a store, so --init does not apply. Run serve with --init \
-                 to create one."
-                    .to_owned(),
-            ),
-            (
-                &["inspect", "--sessions", "--sessions"],
-                one_report.to_owned(),
-            ),
-            (
-                &["inspect", "--conversations", "--sessions"],
-                one_report.to_owned(),
-            ),
-            (
-                &[
-                    "inspect",
-                    "--session",
-                    "conv_a.1",
-                    "--conversation",
-                    "conv_a",
-                ],
-                one_report.to_owned(),
+                "Unknown inspect option: --init.".to_owned(),
             ),
             (
                 &["inspect", "--session"],
@@ -407,13 +331,9 @@ mod tests {
                 "--character requires a value.".to_owned(),
             ),
             (
-                &["inspect", "--character", "mira", "--character", "nova"],
-                "--character can only be provided once.".to_owned(),
-            ),
-            (
                 &["inspect", "--character", "../bad"],
-                "--character must start with a letter and use only letters, numbers, dots, \
-                 underscores, or hyphens."
+                "--character \"../bad\" is not an identifier: an ASCII letter, then up to 127 \
+                 ASCII letters, digits, '.', '_' or '-'."
                     .to_owned(),
             ),
             (
@@ -429,10 +349,6 @@ mod tests {
                     .to_owned(),
             ),
             (
-                &["inspect", "--store", "a", "--store", "b"],
-                "--store can only be provided once.".to_owned(),
-            ),
-            (
                 &["inspect", "--all"],
                 "Unknown inspect option: --all.".to_owned(),
             ),
@@ -443,10 +359,6 @@ mod tests {
             (
                 &["telegram", "--store"],
                 "--store requires a value.".to_owned(),
-            ),
-            (
-                &["telegram", "--store", "a", "--store", "b"],
-                "--store can only be provided once.".to_owned(),
             ),
         ] {
             assert_eq!(read(&line(words)), Err(UsageError(said)), "{words:?}");

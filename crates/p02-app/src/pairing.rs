@@ -6,8 +6,8 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Connector, Namespace, Operation,
-    Resolution, connectors,
+    ChangeOutcome, ConfigChange, ConfigTarget, Connector, Namespace, Operation, Resolution,
+    connectors,
 };
 use p02_core::{ClientStamp, SpeakerName, Timestamp};
 use p02_shared::Fingerprint;
@@ -21,14 +21,6 @@ use crate::outcome::{
     Event, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
     PairingSubject,
 };
-
-/// Writes in all for one approval while other writes keep moving the
-/// home's document.
-const WRITE_ATTEMPTS: usize = 3;
-
-const INVALID_SUBJECT: &str = "A pairing names the account by its id, one token of letters, \
-     digits and any of \":._-\" at most 64 characters, and by a name of one line, at most 128 \
-     characters.";
 
 /// The requests waiting, oldest first. None outlives the daemon's run.
 #[derive(Debug, Default)]
@@ -71,39 +63,23 @@ impl Pairings {
 impl Daemon {
     /// Asks the person to let in the account `id` of connector `connector`,
     /// named `label`, which wrote to `source`: an account the home lets in
-    /// already is `paired`, and a request waiting for that account settles
-    /// approved with it, unless its approval is being written; otherwise
-    /// the request waiting for that account, wherever it wrote this time,
-    /// or a new one from `source` under a fresh code until the pairing
-    /// deadline, which every surface hears of.
+    /// already is `paired`; otherwise the request waiting for that account,
+    /// wherever it wrote this time, or a new one from `source` under a
+    /// fresh code until the pairing deadline, which every surface hears of.
     pub async fn request_pairing(
         &self,
         connector: &str,
         id: ClientStamp,
-        label: &str,
+        label: SpeakerName,
         source: ClientStamp,
     ) -> PairingOutcome {
         let Some(connector) = connectors()
             .iter()
             .find(|known| known.id().as_str() == connector)
         else {
-            let pairing: Vec<&str> = connectors()
-                .iter()
-                .map(|known| known.id().as_str())
-                .collect();
-
             return PairingOutcome::Refused {
                 reason: PairingRefusal::UnknownConnector,
-                message: format!(
-                    "Connector \"{connector}\" does not pair. Connectors that pair: {}.",
-                    pairing.join(", ")
-                ),
-            };
-        };
-        let Ok(label) = SpeakerName::new(label) else {
-            return PairingOutcome::Refused {
-                reason: PairingRefusal::InvalidSubject,
-                message: INVALID_SUBJECT.to_owned(),
+                message: format!("Connector \"{connector}\" does not pair."),
             };
         };
         let daemon = self.clone();
@@ -125,7 +101,7 @@ impl Daemon {
     /// clock has passed is settled expired, whatever its timer, on a clock
     /// of its own, has done. An approval stays waiting while it is written,
     /// taking no second answer, and one that cannot be written leaves the
-    /// request waiting with what is left of its time, announced again.
+    /// request waiting with what is left of its time.
     /// The approval runs on the blocking pool to its end, so a caller that
     /// stops waiting leaves nothing of it undone.
     pub async fn settle_pairing(&self, code: &str, answer: Answer) -> PairingAnswer {
@@ -150,21 +126,14 @@ impl Daemon {
                 };
             }
         };
+        if paired {
+            return PairingOutcome::Paired;
+        }
+
         let mut waiting = self.pairings().waiting();
         let asked = waiting.iter().position(|entry| {
             entry.request.connector_id == *connector.id() && entry.request.subject.id == subject.id
         });
-
-        if paired {
-            if let Some(index) = asked.filter(|index| !waiting[*index].writing) {
-                let mut settled = waiting.remove(index);
-
-                settled.disarm();
-                self.announce_settled(&settled.request, PairingDecision::Approved);
-            }
-
-            return PairingOutcome::Paired;
-        }
 
         if let Some(index) = asked {
             return PairingOutcome::Pending {
@@ -255,9 +224,6 @@ impl Daemon {
                     self.arm(unwritten);
                 }
 
-                // Again, so a surface that came meanwhile shows it too, and
-                // one that has it keeps one card.
-                self.world().events.emit(Event::PairingRequested(request));
                 PairingAnswer::Failed { message }
             }
         }
@@ -308,46 +274,36 @@ impl Daemon {
 
     /// Writes `subject` into `connector`'s allowlist by the daemon's one
     /// change of settings: the whole allowlist as one change of its field,
-    /// bound to the fingerprint it was read under, and while other writes
-    /// move the document meanwhile, read again and merged with the accounts
-    /// paired since, up to three writes in all. An account another hand
-    /// paired meanwhile keeps the name that hand gave it. The sentence saying
-    /// why the account is not in, when it is not.
+    /// bound to the fingerprint it was read under. An account the allowlist
+    /// holds already keeps the name it has. The sentence saying why the
+    /// account is not in, when it is not.
     fn admit(&self, connector: &Connector, subject: &PairingSubject) -> Result<(), String> {
-        let mut attempts = 1;
+        let Allowlist {
+            fingerprint,
+            mut accounts,
+        } = allowlist(self.world(), connector)?;
 
-        loop {
-            let Allowlist {
-                fingerprint,
-                mut accounts,
-            } = allowlist(self.world(), connector)?;
+        if accounts.contains_key(subject.id.as_str()) {
+            return Ok(());
+        }
 
-            if accounts.contains_key(subject.id.as_str()) {
-                return Ok(());
-            }
+        accounts.insert(subject.id.to_string(), Value::from(subject.label.as_str()));
 
-            accounts.insert(subject.id.to_string(), Value::from(subject.label.as_str()));
+        let change = ConfigChange {
+            target: ConfigTarget::Global,
+            expected_fingerprint: fingerprint.as_str().to_owned(),
+            operation: Operation::SectionFieldSet {
+                namespace: Namespace::Connectors,
+                id: connector.id().to_string(),
+                field: connector.pairing_field().to_owned(),
+                value: Value::Object(accounts),
+            },
+        };
 
-            let change = ConfigChange {
-                target: ConfigTarget::Global,
-                expected_fingerprint: fingerprint.as_str().to_owned(),
-                operation: Operation::SectionFieldSet {
-                    namespace: Namespace::Connectors,
-                    id: connector.id().to_string(),
-                    field: connector.pairing_field().to_owned(),
-                    value: Value::Object(accounts),
-                },
-            };
-
-            match self.change_settings(&change, || {}) {
-                ChangeOutcome::Applied { .. } => return Ok(()),
-                ChangeOutcome::Refused {
-                    reason: ChangeRefusal::Conflict,
-                    ..
-                } if attempts < WRITE_ATTEMPTS => attempts += 1,
-                ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message } => {
-                    return Err(message);
-                }
+        match self.change_settings(&change, || {}) {
+            ChangeOutcome::Applied { .. } => Ok(()),
+            ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message } => {
+                Err(message)
             }
         }
     }

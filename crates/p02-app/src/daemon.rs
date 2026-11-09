@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use futures_util::FutureExt;
 use futures_util::future::join_all;
-use p02_characters::{CharacterDefinition, Discovery, discover};
+use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
     ChangeOutcome, ConfigChange, ConfigTarget, ConfigView, Connector, ConnectorConfigView,
     Sections, apply_change, connectors,
 };
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
-use p02_core::{ClientStamp, Conversation, ConversationId, Participant, VisibleMessageRole};
+use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{Home, StorageError};
 use tokio::sync::mpsc;
@@ -28,12 +28,11 @@ use crate::history::{self, HistoryPage};
 use crate::outcome::{
     CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
     HistoryOutcome, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PendingConfirmation,
-    ProtocolVersion, ReconcilePlan, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal,
-    TurnStamp,
+    ProtocolVersion, StartOutcome, StartRefusal, TurnOutcome, TurnRefusal, TurnStamp,
 };
 use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
-use crate::submissions::{Ledger, Line};
+use crate::submissions::Ledger;
 
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
@@ -136,17 +135,16 @@ pub struct DaemonSettings {
     pub plugins: Vec<Plugin>,
 }
 
-/// A line a client delivers into a conversation, as the client sent it:
-/// the daemon judges every part of it.
+/// A line a client delivers into a conversation.
 #[derive(Clone, Debug)]
 pub struct Message {
     pub conversation_id: String,
     pub sender_id: String,
     pub text: String,
     /// The surface the line came from.
-    pub source: String,
+    pub source: ClientStamp,
     /// The id the client submitted the line under, which a repeat reuses.
-    pub client_message_id: String,
+    pub client_message_id: ClientStamp,
 }
 
 /// Why a daemon could not be opened on a home.
@@ -419,12 +417,10 @@ impl Daemon {
             .ok()
             .and_then(|id| self.live(&id))
         else {
-            let (reason, message) = match self.unreached(character).await {
-                Unreached::NotInstalled(message) => (OpenRefusal::UnknownCharacter, message),
-                Unreached::Unavailable(message) => (OpenRefusal::CharacterUnavailable, message),
+            return OpenOutcome::Refused {
+                reason: OpenRefusal::CharacterUnavailable,
+                message: self.unavailable(character),
             };
-
-            return OpenOutcome::Refused { reason, message };
         };
         let opened = handle.open().await;
 
@@ -449,17 +445,6 @@ impl Daemon {
     /// and its place in her queue are one step, which lines take in the
     /// order they came, so they reach her in that order.
     pub async fn deliver(&self, message: Message) -> TurnOutcome {
-        let (Ok(source), Ok(client_message_id)) = (
-            ClientStamp::new(&message.source),
-            ClientStamp::new(&message.client_message_id),
-        ) else {
-            return TurnOutcome::refused(
-                TurnRefusal::InvalidMessage,
-                "A message names its source and its own id as single tokens: letters, digits, \
-                 and any of \":._-\", at most 64 characters."
-                    .to_owned(),
-            );
-        };
         let outcome = {
             let mut routes = self.inner.routes.lock().await;
             let (conversation, character) =
@@ -469,20 +454,15 @@ impl Daemon {
                 };
             let stamp = TurnStamp {
                 conversation_id: conversation.clone(),
-                source: source.clone(),
-                client_message_id: client_message_id.clone(),
-            };
-            let line = Line {
-                sender: message.sender_id.clone(),
-                source,
-                text: message.text.clone(),
+                source: message.source,
+                client_message_id: message.client_message_id,
             };
 
-            self.inner
-                .ledger
-                .submit(conversation, client_message_id, line, || {
-                    self.take(character, stamp, message)
-                })
+            self.inner.ledger.submit(
+                stamp.conversation_id.clone(),
+                stamp.client_message_id.clone(),
+                || self.take(character, stamp, message.text),
+            )
         };
 
         outcome.await
@@ -568,13 +548,13 @@ impl Daemon {
     }
 
     /// Makes the characters running at the call match the settings, and
-    /// answers with what that set in motion: the pass runs on a task of its
-    /// own whether or not the answer is awaited. A request while a pass runs
-    /// joins it and marks one more pass after it, so the newest roster has
-    /// the last word; passes never overlap.
-    pub fn reconcile(&self) -> impl Future<Output = ReconcilePlan> + Send + 'static {
+    /// answers once they do: the pass runs on a task of its own whether or
+    /// not the answer is awaited. A request while a pass runs joins it and
+    /// marks one more pass after it, so the newest roster has the last
+    /// word; passes never overlap.
+    pub fn reconcile(&self) -> impl Future<Output = ()> + Send + 'static {
         if self.inner.characters().stopped {
-            return std::future::ready(ReconcilePlan::default()).boxed();
+            return std::future::ready(()).boxed();
         }
 
         let daemon = self.clone();
@@ -813,43 +793,20 @@ impl Daemon {
         &self,
         character: Identifier,
         stamp: TurnStamp,
-        message: Message,
+        text: String,
     ) -> impl Future<Output = TurnOutcome> + Send + 'static {
         let answer = match self.live(&character) {
-            // Refused at once, while a turn ahead of it still runs.
-            Some(_) if message.sender_id != Participant::local_user_id().as_str() => {
-                std::future::ready(TurnOutcome::refused(
-                    TurnRefusal::SenderNotSupported,
-                    format!(
-                        "Conversation \"{}\" accepts messages from its local user only; \"{}\" \
-                         is not driven yet.",
-                        stamp.conversation_id, message.sender_id
-                    ),
-                ))
-                .boxed()
-            }
             Some(handle) => handle
                 .deliver(Request {
                     stamp: stamp.clone(),
-                    text: message.text,
+                    text,
                 })
                 .boxed(),
-            None => {
-                let daemon = self.clone();
-                let character = character.clone();
-
-                async move {
-                    match daemon.unreached(character.as_str()).await {
-                        Unreached::NotInstalled(sentence) => {
-                            TurnOutcome::refused(TurnRefusal::UnknownCharacter, sentence)
-                        }
-                        Unreached::Unavailable(sentence) => {
-                            TurnOutcome::refused(TurnRefusal::CharacterUnavailable, sentence)
-                        }
-                    }
-                }
-                .boxed()
-            }
+            None => std::future::ready(TurnOutcome::refused(
+                TurnRefusal::CharacterUnavailable,
+                self.unavailable(character.as_str()),
+            ))
+            .boxed(),
         };
         let events = Arc::clone(&self.inner.world.events);
 
@@ -861,33 +818,15 @@ impl Daemon {
         }
     }
 
-    /// Why `character` takes nothing now, the roster read to say it: she is
-    /// not installed, has no runtime, or hers takes nothing.
-    async fn unreached(&self, character: &str) -> Unreached {
-        let world = Arc::clone(&self.inner.world);
-        let discovery = blocking(move || discover(world.home.root())).await;
-
-        let Some(definition) = installed(&discovery, character) else {
-            let installed: Vec<&str> = discovery
-                .characters
-                .iter()
-                .map(|definition| definition.profile.id.as_str())
-                .collect();
-
-            return Unreached::NotInstalled(format!(
-                "Character \"{character}\" is not installed. Installed characters: {}.",
-                if installed.is_empty() {
-                    "(none)".to_owned()
-                } else {
-                    installed.join(", ")
-                }
-            ));
-        };
-
-        Unreached::Unavailable(match self.handle(&definition.profile.id) {
-            Some(handle) => handle.unavailable(),
-            None => format!("Character \"{character}\" has not been started."),
-        })
+    /// The sentence `character` answers with while she takes nothing.
+    fn unavailable(&self, character: &str) -> String {
+        Identifier::new(character)
+            .ok()
+            .and_then(|id| self.handle(&id))
+            .map_or_else(
+                || format!("Character \"{character}\" is not running."),
+                |handle| handle.unavailable(),
+            )
     }
 
     /// The character `conversation` belongs to: the route this run holds from
@@ -915,16 +854,11 @@ impl Daemon {
         let home = self.inner.world.home.clone();
         let wanted = id.clone();
         let character = match blocking(move || home.conversation(&wanted)).await {
-            Ok(record) => character_of(&record).ok_or_else(|| {
-                TurnOutcome::refused(
-                    TurnRefusal::UnknownConversation,
-                    format!("Conversation \"{id}\" has no character to answer it."),
-                )
-            })?,
+            Ok(record) => character_of(&record).ok_or_else(unknown)?,
             Err(StorageError::ConversationNotFound(_)) => return Err(unknown()),
             Err(error) => {
                 return Err(TurnOutcome::refused(
-                    TurnRefusal::ConversationUnreadable,
+                    TurnRefusal::UnknownConversation,
                     format!(
                         "Conversation \"{id}\" cannot be read: {}",
                         error_sentence(&error)
@@ -945,12 +879,6 @@ pub(crate) enum Actor {
     Built(Arc<CharacterHandle>),
 }
 
-/// Why a character takes nothing now, in a sentence.
-enum Unreached {
-    NotInstalled(String),
-    Unavailable(String),
-}
-
 /// The character among a conversation's participants.
 pub(crate) fn character_of(conversation: &Conversation) -> Option<Identifier> {
     conversation
@@ -958,13 +886,6 @@ pub(crate) fn character_of(conversation: &Conversation) -> Option<Identifier> {
         .iter()
         .find(|participant| participant.kind == VisibleMessageRole::Character)
         .map(|participant| participant.id.clone())
-}
-
-fn installed<'d>(discovery: &'d Discovery, character: &str) -> Option<&'d CharacterDefinition> {
-    discovery
-        .characters
-        .iter()
-        .find(|definition| definition.profile.id.as_str() == character)
 }
 
 /// Runs `work` on the blocking pool, where the store may wait on a lock; a

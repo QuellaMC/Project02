@@ -416,7 +416,7 @@ it('storage.damaged-record: damage that would lose history is reported, never re
   }
 });
 
-it('storage.damaged-segment-tolerance: a committed line that is no record, in an older segment or the current one, and a sessions catalog row that is no session row are skipped and said: serve warns once on stderr as the thread opens past them, inspect --session shows the lines and --sessions warns of the row, the character chats on, history reads every message around them, and a line the damaged segment took is still refused duplicate_submission', async () => {
+it('storage.damaged-segment-tolerance: a committed line that is no record, in an older segment or the current one, and a sessions catalog row that is no session row are skipped and said: serve warns once on stderr as the thread opens past them, inspect --session warns of the lines and --sessions of the row, the character chats on, history reads every message around them, and a line the damaged segment took is still refused duplicate_submission', async () => {
   const {home, conversationId, segment} = await threeSegments();
   const data = join(home, 'character-data', 'mira');
   const current = `${conversationId}.3`;
@@ -454,7 +454,9 @@ it('storage.damaged-segment-tolerance: a committed line that is no record, in an
   const session = inspect(['--store', home, '--session', current]);
 
   expect(await session.exit(), session.stderr()).toBe(0);
-  expect(JSON.parse(session.stdout())).toMatchObject({skippedLines: [2]});
+  expect(session.stderr()).toContain(
+    `Warning: Skipped line 2 of session "${current}", which could not be read.`,
+  );
 
   const sessions = inspect(['--store', home, '--sessions']);
 

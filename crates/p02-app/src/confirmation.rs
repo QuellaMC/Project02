@@ -12,8 +12,7 @@ use p02_core::Timestamp;
 use p02_plugins::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 use p02_shared::Identifier;
 use schemars::JsonSchema;
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
@@ -28,38 +27,27 @@ use crate::outcome::{
 
 /// A parked confirmation's id: a fresh UUID, unique across the daemon, by
 /// which any surface answers it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, TS)]
-#[schemars(with = "String")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(transparent)]
 #[ts(as = "String")]
-pub struct ConfirmationId(Uuid);
+pub struct ConfirmationId(String);
 
 impl ConfirmationId {
     /// A fresh id: the one way one is minted.
     #[must_use]
     pub fn mint() -> Self {
-        Self(Uuid::new_v4())
+        Self(Uuid::new_v4().to_string())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
 impl fmt::Display for ConfirmationId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Serialize for ConfirmationId {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
-
-impl<'de> Deserialize<'de> for ConfirmationId {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
-
-        Uuid::parse_str(&text)
-            .map(Self)
-            .map_err(|_| D::Error::custom("a confirmation id is a UUID"))
+        formatter.write_str(&self.0)
     }
 }
 
@@ -126,10 +114,7 @@ impl Broker {
     /// can stop; the deadline is the one shown, on the clock it was shown
     /// on.
     pub(crate) fn answer(&self, id: &str, answer: Answer) -> ConfirmationAnswer {
-        let Some(parked) = Uuid::try_parse(id)
-            .ok()
-            .and_then(|id| self.take(ConfirmationId(id)))
-        else {
+        let Some(parked) = self.take(id) else {
             return ConfirmationAnswer::Unknown;
         };
 
@@ -157,17 +142,19 @@ impl Broker {
         self.parked.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn take(&self, id: ConfirmationId) -> Option<Parked> {
+    fn take(&self, id: &str) -> Option<Parked> {
         let mut parked = self.parked();
-        let index = parked.iter().position(|parked| parked.pending.id == id)?;
+        let index = parked
+            .iter()
+            .position(|parked| parked.pending.id.as_str() == id)?;
 
         Some(parked.remove(index))
     }
 
     /// Settles `id` as `settlement` says, unless something settled it
     /// first.
-    fn settle(&self, id: ConfirmationId, settlement: Settlement) {
-        if let Some(parked) = self.take(id) {
+    fn settle(&self, id: &ConfirmationId, settlement: Settlement) {
+        if let Some(parked) = self.take(id.as_str()) {
             self.settled(parked, settlement);
         }
     }
@@ -203,7 +190,7 @@ impl Confirmer for Broker {
         let wait = i64::try_from(self.wait.as_millis()).unwrap_or(i64::MAX);
         let pending = PendingConfirmation {
             character_id: self.character.clone(),
-            id,
+            id: id.clone(),
             request: ConfirmationQuestion {
                 plugin_id: request.plugin_id,
                 tool_name: request.tool_name,
@@ -225,15 +212,18 @@ impl Confirmer for Broker {
         });
         self.events.emit(Event::ConfirmationRequested(pending));
 
-        let abandoned = Abandoned { broker: self, id };
+        let abandoned = Abandoned {
+            broker: self,
+            id: id.clone(),
+        };
         let decision = tokio::select! {
             decision = &mut answered => decision,
             () = sleep_until(deadline) => {
-                self.settle(id, Settlement::Cancelled { reason: CancelReason::Expired });
+                self.settle(&id, Settlement::Cancelled { reason: CancelReason::Expired });
                 answered.await
             }
             () = self.stop.cancelled() => {
-                self.settle(id, Settlement::Cancelled { reason: CancelReason::Stopped });
+                self.settle(&id, Settlement::Cancelled { reason: CancelReason::Stopped });
                 answered.await
             }
         };
@@ -253,7 +243,7 @@ struct Abandoned<'a> {
 impl Drop for Abandoned<'_> {
     fn drop(&mut self) {
         self.broker.settle(
-            self.id,
+            &self.id,
             Settlement::Cancelled {
                 reason: CancelReason::Stopped,
             },
@@ -312,7 +302,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(1)).await;
 
-        let id = broker.pending()[0].id.to_string();
+        let id = broker.pending()[0].id.as_str().to_owned();
 
         // The wall clock passes the deadline while the paused timer waits.
         std::thread::sleep(Duration::from_millis(50));

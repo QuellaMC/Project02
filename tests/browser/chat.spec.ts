@@ -274,7 +274,7 @@ test('page.refused-line-handback: a line the daemon refuses before any turn, lon
   await page.goto(daemon.url);
   await send(page, tooLong);
   await expect(page.locator('main > .notice')).toContainText(
-    'Mira: The message.text exceeds',
+    'Mira: The message: a line is at most',
   );
   await expect(composerFor(page)).toHaveValue(tooLong);
   await expect(page.locator('[data-pending]')).toHaveCount(0);

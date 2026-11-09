@@ -24,12 +24,11 @@ use p02_runtime::{
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{RuntimeRejection, StorageError};
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::task::JoinError;
 use tokio_util::sync::CancellationToken;
 
 use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
-use crate::daemon::{Daemon, WeakDaemon, World};
+use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{
     Event, MaintenanceFailure, OpenOutcome, OpenRefusal, StorageFailure, TurnOutcome, TurnRefusal,
     TurnStamp,
@@ -80,21 +79,13 @@ pub(crate) struct Request {
     pub(crate) text: String,
 }
 
-/// What a reconcile did to her.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Reconciled {
-    Started,
-    Reloaded,
-    Unchanged,
-}
-
 #[derive(Debug)]
 enum Command {
     /// Answered once her start settles, whichever start that is.
     Start(oneshot::Sender<()>),
     Open(oneshot::Sender<OpenOutcome>),
     Deliver(Request, oneshot::Sender<TurnOutcome>),
-    Reconcile(Option<Box<Built>>, oneshot::Sender<Reconciled>),
+    Reconcile(Option<Box<Built>>, oneshot::Sender<()>),
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -221,11 +212,11 @@ impl CharacterHandle {
     }
 
     /// Makes her match `now`, what she would be built from now, which is
-    /// none when her settings cannot be resolved.
-    pub(crate) async fn reconcile(&self, now: Option<Built>) -> Reconciled {
-        self.ask(|reply| Command::Reconcile(now.map(Box::new), reply))
-            .await
-            .unwrap_or(Reconciled::Unchanged)
+    /// none when her settings cannot be resolved; answered once she does.
+    pub(crate) async fn reconcile(&self, now: Option<Built>) {
+        let _ = self
+            .ask(|reply| Command::Reconcile(now.map(Box::new), reply))
+            .await;
     }
 
     /// The sentence she answers with while she takes nothing.
@@ -313,7 +304,7 @@ struct Actor {
     /// What her own settings change through.
     daemon: WeakDaemon,
     commands: mpsc::UnboundedReceiver<Command>,
-    /// What her recovery set aside to answer once she is back.
+    /// What was asked of her during a turn, to answer once it ends.
     deferred: VecDeque<Command>,
     stop: CancellationToken,
     health: watch::Sender<CharacterHealth>,
@@ -361,22 +352,19 @@ impl Actor {
             }
             Command::Deliver(request, reply) => self.deliver(request, reply).await,
             Command::Reconcile(now, reply) => {
-                let reconciled = match self.state() {
-                    CharacterState::Failed => {
-                        self.boot().await;
-                        Reconciled::Started
-                    }
+                match self.state() {
+                    CharacterState::Failed => self.boot().await,
                     CharacterState::Ready
                         if self.parts.as_ref().is_some_and(|parts| {
                             !runs(&parts.built, &parts.host, now.as_deref())
                         }) =>
                     {
                         self.reload().await;
-                        Reconciled::Reloaded
                     }
-                    _ => Reconciled::Unchanged,
-                };
-                let _ = reply.send(reconciled);
+                    _ => {}
+                }
+
+                let _ = reply.send(());
             }
         }
     }
@@ -386,8 +374,8 @@ impl Actor {
     /// of her thread once it is open; a reconcile that would build her from
     /// something else says she is reloading at once, and the reload follows
     /// the turn, before her next line; a line waits its turn, in the order
-    /// it came. A turn the runtime fails leaves her failed, and she recovers
-    /// behind it.
+    /// it came. A turn the runtime fails leaves her failed, and she is built
+    /// again behind it, the lines sent meanwhile waiting as for a reload.
     async fn deliver(&mut self, request: Request, reply: oneshot::Sender<TurnOutcome>) {
         let mut parts = match self.parts.take() {
             Some(parts) if self.state() == CharacterState::Ready => parts,
@@ -438,9 +426,6 @@ impl Actor {
                     biased;
                     taken = &mut turn => break taken,
                     Some(command) = self.commands.recv() => match command {
-                        Command::Start(answer) => {
-                            let _ = answer.send(());
-                        }
                         Command::Open(answer) => match &opened {
                             Some(opened) => {
                                 let _ = answer.send(opened.clone());
@@ -454,8 +439,8 @@ impl Actor {
                             self.publish(Change::Reloading);
                             reload = Some(answer);
                         }
-                        Command::Reconcile(_, answer) => {
-                            let _ = answer.send(Reconciled::Unchanged);
+                        Command::Start(answer) | Command::Reconcile(_, answer) => {
+                            let _ = answer.send(());
                         }
                         line @ Command::Deliver(..) => self.deferred.push_back(line),
                     },
@@ -473,14 +458,12 @@ impl Actor {
         };
         let _ = reply.send(outcome);
 
-        if fatal {
-            self.recover().await;
-        } else if reload.is_some() {
+        if fatal || reload.is_some() {
             self.rebuild().await;
         }
 
         if let Some(answer) = reload {
-            let _ = answer.send(Reconciled::Reloaded);
+            let _ = answer.send(());
         }
     }
 
@@ -528,9 +511,7 @@ impl Actor {
         let id = self.id.clone();
         let broker = Arc::clone(&self.broker);
         let daemon = self.daemon.clone();
-        let assembled = tokio::task::spawn_blocking(move || assemble(&world, &id, broker, daemon))
-            .await
-            .unwrap_or_else(|error| Err(interrupted(&error)));
+        let assembled = blocking(move || assemble(&world, &id, broker, daemon)).await;
 
         match assembled {
             Ok(Assembled { parts, warning }) => {
@@ -572,11 +553,7 @@ impl Actor {
                 character_id: self.id.clone(),
                 user_participant_id: Participant::local_user_id().clone(),
             },
-            Err(Unheld::Storage(error)) => OpenOutcome::Failed(StorageFailure::of(&error)),
-            Err(Unheld::Interrupted(error)) => OpenOutcome::Refused {
-                reason: OpenRefusal::CharacterUnavailable,
-                message: interrupted(&error),
-            },
+            Err(error) => OpenOutcome::Failed(StorageFailure::of(&error)),
         }
     }
 
@@ -675,39 +652,6 @@ impl Actor {
         }
     }
 
-    /// The one restart a fatal turn earns: the lines queued behind it are
-    /// refused first, as she is failed, then her thread is closed and her
-    /// host shut down, then she starts. A stop read meanwhile wins.
-    async fn recover(&mut self) {
-        let mut queued: Vec<Command> = self.deferred.drain(..).collect();
-
-        while let Ok(command) = self.commands.try_recv() {
-            queued.push(command);
-        }
-
-        for command in queued {
-            match command {
-                Command::Deliver(_, reply) => {
-                    let _ = reply.send(TurnOutcome::refused(
-                        TurnRefusal::CharacterUnavailable,
-                        not_ready(&self.id, &self.health.borrow()),
-                    ));
-                }
-                Command::Open(reply) => {
-                    let _ = reply.send(OpenOutcome::Refused {
-                        reason: OpenRefusal::CharacterUnavailable,
-                        message: not_ready(&self.id, &self.health.borrow()),
-                    });
-                }
-                waits @ (Command::Start(_) | Command::Reconcile(..)) => {
-                    self.deferred.push_back(waits);
-                }
-            }
-        }
-
-        self.rebuild().await;
-    }
-
     /// Between turns, when what she would be built from now is not what she
     /// was built from: deliveries that arrive meanwhile wait, and land on
     /// her thread opened again.
@@ -764,7 +708,7 @@ impl Actor {
         let refusal = || not_ready(&self.id, &self.health.borrow());
 
         match command {
-            Command::Start(reply) => {
+            Command::Start(reply) | Command::Reconcile(_, reply) => {
                 let _ = reply.send(());
             }
             Command::Open(reply) => {
@@ -778,9 +722,6 @@ impl Actor {
                     TurnRefusal::CharacterUnavailable,
                     refusal(),
                 ));
-            }
-            Command::Reconcile(_, reply) => {
-                let _ = reply.send(Reconciled::Unchanged);
             }
         }
     }
@@ -861,13 +802,10 @@ async fn take_line(
         parts.person,
     )
     .await
-    .map_err(|unheld| TurnOutcome::Failed {
+    .map_err(|error| TurnOutcome::Failed {
         character_id: id.clone(),
         conversation_id: conversation.clone(),
-        message: match unheld {
-            Unheld::Storage(error) => error_sentence(&error),
-            Unheld::Interrupted(error) => interrupted(&error),
-        },
+        message: error_sentence(&error),
         committed: false,
     })?;
 
@@ -911,12 +849,6 @@ async fn take_line(
     Ok((delivery, conversation, committed.into_inner()))
 }
 
-/// Why her thread could not be held.
-enum Unheld {
-    Storage(StorageError),
-    Interrupted(JoinError),
-}
-
 /// Her thread with the person, opened on the blocking pool the first time
 /// it is asked for; what the open read past is noted as maintenance.
 async fn hold<'t>(
@@ -926,17 +858,13 @@ async fn hold<'t>(
     thread: &'t mut Option<Conversation>,
     character: &Character,
     person: &SpeakerName,
-) -> Result<&'t mut Conversation, Unheld> {
+) -> Result<&'t mut Conversation, StorageError> {
     let held = if let Some(held) = thread.take() {
         held
     } else {
         let home = world.home.clone();
         let (character, person) = (character.clone(), person.clone());
-        let opened =
-            tokio::task::spawn_blocking(move || Conversation::open(&home, character, person))
-                .await
-                .map_err(Unheld::Interrupted)?
-                .map_err(Unheld::Storage)?;
+        let opened = blocking(move || Conversation::open(&home, character, person)).await?;
 
         if let Some(skipped) = opened.skipped() {
             note_maintenance(world, health, id, skipped.to_owned());
@@ -966,10 +894,6 @@ fn note_maintenance(
         character_id: id.clone(),
         failure,
     });
-}
-
-fn interrupted(error: &JoinError) -> String {
-    format!("Work on the disk did not finish: {}", error_sentence(error))
 }
 
 /// Assembles character `id` from what the disk holds now: her package, her

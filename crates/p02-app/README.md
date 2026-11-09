@@ -40,16 +40,16 @@ tokio's blocking pool.
   person is opened the first time a client opens it or a line comes for
   it, and opened again after a reload or a recovery, so no client reopens
   it. A turn the runtime itself fails leaves her failed and earns one
-  restart: the lines queued behind it are refused, her thread is closed
-  and her plugins shut down, and she starts again. She hears what she is
-  asked while a turn runs, so a reload is said the moment her package or
-  her settings come to differ from those she was built from; it happens
-  once no turn runs, before her next line, and lines sent meanwhile wait
-  and land on her thread opened again. Her stop cancels her parked
-  confirmations first, closes her thread, and shuts her plugins down,
-  saying what failed of that. Her host is handed her settings, which its
-  own plugin reads and changes in her overlay alone, by the one change of
-  settings below.
+  restart: her thread is closed and her plugins shut down, and she starts
+  again, the lines queued behind it waiting for her as for a reload. She
+  hears what she is asked while a turn runs, so a reload is said the
+  moment her package or her settings come to differ from those she was
+  built from; it happens once no turn runs, before her next line, and
+  lines sent meanwhile wait and land on her thread opened again. Her stop
+  cancels her parked confirmations first, closes her thread, and shuts her
+  plugins down, saying what failed of that. Her host is handed her
+  settings, which its own plugin reads and changes in her overlay alone,
+  by the one change of settings below.
 - **Confirmations.** A question an approval-gated call raises is parked
   under a fresh UUID with its deadline and the turn that raised it, and
   announced; it settles once, by the person's answer, its deadline, or her
@@ -60,14 +60,13 @@ tokio's blocking pool.
   unannounced.
 - **Submissions.** One turn per conversation and client message id within
   a run: a repeat while it runs joins it and one after it gets its outcome,
-  an id reused for another line is refused, and a conversation remembers
-  its last 32 settled submissions. Only an outcome whose line is in the log
-  is remembered: a line that never reached it is its client's to send
-  again under the same id. A line a run before this one took is the
-  thread's to answer. The turn runs as a task of its own, which settles its
-  submission however it ends, so a client that stops waiting abandons
-  nothing; and every delivery that reaches a character is announced as
-  completed once, however it ended.
+  and a conversation remembers its last 32 settled submissions. Only an
+  outcome whose line is in the log is remembered: a line that never
+  reached it is its client's to send again under the same id. A line a
+  run before this one took is the thread's to answer. The turn runs as a
+  task of its own, which settles its submission however it ends, so a
+  client that stops waiting abandons nothing; and every delivery that
+  reaches a character is announced as completed once, however it ended.
 - **Settings.** A settings screen's view and a connector's read are
   p02-config's, read as the disk holds them now. A change, a client's or
   a character's own plugin's alike, is made one way: as p02-config makes
@@ -93,23 +92,21 @@ tokio's blocking pool.
   person's answer under a six-digit code, drawn at random and unlike any
   waiting, until its deadline, an hour unless a test harness shortens it;
   asking again for the same account answers the same request, and an
-  account the home's allowlist holds is paired, settling a request that
-  waited for it, unless its approval is being written. An answer settles
-  it once: denied, or approved by writing the account's name into the
+  account the home's allowlist holds is paired. An answer settles it
+  once: denied, or approved by writing the account's name into the
   connector's pairing field in the home's document, by the one change of
-  settings, bound to the fingerprint it was read under and, while other
-  writes move the document, read again and merged up to three writes in
-  all; an account another hand paired meanwhile keeps the name it gave.
-  The daemon judges the deadline, as it does a confirmation's, and
-  settles a request nobody answered expired; an approval that cannot be
-  written leaves the request waiting with what is left of its time,
-  announced again. No request outlives the daemon's run. A request names
-  the source its account wrote to first, the stamp its lines will carry;
-  asking again from another keeps it.
+  settings, bound to the fingerprint it was read under; an account the
+  allowlist holds already keeps the name it has. The daemon judges the
+  deadline, as it does a confirmation's, and settles a request nobody
+  answered expired; an approval that cannot be written leaves the request
+  waiting with what is left of its time. No request outlives the daemon's
+  run. A request names the source its account wrote to first, the stamp
+  its lines will carry; asking again from another keeps it.
 - **History.** A conversation's committed messages as one scrollback
   across her segments, newest page first and chronological within it, the
   cursor `v1:<segment>:<index>` naming where the next page ends; a limit is
-  1 to 500, 100 unless given, and a cursor is one a page handed out.
+  held to 1 to 500, 100 unless given, and a cursor is one a page handed
+  out.
 - **Events** are announced in one order, and every subscriber hears each
   one, in that order, however far behind it reads, since the stream a
   client follows numbers every event. A turn in progress is folded from

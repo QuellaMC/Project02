@@ -5,15 +5,14 @@ use std::sync::Arc;
 
 use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
 use p02_app::{
-    Answer, ConfirmationAnswer, Event, OpenOutcome, ReconcilePlan, RosterState, StartOutcome,
-    TurnOutcome,
+    Answer, ConfirmationAnswer, Event, OpenOutcome, RosterState, StartOutcome, TurnOutcome,
 };
 use p02_config::ConfigTarget;
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, Toy, World, a_while, begun, change, home, id, line, open, said, settle, wire,
+    Ear, Gate, Round, Toy, World, a_while, begun, change, home, line, open, said, settle, wire,
 };
 
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
@@ -79,7 +78,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
         .daemon(vec![Toy::new("notes").asking("notes.save").plugin()])
         .await;
 
-    assert_eq!(daemon.reconcile().await.starting, []);
+    daemon.reconcile().await;
     assert_eq!(
         wire(&daemon.health().await)["characters"][0],
         json!({"id": "mira", "displayName": "Mira", "enabled": false, "state": "not_started"})
@@ -95,7 +94,11 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
         json!({"kind": "unset", "path": "project02.enabled"}),
     )
     .await;
-    assert_eq!(daemon.reconcile().await.starting, [id("mira")]);
+    daemon.reconcile().await;
+    assert_eq!(
+        wire(&daemon.health().await)["characters"][0]["state"],
+        "ready"
+    );
 
     let conversation = open(&daemon).await;
     let mut ear = Ear::on(&daemon);
@@ -123,12 +126,12 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     )
     .await;
 
-    let plan = daemon.reconcile().await;
+    daemon.reconcile().await;
+
     let settled = ear
         .until(|event| matches!(event, Event::ConfirmationSettled { .. }))
         .await;
 
-    assert_eq!(plan.stopping, [id("mira")]);
     assert_eq!(wire(&settled)["decision"], "cancelled");
     assert_eq!(wire(&settled)["reason"], "stopped");
     assert!(daemon.pending_confirmations().is_empty());
@@ -154,7 +157,7 @@ async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
         panic!("her start runs");
     };
 
-    assert_eq!(pass.await, ReconcilePlan::default());
+    pass.await;
     assert_eq!(character.state, RosterState::Failed);
     assert!(
         character
@@ -280,7 +283,7 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
         }),
     )
     .await;
-    assert_eq!(daemon.reconcile().await.reloading, []);
+    daemon.reconcile().await;
 
     world.assembly.shut();
     change(&daemon, home(), warm()).await;
@@ -303,7 +306,7 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     a_while().await;
     assert!(!turn.is_finished());
     world.assembly.open();
-    assert_eq!(pass.await.unwrap().reloading, [id("mira")]);
+    pass.await.unwrap();
 
     let delivered = turn.await.unwrap();
 
@@ -427,9 +430,9 @@ async fn a_change_her_own_plugin_makes_is_announced_and_reloads_nothing_it_appli
     ear.until(|event| matches!(event, Event::HealthChanged { .. }))
         .await;
     assert_eq!(said(&turn.await.unwrap()), ["Be warmer.", "Warmer now."]);
+    daemon.reconcile().await;
     ear.drain();
     assert_eq!(ear.states("mira"), []);
-    assert_eq!(daemon.reconcile().await.reloading, []);
 }
 
 /// A stop answers only once everything it ended is announced: the turn in
@@ -488,7 +491,7 @@ async fn a_package_changed_under_her_rebuilds_her_from_it() {
 
     daemon.reconcile().await;
     world.package("nova", "Nova Prime");
-    assert_eq!(daemon.reconcile().await.reloading, [id("nova")]);
+    daemon.reconcile().await;
 
     let OpenOutcome::Opened {
         conversation_id, ..
@@ -516,16 +519,16 @@ async fn a_package_removed_while_she_runs_stops_her() {
     daemon.reconcile().await;
     remove(&world.path("characters/nova"));
 
-    let plan = daemon.reconcile().await;
+    daemon.reconcile().await;
+
     let OpenOutcome::Refused { reason, message } = daemon.open_conversation("nova").await else {
         panic!("she is no character to reach");
     };
 
-    assert_eq!(plan.stopping, [id("nova")]);
-    assert_eq!(wire(&reason), "unknown_character");
+    assert_eq!(wire(&reason), "character_unavailable");
     assert_eq!(
         message,
-        "Character \"nova\" is not installed. Installed characters: mira."
+        "Character \"nova\" is not ready (state \"stopped\")."
     );
 }
 

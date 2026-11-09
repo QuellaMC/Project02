@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use p02_app::{Answer, Event, PairingAnswer, PairingOutcome};
-use p02_core::ClientStamp;
+use p02_core::{ClientStamp, SpeakerName};
 use serde_json::json;
 
 use crate::support::{Ear, World, wire};
@@ -19,7 +19,7 @@ async fn a_request_nobody_answers_expires_at_its_deadline() {
         .request_pairing(
             "telegram",
             ClientStamp::new("381940562").unwrap(),
-            "Alice",
+            SpeakerName::new("Alice").unwrap(),
             ClientStamp::new("telegram:mira_bot").unwrap(),
         )
         .await

@@ -8,7 +8,7 @@ use p02_app::CharacterState::{Ready, Starting};
 use p02_app::Event;
 use serde_json::json;
 
-use crate::support::{Ear, Gate, Round, Toy, World, id, line, open, said, settle, wire};
+use crate::support::{Ear, Gate, Round, Toy, World, line, open, said, settle, wire};
 
 /// A daemon on a home with the bundled Mira starts her on its first
 /// reconcile; her thread opens as the same conversation every time, and a
@@ -21,7 +21,7 @@ async fn a_line_through_her_thread_completes_as_the_stream_tells() {
     let daemon = world.daemon(Vec::new()).await;
     let mut ear = Ear::on(&daemon);
 
-    assert_eq!(daemon.reconcile().await.starting, [id("mira")]);
+    daemon.reconcile().await;
     assert_eq!(ear.states("mira"), []);
     ear.reached("mira", Ready).await;
     assert_eq!(ear.states("mira"), [Starting, Ready]);
@@ -101,8 +101,7 @@ async fn a_line_through_her_thread_completes_as_the_stream_tells() {
 }
 
 /// One turn per submission: a repeat while the turn runs and one after it
-/// get its outcome, the model asked once; the same id with another line is
-/// refused, and a new id runs a new turn.
+/// get its outcome, the model asked once, and a new id runs a new turn.
 #[tokio::test(start_paused = true)]
 async fn a_repeated_submission_gets_its_turns_outcome_and_runs_nothing() {
     let world = World::new();
@@ -143,19 +142,6 @@ async fn a_repeated_submission_gets_its_turns_outcome_and_runs_nothing() {
         outcome
     );
     assert_eq!(world.model.asked(), 1);
-    assert_eq!(
-        wire(
-            &daemon
-                .deliver(line(&conversation, "Something else", "hello"))
-                .await
-        ),
-        json!({
-            "status": "refused",
-            "reason": "invalid_message",
-            "message": "clientMessageId \"hello\" was already used for a different message on \
-                        this conversation; give each message its own.",
-        })
-    );
     assert_eq!(
         said(
             &daemon

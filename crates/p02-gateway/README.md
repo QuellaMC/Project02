@@ -22,22 +22,20 @@ Nothing here prints, reads an environment variable or parses a flag.
   must be `127.0.0.1` or `localhost`, `421 misdirected_host`, and an
   origin, which when sent must be this daemon's page, `403
   forbidden_origin`; the bearer token, compared in one time whatever is
-  presented, `401 unauthorized`, or `400 invalid_request` for a header
-  that is no bearer; and, as its route reads its body, the cap of
-  64 KiB, `413 payload_too_large`: a route that takes no body reads
-  none. Every answer of the API is never cached, and every refusal of
-  the transport is the one envelope `{"error":{"code","message"}}`. A
-  body is read as JSON, each string value within 16,384 characters,
-  the longest text a request carries, a line; then as its route's
-  shape, which judges itself as it is read, so nothing validates it
-  twice: no unknown field, the stamps as stamps, a line's text not
-  empty, an id or a name within 128 characters; anything else is `400
-  invalid_request`, saying where. A change of settings is read as
-  p02-config's own change, whose character, fields and fingerprint are
-  judged against the home: one the home does not hold is the change's
-  own refusal, not the transport's. Each route answers its verb's
-  outcome verbatim under 200: the status describes the transport, and
-  `status` in the body what happened. An unknown route of the API,
+  presented, `401 unauthorized`; and, as its route reads its body, the
+  cap of 64 KiB, `413 payload_too_large`: a route that takes no body
+  reads none. Every answer of the API is never cached, and every refusal
+  of the transport is the one envelope `{"error":{"code","message"}}`. A
+  body is read as JSON, then as its route's shape, which judges itself as
+  it is read, so nothing validates it twice: no unknown field, the stamps
+  as stamps, a line within 16,384 characters, an id or a name within
+  128, a pairing's label one line; anything else is `400
+  invalid_request`, saying which request it was. A change of settings is
+  read as p02-config's own change, whose character, fields and
+  fingerprint are judged against the home: one the home does not hold is
+  the change's own refusal, not the transport's. Each route answers its
+  verb's outcome verbatim under 200: the status describes the transport,
+  and `status` in the body what happened. An unknown route of the API,
   `/api` itself included, is a 404 behind the same rules. No CORS header
   is sent, and a token is taken from no cookie and no query.
 - **The page.** Its files are built into the binary from
@@ -86,7 +84,6 @@ Nothing here prints, reads an environment variable or parses a flag.
   its turns draining with the socket and the streams open, so an accepted
   turn still receives its answer and the stream its reply; then each
   stream ends once everything announced before the stop reached it and
-  the frames queued for it are written; an answer still
-  being written gets the grace to finish, while a request that never fully
-  arrived is waited for not at all; and only then does the listener close
-  and whatever remains is cut.
+  the frames queued for it are written; then the listener closes, every
+  exchange still in flight gets the grace to finish, and whatever remains
+  is cut.

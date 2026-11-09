@@ -5,14 +5,11 @@ use std::future::Future;
 use std::io;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::{Body, Bytes};
-use hyper::body::{Frame, Incoming, SizeHint};
+use axum::body::Body;
+use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use p02_app::Daemon;
@@ -21,12 +18,10 @@ use socket2::SockRef;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tokio_util::task::task_tracker::TaskTrackerToken;
 use tower_service::Service as _;
 
 use crate::events::Streams;
 use crate::http::{self, App, Link};
-use crate::page::Page;
 
 /// How long accepting waits before it tries again when the system has no
 /// room for another connection.
@@ -51,9 +46,6 @@ pub struct Server {
     stopping: CancellationToken,
     signals: Signals,
     connections: TaskTracker,
-    /// The connections whose request has fully arrived, each until it ends:
-    /// the answers a stop gives the grace to finish.
-    answering: TaskTracker,
 }
 
 /// What a connection hears of the stop.
@@ -78,9 +70,9 @@ pub struct BindServerError {
 
 impl Server {
     /// Serves `daemon` on `127.0.0.1`, with `token` the bearer every API
-    /// request presents and `page` the page at the root: on `port`, the
-    /// port the home's record held, or on a free port when that one is
-    /// taken by another program or there is none.
+    /// request presents: on `port`, the port the home's record held, or on
+    /// a free port when that one is taken by another program or there is
+    /// none.
     ///
     /// # Errors
     ///
@@ -89,7 +81,6 @@ impl Server {
         daemon: Daemon,
         token: &DaemonToken,
         port: Option<NonZeroU16>,
-        page: Page,
     ) -> Result<Self, BindServerError> {
         let listener = listen(port)
             .await
@@ -108,7 +99,6 @@ impl Server {
             token,
             stopping.clone(),
             streams.clone(),
-            page,
         ));
         let server = Self {
             port,
@@ -118,7 +108,6 @@ impl Server {
             stopping,
             signals: Signals::default(),
             connections: TaskTracker::new(),
-            answering: TaskTracker::new(),
         };
 
         server.connections.spawn(accept(
@@ -126,7 +115,6 @@ impl Server {
             router,
             server.signals.clone(),
             server.connections.clone(),
-            server.answering.clone(),
         ));
         Ok(server)
     }
@@ -141,9 +129,8 @@ impl Server {
     /// requests answer 503; the daemon stops, its turns draining with the
     /// socket and the streams open, so an accepted turn still receives its
     /// answer and the stream its reply; then each stream ends once the
-    /// frames queued for it are written; an answer still being written
-    /// gets the grace to finish, while a request that never fully arrived
-    /// is waited for not at all; and only then does the listener close and
+    /// frames queued for it are written; then the listener closes, each
+    /// connection gets the grace to finish the exchange it holds, and
     /// whatever remains is cut.
     pub fn close(self) -> impl Future<Output = ()> + Send + 'static {
         self.stopping.cancel();
@@ -152,14 +139,13 @@ impl Server {
             self.daemon.stop().await;
             self.streams.close().await;
             self.signals.draining.cancel();
-            self.answering.close();
-
-            // A client that has not taken its answer by then is gone.
-            let _ = tokio::time::timeout(self.grace, self.answering.wait()).await;
-
             self.signals.closing.cancel();
-            self.signals.cut.cancel();
             self.connections.close();
+
+            // A client that has not finished its exchange by then is gone.
+            let _ = tokio::time::timeout(self.grace, self.connections.wait()).await;
+
+            self.signals.cut.cancel();
             self.connections.wait().await;
         }
     }
@@ -179,13 +165,7 @@ async fn listen(port: Option<NonZeroU16>) -> io::Result<TcpListener> {
 }
 
 /// Takes every connection until the listener closes.
-async fn accept(
-    listener: TcpListener,
-    router: Router,
-    signals: Signals,
-    connections: TaskTracker,
-    answering: TaskTracker,
-) {
+async fn accept(listener: TcpListener, router: Router, signals: Signals, connections: TaskTracker) {
     loop {
         let accepted = tokio::select! {
             () = signals.closing.cancelled() => return,
@@ -195,12 +175,7 @@ async fn accept(
         match accepted {
             Ok((stream, _)) => {
                 bound(&stream);
-                connections.spawn(serve(
-                    stream,
-                    router.clone(),
-                    signals.clone(),
-                    answering.clone(),
-                ));
+                connections.spawn(serve(stream, router.clone(), signals.clone()));
             }
             // A connection that broke while it was accepted is its
             // client's to make again.
@@ -236,19 +211,13 @@ fn failed_connection(error: &io::Error) -> bool {
 /// its stream closes it, or the stop cuts it. Once the stop reaches the
 /// connections, each finishes the exchange it holds and closes, and one
 /// that came after serves one exchange.
-async fn serve(stream: TcpStream, router: Router, signals: Signals, answering: TaskTracker) {
-    let exchange = Arc::new(Exchange {
-        answering,
-        token: Mutex::new(None),
-    });
+async fn serve(stream: TcpStream, router: Router, signals: Signals) {
     let link = CancellationToken::new();
     let service = {
-        let (exchange, link) = (Arc::clone(&exchange), link.clone());
+        let link = link.clone();
 
         hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
-            exchange.began();
-
-            let mut request = request.map(|body| Body::new(Watched::new(body, &exchange)));
+            let mut request = request.map(Body::new);
 
             request.extensions_mut().insert(Link(link.clone()));
             router.clone().call(request)
@@ -271,75 +240,5 @@ async fn serve(stream: TcpStream, router: Router, signals: Signals, answering: T
                 told = true;
             }
         }
-    }
-}
-
-/// Whether the request a connection holds has fully arrived: from then on
-/// an answer to it may be on its way, which a stop waits for, and the
-/// connection counts among those answering until its next request begins
-/// or it ends.
-#[derive(Debug)]
-struct Exchange {
-    answering: TaskTracker,
-    token: Mutex<Option<TaskTrackerToken>>,
-}
-
-impl Exchange {
-    fn began(&self) {
-        *self.token() = None;
-    }
-
-    fn arrived(&self) {
-        self.token().get_or_insert_with(|| self.answering.token());
-    }
-
-    fn token(&self) -> MutexGuard<'_, Option<TaskTrackerToken>> {
-        self.token.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// A request's body, which marks its exchange arrived once it has been
-/// read to its end, or at once when it has none.
-struct Watched {
-    body: Incoming,
-    exchange: Arc<Exchange>,
-}
-
-impl Watched {
-    fn new(body: Incoming, exchange: &Arc<Exchange>) -> Self {
-        if hyper::body::Body::is_end_stream(&body) {
-            exchange.arrived();
-        }
-
-        Self {
-            body,
-            exchange: Arc::clone(exchange),
-        }
-    }
-}
-
-impl hyper::body::Body for Watched {
-    type Data = Bytes;
-    type Error = hyper::Error;
-
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, hyper::Error>>> {
-        let polled = Pin::new(&mut self.body).poll_frame(context);
-
-        if matches!(polled, Poll::Ready(None)) {
-            self.exchange.arrived();
-        }
-
-        polled
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
     }
 }

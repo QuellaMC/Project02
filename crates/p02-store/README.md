@@ -40,8 +40,8 @@ thread.
   session cannot take are skipped and named, and an append the replay
   would skip is refused instead. A catalog row that is no session row, or
   lists a session again, is skipped the same way, and the next rewrite
-  leaves it out. What was skipped is said: `inspect --session` shows its
-  `skippedLines`, `serve` warns once as a thread opens past any, and
+  leaves it out. What was skipped is said: `inspect --session` warns of
+  it, `serve` warns once as a thread opens past any, and
   plugins reading history count it as damage. A round keeps the verdict it
   recorded, and a field a record does not know is ignored.
 - **What stays refused** is what reading past would lose without saying:

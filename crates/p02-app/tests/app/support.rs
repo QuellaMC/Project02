@@ -23,6 +23,7 @@ use p02_contracts::{
     ProvidedTool, RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
     ToolCallOutcome, ToolInputContract, ToolPreparation,
 };
+use p02_core::ClientStamp;
 use p02_plugins::list;
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
@@ -33,7 +34,7 @@ use tokio::sync::{Notify, mpsc};
 /// How long a test waits for what it expects before it fails.
 const PATIENCE: Duration = Duration::from_secs(120);
 
-pub(crate) fn id(text: &str) -> Identifier {
+fn id(text: &str) -> Identifier {
     Identifier::new(text).unwrap()
 }
 
@@ -189,8 +190,8 @@ pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Message {
         conversation_id: conversation.to_owned(),
         sender_id: "local-user".to_owned(),
         text: text.to_owned(),
-        source: "web".to_owned(),
-        client_message_id: id.to_owned(),
+        source: ClientStamp::new("web").unwrap(),
+        client_message_id: ClientStamp::new(id).unwrap(),
     }
 }
 

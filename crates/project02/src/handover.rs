@@ -7,7 +7,6 @@
 //! tried and the address asked again, so a stop then a start takes the
 //! home over and a start twice hands the address back.
 
-use std::error::Error;
 use std::num::NonZeroU32;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -44,8 +43,9 @@ enum Asked {
         line: String,
         pid: Option<NonZeroU32>,
     },
-    /// Why it is not taken as running here, the rest of a sentence.
-    Silent(String),
+    Stopping,
+    /// It did not answer as this home's daemon.
+    Silent,
 }
 
 /// Hands back the address of the daemon serving `home`, as its `record`
@@ -76,7 +76,8 @@ pub(crate) async fn hand_over(
                 console.say(&line);
                 return HandedOver::Ended(ExitCode::SUCCESS);
             }
-            Asked::Silent(why) => why,
+            Asked::Stopping => "is stopping",
+            Asked::Silent => "has not answered",
         };
 
         if stop.is_cancelled() {
@@ -113,7 +114,7 @@ pub(crate) async fn hand_over(
 }
 
 /// One question to the daemon `record` names, `GET /api/health` with its
-/// token, under the probe and the stop: running here, or why not.
+/// token, under the probe and the stop: running here, stopping, or neither.
 async fn ask(
     client: &reqwest::Client,
     home: &Home,
@@ -121,12 +122,11 @@ async fn ask(
     stop: &CancellationToken,
 ) -> Asked {
     let Some(record) = record else {
-        return Asked::Silent("has not published its address yet".to_owned());
+        return Asked::Silent;
     };
-    let origin = format!("http://127.0.0.1:{}/", record.port);
     let health = async {
         let response = client
-            .get(format!("{origin}api/health"))
+            .get(format!("http://127.0.0.1:{}/api/health", record.port))
             .bearer_auth(record.token.as_str())
             .timeout(PROBE)
             .send()
@@ -137,49 +137,26 @@ async fn ask(
     };
     let answered = tokio::select! {
         biased;
-        () = stop.cancelled() => return Asked::Silent(format!("did not answer at {origin}")),
+        () = stop.cancelled() => return Asked::Silent,
         answered = health => answered,
     };
 
     match answered {
-        Err(error) if error.is_timeout() => Asked::Silent(format!(
-            "did not answer at {origin} within {} seconds",
-            PROBE.as_secs()
-        )),
-        Err(error) => Asked::Silent(format!("did not answer at {origin}: {}", innermost(&error))),
-        Ok((status, _)) if status.as_u16() == 503 => Asked::Silent("is stopping".to_owned()),
-        Ok((status, _)) if !status.is_success() => {
-            Asked::Silent(format!("did not answer at {origin}: it answered {status}"))
-        }
-        Ok((_, body)) => {
-            let health: Option<Value> = serde_json::from_slice(&body).ok();
-            let served = health
-                .as_ref()
-                .and_then(|health| health.get("homeRoot"))
-                .and_then(Value::as_str);
+        Ok((status, _)) if status.as_u16() == 503 => Asked::Stopping,
+        Ok((status, body)) if status.is_success() => {
+            let served = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|health| Some(health.get("homeRoot")?.as_str()?.to_owned()));
 
-            match served {
-                Some(served) if served == home.root().display().to_string() => Asked::Running {
+            if served == Some(home.root().display().to_string()) {
+                Asked::Running {
                     line: address_line(record.port, &record.token),
                     pid: record.running.as_ref().map(|run| run.pid),
-                },
-                Some(served) => Asked::Silent(format!("the one at {origin} serves {served}")),
-                None => Asked::Silent(format!(
-                    "did not answer at {origin}: its answer is no daemon's health"
-                )),
+                }
+            } else {
+                Asked::Silent
             }
         }
+        _ => Asked::Silent,
     }
-}
-
-/// The cause at the bottom of `error`, which says what a person can act on:
-/// a refused connection, say, rather than the request it failed.
-fn innermost(error: &(dyn Error + 'static)) -> String {
-    let mut deepest = error;
-
-    while let Some(cause) = deepest.source() {
-        deepest = cause;
-    }
-
-    deepest.to_string()
 }

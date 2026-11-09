@@ -9,11 +9,10 @@ use std::num::NonZeroU16;
 use std::process::ExitCode;
 
 use p02_app::{Daemon, DaemonSettings, Event, Health, Plugin};
-use p02_config::Severity;
-use p02_gateway::{Claim, ClaimOutcome, Page, Server};
+use p02_gateway::{Claim, ClaimOutcome, Server};
 use p02_role_model::select_adapter;
 use p02_shared::{DaemonToken, error_sentence};
-use p02_store::{Home, StorageError};
+use p02_store::Home;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::{self, Unconsented};
@@ -84,20 +83,9 @@ pub(crate) async fn run(
     serve(home, claim, settings, &stop, console).await
 }
 
-/// Says why serve ends before it served: what broke, then why. A store
-/// that refused a write says so first, so the person knows their folder or
-/// their disk is what to look at.
+/// Says why serve ends before it served: what broke, then why.
 pub(crate) fn failed(console: &mut Console, error: &(dyn Error + 'static)) -> ExitCode {
-    let said = error_sentence(error);
-    let unwritten = error
-        .downcast_ref::<StorageError>()
-        .is_some_and(|error| error.code() == "write_failed");
-
-    if unwritten {
-        console.failed(&format!("Local runtime store could not be written. {said}"))
-    } else {
-        console.failed(&said)
-    }
+    console.failed(&error_sentence(error))
 }
 
 /// The line a client finds a daemon by, its address with the token in the
@@ -135,22 +123,14 @@ async fn serve(
     // the characters it starts itself: one a client starts is the client's.
     tokio::spawn(daemon.reconcile());
 
-    if let Some(unreadable) = claim.unreadable_record() {
-        console.warn(&format!(
-            "{} It is replaced, with a new token: open the address below.",
-            error_sentence(unreadable)
-        ));
-    }
-
-    let server =
-        match Server::bind(daemon.clone(), claim.token(), claim.port(), Page::built()).await {
-            Ok(server) => server,
-            Err(error) => {
-                daemon.stop().await;
-                claim.release();
-                return failed(console, &error);
-            }
-        };
+    let server = match Server::bind(daemon.clone(), claim.token(), claim.port()).await {
+        Ok(server) => server,
+        Err(error) => {
+            daemon.stop().await;
+            claim.release();
+            return failed(console, &error);
+        }
+    };
     let moved = match claim.publish(server.port()) {
         Ok(moved) => moved,
         Err(error) => {
@@ -212,16 +192,10 @@ async fn serve(
     }
 }
 
-/// What the roster cannot carry: a setting in error, and a character
-/// package discovery could not publish, which has no runtime to report
-/// itself and would otherwise go unsaid.
+/// What the roster cannot carry: a character package discovery could not
+/// publish, which has no runtime to report itself and would otherwise go
+/// unsaid.
 fn report_startup_problems(health: &Health, console: &mut Console) {
-    for diagnostic in &health.config.diagnostics {
-        if diagnostic.severity() == Severity::Error {
-            console.warn(&format!("Config: {}", diagnostic.message()));
-        }
-    }
-
     for package in &health.packages.diagnostics {
         console.warn(&package_problem(package));
     }

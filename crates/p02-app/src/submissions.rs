@@ -18,15 +18,6 @@ use crate::outcome::{TurnOutcome, TurnRefusal};
 /// only turns.
 const REMEMBERED: usize = 32;
 
-/// What a client message id was first used for: the same id must mean the
-/// same line.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Line {
-    pub(crate) sender: String,
-    pub(crate) source: ClientStamp,
-    pub(crate) text: String,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct Ledger {
     conversations: Mutex<HashMap<ConversationId, Vec<Submission>>>,
@@ -37,7 +28,6 @@ pub(crate) struct Ledger {
 /// A submission's turn, which every repeat of it joins, oldest first.
 struct Submission {
     id: ClientStamp,
-    line: Line,
     outcome: Shared<BoxFuture<'static, TurnOutcome>>,
     settled: bool,
 }
@@ -53,21 +43,18 @@ impl std::fmt::Debug for Submission {
 }
 
 impl Ledger {
-    /// The outcome of `line` submitted as `id` on `conversation`, whose turn
+    /// The outcome of the submission `id` on `conversation`, whose turn
     /// `start` begins, once: a repeat joins the turn while it runs and gets
-    /// its outcome after, and an id reused for another line is refused, so
-    /// no line is ever swallowed by an old one. A new submission's turn is
-    /// begun at once, the ledger held, so turns begin in the order their
-    /// lines came, and runs as a task of its own, which settles the
-    /// submission however it ends: a client that stops waiting abandons
-    /// nothing. Only an outcome whose line is in the log is remembered: a
-    /// line that never reached the log is its client's to send again, under
-    /// the same id.
+    /// its outcome after. A new submission's turn is begun at once, the
+    /// ledger held, so turns begin in the order their lines came, and runs
+    /// as a task of its own, which settles the submission however it ends:
+    /// a client that stops waiting abandons nothing. Only an outcome whose
+    /// line is in the log is remembered: a line that never reached the log
+    /// is its client's to send again, under the same id.
     pub(crate) fn submit<F>(
         self: &Arc<Self>,
         conversation: ConversationId,
         id: ClientStamp,
-        line: Line,
         start: impl FnOnce() -> F,
     ) -> BoxFuture<'static, TurnOutcome>
     where
@@ -77,11 +64,7 @@ impl Ledger {
         let submissions = conversations.entry(conversation.clone()).or_default();
 
         if let Some(known) = submissions.iter().find(|submission| submission.id == id) {
-            return if known.line == line {
-                known.outcome.clone().boxed()
-            } else {
-                std::future::ready(reused(&id)).boxed()
-            };
+            return known.outcome.clone().boxed();
         }
 
         let turn = start();
@@ -104,7 +87,6 @@ impl Ledger {
 
         submissions.push(Submission {
             id,
-            line,
             outcome: outcome.clone(),
             settled: false,
         });
@@ -176,16 +158,6 @@ impl Drop for Settling {
     }
 }
 
-fn reused(id: &ClientStamp) -> TurnOutcome {
-    TurnOutcome::refused(
-        TurnRefusal::InvalidMessage,
-        format!(
-            "clientMessageId \"{id}\" was already used for a different message on this \
-             conversation; give each message its own."
-        ),
-    )
-}
-
 /// What a turn whose task ended before it answered comes to: the line may
 /// have landed, and its client asks again under the same id, which the
 /// thread then answers.
@@ -205,14 +177,6 @@ mod tests {
 
     use super::*;
 
-    fn hello() -> Line {
-        Line {
-            sender: "local-user".to_owned(),
-            source: ClientStamp::new("web").unwrap(),
-            text: "Hello.".to_owned(),
-        }
-    }
-
     /// A client that stops waiting abandons nothing: the turn runs on and
     /// settles its submission, so a line the turn left out of the log is its
     /// client's to send again under the same id, and runs again.
@@ -223,12 +187,11 @@ mod tests {
         let id = ClientStamp::new("hello").unwrap();
         let (answer, answered) = oneshot::channel();
 
-        drop(ledger.submit(
-            conversation.clone(),
-            id.clone(),
-            hello(),
-            move || async move { answered.await.unwrap() },
-        ));
+        drop(
+            ledger.submit(conversation.clone(), id.clone(), move || async move {
+                answered.await.unwrap()
+            }),
+        );
         answer
             .send(TurnOutcome::refused(
                 TurnRefusal::CharacterUnavailable,
@@ -238,7 +201,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1)).await;
 
         let again = ledger
-            .submit(conversation.clone(), id, hello(), move || async move {
+            .submit(conversation.clone(), id, move || async move {
                 TurnOutcome::Completed {
                     character_id: Identifier::new("mira").unwrap(),
                     conversation_id: conversation,

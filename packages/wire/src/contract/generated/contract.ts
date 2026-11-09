@@ -206,7 +206,7 @@ export type GatewayReady = { protocolVersion: 7, health: GatewayHealth, confirma
 /**
  * Why a line was refused before any turn ran.
  */
-export type GatewayRefusalReason = "unknown_character" | "unknown_conversation" | "conversation_unreadable" | "sender_not_supported" | "character_unavailable" | "invalid_message" | "duplicate_submission";
+export type GatewayRefusalReason = "unknown_conversation" | "character_unavailable" | "duplicate_submission";
 
 /**
  * A committed message as a client renders it.
@@ -265,7 +265,7 @@ export type OpenOutcome = { "status": "opened", conversationId: ConversationId, 
  */
 userParticipantId: Identifier, } | { "status": "refused", reason: OpenRefusal, message: string, } | { "status": "failed" } & StorageFailure;
 
-export type OpenRefusal = "unknown_character" | "character_unavailable";
+export type OpenRefusal = "character_unavailable";
 
 /**
  * What a change does: sets or unsets a host field, by its path
@@ -278,26 +278,9 @@ export type Operation = { "kind": "set", path: string, value: JsonValue, } | { "
 export type Origin = { "scope": "character", characterId: Identifier, path: string, };
 
 /**
- * Where a package comes from: compiled in, or added by the person.
- */
-export type PackageProvenance = "bundled" | "operator";
-
-/**
  * A package discovery could not publish, and why, where.
  */
-export type PackageReport = { 
-/**
- * Always an error: the package is not in the roster.
- */
-severity: Severity, message: string, path: string, provenance: PackageProvenance, 
-/**
- * The folder the package was found in.
- */
-characterId?: string, 
-/**
- * The id its descriptor claims, when that is not its folder's.
- */
-claimedCharacterId?: Identifier, };
+export type PackageReport = { message: string, path: string, };
 
 export type PackagesHealth = { diagnostics: ReadonlyArray<PackageReport>, };
 
@@ -307,7 +290,7 @@ export type PackagesHealth = { diagnostics: ReadonlyArray<PackageReport>, };
  */
 export type PairingDecision = "approved" | "denied" | "expired";
 
-export type PairingRefusal = "unknown_connector" | "config_unloadable" | "invalid_subject";
+export type PairingRefusal = "unknown_connector" | "config_unloadable";
 
 /**
  * An account a connector asks to let in, waiting for the person's answer
@@ -474,8 +457,7 @@ export type StartRefusal = "unknown_character" | "gateway_stopped";
 export type StorageFailure = { code: string, message: string, };
 
 /**
- * A line's text: at least one character, and as long as any text of a
- * body may be.
+ * A line's text, as long as a line may be.
  */
 export type Text = string;
 

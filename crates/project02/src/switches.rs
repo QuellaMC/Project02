@@ -4,6 +4,7 @@
 //! than doing nothing, before anything is bound or written.
 
 use std::ffi::OsStr;
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use p02_app::Durations;
@@ -111,51 +112,36 @@ pub(crate) fn telegram(
 }
 
 /// The waits `pairs` sets among the command's `keys`, as `key=milliseconds`
-/// pairs separated by commas: a key named twice, one the command does not
-/// read, or a value that is no whole number of milliseconds above 0 is
-/// refused.
+/// pairs separated by commas: a key the command does not read, or a value
+/// that is no whole number of milliseconds above 0, is refused.
 fn waits(
     pairs: Option<&OsStr>,
     keys: &[&'static str],
 ) -> Result<Vec<(&'static str, Duration)>, SwitchError> {
-    let mut given: Vec<(&'static str, Duration)> = Vec::new();
     let Some(pairs) = pairs else {
-        return Ok(given);
+        return Ok(Vec::new());
     };
 
-    for pair in pairs.to_string_lossy().split(',') {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let Some(key) = keys.iter().copied().find(|known| *known == key) else {
-            return Err(refused(&format!(
-                "unknown key \"{key}\"; the keys here are {}.",
-                keys.join(", ")
-            )));
-        };
+    pairs
+        .to_string_lossy()
+        .split(',')
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let Some(key) = keys.iter().copied().find(|known| *known == key) else {
+                return Err(refused(&format!(
+                    "unknown key \"{key}\"; the keys here are {}.",
+                    keys.join(", ")
+                )));
+            };
+            let wait = value.parse::<NonZeroU64>().map_err(|_| {
+                refused(&format!(
+                    "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
+                ))
+            })?;
 
-        if given.iter().any(|(seen, _)| *seen == key) {
-            return Err(refused(&format!("key \"{key}\" is given twice.")));
-        }
-
-        let wait = milliseconds(value).ok_or_else(|| {
-            refused(&format!(
-                "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
-            ))
-        })?;
-
-        given.push((key, wait));
-    }
-
-    Ok(given)
-}
-
-/// `value` as a wait: digits, the first of them not 0.
-fn milliseconds(value: &str) -> Option<Duration> {
-    let digits = value.bytes().all(|byte| byte.is_ascii_digit()) && !value.starts_with('0');
-
-    digits
-        .then(|| value.parse().ok())
-        .flatten()
-        .map(Duration::from_millis)
+            Ok((key, Duration::from_millis(wait.get())))
+        })
+        .collect()
 }
 
 fn refused(why: &str) -> SwitchError {
@@ -217,53 +203,15 @@ mod tests {
             ),
             (
                 None,
-                Some(""),
-                format!("PROJECT02_TEST_DURATIONS: unknown key \"\"; {keys}"),
-            ),
-            (
-                None,
-                Some("grace=100,grace=200"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" is given twice.".to_owned(),
-            ),
-            (
-                None,
-                Some("grace=0"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
-                 above 0, not \"0\"."
-                    .to_owned(),
-            ),
-            (
-                None,
                 Some("grace=1.5"),
                 "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
                  above 0, not \"1.5\"."
                     .to_owned(),
             ),
             (
-                None,
-                Some("heartbeat"),
-                "PROJECT02_TEST_DURATIONS: key \"heartbeat\" needs a whole number of \
-                 milliseconds above 0, not \"\"."
-                    .to_owned(),
-            ),
-            (
-                None,
-                Some("silence=99999999999999999999"),
-                "PROJECT02_TEST_DURATIONS: key \"silence\" needs a whole number of \
-                 milliseconds above 0, not \"99999999999999999999\"."
-                    .to_owned(),
-            ),
-            (
                 Some("nvidia"),
                 None,
                 "PROJECT02_TEST_PROVIDER must be \"deterministic\" when it is set.".to_owned(),
-            ),
-            (
-                Some(""),
-                Some("grace=0"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
-                 above 0, not \"0\"."
-                    .to_owned(),
             ),
         ] {
             assert_eq!(

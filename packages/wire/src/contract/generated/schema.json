@@ -1016,23 +1016,11 @@
       "description": "The first frame of a stream that cannot be caught up: the state every\nlater frame moves on from."
     },
     "GatewayRefusalReason": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "unknown_character",
-            "unknown_conversation",
-            "sender_not_supported",
-            "character_unavailable",
-            "invalid_message",
-            "duplicate_submission"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "conversation_unreadable",
-          "description": "The conversation's record could not be read; the message says why."
-        }
+      "type": "string",
+      "enum": [
+        "unknown_conversation",
+        "character_unavailable",
+        "duplicate_submission"
       ],
       "description": "Why a line was refused before any turn ran."
     },
@@ -1276,7 +1264,6 @@
     "OpenRefusal": {
       "type": "string",
       "enum": [
-        "unknown_character",
         "character_unavailable"
       ]
     },
@@ -1422,44 +1409,19 @@
         }
       ]
     },
-    "PackageProvenance": {
-      "type": "string",
-      "enum": [
-        "bundled",
-        "operator"
-      ],
-      "description": "Where a package comes from: compiled in, or added by the person."
-    },
     "PackageReport": {
       "type": "object",
       "properties": {
-        "severity": {
-          "$ref": "#/$defs/Severity",
-          "description": "Always an error: the package is not in the roster."
-        },
         "message": {
           "type": "string"
         },
         "path": {
           "type": "string"
-        },
-        "provenance": {
-          "$ref": "#/$defs/PackageProvenance"
-        },
-        "characterId": {
-          "type": "string",
-          "description": "The folder the package was found in."
-        },
-        "claimedCharacterId": {
-          "description": "The id its descriptor claims, when that is not its folder's.",
-          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
-        "severity",
         "message",
-        "path",
-        "provenance"
+        "path"
       ],
       "description": "A package discovery could not publish, and why, where."
     },
@@ -1490,8 +1452,7 @@
       "type": "string",
       "enum": [
         "unknown_connector",
-        "config_unloadable",
-        "invalid_subject"
+        "config_unloadable"
       ]
     },
     "PairingRequest": {
@@ -2090,7 +2051,7 @@
     },
     "Text": {
       "type": "string",
-      "description": "A line's text: at least one character, and as long as any text of a\nbody may be."
+      "description": "A line's text, as long as a line may be."
     },
     "Timestamp": {
       "type": "string",

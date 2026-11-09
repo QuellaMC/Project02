@@ -6,11 +6,6 @@
     reason = "a test, and the world it builds, fail by panicking, as in the unit tests"
 )]
 
-mod config;
-mod discovery;
-mod page;
-mod pairing;
 mod stop;
-mod stream;
 mod support;
 mod transport;

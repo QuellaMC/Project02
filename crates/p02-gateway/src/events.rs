@@ -90,15 +90,6 @@ struct Tail {
     latest: u64,
 }
 
-/// Why a stream did not open.
-#[derive(Debug)]
-pub(crate) enum Unopened {
-    /// The stop began.
-    Stopping,
-    /// The snapshot would not spell as JSON, which is the daemon's fault.
-    Unformatted(serde_json::Error),
-}
-
 /// The first frame of a stream that cannot be caught up: the state every
 /// later frame moves on from.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
@@ -141,19 +132,20 @@ impl Streams {
     /// id the client last applied, when the tail still holds them; else
     /// `ready`. A connector's stream counts it present from before its
     /// first frame until the stream ends. `link` closes its connection
-    /// when the client stops taking what it is sent.
+    /// when the client stops taking what it is sent. None once the stop
+    /// began.
     pub(crate) async fn open(
         &self,
         last_event_id: Option<&str>,
         connector: Option<&Connector>,
         link: CancellationToken,
-    ) -> Result<Response, Unopened> {
+    ) -> Option<Response> {
         let shared = &self.0;
         let presence = {
             let hub = shared.hub();
 
             if hub.closed {
-                return Err(Unopened::Stopping);
+                return None;
             }
 
             let presence = connector.map(|connector| shared.daemon.connector_present(connector));
@@ -163,14 +155,14 @@ impl Streams {
                     .chain(missed)
                     .collect();
 
-                return Ok(self.join(hub, first, presence, link));
+                return Some(self.join(hub, first, presence, link));
             }
 
             presence
         };
         let (ready, hub) = self.ready().await?;
 
-        Ok(self.join(hub, vec![ready], presence, link))
+        Some(self.join(hub, vec![ready], presence, link))
     }
 
     /// The stream that goes on from `first` with every frame `hub` numbers
@@ -220,7 +212,7 @@ impl Streams {
     /// they show changed under the read, so they hold exactly what the
     /// frames before it told, and the turns running with their drafts as
     /// of that frame.
-    async fn ready(&self) -> Result<(Bytes, MutexGuard<'_, Hub>), Unopened> {
+    async fn ready(&self) -> Option<(Bytes, MutexGuard<'_, Hub>)> {
         let shared = &self.0;
 
         loop {
@@ -236,7 +228,7 @@ impl Streams {
             let mut hub = shared.hub();
 
             if hub.closed {
-                return Err(Unopened::Stopping);
+                return None;
             }
 
             hub.catch_up(&shared.run);
@@ -250,9 +242,8 @@ impl Streams {
                     turns: hub.turns.turns(),
                 };
                 let id = format!("{}-{}", shared.run, hub.tail.latest);
-                let data = serde_json::to_string(&ready).map_err(Unopened::Unformatted)?;
 
-                return Ok((frame(Some(&id), "ready", &data), hub));
+                return Some((frame(&id, "ready", &json(&ready)), hub));
             }
         }
     }
@@ -337,17 +328,11 @@ impl Hub {
             self.changed = self.tail.latest;
         }
 
-        if let Ok(frame) = numbered(run, self.tail.latest, event) {
-            self.tail.keep(self.tail.latest, frame.clone());
-            self.open
-                .retain(|stream| stream.send(frame.clone()).is_ok());
-        } else {
-            // An event its own type cannot spell has no frame, and no
-            // stream may go on as if it had none: each ends, and none
-            // resumes across the number it took.
-            self.tail.forget();
-            self.open.clear();
-        }
+        let frame = numbered(run, self.tail.latest, event);
+
+        self.tail.keep(self.tail.latest, frame.clone());
+        self.open
+            .retain(|stream| stream.send(frame.clone()).is_ok());
     }
 }
 
@@ -365,32 +350,19 @@ impl Tail {
         }
     }
 
-    fn forget(&mut self) {
-        self.frames.clear();
-        self.bytes = 0;
-    }
-
     /// The frames after the one `last_event_id` names, oldest first, and
     /// an empty list when it names the newest; nothing when it is of
     /// another run, names a frame the tail let go or one it never held, or
     /// is no frame's id.
     fn after(&self, run: &str, last_event_id: &str) -> Option<Vec<Bytes>> {
         let (of, number) = last_event_id.split_once('-')?;
-
-        if of != run
-            || !(1..=15).contains(&number.len())
-            || !number.bytes().all(|byte| byte.is_ascii_digit())
-        {
-            return None;
-        }
-
         let number: u64 = number.parse().ok()?;
         let oldest = self
             .frames
             .front()
             .map_or(self.latest + 1, |(oldest, _)| *oldest);
 
-        if number + 1 < oldest || number > self.latest {
+        if of != run || number > self.latest || number + 1 < oldest {
             return None;
         }
 
@@ -407,24 +379,23 @@ impl Tail {
 /// `event` as the frame numbered `number` of `run`: its kind as the event's
 /// name and the event as one line of JSON, which never holds a raw line
 /// break.
-fn numbered(run: &str, number: u64, event: &Event) -> Result<Bytes, serde_json::Error> {
-    let event = serde_json::to_value(event)?;
+fn numbered(run: &str, number: u64, event: &Event) -> Bytes {
+    let event =
+        serde_json::to_value(event).expect("an event holds no map with keys that are not text");
     let kind = event
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or_default();
 
-    Ok(frame(
-        Some(&format!("{run}-{number}")),
-        kind,
-        &event.to_string(),
-    ))
+    frame(&format!("{run}-{number}"), kind, &event.to_string())
 }
 
-fn frame(id: Option<&str>, event: &str, data: &str) -> Bytes {
-    let id = id.map_or_else(String::new, |id| format!("id: {id}\n"));
+fn json(ready: &Ready) -> String {
+    serde_json::to_string(ready).expect("a snapshot holds no map with keys that are not text")
+}
 
-    Bytes::from(format!("{id}event: {event}\ndata: {data}\n\n"))
+fn frame(id: &str, event: &str, data: &str) -> Bytes {
+    Bytes::from(format!("id: {id}\nevent: {event}\ndata: {data}\n\n"))
 }
 
 #[derive(Clone, Copy)]
