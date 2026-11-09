@@ -77,10 +77,9 @@
       <pre><code>PROJECT02_GATEWAY=http://127.0.0.1:&lt;port&gt;/#token=&lt;token&gt;</code></pre>
 
       <p>
-        A home is the daemon's own store, at storage version 15. A home the
-        TypeScript daemon wrote, at version 14, is not read and never converted:
-        <code>serve</code> refuses it, saying which version it found, and the
-        person starts a new home.
+        A home is the daemon's own store, at storage version 15. A home an
+        older build wrote is read as it stands; one a newer Project02 wrote is
+        refused, and <code>serve</code> says so.
       </p>
 
       <p>
@@ -111,7 +110,7 @@
         <code>running</code> is removed by a clean stop and left behind by a
         crash: a reader never trusts it without asking the address, and the
         lease, not the record, is what says a daemon is alive. A record that
-        cannot be read is replaced, with a new token, and said on stderr.
+        cannot be read is replaced, with a new token.
       </p>
       <p>
         The desktop app runs this same daemon inside its own process, through
@@ -157,9 +156,10 @@
         prints <em>Stopping; finishing what is in flight</em>, requests the stop
         at once (a boot still under way is joined, and its late
         <code>ready</code> suppressed), finishes the turns it accepted, ends
-        each stream once every frame queued for it is written, gives an answer
-        still being written two seconds to finish, closes the socket, then
-        rewrites the record without <code>running</code> and releases the lease.
+        each stream once every frame queued for it is written, closes the
+        socket and gives each exchange still in flight two seconds to finish,
+        then rewrites the record without <code>running</code> and releases the
+        lease.
         A client that does not take a frame within two seconds is dropped, at a
         stop as at any other time. A second signal of any kind ends the process
         at once; the lease left behind is the next start's to reclaim. On
@@ -231,11 +231,10 @@
             <td>Every submission has an identity</td>
             <td>
               <code>clientMessageId</code> is required on a turn. A repeat with
-              the same <code>(conversationId, clientMessageId)</code> and the
-              same content joins the turn in flight or returns the recent
-              outcome; the same id with different content is refused; and an id
-              the character already holds from an earlier run of the daemon, on
-              any segment of the conversation, is refused as
+              the same <code>(conversationId, clientMessageId)</code> joins the
+              turn in flight or returns the recent outcome; and an id the
+              character already holds from an earlier run of the daemon, on any
+              segment of the conversation, is refused as
               <code>duplicate_submission</code>. That is what lets a client
               whose answer was lost send the line again under the same id, at
               once or after the daemon came back, without saying it twice;
@@ -261,14 +260,14 @@
             <td>400</td>
             <td><code>invalid_request</code></td>
             <td>
-              Unreadable or mis-shaped body or query, or malformed
-              <code>Authorization</code> syntax.
+              Unreadable or mis-shaped body or query, or a line of more than
+              16,384 characters.
             </td>
           </tr>
           <tr>
             <td>401</td>
             <td><code>unauthorized</code></td>
-            <td>Missing or wrong token.</td>
+            <td>Missing, malformed or wrong token.</td>
           </tr>
           <tr>
             <td>403</td>
@@ -297,11 +296,6 @@
             <td>503</td>
             <td><code>unavailable</code></td>
             <td>The daemon is stopping.</td>
-          </tr>
-          <tr>
-            <td>500</td>
-            <td><code>internal</code></td>
-            <td>A bug. A storage failure is never a 500; it is an outcome.</td>
           </tr>
         </tbody>
       </table>
@@ -349,8 +343,8 @@
             <td>
               <code>{characterId}</code> → <code>OpenOutcome</code>:
               <code>opened</code> with the conversation and user participant
-              ids, <code>refused</code> (<code>unknown_character</code>,
-              <code>character_unavailable</code>), or a storage failure.
+              ids, <code>refused</code> (<code>character_unavailable</code>), or
+              a storage failure.
             </td>
           </tr>
           <tr>
@@ -373,8 +367,9 @@
             <td>
               → <code>HistoryOutcome</code>: the newest page without a cursor,
               chronological within the page, with <code>earlier</code> when
-              older messages remain. <code>limit</code> is 1..500 (default 100);
-              <code>before</code> is the opaque cursor from a previous page.
+              older messages remain. <code>limit</code> is held to 1..500
+              (default 100); <code>before</code> is the opaque cursor from a
+              previous page.
             </td>
           </tr>
           <tr>
@@ -451,8 +446,7 @@
               request — the one already waiting for that account, or a new one —
               <code>paired</code> when the home's allowlist already holds the
               account, or <code>refused</code> (<code>unknown_connector</code>,
-              <code>config_unloadable</code>, <code>invalid_subject</code>).
-              Described below.
+              <code>config_unloadable</code>). Described below.
             </td>
           </tr>
           <tr>
@@ -523,11 +517,8 @@ Content-Type: application/json
         <code>clientMessageId</code> alone. Both stamps match
         <code>^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$</code>, are persisted on the
         user's commit record, and come back in history. A stamp that fails the
-        pattern never reaches a turn: on the wire the body schema answers
-        <code>400</code> <code>invalid_request</code>, and a caller holding the
-        façade in-process gets a <code>refused</code> outcome
-        (<code>invalid_message</code>) — the same rule, checked at whichever
-        boundary the message crosses first.
+        pattern never reaches a turn: the body is answered <code>400</code>
+        <code>invalid_request</code>.
       </p>
 
       <h2>The event stream</h2>
@@ -677,9 +668,8 @@ data: {…}</code></pre>
               the <code>subject</code> (<code>id</code>, <code>label</code>),
               the <code>source</code> it wrote to, <code>requestedAt</code>, and
               <code>expiresAt</code>, an hour on.
-              The same shape the pairing list returns. A request put back after
-              an approval that could not be written is announced again, so a
-              surface adds a request by its code, once.
+              The same shape the pairing list returns; a surface adds a request
+              by its code, once.
             </td>
           </tr>
           <tr>
@@ -783,9 +773,8 @@ data: {…}</code></pre>
         owner sees, one line of at most 128 characters with no space at either
         end — and the <code>source</code>: where the account wrote, as the
         stamp its lines will carry once it is paired,
-        <code>telegram:&lt;bot username&gt;</code> for Telegram. A subject the
-        body schema cannot take is a 400, and one it takes that breaks the rule
-        is refused <code>invalid_subject</code>. The answer is
+        <code>telegram:&lt;bot username&gt;</code> for Telegram. A subject that
+        breaks the rule is a 400. The answer is
         <code>paired</code> when the home's allowlist already holds the
         account, or <code>pending</code> with the request: the one already
         waiting for that account, so asking again is safe, which keeps the
@@ -803,8 +792,7 @@ data: {…}</code></pre>
         request. An approval is the daemon's own config write, through the same
         path as any change: the account, named by its label, goes into that
         field in the home's document — which every character that sets none of
-        its own inherits — under the current fingerprint, with up to three
-        attempts in all when other writes moved the document. A connector
+        its own inherits — under the current fingerprint. A connector
         therefore hears it as <code>health_changed</code>, on which its next
         read finds the account, and then as <code>pairing_settled</code>. An
         answer at or past the deadline is answered <code>expired</code>, the
@@ -813,8 +801,9 @@ data: {…}</code></pre>
         stream. While an approval's write runs the request keeps its place, so
         asking for the same account again gets the same request, and a second
         answer meanwhile is <code>unknown</code>; an approval that could not be
-        written puts the request back on the clock, announced again, and is
-        answered <code>failed</code> with the reason. A request lives as long as
+        written, another write having moved the document first among the
+        reasons, puts the request back on the clock and is answered
+        <code>failed</code> with the reason. A request lives as long as
         the daemon's run: the <code>ready</code> after a restart carries none,
         and asking again makes a new one.
       </p>
@@ -952,9 +941,8 @@ data: {…}</code></pre>
         opened — a tab that reconnected after a restart keeps its id — is routed
         from the store's record of the conversation, so no client reopens a
         thread after a restart; <code>unknown_conversation</code> means a
-        conversation the home does not hold, and a record that cannot be read is
-        refused <code>conversation_unreadable</code> with the reason, never
-        mistaken for one. A reconnect gets its whole world in the
+        conversation the home does not hold or whose record cannot be read,
+        the message saying which. A reconnect gets its whole world in the
         <code>ready</code> frame, or exactly what it missed after
         <code>resumed</code>. A confirmation names the turn that raised it. And
         a turn whose answer was lost is safe to send again under its id.
@@ -1030,7 +1018,7 @@ data: {…}</code></pre>
       <h2>Storage failures are outcomes</h2>
 
       <p>
-        A read-only store, a busy lease, a damaged segment: the daemon answers
+        A read-only store, a busy lease, a missing segment: the daemon answers
         <code
           >{"status": "failed", "code": &lt;storage code&gt;, "message"}</code
         >

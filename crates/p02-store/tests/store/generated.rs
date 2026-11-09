@@ -1,12 +1,12 @@
 //! Logs written the way the runtime writes them, generated at random from
 //! fixed seeds: each must read back as written, record for record and byte
 //! for byte, whatever a crash left after its last line, and a damaged line
-//! before that is never read past.
+//! before that is skipped and named, never the end of the read.
 
 use std::path::PathBuf;
 
 use p02_core::SessionId;
-use p02_store::{LogRecord, SessionLog, StorageError};
+use p02_store::{LogRecord, SessionLog};
 
 use crate::support::{Script, World, answer, conversation_named, lines_of};
 
@@ -177,8 +177,10 @@ fn every_generated_log_reads_back_as_written_and_every_line_re_encodes_to_its_ow
     for seed in 0..100 {
         let (log, path, records) = written(&world, seed);
         let lines = lines_of(&path);
+        let replay = log.read().unwrap();
 
-        assert_eq!(log.read().unwrap().records(), records, "seed {seed}");
+        assert_eq!(replay.records(), records, "seed {seed}");
+        assert!(replay.skipped_lines().is_empty(), "seed {seed}");
         assert_eq!(lines.len(), records.len(), "seed {seed}");
 
         for line in &lines {
@@ -222,12 +224,12 @@ fn what_a_crash_left_of_the_last_line_is_dropped_and_the_next_append_cuts_it() {
 }
 
 #[test]
-fn a_damaged_committed_line_fails_the_read_naming_its_line() {
+fn a_damaged_committed_line_is_skipped_and_named_and_the_lines_before_it_read_as_written() {
     let world = World::new();
     let mut random = Random(5);
 
     for seed in 100..140 {
-        let (log, path, _) = written(&world, seed);
+        let (log, path, records) = written(&world, seed);
         let lines = lines_of(&path);
         let at = random.below(lines.len());
         let mut damaged = lines.clone();
@@ -239,11 +241,9 @@ fn a_damaged_committed_line_fails_the_read_naming_its_line() {
         };
         std::fs::write(&path, damaged.join("\n") + "\n").unwrap();
 
-        match log.read().map(|replay| replay.records().len()) {
-            Err(StorageError::MalformedRecord { line, .. }) => {
-                assert_eq!(line, at + 1, "seed {seed}");
-            }
-            other => panic!("seed {seed}: {other:?}"),
-        }
+        let replay = log.read().unwrap();
+
+        assert_eq!(replay.skipped_lines().numbers()[0], at + 1, "seed {seed}");
+        assert_eq!(replay.records()[..at], records[..at], "seed {seed}");
     }
 }

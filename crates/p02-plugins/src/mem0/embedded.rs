@@ -8,9 +8,7 @@ use p02_shared::{Identifier, error_chain};
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 
-use super::backend::{
-    BackendError, Failure, Found, Operation, RECALL_LIMIT, Readiness, Write, Written,
-};
+use super::backend::{BackendError, Failure, Found, Operation, RECALL_LIMIT, Write, Written};
 
 static DATABASE: LazyLock<Identifier> =
     LazyLock::new(|| Identifier::new("memory").expect("the name is an identifier"));
@@ -23,7 +21,7 @@ pub(super) struct Embedded {
     engine: OnceCell<Engine>,
     /// Re-embedding, running or as it last ended, which ends with the
     /// backend.
-    reembedding: Mutex<Option<JoinHandle<Result<(), EngineError>>>>,
+    reembedding: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Embedded {
@@ -36,13 +34,16 @@ impl Embedded {
     }
 
     /// The engine, opened in the plugin's database when no hook has yet;
-    /// opening it starts re-embedding whatever waits for a vector.
+    /// each use of it starts re-embedding whatever waits for a vector,
+    /// unless a run is under way, so a run that stopped on a failure goes
+    /// on with the next recall or capture.
     pub(super) async fn engine(
         &self,
         databases: Option<&PluginDatabase>,
         operation: Operation,
     ) -> Result<Engine, BackendError> {
         if let Some(engine) = self.engine.get() {
+            self.keep_reembedding(engine);
             return Ok(engine.clone());
         }
 
@@ -67,7 +68,7 @@ impl Embedded {
             .await
             .map_err(unopened)?;
 
-        self.keep_reembedding(engine).await;
+        self.keep_reembedding(engine);
         Ok(engine.clone())
     }
 
@@ -117,71 +118,21 @@ impl Embedded {
         ))
     }
 
-    /// Opens the engine and contacts nothing: verified only once the model
-    /// and the embedder both answered since it opened, and every memory
-    /// has a vector of the current embedder. Re-embedding that stopped on
-    /// a failure is told, and starts again here.
-    pub(super) async fn ping(
-        &self,
-        databases: Option<&PluginDatabase>,
-    ) -> Result<Readiness, BackendError> {
-        let engine = self.engine(databases, Operation::Ping).await?;
-        let status = engine
-            .status()
-            .await
-            .map_err(|error| failed(Operation::Ping, &error))?;
-        let stopped = self.keep_reembedding(&engine).await;
-        let (verified, summary) = if status.unembedded > 0 {
-            let summary = match stopped {
-                Some(why) => format!(
-                    "Mem0 engine could not re-embed its memories for a new embedder ({} to go): \
-                     {why}.",
-                    status.unembedded
-                ),
-                None => format!(
-                    "Mem0 engine is re-embedding its memories for a new embedder; {} to go.",
-                    status.unembedded
-                ),
-            };
+    /// Starts re-embedding unless it runs already: what a run before left
+    /// waits for this one.
+    fn keep_reembedding(&self, engine: &Engine) {
+        let mut running = self
+            .reembedding
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
 
-            (false, summary)
-        } else if status.ready() {
-            (
-                true,
-                "Mem0 engine loaded; its model and embedder have answered.".to_owned(),
-            )
-        } else {
-            (
-                false,
-                "Mem0 engine loaded; its model and embedder are contacted on first capture or \
-                 recall."
-                    .to_owned(),
-            )
-        };
-
-        Ok(Readiness { verified, summary })
-    }
-
-    /// Starts re-embedding unless it runs already, and says why the run
-    /// before stopped short, if it did: what it left waits for this one.
-    async fn keep_reembedding(&self, engine: &Engine) -> Option<String> {
-        let ended = {
-            let mut running = self
-                .reembedding
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-
-            if running.as_ref().is_some_and(|task| !task.is_finished()) {
-                return None;
-            }
-
+        if running.as_ref().is_none_or(JoinHandle::is_finished) {
             let engine = engine.clone();
 
-            running.replace(tokio::spawn(async move { engine.reembed().await }))
-        };
-        let ended = ended?.await.unwrap_or(Err(EngineError::Interrupted));
-
-        ended.err().map(|error| error_chain(&error))
+            *running = Some(tokio::spawn(async move {
+                let _ = engine.reembed().await;
+            }));
+        }
     }
 }
 

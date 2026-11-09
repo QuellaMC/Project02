@@ -6,9 +6,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 /// The settings of the character a plugin host serves, as the host's own
-/// plugin reads and changes them. The host's caller supplies it; without
-/// one, the host's config tools are not offered. Every call does disk
-/// work, so a hook makes it on the blocking pool.
+/// plugin reads and changes them. The host's caller supplies it. Every call
+/// does disk work, so a hook makes it on the blocking pool.
 pub trait ConfigControl: Send + Sync + fmt::Debug {
     /// Plugin `plugin`'s section of her settings, and the fingerprint a
     /// change to her settings presents.
@@ -17,6 +16,14 @@ pub trait ConfigControl: Send + Sync + fmt::Debug {
     ///
     /// [`ReadConfigError`] when her settings cannot be read.
     fn inspect(&self, plugin: &Identifier) -> Result<PluginSettings, ReadConfigError>;
+
+    /// Whether her settings would take `change`, judged as a change of
+    /// them judges it before anything is written.
+    ///
+    /// # Errors
+    ///
+    /// The sentence the change would be refused with.
+    fn check(&self, change: &FieldChange) -> Result<(), String>;
 
     /// Sets or unsets one field of a plugin's section in her own settings,
     /// never the home's, while her settings still have the fingerprint

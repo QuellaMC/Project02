@@ -9,7 +9,7 @@ use std::process;
 
 use p02_app::PROTOCOL_VERSION;
 use p02_core::Timestamp;
-use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, ReadDaemonRecordError, read_daemon_record};
+use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
 use p02_store::{DaemonLease, Home, StorageError};
 
 /// What came of claiming a home.
@@ -30,7 +30,6 @@ pub struct Claim {
     token: DaemonToken,
     /// The port the home's last run bound, for this one to bind again.
     port: Option<NonZeroU16>,
-    unreadable: Option<ReadDaemonRecordError>,
     /// The port the record says this run listens on, once it does.
     published: Option<NonZeroU16>,
 }
@@ -54,10 +53,7 @@ impl Claim {
             }
             Err(error) => return Err(error),
         };
-        let (previous, unreadable) = match read_daemon_record(home.root()) {
-            Ok(previous) => (previous, None),
-            Err(error) => (None, Some(error)),
-        };
+        let previous = read_daemon_record(home.root()).ok().flatten();
 
         Ok(ClaimOutcome::Claimed(Self {
             lease,
@@ -66,7 +62,6 @@ impl Claim {
                 |record| record.token.clone(),
             ),
             port: previous.map(|record| record.port),
-            unreadable,
             published: None,
         }))
     }
@@ -82,13 +77,6 @@ impl Claim {
     #[must_use]
     pub fn port(&self) -> Option<NonZeroU16> {
         self.port
-    }
-
-    /// The record that was there and could not be read, which this claim
-    /// replaces, with a fresh token.
-    #[must_use]
-    pub fn unreadable_record(&self) -> Option<&ReadDaemonRecordError> {
-        self.unreadable.as_ref()
     }
 
     /// Says where the daemon listens: the record is written with the

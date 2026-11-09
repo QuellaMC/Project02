@@ -13,19 +13,18 @@ switches and the signals, and prints the lines it is handed.
   A stream that ends, breaks, or meets a daemon down or stopping (503) is
   opened again a second later from the frame last applied; a record that
   names another port or token then is followed afresh, the bots kept. A
-  token the daemon refuses (401) is said once and the record read again.
-  A `ready` is read for its protocol first: a daemon of another version
-  ends the connector with exit 1, both versions said.
+  daemon that refuses the stream otherwise, its token among the reasons,
+  ends the connector with exit 1, the daemon's sentence said. A `ready` is
+  read for its protocol first: a daemon of another version ends the
+  connector with exit 1, both versions said.
 - **The settings.** The connector config is read on every `ready` and
   every `health_changed`, and once on a stream the daemon resumed; only
   the newest read's answer is applied, and a read that fails is said once
   and tried again, backing off from a second to thirty. Every read holds
   the bots until it lands, and so does a lost stream, until a read begun
-  after the loss lands: no update is handled, no frame applied, not even
-  one a bot was handed before, no write to a paired account made, and the
-  frames since are kept and handed on in order once it does, a `ready`'s
-  snapshot first. The snapshot is kept moved on by every frame, for a bot
-  that catches up.
+  after the loss lands: meanwhile no update is handled and no frame
+  applied, each waiting in its bot's turn. The snapshot is kept moved on
+  by every frame, for a bot that starts.
 - **The bots.** One per token, by the daemon's judgment of each entry: the
   home's management bot while its entry is active and holds
   `managementBotToken`, then each character's while hers is active and
@@ -36,9 +35,8 @@ switches and the signals, and prints the lines it is handed.
   long-polls, fifty seconds at a time, handing each update on in order
   and asking past a batch once all of it was. A token Telegram refuses
   is named once with the settings page to replace it on, and the bot goes
-  quiet; another program polling the token (409) is waited out 30 s, the
-  bot writing nothing until its polls are its own again, when it catches
-  up from the snapshot; a webhook left on the token is removed; a pause
+  quiet; another program polling the token (409) is said once and waited
+  out 30 s at a time; a webhook left on the token is removed; a pause
   Telegram asks for is kept; and a Telegram out of reach is said once and
   backed off from, from a second to thirty, until it answers again.
 - **The Bot API** is eight methods over `reqwest`, each bounded, and each
@@ -61,11 +59,10 @@ switches and the signals, and prints the lines it is handed.
   pairing request to the daemon, from the bot's stamp, and told its code;
   nothing it sends is carried, and it is told how its request ended.
 - **The outbox** makes a bot's calls to Telegram one at a time, in the
-  order decided, none while another program's polls hold the token, and
-  each write to a paired account's chat only while the account is
-  paired, both checked as its turn comes; a text longer than Telegram's
-  4096 goes in as many messages as it takes, counted in UTF-16 units,
-  stopping at one that could not be sent.
+  order decided, and each write to a paired account's chat only while the
+  account is paired, checked as its turn comes; a text longer than
+  Telegram's 4096 goes in as many messages as it takes, counted in UTF-16
+  units, stopping at one that could not be sent.
 - **The stop** cancels every bot, dropping each call in flight, so the
   daemon sees a delivery and a pairing request given up while its turn
   runs on, and answers once every bot has ended.

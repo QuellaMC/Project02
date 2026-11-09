@@ -8,17 +8,21 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, CommittedTurn, Confirmation, ContextItem, ContextItemKind,
-    EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HealthReport, HealthStatus,
-    HookContext, HookReport, HookStatus, Manifest, PluginError, PreparedEffect, ProvidedTool,
-    RedactionLabel, RuntimePlugin, StoreAccess, StoreError, ToolCall, ToolCallId, ToolCallOutcome,
-    ToolConcurrency, ToolInputContract, ToolPreparation, TurnIdentity, TurnText,
+    BeforeRoleModelCallOutput, CharacterStorage, CommittedTurn, Confirmation, ContextItem,
+    ContextItemKind, EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HookContext,
+    HookReport, HookStatus, Manifest, PluginError, PreparedEffect, ProvidedTool, RuntimePlugin,
+    StoreAccess, StoreError, ToolCall, ToolCallId, ToolCallOutcome, ToolConcurrency,
+    ToolInputContract, ToolPreparation, TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
-use p02_plugins::{PluginHost, PluginHostBuilder, ProposedToolCall, ToolCallReport, Turn, list};
+use p02_plugins::{
+    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
+    ProposedToolCall, ReadConfigError, Rebuild, ToolCallReport, Turn, list,
+};
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
@@ -29,7 +33,7 @@ pub(crate) fn id(text: &str) -> Identifier {
     Identifier::new(text).unwrap()
 }
 
-/// A turn of Mira's in session `chat.1`, labeled `turn`.
+/// A turn of Mira's in session `chat.1`.
 pub(crate) fn turn() -> Turn {
     turn_in("chat.1", "evt_1", &["chat.1:message-1"])
 }
@@ -55,8 +59,6 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
             .map(|id| MessageId::parse(id).unwrap())
             .collect(),
     })
-    .with_privacy_labels(vec![RedactionLabel::new("turn").unwrap()])
-    .unwrap()
 }
 
 /// One model round's tool calls through `host`, the reports in call order.
@@ -102,7 +104,6 @@ pub(crate) struct Spec {
     pub(crate) labels: Value,
     pub(crate) before: &'static str,
     pub(crate) tool: &'static str,
-    pub(crate) health: &'static str,
     pub(crate) access: Value,
     pub(crate) config_fields: Value,
 }
@@ -116,7 +117,6 @@ impl Spec {
             labels: json!(["toy"]),
             before: "degrade",
             tool: "reject_tool_call",
-            health: "degrade",
             access: json!({"model_input": "write"}),
             config_fields: json!([]),
         }
@@ -138,17 +138,14 @@ impl Spec {
             "kind": "context_provider",
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
-            "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
             "declaredPlugins": self.declared,
             "config": {"scope": "global_with_character_overrides", "fields": self.config_fields},
-            "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": self.timeout_ms,
                 "redactionLabels": self.labels,
                 "failureBehavior": {
                     "beforeRoleModelCall": self.before,
                     "handleToolCall": self.tool,
-                    "health": self.health,
                 },
             },
             "activation": {"defaultEnabled": false, "reasons": ["test"]},
@@ -177,14 +174,59 @@ impl Enable for PluginHostBuilder {
     }
 }
 
+/// Nobody to ask: every question goes unanswered.
+#[derive(Debug)]
+pub(crate) struct Nobody;
+
+#[async_trait]
+impl Confirmer for Nobody {
+    async fn confirm(&self, _request: ConfirmationRequest) -> ConfirmationDecision {
+        ConfirmationDecision::Cancelled
+    }
+}
+
+/// Settings that never load, for a host whose test asks nothing of them.
+#[derive(Debug)]
+pub(crate) struct NoSettings;
+
+const NO_SETTINGS: &str = "this test keeps no settings";
+
+impl ConfigControl for NoSettings {
+    fn inspect(&self, _plugin: &Identifier) -> Result<PluginSettings, ReadConfigError> {
+        Err(ReadConfigError {
+            sentence: NO_SETTINGS.to_owned(),
+        })
+    }
+
+    fn check(&self, _change: &FieldChange) -> Result<(), String> {
+        Err(NO_SETTINGS.to_owned())
+    }
+
+    fn change(&self, _change: &FieldChange, _rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+        FieldChangeOutcome::Failed {
+            message: NO_SETTINGS.to_owned(),
+        }
+    }
+
+    fn activations(&self) -> Result<Vec<(Identifier, ActivationStatus)>, ReadConfigError> {
+        Err(ReadConfigError {
+            sentence: NO_SETTINGS.to_owned(),
+        })
+    }
+}
+
+/// A host's builder over `storage`, with nobody to ask and no settings.
+pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
+    PluginHost::builder(storage, Arc::new(Nobody), Arc::new(NoSettings))
+}
+
 /// A host of the given plugins over a fresh storage.
 pub(crate) fn host_of(plugins: Vec<(Spec, Arc<dyn RuntimePlugin>)>) -> PluginHost {
     plugins
         .into_iter()
-        .fold(
-            PluginHost::builder(Storage::new()),
-            |builder, (spec, plugin)| builder.enable(&spec, plugin),
-        )
+        .fold(builder(Storage::new()), |builder, (spec, plugin)| {
+            builder.enable(&spec, plugin)
+        })
         .activate()
         .unwrap()
 }
@@ -196,7 +238,6 @@ pub(crate) struct Scripted {
     pub(crate) before: BeforeRoleModelCallOutput,
     pub(crate) tool_outcome: Option<ToolCallOutcome>,
     pub(crate) report: Option<HookReport>,
-    pub(crate) health: Option<HealthReport>,
     pub(crate) calls: AtomicUsize,
 }
 
@@ -267,28 +308,12 @@ impl RuntimePlugin for Scripted {
         }))
     }
 
-    async fn on_session_end(&self, _context: &HookContext) -> Result<HookReport, PluginError> {
-        self.called();
-        Ok(self.report.clone().unwrap_or(HookReport {
-            status: HookStatus::Completed,
-            evidence: Vec::new(),
-        }))
-    }
-
     async fn on_shutdown(&self, _context: &HookContext) -> Result<HookReport, PluginError> {
         self.called();
         Ok(HookReport {
             status: HookStatus::Completed,
             evidence: Vec::new(),
         })
-    }
-
-    async fn health(&self, _context: &HookContext) -> Result<HealthReport, PluginError> {
-        self.called();
-        Ok(self.health.clone().unwrap_or(HealthReport {
-            status: HealthStatus::Ok,
-            summary: "Ready.".to_owned(),
-        }))
     }
 }
 
@@ -352,10 +377,6 @@ impl RuntimePlugin for Hanging {
     ) -> Result<HookReport, PluginError> {
         self.hang(context).await
     }
-
-    async fn health(&self, context: &HookContext) -> Result<HealthReport, PluginError> {
-        self.hang(context).await
-    }
 }
 
 /// Fails every hook at once.
@@ -377,31 +398,6 @@ impl RuntimePlugin for Failing {
         _context: &HookContext,
     ) -> Result<HookReport, PluginError> {
         Err(PluginError::new("backend unreachable"))
-    }
-
-    async fn health(&self, _context: &HookContext) -> Result<HealthReport, PluginError> {
-        Err(PluginError::new("backend unreachable"))
-    }
-}
-
-/// Fails its before-call hook the way a plugin's store call fails: with
-/// the store's refusal beneath the failure.
-#[derive(Debug)]
-pub(crate) struct FailingWithCause;
-
-#[async_trait]
-impl RuntimePlugin for FailingWithCause {
-    async fn before_role_model_call(
-        &self,
-        _context: &HookContext,
-    ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        Err(PluginError::with_source(
-            "the plugin store call failed",
-            std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "the store's lease was refused",
-            ),
-        ))
     }
 }
 
@@ -568,37 +564,6 @@ impl RuntimePlugin for Stalling {
     }
 }
 
-/// Waits in its hook for the host to cancel it, as a plugin on a silent
-/// backend does, then answers with what it gave up.
-#[derive(Debug)]
-pub(crate) struct GivingUp {
-    tools: Vec<ProvidedTool>,
-}
-
-impl GivingUp {
-    pub(crate) const WORD: &'static str = "gave the backend up; whether it wrote is unknown";
-
-    pub(crate) fn new(tools: Vec<ProvidedTool>) -> Arc<Self> {
-        Arc::new(Self { tools })
-    }
-}
-
-#[async_trait]
-impl RuntimePlugin for GivingUp {
-    fn provided_tools(&self) -> &[ProvidedTool] {
-        &self.tools
-    }
-
-    async fn handle_tool_call(
-        &self,
-        _call: &ToolCall,
-        context: &HookContext,
-    ) -> Result<ToolCallOutcome, PluginError> {
-        context.cancellation().cancelled().await;
-        Err(PluginError::new(Self::WORD))
-    }
-}
-
 /// What a hook's context carried: the turn's message, the store and how it
 /// may be used, the session history, and the databases.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -743,14 +708,12 @@ impl RuntimePlugin for SlowTools {
 const SETTINGS: &str = "settings.json";
 
 /// `settings.update` asks the person first. Its preparation refuses a tone
-/// it does not know; otherwise it reads the settings saved now, keeps what
-/// its context carried, trying its store, as no preparation should, with a
-/// write, and answers with `notes`. Its effect saves the new settings.
+/// it does not know; otherwise it reads the settings saved now and answers
+/// with `notes`. Its effect saves the new settings.
 #[derive(Debug)]
 pub(crate) struct Settings {
     tools: Vec<ProvidedTool>,
     notes: Vec<EvidenceNote>,
-    pub(crate) prepared_with: Mutex<Vec<Seen>>,
 }
 
 impl Settings {
@@ -758,7 +721,6 @@ impl Settings {
         Self {
             tools: vec![tool("settings.update").with_confirmation(Confirmation::Required)],
             notes,
-            prepared_with: Mutex::new(Vec::new()),
         }
     }
 }
@@ -793,8 +755,6 @@ impl RuntimePlugin for Settings {
             .ok_or_else(|| PluginError::new("the store was not granted"))?;
         let settings = Value::Object(call.input().clone());
         let saved = store.with_lease(|leased| leased.read_json(SETTINGS))?;
-
-        self.prepared_with.lock().unwrap().push(Seen::of(context));
 
         Ok(ToolPreparation::Prepared {
             preview: [

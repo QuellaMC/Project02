@@ -17,8 +17,8 @@ use p02_gateway::{
     PairingSubjectBody, Ready, Short,
 };
 use p02_shared::{
-    DAEMON_RECORD_FILE, DaemonRecord, DaemonToken, Identifier, SseFrame, SseFrameSplitter,
-    error_sentence, http_client, read_daemon_record,
+    DaemonRecord, DaemonToken, Identifier, SseFrame, SseFrameSplitter, error_sentence, http_client,
+    read_daemon_record,
 };
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
@@ -29,8 +29,7 @@ use tokio_util::sync::CancellationToken;
 use crate::table::Table;
 use crate::{Ended, Lines, Notice};
 
-/// Between two reads of a home whose record is absent or unreadable, or
-/// whose token the daemon refused.
+/// Between two reads of a home whose record is absent or unreadable.
 const RECORD_RETRY: Duration = Duration::from_secs(2);
 
 /// Between a stream lost and the next try at the same record.
@@ -235,8 +234,6 @@ enum Following {
     Stopped,
     /// The record names another daemon now.
     Moved,
-    /// The daemon refused the record's token.
-    Refused,
     Failed(String),
 }
 
@@ -255,7 +252,7 @@ struct Spoken {
 }
 
 /// Follows the daemon the home's record names, the record read again
-/// every 2 s while it is absent, unreadable or refused, until the stop.
+/// every 2 s while it is absent or unreadable, until the stop.
 pub(crate) async fn follow_home(
     home: &Path,
     table: &mut Table,
@@ -271,7 +268,6 @@ pub(crate) async fn follow_home(
                 match follow(home, &record, table, &mut notice, lines, stop).await {
                     Following::Stopped => return Ended::Stopped,
                     Following::Moved => continue,
-                    Following::Refused => {}
                     Following::Failed(sentence) => {
                         lines.report(&sentence);
                         return Ended::Failed;
@@ -294,7 +290,7 @@ pub(crate) async fn follow_home(
     }
 }
 
-/// Follows the daemon `record` names until its stream is refused, the
+/// Follows the daemon `record` names until it refuses its stream, the
 /// record names another, or the stop: a stream that ends, breaks, or
 /// meets a daemon down or stopping is opened again.
 async fn follow(
@@ -346,19 +342,6 @@ async fn follow(
             }
             Err(Unanswered::Unreachable { .. }) => {}
             Err(stopping) if stopping.status() == Some(503) => {}
-            Err(refused) if refused.status() == Some(401) => {
-                table.hold();
-                notice.report(
-                    lines,
-                    format!(
-                        "Telegram connector: the daemon at {} refused the token in {}; trying \
-                         again.",
-                        daemon.origin,
-                        home.join(DAEMON_RECORD_FILE).display()
-                    ),
-                );
-                return Following::Refused;
-            }
             Err(other) => {
                 return Following::Failed(format!(
                     "Telegram connector: the daemon refused its event stream: {}",

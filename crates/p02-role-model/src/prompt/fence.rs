@@ -1,5 +1,5 @@
 //! The fences that set text the character reads apart from what the
-//! runtime says, and the blank space the prompt's grammar reads past.
+//! runtime says.
 
 use crate::prompt::text::{
     EARLIER_CONVERSATION_FENCE, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
@@ -11,27 +11,6 @@ const FENCE_TAGS: [&str; 3] = [
     EARLIER_CONVERSATION_FENCE,
 ];
 
-/// Blank space as the prompt reads it: tab, the line feed, the vertical
-/// tab, the form feed and the carriage return, every Unicode space
-/// separator, the line and paragraph separators, and the byte-order mark.
-pub(crate) fn is_blank(character: char) -> bool {
-    matches!(
-        character,
-        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200a}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202f}'
-                | '\u{205f}'
-                | '\u{3000}'
-                | '\u{feff}'
-    )
-}
-
-pub(crate) fn trim_blank(text: &str) -> &str {
-    text.trim_matches(is_blank)
-}
-
 /// `lines` between the opening and the closing tag of `tag`.
 pub(crate) fn fenced(tag: &str, lines: impl IntoIterator<Item = String>) -> String {
     std::iter::once(format!("<{tag}>"))
@@ -42,8 +21,8 @@ pub(crate) fn fenced(tag: &str, lines: impl IntoIterator<Item = String>) -> Stri
 }
 
 /// Text set inside a fence can never open or close one: each fence tag it
-/// spells, in either case and with the blank space a tag reads past, becomes
-/// a lookalike with hyphens, which stays data.
+/// spells, in either case and with the white space a tag reads past,
+/// becomes a lookalike with hyphens, which stays data.
 pub(crate) fn neutralize(text: &str) -> String {
     FENCE_TAGS.iter().fold(text.to_owned(), |text, tag| {
         let lookalike = tag.replace('_', "-");
@@ -60,9 +39,7 @@ pub(crate) fn bullets<'v>(values: impl IntoIterator<Item = &'v str>) -> Vec<Stri
     let mut lines = Vec::new();
 
     for value in values {
-        let mut value_lines = trim_blank(value)
-            .split('\n')
-            .map(|line| line.strip_suffix('\r').unwrap_or(line));
+        let mut value_lines = value.trim().lines();
 
         match value_lines.next() {
             Some(first) if !first.is_empty() => lines.push(format!("- {first}")),
@@ -106,9 +83,9 @@ fn replace_tags(text: &str, matched: impl Fn(&str) -> Option<usize>, with: &str)
 }
 
 /// How long the opening tag of `tag` is at the start of `candidate`, which
-/// starts with `<`: blank space, then the name, which no word goes on from.
+/// starts with `<`: white space, then the name, which no word goes on from.
 fn opening(candidate: &str, tag: &str) -> Option<usize> {
-    let rest = spelled(candidate[1..].trim_start_matches(is_blank), tag)?;
+    let rest = spelled(candidate[1..].trim_start(), tag)?;
 
     if rest.chars().next().is_some_and(continues_word) {
         return None;
@@ -118,14 +95,12 @@ fn opening(candidate: &str, tag: &str) -> Option<usize> {
 }
 
 /// How long the closing tag of `tag` is at the start of `candidate`, which
-/// starts with `<`: blank space may stand on either side of `/` and before
+/// starts with `<`: white space may stand on either side of `/` and before
 /// the `>`.
 fn closing(candidate: &str, tag: &str) -> Option<usize> {
-    let rest = candidate[1..]
-        .trim_start_matches(is_blank)
-        .strip_prefix('/')?;
-    let rest = spelled(rest.trim_start_matches(is_blank), tag)?;
-    let rest = rest.trim_start_matches(is_blank).strip_prefix('>')?;
+    let rest = candidate[1..].trim_start().strip_prefix('/')?;
+    let rest = spelled(rest.trim_start(), tag)?;
+    let rest = rest.trim_start().strip_prefix('>')?;
 
     Some(candidate.len() - rest.len())
 }
@@ -189,9 +164,9 @@ mod tests {
                 "<earlier_conversation\u{212a}>",
                 "<earlier_conversation\u{212a}>",
             ),
-            ("<\u{feff}recalled_memory>", "<recalled-memory>"),
-            ("</\u{feff}recalled_memory\u{feff}>", "</recalled-memory>"),
-            ("<\u{85}recalled_memory>", "<\u{85}recalled_memory>"),
+            ("<\u{3000}recalled_memory>", "<recalled-memory>"),
+            ("</\u{3000}recalled_memory\u{3000}>", "</recalled-memory>"),
+            ("<\u{85}recalled_memory>", "<recalled-memory>"),
             ("<recalled_memory", "<recalled-memory"),
             ("<<recalled_memory>", "<<recalled-memory>"),
             (
@@ -211,11 +186,7 @@ mod tests {
     #[test]
     fn a_bullet_keeps_its_value_s_shape_and_a_blank_value_has_none() {
         assert_eq!(
-            bullets([
-                " one\r\n  two\n\nthree \u{feff}",
-                "\u{feff}\u{3000}",
-                "four\rfive"
-            ]),
+            bullets([" one\r\n  two\n\nthree \u{3000}", "\u{3000} ", "four\rfive"]),
             ["- one", "    two", "", "  three", "- four\rfive"]
         );
     }

@@ -15,5 +15,4 @@ pub use http::{
     AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody,
     PairingSubjectBody, ParseShortError, ParseTextError, Refusal, Short, Text,
 };
-pub use page::Page;
 pub use server::{BindServerError, Server};

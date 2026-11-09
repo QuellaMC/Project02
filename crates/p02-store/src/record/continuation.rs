@@ -27,7 +27,7 @@ pub struct SessionContinuation {
 
 /// The session continued, and the last event it holds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ContinuedFrom {
     pub session_id: SessionId,
     pub last_event_id: EventId,
@@ -42,7 +42,6 @@ pub enum Summarizer {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SummaryProvider {
     pub name: ProviderName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,7 +49,7 @@ pub struct SummaryProvider {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireContinuation {
     session_id: SessionId,
     continued_from: ContinuedFrom,

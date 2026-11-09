@@ -1,9 +1,9 @@
 //! The host's own plugin, `runtime.plugin`: what the model asks the host
 //! about itself. It lists the plugins the host runs, and on asking every
-//! plugin this build has; and where the host holds the settings of the
-//! character it serves, it shows one plugin's settings and changes one
-//! field of them on the person's yes, rebuilding that plugin live where the
-//! field allows.
+//! plugin this build has; it shows one plugin's settings, as the settings
+//! of the character the host serves hold them, and changes one field of
+//! them on the person's yes, rebuilding that plugin live where the field
+//! allows.
 
 mod config;
 mod inventory;
@@ -28,22 +28,20 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
     )))
 }
 
-/// How a host builds its own plugin: linked to `host`, and offering the
-/// config tools only where `control` hands it the character's settings.
-pub(crate) fn factory(host: &HostLink, control: Option<Arc<dyn ConfigControl>>) -> Box<Factory> {
+/// How a host builds its own plugin: linked to `host`, and reading and
+/// changing the character's settings through `control`.
+pub(crate) fn factory(host: &HostLink, control: Arc<dyn ConfigControl>) -> Box<Factory> {
     let host = host.clone();
 
     Box::new(move |_input: &FactoryInput<'_>| {
         let mut provided = vec![tools::list()?];
 
-        if control.is_some() {
-            provided.extend(tools::config()?);
-        }
+        provided.extend(tools::config()?);
 
         Ok(Arc::new(ManagementPlugin {
             tools: provided,
             host: host.clone(),
-            control: control.clone(),
+            control: Arc::clone(&control),
         }) as Arc<dyn RuntimePlugin>)
     })
 }
@@ -52,7 +50,7 @@ pub(crate) fn factory(host: &HostLink, control: Option<Arc<dyn ConfigControl>>) 
 struct ManagementPlugin {
     tools: Vec<ProvidedTool>,
     host: HostLink,
-    control: Option<Arc<dyn ConfigControl>>,
+    control: Arc<dyn ConfigControl>,
 }
 
 #[async_trait]
@@ -70,9 +68,9 @@ impl RuntimePlugin for ManagementPlugin {
             PLUGIN_LIST_TOOL => {
                 let core = self.host.core()?;
 
-                inventory::answer(&core, self.control.clone(), call).await
+                inventory::answer(&core, Arc::clone(&self.control), call).await
             }
-            tools::CONFIG => config::inspect(self.control()?, call).await,
+            tools::CONFIG => config::inspect(Arc::clone(&self.control), call).await,
             other => Err(PluginError::new(format!(
                 "{HOST_PLUGIN} answers no tool \"{other}\" at once"
             ))),
@@ -85,19 +83,12 @@ impl RuntimePlugin for ManagementPlugin {
         _context: &HookContext,
     ) -> Result<ToolPreparation, PluginError> {
         match call.tool_name().as_str() {
-            tools::UPDATE => config::prepare(self.control()?, self.host.clone(), call).await,
+            tools::UPDATE => {
+                config::prepare(Arc::clone(&self.control), self.host.clone(), call).await
+            }
             other => Err(PluginError::new(format!(
                 "{HOST_PLUGIN} prepares no tool \"{other}\""
             ))),
         }
-    }
-}
-
-impl ManagementPlugin {
-    /// The character's settings, which its config tools exist only with.
-    fn control(&self) -> Result<Arc<dyn ConfigControl>, PluginError> {
-        self.control
-            .clone()
-            .ok_or_else(|| PluginError::new("the host holds no settings of its character"))
     }
 }

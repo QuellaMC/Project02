@@ -4,6 +4,7 @@
 //! than doing nothing, before anything is bound or written.
 
 use std::ffi::OsStr;
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use p02_app::Durations;
@@ -22,42 +23,19 @@ pub(crate) const TEST_DURATIONS: &str = "PROJECT02_TEST_DURATIONS";
 pub(crate) const TEST_TELEGRAM_API: &str = "PROJECT02_TEST_TELEGRAM_API";
 
 /// The waits serve reads, in the order a refusal lists them.
-const SERVE_KEYS: [&str; 7] = [
-    "confirmation",
-    "pairing",
-    "silence",
-    "heartbeat",
-    "grace",
-    "hold",
-    "probe",
-];
+const SERVE_KEYS: [&str; 5] = ["confirmation", "pairing", "silence", "heartbeat", "grace"];
 
 /// The one wait the connector reads: between two edits of a draft.
 const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
-/// through, the daemon's waits, and the two a second serve keeps itself.
-/// The default is a run no switch touched, the one a program that runs the
-/// daemon starts, since no switch is a setting a person sees.
-#[derive(Debug)]
+/// through, and the daemon's waits. The default is a run no switch touched,
+/// the one a program that runs the daemon starts, since no switch is a
+/// setting a person sees.
+#[derive(Debug, Default)]
 pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
     pub(crate) durations: Durations,
-    /// How long a second serve waits for a holder that does not answer.
-    pub(crate) hold: Duration,
-    /// How long one question to that holder waits for its answer.
-    pub(crate) probe: Duration,
-}
-
-impl Default for Switches {
-    fn default() -> Self {
-        Self {
-            test_provider: None,
-            durations: Durations::default(),
-            hold: Duration::from_secs(30),
-            probe: Duration::from_secs(5),
-        }
-    }
 }
 
 /// A switch the command cannot use, and why.
@@ -88,9 +66,7 @@ pub(crate) fn read(
             "pairing" => switches.durations.pairing = wait,
             "silence" => switches.durations.model_silence = Some(wait),
             "heartbeat" => switches.durations.heartbeat = wait,
-            "grace" => switches.durations.grace = wait,
-            "hold" => switches.hold = wait,
-            _ => switches.probe = wait,
+            _ => switches.durations.grace = wait,
         }
     }
 
@@ -136,51 +112,36 @@ pub(crate) fn telegram(
 }
 
 /// The waits `pairs` sets among the command's `keys`, as `key=milliseconds`
-/// pairs separated by commas: a key named twice, one the command does not
-/// read, or a value that is no whole number of milliseconds above 0 is
-/// refused.
+/// pairs separated by commas: a key the command does not read, or a value
+/// that is no whole number of milliseconds above 0, is refused.
 fn waits(
     pairs: Option<&OsStr>,
     keys: &[&'static str],
 ) -> Result<Vec<(&'static str, Duration)>, SwitchError> {
-    let mut given: Vec<(&'static str, Duration)> = Vec::new();
     let Some(pairs) = pairs else {
-        return Ok(given);
+        return Ok(Vec::new());
     };
 
-    for pair in pairs.to_string_lossy().split(',') {
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let Some(key) = keys.iter().copied().find(|known| *known == key) else {
-            return Err(refused(&format!(
-                "unknown key \"{key}\"; the keys here are {}.",
-                keys.join(", ")
-            )));
-        };
+    pairs
+        .to_string_lossy()
+        .split(',')
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let Some(key) = keys.iter().copied().find(|known| *known == key) else {
+                return Err(refused(&format!(
+                    "unknown key \"{key}\"; the keys here are {}.",
+                    keys.join(", ")
+                )));
+            };
+            let wait = value.parse::<NonZeroU64>().map_err(|_| {
+                refused(&format!(
+                    "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
+                ))
+            })?;
 
-        if given.iter().any(|(seen, _)| *seen == key) {
-            return Err(refused(&format!("key \"{key}\" is given twice.")));
-        }
-
-        let wait = milliseconds(value).ok_or_else(|| {
-            refused(&format!(
-                "key \"{key}\" needs a whole number of milliseconds above 0, not \"{value}\"."
-            ))
-        })?;
-
-        given.push((key, wait));
-    }
-
-    Ok(given)
-}
-
-/// `value` as a wait: digits, the first of them not 0.
-fn milliseconds(value: &str) -> Option<Duration> {
-    let digits = value.bytes().all(|byte| byte.is_ascii_digit()) && !value.starts_with('0');
-
-    digits
-        .then(|| value.parse().ok())
-        .flatten()
-        .map(Duration::from_millis)
+            Ok((key, Duration::from_millis(wait.get())))
+        })
+        .collect()
 }
 
 fn refused(why: &str) -> SwitchError {
@@ -202,14 +163,10 @@ mod tests {
 
         assert_eq!(unset.test_provider, None);
         assert_eq!(unset.durations, Durations::default());
-        assert_eq!(
-            (unset.hold, unset.probe),
-            (Duration::from_secs(30), Duration::from_secs(5))
-        );
 
         let set = switched(
             Some("deterministic"),
-            Some("confirmation=1,pairing=2,silence=3,heartbeat=4,grace=5,hold=6,probe=7"),
+            Some("confirmation=1,pairing=2,silence=3,heartbeat=4,grace=5"),
         )
         .unwrap();
 
@@ -225,7 +182,6 @@ mod tests {
                 grace: ms(5),
             }
         );
-        assert_eq!((set.hold, set.probe), (ms(6), ms(7)));
         assert_eq!(
             switched(None, Some("grace=100")).unwrap().durations,
             Durations {
@@ -237,8 +193,7 @@ mod tests {
 
     #[test]
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
-        let keys =
-            "the keys here are confirmation, pairing, silence, heartbeat, grace, hold, probe.";
+        let keys = "the keys here are confirmation, pairing, silence, heartbeat, grace.";
 
         for (provider, durations, said) in [
             (
@@ -248,53 +203,15 @@ mod tests {
             ),
             (
                 None,
-                Some(""),
-                format!("PROJECT02_TEST_DURATIONS: unknown key \"\"; {keys}"),
-            ),
-            (
-                None,
-                Some("grace=100,grace=200"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" is given twice.".to_owned(),
-            ),
-            (
-                None,
-                Some("grace=0"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
-                 above 0, not \"0\"."
-                    .to_owned(),
-            ),
-            (
-                None,
                 Some("grace=1.5"),
                 "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
                  above 0, not \"1.5\"."
                     .to_owned(),
             ),
             (
-                None,
-                Some("hold"),
-                "PROJECT02_TEST_DURATIONS: key \"hold\" needs a whole number of milliseconds \
-                 above 0, not \"\"."
-                    .to_owned(),
-            ),
-            (
-                None,
-                Some("probe=99999999999999999999"),
-                "PROJECT02_TEST_DURATIONS: key \"probe\" needs a whole number of milliseconds \
-                 above 0, not \"99999999999999999999\"."
-                    .to_owned(),
-            ),
-            (
                 Some("nvidia"),
                 None,
                 "PROJECT02_TEST_PROVIDER must be \"deterministic\" when it is set.".to_owned(),
-            ),
-            (
-                Some(""),
-                Some("grace=0"),
-                "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
-                 above 0, not \"0\"."
-                    .to_owned(),
             ),
         ] {
             assert_eq!(

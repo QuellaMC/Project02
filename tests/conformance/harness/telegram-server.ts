@@ -2,10 +2,9 @@
  * Telegram's Bot API on loopback, standing in for api.telegram.org: the
  * connector's environment points it here, and it answers the methods the
  * connector calls by Telegram's envelope and its server's rules — a long
- * poll waits for updates until a newer poll on its token ends it with a
- * 409, a message's id is unique only within its chat, an edit that
- * changes nothing is a 400 — keeping every call, the refused ones too,
- * with the moment it came.
+ * poll waits for updates or its timeout, a message's id is unique only
+ * within its chat, an edit that changes nothing is a 400 — keeping every
+ * call, the refused ones too, with the moment it came.
  */
 import {
   createServer,
@@ -70,17 +69,10 @@ export type TelegramServer = {
     retryAfterSeconds: number,
     method?: string,
   ) => void;
-  /** Telegram sends the token's updates to a webhook, and refuses its polls, until `deleteWebhook`. */
-  readonly setWebhook: (token: string) => void;
-  /** The token is no bot's any more: every call on it is refused. */
-  readonly revokeBot: (token: string) => void;
   /** Telegram out of reach: every call, a waiting poll's too, is dropped unanswered until `back`. */
   readonly away: () => void;
   readonly back: () => void;
 };
-
-/** A waiting poll is answered, or ended by a newer one on its token. */
-type PollEnding = 'answer' | 'conflict';
 
 type Bot = {
   readonly id: number;
@@ -90,18 +82,13 @@ type Bot = {
   readonly contents: Map<string, string>;
   /** The id of the last message sent in each chat. */
   readonly lastMessageIds: Map<string, number>;
-  webhook: boolean;
   throttled:
     | {readonly retryAfterSeconds: number; readonly method: string | undefined}
     | undefined;
-  /** Ends the poll waiting on this token, if one is. */
-  endWaitingPoll: ((ending: PollEnding) => void) | undefined;
+  /** Answers the poll waiting on this token, if one is. */
+  endWaitingPoll: (() => void) | undefined;
 };
 
-const conflictDescription =
-  'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running';
-const webhookDescription =
-  "Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first";
 const notModifiedDescription =
   'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message';
 
@@ -185,15 +172,7 @@ export async function startTelegramServer(
         envelope(response, 200, {ok: true, result: userOf(bot)});
         break;
       case 'getUpdates':
-        if (bot.webhook) {
-          refuse(response, 409, webhookDescription);
-        } else {
-          await answerPoll(bot, fields, response);
-        }
-        break;
-      case 'deleteWebhook':
-        bot.webhook = false;
-        envelope(response, 200, {ok: true, result: true});
+        await answerPoll(bot, fields, response);
         break;
       case 'sendMessage': {
         const chat = String(fields['chat_id']);
@@ -237,7 +216,6 @@ export async function startTelegramServer(
       updates: [],
       contents: new Map(),
       lastMessageIds: new Map(),
-      webhook: false,
       throttled: undefined,
       endWaitingPoll: undefined,
     });
@@ -249,7 +227,7 @@ export async function startTelegramServer(
       const bot = registered(token);
 
       bot.updates.push(...updates);
-      bot.endWaitingPoll?.('answer');
+      bot.endWaitingPoll?.();
     },
     calls: (token, method) =>
       calls.items.filter(
@@ -275,13 +253,6 @@ export async function startTelegramServer(
     },
     throttle(token, retryAfterSeconds, method) {
       registered(token).throttled = {retryAfterSeconds, method};
-    },
-    setWebhook(token) {
-      registered(token).webhook = true;
-    },
-    revokeBot(token) {
-      bots.get(token)?.endWaitingPoll?.('answer');
-      bots.delete(token);
     },
     away() {
       away = true;
@@ -365,9 +336,8 @@ export function pressOn(
 
 /**
  * Answers at once when updates wait past the offset; otherwise waits for
- * one, for `timeout` seconds, or until a newer poll on the token ends
- * this one — the older poll is the one Telegram's server answers 409.
- * An offset confirms every update before it, which Telegram then forgets.
+ * one, for `timeout` seconds. An offset confirms every update before it,
+ * which Telegram then forgets.
  */
 async function answerPoll(
   bot: Bot,
@@ -383,43 +353,32 @@ async function answerPoll(
   bot.updates = pending();
 
   if (bot.updates.length === 0 && timeoutSeconds > 0) {
-    bot.endWaitingPoll?.('conflict');
-
-    if ((await waitForUpdates(bot, timeoutSeconds, response)) === 'conflict') {
-      refuse(response, 409, conflictDescription);
-
-      return;
-    }
+    await waitForUpdates(bot, timeoutSeconds, response);
   }
 
   envelope(response, 200, {ok: true, result: pending()});
 }
 
-/** Ends at the timeout, at a newer poll or an update, or once the poller hung up. */
+/** Ends at the timeout, at an update, or once the poller hung up. */
 function waitForUpdates(
   bot: Bot,
   timeoutSeconds: number,
   response: ServerResponse,
-): Promise<PollEnding> {
+): Promise<void> {
   return new Promise(resolve => {
-    const end = (ending: PollEnding): void => {
+    const end = (): void => {
       clearTimeout(timer);
-      response.off('close', hungUp);
+      response.off('close', end);
 
       if (bot.endWaitingPoll === end) {
         bot.endWaitingPoll = undefined;
       }
 
-      resolve(ending);
+      resolve();
     };
-    const timer = setTimeout(() => {
-      end('answer');
-    }, timeoutSeconds * 1_000);
-    const hungUp = (): void => {
-      end('answer');
-    };
+    const timer = setTimeout(end, timeoutSeconds * 1_000);
 
-    response.once('close', hungUp);
+    response.once('close', end);
     bot.endWaitingPoll = end;
   });
 }

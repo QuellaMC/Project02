@@ -1,8 +1,11 @@
 //! Session logs written by hand, apart from the encoder: what a valid log
-//! holds, spelled out, reads back and re-encodes to the same bytes, and a
-//! record that breaks a rule is refused as damage, whoever wrote it.
+//! holds, spelled out, reads back and re-encodes to the same bytes; a
+//! record is taken as it was written, and one that fits no turn is skipped
+//! and named.
 
-use p02_store::{LogRecord, StorageError};
+use p02_contracts::DecisionResult;
+use p02_core::ClientStamp;
+use p02_store::{LogRecord, RecordBody};
 
 use crate::support::{World, conversation_named, lines_of, session};
 
@@ -13,7 +16,7 @@ const TEA_CALLED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"
 const TEA_ANSWERED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"tool_call_finished","round":1,"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","toolName":"character_state.patch","toolPluginId":"character-state","dispatchedToHost":true,"toolResult":{"status":"accepted","output":{"mood":"warm"}},"runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"character-state","evidenceKind":"tool_invocation","status":"accepted","summary":"Mood set.","redactionLabels":[]}]}"#;
 const TEA_ROUND_2: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"role_model_round","round":2,"roleModelIOSnapshot":{"inputEnvelope":{"event":{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z"},"userMessage":"Tea?","decisionContext":{"sessionId":"conv_a.1","characterSnapshot":{"id":"mira","displayName":"Mira"},"historyWindow":{"turnEventIds":[]},"runtimeNotes":[],"pluginContextItems":[],"curatedContextSections":[]},"pluginToolDefinitions":[],"toolRounds":[],"outputContract":{"version":"mvp-006.tool_calls.v1"}},"rawOutputText":"{\"toolCalls\":[{\"name\":\"visible_reply\",\"input\":{\"text\":\"Tea, always.\"}}]}","characterRef":{"version":"1.1.0","personaFingerprint":"sha256:6b965dfe599ffa2f70010c2ccb993b9305b8bc98f0badd2f9cb582c853836931"},"promptSize":{"frames":[{"kind":"system_protocol","count":1,"chars":100}],"toolChars":0}},"parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"version":"mvp-006.tool_calls.v1","toolCalls":[{"name":"visible_reply","input":{"text":"Tea, always."}}]}}}}"#;
 const TEA_REPLIED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-2"],"visibleMessage":{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always."},"round":2}"#;
-const TEA_COMPLETED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_completed","status":"completed","visibleMessageIds":["conv_a.1:message-1","conv_a.1:message-2"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}},"runtimePluginTurnEvidence":{"health":[{"pluginId":"mem0","status":"ok","checkedAt":"2026-10-21T09:00:00.000Z","summary":"Ready.","redactionLabels":[]}]}}"#;
+const TEA_COMPLETED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_completed","status":"completed","visibleMessageIds":["conv_a.1:message-1","conv_a.1:message-2"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}}"#;
 const TEA_AFTER: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"after_turn_committed","status":"completed_with_failures","runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"mem0","evidenceKind":"after_turn_committed","status":"degraded","summary":"Not queued.","redactionLabels":[]}]}"#;
 const BLANK_RECEIVED: &str = r#"{"eventId":"evt_2","traceId":"trace_2","createdAt":"2026-10-21T09:01:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" \t\n "}}"#;
 const BLANK_REFUSED: &str = r#"{"eventId":"evt_2","traceId":"trace_2","createdAt":"2026-10-21T09:01:00.000Z","kind":"runtime_turn_rejected","reason":"input_validation_rejected","message":"Provide a non-empty message."}"#;
@@ -65,142 +68,94 @@ fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
         let encoded: Vec<String> = replay.records().iter().map(LogRecord::to_line).collect();
 
         assert_eq!(encoded, lines_of(&path));
+        assert!(replay.skipped_lines().is_empty());
     }
 }
 
+/// A record is read as it was written: a field this build does not know
+/// is ignored, a round keeps the verdict it recorded, and no record is
+/// held to the order or the agreement of the records before it.
 #[test]
-fn a_record_that_breaks_a_rule_is_refused_as_damage_on_its_own_line() {
+fn a_record_is_taken_as_written_whatever_the_records_before_it_say() {
     let world = World::new();
     let conversation = conversation_named("conv_a");
     let log = world.log_of(&conversation, 1);
-    let path = world.path_of(log.session_id());
+    let lines = [
+        TEA_RECEIVED.to_owned(),
+        // A round before the line, its verdict other than its output reads as.
+        replace(
+            TEA_ROUND_1,
+            r#""text":"Checking."}}}}"#,
+            r#""text":"Something else."}}}}"#,
+        ),
+        replace(
+            TEA_ASKED,
+            r#""source":"web""#,
+            r#""source":"web","mood":"warm""#,
+        ),
+        // A reply its round never said, and an ending naming other messages.
+        replace(TEA_REPLIED, "Tea, always.", "Coffee."),
+        replace(TEA_COMPLETED, r#""conv_a.1:message-1","#, ""),
+        BLANK_RECEIVED.to_owned(),
+        // The line submitted as "tea" committed a second time.
+        second(TEA_ASKED).replace("message-1", "message-3"),
+    ];
 
     world.first_segment(&conversation).unwrap().release();
+    std::fs::write(world.path_of(log.session_id()), lines.join("\n") + "\n").unwrap();
 
-    for (rule, says, lines) in broken_logs() {
-        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+    let replay = log.read().unwrap();
+    let RecordBody::ModelRound(round) = replay.records()[1].body() else {
+        panic!("{:?}", replay.records()[1]);
+    };
+    let DecisionResult::Accepted { decision } = round.result() else {
+        panic!("{round:?}");
+    };
 
-        match log.read().map(|replay| replay.records().len()) {
-            Err(
-                error @ (StorageError::MalformedRecord { line, .. }
-                | StorageError::BrokenLog { line, .. }),
-            ) => {
-                assert_eq!(line, lines.len(), "{rule}");
-                assert_eq!(error.code(), "malformed_record", "{rule}");
-                assert!(
-                    chain_of(&error).contains(says),
-                    "{rule}: {}",
-                    chain_of(&error)
-                );
-            }
-            other => panic!("{rule}: {other:?}"),
-        }
-    }
-
-    let continued = world.log_of(&conversation, 2);
-
-    world.next_segment(&conversation, 1).unwrap().release();
-    std::fs::write(
-        world.path_of(continued.session_id()),
-        [
-            CONTINUED,
-            &replace(
-                &replace(
-                    &replace(TEA_RECEIVED, "evt_1", "evt_5"),
-                    "trace_1",
-                    "trace_5",
-                ),
-                "09:00:00",
-                "09:06:00",
-            ),
-        ]
-        .join("\n")
-            + "\n",
-    )
-    .unwrap();
-    assert!(
-        matches!(
-            continued.read(),
-            Err(StorageError::BrokenLog { line: 2, ref source, .. })
-                if source.to_string().contains("under the continuation's identity")
-        ),
-        "a turn under the continuation's identity"
-    );
-
-    std::fs::write(&path, b"{\"eventId\":\"\xff\"}\n").unwrap();
-    assert!(
-        matches!(
-            log.read(),
-            Err(StorageError::MalformedRecord { line: 1, .. })
-        ),
-        "a line that is not UTF-8"
+    assert!(replay.skipped_lines().is_empty());
+    assert_eq!(replay.records().len(), lines.len());
+    assert_eq!(decision.text(), Some("Something else."));
+    assert_eq!(replay.records()[2].to_line(), TEA_ASKED);
+    assert_eq!(
+        replay.user_lines()[&ClientStamp::new("tea").unwrap()].to_string(),
+        "conv_a.1:message-1"
     );
 }
 
-/// Each a log whose last line breaks one rule a record keeps, alone or
-/// given the records before it: the rule, what its refusal says, the log.
-fn broken_logs() -> Vec<(&'static str, &'static str, Vec<String>)> {
-    let start = [TEA_RECEIVED];
-    let asked = [TEA_RECEIVED, TEA_ASKED];
-    let called = [TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_CALLED];
+/// A record whose turn never started, a continuation after the session
+/// began, and a message whose number does not climb fit no turn: each is
+/// skipped and named, and the session reads without it.
+#[test]
+fn a_record_that_fits_no_turn_is_skipped_and_named_and_the_session_reads() {
+    let world = World::new();
+    let conversation = conversation_named("conv_a");
+    let log = world.log_of(&conversation, 1);
+    let lines = [
+        TEA_ASKED.to_owned(),
+        BLANK_RECEIVED.to_owned(),
+        BLANK_REFUSED.to_owned(),
+        CONTINUED.to_owned(),
+        TEA_RECEIVED.to_owned(),
+        TEA_ASKED.to_owned(),
+        second(TEA_ASKED),
+    ];
 
-    vec![
-        ("no record", "missing field `traceId`", vec![r#"{"eventId": "evt_torn"}"#.to_owned()]),
-        ("not JSON", "not JSON", vec![TEA_RECEIVED[..40].to_owned()]),
-        ("an array", "not a JSON object", vec!["[]".to_owned()]),
-        ("an unknown kind", "unknown variant `runtime_event_lost`", vec![replace(TEA_RECEIVED, "runtime_event_received", "runtime_event_lost")]),
-        ("a field of another kind", "unknown field `round`", vec![replace(TEA_RECEIVED, "}}", r#"},"round":1}"#)]),
-        ("a lone surrogate", "not JSON", vec![replace(TEA_RECEIVED, r#"" Tea? ""#, r#""\ud83d""#)]),
-        ("a number past a double", "number out of range", vec![replace(TEA_RECEIVED, "}}", r#"},"round":1e400}"#)]),
-        ("equal event and trace ids", "apart from its trace id", vec![replace(TEA_RECEIVED, "trace_1", "evt_1")]),
-        ("a time that is no moment", "not a canonical UTC timestamp", vec![replace(TEA_RECEIVED, "09:00:00.000Z", "24:00:00.000Z")]),
-        ("a turn that never started", "no runtime_event_received", vec![TEA_ASKED.to_owned()]),
-        ("a turn started twice", "starts a second time", vec![TEA_RECEIVED.to_owned(), TEA_RECEIVED.to_owned()]),
-        ("one event at two times", "disagree on when it was created", strings(&start).into_iter().chain([replace(TEA_ASKED, "09:00:00.000Z", "09:00:00.001Z")]).collect()),
-        ("a record after the turn ended", "after the record that ended it", strings(&[BLANK_RECEIVED, BLANK_REFUSED, BLANK_REFUSED])),
-        ("two turns at once", "not the open turn", strings(&[TEA_RECEIVED, BLANK_RECEIVED, TEA_ASKED])),
-        ("a round before the line", "after the turn committed the person's line", strings(&start).into_iter().chain([TEA_ROUND_1.to_owned()]).collect()),
-        ("a reply before the line", "exactly one message of the person's", strings(&start).into_iter().chain([TEA_REPLIED.to_owned()]).collect()),
-        ("a second line", "exactly one message of the person's", strings(&[TEA_RECEIVED, TEA_ASKED, &TEA_ASKED.replace("message-1", "message-2").replace(r#""clientMessageId":"tea""#, r#""clientMessageId":"again""#)])),
-        ("a line other than the model was given", "the line its event was taken as", strings(&start).into_iter().chain([replace(TEA_ASKED, "Tea?", "Coffee?")]).collect()),
-        ("a message under another name", "not under its speaker's id and name", strings(&start).into_iter().chain([replace(TEA_ASKED, r#""speakerName":"Sam""#, r#""speakerName":"Samuel""#)]).collect()),
-        ("a message number that does not climb", "does not climb", strings(&[TEA_RECEIVED, TEA_ASKED, &second(TEA_RECEIVED), &second(TEA_ASKED).replace(r#""clientMessageId":"tea""#, r#""clientMessageId":"again""#)])),
-        ("a line submitted again under its id", "committed a second time", strings(&FIRST_SEGMENT[..9]).into_iter().chain([second(TEA_RECEIVED), second(TEA_ASKED).replace("message-1", "message-3")]).collect()),
-        ("a line committed from an event refused as one", "the line its event was taken as", strings(&[BLANK_RECEIVED, &second(TEA_ASKED)])),
-        ("a round before its round's calls", "before taking up all it gave", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), TEA_ROUND_2.to_owned()]).collect()),
-        ("a round while a call is unfinished", "before taking up all it gave", strings(&called).into_iter().chain([TEA_ROUND_2.to_owned()]).collect()),
-        ("a round out of sequence", "out of sequence", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""round":1"#, r#""round":2"#)]).collect()),
-        ("a decision the output does not read as", "does not read as", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""text":"Checking."}}}}"#, r#""text":"Something else."}}}}"#)]).collect()),
-        ("a round shown another session", "another session", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""sessionId":"conv_a.1""#, r#""sessionId":"conv_b.1""#)]).collect()),
-        ("a round shown another character", "another character", strings(&asked).into_iter().chain([replace(TEA_ROUND_1, r#""displayName":"Mira""#, r#""displayName":"Zeta""#)]).collect()),
-        ("a call of a round never run", "which the turn never ran", strings(&asked).into_iter().chain([TEA_CALLED.to_owned()]).collect()),
-        ("a call of a refused round", "not the next call an accepted round", strings(&[FAILED_RECEIVED, FAILED_ASKED, FAILED_ROUND, &replace(&replace(&replace(TEA_CALLED, "evt_1", "evt_3"), "trace_1", "trace_3"), "09:00:00", "09:02:00")])),
-        ("a call its round never asked", "not the next call an accepted round", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), replace(TEA_CALLED, r#"{"mood":"warm"}"#, r#"{"mood":"cold"}"#)]).collect()),
-        ("an undeclared call answered", "never an answer", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""dispatchedToHost":true"#, r#""dispatchedToHost":false"#)]).collect()),
-        ("a call that finished before it started", "never started", strings(&[TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_ANSWERED])),
-        ("a call that finished as another", "as another call", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""toolName":"character_state.patch","toolPluginId":"character-state","dispatched"#, r#""toolName":"character_state.reset","toolPluginId":"character-state","dispatched"#)]).collect()),
-        ("a round that kept a credential it wrote", "every credential-named value redacted", strings(&asked).into_iter().chain([replace(&replace(TEA_ROUND_1, r#"{\"mood\":\"warm\"}"#, r#"{\"api_key\":\"sk-live\"}"#), r#"{"mood":"warm"}"#, r#"{"api_key":"[redacted]"}"#)]).collect()),
-        ("a call that kept a credential", "credentials redacted", strings(&asked).into_iter().chain([replace(&replace(TEA_ROUND_1, r#"{\"mood\":\"warm\"}"#, r#"{\"api_key\":\"[redacted]\"}"#), r#"{"mood":"warm"}"#, r#"{"api_key":"[redacted]"}"#), replace(TEA_CALLED, r#"{"mood":"warm"}"#, r#"{"api_key":"sk-live"}"#)]).collect()),
-        ("evidence of another event", "evidence of another event", strings(&called).into_iter().chain([replace(TEA_ANSWERED, r#""createdAt":"2026-10-21T09:00:00.000Z","pluginId""#, r#""createdAt":"2026-10-21T09:00:01.000Z","pluginId""#)]).collect()),
-        ("a reply its round never said", "not the next reply", strings(&[TEA_RECEIVED, TEA_ASKED, TEA_ROUND_1, TEA_CALLED, TEA_ANSWERED, TEA_ROUND_2, &replace(TEA_REPLIED, "Tea, always.", "Coffee.")])),
-        ("a reply of a refused round", "not said by an accepted round", strings(&[FAILED_RECEIVED, FAILED_ASKED, FAILED_ROUND, &replace(&replace(&replace(&replace(TEA_REPLIED, "evt_1", "evt_3"), "trace_1", "trace_3"), "09:00:00", "09:02:00"), r#""round":2"#, r#""round":1"#)])),
-        ("a turn completed with a call unfinished", "unfinished", strings(&called).into_iter().chain([replace(replace(TEA_COMPLETED, r#","round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}"#, r#","round":1,"commitValidation":{"result":{"status":"accepted"}}"#).as_str(), r#"["conv_a.1:message-1","conv_a.1:message-2"]"#, r#"["conv_a.1:message-1"]"#)]).collect()),
-        ("a terminal naming other messages", "other messages", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""conv_a.1:message-1","#, "")]).collect()),
-        ("a terminal judging an earlier round", "not the round the turn ended on", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""round":2"#, r#""round":1"#)]).collect()),
-        ("a terminal anchoring a reply never said", "anchors the last reply", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""acceptedVisibleReplyText":"Tea, always.""#, r#""acceptedVisibleReplyText":"Coffee.""#)]).collect()),
-        ("a turn completed short of its replies", "goes on past round 2 before taking up all it gave", strings(&FIRST_SEGMENT[..6]).into_iter().chain([replace(TEA_COMPLETED, r#"["conv_a.1:message-1","conv_a.1:message-2"]"#, r#"["conv_a.1:message-1"]"#)]).collect()),
-        ("a completed turn that judges nothing", "missing field `round`", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#","round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}"#, "")]).collect()),
-        ("a completed turn saying completed_with_failures", "unknown variant `completed_with_failures`", strings(&FIRST_SEGMENT[..7]).into_iter().chain([replace(TEA_COMPLETED, r#""status":"completed""#, r#""status":"completed_with_failures""#)]).collect()),
-        ("a model refusal that judges no round", "names the round it judged", strings(&FIRST_SEGMENT[11..14]).into_iter().chain([replace(FAILED_REJECTED, r#","round":1"#, "")]).collect()),
-        ("a commit refused short of its round's replies", "a commit refused after a round that would have completed the turn", strings(&FIRST_SEGMENT[..6]).into_iter().chain([r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_rejected","reason":"commit_validation_failure","message":"Memory is unwell.","visibleMessageIds":["conv_a.1:message-1"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2}"#.to_owned()]).collect()),
-        ("a budget spent after its round's calls ran", "before any of it was taken up", strings(&called).into_iter().chain([TEA_ANSWERED.to_owned(), r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_rejected","reason":"tool_rounds_exhausted","message":"Role model exceeded maximum executable tool rounds (99).","visibleMessageIds":["conv_a.1:message-1"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":1}"#.to_owned()]).collect()),
-        ("a refusal other than its round's", "repeats the refusal", strings(&FIRST_SEGMENT[11..14]).into_iter().chain([replace(FAILED_REJECTED, r#""message":"The provider answered 503.""#, r#""message":"The provider answered 502.""#)]).collect()),
-        ("a line refused once it was committed", "only before it goes further", strings(&asked).into_iter().chain([replace(&replace(&replace(&replace(BLANK_REFUSED, "evt_2", "evt_1"), "trace_2", "trace_1"), "09:01:00", "09:00:00"), r#"message."}"#, r#"message.","visibleMessageIds":["conv_a.1:message-1"]}"#)]).collect()),
-        ("a plugin's refusal after a round", "only before it goes further", strings(&asked).into_iter().chain([TEA_ROUND_1.to_owned(), replace(&replace(&replace(&replace(&replace(BLANK_REFUSED, "evt_2", "evt_1"), "trace_2", "trace_1"), "09:01:00", "09:00:00"), "input_validation_rejected", "plugin_before_role_model_call_rejected"), r#"message."}"#, r#"message.","visibleMessageIds":["conv_a.1:message-1"]}"#)]).collect()),
-        ("after_turn_committed before the turn completed", "follows the record that completed", strings(&asked).into_iter().chain([TEA_AFTER.to_owned()]).collect()),
-        ("a continuation not first", "before any other", strings(&[BLANK_RECEIVED, BLANK_REFUSED, CONTINUED])),
-        ("a continuation of another session", "not its own", vec![CONTINUED.to_owned()]),
-    ]
+    world.first_segment(&conversation).unwrap().release();
+    std::fs::write(world.path_of(log.session_id()), lines.join("\n") + "\n").unwrap();
+
+    let replay = log.read().unwrap();
+
+    assert_eq!(replay.skipped_lines().numbers(), [1, 4, 7]);
+    assert_eq!(
+        replay
+            .records()
+            .iter()
+            .map(LogRecord::to_line)
+            .collect::<Vec<_>>(),
+        [BLANK_RECEIVED, BLANK_REFUSED, TEA_RECEIVED, TEA_ASKED]
+    );
+    assert_eq!(replay.session().messages().len(), 1);
+    assert_eq!(replay.skipped_lines().to_string(), "lines 1, 4, 7");
 }
 
 /// `line` with the first `from` in it made `to`; `from` must be there.
@@ -215,22 +170,4 @@ fn second(line: &str) -> String {
     line.replace("evt_1", "evt_2")
         .replace("trace_1", "trace_2")
         .replace("09:00:00", "09:01:00")
-}
-
-fn strings(lines: &[&str]) -> Vec<String> {
-    lines.iter().map(|line| (*line).to_owned()).collect()
-}
-
-/// An error and its causes, as a report spells them.
-fn chain_of(error: &dyn std::error::Error) -> String {
-    let mut chain = error.to_string();
-    let mut source = error.source();
-
-    while let Some(cause) = source {
-        chain.push_str(": ");
-        chain.push_str(&cause.to_string());
-        source = cause.source();
-    }
-
-    chain
 }

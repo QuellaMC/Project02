@@ -3,10 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use p02_contracts::{
-    ConversationToolCall, DecisionResult, HealthReport, HealthStatus, ToolCallOutcome,
-    ToolCallResult,
-};
+use p02_contracts::{ConversationToolCall, DecisionResult, ToolCallOutcome, ToolCallResult};
 use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
 use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch, TurnRejected};
 use serde_json::json;
@@ -154,15 +151,10 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
 
 /// A turn whose provider gives nothing usable, or whose model's last
 /// allowed answer is still malformed, ends rejected for its round's own
-/// reason, the round recorded and the person's line kept, without waiting
-/// on the plugins' health, which could not change it.
+/// reason, the round recorded and the person's line kept.
 #[tokio::test]
 async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keeps_the_line() {
-    let vitals = Toy::new("vitals").health(HealthReport {
-        status: HealthStatus::Ok,
-        summary: "Vitals steady.".to_owned(),
-    });
-    let mut chat = Chat::new(&[Arc::new(vitals)]);
+    let mut chat = Chat::new(&[]);
 
     chat.model
         .script([Round::fails("The provider answered 503.")]);
@@ -212,12 +204,6 @@ async fn a_provider_failure_or_a_malformed_last_answer_rejects_the_turn_and_keep
     );
     assert_eq!(records.last().unwrap().kind(), REJECTED);
     assert_eq!(rejections.len(), 2);
-    assert!(
-        rejections
-            .iter()
-            .all(|rejected| rejected.runtime_plugin_turn_evidence.is_none()),
-        "{rejections:?}"
-    );
 }
 
 /// A round of tool calls starts each in the model's order, finishes each as

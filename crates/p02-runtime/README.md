@@ -14,31 +14,32 @@ only on tokio's blocking pool, where a lock's wait blocks.
   first that holds no record is what a rotation interrupted before its
   first record left: it is discarded and the one before it resumed. The
   thread keeps the names its participants had when it began, so a renamed
-  person renames no thread. An open that fails after the conversation's
-  lease was taken releases it. Closing the thread runs the segment's end
-  hooks, then releases the segment's lease and then the conversation's.
+  person renames no thread. What the open skipped because it could not be
+  read, rows of her sessions catalog or lines of the segment it resumed,
+  the thread says in a sentence. An open that fails after the
+  conversation's lease was taken releases it. Closing the thread releases
+  the segment's lease and then the conversation's.
 - **One line at a time.** The thread takes a line only once the one before
   it ended. A line its client submitted under an id a run before this one
   took, in the current segment or a closed one, is answered with the
   message it was committed as: nothing runs twice for one id, and nothing
   is written. The closed segments' lines come from the conversation's
   record of them, completed when the thread opens from every segment the
-  record does not cover; the segment just before the current one must read
-  whole, and an older one that cannot be read gives up its lines.
-- **The turn.** Its records land in the order the store's gate admits
-  them: the event as it came in; the person's line, committed once the
-  history the model is shown was read; the plugins' preparation of the
-  model's call, which may refuse the turn and keeps the line, and which is
-  made again for the rounds after a call rebuilt one of the plugins live,
-  a refusal then leaving it as it was; each model round, recorded before
-  anything it decided happens, each reply committed in the round's order
-  and each tool call started in the model's and finished as it finishes,
-  so a call that finished outlasts a crash before the rest, while the
-  model reads the results in its own order; the health gate, which may
-  refuse a reply already shown and keeps it; and the record that ends the
-  turn, before the plugins' work after its commit, which can change
-  nothing about it. A text that is no line is refused with its event, and
-  nothing is committed.
+  record does not cover; the segment just before the current one must be
+  read, and an older one that cannot be read gives up its lines.
+- **The turn.** Its records land in this order: the event as it came in;
+  the person's line, committed once the history the model is shown was
+  read; the plugins' preparation of the model's call, which may refuse
+  the turn and keeps the line, and which is made again for the rounds
+  after a call rebuilt one of the plugins live, a refusal then leaving it
+  as it was; each model round, recorded before anything it decided
+  happens, each reply committed in the round's order and each tool call
+  started in the model's and finished as it finishes, so a call that
+  finished outlasts a crash before the rest, while the model reads the
+  results in its own order; and the record that ends the turn, before the
+  plugins' work after its commit, which can change nothing about it.
+  A text that is no line is refused with its event, and nothing is
+  committed.
 - **What the turn says.** The person's line, each reply, the pieces of a
   reply the model is still writing and their withdrawal, and the tool
   calls requested and each completed as it finishes, in order, on the
@@ -46,9 +47,9 @@ only on tokio's blocking pool, where a lock's wait blocks.
   message is announced once its record is on disk; a draft is the one
   exception and says so by its kind, and every draft ends exactly once.
 - **Failure.** When the runtime itself fails, a store write or a record
-  the gate refuses, the turn is fatal and its caller restarts the
+  the store refuses, the turn is fatal and its caller restarts the
   character. The turn first records its own rejection, if it still can,
-  naming what it committed, so the log reads back whole. A delivery its
+  naming what it committed, so the log says how it ended. A delivery its
   caller drops before it ends is fatal the same way, with nothing
   recorded: the thread opened again closes the turn it left open with its
   next line.
@@ -70,5 +71,5 @@ only on tokio's blocking pool, where a lock's wait blocks.
   land discards it through that writer, or leaves it empty for the next open
   to discard when the discard fails too, and the thread stays where it was,
   to plan again after the next turn; after it the old segment's lines are
-  recorded, its end hooks run and its lease is released, and what of that
-  fails is reported, never undone. Every length is counted in characters.
+  recorded and its lease is released, and what of that fails is reported,
+  never undone. Every length is counted in characters.

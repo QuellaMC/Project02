@@ -11,11 +11,11 @@ use p02_app::Event;
 use p02_core::ClientStamp;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
-use tokio::time::{Instant, sleep, sleep_until};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::bot_api::{BotApi, BotToken, CallbackQuery, Transport, Update, User};
+use crate::bot_api::{BotApi, BotToken, CallbackQuery, Telegram, Update, User};
 use crate::character::Character;
 use crate::daemon::{Daemon, Unanswered};
 use crate::management::Management;
@@ -32,7 +32,7 @@ pub(crate) const DAEMON_DOWN: &str =
     "The daemon is not running right now; send that again in a moment.";
 
 /// What the table hands a bot of the daemon's stream, each under its frame's
-/// number, so a bot that caught up from a later snapshot skips it.
+/// number, so a bot that began from a later snapshot skips it.
 #[derive(Debug)]
 pub(crate) enum Inbox {
     /// A `ready` the daemon could not resume from, as it came.
@@ -46,18 +46,10 @@ pub(crate) enum Inbox {
     },
 }
 
-/// Whether a bot may act now: no settings read is in doubt, and the
-/// token's polls are its own, as its poll last found.
-#[derive(Clone, Debug)]
-pub(crate) struct Leave {
-    pub(crate) held: watch::Receiver<bool>,
-    pub(crate) claimed: watch::Receiver<bool>,
-}
-
 /// What a bot is started with.
 #[derive(Debug)]
 pub(crate) struct Start {
-    pub(crate) telegram: Arc<dyn Transport>,
+    pub(crate) telegram: Arc<Telegram>,
     pub(crate) token: BotToken,
     pub(crate) settings: BotSettings,
     pub(crate) draft_edits: Duration,
@@ -176,12 +168,10 @@ async fn run(api: BotApi, parts: Parts) {
     let quiet = stop.child_token();
     let tasks = TaskTracker::new();
     let (polled, polls) = mpsc::unbounded_channel();
-    let (claim, claimed) = watch::channel(false);
-    let leave = Leave { held, claimed };
     let outbox = Outbox::start(
         api.clone(),
         settings.clone(),
-        leave.clone(),
+        held.clone(),
         draft_edits,
         Arc::clone(&lines),
         quiet.clone(),
@@ -201,7 +191,7 @@ async fn run(api: BotApi, parts: Parts) {
     let intake = Intake {
         frames,
         polls,
-        leave,
+        held,
         latest,
     };
 
@@ -214,7 +204,6 @@ async fn run(api: BotApi, parts: Parts) {
     let ended = poll(
         &api,
         &polled,
-        &claim,
         &settings,
         lines.as_ref(),
         &mut problems,
@@ -339,16 +328,13 @@ enum PollEnd {
 }
 
 /// Long-polls until the stop or the token refused, handing each update on
-/// in order and asking past a batch only once all of it was handed on.
-/// The token's polls are this bot's, `claim` says, from each poll it
-/// sends, since Telegram hands them to the newest, until a 409 says
-/// another program's took them. A webhook left on the token is removed;
-/// another program's polls are waited out; a pause Telegram asks for is
-/// kept; anything else is Telegram out of reach, backed off from.
+/// in order and asking past a batch only once all of it was handed on. A
+/// webhook left on the token is removed; another program's polls (409)
+/// are waited out; a pause Telegram asks for is kept; anything else is
+/// Telegram out of reach, backed off from.
 async fn poll(
     api: &BotApi,
     rules: &mpsc::UnboundedSender<Polled>,
-    claim: &watch::Sender<bool>,
     settings: &watch::Receiver<Arc<BotSettings>>,
     lines: &dyn Lines,
     problems: &mut Problems,
@@ -358,10 +344,6 @@ async fn poll(
     let mut failures = 0;
 
     loop {
-        if !*claim.borrow() {
-            claim.send_replace(true);
-        }
-
         let outcome = tokio::select! {
             biased;
             () = stop.cancelled() => return PollEnd::Stopped,
@@ -420,7 +402,6 @@ async fn poll(
                     &bot,
                     lines,
                 );
-                claim.send_replace(false);
                 CONFLICT_PAUSE
             }
             Err(failure) => failure.retry_after().unwrap_or_else(|| {
@@ -549,60 +530,41 @@ pub(crate) trait Rules: Send {
     fn frame(&mut self, chat: &mut Chat, event: &Event);
 
     fn done(&mut self, chat: &mut Chat, done: Done);
-
-    /// When something of their own is due next.
-    fn due(&self) -> Option<Instant> {
-        None
-    }
-
-    fn at_due(&mut self, _chat: &mut Chat) {}
 }
 
 /// What a bot's rules take in.
 struct Intake {
     frames: mpsc::UnboundedReceiver<Inbox>,
     polls: mpsc::UnboundedReceiver<Polled>,
-    leave: Leave,
+    held: watch::Receiver<bool>,
     latest: watch::Receiver<Option<Latest>>,
 }
 
 /// Runs a bot's rules until the stop. They act only while no settings
-/// read is in doubt, on a frame, an update, an answer or a wait of their
-/// own, so nothing is shown or judged by settings a change may have left
-/// behind; meanwhile they follow only the token's polls. Only an owner of
-/// those reads frames, so two connectors on one token do not both answer:
-/// the rules drop them from the 409 that says another program took the
-/// polls, and once the polls are theirs again catch up from the latest
-/// snapshot, skipping every frame it already holds.
+/// read is in doubt, on a frame, an update or an answer, so nothing is
+/// shown or judged by settings a change may have left behind. They begin
+/// from the latest snapshot, skipping every frame it already holds.
 async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
     let Intake {
         mut frames,
         mut polls,
-        leave: Leave {
-            mut held,
-            mut claimed,
-        },
+        mut held,
         latest,
     } = intake;
-    let mut caught_up = false;
+    let mut installed = false;
     let mut seen = 0;
 
     rules.started(&mut chat);
 
     loop {
         let free = !*held.borrow_and_update();
-        let ours = *claimed.borrow_and_update();
-        let due = rules.due();
-
-        caught_up &= ours;
 
         tokio::select! {
             biased;
             () = chat.stop.cancelled() => return,
-            Ok(()) = claimed.changed() => {}
             Ok(()) = held.changed() => {}
-            () = std::future::ready(()), if free && ours && !caught_up => {
-                caught_up = true;
+            () = std::future::ready(()), if free && !installed => {
+                installed = true;
 
                 let newest = latest.borrow().clone();
 
@@ -612,11 +574,11 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                 }
             }
             Some(message) = frames.recv(), if free => match message {
-                Inbox::Install { seq, snapshot } if caught_up && seq > seen => {
+                Inbox::Install { seq, snapshot } if seq > seen => {
                     seen = seq;
                     rules.install(&mut chat, &snapshot);
                 }
-                Inbox::Frame { seq, event } if caught_up && seq > seen => {
+                Inbox::Frame { seq, event } if seq > seen => {
                     seen = seq;
                     rules.frame(&mut chat, &event);
                 }
@@ -631,256 +593,6 @@ async fn follow(mut rules: impl Rules, mut chat: Chat, intake: Intake) {
                     rules.done(&mut chat, done);
                 }
             }
-            () = sleep_until(due.unwrap_or_else(Instant::now)), if free && due.is_some() => {
-                rules.at_due(&mut chat);
-            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    use p02_app::{
-        ConfirmationId, ConfirmationQuestion, PendingConfirmation, RunningTurns, Settlement,
-    };
-    use p02_shared::Identifier;
-    use serde_json::{Map, json};
-
-    use super::*;
-    use crate::stand_in::{Heard, StandIn};
-
-    /// A confirmation of Mira's waiting for the person's answer.
-    fn parked(summary: &str) -> PendingConfirmation {
-        PendingConfirmation {
-            character_id: Identifier::new("mira").unwrap(),
-            id: ConfirmationId::mint(),
-            request: ConfirmationQuestion {
-                plugin_id: Identifier::new("demo-config").unwrap(),
-                tool_name: Identifier::new("runtime_plugin_config_update").unwrap(),
-                summary: summary.to_owned(),
-                preview: Map::new(),
-            },
-            deadline_at: 0,
-            turn: None,
-        }
-    }
-
-    /// connectors.telegram-409-takeover: A bot whose polls another program takes says so once and writes nothing for the 30 s it waits, neither a call it had under way nor the frames a settings read held back; once its polls are its own again it catches up from the snapshot and says it gets its messages again.
-    #[tokio::test(start_paused = true)]
-    async fn a_bot_outpolled_waits_writing_nothing_then_catches_up_from_the_snapshot() {
-        let telegram = StandIn::new();
-        let conflict = telegram.conflict_next_poll();
-        let heard = Arc::new(Heard::default());
-        let waited = parked("Set tone to pirate.");
-        let raised = parked("Set tone to formal.");
-        let (latest, latest_read) = watch::channel(Some(Latest {
-            seq: 0,
-            snapshot: Snapshot {
-                confirmations: vec![waited.clone()],
-                pairings: Vec::new(),
-                turns: RunningTurns::default(),
-            },
-        }));
-        let (reading, held) = watch::channel(false);
-        let (_daemon, daemon) = watch::channel(None);
-        let stop = CancellationToken::new();
-        let bots = TaskTracker::new();
-
-        // The card for what waits is under way, Telegram asking it to wait.
-        telegram.ask_to_wait("sendMessage", 0, 10);
-
-        let bot = Bot::start(
-            Start {
-                telegram: Arc::new(telegram.clone()),
-                token: BotToken::new("123456:home"),
-                settings: BotSettings {
-                    owner: Owner::Management {
-                        names: BTreeMap::new(),
-                    },
-                    paired: BTreeSet::from(["4242".to_owned()]),
-                },
-                draft_edits: Duration::from_millis(1_500),
-                daemon,
-                held,
-                latest: latest_read,
-                lines: heard.clone(),
-                stop: stop.clone(),
-            },
-            &bots,
-        );
-        let waiting = "Another program is polling the management bot (409); this one waits.";
-        let back = "Telegram: the management bot gets its messages again.";
-
-        // The other program polls the token while a settings read is in
-        // doubt: Telegram ends the bot's poll.
-        telegram.called("getUpdates", 1).await;
-        telegram.called("sendMessage", 1).await;
-        reading.send_replace(true);
-        conflict.send(()).unwrap();
-        heard.reported(waiting).await;
-
-        let lost = Instant::now();
-
-        // Raised meanwhile, and handed on as the read lands: the snapshot
-        // has it, the chat does not.
-        latest.send_modify(|latest| {
-            if let Some(latest) = latest {
-                latest.seq = 1;
-                latest.snapshot.confirmations.push(raised.clone());
-            }
-        });
-        bot.send(Inbox::Frame {
-            seq: 1,
-            event: Arc::new(Event::ConfirmationRequested(raised.clone())),
-        });
-        reading.send_replace(false);
-
-        // The other program stopped: the bot's next poll is answered.
-        let sent = telegram.called("sendMessage", 3).await;
-        let polls = telegram.calls("getUpdates");
-        let buttons = |pending: &PendingConfirmation| {
-            json!({"inline_keyboard": [[
-                {"text": "Approve", "callback_data": format!("c:{}:a", pending.id)},
-                {"text": "Deny", "callback_data": format!("c:{}:d", pending.id)},
-            ]]})
-        };
-
-        heard.reported(back).await;
-        assert_eq!(polls[1].at - lost, CONFLICT_PAUSE);
-        assert_eq!(sent.len(), 3);
-        assert!(sent[1..].iter().all(|card| card.at >= polls[1].at));
-        assert_eq!(
-            sent.iter()
-                .map(|card| card.body["reply_markup"].clone())
-                .collect::<Vec<_>>(),
-            [buttons(&waited), buttons(&waited), buttons(&raised)]
-        );
-        assert_eq!(heard.reports(), [waiting, back]);
-        stop.cancel();
-        bots.close();
-        bots.wait().await;
-    }
-
-    /// What a bot's rules were handed: the snapshots they installed and the
-    /// frames they applied.
-    #[derive(Debug, Default)]
-    struct Handed {
-        installed: usize,
-        applied: usize,
-    }
-
-    /// Rules that only count what they are handed.
-    #[derive(Debug)]
-    struct Counting(Arc<watch::Sender<Handed>>);
-
-    impl Rules for Counting {
-        fn update(&mut self, _chat: &mut Chat, _update: Update) -> impl Future<Output = ()> + Send {
-            std::future::ready(())
-        }
-
-        fn install(&mut self, _chat: &mut Chat, _snapshot: &Snapshot) {
-            self.0.send_modify(|handed| handed.installed += 1);
-        }
-
-        fn frame(&mut self, _chat: &mut Chat, _event: &Event) {
-            self.0.send_modify(|handed| handed.applied += 1);
-        }
-
-        fn done(&mut self, _chat: &mut Chat, _done: Done) {}
-    }
-
-    /// connectors.telegram-frames-wait-for-read: A frame already handed to a bot is applied only once a settings read begun since has landed, so nothing of it is shown or judged by settings that read may change.
-    #[tokio::test(start_paused = true)]
-    async fn a_frame_handed_on_waits_for_a_settings_read_begun_since() {
-        let stop = CancellationToken::new();
-        let tasks = TaskTracker::new();
-        let api = BotApi::new(Arc::new(StandIn::new()), BotToken::new("123456:home"));
-        let (_settings, settings) = watch::channel(Arc::new(BotSettings {
-            owner: Owner::Management {
-                names: BTreeMap::new(),
-            },
-            paired: BTreeSet::new(),
-        }));
-        let (reading, held) = watch::channel(false);
-        let (_claim, claimed) = watch::channel(true);
-        let (_daemon, daemon) = watch::channel(None);
-        let (_latest, latest) = watch::channel(Some(Latest {
-            seq: 0,
-            snapshot: Snapshot {
-                confirmations: Vec::new(),
-                pairings: Vec::new(),
-                turns: RunningTurns::default(),
-            },
-        }));
-        let (inbox, frames) = mpsc::unbounded_channel();
-        let (_polled, polls) = mpsc::unbounded_channel();
-        let heard = Arc::new(Heard::default());
-        let handed = Arc::new(watch::Sender::new(Handed::default()));
-        let chat = Chat {
-            api: api.clone(),
-            id: 123_456,
-            source: source_of("home_bot"),
-            settings: settings.clone(),
-            daemon,
-            outbox: Outbox::start(
-                api,
-                settings,
-                Leave {
-                    held: held.clone(),
-                    claimed: claimed.clone(),
-                },
-                Duration::from_millis(1_500),
-                heard.clone(),
-                stop.clone(),
-                &tasks,
-            ),
-            lines: heard,
-            stop: stop.clone(),
-            work: JoinSet::new(),
-        };
-
-        tasks.spawn(follow(
-            Counting(Arc::clone(&handed)),
-            chat,
-            Intake {
-                frames,
-                polls,
-                leave: Leave { held, claimed },
-                latest,
-            },
-        ));
-        handed
-            .subscribe()
-            .wait_for(|handed| handed.installed == 1)
-            .await
-            .unwrap();
-
-        // A frame handed on, and a read begun before the bot gets to it.
-        inbox
-            .send(Inbox::Frame {
-                seq: 1,
-                event: Arc::new(Event::ConfirmationSettled {
-                    character_id: Identifier::new("mira").unwrap(),
-                    id: ConfirmationId::mint(),
-                    settlement: Settlement::Denied,
-                }),
-            })
-            .unwrap();
-        reading.send_replace(true);
-        sleep(Duration::from_secs(1)).await;
-        assert_eq!(handed.borrow().applied, 0);
-
-        // The read lands.
-        reading.send_replace(false);
-        handed
-            .subscribe()
-            .wait_for(|handed| handed.applied == 1)
-            .await
-            .unwrap();
-        stop.cancel();
-        tasks.close();
-        tasks.wait().await;
     }
 }

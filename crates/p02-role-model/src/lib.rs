@@ -9,8 +9,8 @@ mod test_provider;
 
 pub use nvidia::{BuildNvidiaAdapterError, NvidiaSettings};
 pub use prompt::{
-    CalendarDay, InvalidCalendarDayError, Person, Recollection, estimated_tokens,
-    newest_turns_within, select_history_window, summarizer_instructions, today_note,
+    Person, Recollection, estimated_tokens, newest_turns_within, select_history_window,
+    summarizer_instructions, today_note,
 };
 pub use rounds::{
     DraftEvent, DraftId, ModelRound, Reply, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,

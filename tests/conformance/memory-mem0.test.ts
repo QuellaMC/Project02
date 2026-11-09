@@ -1,4 +1,4 @@
-import {readdirSync, statSync, writeFileSync} from 'node:fs';
+import {readdirSync, statSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {text} from 'node:stream/consumers';
@@ -49,39 +49,7 @@ function lineOf(request: ModelRequest | undefined): string {
   );
 }
 
-/** The items a plugin handed the round, as the round's record keeps them. */
-function contextItemsOf(record: Record<string, unknown>): unknown[] {
-  const found: unknown[] = [];
-  const look = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const element of value) {
-        look(element);
-      }
-    } else if (typeof value === 'object' && value !== null) {
-      for (const [key, inner] of Object.entries(value)) {
-        if (key === 'pluginContextItems' && Array.isArray(inner)) {
-          found.push(...(inner as unknown[]));
-        } else {
-          look(inner);
-        }
-      }
-    }
-  };
-
-  look(record);
-  return found;
-}
-
-/** What mem0 recorded about each turn it was handed after the commit. */
-function capturesOf(home: string): unknown[] {
-  return sessionRecords(home, 'mira', 'after_turn_committed').map(record =>
-    (
-      record['runtimePluginEvidence'] as readonly {readonly pluginId: string}[]
-    ).find(evidence => evidence.pluginId === 'mem0'),
-  );
-}
-
-it('memory.mem0-wire: the server backend asks POST /search and hands the whole turn, under its session and with its provenance, to POST /memories at the baseUrl, an m0sk_ key as X-API-Key; the platform backend speaks v3 under Token auth; a redirect, an unreadable body or row, or an answer shaped for the other backend is an error, never an empty result, and no error carries the key', async () => {
+it("memory.mem0-wire: the server backend recalls and captures under its X-API-Key and the platform backend under Token auth; a failing backend reaches the model without the key, and no record holds the key or a baseUrl's credentials", async () => {
   const model = await startModelServer();
   const server = await startMem0Server();
   const serverKey = 'm0sk_server-secret';
@@ -100,11 +68,6 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
   await say('Remember the lighthouse.', 'lighthouse');
 
   const captured = await capture.arrived();
-  const [{eventId} = {}] = sessionRecords(
-    home,
-    'mira',
-    'runtime_event_received',
-  );
 
   capture.release({status: 200, body: {results: [{id: 'mem-1'}]}});
   expect(server.requests[0]).toMatchObject({
@@ -115,7 +78,6 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
       query: 'Remember the lighthouse.',
       user_id: 'project02-user',
       agent_id: 'mira',
-      limit: 5,
     },
   });
   expect(captured).toMatchObject({
@@ -129,36 +91,36 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
       ],
       user_id: 'project02-user',
       agent_id: 'mira',
-      run_id: `${conversationId}.1`,
-      infer: true,
-      metadata: {project02_sources: [eventId]},
     },
   });
-  expect(server.requests.map(request => request.headers.authorization)).toEqual(
-    server.requests.map(() => undefined),
-  );
 
+  // The recall before the turn finds nothing; the search the model asks
+  // for is refused by a backend that echoes the key.
   server.answer(
     '/search',
     {status: 200, body: {results: []}},
-    {status: 302, headers: {location: `${server.baseUrl}/elsewhere`}},
     {status: 401, body: {detail: `The key ${serverKey} was rejected.`}},
-    {status: 200, body: 'not json'},
-    {status: 200, body: {results: [{memory: 'A row without an id.'}]}},
   );
-  server.answer('/memories', {
-    status: 200,
-    body: {event_id: 'evt-queued', status: 'PENDING'},
-  });
   model.answer(
-    calling(['mem0_search', {query: 'one'}]),
-    calling(['mem0_search', {query: 'two'}]),
-    calling(['mem0_search', {query: 'three'}]),
-    calling(['mem0_search', {query: 'four'}]),
-    calling(['mem0_add', {text: 'The lighthouse is red.'}]),
+    calling(['mem0_search', {query: 'lighthouse'}]),
     reply('Nothing came back.'),
   );
-  await say('What do you remember?', 'errors');
+  await say('What do you remember?', 'refused');
+
+  const refused = toolResults(model.requests.at(-1));
+
+  expect(refused).toMatchObject([
+    {
+      status: 'rejected',
+      pluginId: 'mem0',
+      toolName: 'mem0.search',
+      message: expect.stringContaining('HTTP 401') as string,
+    },
+  ]);
+  expect(JSON.stringify(refused)).not.toContain(serverKey);
+  expect(
+    JSON.stringify(sessionLog(home, 'mira', `${conversationId}.1`)),
+  ).not.toContain(serverKey);
 
   const platform = await startMem0Server();
   const platformKey = 'platform-secret';
@@ -189,7 +151,6 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
       ],
       user_id: 'project02-user',
       agent_id: 'mira',
-      infer: true,
     },
   });
   queued.release({status: 200, body: {event_id: 'evt-1', status: 'PENDING'}});
@@ -200,72 +161,69 @@ it('memory.mem0-wire: the server backend asks POST /search and hands the whole t
     body: {
       query: 'Remember the harbor.',
       filters: {user_id: 'project02-user', agent_id: 'mira'},
-      top_k: 5,
     },
   });
-  platform.answer('/v3/memories/add/', {
-    status: 200,
-    body: {results: [{id: 'mem-9'}]},
+
+  const credentialed = createHome({
+    'config.json': configJson({
+      project02: model.settings,
+      plugins: {
+        mem0: {
+          enabled: true,
+          config: {
+            backend: 'server',
+            baseUrl: 'https://operator:hunter2@mem0.example',
+          },
+        },
+      },
+    }),
   });
-  model.answer(
-    calling(['mem0_add', {text: 'The harbor is quiet.'}]),
-    reply('Hm.'),
+  const credentialedWire = wireOf(await startDaemon(credentialed));
+  const sayWithCredentials = await converse(credentialedWire, 'mira');
+  const thread = await conversationOf(credentialedWire, 'mira');
+
+  model.answer(reply('Hello.'));
+  await sayWithCredentials('Hello?', 'credentials');
+
+  const [completed] = sessionRecords(
+    credentialed,
+    'mira',
+    'runtime_turn_completed',
   );
-  await sayToPlatform('Keep that.', 'keep');
+  const recalled = (
+    completed?.['runtimePluginEvidence'] as
+      | readonly {readonly pluginId: string; readonly status: string}[]
+      | undefined
+  )?.find(entry => entry.pluginId === 'mem0');
 
-  const errors = [
-    ...toolResults(
-      model.requests.findLast(request =>
-        lineOf(request).startsWith('What do you remember?'),
-      ),
-    ),
-    ...toolResults(model.requests.at(-1)),
-  ];
-
-  expect(errors).toEqual(
-    [
-      ['mem0.search', 'HTTP 302'],
-      ['mem0.search', 'HTTP 401'],
-      ['mem0.search', 'unreadable'],
-      ['mem0.search', 'unreadable'],
-      ['mem0.add', 'unreadable'],
-      ['mem0.add', 'unreadable'],
-    ].map(([toolName = '', problem = '']) => ({
-      status: 'rejected',
-      pluginId: 'mem0',
-      toolName,
-      reason: 'handler_failed',
-      message: expect.stringContaining(problem) as string,
-    })),
-  );
-
-  for (const key of [serverKey, platformKey]) {
-    expect(JSON.stringify(errors)).not.toContain(key);
-  }
-
-  // The redirect was never followed, and the key the backend echoed is in
-  // no record the turn left.
-  expect(server.requests.map(request => request.path)).not.toContain(
-    '/elsewhere',
-  );
+  // Judged unusable, and recorded so without the credentials it carries.
+  expect(recalled?.status).toBe('degraded');
   expect(
-    JSON.stringify(sessionLog(home, 'mira', `${conversationId}.1`)),
-  ).not.toContain(serverKey);
+    JSON.stringify(
+      sessionLog(credentialed, 'mira', `${thread.conversationId}.1`),
+    ),
+  ).not.toContain('hunter2');
 });
 
-it("memory.mem0-capture: mem0 takes each turn behind its answer, as the character's own under the speakers' names the session recorded; what is queued is sent before a stop ends the process, and once eight wait the next turns are not queued, which health then says", async () => {
+it("memory.mem0-capture: mem0 takes each turn behind its answer, as the character's under its speakers' names, and what is still queued is sent before a stop ends the process", async () => {
   const model = await startModelServer();
   const mem0 = await startMem0Server();
-  const named = (userDisplayName: string) =>
-    mem0Config(model, mem0, {backend: 'server'}, {userDisplayName});
-  const home = createHome({'config.json': named('Sam')});
-  const first = await startDaemon(home);
-  const say = await converse(wireOf(first), 'mira');
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': mem0Config(
+        model,
+        mem0,
+        {backend: 'server'},
+        {userDisplayName: 'Sam'},
+      ),
+    }),
+  );
+  const say = await converse(wireOf(daemon), 'mira');
   const held = mem0.hold('/memories');
   const captures = () =>
     mem0.requests.filter(request => request.path === '/memories');
 
-  model.answer(reply('Reply 1.'));
+  model.answer(reply('Reply 1.'), reply('Reply 2.'));
 
   // The turn answers while its capture is still held at the backend: the
   // capture runs behind the answer and never holds it up.
@@ -283,37 +241,13 @@ it("memory.mem0-capture: mem0 takes each turn behind its answer, as the characte
     },
   });
 
-  for (let turn = 2; turn <= 10; turn += 1) {
-    model.answer(reply(`Reply ${String(turn)}.`));
-    await say(`Line ${String(turn)}.`, `line-${String(turn)}`);
-  }
-
+  // Captures run one at a time: the next waits behind the held one.
+  await say('Line 2.', 'line-2');
   expect(captures()).toHaveLength(1);
-  expect(capturesOf(home)).toMatchObject([
-    ...Array.from({length: 8}, () => ({status: 'accepted'})),
-    {
-      status: 'degraded',
-      summary: expect.stringContaining('not queued') as string,
-    },
-    {status: 'degraded'},
-  ]);
-  expect(
-    sessionRecords(home, 'mira', 'runtime_turn_completed').map(record =>
-      (
-        record['runtimePluginTurnEvidence'] as {
-          readonly health: readonly {readonly pluginId: string}[];
-        }
-      ).health.find(health => health.pluginId === 'mem0'),
-    )[9],
-  ).toMatchObject({
-    status: 'degraded',
-    summary: expect.stringContaining('backlog is full') as string,
-  });
-
-  first.signal('SIGINT');
-  await first.printed('Stopping; finishing what is in flight.');
+  daemon.signal('SIGINT');
+  await daemon.printed('Stopping; finishing what is in flight.');
   held.release({status: 200, body: {results: [{id: 'mem-1'}]}});
-  await first.exit();
+  await daemon.exit();
   expect(
     captures().map(
       request =>
@@ -323,109 +257,10 @@ it("memory.mem0-capture: mem0 takes each turn behind its answer, as the characte
           }
         ).messages[0]?.content,
     ),
-  ).toEqual(Array.from({length: 8}, (_, at) => `Sam: Line ${String(at + 1)}.`));
-
-  writeFileSync(join(home, 'config.json'), named('Samuel'));
-
-  const again = await converse(wireOf(await startDaemon(home)), 'mira');
-  const renamed = mem0.hold('/memories');
-
-  model.answer(reply('Reply 11.'));
-  await again('Line 11.', 'line-11');
-  expect(await renamed.arrived()).toMatchObject({
-    body: {
-      messages: [
-        {role: 'user', content: 'Sam: Line 11.'},
-        {role: 'assistant', content: 'Mira: Reply 11.'},
-      ],
-    },
-  });
-  renamed.release({status: 200, body: {results: [{id: 'mem-11'}]}});
+  ).toEqual(['Sam: Line 1.', 'Sam: Line 2.']);
 });
 
-it('memory.mem0-recall: before a turn, what mem0 recalls rides the line in the recalled-memory fence, five items at most and each bounded, each recorded with its source; an empty recall adds nothing, and a failing backend leaves the turn to complete without it', async () => {
-  const model = await startModelServer();
-  const mem0 = await startMem0Server();
-  const home = createHome({
-    'config.json': mem0Config(model, mem0, {backend: 'server'}),
-  });
-  const say = await converse(wireOf(await startDaemon(home)), 'mira');
-  const memories = [
-    'Sam likes tea.',
-    'Sam lives by the sea.',
-    'Sam has a cat.',
-    'Sam reads at night.',
-    'x'.repeat(700),
-    'Sam hums when thinking.',
-  ];
-
-  mem0.answer(
-    '/search',
-    {
-      status: 200,
-      body: {
-        results: memories.map((memory, at) => ({
-          id: `mem-${String(at)}`,
-          memory,
-          score: 0.9,
-        })),
-      },
-    },
-    {status: 200, body: {results: []}},
-    {status: 500},
-  );
-  model.answer(reply('Tea.'), reply('Hm.'), reply('Still here.'));
-
-  for (const [line, id] of [
-    ['What do I like?', 'recalled'],
-    ['Anything else?', 'empty'],
-    ['And now?', 'failing'],
-  ] as const) {
-    expect(await say(line, id), id).toMatchObject({status: 'completed'});
-  }
-
-  const [recalled, empty, failing] = model.requests.map(lineOf);
-  const fence = recalled?.split('\n\n<recalled_memory>\n');
-
-  expect(fence?.[0]).toBe('What do I like?');
-  expect(fence?.[1]?.endsWith('\n</recalled_memory>')).toBe(true);
-  expect(fence?.[1]?.split('\n').filter(row => row.startsWith('- '))).toEqual([
-    ...memories.slice(0, 4).map(memory => `- ${memory}`),
-    `- ${'x'.repeat(597)}...`,
-  ]);
-  expect([empty, failing]).toEqual(['Anything else?', 'And now?']);
-  // The recall before each turn, as its record marks it: the failing backend degrades the turn, an empty recall does not.
-  expect(
-    sessionRecords(home, 'mira', 'runtime_turn_completed').map(record =>
-      (
-        record['runtimePluginEvidence'] as readonly {
-          readonly pluginId: string;
-          readonly evidenceKind: string;
-          readonly status: string;
-        }[]
-      )
-        .filter(
-          entry =>
-            entry.pluginId === 'mem0' &&
-            entry.evidenceKind === 'before_role_model_call',
-        )
-        .map(entry => entry.status),
-    ),
-  ).toEqual([['accepted'], ['accepted'], ['degraded']]);
-
-  // Each recalled item is recorded with the memory it came from.
-  const [recalledRound] = sessionRecords(home, 'mira', 'role_model_round');
-
-  expect(contextItemsOf(recalledRound ?? {})).toMatchObject(
-    memories.slice(0, 5).map((_, at) => ({
-      pluginId: 'mem0',
-      kind: 'memory',
-      sourceReferences: [{kind: 'memory', id: `mem-${String(at)}`}],
-    })),
-  );
-});
-
-it('memory.mem0-search-tool: mem0.search answers the model with at most five items, each bounded and sourced to its memory, and a search that finds nothing is answered all the same', async () => {
+it("memory.mem0-recall: before a turn, what mem0 recalls rides the person's line to the model, and a failing backend leaves the turn to complete without it", async () => {
   const model = await startModelServer();
   const mem0 = await startMem0Server();
   const say = await converse(
@@ -438,57 +273,30 @@ it('memory.mem0-search-tool: mem0.search answers the model with at most five ite
     ),
     'mira',
   );
-  const memories = Array.from({length: 7}, (_, at) =>
-    at === 4 ? 'y'.repeat(700) : `Memory ${String(at)}.`,
-  );
 
   mem0.answer(
     '/search',
-    {status: 200, body: {results: []}},
     {
       status: 200,
-      body: {
-        results: memories.map((memory, at) => ({
-          id: `mem-${String(at)}`,
-          memory,
-          score: 0.5,
-        })),
-      },
+      body: {results: [{id: 'mem-1', memory: 'Sam likes tea.', score: 0.9}]},
     },
-    {status: 200, body: {results: []}},
+    {status: 500},
   );
-  model.answer(
-    calling(['mem0_search', {query: 'memories'}]),
-    calling(['mem0_search', {query: 'nothing at all'}]),
-    reply('That is all.'),
-  );
-  await say('What do you remember?', 'search');
-  expect(toolResults(model.requests.at(-1))).toEqual([
-    {
-      status: 'accepted',
-      pluginId: 'mem0',
-      toolName: 'mem0.search',
-      output: {
-        items: memories.slice(0, 5).map((memory, at) => ({
-          id: `mem-${String(at)}`,
-          text: at === 4 ? `${'y'.repeat(597)}...` : memory,
-          sourceReferences: [
-            {kind: 'memory', id: `mem-${String(at)}`, title: 'Mem0 memory'},
-          ],
-          confidence: 0.5,
-        })),
-      },
-    },
-    {
-      status: 'accepted',
-      pluginId: 'mem0',
-      toolName: 'mem0.search',
-      output: {items: []},
-    },
-  ]);
+  model.answer(reply('Tea.'), reply('Still here.'));
+  expect(await say('What do I like?', 'recalled')).toMatchObject({
+    status: 'completed',
+  });
+  expect(await say('And now?', 'failing')).toMatchObject({
+    status: 'completed',
+  });
+
+  const [recalled, failing] = model.requests.map(lineOf);
+
+  expect(recalled).toContain('Sam likes tea.');
+  expect(failing).toBe('And now?');
 });
 
-it('memory.mem0-add-tool: mem0.add stores an explicit memory, its text cut to 600 characters, answers the rows it stored as a list of at most 32, fails an add that stored nothing and one the backend failed, and answers a platform receipt as queued, never as stored', async () => {
+it('memory.mem0-add-tool: mem0.add stores the text the model gives it at the backend, and mem0.search hands the model the memories the backend finds', async () => {
   const model = await startModelServer();
   const mem0 = await startMem0Server();
   const say = await converse(
@@ -501,187 +309,40 @@ it('memory.mem0-add-tool: mem0.add stores an explicit memory, its text cut to 60
     ),
     'mira',
   );
-  const adding = (words: string) => calling(['mem0_add', {text: words}]);
 
+  mem0.answer('/memories', {status: 200, body: {results: [{id: 'mem-1'}]}});
+  // The recall before the turn, then the search the model asks for.
   mem0.answer(
-    '/memories',
+    '/search',
+    {status: 200, body: {results: []}},
     {
       status: 200,
-      body: {
-        results: Array.from({length: 40}, (_, at) => ({
-          id: `mem-${String(at)}`,
-        })),
-      },
+      body: {results: [{id: 'mem-1', memory: 'Sam likes tea.', score: 0.5}]},
     },
-    {status: 200, body: {results: []}},
-    {status: 500},
   );
   model.answer(
-    adding('z'.repeat(700)),
-    adding('Sam likes tea.'),
-    adding('Sam likes coffee.'),
-    reply('Kept what I could.'),
+    calling(['mem0_add', {text: 'Sam likes tea.'}]),
+    calling(['mem0_search', {query: 'tea'}]),
+    reply('You like tea.'),
   );
-  await say('Keep these.', 'keep');
-
-  const [stored, nothing, failed] = toolResults(model.requests.at(-1));
-
+  await say('What do I like?', 'tea');
   expect(
     mem0.requests.find(request => request.path === '/memories'),
   ).toMatchObject({
-    body: {
-      messages: [{role: 'user', content: `${'z'.repeat(597)}...`}],
-      infer: false,
-    },
+    body: {messages: [{role: 'user', content: 'Sam likes tea.'}]},
   });
-  expect(stored).toMatchObject({
-    status: 'accepted',
-    output: {
-      id: 'mem-0',
-      sourceReferences: Array.from({length: 32}, (_, at) => ({
-        kind: 'memory',
-        id: `mem-${String(at)}`,
-      })),
+  expect(toolResults(model.requests.at(-1))).toMatchObject([
+    {status: 'accepted', pluginId: 'mem0', toolName: 'mem0.add'},
+    {
+      status: 'accepted',
+      pluginId: 'mem0',
+      toolName: 'mem0.search',
+      output: {items: [{text: 'Sam likes tea.'}]},
     },
-  });
-  expect([nothing, failed]).toEqual([
-    expect.objectContaining({
-      status: 'rejected',
-      reason: 'handler_failed',
-      message: 'mem0 add failed: the backend created no memory for it.',
-    }),
-    expect.objectContaining({
-      status: 'rejected',
-      reason: 'handler_failed',
-      message: 'mem0 add failed: HTTP 500.',
-    }),
   ]);
-
-  const platform = await startMem0Server();
-  const sayToPlatform = await converse(
-    wireOf(
-      await startDaemon(
-        createHome({
-          'config.json': mem0Config(model, platform, {
-            backend: 'platform',
-            apiKey: 'platform-key',
-          }),
-        }),
-      ),
-    ),
-    'mira',
-  );
-
-  platform.answer('/v3/memories/add/', {
-    status: 200,
-    body: {event_id: 'evt-queued', status: 'PENDING'},
-  });
-  model.answer(adding('The harbor is quiet.'), reply('Queued.'));
-  await sayToPlatform('Keep that.', 'queued');
-  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
-    status: 'accepted',
-    output: {
-      queued: true,
-      sourceReferences: [{kind: 'external_contract', id: 'evt-queued'}],
-    },
-  });
 });
 
-it("memory.mem0-health: mem0's health, as each completed turn records it, names what its settings lack and a malformed baseUrl without echoing it, pings the backend, and stays degraded once a capture did not complete, its summary of at most 160 characters leading with the loss", async () => {
-  const model = await startModelServer();
-  const mem0 = await startMem0Server();
-  const healthOf = (home: string) =>
-    sessionRecords(home, 'mira', 'runtime_turn_completed').map(record =>
-      (
-        record['runtimePluginTurnEvidence'] as {
-          readonly health: readonly {
-            readonly pluginId: string;
-            readonly status: string;
-            readonly summary: string;
-          }[];
-        }
-      ).health.find(health => health.pluginId === 'mem0'),
-    );
-  const afterATurn = async (settings: Readonly<Record<string, string>>) => {
-    const home = createHome({
-      'config.json': configJson({
-        project02: model.settings,
-        plugins: {mem0: {enabled: true, config: settings}},
-      }),
-    });
-    const say = await converse(wireOf(await startDaemon(home)), 'mira');
-
-    model.answer(reply('Hello.'));
-    await say('Hello?', 'hello');
-
-    return healthOf(home).at(-1);
-  };
-  const rule =
-    'an absolute http:// or https:// address with no embedded credentials, query, or fragment';
-  const malformed = await afterATurn({
-    backend: 'server',
-    baseUrl: 'https://operator:hunter2@mem0.example',
-  });
-
-  expect(await afterATurn({backend: 'server'})).toMatchObject({
-    status: 'unavailable',
-    summary: 'Mem0 server backend needs the baseUrl config field.',
-  });
-  expect(await afterATurn({backend: 'platform'})).toMatchObject({
-    status: 'unavailable',
-    summary:
-      'Mem0 platform backend needs the apiKey config field (MEM0_API_KEY).',
-  });
-  expect(await afterATurn({backend: 'oss'})).toMatchObject({
-    status: 'unavailable',
-    summary: expect.stringContaining('MEM0_OSS_LLM_API_KEY') as string,
-  });
-  expect(malformed).toMatchObject({
-    status: 'unavailable',
-    summary: `Mem0 baseUrl must be ${rule}.`,
-  });
-  expect(JSON.stringify(malformed)).not.toContain('hunter2');
-  expect(
-    await afterATurn({backend: 'server', baseUrl: mem0.baseUrl}),
-  ).toMatchObject({status: 'ok', summary: 'Mem0 server reachable.'});
-  expect(mem0.requests).toContainEqual(
-    expect.objectContaining({method: 'GET', path: '/'}),
-  );
-
-  // Captures run one at a time, so one reaching the backend says the one
-  // before it settled.
-  const home = createHome({
-    'config.json': mem0Config(model, mem0, {backend: 'server'}),
-  });
-  const say = await converse(wireOf(await startDaemon(home)), 'mira');
-  const lost =
-    '1 capture(s) did not complete; most recent: mem0 add failed: HTTP 500.';
-
-  mem0.answer('/memories', {status: 500});
-
-  const second = mem0.hold('/memories');
-  const third = mem0.hold('/memories');
-  const turn = async (n: number) => {
-    model.answer(reply(`Reply ${String(n)}.`));
-    await say(`Line ${String(n)}.`, `line-${String(n)}`);
-  };
-
-  await turn(1);
-  await turn(2);
-  await second.arrived();
-  await turn(3);
-  second.release({status: 200, body: {results: [{id: 'mem-2'}]}});
-  await third.arrived();
-  await turn(4);
-
-  for (const health of healthOf(home).slice(2)) {
-    expect(health).toMatchObject({status: 'degraded'});
-    expect(health?.summary.startsWith(lost), health?.summary).toBe(true);
-    expect(health?.summary.length).toBeLessThanOrEqual(160);
-  }
-});
-
-it('memory.mem0-embedded: the embedded engine claims readiness only once its model and its embedder have both answered, creates its database owner-only, and writes nothing outside the home', async () => {
+it('memory.mem0-embedded: the embedded engine captures through its own model and embedder, keeps its database in the home readable by its owner alone, and writes nothing outside the home', async () => {
   const model = await startModelServer();
   const engine = await startEngineServer('Sam likes tea.');
   const outside = createHome();
@@ -707,42 +368,12 @@ it('memory.mem0-embedded: the embedded engine claims readiness only once its mod
     model.answer(reply(`Reply ${String(n)}.`));
     await say(`I like tea, ${String(n)}.`, `tea-${String(n)}`);
   };
-  const health = () =>
-    sessionRecords(home, 'mira', 'runtime_turn_completed').map(
-      record =>
-        (
-          record['runtimePluginTurnEvidence'] as {
-            readonly health: readonly {
-              readonly pluginId: string;
-              readonly status: string;
-              readonly summary: string;
-            }[];
-          }
-        ).health.find(entry => entry.pluginId === 'mem0') ?? {},
-    );
 
   await turn(1);
   await turn(2);
   // Captures run one at a time: the second one's extraction says the first
   // one's model and embedder have answered.
   await engine.extracted(2);
-  await turn(3);
-  expect(health()).toMatchObject([
-    {
-      status: 'degraded',
-      summary:
-        'Mem0 engine loaded; its model and embedder are contacted on first capture or recall.',
-    },
-    {},
-    {
-      status: 'ok',
-      summary: expect.stringContaining(
-        'its model and embedder have answered.',
-      ) as string,
-    },
-  ]);
-
-  expectOwnerOnly(join(home, 'character-data', 'mira', 'plugin-data', 'mem0'));
   daemon.signal('SIGINT');
   await daemon.exit();
   expectOwnerOnly(join(home, 'character-data', 'mira', 'plugin-data', 'mem0'));

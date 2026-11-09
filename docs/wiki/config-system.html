@@ -134,9 +134,12 @@
       and a character's overlay value overrides it. A character switched off keeps its settings
       readable, and the same field switches it back on. An absent character field keeps
       inheriting future global changes; global values are never copied into the overlay. On
-      first selection, the character package contributes only its plugin declarations and
-      non-secret defaults. On a package-version change, Project02 adds currently missing
-      package fields and never changes or removes existing character values.
+      first selection, the character package contributes only its plugin declarations and the
+      values her own settings screen could set, never a credential or a field declared
+      <code>url</code> or <code>path</code>: a package may come from a stranger, and where her
+      data goes is the person's to choose. What it cannot contribute is a warning in her view.
+      On a package-version change, Project02 adds currently missing package fields and never
+      changes or removes existing character values.
     </p>
 
     <h2>Secrets</h2>
@@ -183,11 +186,11 @@
     <h2>Safe mutation boundary</h2>
 
     <ol>
-      <li>Read and strictly validate the current authored document.</li>
+      <li>Read the current authored document; one that cannot be read is refused, never written over.</li>
       <li>Validate an exact structured operation; model writes cannot submit dotted paths or whole-document patches.</li>
       <li>For model writes, require an installed manifest, a declared non-secret field, and <code>agentMutable: true</code>.</li>
       <li>Compare the caller's authored fingerprint while holding the cross-process mutation lock.</li>
-      <li>Revalidate the new document and the target section's complete declared schema while still holding the lock, then atomically replace it with mode <code>0600</code>.</li>
+      <li>Judge the change by its own rules alone, never by what else the documents hold, so refused values are put right one at a time; then, still holding the lock, atomically replace the document with mode <code>0600</code>.</li>
       <li>Return the new fingerprint; never return resolved secret values.</li>
     </ol>
 
@@ -287,8 +290,8 @@
 
     <p>
       Listing and inspection are available whenever <code>runtime.plugin</code> runs. A settings
-      error about a plugin she runs stops her before any turn, so no list is ever answered while
-      her plugins are blocked. The update tool is offered only when the host has a confirmation
+      error about a plugin blocks that plugin alone, and the list shows it blocked. The update
+      tool is offered only when the host has a confirmation
       handler. The host validates
       the proposal before prompting, shows a redacted exact preview, and accepts only a one-shot user
       approval within the existing five-minute deadline. Missing, denied, cancelled, timed-out, or
@@ -328,12 +331,16 @@
     <h2>Pre-release compatibility and future import</h2>
 
     <p>
-      Runtime config accepts only <code>project02.config.v2</code>. Project02 is private and
-      untagged, so retired shapes have no readers: a document that still carries the former
-      <code>project02.storeRoot</code> field, or a secret written as an environment reference,
-      is refused as unknown, and the person edits it out. Nor is a home the TypeScript daemon
-      wrote read: the daemon's store is at storage version 15, a home at version 14 is refused
-      and never converted, and the person starts a new one.
+      Settings are read forgivingly, as stored data is. A document that cannot be read, is not
+      JSON or is no object is refused for every target that reads it and is never written over.
+      Otherwise what the settings know is used and the rest is said: a key they do not know,
+      such as the former <code>project02.storeRoot</code>, is the warning
+      <code>runtime_config_ignored</code> at its path and is not used, and a document's version
+      is not judged, since the home's marker already refuses a home a newer build wrote. A
+      value its field refuses, such as a secret written as an environment reference, is the
+      error <code>runtime_config_value_invalid</code> at its path: nothing stands in for it, and
+      it stops only what it configures, its plugin or connector, or for a host field the
+      characters that read it.
     </p>
 
     <p>
@@ -358,7 +365,7 @@
       <li>One place for every setting, layered home under character, with a real distinction between authored and effective config, on top of Project02's cross-process lock and manifest schema.</li>
       <li>Cold manifest inspection, declared fields rendered as they are, authored/runtime separation, and fingerprint-bound writes, with explicit per-call approval for the model.</li>
       <li>Clear precedence and centralized loading.</li>
-      <li>A strict typed config boundary rather than independent ad hoc readers.</li>
+      <li>One typed config boundary, read forgivingly, rather than independent ad hoc readers.</li>
       <li>Targeted atomic edits that preserve unrelated state.</li>
     </ul>
 

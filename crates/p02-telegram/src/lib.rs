@@ -9,8 +9,6 @@ mod daemon;
 mod gate;
 mod management;
 mod outbox;
-#[cfg(test)]
-mod stand_in;
 mod table;
 
 use std::fmt;

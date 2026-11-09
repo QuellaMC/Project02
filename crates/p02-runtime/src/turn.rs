@@ -1,35 +1,35 @@
-//! One line through the turn: its records in the order the store's gate
-//! admits them, the plugins' hooks around the model's rounds, and what the
-//! turn announces as it goes.
+//! One line through the turn: its records in the order they happen, the
+//! plugins' hooks around the model's rounds, and what the turn announces as
+//! it goes.
 
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
+use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     BlankContextTextError, CharacterDecision, CommittedTurn, ConversationToolCall,
-    ConversationTurn, DecisionContext, DecisionRejectionReason, Evidence, ModelToolCall,
-    ProviderAnswer, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
+    ConversationTurn, DecisionContext, Evidence, ModelToolCall, ProviderAnswer, ToolCallId,
+    ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, Participant, SpeakerName, Timestamp,
     UserLine, VisibleMessage, VisibleText,
 };
 use p02_plugins::{
-    BeforeCallOutcome, HealthCheck, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall,
-    ToolCallReport,
+    BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    CalendarDay, DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput,
-    TurnOutcome, TurnSink, run_turn, select_history_window, today_note,
+    DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput, TurnOutcome,
+    TurnSink, run_turn, select_history_window, today_note,
 };
 use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
     PayloadSummary, RecordBody, RecordError, RoundRecord, RoundSnapshot, RuntimeRejection,
-    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence,
-    TurnRejected, TurnRejection, TurnStatus,
+    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected,
+    TurnRejection, TurnStatus,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinError;
@@ -85,9 +85,7 @@ pub struct CompletedTurn {
 /// A turn that ended refused, the person's line kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RejectedTurn {
-    /// The reason its record names, but at the health gate, where the
-    /// record names the refused commit and this the plugin's
-    /// `plugin_health_rejected`.
+    /// The reason its record names.
     pub reason: &'static str,
     pub message: String,
 }
@@ -235,7 +233,7 @@ async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) ->
 struct Begun {
     history: ConversationHistory,
     message: VisibleMessage,
-    day: Option<CalendarDay>,
+    day: Option<Date>,
 }
 
 /// Records the event, reads the history, then commits the person's line,
@@ -286,9 +284,8 @@ async fn begin(
 }
 
 /// The turn failed: its rejection is recorded if it still can be, naming
-/// what it committed and finished, so the log reads back whole with the
-/// person's line and every shown reply anchored. The failure reported is
-/// the turn's, so the record's own is not.
+/// what it committed and finished, so the log says how the turn ended. The
+/// failure reported is the turn's, so the record's own is not.
 async fn failed(
     disk: &mut Option<Disk>,
     identity: &EventIdentity,
@@ -315,20 +312,10 @@ async fn failed(
 /// The day it is where the person is at `moment`, by the machine's time
 /// zone, which no setting could know better and which is read from the
 /// machine's files; a zone that cannot be read is taken as UTC.
-fn calendar_day(moment: &Timestamp) -> Option<CalendarDay> {
-    let date = moment
-        .as_str()
-        .parse::<jiff::Timestamp>()
-        .ok()?
-        .to_zoned(TimeZone::system())
-        .date();
+fn calendar_day(moment: &Timestamp) -> Option<Date> {
+    let at = moment.as_str().parse::<jiff::Timestamp>().ok()?;
 
-    CalendarDay::new(
-        u16::try_from(date.year()).ok()?,
-        u8::try_from(date.month()).ok()?,
-        u8::try_from(date.day()).ok()?,
-    )
-    .ok()
+    Some(at.to_zoned(TimeZone::system()).date())
 }
 
 /// A turn from its committed line to its end: the sink of its model's
@@ -337,7 +324,7 @@ struct OpenTurn<'a> {
     identity: EventIdentity,
     line: VisibleText,
     /// The day the model is told it is, first of its notes.
-    day: Option<CalendarDay>,
+    day: Option<Date>,
     cast: &'a Cast,
     host: &'a PluginHost,
     listener: &'a Listener<'a>,
@@ -390,9 +377,8 @@ impl OpenTurn<'_> {
     }
 
     /// The plugins prepare the model's call or refuse the turn; the model's
-    /// rounds run to their end; the health gate judges a reply that would
-    /// commit, never a turn already refused; and the record that ends the
-    /// turn lands, before the work after its commit.
+    /// rounds run to their end; and the record that ends the turn lands,
+    /// before the work after its commit.
     async fn answer(
         &mut self,
         mind: Mind<'_>,
@@ -404,7 +390,7 @@ impl OpenTurn<'_> {
                 let refused =
                     TurnRejection::Runtime(RuntimeRejection::PluginBeforeRoleModelCallRejected);
 
-                self.reject(refused, rejection.message.clone(), rejection.evidence, None)
+                self.reject(refused, rejection.message.clone(), rejection.evidence)
                     .await?;
                 return Ok(Ended::Rejected(RejectedTurn {
                     reason: refused.reason(),
@@ -438,36 +424,13 @@ impl OpenTurn<'_> {
                     .unwrap_or_else(|| rejection.reason.as_str().to_owned());
                 let evidence = self.recorded().await;
 
-                self.reject(refused, message.clone(), evidence, None)
-                    .await?;
+                self.reject(refused, message.clone(), evidence).await?;
                 Ok(Ended::Rejected(RejectedTurn {
                     reason: refused.reason(),
                     message,
                 }))
             }
-            TurnOutcome::Replied { round, decision } => {
-                let check = self.host.health(&self.shown().await).await;
-                let Some(rejection) = check.rejection.clone() else {
-                    return self.complete(round, &decision, check).await;
-                };
-                let refused = TurnRejection::Judged {
-                    round,
-                    reason: DecisionRejectionReason::CommitValidationFailure,
-                };
-                let (evidence, turn_evidence) = self.evidence(check).await;
-
-                self.reject(
-                    refused,
-                    rejection.message.clone(),
-                    evidence,
-                    Some(turn_evidence),
-                )
-                .await?;
-                Ok(Ended::Rejected(RejectedTurn {
-                    reason: rejection.reason(),
-                    message: rejection.message,
-                }))
-            }
+            TurnOutcome::Replied { round, decision } => self.complete(round, &decision).await,
         }
     }
 
@@ -543,7 +506,6 @@ impl OpenTurn<'_> {
         rejection: TurnRejection,
         message: String,
         evidence: Vec<Evidence>,
-        turn_evidence: Option<TurnEvidence>,
     ) -> Result<(), RunTurnError> {
         let mut rejected = TurnRejected::new(rejection, message)?;
 
@@ -555,7 +517,6 @@ impl OpenTurn<'_> {
         }
 
         rejected.runtime_plugin_evidence = evidence;
-        rejected.runtime_plugin_turn_evidence = turn_evidence;
         self.append(RecordBody::TurnRejected(rejected)).await
     }
 
@@ -572,27 +533,12 @@ impl OpenTurn<'_> {
             .collect()
     }
 
-    /// The turn's evidence once the health gate judged its reply, its
-    /// phases' and then the gate's, and the health the gate found.
-    async fn evidence(&self, check: HealthCheck) -> (Vec<Evidence>, TurnEvidence) {
-        let mut evidence = self.recorded().await;
-
-        evidence.extend(check.evidence);
-        (
-            evidence,
-            TurnEvidence {
-                health: check.snapshots,
-            },
-        )
-    }
-
     /// Ends the turn completed on round `round`, anchoring the last reply it
     /// said, then runs the plugins' work after the commit.
     async fn complete(
         &self,
         round: NonZeroU32,
         decision: &CharacterDecision,
-        check: HealthCheck,
     ) -> Result<Ended, RunTurnError> {
         let accepted_reply = decision
             .tool_calls()
@@ -602,7 +548,7 @@ impl OpenTurn<'_> {
                 ModelToolCall::VisibleReply { text } => Some(text.clone()),
                 ModelToolCall::Plugin { .. } => None,
             });
-        let (evidence, turn_evidence) = self.evidence(check).await;
+        let evidence = self.recorded().await;
         let (messages, finished) = {
             let ledger = self.ledger.lock().await;
 
@@ -617,7 +563,6 @@ impl OpenTurn<'_> {
                 accepted_reply,
             },
             runtime_plugin_evidence: evidence,
-            runtime_plugin_turn_evidence: Some(turn_evidence),
         }))
         .await?;
 
@@ -716,7 +661,7 @@ impl TurnSink for OpenTurn<'_> {
                 provider_exchange: round.output.provider_exchange.clone(),
             },
             round.result.clone(),
-        )?;
+        );
 
         self.append(RecordBody::ModelRound(Box::new(record))).await
     }

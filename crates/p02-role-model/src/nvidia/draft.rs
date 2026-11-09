@@ -9,7 +9,7 @@
 use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, ToolNameMapping, VISIBLE_REPLY};
 
 use super::stream::Fragment;
-use crate::prompt::{is_blank, runtime_name};
+use crate::prompt::runtime_name;
 
 /// Follows one string field of a flat JSON object as its text arrives in
 /// pieces, `{"text": "…"}`, decoding the value as far as the pieces reach:
@@ -216,7 +216,7 @@ impl FieldScanner {
     }
 
     fn skip_blank(&mut self) {
-        let blank = self.pending.len() - self.pending.trim_start_matches(is_blank).len();
+        let blank = self.pending.len() - self.pending.trim_start().len();
 
         self.pending.drain(..blank);
     }
@@ -282,9 +282,9 @@ impl<'a> ReplyDrafts<'a> {
     /// that never became a tag.
     pub(super) fn finish(self) {
         for draft in self.drafts {
-            if let Ok(held) = draft.filter.finish()
-                && !held.is_empty()
-            {
+            let held = draft.filter.finish();
+
+            if !held.is_empty() {
                 self.invocation.hear(ReplyDelta {
                     reply: draft.reply,
                     text: held,

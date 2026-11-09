@@ -7,9 +7,6 @@
     "kind": "first_party",
     "description": "Cross-session recall over this character's own conversation history: full-text search with anchored context windows, and transcript scrolling by message anchor.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
-    "compatibility": {
-      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
-    },
     "declaredPlugins": [
       "tool_provider",
       "handle_tool_call",
@@ -21,14 +18,12 @@
       "scope": "global_with_character_overrides",
       "fields": []
     },
-    "firstParty": true,
     "runtimePolicy": {
       "timeoutMs": 5000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",
-        "handleToolCall": "reject_tool_call",
-        "health": "degrade"
+        "handleToolCall": "reject_tool_call"
       }
     },
     "activation": {

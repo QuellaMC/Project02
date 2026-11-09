@@ -49,7 +49,6 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
                 accepted_reply: None,
             },
             runtime_plugin_evidence: Vec::new(),
-            runtime_plugin_turn_evidence: None,
         }),
     )
     .unwrap();

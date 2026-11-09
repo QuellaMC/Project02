@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use p02_characters::discover;
 use p02_config::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation, Resolution,
-    Sections, apply_change, materialize,
+    Sections, apply_change, check_change, materialize,
 };
 use p02_contracts::{Manifest, PluginFactory};
 use p02_plugins::{
@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
-use crate::support::id;
+use crate::support::{builder, id};
 
 /// How long a test waits for a settings document's lock.
 const SETTINGS_WAIT: Duration = Duration::from_secs(5);
@@ -101,7 +101,7 @@ impl MiraHome {
         plugins
             .iter()
             .fold(
-                PluginHost::builder(Arc::new(self.data())),
+                builder(Arc::new(self.data())),
                 |builder, (plugin, values)| {
                     let (manifest, factory) = bundled(plugin);
 
@@ -121,16 +121,6 @@ impl MiraHome {
     /// with the values they give it, `asking` asking the person, and her
     /// settings handed to the host's own plugin.
     pub(crate) fn mira(&self, asking: Arc<dyn Confirmer>) -> PluginHost {
-        self.mira_building(asking, |plugin| bundled(plugin).1)
-    }
-
-    /// Mira's host as [`MiraHome::mira`] builds it, each plugin by the
-    /// factory `factory_of` gives its id.
-    pub(crate) fn mira_building(
-        &self,
-        asking: Arc<dyn Confirmer>,
-        factory_of: impl Fn(&str) -> PluginFactory,
-    ) -> PluginHost {
         let discovery = discover(self.home.root());
         let mira = discovery.find("mira").unwrap();
         let data = materialize(&self.home, &self.sections, mira, SETTINGS_WAIT).unwrap();
@@ -141,20 +131,20 @@ impl MiraHome {
         settings
             .plugins()
             .fold(
-                PluginHost::builder(Arc::new(data)),
+                PluginHost::builder(
+                    Arc::new(data),
+                    asking,
+                    Arc::new(MiraSettings {
+                        home: self.home.clone(),
+                        sections: Arc::clone(&self.sections),
+                    }),
+                ),
                 |builder, (plugin, values)| {
-                    builder.plugin(
-                        bundled(plugin.as_str()).0.clone(),
-                        values.clone(),
-                        factory_of(plugin.as_str()),
-                    )
+                    let (manifest, factory) = bundled(plugin.as_str());
+
+                    builder.plugin(manifest.clone(), values.clone(), *factory)
                 },
             )
-            .confirmer(asking)
-            .config_control(Arc::new(MiraSettings {
-                home: self.home.clone(),
-                sections: Arc::clone(&self.sections),
-            }))
             .activate()
             .unwrap()
     }
@@ -282,6 +272,31 @@ pub(crate) fn bundled(id: &str) -> &'static (Manifest, PluginFactory) {
         .unwrap()
 }
 
+/// `change` as a change of Mira's own settings.
+fn config_change(change: &FieldChange) -> ConfigChange {
+    let (id, field) = (change.plugin.to_string(), change.field.to_string());
+
+    ConfigChange {
+        target: ConfigTarget::Character {
+            character_id: "mira".to_owned(),
+        },
+        expected_fingerprint: change.expected_fingerprint.clone(),
+        operation: match &change.value {
+            Some(value) => Operation::SectionFieldSet {
+                namespace: Namespace::Plugins,
+                id,
+                field,
+                value: value.clone(),
+            },
+            None => Operation::SectionFieldUnset {
+                namespace: Namespace::Plugins,
+                id,
+                field,
+            },
+        },
+    }
+}
+
 /// Mira's settings as her daemon hands them to her host.
 #[derive(Debug)]
 struct MiraSettings {
@@ -319,32 +334,25 @@ impl ConfigControl for MiraSettings {
         })
     }
 
+    fn check(&self, change: &FieldChange) -> Result<(), String> {
+        match check_change(
+            &self.sections,
+            &discover(self.home.root()),
+            &config_change(change),
+        ) {
+            Some(ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message }) => {
+                Err(message)
+            }
+            Some(ChangeOutcome::Applied { .. }) | None => Ok(()),
+        }
+    }
+
     fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
-        let (id, field) = (change.plugin.to_string(), change.field.to_string());
-        let operation = match &change.value {
-            Some(value) => Operation::SectionFieldSet {
-                namespace: Namespace::Plugins,
-                id,
-                field,
-                value: value.clone(),
-            },
-            None => Operation::SectionFieldUnset {
-                namespace: Namespace::Plugins,
-                id,
-                field,
-            },
-        };
         let outcome = apply_change(
             &self.home,
             &self.sections,
             &discover(self.home.root()),
-            &ConfigChange {
-                target: ConfigTarget::Character {
-                    character_id: "mira".to_owned(),
-                },
-                expected_fingerprint: change.expected_fingerprint.clone(),
-                operation,
-            },
+            &config_change(change),
             SETTINGS_WAIT,
         );
 

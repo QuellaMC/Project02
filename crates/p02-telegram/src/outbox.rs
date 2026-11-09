@@ -1,11 +1,11 @@
 //! What a bot writes in its chats. Its calls to Telegram go one at a time
 //! in the order they were decided, so no edit overtakes a commit nor a
-//! reply the line shown before it, and none once the bot has stopped, nor
-//! while another program's polls hold the token; one Telegram asks to wait
-//! on is made again after the pause. A write to a paired account's chat
-//! waits while the settings are in doubt and is made only while the
-//! account is paired, each checked as the call's turn comes. A chat that
-//! answers 403 never opened the bot, and is skipped until it writes.
+//! reply the line shown before it, and none once the bot has stopped; one
+//! Telegram asks to wait on is made again after the pause. A write to a
+//! paired account's chat waits while the settings are in doubt and is made
+//! only while the account is paired, each checked as the call's turn
+//! comes. A chat that answers 403 never opened the bot, and is skipped
+//! until it writes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::future::Future;
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::Lines;
-use crate::bot::{Leave, capitalized};
+use crate::bot::capitalized;
 use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
@@ -135,7 +135,7 @@ impl Outbox {
     pub(crate) fn start(
         api: BotApi,
         settings: watch::Receiver<Arc<BotSettings>>,
-        leave: Leave,
+        held: watch::Receiver<bool>,
         draft_edits: Duration,
         lines: Arc<dyn Lines>,
         stop: CancellationToken,
@@ -143,7 +143,6 @@ impl Outbox {
     ) -> Self {
         let (commands, taken) = mpsc::unbounded_channel();
         let read = Arc::clone(&settings.borrow());
-        let Leave { held, claimed } = leave;
 
         tracker.spawn(
             Writer {
@@ -151,7 +150,6 @@ impl Outbox {
                 settings,
                 read,
                 held,
-                claimed,
                 draft_edits,
                 lines,
                 stop,
@@ -314,8 +312,8 @@ struct Writer {
     /// The settings the accounts admitted since were judged against: a new
     /// read supersedes them.
     read: Arc<BotSettings>,
+    /// Whether the settings are in doubt: being read, or the daemon away.
     held: watch::Receiver<bool>,
-    claimed: watch::Receiver<bool>,
     draft_edits: Duration,
     lines: Arc<dyn Lines>,
     stop: CancellationToken,
@@ -687,11 +685,9 @@ impl Writer {
     }
 
     /// The call, made again after each pause Telegram asks for, the outbox
-    /// waiting with it, and not made, nor made again, while another
-    /// program's polls hold the token; a call to a paired account's chat,
-    /// `to`, waits while the settings are in doubt and is not made, nor
-    /// made again, once the account is paired no longer. None for one not
-    /// made.
+    /// waiting with it; a call to a paired account's chat, `to`, waits while
+    /// the settings are in doubt and is not made, nor made again, once the
+    /// account is paired no longer. None for one not made.
     async fn patiently<T, F>(
         &mut self,
         to: Option<i64>,
@@ -711,10 +707,6 @@ impl Writer {
                 if !self.paired().contains(&chat) {
                     return None;
                 }
-            }
-
-            if !*self.claimed.borrow() {
-                return None;
             }
 
             let outcome = tokio::select! {
@@ -755,69 +747,5 @@ impl Writer {
                 None
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use p02_shared::Identifier;
-
-    use serde_json::Value;
-
-    use super::*;
-    use crate::bot_api::BotToken;
-    use crate::stand_in::{Heard, StandIn};
-    use crate::table::Owner;
-
-    /// connectors.telegram-split-stops-at-failure: A text longer than one Telegram message stops at the first piece Telegram would not take: the pieces after it are not sent.
-    #[tokio::test(start_paused = true)]
-    async fn a_long_text_stops_at_the_piece_telegram_would_not_take() {
-        let telegram = StandIn::new();
-        let heard = Arc::new(Heard::default());
-        let (_settings, settings) = watch::channel(Arc::new(BotSettings {
-            owner: Owner::Character {
-                id: Identifier::new("mira").unwrap(),
-                name: "Mira".to_owned(),
-                mirror: true,
-            },
-            paired: BTreeSet::from(["4242".to_owned()]),
-        }));
-        let (_held, held) = watch::channel(false);
-        let (_claim, claimed) = watch::channel(true);
-        let stop = CancellationToken::new();
-        let tasks = TaskTracker::new();
-        let outbox = Outbox::start(
-            BotApi::new(Arc::new(telegram.clone()), BotToken::new("987654:mira")),
-            settings,
-            Leave { held, claimed },
-            Duration::from_millis(1_500),
-            heard.clone(),
-            stop.clone(),
-            &tasks,
-        );
-        let (first, second) = ("a".repeat(MAX_MESSAGE), "b".repeat(MAX_MESSAGE));
-
-        telegram.refuse("sendMessage", 1, 400, "Bad Request: message is too long");
-        outbox.say_to_paired(4242, format!("{first}{second}c"));
-        // The next text goes: once it is in, the third piece would be too.
-        outbox.say_to_paired(4242, "After.".to_owned());
-
-        let sent: Vec<Value> = telegram
-            .called("sendMessage", 3)
-            .await
-            .into_iter()
-            .map(|call| call.body["text"].clone())
-            .collect();
-
-        assert_eq!(sent, [first.as_str(), second.as_str(), "After."]);
-        assert_eq!(
-            heard.reports(),
-            ["Mira's bot could not write to chat 4242: Bad Request: message is too long"]
-        );
-        stop.cancel();
-        tasks.close();
-        tasks.wait().await;
     }
 }

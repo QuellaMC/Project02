@@ -23,6 +23,7 @@ use p02_contracts::{
     ProvidedTool, RawOutput, ReplyDelta, RoleModelAdapter, RuntimePlugin, ToolCall,
     ToolCallOutcome, ToolInputContract, ToolPreparation,
 };
+use p02_core::ClientStamp;
 use p02_plugins::list;
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
@@ -33,7 +34,7 @@ use tokio::sync::{Notify, mpsc};
 /// How long a test waits for what it expects before it fails.
 const PATIENCE: Duration = Duration::from_secs(120);
 
-pub(crate) fn id(text: &str) -> Identifier {
+fn id(text: &str) -> Identifier {
     Identifier::new(text).unwrap()
 }
 
@@ -155,13 +156,6 @@ impl World {
         .await
         .unwrap()
     }
-
-    /// Where segment `segment` of `conversation` keeps Mira's log.
-    pub(crate) fn log(&self, conversation: &str, segment: u64) -> PathBuf {
-        self.path(&format!(
-            "character-data/mira/sessions/{conversation}.{segment}/raw-events.jsonl"
-        ))
-    }
 }
 
 #[expect(
@@ -180,28 +174,6 @@ fn create_directories(path: &Path) {
     std::fs::create_dir_all(path).unwrap();
 }
 
-/// Makes `path` read-only, handing back what its permissions were.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test makes a home's files read-only as a failing disk would"
-)]
-pub(crate) fn make_read_only(path: &Path) -> std::fs::Permissions {
-    let before = std::fs::metadata(path).unwrap().permissions();
-    let mut read_only = before.clone();
-
-    read_only.set_readonly(true);
-    std::fs::set_permissions(path, read_only).unwrap();
-    before
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test gives a home's files back their permissions"
-)]
-pub(crate) fn restore(path: &Path, permissions: std::fs::Permissions) {
-    std::fs::set_permissions(path, permissions).unwrap();
-}
-
 /// Mira's thread, opened.
 pub(crate) async fn open(daemon: &Daemon) -> String {
     match daemon.open_conversation("mira").await {
@@ -218,8 +190,8 @@ pub(crate) fn line(conversation: &str, text: &str, id: &str) -> Message {
         conversation_id: conversation.to_owned(),
         sender_id: "local-user".to_owned(),
         text: text.to_owned(),
-        source: "web".to_owned(),
-        client_message_id: id.to_owned(),
+        source: ClientStamp::new("web").unwrap(),
+        client_message_id: ClientStamp::new(id).unwrap(),
     }
 }
 
@@ -327,11 +299,10 @@ impl Gate {
 }
 
 /// One round of the scripted model: the pieces it drafts of its reply, a
-/// gate it waits at, what it does then, and its answer.
+/// gate it waits at, and its answer.
 pub(crate) struct Round {
     drafts: Vec<String>,
     gate: Option<Arc<Gate>>,
-    then: Option<Box<dyn FnOnce() + Send>>,
     answer: String,
 }
 
@@ -353,7 +324,6 @@ impl Round {
         Self {
             drafts: Vec::new(),
             gate: None,
-            then: None,
             answer: answer.to_string(),
         }
     }
@@ -367,12 +337,6 @@ impl Round {
     /// Waits at `gate` once it drafted.
     pub(crate) fn held(mut self, gate: &Arc<Gate>) -> Self {
         self.gate = Some(Arc::clone(gate));
-        self
-    }
-
-    /// Does `act` just before it answers.
-    pub(crate) fn then(mut self, act: impl FnOnce() + Send + 'static) -> Self {
-        self.then = Some(Box::new(act));
         self
     }
 }
@@ -422,10 +386,6 @@ impl RoleModelAdapter for Model {
 
         if let Some(gate) = round.gate {
             gate.pass_async().await;
-        }
-
-        if let Some(act) = round.then {
-            act();
         }
 
         RawOutput::text(round.answer)
@@ -502,17 +462,14 @@ impl Toy {
             "kind": "first_party",
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
-            "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
             "declaredPlugins": declared,
             "config": {"scope": "global_with_character_overrides", "fields": self.fields},
-            "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": 10_000,
                 "redactionLabels": [],
                 "failureBehavior": {
                     "beforeRoleModelCall": "degrade",
                     "handleToolCall": "reject_tool_call",
-                    "health": "degrade",
                 },
             },
             "activation": {"defaultEnabled": true, "reasons": ["test"]},

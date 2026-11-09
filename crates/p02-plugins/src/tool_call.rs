@@ -108,7 +108,7 @@ impl Core {
             tool_name,
             input,
         } = proposed;
-        let Some(Route { slot, tool, asking }) = self.route(tool_name.as_str()) else {
+        let Some(Route { slot, tool }) = self.route(tool_name.as_str()) else {
             return ToolCallReport {
                 result: ToolCallResult::Rejected {
                     reason: "tool_not_declared".to_owned(),
@@ -132,8 +132,10 @@ impl Core {
             }
         };
 
-        if let Some(confirmer) = asking {
-            return slot.approval_gated_call(confirmer, tool, call, turn).await;
+        if tool.is_approval_gated() {
+            return slot
+                .approval_gated_call(self.confirmer.as_ref(), tool, call, turn)
+                .await;
         }
 
         let plugin = slot.live();

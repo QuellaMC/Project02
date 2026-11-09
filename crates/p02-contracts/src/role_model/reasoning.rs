@@ -1,12 +1,15 @@
 /// The one grammar for the reasoning a model leaks into its text. A block
 /// opens on `<think …>` or `<reasoning …>`, in any case and with any blank
 /// space and attributes, and closes on the first bare closing tag of the
-/// same name; the block is dropped whole, nested tags and all. A tag outside
-/// any block, or a block never closed, is a leak the text cannot be cleaned
-/// of. What is taken out is read as never written: the text on its two
+/// same name; the block is dropped whole, nested tags and all. A block
+/// never closed runs to the end of the text, and a closing tag outside any
+/// block closes one the text began inside, so what came before it is
+/// dropped. What is taken out is read as never written: the text on its two
 /// sides is read again as one, so no tag is spelled across it, and what the
 /// filter passes reads back as itself. The filter reads the text as it
-/// arrives, so a draft can be shown while the model still writes.
+/// arrives, so a draft can be shown while the model still writes; what it
+/// passed before a stray closing tag came stays passed, and only the text
+/// read whole drops it.
 #[derive(Debug, Default)]
 pub struct ReasoningFilter {
     buffer: String,
@@ -14,14 +17,7 @@ pub struct ReasoningFilter {
     /// The start of a would-be tag that the open block began inside, read
     /// again in front of what follows the block.
     cut: String,
-    stray: bool,
 }
-
-/// The text holds a reasoning tag outside any block, or a block that never
-/// closes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the text leaks reasoning: a reasoning tag outside a block, or a block never closed")]
-pub struct ReasoningLeakError;
 
 const TAG_NAMES: [&str; 2] = ["think", "reasoning"];
 
@@ -113,7 +109,7 @@ impl ReasoningFilter {
                         self.cut = self.buffer[tag_start..start].to_owned();
 
                         if closing {
-                            self.stray = true;
+                            passed.clear();
                             self.read_on_after(end);
                             cursor = 0;
                         } else {
@@ -140,32 +136,25 @@ impl ReasoningFilter {
         self.buffer.replace_range(..end, &cut);
     }
 
-    /// Releases what was held as text, a `<` that never became a tag.
-    ///
-    /// # Errors
-    ///
-    /// [`ReasoningLeakError`] when a block was left open or a tag stood
-    /// outside any block.
-    pub fn finish(self) -> Result<String, ReasoningLeakError> {
-        if self.open_block.is_some() || self.stray {
-            Err(ReasoningLeakError)
+    /// Releases what was held as text, a `<` that never became a tag; a
+    /// block left open keeps the rest.
+    #[must_use]
+    pub fn finish(self) -> String {
+        if self.open_block.is_some() {
+            String::new()
         } else {
-            Ok(self.buffer)
+            self.buffer
         }
     }
 }
 
 /// The text with its reasoning blocks dropped.
-///
-/// # Errors
-///
-/// [`ReasoningLeakError`] when the text leaks reasoning it cannot be
-/// cleaned of.
-pub fn scrub_reasoning_blocks(text: &str) -> Result<String, ReasoningLeakError> {
+#[must_use]
+pub fn scrub_reasoning_blocks(text: &str) -> String {
     let mut filter = ReasoningFilter::new();
     let passed = filter.push(text);
 
-    filter.finish().map(|held| passed + &held)
+    passed + &filter.finish()
 }
 
 fn match_tag(buffer: &str, start: usize) -> TagMatch {
@@ -256,57 +245,59 @@ fn skip_blank(buffer: &str, start: usize) -> usize {
 mod tests {
     use super::*;
 
-    /// The grammar, whole: what the decision parser and the adapters rely on.
-    const CASES: [(&str, Result<&str, ReasoningLeakError>); 19] = [
-        ("<think>plan</think>Hello", Ok("Hello")),
-        ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", Ok("a  b")),
-        ("<THINK>plan</Think>Hello", Ok("Hello")),
-        ("< think >plan</ think >Hello", Ok("Hello")),
-        ("<think>a<think>b</think>c", Ok("c")),
-        ("<think>a</reasoning>b</think>c", Ok("c")),
-        ("<thinking>x</thinking>", Ok("<thinking>x</thinking>")),
+    /// The grammar, whole: what the decision parser and the adapters rely
+    /// on, read the same at every split point.
+    const CASES: [(&str, &str); 17] = [
+        ("<think>plan</think>Hello", "Hello"),
+        ("a <reasoning kind=\"x\">\nplan\n</reasoning> b", "a  b"),
+        ("<THINK>plan</Think>Hello", "Hello"),
+        ("< think >plan</ think >Hello", "Hello"),
+        ("<think>a<think>b</think>c", "c"),
+        ("<think>a</reasoning>b</think>c", "c"),
+        ("<thinking>x</thinking>", "<thinking>x</thinking>"),
         (
             "<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>",
-            Ok("<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>"),
+            "<think-aloud>a</think-aloud> <reasoning:note>b</reasoning:note>",
         ),
-        ("x < y and a<b", Ok("x < y and a<b")),
-        ("3 <<think>check</think> 5", Ok("3 < 5")),
-        ("<th<think>a</think>ink>b</think>c", Ok("c")),
-        ("<<think>plan</think>think>secret", Err(ReasoningLeakError)),
-        ("<thin", Ok("<thin")),
-        ("plain text", Ok("plain text")),
-        ("<think>still thinking about it", Err(ReasoningLeakError)),
-        ("<think/>", Err(ReasoningLeakError)),
-        ("a </think> b", Err(ReasoningLeakError)),
-        ("<think>a</think>b</think>", Err(ReasoningLeakError)),
-        ("<think>a</think foo>b", Err(ReasoningLeakError)),
+        ("x < y and a<b", "x < y and a<b"),
+        ("3 <<think>check</think> 5", "3 < 5"),
+        ("<th<think>a</think>ink>b</think>c", "c"),
+        ("<<think>plan</think>think>secret", ""),
+        ("<thin", "<thin"),
+        ("plain text", "plain text"),
+        ("<think>still thinking about it", ""),
+        ("<think/>", ""),
+        ("<think>a</think foo>b", ""),
+    ];
+
+    /// A closing tag outside any block, read whole: what came before it
+    /// was reasoning.
+    const STRAY: [(&str, &str); 3] = [
+        ("a </think> b", " b"),
+        ("<think>a</think>b</think>", ""),
+        ("plan it</think>Hello", "Hello"),
     ];
 
     #[test]
     fn the_grammar_reads_text_the_same_whole_and_at_every_split_point() {
         for (input, expected) in CASES {
-            let expected = expected.map(str::to_owned);
-
             assert_eq!(scrub_reasoning_blocks(input), expected, "{input:?}");
-
-            if let Ok(clean) = &expected {
-                assert_eq!(
-                    scrub_reasoning_blocks(clean).as_ref(),
-                    Ok(clean),
-                    "{input:?}"
-                );
-            }
+            assert_eq!(scrub_reasoning_blocks(expected), expected, "{input:?}");
 
             for split in (0..=input.len()).filter(|&split| input.is_char_boundary(split)) {
                 let mut filter = ReasoningFilter::new();
                 let passed = filter.push(&input[..split]) + &filter.push(&input[split..]);
 
                 assert_eq!(
-                    filter.finish().map(|held| passed + &held),
+                    passed + &filter.finish(),
                     expected,
                     "{input:?} split at {split}"
                 );
             }
+        }
+
+        for (input, expected) in STRAY {
+            assert_eq!(scrub_reasoning_blocks(input), expected, "{input:?}");
         }
     }
 
@@ -319,27 +310,27 @@ mod tests {
         assert_eq!(filter.push("den</think> wor"), " wor");
         assert_eq!(filter.push("ld <"), "ld ");
         assert_eq!(filter.push("3"), "<3");
-        assert_eq!(filter.finish(), Ok(String::new()));
+        assert_eq!(filter.finish(), "");
 
         let mut held = ReasoningFilter::new();
 
         assert_eq!(held.push("a <thin"), "a ");
-        assert_eq!(held.finish(), Ok("<thin".to_owned()));
+        assert_eq!(held.finish(), "<thin");
 
         let mut open = ReasoningFilter::new();
 
         assert_eq!(open.push("a <think>b</thi"), "a ");
-        assert_eq!(open.finish(), Err(ReasoningLeakError));
+        assert_eq!(open.finish(), "", "a block left open keeps the rest");
 
         let mut spelled = ReasoningFilter::new();
 
         assert_eq!(spelled.push("a <<think>plan</think>"), "a ");
         assert_eq!(spelled.push("think>secret"), "");
-        assert_eq!(spelled.finish(), Err(ReasoningLeakError));
+        assert_eq!(spelled.finish(), "");
 
         let mut stray = ReasoningFilter::new();
 
-        assert_eq!(stray.push("a <th</think>ink>secret"), "a ");
-        assert_eq!(stray.finish(), Err(ReasoningLeakError));
+        assert_eq!(stray.push("a <th</think>ink>secret"), "");
+        assert_eq!(stray.finish(), "");
     }
 }

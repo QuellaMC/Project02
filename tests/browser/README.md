@@ -8,10 +8,9 @@ harness's model server. Nothing here is imported from `packages/`, so
 the suite runs against whichever daemon `PROJECT02_SERVE_CMD` starts:
 the binary `pnpm build` makes, unless it names another.
 
-The rules of `tests/conformance/README.md` hold here: a test's title is
-its row id in `tests/conformance/inventory.csv`, a colon, a space, then
-the behavior as a sentence, and a page row is done only when a test here
-names it; the suite is flat, and it waits only on what it can observe.
+The rules of `tests/conformance/README.md` hold here: a test's title is a
+short id, a colon, a space, then the behavior as a sentence, and a test
+waits only on what it can observe.
 
 `fixture.ts` is Playwright's `test` with the harness under it: each test
 hands the harness its runner, and once the test is over runs what the

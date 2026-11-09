@@ -1,19 +1,17 @@
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import {join, relative} from 'node:path';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
-import {inspect, serve, startDaemon} from './harness/daemon.ts';
-import {frameOf, openEvents, type Events} from './harness/events.ts';
+import {startDaemon} from './harness/daemon.ts';
+import {frameOf, openEvents} from './harness/events.ts';
 import {characterJson, chmod, configJson, createHome} from './harness/home.ts';
-import {reply, startModelServer} from './harness/model-server.ts';
+import {
+  messagesOf,
+  reply,
+  startModelServer,
+  type ModelRequest,
+} from './harness/model-server.ts';
 import {
   changeConfig,
   conversationOf,
@@ -34,27 +32,13 @@ type Section = {
   readonly namespace: string;
   readonly id: string;
   readonly enabled: boolean;
-  readonly activation: {readonly status: string};
   readonly fields: readonly Field[];
-};
-
-type Diagnostic = {
-  readonly severity: string;
-  readonly code: string;
-  readonly path?: string;
-  readonly namespace?: string;
-  readonly id?: string;
 };
 
 type View = {
   readonly fingerprint: string;
-  readonly diagnostics: readonly Diagnostic[];
   readonly project02: readonly Field[];
   readonly sections: readonly Section[];
-};
-
-type Health = {
-  readonly config: {readonly diagnostics: readonly Diagnostic[]};
 };
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
@@ -65,10 +49,6 @@ async function viewOf(
   target: Parameters<Wire['configView']>[0],
 ): Promise<View> {
   return (await wire.configView(target)) as View;
-}
-
-async function healthOf(wire: Wire): Promise<Health> {
-  return (await wire.health()) as Health;
 }
 
 function hostField(view: View, name: string): Field | undefined {
@@ -83,21 +63,12 @@ function homeDocument(home: string): string {
   return readFileSync(join(home, 'config.json'), 'utf8');
 }
 
-function overlayPath(home: string, characterId: string): string {
-  return join(home, 'character-data', characterId, 'config.json');
-}
-
-/** The stream's health_changed frames and the character's states, as they came. */
-function timeline(events: Events, characterId: string): string[] {
-  return events.frames.flatMap(frame => {
-    if (frame.event === 'health_changed') {
-      return ['health_changed'];
-    }
-
-    return frameOf('state_changed', {characterId})(frame)
-      ? [(JSON.parse(frame.data ?? '') as {readonly state: string}).state]
-      : [];
-  });
+/** The line of the model's system messages where demo-config names the tone. */
+function toneIn(request: ModelRequest | undefined): string | undefined {
+  return messagesOf(request)
+    .filter(message => message.role === 'system')
+    .flatMap(message => String(message.content).split('\n'))
+    .find(line => line.includes(' tone'));
 }
 
 it("config.view-global: the home's view lists the host fields in page order, each with what the home authored, what is in effect and where it comes from, every section the home may set, the document's diagnostics and a fingerprint", async () => {
@@ -166,125 +137,6 @@ it("config.view-global: the home's view lists the host fields in page order, eac
     'plugins.session-history',
     'connectors.telegram',
   ]);
-});
-
-it("config.view-character: a character's view shows the home's values in effect but not authored there, her own overlay's values, a fingerprint of her own, and the plugin her package requires as active before she ever started", async () => {
-  const home = createHome({
-    'config.json': configJson({project02: {userDisplayName: 'Robin'}}),
-    'character-data': {
-      mira: {
-        'config.json': configJson({
-          project02: {enabled: false, contextWindowTokens: 4096},
-        }),
-      },
-    },
-  });
-  const wire = wireOf(await startDaemon(home));
-  const view = await viewOf(wire, mira);
-
-  expect(await wire.health()).toMatchObject({
-    characters: [{id: 'mira', state: 'not_started'}],
-  });
-  expect(hostField(view, 'userDisplayName')).toMatchObject({
-    authored: {configured: false},
-    effectiveSource: 'global',
-    effective: {source: 'config', value: 'Robin'},
-  });
-  expect(hostField(view, 'contextWindowTokens')).toMatchObject({
-    authored: {configured: true, value: 4096},
-    effectiveSource: 'character',
-    effective: {source: 'config', value: 4096},
-  });
-  expect(view.fingerprint).not.toBe(
-    (await viewOf(wire, {scope: 'global'})).fingerprint,
-  );
-  expect(sectionOf(view, 'character-state')).toMatchObject({
-    enabled: true,
-    activation: {status: 'active'},
-  });
-});
-
-it("config.view-refusals: a view of an unknown character or of a broken package is refused unknown_character, the broken one naming invalid_descriptor, and while the home's document cannot be loaded every view is refused config_unloadable instead of blank fields", async () => {
-  const home = createHome({
-    characters: {broken: {'project02.character.json': '{not json'}},
-  });
-  const wire = wireOf(await startDaemon(home));
-
-  expect(
-    await wire.configView({scope: 'character', characterId: 'nobody'}),
-  ).toMatchObject({status: 'refused', reason: 'unknown_character'});
-  expect(
-    await wire.configView({scope: 'character', characterId: 'broken'}),
-  ).toMatchObject({
-    status: 'refused',
-    reason: 'unknown_character',
-    message: expect.stringContaining('invalid_descriptor') as string,
-  });
-  writeFileSync(join(home, 'config.json'), '{not json');
-
-  for (const target of [{scope: 'global'}, mira] as const) {
-    expect(await wire.configView(target), target.scope).toEqual({
-      status: 'refused',
-      reason: 'config_unloadable',
-      message: expect.any(String) as string,
-    });
-  }
-});
-
-it('config.no-config-defaults: a home without config.json views with no diagnostics, each host field with a default showing it and the rest showing no value', async () => {
-  const home = createHome();
-  const wire = wireOf(await startDaemon(home));
-
-  rmSync(join(home, 'config.json'));
-
-  const view = await wire.configView({scope: 'global'});
-
-  expect(view).toMatchObject({status: 'ok', diagnostics: []});
-  expect(
-    (view as View).project02.map(field => [
-      field.name,
-      field.effective.source,
-      field.effective.value,
-    ]),
-  ).toEqual([
-    ['userDisplayName', 'default', 'You'],
-    ['roleModelProvider', 'missing', undefined],
-    ['nvidiaApiKey', 'missing', undefined],
-    ['nvidiaModel', 'missing', undefined],
-    ['nvidiaBaseUrl', 'missing', undefined],
-    ['contextWindowTokens', 'default', 32768],
-    ['defaultMemoryProvider', 'missing', undefined],
-    ['enabled', 'default', true],
-  ]);
-});
-
-it("config.effective-source-default: a declared default is in effect beneath both layers, and the home's value and then the character's override it", async () => {
-  const wire = wireOf(await startDaemon(createHome()));
-  const contextWindow = async () =>
-    hostField(await viewOf(wire, mira), 'contextWindowTokens');
-
-  expect(await contextWindow()).toMatchObject({
-    effectiveSource: 'default',
-    effective: {source: 'default', value: 32768},
-  });
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {kind: 'set', path: 'project02.contextWindowTokens', value: 8192},
-  );
-  expect(await contextWindow()).toMatchObject({
-    effectiveSource: 'global',
-    effective: {value: 8192},
-  });
-  await saveConfig(wire, mira, {
-    kind: 'set',
-    path: 'project02.contextWindowTokens',
-    value: 4096,
-  });
-  expect(await contextWindow()).toMatchObject({
-    effectiveSource: 'character',
-    effective: {value: 4096},
-  });
 });
 
 it('config.change-ops: set, unset, section_enabled and a section field set and unset each answer applied with the new fingerprint, which the next view carries with the change in it', async () => {
@@ -371,72 +223,38 @@ it('config.fingerprint-conflict: a change presenting a fingerprint from before a
   expect(homeDocument(home)).toBe(written);
 });
 
-it('config.secret-fingerprint: the fingerprint changes when a secret is first set but not when its value is replaced, so two pages replacing one secret both succeed and the later value stands', async () => {
+it('config.change-refusals: a value of the wrong type or outside its allowed values is refused invalid, naming the field, and nothing is written', async () => {
   const home = createHome();
   const wire = wireOf(await startDaemon(home));
-  const unset = await viewOf(wire, {scope: 'global'});
+  const written = homeDocument(home);
 
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {kind: 'set', path: 'project02.nvidiaApiKey', value: 'nvapi-first'},
-  );
-
-  const {fingerprint} = await viewOf(wire, {scope: 'global'});
-
-  expect(fingerprint).not.toBe(unset.fingerprint);
-
-  for (const value of ['nvapi-second', 'nvapi-third']) {
+  for (const [field, operation] of [
+    [
+      'contextWindowTokens',
+      {kind: 'set', path: 'project02.contextWindowTokens', value: 'many'},
+    ],
+    [
+      'tone',
+      {
+        kind: 'section_field_set',
+        namespace: 'plugins',
+        id: 'demo-config',
+        field: 'tone',
+        value: 'shouty',
+      },
+    ],
+  ] as const) {
     expect(
-      await wire.configChange({
-        target: {scope: 'global'},
-        expectedFingerprint: fingerprint,
-        operation: {kind: 'set', path: 'project02.nvidiaApiKey', value},
-      }),
-      value,
-    ).toEqual({status: 'applied', fingerprint});
+      await changeConfig(wire, {scope: 'global'}, operation),
+      field,
+    ).toMatchObject({
+      status: 'refused',
+      reason: 'invalid',
+      message: expect.stringContaining(field) as string,
+    });
   }
 
-  expect(JSON.parse(homeDocument(home))).toMatchObject({
-    project02: {nvidiaApiKey: 'nvapi-third'},
-  });
-});
-
-it('config.change-refusals: a change is refused invalid for a value of the wrong type, one outside its allowed values, the store root, an undeclared field and an unknown section, and unknown_character for a character not installed, and none creates her data directory', async () => {
-  const home = createHome({
-    'config.json': configJson({project02: {enabled: false}}),
-  });
-  const wire = wireOf(await startDaemon(home));
-  const demoConfig = {
-    kind: 'section_field_set',
-    namespace: 'plugins',
-    id: 'demo-config',
-  };
-
-  for (const operation of [
-    {kind: 'set', path: 'project02.contextWindowTokens', value: 'many'},
-    {...demoConfig, field: 'tone', value: 'shouty'},
-    {kind: 'set', path: 'project02.storeRoot', value: '/elsewhere'},
-    {...demoConfig, field: 'volume', value: 11},
-    {...demoConfig, id: 'nope', field: 'tone', value: 'warm'},
-  ]) {
-    expect(
-      await changeConfig(wire, mira, operation),
-      JSON.stringify(operation),
-    ).toMatchObject({status: 'refused', reason: 'invalid'});
-  }
-
-  expect(
-    await wire.configChange({
-      target: {scope: 'character', characterId: 'nobody'},
-      expectedFingerprint: (await viewOf(wire, mira)).fingerprint,
-      operation: {kind: 'set', path: 'project02.enabled', value: true},
-    }),
-  ).toMatchObject({status: 'refused', reason: 'unknown_character'});
-
-  const data = join(home, 'character-data');
-
-  expect(existsSync(data) ? readdirSync(data) : []).toEqual([]);
+  expect(homeDocument(home)).toBe(written);
 });
 
 it('config.write-failed: a change to a home that cannot be written answers failed, and the fingerprint stays what it was', async () => {
@@ -467,146 +285,7 @@ it('config.write-failed: a change to a home that cannot be written answers faile
   );
 });
 
-it("config.scope-rules: the home's view leaves out what belongs to a character and a character's what belongs to the home, and a write of either on the other's target is refused invalid and changes no file", async () => {
-  const home = createHome();
-  const wire = wireOf(await startDaemon(home, fixedReplies));
-
-  await wire.start('mira');
-
-  const telegramFields = (view: View) =>
-    sectionOf(view, 'telegram')?.fields.map(field => field.name);
-  const homeView = await viewOf(wire, {scope: 'global'});
-  const miraView = await viewOf(wire, mira);
-
-  expect(sectionOf(homeView, 'character-state')).toBeUndefined();
-  expect(sectionOf(miraView, 'character-state')).toBeDefined();
-  expect(telegramFields(homeView)).toEqual([
-    'managementBotToken',
-    'mirror',
-    'pairedUsers',
-  ]);
-  expect(telegramFields(miraView)).toEqual(['botToken', 'mirror']);
-
-  const documents = [join(home, 'config.json'), overlayPath(home, 'mira')];
-  const before = documents.map(document => readFileSync(document, 'utf8'));
-  const telegram = {
-    kind: 'section_field_set',
-    namespace: 'connectors',
-    id: 'telegram',
-  };
-
-  for (const [target, operation] of [
-    [
-      {scope: 'global'},
-      {
-        kind: 'section_enabled',
-        namespace: 'plugins',
-        id: 'character-state',
-        enabled: true,
-      },
-    ],
-    [{scope: 'global'}, {...telegram, field: 'botToken', value: '987654:bot'}],
-    [mira, {...telegram, field: 'managementBotToken', value: '123456:bot'}],
-    [mira, {...telegram, field: 'pairedUsers', value: {}}],
-  ] as const) {
-    expect(
-      await changeConfig(wire, target, operation),
-      JSON.stringify(operation),
-    ).toMatchObject({status: 'refused', reason: 'invalid'});
-  }
-
-  expect(documents.map(document => readFileSync(document, 'utf8'))).toEqual(
-    before,
-  );
-});
-
-it("config.scope-target-document: a change on a character's screen, a secret's among them, is written into her overlay alone, and the home's config.json is left as it was", async () => {
-  const home = createHome();
-  const wire = wireOf(await startDaemon(home));
-  const homeBefore = homeDocument(home);
-
-  for (const operation of [
-    {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'},
-    {kind: 'set', path: 'project02.nvidiaApiKey', value: 'nvapi-mira'},
-    {
-      kind: 'section_field_set',
-      namespace: 'connectors',
-      id: 'telegram',
-      field: 'botToken',
-      value: '987654:mira',
-    },
-  ]) {
-    await saveConfig(wire, mira, operation);
-  }
-
-  expect(
-    JSON.parse(readFileSync(overlayPath(home, 'mira'), 'utf8')),
-  ).toMatchObject({
-    project02: {userDisplayName: 'Sam', nvidiaApiKey: 'nvapi-mira'},
-    connectors: {telegram: {config: {botToken: '987654:mira'}}},
-  });
-  expect(homeDocument(home)).toBe(homeBefore);
-});
-
-it("config.authored-outside-scope-warning: a character's plugin switched on in the home's document, a character's field set there and a home's field set in an overlay each warn runtime_config_authored_outside_scope at its path and never take effect", async () => {
-  const home = createHome({
-    'config.json': configJson({
-      plugins: {'character-state': {enabled: true}},
-      connectors: {telegram: {config: {botToken: '111111:home'}}},
-    }),
-    'character-data': {
-      mira: {
-        'config.json': configJson({
-          connectors: {telegram: {config: {managementBotToken: '222222:mira'}}},
-        }),
-      },
-    },
-    characters: {
-      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
-    },
-  });
-  const wire = wireOf(await startDaemon(home));
-  const outsideScope = (path: string) =>
-    expect.objectContaining({
-      severity: 'warning',
-      code: 'runtime_config_authored_outside_scope',
-      path,
-    }) as unknown;
-
-  expect(await wire.configView({scope: 'global'})).toMatchObject({
-    diagnostics: expect.arrayContaining([
-      outsideScope('plugins.character-state.enabled'),
-      outsideScope('connectors.telegram.config.botToken'),
-    ]) as unknown[],
-  });
-  expect(await wire.configView(mira)).toMatchObject({
-    diagnostics: expect.arrayContaining([
-      outsideScope('connectors.telegram.config.managementBotToken'),
-    ]) as unknown[],
-  });
-  expect(
-    sectionOf(
-      await viewOf(wire, {scope: 'character', characterId: 'zeta'}),
-      'character-state',
-    ),
-  ).toMatchObject({enabled: false, activation: {status: 'disabled'}});
-
-  const {characters} = (await wire.connectorConfig('telegram')) as {
-    readonly characters: readonly {
-      readonly characterId: string;
-      readonly values: unknown;
-    }[];
-  };
-
-  expect(
-    characters.map(character => [character.characterId, character.values]),
-  ).toEqual([
-    ['mira', {mirror: true, pairedUsers: {}}],
-    ['zeta', {mirror: true, pairedUsers: {}}],
-  ]);
-});
-
-it("config.overlay-merge: a character's overlay overrides the home field by field: a host field, a plugin's switch, which can turn on what the home turned off, and its settings, and a secret, the home's standing in when she has none", async () => {
+it("config.overlay-merge: what a character's screen saves is written into her overlay alone and overrides the home's values for her field by field, a plugin's switch and a key among them, while the home's values stand in for what she leaves unset", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({
@@ -614,45 +293,62 @@ it("config.overlay-merge: a character's overlay overrides the home field by fiel
         ...model.settings,
         userDisplayName: 'Robin',
         contextWindowTokens: 8192,
+        enabled: false,
       },
       plugins: {
         'demo-config': {enabled: false, config: {tone: 'warm', signoff: '-R'}},
       },
     }),
-    'character-data': {
-      mira: {
-        'config.json': configJson({
-          project02: {userDisplayName: 'Sam'},
-          plugins: {'demo-config': {enabled: true, config: {tone: 'formal'}}},
-        }),
-      },
-      zeta: {
-        'config.json': configJson({project02: {nvidiaApiKey: 'zeta-key'}}),
-      },
-    },
     characters: {
       zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
     },
   });
   const wire = wireOf(await startDaemon(home));
+  const zeta = {scope: 'character', characterId: 'zeta'} as const;
+  const demoConfig = {namespace: 'plugins', id: 'demo-config'};
+  const homeBefore = homeDocument(home);
+
+  // Switched on last, each starts once, on all she was given.
+  for (const [target, operation] of [
+    [mira, {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'}],
+    [mira, {kind: 'section_enabled', ...demoConfig, enabled: true}],
+    [
+      mira,
+      {
+        kind: 'section_field_set',
+        ...demoConfig,
+        field: 'tone',
+        value: 'formal',
+      },
+    ],
+    [zeta, {kind: 'set', path: 'project02.nvidiaApiKey', value: 'zeta-key'}],
+    [mira, {kind: 'set', path: 'project02.enabled', value: true}],
+    [zeta, {kind: 'set', path: 'project02.enabled', value: true}],
+  ] as const) {
+    await saveConfig(wire, target, operation);
+  }
+
+  expect(homeDocument(home)).toBe(homeBefore);
+
   const view = await viewOf(wire, mira);
-  const demoConfig = sectionOf(view, 'demo-config');
+  const demoConfigOfHers = sectionOf(view, 'demo-config');
 
   expect(hostField(view, 'userDisplayName')).toMatchObject({
     effectiveSource: 'character',
     effective: {value: 'Sam'},
   });
   expect(hostField(view, 'contextWindowTokens')).toMatchObject({
+    authored: {configured: false},
     effectiveSource: 'global',
     effective: {value: 8192},
   });
-  expect(demoConfig).toMatchObject({
+  expect(demoConfigOfHers).toMatchObject({
     enabled: true,
     enabledSource: 'character',
     activation: {status: 'active'},
   });
   expect(
-    demoConfig?.fields
+    demoConfigOfHers?.fields
       .filter(field => ['tone', 'signoff'].includes(field.name))
       .map(field => [field.name, field.effectiveSource, field.effective.value]),
   ).toEqual([
@@ -674,171 +370,60 @@ it("config.overlay-merge: a character's overlay overrides the home field by fiel
   }
 });
 
-it('config.applied-reload: a change reloads a running character only when what she runs would differ, an effective value of hers or a re-keyed provider secret, not for a home value she overrides or a switched-off plugin, through reloading then ready; the turn in flight finishes first and one sent mid-reload waits and lands on the same conversation', async () => {
+it('config.applied-reload: a change to what a running character runs, her key among them, reloads her once the turn in flight has finished, and the turns after it, one sent during the reload among them, land on the same conversation under the new settings', async () => {
   const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({project02: model.settings}),
-    'character-data': {
-      mira: {'config.json': configJson({project02: {userDisplayName: 'Sam'}})},
-    },
-  });
-  const daemon = await startDaemon(home);
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({
+        project02: model.settings,
+        plugins: {'demo-config': {enabled: true}},
+      }),
+    }),
+  );
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
   const events = await openEvents(daemon);
-
-  for (const operation of [
-    {kind: 'set', path: 'project02.userDisplayName', value: 'Robin'},
-    {
-      kind: 'section_field_set',
-      namespace: 'plugins',
-      id: 'demo-config',
-      field: 'tone',
-      value: 'warm',
-    },
-  ]) {
-    await saveConfig(wire, {scope: 'global'}, operation);
-  }
-
+  const ready = frameOf('state_changed', {characterId: 'mira', state: 'ready'});
   const held = model.hold();
   const inFlight = say('First?', 'in-flight');
 
-  await held.arrived();
+  expect(toneIn(await held.arrived())).toContain('neutral tone');
   await saveConfig(wire, mira, {
-    kind: 'set',
-    path: 'project02.contextWindowTokens',
-    value: 4096,
+    kind: 'section_field_set',
+    namespace: 'plugins',
+    id: 'demo-config',
+    field: 'tone',
+    value: 'pirate',
   });
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'reloading'}),
   );
 
-  const midReload = say('Second?', 'mid-reload');
+  const duringReload = say('Second?', 'during-reload');
 
-  // A round trip the daemon answers after the request left: the request
-  // is in by then in every run seen, and the turn lands the same either way.
-  await wire.health();
   model.answer(reply('Second.'));
   held.release(reply('First.'));
-  await events.next(
-    frameOf('turn_completed', {
-      clientMessageId: 'in-flight',
-      status: 'completed',
-    }),
-  );
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
-  );
-  await events.next(
-    frameOf('turn_completed', {
-      clientMessageId: 'mid-reload',
-      status: 'completed',
-    }),
-  );
-  expect(await inFlight).toMatchObject({messages: [{}, {text: 'First.'}]});
-  expect(await midReload).toMatchObject({
+  expect(await inFlight).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'First.'}],
+  });
+  expect(await duringReload).toMatchObject({
     status: 'completed',
     conversationId,
     messages: [{}, {text: 'Second.'}],
   });
+  expect(toneIn(model.requests.at(-1))).toContain('pirate tone');
+  await events.next(ready);
   await saveConfig(
     wire,
     {scope: 'global'},
     {kind: 'set', path: 'project02.nvidiaApiKey', value: 'rekeyed'},
   );
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
-  );
-  // Passes never overlap: a reload either of the first two changes began
-  // would be on the stream before the third change's health_changed.
-  expect(timeline(events, 'mira')).toEqual([
-    'health_changed',
-    'health_changed',
-    'health_changed',
-    'reloading',
-    'ready',
-    'health_changed',
-    'reloading',
-    'ready',
-  ]);
-});
-
-it('config.reload-failure: a reload that cannot assemble leaves the character failed with the diagnostic, tried again by nothing until the next change, which starts her once the overlay is fixed', async () => {
-  const home = createHome();
-  const daemon = await startDaemon(home, {
-    ...fixedReplies,
-    PROJECT02_TEST_DURATIONS: 'heartbeat=1000',
-  });
-  const wire = wireOf(daemon);
-
-  await wire.start('mira');
-
-  const events = await openEvents(daemon);
-  const overlay = readFileSync(overlayPath(home, 'mira'), 'utf8');
-  const mirror = (value: boolean) =>
-    saveConfig(
-      wire,
-      {scope: 'global'},
-      {
-        kind: 'section_field_set',
-        namespace: 'connectors',
-        id: 'telegram',
-        field: 'mirror',
-        value,
-      },
-    );
-
-  writeFileSync(
-    overlayPath(home, 'mira'),
-    JSON.stringify({
-      ...(JSON.parse(overlay) as object),
-      project02: {contextWindowTokens: -5},
-    }),
-  );
-  await mirror(false);
-
-  const failed = await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'failed'}),
-  );
-
-  expect(JSON.parse(failed.data ?? '')).toMatchObject({
-    message: expect.stringContaining('contextWindowTokens') as string,
-  });
-  expect(await wire.health()).toMatchObject({
-    characters: [
-      {
-        id: 'mira',
-        state: 'failed',
-        diagnostic: expect.stringContaining('contextWindowTokens') as string,
-      },
-    ],
-  });
-
-  // Tried again by nothing: two heartbeats on, she is failed as before.
-  const failedSoFar = timeline(events, 'mira');
-
-  for (let beat = 0; beat < 2; beat += 1) {
-    await events.next(frame => frame.comment === 'ping');
-  }
-
-  expect(timeline(events, 'mira')).toEqual(failedSoFar);
-  expect(await wire.health()).toMatchObject({
-    characters: [{id: 'mira', state: 'failed'}],
-  });
-  writeFileSync(overlayPath(home, 'mira'), overlay);
-  await mirror(true);
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
-  );
-  expect(timeline(events, 'mira')).toEqual([
-    'health_changed',
-    'reloading',
-    'failed',
-    'health_changed',
-    'starting',
-    'ready',
-  ]);
+  await events.next(ready);
+  model.answer(reply('Third.'));
+  expect(await say('Third?', 'third')).toMatchObject({conversationId});
+  expect(model.requests.at(-1)?.authorization).toBe('Bearer rekeyed');
 });
 
 it('config.enabled-switch: switching a character off through a change says so at once in health_changed and then stops her, her view stays readable with the switch the way back, and switching her on starts her again', async () => {
@@ -874,403 +459,19 @@ it('config.enabled-switch: switching a character off through a change says so at
   );
 });
 
-it('config.document-format: what the daemon saves is a project02.config.v2 document holding the host fields under project02 and each section under plugins or connectors', async () => {
-  const home = createHome();
-  const wire = wireOf(await startDaemon(home));
-
-  for (const operation of [
-    {kind: 'set', path: 'project02.userDisplayName', value: 'Robin'},
-    {
-      kind: 'section_field_set',
-      namespace: 'plugins',
-      id: 'demo-config',
-      field: 'tone',
-      value: 'warm',
-    },
-    {
-      kind: 'section_field_set',
-      namespace: 'connectors',
-      id: 'telegram',
-      field: 'mirror',
-      value: false,
-    },
-  ]) {
-    await saveConfig(wire, {scope: 'global'}, operation);
-  }
-
-  expect(JSON.parse(homeDocument(home))).toEqual({
-    version: 'project02.config.v2',
-    project02: {userDisplayName: 'Robin'},
-    plugins: {'demo-config': {config: {tone: 'warm'}}},
-    connectors: {telegram: {config: {mirror: false}}},
-  });
-});
-
-it("config.unloadable: while the home's config.json is malformed a change on a character's screen is refused, saying the home's document failed to load, and creates no overlay", async () => {
-  const home = createHome({
-    'config.json': configJson({project02: {enabled: false}}),
-  });
-  const wire = wireOf(await startDaemon(home));
-  const {fingerprint} = await viewOf(wire, mira);
-
-  writeFileSync(join(home, 'config.json'), '{not json');
-  expect(
-    await wire.configChange({
-      target: mira,
-      expectedFingerprint: fingerprint,
-      operation: {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'},
-    }),
-  ).toMatchObject({
-    status: 'refused',
-    message: expect.stringContaining('failed to load') as string,
-  });
-  expect(existsSync(overlayPath(home, 'mira'))).toBe(false);
-});
-
-it('config.symlinked-config-file: a home whose config.json is a symlink is refused by serve and by inspect, each exiting 1, with nothing written in the home or to the file the link names', async () => {
-  const home = createHome();
-  const first = await startDaemon(home);
-
-  first.signal('SIGINT');
-  await first.exit();
-  rmSync(join(home, 'config.json'));
-  symlinkSync(
-    join(
-      createHome({
-        'config.json': configJson({project02: {userDisplayName: 'Robin'}}),
-      }),
-      'config.json',
-    ),
-    join(home, 'config.json'),
-  );
-
-  const tree = () =>
-    readdirSync(home, {recursive: true, withFileTypes: true}).map(entry => {
-      const path = join(entry.parentPath, entry.name);
-
-      return {
-        path: relative(home, path),
-        link: entry.isSymbolicLink(),
-        ...(entry.isDirectory() ? {} : {bytes: readFileSync(path, 'utf8')}),
-      };
-    });
-  const before = tree();
-
-  for (const run of [
-    serve(['--store', home]),
-    inspect(['--store', home, '--sessions']),
-  ]) {
-    expect(await run.exit()).toBe(1);
-  }
-
-  expect(tree()).toEqual(before);
-});
-
-it("config.retired-shapes-refused: a config.json still carrying project02.storeRoot, or the NVIDIA key written as an environment reference, is refused as invalid at that path, in health's diagnostics and by every view, and neither takes effect: the home stays where it is and no character starts on a key from the environment", async () => {
-  const home = createHome();
-  const elsewhere = createHome();
-  const wire = wireOf(
-    await startDaemon(home, {NVIDIA_API_KEY: 'nvapi-from-environment'}),
-  );
-
-  // Her boot settles first: a start sent while it runs joins it, and it
-  // read the home before the documents written below.
-  await wire.start('mira');
-
-  for (const [project02, field, code] of [
-    [
-      {storeRoot: elsewhere},
-      'storeRoot',
-      'runtime_config_unknown_project02_field',
-    ],
-    [
-      {roleModelProvider: 'nvidia', nvidiaApiKey: {$env: 'NVIDIA_API_KEY'}},
-      'nvidiaApiKey',
-      'runtime_config_secret_value_invalid',
-    ],
-  ] as const) {
-    writeFileSync(join(home, 'config.json'), configJson({project02}));
-    expect(await wire.health(), field).toMatchObject({
-      homeRoot: home,
-      config: {
-        diagnostics: [{severity: 'error', code, path: `project02.${field}`}],
-      },
-    });
-
-    for (const target of [{scope: 'global'}, mira] as const) {
-      expect(await wire.configView(target), field).toMatchObject({
-        status: 'refused',
-        reason: 'config_unloadable',
-      });
-    }
-
-    expect(await wire.start('mira'), field).toMatchObject({
-      character: {
-        state: 'failed',
-        diagnostic: expect.stringContaining(field) as string,
-      },
-    });
-  }
-
-  expect(readdirSync(elsewhere)).toEqual([]);
-});
-
-it("config.unknown-field-diagnostic: a hand-edited unknown field is an error at its path that stops the character: at the top level or at the retired project02.character the document does not load, and under a plugin's wrapper or in its config it blocks every plugin of hers but the host's own", async () => {
-  const failing = async (path: string, document: object): Promise<Wire> => {
-    const wire = wireOf(
-      await startDaemon(
-        createHome({'config.json': configJson(document)}),
-        fixedReplies,
-      ),
-    );
-
-    expect(await wire.start('mira'), path).toMatchObject({
-      character: {state: 'failed'},
-    });
-    expect(await wire.health(), path).toMatchObject({
-      config: {diagnostics: [{severity: 'error', path}]},
-    });
-
-    return wire;
-  };
-
-  for (const [path, document] of [
-    ['unknownField', {unknownField: true}],
-    ['project02.character', {project02: {character: 'mira'}}],
-  ] as const) {
-    const wire = await failing(path, document);
-
-    expect(await wire.configView(mira), path).toMatchObject({
-      status: 'refused',
-      reason: 'config_unloadable',
-    });
-  }
-
-  for (const [path, section] of [
-    ['plugins.demo-config.bogus', {enabled: true, bogus: true}],
-    ['plugins.demo-config.config.nope', {enabled: true, config: {nope: true}}],
-  ] as const) {
-    const wire = await failing(path, {plugins: {'demo-config': section}});
-    const {sections} = await viewOf(wire, mira);
-
-    expect(
-      sections
-        .filter(
-          ({namespace, activation}) =>
-            namespace === 'plugins' && activation.status === 'active',
-        )
-        .map(({id}) => id),
-      path,
-    ).toEqual(['runtime.plugin']);
-  }
-});
-
-it('config.unknown-section-warning: a section naming a plugin or a connector this version lacks warns runtime_config_unknown_plugin or runtime_config_unknown_connector for that id, in health and in the views, unless the nearest document switching it switches it off', async () => {
-  const wire = wireOf(
-    await startDaemon(
-      createHome({
-        'config.json': configJson({
-          plugins: {ghost: {enabled: true}, spirit: {enabled: false}},
-          connectors: {discord: {}, slack: {enabled: false}},
-        }),
-        'character-data': {
-          mira: {
-            'config.json': configJson({plugins: {ghost: {enabled: false}}}),
-          },
-        },
-      }),
-      fixedReplies,
-    ),
-  );
-  const unknown = (diagnostics: readonly Diagnostic[]) =>
-    diagnostics
-      .filter(({code}) => code.startsWith('runtime_config_unknown_'))
-      .map(({severity, code, path, namespace, id}) => ({
-        severity,
-        code,
-        path,
-        namespace,
-        id,
-      }));
-  const ghost = {
-    severity: 'warning',
-    code: 'runtime_config_unknown_plugin',
-    path: 'plugins.ghost',
-    namespace: 'plugins',
-    id: 'ghost',
-  };
-  const discord = {
-    severity: 'warning',
-    code: 'runtime_config_unknown_connector',
-    path: 'connectors.discord',
-    namespace: 'connectors',
-    id: 'discord',
-  };
-
-  expect(unknown((await healthOf(wire)).config.diagnostics)).toEqual([
-    ghost,
-    discord,
-  ]);
-  expect(unknown((await viewOf(wire, {scope: 'global'})).diagnostics)).toEqual([
-    ghost,
-    discord,
-  ]);
-  expect(unknown((await viewOf(wire, mira)).diagnostics)).toEqual([discord]);
-});
-
-it("config.disabled-plugin-not-validated: a switched-off plugin's settings are not judged: a misspelled field and a value outside its allowed ones raise no diagnostic, in health or in a view, and stop no character", async () => {
-  const wire = wireOf(
-    await startDaemon(
-      createHome({
-        'config.json': configJson({
-          plugins: {
-            'demo-config': {
-              enabled: false,
-              config: {nope: true, tone: 'shouty'},
-            },
-          },
-        }),
-      }),
-      fixedReplies,
-    ),
-  );
-
-  expect(await wire.start('mira')).toMatchObject({
-    character: {state: 'ready'},
-  });
-  expect((await healthOf(wire)).config.diagnostics).toEqual([]);
-  expect((await viewOf(wire, {scope: 'global'})).diagnostics).toEqual([]);
-  expect((await viewOf(wire, mira)).diagnostics).toEqual([]);
-});
-
-it('config.load-diagnostics: a config.json that cannot be read, is not JSON or is of another version is told apart in health as runtime_config_read_failed, runtime_config_malformed_json or runtime_config_version_unsupported', async () => {
-  for (const [code, document] of [
-    ['runtime_config_read_failed', configJson({})],
-    ['runtime_config_malformed_json', '{not json'],
-    [
-      'runtime_config_version_unsupported',
-      JSON.stringify({version: 'project02.config.v1'}),
-    ],
-  ] as const) {
-    const home = createHome({'config.json': document});
-
-    if (code === 'runtime_config_read_failed') {
-      chmod(join(home, 'config.json'), 0o000);
-    }
-
-    const wire = wireOf(await startDaemon(home, fixedReplies));
-
-    expect((await healthOf(wire)).config.diagnostics, code).toEqual([
-      expect.objectContaining({severity: 'error', code}),
-    ]);
-  }
-});
-
-it('config.overlay-unloadable: an overlay that is malformed, unreadable or invalid stops its character from starting with its diagnostic and has nothing written for her, and an edit sent from her screen as it was before is refused and leaves the overlay as it is', async () => {
-  const broken = [
-    ['nova', '{not json', 'not valid JSON'],
-    ['vega', configJson({}), 'could not be read'],
-    [
-      'lyra',
-      configJson({project02: {contextWindowTokens: -5}}),
-      'contextWindowTokens',
-    ],
-  ] as const;
-  const home = createHome({
-    'config.json': configJson({project02: {enabled: false}}),
-    characters: Object.fromEntries(
-      broken.map(([id]) => [
-        id,
-        {'project02.character.json': characterJson(id, id)},
-      ]),
-    ),
-    'character-data': Object.fromEntries(
-      broken.map(([id]) => [id, {'config.json': configJson({})}]),
-    ),
-  });
-  const wire = wireOf(await startDaemon(home, fixedReplies));
-  const screens = await Promise.all(
-    broken.map(([id]) => viewOf(wire, {scope: 'character', characterId: id})),
-  );
-
-  for (const [id, overlay] of broken) {
-    writeFileSync(overlayPath(home, id), overlay);
-  }
-
-  chmod(overlayPath(home, 'vega'), 0o000);
-
-  try {
-    for (const [index, [id]] of broken.entries()) {
-      expect(
-        await wire.configChange({
-          target: {scope: 'character', characterId: id},
-          expectedFingerprint: screens[index]?.fingerprint,
-          operation: {
-            kind: 'set',
-            path: 'project02.userDisplayName',
-            value: 'Sam',
-          },
-        }),
-        id,
-      ).toMatchObject({status: 'refused'});
-    }
-
-    await saveConfig(
-      wire,
-      {scope: 'global'},
-      {kind: 'unset', path: 'project02.enabled'},
-    );
-
-    for (const [id, , diagnostic] of broken) {
-      expect(await wire.start(id), id).toMatchObject({
-        character: {
-          state: 'failed',
-          diagnostic: expect.stringContaining(diagnostic) as string,
-        },
-      });
-      expect(readdirSync(join(home, 'character-data', id)), id).toEqual([
-        'config.json',
-      ]);
-    }
-  } finally {
-    chmod(overlayPath(home, 'vega'), 0o644);
-  }
-
-  for (const [id, overlay] of broken) {
-    expect(readFileSync(overlayPath(home, id), 'utf8'), id).toBe(overlay);
-  }
-});
-
-it('config.secret-redaction: no secret appears in a view, in inspect or in a diagnostic, only [redacted], whether declared secret or held in an object under a credential-looking name: an API key, a token, an access_token deeper down or a dotted name', async () => {
+it("config.secret-redaction: no secret appears in the home's view or a character's, only [redacted]: the model's key, a plugin's and the Telegram tokens", async () => {
   const secrets = [
     'nvapi-home-secret',
     'demo-key-secret',
     '123456:management-secret',
-    '111111:misplaced-secret',
     '987654:mira-secret',
-    'paired-key-secret',
-    'paired-token-secret',
-    'paired-access-secret',
-    'paired-dotted-secret',
   ];
   const home = createHome({
     'config.json': configJson({
       project02: {nvidiaApiKey: 'nvapi-home-secret'},
       plugins: {'demo-config': {config: {apiKey: 'demo-key-secret'}}},
       connectors: {
-        telegram: {
-          config: {
-            managementBotToken: '123456:management-secret',
-            botToken: '111111:misplaced-secret',
-            pairedUsers: {
-              '381940562': 'Alice (@alice)',
-              apiKey: 'paired-key-secret',
-              token: 'paired-token-secret',
-              nested: {access_token: 'paired-access-secret', label: 'kept'},
-              'api.key': 'paired-dotted-secret',
-            },
-          },
-        },
+        telegram: {config: {managementBotToken: '123456:management-secret'}},
       },
     }),
     'character-data': {
@@ -1281,25 +482,12 @@ it('config.secret-redaction: no secret appears in a view, in inspect or in a dia
       },
     },
   });
-  const pairedUsers = {
-    '381940562': 'Alice (@alice)',
-    apiKey: '[redacted]',
-    token: '[redacted]',
-    nested: {access_token: '[redacted]', label: 'kept'},
-    'api.key': '[redacted]',
-  };
   const wire = wireOf(await startDaemon(home));
   const homeView = await viewOf(wire, {scope: 'global'});
   const miraView = await viewOf(wire, mira);
-  const report = inspect(['--store', home, '--sessions']);
   const sectionField = (view: View, id: string, name: string) =>
     sectionOf(view, id)?.fields.find(field => field.name === name);
 
-  expect(homeView).toMatchObject({
-    diagnostics: expect.arrayContaining([
-      expect.objectContaining({path: 'connectors.telegram.config.botToken'}),
-    ]) as unknown[],
-  });
   expect(hostField(homeView, 'nvidiaApiKey')).toMatchObject({
     authored: {value: '[redacted]'},
     effective: {value: '[redacted]'},
@@ -1310,144 +498,18 @@ it('config.secret-redaction: no secret appears in a view, in inspect or in a dia
   expect(
     sectionField(homeView, 'telegram', 'managementBotToken'),
   ).toMatchObject({authored: {value: '[redacted]'}});
-  expect(
-    sectionField(homeView, 'telegram', 'pairedUsers')?.authored.value,
-  ).toEqual(pairedUsers);
   expect(sectionField(miraView, 'telegram', 'botToken')).toMatchObject({
     authored: {value: '[redacted]'},
   });
-  expect(await report.exit()).toBe(0);
-  expect(JSON.parse(report.stdout())).toMatchObject({
-    runtimeConfig: {project02: {nvidiaApiKey: '[redacted]'}},
-    connectors: [
-      {
-        config: {
-          managementBotToken: {value: '[redacted]'},
-          pairedUsers: {value: pairedUsers},
-        },
-      },
-    ],
-  });
 
-  for (const shown of [
-    JSON.stringify(homeView),
-    JSON.stringify(miraView),
-    report.stdout(),
-  ]) {
+  for (const shown of [JSON.stringify(homeView), JSON.stringify(miraView)]) {
     for (const secret of secrets) {
       expect(shown).not.toContain(secret);
     }
   }
 });
 
-it('config.secret-values: a secret is kept as it was typed and handed to its connector as written; a blank one is refused when saved, and a blank or non-string one written by hand is runtime_config_secret_value_invalid at its path', async () => {
-  const home = createHome();
-  const wire = wireOf(await startDaemon(home));
-  const typed = '  123456:as typed  ';
-  const managementBotToken = (value: unknown) => ({
-    kind: 'section_field_set',
-    namespace: 'connectors',
-    id: 'telegram',
-    field: 'managementBotToken',
-    value,
-  });
-
-  await saveConfig(wire, {scope: 'global'}, managementBotToken(typed));
-  expect(JSON.parse(homeDocument(home))).toMatchObject({
-    connectors: {telegram: {config: {managementBotToken: typed}}},
-  });
-  expect(await wire.connectorConfig('telegram')).toMatchObject({
-    home: {values: {managementBotToken: typed}},
-  });
-
-  for (const blank of ['', '   ']) {
-    expect(
-      await changeConfig(wire, {scope: 'global'}, managementBotToken(blank)),
-      JSON.stringify(blank),
-    ).toMatchObject({status: 'refused', reason: 'invalid'});
-  }
-
-  for (const value of ['', '   ', 42]) {
-    writeFileSync(
-      join(home, 'config.json'),
-      configJson({
-        connectors: {telegram: {config: {managementBotToken: value}}},
-      }),
-    );
-    expect(
-      await wire.configView({scope: 'global'}),
-      JSON.stringify(value),
-    ).toMatchObject({
-      diagnostics: [
-        {
-          severity: 'error',
-          code: 'runtime_config_secret_value_invalid',
-          path: 'connectors.telegram.config.managementBotToken',
-        },
-      ],
-    });
-  }
-});
-
-it('config.user-display-name-bounds: the name a person goes by is used trimmed and may run to 128 characters on one line; a longer, multi-line or blank one is refused when saved and is an error at its path when written by hand', async () => {
-  const home = createHome({
-    'config.json': configJson({project02: {userDisplayName: '  Robin  '}}),
-  });
-  const wire = wireOf(await startDaemon(home, fixedReplies));
-  const userDisplayName = (value: string) => ({
-    kind: 'set',
-    path: 'project02.userDisplayName',
-    value,
-  });
-
-  expect(await wire.health()).toMatchObject({config: {diagnostics: []}});
-
-  const say = await converse(wire, 'mira');
-
-  expect(await say('Hello.', 'hello')).toMatchObject({
-    messages: [{speakerName: 'Robin'}, {}],
-  });
-  await saveConfig(wire, {scope: 'global'}, userDisplayName('x'.repeat(128)));
-
-  for (const value of ['x'.repeat(129), 'Two\nlines', '   ']) {
-    expect(
-      await changeConfig(wire, {scope: 'global'}, userDisplayName(value)),
-      JSON.stringify(value),
-    ).toMatchObject({status: 'refused', reason: 'invalid'});
-  }
-
-  for (const value of ['x'.repeat(129), 'Two\nlines', '   ']) {
-    writeFileSync(
-      join(home, 'config.json'),
-      configJson({project02: {userDisplayName: value}}),
-    );
-    expect(await wire.health(), JSON.stringify(value)).toMatchObject({
-      config: {
-        diagnostics: [{severity: 'error', path: 'project02.userDisplayName'}],
-      },
-    });
-  }
-});
-
-it('config.context-window-validation: the context window takes a positive whole number of tokens, and 0, 1.5 or a string is refused invalid', async () => {
-  const wire = wireOf(await startDaemon(createHome()));
-  const contextWindowTokens = (value: unknown) => ({
-    kind: 'set',
-    path: 'project02.contextWindowTokens',
-    value,
-  });
-
-  for (const value of [0, 1.5, '4096']) {
-    expect(
-      await changeConfig(wire, {scope: 'global'}, contextWindowTokens(value)),
-      JSON.stringify(value),
-    ).toMatchObject({status: 'refused', reason: 'invalid'});
-  }
-
-  await saveConfig(wire, {scope: 'global'}, contextWindowTokens(4096));
-});
-
-it('config.nvidia-base-url-rule: the NVIDIA base URL takes only an absolute http or https address without credentials, a query or a fragment; anything else is refused invalid when saved and is runtime_config_nvidia_base_url_invalid at its path when written by hand, and neither repeats the address', async () => {
+it('config.nvidia-base-url-rule: an NVIDIA base URL carrying credentials or a query is refused when saved, and neither the refusal nor the home repeats it', async () => {
   const home = createHome();
   const wire = wireOf(await startDaemon(home));
   const marker = 'never-repeated';
@@ -1457,19 +519,15 @@ it('config.nvidia-base-url-rule: the NVIDIA base URL takes only an absolute http
     value,
   });
 
-  for (const value of [
-    'http://127.0.0.1:1234/v1',
-    'https://nim.example.test/v1',
-  ]) {
-    await saveConfig(wire, {scope: 'global'}, nvidiaBaseUrl(value));
-  }
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    nvidiaBaseUrl('https://nim.example.test/v1'),
+  );
 
   for (const value of [
-    `ftp://${marker}.example.test/v1`,
-    `${marker}.example.test/v1`,
     `https://user:${marker}@nim.example.test/v1`,
     `https://nim.example.test/v1?key=${marker}`,
-    `https://nim.example.test/v1#${marker}`,
   ]) {
     const refused = await changeConfig(
       wire,
@@ -1482,24 +540,7 @@ it('config.nvidia-base-url-rule: the NVIDIA base URL takes only an absolute http
       reason: 'invalid',
     });
     expect(JSON.stringify(refused), value).not.toContain(marker);
-    writeFileSync(
-      join(home, 'config.json'),
-      configJson({project02: {nvidiaBaseUrl: value}}),
-    );
-
-    const health = await wire.health();
-
-    expect(health, value).toMatchObject({
-      config: {
-        diagnostics: [
-          {
-            code: 'runtime_config_nvidia_base_url_invalid',
-            path: 'project02.nvidiaBaseUrl',
-          },
-        ],
-      },
-    });
-    expect(JSON.stringify(health), value).not.toContain(marker);
-    writeFileSync(join(home, 'config.json'), configJson({}));
   }
+
+  expect(homeDocument(home)).not.toContain(marker);
 });

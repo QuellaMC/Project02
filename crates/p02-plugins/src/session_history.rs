@@ -53,11 +53,9 @@ struct SessionHistoryPlugin {
     index: Arc<Mutex<Option<SessionIndex>>>,
 }
 
-/// What the plugin's hooks reach, as its manifest requests, and whose
-/// history it is.
+/// What the plugin's hooks reach, as its manifest requests.
 #[derive(Clone, Debug)]
 struct Reach {
-    character: Identifier,
     history: SessionHistory,
     databases: PluginDatabase,
 }
@@ -192,7 +190,6 @@ impl Reach {
     fn of(context: &HookContext) -> Result<Self, PluginError> {
         match (context.session_history(), context.plugin_database()) {
             (Some(history), Some(databases)) => Ok(Self {
-                character: context.turn().character.id.clone(),
                 history: history.clone(),
                 databases: databases.clone(),
             }),
@@ -212,7 +209,7 @@ impl Reach {
         let mut kept = index.lock().unwrap_or_else(PoisonError::into_inner);
         let mut opened = match kept.take() {
             Some(opened) => opened,
-            None => SessionIndex::open(&self.databases, &self.character)?,
+            None => SessionIndex::open(&self.databases)?,
         };
         let done = work(&mut opened, &self.history);
 
@@ -254,7 +251,6 @@ impl Reach {
                             limit,
                         },
                     )?;
-                    let damaged = listing.damaged_entry_count + index.damaged_records()?;
 
                     Ok(Answer {
                         summary: format!(
@@ -262,7 +258,7 @@ impl Reach {
                             hits.views.len(),
                             hits.sessions_with_hits
                         ),
-                        output: output::search(&hits, damaged, &query),
+                        output: output::search(&hits, &query),
                     })
                 })
             }
@@ -285,14 +281,13 @@ impl Reach {
                     }
 
                     let window = index.read(&session, anchor.as_deref(), i64::from(window))?;
-                    let damaged = listing.damaged_entry_count + index.damaged_records()?;
 
                     Ok(Answer {
                         summary: format!(
                             "Returned {} message(s) from one session.",
                             window.messages.len()
                         ),
-                        output: output::read(&session.to_string(), &window, damaged),
+                        output: output::read(&session.to_string(), &window),
                     })
                 })
             }

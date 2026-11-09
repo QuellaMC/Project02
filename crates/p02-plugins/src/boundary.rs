@@ -1,13 +1,13 @@
 //! The output boundary: what a plugin returns becomes records only once it
 //! keeps to the record limits and the JSON limits, stamped with its turn,
-//! its plugin and their labels. A breach is the plugin's failure, routed
+//! its plugin and its labels. A breach is the plugin's failure, routed
 //! through its failure policy; nothing a plugin returns is cut to fit.
 
 use std::borrow::Cow;
 
 use p02_contracts::{
     Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, Hook, PolicyOutcome, RedactionLabel,
-    merged_labels, within_limits,
+    within_limits,
 };
 use p02_shared::error_chain;
 use serde::Serialize;
@@ -30,22 +30,22 @@ pub(crate) fn quoted(text: &str) -> Cow<'_, str> {
     excerpt(text, QUOTED_CHARS)
 }
 
-/// How many labels a turn, or a plugin's manifest, brings to each record,
-/// and how long each may be: more than any record needs, and few enough
-/// that the labels of both, beside the longest summary the host writes,
-/// keep the record within the JSON limits.
+/// How many labels a plugin's manifest brings to each record, and how long
+/// each may be: more than any record needs, and few enough that they,
+/// beside the longest summary the host writes, keep the record within the
+/// JSON limits.
 const LABEL_LIMIT: usize = 16;
 const LABEL_BYTES: usize = 128;
 
 /// Why labels cannot ride a record.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "a turn or a plugin brings at most {LABEL_LIMIT} labels to each record, each of at most \
-     {LABEL_BYTES} bytes"
+    "a plugin brings at most {LABEL_LIMIT} labels to each record, each of at most {LABEL_BYTES} \
+     bytes"
 )]
 pub struct RecordLabelsError;
 
-/// Holds labels, where they enter the host, to what a record has room for.
+/// Holds a manifest's labels, at activation, to what a record has room for.
 pub(crate) fn within_label_allowance(labels: &[RedactionLabel]) -> Result<(), RecordLabelsError> {
     if labels.len() <= LABEL_LIMIT
         && labels
@@ -59,11 +59,8 @@ pub(crate) fn within_label_allowance(labels: &[RedactionLabel]) -> Result<(), Re
 }
 
 impl Slot {
-    pub(crate) fn labels(&self, turn: &Turn) -> Vec<RedactionLabel> {
-        merged_labels(
-            turn.privacy_labels(),
-            self.manifest.runtime_policy().redaction_labels(),
-        )
+    pub(crate) fn labels(&self) -> Vec<RedactionLabel> {
+        self.manifest.runtime_policy().redaction_labels().to_vec()
     }
 
     /// The plugin's notes as records of this turn.
@@ -83,7 +80,7 @@ impl Slot {
                     turn.identity().event.clone(),
                     self.manifest.id().clone(),
                     note,
-                    self.labels(turn),
+                    self.labels(),
                 )
                 .map_err(|error| error_chain(&error))
             })
@@ -109,7 +106,7 @@ impl Slot {
             turn.identity().event.clone(),
             self.manifest.id().clone(),
             note,
-            self.labels(turn),
+            self.labels(),
         )
         .expect(
             "a host record says something, within the limits once its quote is cut and its \

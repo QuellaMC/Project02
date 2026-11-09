@@ -114,10 +114,6 @@ pub(crate) struct Files {
 struct Leased<'a>(MutexGuard<'a, BTreeMap<String, Value>>);
 
 impl Files {
-    pub(crate) fn get(&self, path: &str) -> Option<Value> {
-        self.documents.lock().unwrap().get(path).cloned()
-    }
-
     /// The deadline the last lease was waited for by, on the real clock.
     pub(crate) fn waited_until(&self) -> Option<std::time::Instant> {
         *self.waited_until.lock().unwrap()
@@ -188,10 +184,6 @@ impl Opener {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap()
     }
-
-    pub(crate) fn corrupt(&self, name: &str) {
-        write_file_atomically(&self.path(name), b"not a database").unwrap();
-    }
 }
 
 impl DatabaseOpener for Opener {
@@ -260,7 +252,7 @@ fn connect(path: &Path) -> rusqlite::Result<Connection> {
 }
 
 /// One character's session history as the store crate serves it: a
-/// catalog of sessions, each a log of records read from an opaque cursor.
+/// catalog of sessions, each a log of messages read from an opaque cursor.
 #[derive(Debug)]
 pub(crate) struct Feed {
     log: Mutex<Log>,
@@ -271,16 +263,9 @@ pub(crate) struct Feed {
 #[derive(Debug, Default)]
 struct Log {
     said: u64,
-    sessions: Vec<(SessionSummary, Vec<Record>)>,
-    damaged_entries: u64,
+    sessions: Vec<(SessionSummary, Vec<HistoryMessage>)>,
     failure: Option<String>,
     records_per_read: Option<usize>,
-}
-
-#[derive(Debug)]
-enum Record {
-    Message(HistoryMessage),
-    Damaged,
 }
 
 impl Feed {
@@ -315,12 +300,8 @@ impl Feed {
         log.said += 1;
 
         let second = log.said;
-        let records = log.session(session);
-        let number = records
-            .iter()
-            .filter(|record| matches!(record, Record::Message(_)))
-            .count()
-            + 1;
+        let messages = log.session(session);
+        let number = messages.len() + 1;
         let speaker_id = match role {
             VisibleMessageRole::User => "local-user",
             VisibleMessageRole::Character => "mira",
@@ -330,7 +311,7 @@ impl Feed {
             NonZeroU64::new(u64::try_from(number).unwrap()).unwrap(),
         );
 
-        records.push(Record::Message(HistoryMessage {
+        messages.push(HistoryMessage {
             message: VisibleMessage {
                 id: message_id.clone(),
                 role,
@@ -345,7 +326,7 @@ impl Feed {
                 second % 60
             ))
             .unwrap(),
-        }));
+        });
         message_id.to_string()
     }
 
@@ -353,20 +334,6 @@ impl Feed {
     pub(crate) fn exchange(&self, session: &str, line: &str, answer: &str) {
         self.say(session, VisibleMessageRole::User, line);
         self.say(session, VisibleMessageRole::Character, answer);
-    }
-
-    /// A record of the session that does not read.
-    pub(crate) fn damage(&self, session: &str) {
-        self.log
-            .lock()
-            .unwrap()
-            .session(session)
-            .push(Record::Damaged);
-    }
-
-    /// A catalog entry that does not read.
-    pub(crate) fn damage_catalog(&self) {
-        self.log.lock().unwrap().damaged_entries += 1;
     }
 
     /// The catalog no longer lists the session.
@@ -380,9 +347,9 @@ impl Feed {
             .retain(|(summary, _)| summary.session_id != session);
     }
 
-    /// The session's log keeps only its first `records`: it shrank.
-    pub(crate) fn shrink(&self, session: &str, records: usize) {
-        self.log.lock().unwrap().session(session).truncate(records);
+    /// The session's log keeps only its first `messages`: it shrank.
+    pub(crate) fn shrink(&self, session: &str, messages: usize) {
+        self.log.lock().unwrap().session(session).truncate(messages);
     }
 
     /// Every read fails, saying `why`.
@@ -407,7 +374,7 @@ impl Feed {
 }
 
 impl Log {
-    fn session(&mut self, session: &str) -> &mut Vec<Record> {
+    fn session(&mut self, session: &str) -> &mut Vec<HistoryMessage> {
         let session_id = SessionId::parse(session).unwrap();
         let at = self
             .sessions
@@ -444,7 +411,6 @@ impl SessionHistoryFeed for Feed {
                 .iter()
                 .map(|(summary, _)| summary.clone())
                 .collect(),
-            damaged_entry_count: log.damaged_entries,
         })
     }
 
@@ -474,17 +440,17 @@ impl SessionHistoryFeed for Feed {
             ))));
         }
 
-        let records = log
+        let messages = log
             .sessions
             .iter()
             .find(|(summary, _)| &summary.session_id == request.session_id())
-            .map_or(&[][..], |(_, records)| records.as_slice());
+            .map_or(&[][..], |(_, messages)| messages.as_slice());
         let cursor = request
             .cursor()
             .map(|cursor| cursor.as_str().parse::<usize>());
         let (start, reset) = match cursor {
             None => (0, false),
-            Some(Ok(at)) if at <= records.len() => (at, false),
+            Some(Ok(at)) if at <= messages.len() => (at, false),
             Some(_) => (0, true),
         };
         let budget = request
@@ -493,11 +459,8 @@ impl SessionHistoryFeed for Feed {
         let mut end = start;
         let mut bytes = 0;
 
-        while let Some(record) = records.get(end) {
-            let size = match record {
-                Record::Message(message) => message.message.text.as_str().len(),
-                Record::Damaged => 1,
-            };
+        while let Some(message) = messages.get(end) {
+            let size = message.message.text.as_str().len();
 
             if end > start
                 && (bytes + size > budget
@@ -511,20 +474,8 @@ impl SessionHistoryFeed for Feed {
         }
 
         Ok(MessageBatch {
-            messages: records[start..end]
-                .iter()
-                .filter_map(|record| match record {
-                    Record::Message(message) => Some(message.clone()),
-                    Record::Damaged => None,
-                })
-                .collect(),
+            messages: messages[start..end].to_vec(),
             next_cursor: HistoryCursor::new(end.to_string()),
-            damaged_record_count: records[start..end]
-                .iter()
-                .filter(|record| matches!(record, Record::Damaged))
-                .count()
-                .try_into()
-                .unwrap(),
             reset,
         })
     }

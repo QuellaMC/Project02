@@ -7,15 +7,11 @@
     "kind": "memory_provider",
     "description": "Retrieval-driven long-term memory backed by a Mem0 platform account, a self-hosted Mem0 server, or the embedded Mem0 engine running on this device with its own extraction model and embedder.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
-    "compatibility": {
-      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
-    },
     "declaredPlugins": [
       "before_role_model_call",
       "after_turn_committed",
       "tool_provider",
       "handle_tool_call",
-      "health",
       "on_shutdown"
     ],
     "config": {
@@ -48,7 +44,7 @@
           "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
@@ -89,7 +85,7 @@
           "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
@@ -119,21 +115,19 @@
           "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
-          "valueType": "string",
+          "valueType": "url",
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
         }
       ]
     },
-    "firstParty": false,
     "runtimePolicy": {
       "timeoutMs": 20000,
       "redactionLabels": ["memory"],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",
-        "handleToolCall": "degrade",
-        "health": "degrade"
+        "handleToolCall": "degrade"
       }
     },
     "activation": {

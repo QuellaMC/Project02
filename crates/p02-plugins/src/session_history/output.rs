@@ -12,7 +12,7 @@ const READ_TEXT_CHARS: usize = 400;
 const SPEAKER_NAME_CHARS: usize = 80;
 const SNIPPET_CHARS: usize = 160;
 
-pub(super) fn search(hits: &Hits, damaged_records: u64, query: &str) -> Value {
+pub(super) fn search(hits: &Hits, query: &str) -> Value {
     let sessions = hits.views.iter().map(|view| session(view, query)).collect();
 
     Value::Object(Map::from_iter([
@@ -21,14 +21,10 @@ pub(super) fn search(hits: &Hits, damaged_records: u64, query: &str) -> Value {
             "totalSessionsWithHits".to_owned(),
             Value::from(hits.sessions_with_hits),
         ),
-        (
-            "damagedRecordsSkipped".to_owned(),
-            Value::from(damaged_records),
-        ),
     ]))
 }
 
-pub(super) fn read(session_id: &str, window: &Window, damaged_records: u64) -> Value {
+pub(super) fn read(session_id: &str, window: &Window) -> Value {
     let messages = window
         .messages
         .iter()
@@ -40,10 +36,6 @@ pub(super) fn read(session_id: &str, window: &Window, damaged_records: u64) -> V
         ("messages".to_owned(), Value::Array(messages)),
         ("hasBefore".to_owned(), Value::from(window.has_before)),
         ("hasAfter".to_owned(), Value::from(window.has_after)),
-        (
-            "damagedRecordsSkipped".to_owned(),
-            Value::from(damaged_records),
-        ),
     ]))
 }
 

@@ -73,9 +73,8 @@ pub enum ModelToolCall {
     },
 }
 
-/// A call as recorded, closed like the call the parser judges.
+/// A call as recorded.
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct WireCall {
     name: String,
     input: Map<String, Value>,
@@ -84,30 +83,25 @@ struct WireCall {
 /// Why a recorded call is not a [`ModelToolCall`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "a recorded tool call names a tool by identifier, a plugin tool's input keeps within the \
-     JSON limits, and a visible_reply carries one normalized \"text\" with no reasoning in it"
+    "a recorded tool call names a tool by identifier, and a visible_reply carries a \"text\" \
+     that is not blank"
 )]
 pub struct ParseModelToolCallError;
 
-/// Why what the model wrote is no reply.
+/// What the model wrote is no reply: nothing is left once its reasoning is
+/// taken out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum ReplyError {
-    #[error("visible_reply text contains an unterminated reasoning block")]
-    Leak,
-    #[error("visible_reply text must not be empty")]
-    Blank,
-}
+#[error("visible_reply text must not be empty")]
+pub(crate) struct BlankReplyError;
 
 impl ModelToolCall {
     /// The character's reply as the model wrote it: what its reasoning
     /// blocks leave, normalized, so what the model said, what the person
     /// sees and what the log keeps are one text.
-    pub(crate) fn reply(written: &str) -> Result<Self, ReplyError> {
-        let shown = scrub_reasoning_blocks(written).map_err(|_| ReplyError::Leak)?;
-
-        VisibleText::normalize(&shown)
+    pub(crate) fn reply(written: &str) -> Result<Self, BlankReplyError> {
+        VisibleText::normalize(&scrub_reasoning_blocks(written))
             .map(|text| Self::VisibleReply { text })
-            .map_err(|_| ReplyError::Blank)
+            .map_err(|_| BlankReplyError)
     }
 
     /// A call of a plugin tool whose input crosses the JSON boundary, its
@@ -151,31 +145,26 @@ impl From<ModelToolCall> for WireCall {
     }
 }
 
+/// A recorded call reads back as it was written.
 impl TryFrom<WireCall> for ModelToolCall {
     type Error = ParseModelToolCallError;
 
     fn try_from(call: WireCall) -> Result<Self, Self::Error> {
-        // A record is judged as it stands, never rewritten: it must already
-        // be what reading the call makes of it.
         if call.name != VISIBLE_REPLY {
-            let name = Identifier::new(&call.name).map_err(|_| ParseModelToolCallError)?;
-
-            return Self::plugin(name, call.input, Credentials::Keep)
+            return Identifier::new(&call.name)
+                .map(|name| Self::Plugin {
+                    name,
+                    input: call.input,
+                })
                 .map_err(|_| ParseModelToolCallError);
         }
 
-        match (
-            call.input.len(),
-            call.input.get("text").and_then(Value::as_str),
-        ) {
-            (1, Some(text)) => match Self::reply(text) {
-                Ok(Self::VisibleReply { text: read }) if read.as_str() == text => {
-                    Ok(Self::VisibleReply { text: read })
-                }
-                _ => Err(ParseModelToolCallError),
-            },
-            _ => Err(ParseModelToolCallError),
-        }
+        call.input
+            .get("text")
+            .and_then(Value::as_str)
+            .and_then(|text| VisibleText::normalize(text).ok())
+            .map(|text| Self::VisibleReply { text })
+            .ok_or(ParseModelToolCallError)
     }
 }
 
@@ -188,9 +177,10 @@ pub struct PluginToolDefinition {
     pub tool: ProvidedTool,
 }
 
-/// The plugin tools of one model call, each name offered once.
+/// The plugin tools of one model call, each name offered once. A record of
+/// them reads back as it was written.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "Vec<PluginToolDefinition>")]
+#[serde(transparent)]
 pub struct PluginToolDefinitions(Vec<PluginToolDefinition>);
 
 /// Two plugin tools share a name, so a call could not say which it meant.
@@ -233,14 +223,6 @@ impl PluginToolDefinitions {
     #[must_use]
     pub fn definitions(&self) -> &[PluginToolDefinition] {
         &self.0
-    }
-}
-
-impl TryFrom<Vec<PluginToolDefinition>> for PluginToolDefinitions {
-    type Error = DuplicateToolError;
-
-    fn try_from(definitions: Vec<PluginToolDefinition>) -> Result<Self, Self::Error> {
-        Self::new(definitions)
     }
 }
 
@@ -297,16 +279,10 @@ mod tests {
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), call);
         }
 
-        let many_fields: Map<String, Value> = (0..257)
-            .map(|index| (format!("field{index}"), json!(index)))
-            .collect();
-
         for refused in [
-            json!({"name": "visible_reply", "input": {"text": " Hello."}}),
-            json!({"name": "visible_reply", "input": {"text": "<think>secret</think>Hello."}}),
-            json!({"name": "visible_reply", "input": {"text": "Hi.", "mood": "warm"}}),
-            json!({"name": "memory.search", "input": {"query": "Mira"}, "tool": "x"}),
-            json!({"name": "memory.capture", "input": many_fields}),
+            json!({"name": "visible_reply", "input": {"text": " "}}),
+            json!({"name": "visible_reply", "input": {}}),
+            json!({"name": "9-lives", "input": {}}),
         ] {
             assert!(serde_json::from_value::<ModelToolCall>(refused).is_err());
         }

@@ -12,7 +12,7 @@ use crate::config::{ConfigField, ConfigSection};
 use crate::label::RedactionLabel;
 use crate::vocabulary::{
     BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope, ConfigValueType, Declaration,
-    HandleToolCallFailure, HealthFailure, PluginKind, ValidationFailureReason,
+    HandleToolCallFailure, PluginKind,
 };
 
 /// A plugin's manifest, validated: it exists only once every rule holds.
@@ -27,21 +27,11 @@ pub struct Manifest {
     kind: PluginKind,
     description: String,
     contract_version: ContractVersion,
-    compatibility: Compatibility,
     declared_plugins: Vec<Declaration>,
     config: ConfigSection,
-    first_party: bool,
     runtime_policy: RuntimePolicy,
     activation: Activation,
     requested_access: AccessMap,
-}
-
-/// The host contract versions a plugin was written against; this host's
-/// is always among them.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Compatibility {
-    host_contract_versions: Vec<String>,
 }
 
 /// The one budget every hook of the plugin runs under, and what a failure
@@ -59,7 +49,6 @@ pub struct RuntimePolicy {
 pub struct FailureBehavior {
     before_role_model_call: BeforeRoleModelCallFailure,
     handle_tool_call: HandleToolCallFailure,
-    health: HealthFailure,
 }
 
 /// Whether the plugin runs where no settings switch it, and why.
@@ -83,8 +72,6 @@ pub enum ManifestError {
     UnsupportedKind,
     #[error("plugin manifest declaredPlugins declares \"{0}\" more than once")]
     DuplicateDeclaration(Declaration),
-    #[error("plugin manifest compatibility must include \"{CONTRACT_VERSION}\"")]
-    IncompatibleHost,
     #[error("plugin config field \"{0}\" is declared more than once")]
     DuplicateConfigField(Identifier),
     #[error(
@@ -157,33 +144,6 @@ fn spellings<T: Display>(values: &[T]) -> String {
     }
 }
 
-impl ManifestError {
-    #[must_use]
-    pub fn reason(&self) -> ValidationFailureReason {
-        match self {
-            Self::UnsupportedContractVersion | Self::IncompatibleHost => {
-                ValidationFailureReason::UnsupportedContractVersion
-            }
-            Self::UnsupportedKind => ValidationFailureReason::UnsupportedPluginKind,
-            Self::DuplicateDeclaration(_) | Self::DuplicateConfigField(_) => {
-                ValidationFailureReason::DuplicateDeclaration
-            }
-            Self::Invalid { .. }
-            | Self::UnknownKey { .. }
-            | Self::FieldScopeWidens { .. }
-            | Self::SecretAgentMutable(_)
-            | Self::SecretNotText(_)
-            | Self::SecretDefault(_)
-            | Self::RequiredDefault(_)
-            | Self::AllowedValuesMismatch(_)
-            | Self::DefaultMismatch(_)
-            | Self::DefaultTooLarge { .. }
-            | Self::CharacterOnlyDefaultEnabled
-            | Self::RequestedAccess(_) => ValidationFailureReason::MalformedManifest,
-        }
-    }
-}
-
 impl Manifest {
     /// Validates an authored manifest.
     ///
@@ -201,10 +161,8 @@ impl Manifest {
                 "kind",
                 "description",
                 "contractVersion",
-                "compatibility",
                 "declaredPlugins",
                 "config",
-                "firstParty",
                 "runtimePolicy",
                 "activation",
                 "requestedAccess",
@@ -221,10 +179,7 @@ impl Manifest {
             .and_then(PluginKind::parse)
             .ok_or(ManifestError::UnsupportedKind)?;
         let declared_plugins = declarations(&root)?;
-        let compatibility =
-            compatibility(&root.object("compatibility", &["hostContractVersions"])?)?;
         let config = config_section(&root.object("config", &["scope", "fields"])?)?;
-        let first_party = root.boolean("firstParty")?;
         let runtime_policy = runtime_policy(&root.object(
             "runtimePolicy",
             &["timeoutMs", "redactionLabels", "failureBehavior"],
@@ -245,10 +200,8 @@ impl Manifest {
             kind,
             description: root.text("description")?,
             contract_version: ContractVersion,
-            compatibility,
             declared_plugins,
             config,
-            first_party,
             runtime_policy,
             activation,
             requested_access,
@@ -281,11 +234,6 @@ impl Manifest {
         &self.description
     }
 
-    #[must_use]
-    pub fn compatibility(&self) -> &Compatibility {
-        &self.compatibility
-    }
-
     /// The declarations, in authored order.
     #[must_use]
     pub fn declared_plugins(&self) -> &[Declaration] {
@@ -300,12 +248,6 @@ impl Manifest {
     #[must_use]
     pub fn config(&self) -> &ConfigSection {
         &self.config
-    }
-
-    /// Shown to the person; it grants nothing.
-    #[must_use]
-    pub fn first_party(&self) -> bool {
-        self.first_party
     }
 
     #[must_use]
@@ -359,13 +301,6 @@ impl Serialize for ContractVersion {
     }
 }
 
-impl Compatibility {
-    #[must_use]
-    pub fn host_contract_versions(&self) -> &[String] {
-        &self.host_contract_versions
-    }
-}
-
 impl RuntimePolicy {
     /// What every hook of the plugin may take, the work the host does on
     /// its behalf included.
@@ -400,11 +335,6 @@ impl FailureBehavior {
     #[must_use]
     pub fn handle_tool_call(self) -> HandleToolCallFailure {
         self.handle_tool_call
-    }
-
-    #[must_use]
-    pub fn health(self) -> HealthFailure {
-        self.health
     }
 }
 
@@ -445,21 +375,6 @@ fn declarations(root: &Fields<'_>) -> Result<Vec<Declaration>, ManifestError> {
             }
         })
         .collect()
-}
-
-fn compatibility(fields: &Fields<'_>) -> Result<Compatibility, ManifestError> {
-    let host_contract_versions = fields.strings("hostContractVersions")?;
-
-    if host_contract_versions
-        .iter()
-        .any(|version| version == CONTRACT_VERSION)
-    {
-        Ok(Compatibility {
-            host_contract_versions,
-        })
-    } else {
-        Err(ManifestError::IncompatibleHost)
-    }
 }
 
 fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
@@ -607,7 +522,7 @@ fn runtime_policy(fields: &Fields<'_>) -> Result<RuntimePolicy, ManifestError> {
     let redaction_labels = fields.labels("redactionLabels")?;
     let behavior = fields.object(
         "failureBehavior",
-        &["beforeRoleModelCall", "handleToolCall", "health"],
+        &["beforeRoleModelCall", "handleToolCall"],
     )?;
 
     Ok(RuntimePolicy {
@@ -617,7 +532,6 @@ fn runtime_policy(fields: &Fields<'_>) -> Result<RuntimePolicy, ManifestError> {
             before_role_model_call: behavior
                 .vocabulary("beforeRoleModelCall", BeforeRoleModelCallFailure::ALL)?,
             handle_tool_call: behavior.vocabulary("handleToolCall", HandleToolCallFailure::ALL)?,
-            health: behavior.vocabulary("health", HealthFailure::ALL)?,
         },
     })
 }
@@ -783,7 +697,6 @@ mod tests {
             "kind": "tool_provider",
             "description": "A test plugin.",
             "contractVersion": CONTRACT_VERSION,
-            "compatibility": {"hostContractVersions": [CONTRACT_VERSION]},
             "declaredPlugins": ["tool_provider", "handle_tool_call"],
             "config": {
                 "scope": "global_with_character_overrides",
@@ -807,14 +720,12 @@ mod tests {
                     },
                 ],
             },
-            "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": 1000,
                 "redactionLabels": [],
                 "failureBehavior": {
                     "beforeRoleModelCall": "degrade",
                     "handleToolCall": "reject_tool_call",
-                    "health": "degrade",
                 },
             },
             "activation": {"defaultEnabled": false, "reasons": ["test"]},
@@ -838,31 +749,23 @@ mod tests {
         clippy::too_many_lines,
         reason = "one table of every refusal, read top to bottom"
     )]
-    fn a_manifest_is_refused_by_the_first_rule_it_breaks_with_its_reason() {
-        use ValidationFailureReason::{
-            DuplicateDeclaration, MalformedManifest, UnsupportedContractVersion,
-            UnsupportedPluginKind,
-        };
-
+    fn a_manifest_is_refused_by_the_first_rule_it_breaks() {
         type Mutation = fn(&mut Value);
 
         let scopes =
             r#"one of "global_with_character_overrides", "character_only" or "global_only""#;
-        let cases: Vec<(Mutation, ManifestError, ValidationFailureReason)> = vec![
+        let cases: Vec<(Mutation, ManifestError)> = vec![
             (
                 |m| m["contractVersion"] = json!("mvp-008.runtime_plugin.v1"),
                 ManifestError::UnsupportedContractVersion,
-                UnsupportedContractVersion,
             ),
             (
                 |m| m["kind"] = json!("marketplace"),
                 ManifestError::UnsupportedKind,
-                UnsupportedPluginKind,
             ),
             (
                 |m| m["declaredPlugins"] = json!([]),
                 invalid("declaredPlugins", "a non-empty array of declarations"),
-                MalformedManifest,
             ),
             (
                 |m| m["declaredPlugins"] = json!(["plugin_discovery"]),
@@ -870,29 +773,20 @@ mod tests {
                     "declaredPlugins[0]",
                     &format!("one of {}", spellings(Declaration::ALL)),
                 ),
-                MalformedManifest,
             ),
             (
-                |m| m["declaredPlugins"] = json!(["health", "health"]),
-                ManifestError::DuplicateDeclaration(Declaration::Health),
-                DuplicateDeclaration,
-            ),
-            (
-                |m| m["compatibility"]["hostContractVersions"] = json!(["mvp-007"]),
-                ManifestError::IncompatibleHost,
-                UnsupportedContractVersion,
+                |m| m["declaredPlugins"] = json!(["on_shutdown", "on_shutdown"]),
+                ManifestError::DuplicateDeclaration(Declaration::OnShutdown),
             ),
             (
                 |m| {
                     m["config"].as_object_mut().unwrap().remove("scope");
                 },
                 invalid("config.scope", scopes),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["scope"] = json!("sometimes_global"),
                 invalid("config.scope", scopes),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fingerprint"] = json!("sha256:retired"),
@@ -900,7 +794,6 @@ mod tests {
                     path: "config".to_owned(),
                     key: "fingerprint".to_owned(),
                 },
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][0]["defaultValueSummary"] = json!("warm"),
@@ -908,7 +801,6 @@ mod tests {
                     path: "config.fields[0]".to_owned(),
                     key: "defaultValueSummary".to_owned(),
                 },
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][0]["valueType"] = json!("secret"),
@@ -916,27 +808,22 @@ mod tests {
                     "config.fields[0].valueType",
                     &format!("one of {}", spellings(ConfigValueType::ALL)),
                 ),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][1]["name"] = json!("tone"),
                 ManifestError::DuplicateConfigField(name("tone")),
-                DuplicateDeclaration,
             ),
             (
                 |m| m["config"]["fields"][1]["agentMutable"] = json!(true),
                 ManifestError::SecretAgentMutable(name("apiKey")),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][1]["defaultValue"] = json!("key"),
                 ManifestError::SecretDefault(name("apiKey")),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][1]["valueType"] = json!("number"),
                 ManifestError::SecretNotText(name("apiKey")),
-                MalformedManifest,
             ),
             (
                 |m| {
@@ -944,22 +831,18 @@ mod tests {
                     m["config"]["fields"][0]["defaultValue"] = json!("warm");
                 },
                 ManifestError::RequiredDefault(name("tone")),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][0]["valueType"] = json!("number"),
                 ManifestError::AllowedValuesMismatch(name("tone")),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][0]["allowedValues"] = json!([]),
                 ManifestError::AllowedValuesMismatch(name("tone")),
-                MalformedManifest,
             ),
             (
                 |m| m["config"]["fields"][0]["defaultValue"] = json!("sarcastic"),
                 ManifestError::DefaultMismatch(name("tone")),
-                MalformedManifest,
             ),
             (
                 |m| {
@@ -971,7 +854,6 @@ mod tests {
                     field_scope: ConfigScope::CharacterOnly,
                     section_scope: ConfigScope::GlobalOnly,
                 },
-                MalformedManifest,
             ),
             (
                 |m| {
@@ -979,27 +861,23 @@ mod tests {
                     m["activation"]["defaultEnabled"] = json!(true);
                 },
                 ManifestError::CharacterOnlyDefaultEnabled,
-                MalformedManifest,
             ),
             (
                 |m| m["runtimePolicy"]["timeoutMs"] = json!(0),
                 invalid("runtimePolicy.timeoutMs", "a positive integer"),
-                MalformedManifest,
             ),
             (
-                |m| m["runtimePolicy"]["failureBehavior"]["health"] = json!("reject_tool_call"),
+                |m| m["runtimePolicy"]["failureBehavior"]["handleToolCall"] = json!("reject_turn"),
                 invalid(
-                    "runtimePolicy.failureBehavior.health",
-                    r#"one of "degrade" or "reject_turn""#,
+                    "runtimePolicy.failureBehavior.handleToolCall",
+                    r#"one of "reject_tool_call" or "degrade""#,
                 ),
-                MalformedManifest,
             ),
             (
                 |m| m["requestedAccess"] = json!({"file_store": "read"}),
                 ManifestError::RequestedAccess(AccessMapError::UnknownAccess {
                     name: "file_store".to_owned(),
                 }),
-                MalformedManifest,
             ),
             (
                 |m| m["id"] = json!("9-lives"),
@@ -1007,17 +885,14 @@ mod tests {
                     "id",
                     "an identifier: a letter, then letters, numbers, dots, underscores or hyphens",
                 ),
-                MalformedManifest,
             ),
             (
                 |m| m["displayName"] = json!("  "),
                 invalid("displayName", "a non-empty string"),
-                MalformedManifest,
             ),
             (
-                |m| m["firstParty"] = json!("yes"),
-                invalid("firstParty", "a boolean"),
-                MalformedManifest,
+                |m| m["activation"]["defaultEnabled"] = json!("yes"),
+                invalid("activation.defaultEnabled", "a boolean"),
             ),
             (
                 |m| m["entry"] = json!("./index.ts"),
@@ -1025,19 +900,15 @@ mod tests {
                     path: String::new(),
                     key: "entry".to_owned(),
                 },
-                MalformedManifest,
             ),
         ];
 
-        for (mutate, expected, reason) in cases {
+        for (mutate, expected) in cases {
             let mut manifest = fixture();
 
             mutate(&mut manifest);
 
-            let error = Manifest::from_value(&manifest).unwrap_err();
-
-            assert_eq!(error, expected);
-            assert_eq!(error.reason(), reason, "{error}");
+            assert_eq!(Manifest::from_value(&manifest).unwrap_err(), expected);
         }
     }
 

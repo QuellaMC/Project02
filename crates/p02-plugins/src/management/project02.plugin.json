@@ -7,22 +7,17 @@
     "kind": "first_party",
     "description": "Host-owned plugin inventory, redacted config inspection, and approval-gated config updates.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
-    "compatibility": {
-      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
-    },
     "declaredPlugins": ["tool_provider", "handle_tool_call"],
     "config": {
       "scope": "global_with_character_overrides",
       "fields": []
     },
-    "firstParty": true,
     "runtimePolicy": {
       "timeoutMs": 5000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",
-        "handleToolCall": "reject_tool_call",
-        "health": "degrade"
+        "handleToolCall": "reject_tool_call"
       }
     },
     "activation": {

@@ -77,8 +77,6 @@ pub(crate) enum StoreError {
         "the embedder answered vectors of {found} dimensions where this store's have {expected}"
     )]
     WidthChanged { expected: usize, found: usize },
-    #[error("a stored vector does not have its generation's width")]
-    Damaged,
     #[error("a newer embedder took over the memory store")]
     Superseded,
 }
@@ -134,19 +132,6 @@ pub(crate) fn adopt_generation(
     Ok(Generation(generation))
 }
 
-/// How many memories have no vector of `generation` yet.
-pub(crate) fn unembedded(connection: &Connection, generation: Generation) -> rusqlite::Result<u64> {
-    let count: i64 = connection.query_row(
-        "SELECT COUNT(*) FROM memories AS m
-         LEFT JOIN vectors AS v ON v.memory = m.seq AND v.generation = ?1
-         WHERE v.memory IS NULL",
-        [generation.0],
-        |row| row.get(0),
-    )?;
-
-    Ok(count.unsigned_abs())
-}
-
 /// The oldest memory with no vector of `generation`, and its text.
 pub(crate) fn next_unembedded(
     connection: &Connection,
@@ -188,7 +173,9 @@ pub(crate) fn store_vector(
 
 /// The memories of `scope` nearest to `query` among the vectors of
 /// `generation`, best first and the newest of equals first: at most
-/// `limit`, and with a `threshold` only those at least that similar.
+/// `limit`, and with a `threshold` only those at least that similar. A
+/// vector not of its generation's width, which no write of the store's
+/// leaves, is passed over.
 pub(crate) fn nearest(
     connection: &Connection,
     generation: Generation,
@@ -225,7 +212,10 @@ pub(crate) fn nearest(
 
     for row in rows {
         let (seq, id, text, blob) = row?;
-        let similarity = cosine(query, &decode(&blob, width)?);
+        let Some(vector) = decode(&blob, width) else {
+            continue;
+        };
+        let similarity = cosine(query, &vector);
 
         if threshold.is_none_or(|threshold| similarity >= threshold) {
             scored.push((
@@ -264,20 +254,17 @@ pub(crate) fn last_messages(
         params![scope.user(), scope.agent(), session, KEPT_MESSAGES],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
     )?;
+    let mut messages = Vec::new();
 
-    rows.map(|row| {
+    for row in rows {
         let (role, content) = row?;
-        let role = Role::parse(&role).ok_or_else(|| {
-            rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                "a message role is user or assistant".into(),
-            )
-        })?;
 
-        Ok(Message { role, content })
-    })
-    .collect()
+        if let Some(role) = Role::parse(&role) {
+            messages.push(Message { role, content });
+        }
+    }
+
+    Ok(messages)
 }
 
 /// Commits `write` in one transaction, so a failure leaves nothing of it
@@ -443,17 +430,16 @@ fn encode(vector: &[f32]) -> Vec<u8> {
         .collect()
 }
 
-fn decode(blob: &[u8], width: usize) -> Result<Vec<f32>, StoreError> {
+/// The vector `blob` holds, when it holds `width` values.
+fn decode(blob: &[u8], width: usize) -> Option<Vec<f32>> {
     let (values, rest) = blob.as_chunks::<4>();
 
-    if values.len() != width || !rest.is_empty() {
-        return Err(StoreError::Damaged);
-    }
-
-    Ok(values
-        .iter()
-        .map(|bytes| f32::from_le_bytes(*bytes))
-        .collect())
+    (values.len() == width && rest.is_empty()).then(|| {
+        values
+            .iter()
+            .map(|bytes| f32::from_le_bytes(*bytes))
+            .collect()
+    })
 }
 
 #[cfg(test)]
@@ -702,7 +688,7 @@ mod tests {
         let second = adopt_generation(&mut connection, "embed-b", "http://127.0.0.1:9/v1").unwrap();
 
         assert_ne!(second, first);
-        assert_eq!(unembedded(&connection, second).unwrap(), 2);
+        assert_eq!(count(&connection, "vectors"), 0);
         assert_eq!(
             nearest(&connection, second, &sam(), &[1.0, 0.0, 0.0], 5, None).unwrap(),
             []
@@ -713,7 +699,7 @@ mod tests {
         assert_eq!(text, "Sam likes tea.");
         store_vector(&mut connection, second, memory, &[1.0, 0.0, 0.0]).unwrap();
 
-        assert_eq!(unembedded(&connection, second).unwrap(), 1);
+        assert_eq!(count(&connection, "vectors"), 1);
         assert_eq!(
             next_unembedded(&connection, second)
                 .unwrap()
@@ -727,9 +713,10 @@ mod tests {
 
         let third = adopt_generation(&mut connection, "embed-a", "http://127.0.0.1:9/v1").unwrap();
 
+        assert_ne!(third, second);
         assert_eq!(
-            unembedded(&connection, third).unwrap(),
-            2,
+            count(&connection, "vectors"),
+            0,
             "a third embedder, though it was the first, embeds every memory again"
         );
     }
@@ -769,7 +756,7 @@ mod tests {
             ["Sam likes cocoa."]
         );
         assert_eq!(count(&connection, "vectors"), 0);
-        assert_eq!(unembedded(&connection, current).unwrap(), 2);
+        assert_eq!(count(&connection, "memories"), 2);
         assert_eq!(
             nearest(&connection, replaced, &sam(), &[1.0, 0.0], 5, None).unwrap(),
             []

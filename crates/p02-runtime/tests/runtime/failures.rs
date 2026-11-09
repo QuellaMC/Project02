@@ -12,57 +12,7 @@ use tokio::sync::Notify;
 
 use crate::support::{Chat, Round, Toy, id, make_read_only, reply, restore};
 
-/// stream.draft-never-a-message: a reply whose write fails was only ever a draft: it is withdrawn and never announced as a message, the turn fails, and the log never holds it, its turn left open
-#[tokio::test]
-async fn a_reply_whose_write_fails_was_only_a_draft() {
-    let mut chat = Chat::new(&[]);
-    let log = chat.log(1);
-    let writable = Mutex::new(None);
-
-    chat.model.script([
-        Round::says(reply(&["Let me look.", "Found it."])).drafting(1, &["Fou", "nd it."])
-    ]);
-
-    // A reply's record follows its round's with nothing between them, so the
-    // log refuses writes from the announcement of the reply before it on.
-    let delivery = chat
-        .say_hearing("hello there", "hello", |progress| {
-            if let Progress::VisibleReply { .. } = progress {
-                *writable.lock().unwrap() = Some(make_read_only(&log));
-            }
-        })
-        .await;
-
-    restore(&log, writable.into_inner().unwrap().unwrap());
-
-    let committed: Vec<String> = chat
-        .records(1)
-        .iter()
-        .filter_map(|record| match record.body() {
-            RecordBody::MessageCommitted(commit) => Some(commit.message().text.to_string()),
-            _ => None,
-        })
-        .collect();
-
-    assert!(matches!(delivery, Delivery::Failed { .. }), "{delivery:?}");
-    assert_eq!(
-        chat.heard.take(),
-        [
-            "user_message hello there",
-            "reply_delta 1.1 Fou",
-            "reply_delta 1.1 nd it.",
-            "visible_reply 1.0 Let me look.",
-            "reply_withdrawn 1.1",
-        ]
-    );
-    assert_eq!(committed, ["hello there", "Let me look."]);
-    assert_eq!(
-        chat.kinds(1).last(),
-        Some(&RecordKind::VisibleMessageCommitted)
-    );
-}
-
-/// storage.append-failure-recovery: when a reply's write fails after the reply before it was shown, the turn fails and its rejection anchors the shown reply, and the thread a restarted character opens reads back valid, its next line completes, and what a plugin wrote to its store before the failure is still there
+/// storage.append-failure-recovery: when a reply's write fails after the reply before it was shown, that reply was only ever a draft, withdrawn and never announced as a message, the turn fails and its rejection anchors the shown reply, and the thread a restarted character opens reads back valid, its next line completes, and what a plugin wrote to its store before the failure is still there
 #[tokio::test]
 async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     let keeper = Toy::new("keeper")
@@ -100,6 +50,16 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         .await;
 
     assert!(matches!(failed, Delivery::Failed { .. }), "{failed:?}");
+    assert_eq!(
+        chat.heard.take(),
+        [
+            "user_message hello there",
+            "reply_delta 1.1 Fou",
+            "reply_delta 1.1 nd it.",
+            "visible_reply 1.0 Let me look.",
+            "reply_withdrawn 1.1",
+        ]
+    );
     assert_eq!(chat.reopen().await, None);
 
     let Delivery::Completed { turn, .. } = chat.say("hello again", "again").await else {

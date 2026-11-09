@@ -12,17 +12,16 @@ use std::path::{Path, PathBuf};
 use p02_app::{
     Answer, CancelReason, CharacterState, CharacterSummary, ConfigHealth, ConfirmationAnswer,
     ConfirmationId, ConfirmationQuestion, ConnectorPresence, Event, Health, HistoryMessage,
-    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal,
-    PackageProvenance, PackageReport, PackagesHealth, PairingAnswer, PairingDecision,
-    PairingOutcome, PairingRefusal, PairingRequest, PairingSubject, PendingConfirmation,
-    ProtocolVersion, RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome,
-    StartRefusal, StorageFailure, ToolCallStatus, TurnMessage, TurnOutcome, TurnProgress,
-    TurnRefusal, TurnStamp, TurnStatus,
+    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingSubject, PendingConfirmation, ProtocolVersion, RosterState, RunningDraft, RunningTurn,
+    Settlement, StartOutcome, StartRefusal, StorageFailure, ToolCallStatus, TurnMessage,
+    TurnOutcome, TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
 };
 use p02_characters::discover;
 use p02_config::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, ConfigView, ConnectorConfigView,
-    ConnectorRefusal, Sections, Severity, ViewRefusal,
+    ConnectorRefusal, Sections, ViewRefusal,
 };
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
@@ -357,13 +356,8 @@ fn written() -> Vec<(&'static str, Value)> {
         },
         packages: PackagesHealth {
             diagnostics: vec![PackageReport {
-                severity: Severity::Error,
-                code: "package_id_mismatch".to_owned(),
                 message: "The package's id is not its folder's.".to_owned(),
                 path: "/home/person/.project02/characters/nova".to_owned(),
-                provenance: PackageProvenance::Operator,
-                character_id: Some("nova".to_owned()),
-                claimed_character_id: Some(id("vega")),
             }],
         },
         characters: vec![CharacterSummary {
@@ -443,7 +437,7 @@ fn written() -> Vec<(&'static str, Value)> {
         Event::ConfirmationRequested(pending.clone()),
         Event::ConfirmationSettled {
             character_id: id("mira"),
-            id: pending.id,
+            id: pending.id.clone(),
             settlement: Settlement::Cancelled {
                 reason: CancelReason::Stopped,
             },
@@ -569,8 +563,8 @@ fn written() -> Vec<(&'static str, Value)> {
         read_back(
             "PairingRequestOutcome",
             &PairingOutcome::Refused {
-                reason: PairingRefusal::InvalidSubject,
-                message: "A label is one line.".to_owned(),
+                reason: PairingRefusal::UnknownConnector,
+                message: "Connector \"discord\" does not pair.".to_owned(),
             },
         ),
         read_back(

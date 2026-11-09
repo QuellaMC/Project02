@@ -127,8 +127,7 @@ impl Slot {
     }
 
     /// Holds an answer to the contract. A malformed answer stands for
-    /// nothing; one that breaks a rule of access or of the trusted frame
-    /// keeps the records it made.
+    /// nothing; one that breaks a rule of access keeps the records it made.
     fn accept(
         &self,
         turn: &Turn,
@@ -206,11 +205,6 @@ impl Slot {
         let (trusted, context_items): (Vec<_>, Vec<_>) = items
             .into_iter()
             .partition(|item| trusted_context::is_trusted_note(access, item.item()));
-
-        if let Some(message) = trusted_context::cap_breach(plugin_id, &trusted, &curated_sections) {
-            return Err(refused(message));
-        }
-
         let runtime_notes = trusted
             .iter()
             .map(|item| {

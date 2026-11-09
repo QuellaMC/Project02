@@ -41,9 +41,6 @@ export const noSettingsVerbs: SettingsVerbs = {
   resetSetting: () => Promise.resolve(),
 };
 
-/** Between reads of a screen whose save has its answer but not yet its view. */
-const rereadRetryMs = 1_000;
-
 function problem(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -116,8 +113,8 @@ export function createSettingsVerbs(tab: {
    * than its field, and a conflict means the screen was stale — and the
    * answer lands with that view, so a row goes from what was typed to
    * what is saved, never back through the value from before. A read that
-   * fails is tried again, the screen busy meanwhile, until one lands or
-   * the screen is left: no change ends on a view from before it.
+   * fails is said, and the answer lands alone: the next change on the
+   * stream reads the screen again.
    */
   const change = async (
     key: string,
@@ -162,20 +159,12 @@ export function createSettingsVerbs(tab: {
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
 
-    if (!moved || !isOpen(page.target)) {
+    if (
+      !moved ||
+      !isOpen(page.target) ||
+      !(await readView(page.target, ended))
+    ) {
       apply(ended);
-
-      return;
-    }
-
-    while (!(await readView(page.target, ended))) {
-      await new Promise(resolve => {
-        setTimeout(resolve, rereadRetryMs);
-      });
-
-      if (!isOpen(page.target)) {
-        return;
-      }
     }
   };
 

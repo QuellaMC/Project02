@@ -1,7 +1,6 @@
 //! A character's history as her plugins read it through her storage: the
 //! sessions her catalog lists, and each session's committed messages from
-//! a cursor, a batch at a time, read past damage the log's own read
-//! refuses.
+//! a cursor, a batch at a time, what the reads skip counted as damage.
 
 use std::num::NonZeroUsize;
 
@@ -67,7 +66,6 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
                 session_id: entry.session_id().clone(),
                 created_at: entry.created_at().clone(),
             }],
-            damaged_entry_count: 0,
         }
     );
 
@@ -85,7 +83,6 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
 
         batches += 1;
         assert!(!batch.reset);
-        assert_eq!(batch.damaged_record_count, 0);
         read.extend(batch.messages);
 
         if cursor.as_ref() == Some(&batch.next_cursor) {
@@ -134,12 +131,11 @@ fn history_is_read_a_batch_at_a_time_from_cursors_that_hold_across_a_reopen() {
     }
 }
 
-/// A session the runtime has left, damaged by a line that is no record and
-/// a round that no longer reads: the gate skips each line it refuses, and
-/// with the round the reply and the ending that needed it, so the turns
-/// around them read as they were.
+/// A session damaged by a line that is no record and a round torn in two:
+/// each is skipped, and every message around them is read; a catalog row
+/// that is no session row is passed over.
 #[test]
-fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
+fn damage_is_read_past() {
     let world = World::new();
     let mut script = Script::new(world.segment(1));
 
@@ -173,6 +169,11 @@ fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
         .unwrap()
         .release();
 
+    let catalog = world.data.root().join("sessions.jsonl");
+    let rows = std::fs::read_to_string(&catalog).unwrap();
+
+    std::fs::write(&catalog, format!("{rows}{{\"sessionId\": 7}}\n")).unwrap();
+
     let feed = world.data.session_history();
     let older = feed
         .read_messages(&ReadMessages::from_start(world.segment(1)))
@@ -180,20 +181,26 @@ fn a_damaged_older_segment_is_read_past_its_damage_while_its_log_refuses_it() {
     let current = feed
         .read_messages(&ReadMessages::from_start(world.segment(2)))
         .unwrap();
+    let listing = feed.list_sessions().unwrap();
 
-    assert_eq!(world.log(1).read().unwrap_err().code(), "malformed_record");
-    assert_eq!(feed.list_sessions().unwrap().sessions.len(), 2);
+    assert_eq!(listing.sessions.len(), 2);
     assert_eq!(
         texts(&older),
-        ["Tea?", "Tea, always.", "Coffee?", "Water?", "Fine."]
+        [
+            "Tea?",
+            "Tea, always.",
+            "Coffee?",
+            "Never.",
+            "Water?",
+            "Fine."
+        ]
     );
-    assert_eq!((older.damaged_record_count, older.reset), (4, false));
+    assert!(!older.reset);
     assert_eq!(
         current,
         MessageBatch {
             messages: Vec::new(),
             next_cursor: HistoryCursor::new("0"),
-            damaged_record_count: 0,
             reset: false,
         }
     );

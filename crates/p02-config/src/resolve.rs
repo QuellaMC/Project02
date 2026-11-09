@@ -1,12 +1,12 @@
 //! A target's settings in effect: each value taken from the nearest
 //! document its scope lets the target read, else from its declared
 //! default, with where it came from, what is wrong with it, and the
-//! fingerprints a change is bound to.
+//! fingerprint a change is bound to.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::num::NonZeroU64;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use p02_characters::{CharacterDefinition, CharacterVersion, Discovery};
 use p02_contracts::{ConfigField, ConfigScope};
@@ -17,14 +17,14 @@ use serde_json::{Map, Value, json};
 
 use crate::activation;
 use crate::change::ConfigTarget;
-use crate::conceal::{conceal_document, conceal_stanza};
+use crate::conceal::conceal_document;
 use crate::declaration::{
     Declared, Layer, Namespace, RoleModelProvider, Sections, Source, Target, authorable, base_url,
     context_window_tokens, host_fields, outside_scope, role_model_provider, text,
     user_display_name,
 };
 use crate::diagnostic::{Code, Diagnostic};
-use crate::document::{Document, Read, Stanza, unknown};
+use crate::document::{Document, Read, Stanza, ignored_key, unknown};
 use crate::materialize::merged_overlay;
 
 /// A target's settings, resolved: the home's, or one character's over the
@@ -60,9 +60,9 @@ pub enum ReadSettingsError {
     /// The store refuses the home, or her data directory.
     #[error("the settings' storage is refused")]
     Storage(#[from] StorageError),
-    /// A document the target reads does not load.
+    /// A document the target reads cannot be read.
     #[error("a settings document does not load")]
-    Unloadable { diagnostics: Vec<Diagnostic> },
+    Unreadable(Box<Diagnostic>),
 }
 
 /// The documents a target is resolved from.
@@ -165,18 +165,6 @@ impl WrittenOverlay {
     }
 }
 
-/// `diagnostics`, each found in `character`'s overlay at `path`.
-pub(crate) fn in_overlay(
-    diagnostics: Vec<Diagnostic>,
-    character: &Identifier,
-    path: &Path,
-) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| diagnostic.in_overlay(character, path))
-        .collect()
-}
-
 /// One field resolved for a target.
 #[derive(Debug)]
 pub(crate) struct Field<'s> {
@@ -184,9 +172,6 @@ pub(crate) struct Field<'s> {
     /// What the target's own document holds for it, if anything.
     pub(crate) authored: Option<Value>,
     pub(crate) effective: Effective,
-    /// Whether the target must have a value for it: a required field the
-    /// target's documents can supply.
-    pub(crate) required: bool,
 }
 
 /// Where a value in effect comes from.
@@ -235,7 +220,6 @@ pub(crate) struct Section<'s> {
     pub(crate) switch: Effective,
     pub(crate) fields: Vec<Field<'s>>,
     pub(crate) diagnostics: Vec<Diagnostic>,
-    pub(crate) fingerprint: Fingerprint,
     pub(crate) status: Status,
 }
 
@@ -260,7 +244,8 @@ impl<'s> Resolution<'s> {
     /// # Errors
     ///
     /// [`ReadSettingsError`] when the character is not installed, the store
-    /// refuses the home or her data directory, or a document does not load.
+    /// refuses the home or her data directory, or a document cannot be
+    /// read.
     pub fn read(
         home: &Home,
         sections: &'s Sections,
@@ -284,14 +269,14 @@ impl<'s> Resolution<'s> {
     /// # Errors
     ///
     /// [`ReadSettingsError`] when the store refuses the home or its
-    /// document does not load.
+    /// document cannot be read.
     pub fn home(home: &Home, sections: &'s Sections) -> Result<Self, ReadSettingsError> {
         let written = Written::read(home)?;
         let home_present = !matches!(written.read, Read::Absent);
         let document = written
             .read
             .usable()
-            .map_err(|diagnostics| ReadSettingsError::Unloadable { diagnostics })?;
+            .map_err(ReadSettingsError::Unreadable)?;
 
         Ok(Self::new(
             sections,
@@ -312,7 +297,7 @@ impl<'s> Resolution<'s> {
     /// # Errors
     ///
     /// [`ReadSettingsError`] when the store refuses the home or her data
-    /// directory, or a document does not load.
+    /// directory, or a document cannot be read.
     pub fn character(
         home: &Home,
         sections: &'s Sections,
@@ -325,16 +310,12 @@ impl<'s> Resolution<'s> {
         let home_document = written
             .read
             .usable()
-            .map_err(|diagnostics| ReadSettingsError::Unloadable { diagnostics })?;
+            .map_err(ReadSettingsError::Unreadable)?;
         let absent = matches!(overlay.read, Read::Absent);
-        let on_disk =
-            overlay
-                .read
-                .usable()
-                .map_err(|diagnostics| ReadSettingsError::Unloadable {
-                    diagnostics: in_overlay(diagnostics, id, &overlay.path),
-                })?;
-        let (merged, package_problems) = merged_overlay(
+        let on_disk = overlay.read.usable().map_err(|diagnostic| {
+            ReadSettingsError::Unreadable(Box::new(diagnostic.in_overlay(id, &overlay.path)))
+        })?;
+        let (merged, skipped) = merged_overlay(
             sections,
             character,
             overlay.path,
@@ -350,17 +331,11 @@ impl<'s> Resolution<'s> {
                 home: home_document,
                 overlay: Some(merged),
             },
-            package_problems,
+            skipped,
         );
-        let chosen = resolution.chosen_memory().map(str::to_owned);
+        let found = activation::judge(character, resolution.chosen_memory(), &resolution.resolved);
 
-        activation::judge(
-            sections,
-            character,
-            chosen.as_deref(),
-            &mut resolution.resolved,
-            &mut resolution.diagnostics,
-        );
+        resolution.diagnostics.extend(found);
         Ok(resolution)
     }
 
@@ -392,17 +367,27 @@ impl<'s> Resolution<'s> {
                         |value| field.accepts(value),
                         field.declaration.default_value(),
                     ),
-                    required: field.declaration.required() && !read.is_empty(),
                 }
             })
             .collect();
         let chosen_memory = memory_choice(&host);
         let resolved: Vec<Section<'s>> = sections
             .declared()
-            .map(|declared| section(sections, declared, &target, &layers, chosen_memory))
+            .map(|declared| section(declared, &target, &layers, chosen_memory))
             .collect();
-        let mut all = unknown_sections(sections, &layers);
+        let mut all: Vec<Diagnostic> = layers
+            .present()
+            .flat_map(|(layer, document)| {
+                document
+                    .ignored()
+                    .iter()
+                    .map(move |ignored| (layer, ignored.clone()))
+            })
+            .map(|(layer, ignored)| layers.found_in(layer, ignored))
+            .collect();
 
+        all.extend(unknown_sections(sections, &layers));
+        all.extend(refused_host_values(&host, &layers));
         all.append(&mut diagnostics);
         all.extend(
             resolved
@@ -428,32 +413,29 @@ impl<'s> Resolution<'s> {
         &self.fingerprint
     }
 
-    /// Every finding about the target's settings: sections named that this
-    /// build lacks, what is wrong with each section, with her package's
-    /// settings when they cannot be merged, and with what they make of her
-    /// plugins.
+    /// Every finding about the target's settings: what of the documents is
+    /// not used, sections named that this build lacks, host values refused,
+    /// what of her package's settings is skipped, what is wrong with each
+    /// section, and what they make of her plugins.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 
-    /// What stops a character on these settings: every error about what she
-    /// runs. While one stands she runs none of her plugins, and her start is
-    /// refused saying why.
+    /// What stops a character on these settings: every error about her
+    /// settings as a whole. Her start is refused saying why.
     pub fn stopping(&self) -> impl Iterator<Item = &Diagnostic> {
         self.diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.stops_character())
     }
 
-    /// What a character's start warns of: the plugins her package recommends
-    /// that she does not run.
+    /// What a character's start warns of: the plugins her package expects
+    /// that she does not run, and what keeps a plugin of hers from running.
     pub fn cautions(&self) -> impl Iterator<Item = &Diagnostic> {
         self.diagnostics.iter().filter(|diagnostic| {
-            matches!(
-                diagnostic.code(),
-                Code::CharacterRecommendedPluginMissing | Code::CharacterRecommendedPluginDisabled
-            )
+            diagnostic.code() == Code::PluginNotRunning
+                || (diagnostic.is_error() && diagnostic.about(Namespace::Plugins))
         })
     }
 
@@ -473,21 +455,26 @@ impl<'s> Resolution<'s> {
         reason = "a host field with a default resolves to a value: each default meets its rule"
     )]
     pub fn settings(&self) -> CharacterSettings {
-        let value = |name: &str| {
+        let field = |name: &str| {
             self.host
                 .iter()
                 .find(|field| field.declaration.name().as_str() == name)
-                .and_then(|field| field.effective.value())
+        };
+        let value = |name: &str| field(name).and_then(|field| field.effective.value());
+        // A refused name or window stops her start, so until it is put
+        // right the default stands in for it only here.
+        let or_default = |name: &str| {
+            value(name).or_else(|| field(name).and_then(|field| field.declaration.default_value()))
         };
         let host = HostSettings {
-            user_display_name: value("userDisplayName")
+            user_display_name: or_default("userDisplayName")
                 .and_then(user_display_name)
                 .expect("userDisplayName resolves to a name"),
             role_model_provider: value("roleModelProvider").and_then(role_model_provider),
             nvidia_api_key: value("nvidiaApiKey").and_then(text).map(str::to_owned),
             nvidia_model: value("nvidiaModel").and_then(text).map(str::to_owned),
             nvidia_base_url: value("nvidiaBaseUrl").and_then(base_url),
-            context_window_tokens: value("contextWindowTokens")
+            context_window_tokens: or_default("contextWindowTokens")
                 .and_then(context_window_tokens)
                 .expect("contextWindowTokens resolves to a number of tokens"),
             default_memory_provider: value("defaultMemoryProvider")
@@ -669,7 +656,6 @@ fn resolve(
 }
 
 fn section<'s>(
-    sections: &'s Sections,
     declared: Declared<'s>,
     target: &Target,
     layers: &Layers,
@@ -711,7 +697,6 @@ fn section<'s>(
                     |value| field.accepts(value),
                     field.default_value(),
                 ),
-                required: field.required() && !field_layers.is_empty(),
             }
         })
         .collect();
@@ -746,15 +731,14 @@ fn section<'s>(
         switch,
         fields,
         diagnostics,
-        fingerprint: section_fingerprint(sections, declared, layers),
         status,
     }
 }
 
 /// What is wrong with a section's settings in the documents `read`: the
-/// shape of its stanzas, a switch in effect that is no boolean, fields it
-/// does not declare, and values its fields refuse or, while it is on,
-/// lack.
+/// shape of its stanzas, a switch in effect that is no boolean, values its
+/// fields refuse, which block it, and keys it does not declare, which are
+/// not used.
 fn judge(
     declared: Declared<'_>,
     fields: &[Field<'_>],
@@ -773,93 +757,81 @@ fn judge(
                 .map(|stanza| (layer, stanza))
         })
         .collect();
-    let mut diagnostics: Vec<Diagnostic> = stanzas
-        .iter()
-        .flat_map(|(layer, stanza)| {
-            stanza
-                .problems
-                .iter()
-                .map(|problem| layers.found_in(*layer, problem.clone()))
-        })
-        .collect();
-
-    diagnostics.extend(refused_switch(declared, switch, layers));
-
     let names: Vec<&str> = declared
         .config()
         .fields()
         .iter()
         .map(|field| field.name().as_str())
         .collect();
+    let mut diagnostics = Vec::new();
 
     for (layer, stanza) in &stanzas {
-        for name in stanza
-            .config
-            .iter()
-            .flat_map(|config| unknown(config, &names))
-        {
-            diagnostics.push(
-                layers.found_in(
-                    *layer,
-                    Diagnostic::error(
-                        Code::UnknownPluginConfigField,
-                        format!("Unknown config field \"{name}\" for section \"{id}\"."),
-                    )
-                    .at(declared.field_path(name))
-                    .on_field(namespace, id, name),
-                ),
-            );
-        }
+        let found = stanza.findings.iter().cloned().chain(
+            stanza
+                .config
+                .iter()
+                .flat_map(|config| unknown(config, &names))
+                .map(|name| {
+                    ignored_key(name, declared.field_path(name)).on_field(namespace, id, name)
+                }),
+        );
+
+        diagnostics.extend(found.map(|finding| layers.found_in(*layer, finding)));
     }
 
-    let on = switch.value() == Some(&Value::Bool(true));
+    diagnostics.extend(refused_switch(declared, switch, layers));
 
     for field in fields {
-        let name = field.declaration.name().as_str();
-        let secret = field.declaration.secret();
-        let diagnostic = match &field.effective {
-            Effective::Authored {
-                layer,
-                accepted: false,
-                ..
-            } => layers.found_in(
-                *layer,
-                if secret {
-                    Diagnostic::error(
-                        Code::SecretValueInvalid,
-                        format!(
-                            "Secret config field \"{name}\" of \"{id}\" must be a non-blank string."
-                        ),
-                    )
-                } else {
-                    Diagnostic::error(
-                        Code::ValueTypeInvalid,
-                        format!(
-                            "Config field \"{name}\" of \"{id}\" must be {}.",
-                            crate::declaration::expectation(field.declaration)
-                        ),
-                    )
-                },
-            ),
-            Effective::Missing if field.required && on => Diagnostic::error(
-                if secret {
-                    Code::RequiredSecretMissing
-                } else {
-                    Code::RequiredValueMissing
-                },
-                format!("Required config field \"{name}\" is missing for section \"{id}\"."),
-            ),
-            _ => continue,
+        let Effective::Authored {
+            layer,
+            accepted: false,
+            ..
+        } = &field.effective
+        else {
+            continue;
         };
+        let name = field.declaration.name().as_str();
 
         diagnostics.push(
-            diagnostic
+            layers.found_in(
+                *layer,
+                Diagnostic::error(
+                    Code::ValueInvalid,
+                    format!(
+                        "Config field \"{name}\" of \"{id}\" must be {}.",
+                        crate::declaration::expectation(field.declaration)
+                    ),
+                )
                 .at(declared.field_path(name))
                 .on_field(namespace, id, name),
+            ),
         );
     }
 
     diagnostics
+}
+
+/// An error for each host value in effect that its field refuses, made in
+/// the document that holds it: it stops the characters that read it.
+fn refused_host_values(host: &[Field<'_>], layers: &Layers) -> Vec<Diagnostic> {
+    host_fields()
+        .iter()
+        .zip(host)
+        .filter_map(|(declared, field)| match &field.effective {
+            Effective::Authored {
+                layer,
+                accepted: false,
+                ..
+            } => Some(
+                layers.found_in(
+                    *layer,
+                    Diagnostic::error(Code::ValueInvalid, declared.sentence.clone())
+                        .at(declared.path()),
+                ),
+            ),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The finding of a switch in effect that is no boolean, made in the
@@ -883,7 +855,7 @@ fn refused_switch(
     Some(
         layers.found_in(
             *layer,
-            Diagnostic::error(Code::BooleanInvalid, format!("{path} must be a boolean."))
+            Diagnostic::error(Code::ValueInvalid, format!("{path} must be a boolean."))
                 .at(path)
                 .in_section(declared.namespace(), declared.id().as_str()),
         ),
@@ -941,8 +913,7 @@ fn outside_scope_warnings(declared: Declared<'_>, layers: &Layers) -> Vec<Diagno
 }
 
 /// A warning for each section the documents name that this build has no
-/// declaration of, unless the nearest document that switches it switches
-/// it off.
+/// declaration of.
 fn unknown_sections(sections: &Sections, layers: &Layers) -> Vec<Diagnostic> {
     let mut warnings = Vec::new();
 
@@ -954,17 +925,6 @@ fn unknown_sections(sections: &Sections, layers: &Layers) -> Vec<Diagnostic> {
             .collect();
 
         for id in named {
-            let switched_off = layers
-                .present()
-                .filter_map(|(_, document)| document.stanza(namespace, id))
-                .filter_map(|stanza| stanza.enabled.as_ref())
-                .last()
-                == Some(&Value::Bool(false));
-
-            if switched_off {
-                continue;
-            }
-
             let (code, kind) = match namespace {
                 Namespace::Plugins => (Code::UnknownPlugin, "plugin"),
                 Namespace::Connectors => (Code::UnknownConnector, "connector"),
@@ -1002,36 +962,6 @@ pub(crate) fn target_fingerprint(sections: &Sections, layers: &Layers) -> Finger
             "character": overlay.character,
             "home": home,
             "overlay": conceal_document(overlay.read.raw(), sections),
-        }),
-    })
-}
-
-/// The fingerprint of one section for a target: its stanzas as the
-/// target's settings are read from them, so a change to that section alone
-/// is bound to nothing else.
-fn section_fingerprint(
-    sections: &Sections,
-    declared: Declared<'_>,
-    layers: &Layers,
-) -> Fingerprint {
-    let namespace = declared.namespace();
-    let id = declared.id().as_str();
-    let stanza = |document: &Document| {
-        document
-            .raw()
-            .get(namespace.as_str())
-            .and_then(|stanzas| stanzas.get(id))
-            .map(|stanza| conceal_stanza(namespace, id, stanza, sections))
-    };
-    let home = stanza(&layers.home);
-
-    Fingerprint::new(&match &layers.overlay {
-        None => json!({"section": declared.path(), "home": home}),
-        Some(overlay) => json!({
-            "section": declared.path(),
-            "character": overlay.character,
-            "home": home,
-            "overlay": stanza(&overlay.read),
         }),
     })
 }

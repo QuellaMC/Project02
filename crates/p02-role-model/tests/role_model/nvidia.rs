@@ -311,8 +311,10 @@ async fn calls_come_back_under_the_runtime_s_names_with_their_ids_and_arguments_
     );
 }
 
+/// Reasoning never closed hides the rest of the text, so it says nothing,
+/// as empty content does: the parser refuses it and the model is told.
 #[tokio::test]
-async fn text_the_parser_must_refuse_reaches_it_as_the_model_wrote_it() {
+async fn an_answer_that_says_nothing_reaches_the_parser_as_no_call() {
     let stub = Stub::start().await;
     let adapter = adapter(&stub);
 
@@ -330,11 +332,7 @@ async fn text_the_parser_must_refuse_reaches_it_as_the_model_wrote_it() {
     let (unterminated, _) = invoke(&adapter, &["visible_reply"]).await;
     let (empty, _) = invoke(&adapter, &["visible_reply"]).await;
 
-    assert_eq!(
-        unterminated.answer,
-        ProviderAnswer::Text("<think>never closed".to_owned())
-    );
-    assert_eq!(exchange(&unterminated).get("nativeAssistantMessage"), None);
+    assert_eq!(decision(&unterminated), json!({"toolCalls": []}));
     assert_eq!(decision(&empty), json!({"toolCalls": []}));
 }
 

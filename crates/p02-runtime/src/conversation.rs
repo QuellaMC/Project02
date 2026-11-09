@@ -5,7 +5,7 @@
 use std::num::{NonZeroU32, NonZeroU64};
 
 use p02_characters::{CharacterRef, Persona};
-use p02_contracts::{ConversationTurn, RoleModelAdapter, TurnIdentity};
+use p02_contracts::{ConversationTurn, RoleModelAdapter};
 use p02_core::{
     CharacterProfile, ClientStamp, ConversationId, EventIdentity, MessageId, Participant,
     SessionId, SpeakerName,
@@ -14,7 +14,8 @@ use p02_plugins::PluginHost;
 use p02_shared::error_chain;
 use p02_store::{
     CharacterData, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
-    SessionContinuation, SessionContinued, SessionWriter, StorageError, Summarizer, TakenLines,
+    SessionContinuation, SessionContinued, SessionWriter, SkippedLines, StorageError, Summarizer,
+    TakenLines,
 };
 
 use crate::continuation;
@@ -55,6 +56,7 @@ pub struct Conversation {
     /// None once a panic on the blocking pool, or a delivery dropped before
     /// it ended, lost it.
     disk: Option<Disk>,
+    skipped: Option<String>,
 }
 
 /// What became of a line.
@@ -211,12 +213,21 @@ impl Conversation {
                 writer: current.writer,
                 taken: current.taken,
             }),
+            skipped: current.skipped,
         })
     }
 
     #[must_use]
     pub fn id(&self) -> &ConversationId {
         &self.id
+    }
+
+    /// What the open read past because it could not be read, rows of her
+    /// sessions catalog and lines of the segment it resumed, in a
+    /// sentence; none when it read everything.
+    #[must_use]
+    pub fn skipped(&self) -> Option<&str> {
+        self.skipped.as_deref()
     }
 
     /// Takes one line through the turn, as `adapter` and `host` answer it
@@ -288,27 +299,21 @@ impl Conversation {
         }
     }
 
-    /// Ends the thread: the current segment's end hooks run, then the
-    /// segment's lease is released, then the thread's. What failed of the
-    /// segment's end, in a sentence, when anything did.
-    pub async fn close(mut self, host: &PluginHost) -> Option<String> {
+    /// Ends the thread: the segment's lease is released, then the
+    /// thread's. What failed, in a sentence, when anything did.
+    pub async fn close(mut self) -> Option<String> {
         let Some(disk) = self.disk.take() else {
             return Some(error_chain(&RunTurnError::StateLost));
         };
-        let session = disk.writer.session_id().clone();
-        let mut failures = end(host, &session, &self.cast.character).await;
         let Disk { writer, holder, .. } = disk;
 
-        if let Err(error) = blocking(move || {
+        blocking(move || {
             writer.release();
             holder.release();
         })
         .await
-        {
-            failures.push(error_chain(&error));
-        }
-
-        joined(&failures)
+        .err()
+        .map(|error| error_chain(&error))
     }
 
     /// The message a run before this one committed a line submitted as
@@ -333,8 +338,8 @@ impl Conversation {
     /// Continues the session `from` in a new segment when the model's window
     /// would no longer hold its history whole. The continuation record is
     /// the commit point: until it lands the thread stays where it was, and
-    /// after it the old segment's lines are recorded, its end hooks run and
-    /// its lease is released, what of that fails reported and never undone.
+    /// after it the old segment's lines are recorded and its lease is
+    /// released, what of that fails reported and never undone.
     async fn rotate(&mut self, from: SessionId, mind: Mind<'_>) -> Option<Rotation> {
         let read = on_disk(&mut self.disk, |disk| {
             let replay = disk.writer.replay()?;
@@ -395,8 +400,6 @@ impl Conversation {
             failures.push(error_chain(&error));
         }
 
-        failures.extend(end(mind.host, &from, &self.cast.character).await);
-
         if let Err(error) = blocking(move || ended.release()).await {
             failures.push(error_chain(&error));
         }
@@ -412,13 +415,14 @@ impl Conversation {
 }
 
 /// A thread's current segment under its writer, who the thread is between,
-/// and the lines its closed segments took; the writer is released again on
-/// a failure after it was taken.
+/// the lines its closed segments took, and what reading it skipped; the
+/// writer is released again on a failure after it was taken.
 struct Current {
     writer: SessionWriter,
     character: CharacterProfile,
     person: SpeakerName,
     taken: TakenLines,
+    skipped: Option<String>,
 }
 
 fn current_segment(
@@ -426,26 +430,65 @@ fn current_segment(
     holder: &ConversationWriter,
 ) -> Result<Current, StorageError> {
     let mut writer = resume(data, holder)?;
-    let segment = writer.session_id().segment();
-    let cast = writer.replay().map(|replay| {
-        (
-            replay.session().character().clone(),
-            replay.session().user_name().clone(),
-        )
-    });
 
-    match cast.and_then(|cast| Ok((cast, taken_lines(data, holder.conversation(), segment)?))) {
-        Ok(((character, person), taken)) => Ok(Current {
+    match read_current(data, holder, &mut writer) {
+        Ok((character, person, taken, skipped)) => Ok(Current {
             writer,
             character,
             person,
             taken,
+            skipped,
         }),
         Err(error) => {
             writer.release();
             Err(error)
         }
     }
+}
+
+/// What [`Current`] holds beside the writer of its segment.
+fn read_current(
+    data: &CharacterData,
+    holder: &ConversationWriter,
+    writer: &mut SessionWriter,
+) -> Result<(CharacterProfile, SpeakerName, TakenLines, Option<String>), StorageError> {
+    let session = writer.session_id().clone();
+    let replay = writer.replay()?;
+    let character = replay.session().character().clone();
+    let person = replay.session().user_name().clone();
+    let skipped = skipped(
+        &data.sessions()?.skipped_lines,
+        &session,
+        replay.skipped_lines(),
+    );
+
+    Ok((
+        character,
+        person,
+        taken_lines(data, holder.conversation(), session.segment())?,
+        skipped,
+    ))
+}
+
+/// What reading `rows` of her sessions catalog and `lines` of `session`
+/// skipped, in a sentence, when either skipped anything.
+fn skipped(rows: &SkippedLines, session: &SessionId, lines: &SkippedLines) -> Option<String> {
+    let mut parts = Vec::new();
+
+    if !rows.is_empty() {
+        parts.push(format!("{rows} of her sessions catalog"));
+    }
+
+    if !lines.is_empty() {
+        parts.push(format!("{lines} of session {session}"));
+    }
+
+    (!parts.is_empty()).then(|| {
+        format!(
+            "Skipped what could not be read, {}; the rest was read.",
+            parts.join(" and ")
+        )
+    })
 }
 
 /// The thread's latest whole segment under its writer, or its first, made
@@ -482,9 +525,9 @@ fn resume(
 
 /// The lines the segments before `current` took: the thread's record of
 /// them, completed from every segment it does not cover. The segment just
-/// before `current` must read whole, as the current one must, since a run
-/// can end between a rotation and its record; an older one that cannot be
-/// read gives up its lines.
+/// before `current` must be read, as the current one must, since a run can
+/// end between a rotation and its record; an older one that cannot be read
+/// gives up its lines.
 fn taken_lines(
     data: &CharacterData,
     conversation: &p02_core::Conversation,
@@ -582,18 +625,6 @@ impl Disk {
             }
         }
     }
-}
-
-/// Runs the end hooks of segment `session` under a fresh event that says
-/// nothing: what failed, a sentence each.
-async fn end(host: &PluginHost, session: &SessionId, character: &CharacterProfile) -> Vec<String> {
-    let turn = p02_plugins::Turn::new(TurnIdentity {
-        session_id: session.clone(),
-        event: EventIdentity::mint(),
-        character: character.clone(),
-    });
-
-    host.session_end(&turn).await.failures()
 }
 
 fn joined(failures: &[String]) -> Option<String> {

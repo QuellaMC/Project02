@@ -13,13 +13,6 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          name: 'unit',
-          include: ['*.test.ts'],
-        },
-      },
-      {
-        extends: true,
-        test: {
           name: 'conformance',
           include: ['conformance/**/*.test.ts'],
           setupFiles: ['conformance/setup.ts'],

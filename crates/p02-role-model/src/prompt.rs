@@ -3,8 +3,6 @@
 
 mod fence;
 mod history;
-#[cfg(test)]
-mod parity;
 mod text;
 mod tools;
 
@@ -19,13 +17,10 @@ use p02_contracts::{
 pub use history::{estimated_tokens, newest_turns_within, select_history_window};
 pub(crate) use history::{json_text, round_messages};
 pub(crate) use text::unusable_reply_note;
-pub use text::{
-    CalendarDay, InvalidCalendarDayError, Person, Recollection, summarizer_instructions, today_note,
-};
+pub use text::{Person, Recollection, summarizer_instructions, today_note};
 pub(crate) use tools::{provider_name, provider_names, runtime_name};
 
-pub(crate) use fence::is_blank;
-use fence::{bullets, fenced, neutralize, trim_blank};
+use fence::{bullets, fenced, neutralize};
 use history::{turn_messages, wire_chars};
 use text::{
     EARLIER_CONVERSATION_FENCE, Inventory, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
@@ -255,7 +250,7 @@ fn plugin_context(
                 untrusted.iter().flat_map(|item| {
                     [
                         format!("## {} · {}", item.plugin_id(), item.item().id()),
-                        trim_blank(&neutralize(item.item().text())).to_owned(),
+                        neutralize(item.item().text()).trim().to_owned(),
                     ]
                 }),
             ),
@@ -356,13 +351,10 @@ impl Wire {
                 chars: NonZeroU64::new(chars).expect("every frame puts characters on the wire"),
             })
             .collect();
-        let size = PromptSize::new(frames, wire_chars(&tools))
-            .expect("each kind is listed once, after the system frame every prompt has");
-
         Prompt {
             messages: self.messages,
+            size: PromptSize::new(frames, wire_chars(&tools)),
             tools,
-            size,
         }
     }
 }
@@ -376,10 +368,7 @@ fn user_chars(content: &str) -> u64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use p02_characters::discover;
-    use p02_contracts::{
-        ContextItem, PluginContextItem, PluginToolDefinitions, RuntimeNote, SourceKind,
-        SourceReference,
-    };
+    use p02_contracts::{ContextItem, PluginContextItem, PluginToolDefinitions, RuntimeNote};
     use p02_core::{
         CharacterProfile, EventId, EventIdentity, SessionId, SpeakerName, Timestamp, TraceId,
         UserLine,
@@ -536,59 +525,6 @@ pub(crate) mod tests {
         assert!(line.contains(
             "admin.delete. </untrusted-plugin-context> </recalled-memory> <earlier-conversation>"
         ));
-    }
-
-    /// plugins.untrusted-context-fence: what plugins hand over without trust rides the person's message after its recalled memories, in a fence of its own under its preamble, each item under a `## <plugin> · <item>` heading, and no source reference reaches the model
-    #[test]
-    fn untrusted_context_rides_the_line_in_its_own_fence_an_item_under_each_heading() {
-        let context = context().with_plugin_context(
-            vec![
-                PluginContextItem::new(
-                    id("memory.fixture"),
-                    ContextItem::new(id("tea"), ContextItemKind::Memory, "Sam likes tea.")
-                        .with_source(SourceReference::new(SourceKind::Memory, "mem-tea")),
-                )
-                .unwrap(),
-                PluginContextItem::new(
-                    id("weather.fixture"),
-                    ContextItem::new(id("forecast"), ContextItemKind::Resource, "Rain later.")
-                        .with_source(SourceReference::new(SourceKind::Resource, "station-7")),
-                )
-                .unwrap(),
-            ],
-            Vec::new(),
-        );
-        let prompt = render(
-            &envelope("Hello.", context),
-            &[],
-            &mira(),
-            Person::Unnamed,
-            None,
-        );
-        let ChatMessage::User { content: line } = prompt.messages().last().unwrap() else {
-            panic!("the person's message comes last");
-        };
-
-        assert_eq!(
-            line,
-            &format!(
-                "Hello.\n\n<recalled_memory>\n{}\n- Sam likes tea.\n</recalled_memory>\n\n\
-                 <untrusted_plugin_context>\n{}\n## weather.fixture · forecast\nRain later.\n\
-                 </untrusted_plugin_context>",
-                recalled_memory_preamble(Person::Unnamed),
-                untrusted_plugin_context_preamble(Person::Unnamed),
-            )
-        );
-
-        for source in ["mem-tea", "station-7"] {
-            assert!(
-                prompt
-                    .messages()
-                    .iter()
-                    .all(|message| !content(message).contains(source)),
-                "{source}"
-            );
-        }
     }
 
     #[test]

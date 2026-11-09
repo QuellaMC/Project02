@@ -178,8 +178,7 @@ impl Slot {
             turn.shared_identity(),
             deadline,
             cancellation,
-        )
-        .with_privacy_labels(Arc::clone(turn.privacy_labels()));
+        );
 
         if capabilities.turn_text
             && let Some(text) = turn.shared_text()

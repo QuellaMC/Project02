@@ -11,12 +11,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction, ContextRole,
-    ExchangeProvider, ExchangeRecord, InputEnvelope, Invocation, ProviderAnswer,
-    ProviderCapabilities, ProviderExchange, ProviderFailure, ProviderMetadata, ProviderName,
-    ProviderRequest, ProviderResponse, RawOutput, ReasoningParameterStyle, RoleModelAdapter,
-    TextCompletion, TextCompletionRequest, ToolCallId, ToolNameMapping, VISIBLE_REPLY,
-    scrub_reasoning_blocks,
+    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction,
+    ExchangeProvider, ExchangeRecord, InputEnvelope, Invocation, ProviderAnswer, ProviderExchange,
+    ProviderFailure, ProviderMetadata, ProviderName, ProviderRequest, ProviderResponse, RawOutput,
+    RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId, ToolNameMapping,
+    VISIBLE_REPLY, scrub_reasoning_blocks,
 };
 use p02_shared::{BaseUrl, credential_header, http_client};
 use reqwest::Url;
@@ -24,7 +23,7 @@ use reqwest::header::HeaderValue;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::prompt::{is_blank, json_text, provider_name, provider_names, runtime_name};
+use crate::prompt::{json_text, provider_name, provider_names, runtime_name};
 use draft::ReplyDrafts;
 use stream::{Completion, Flow, StreamFold};
 use transport::{Answer, Failure, Silence};
@@ -40,18 +39,6 @@ const REASONING_BUDGET: u32 = 16_384;
 
 /// Reasons a chat completion ends whole; any other cut the output short.
 const TERMINAL_FINISH_REASONS: [&str; 2] = ["stop", "tool_calls"];
-
-const CAPABILITIES: ProviderCapabilities = ProviderCapabilities {
-    supports_native_tools: true,
-    supports_developer_or_system_context: true,
-    preferred_model_context_role: ContextRole::System,
-    supports_strict_tool_schema: true,
-    supports_reasoning: true,
-    reasoning_parameter_style: ReasoningParameterStyle::Nvidia,
-    requires_reasoning_block_round_trip: false,
-    supports_tool_choice: true,
-    supports_parallel_tool_calls: true,
-};
 
 /// A character's settings for the NVIDIA provider.
 #[derive(Clone, Default)]
@@ -335,7 +322,7 @@ impl RoleModelAdapter for NvidiaAdapter {
 
         exchange.finish_reason = Some(judged.finish_reason);
         exchange.usage = judged.usage;
-        exchange.native_assistant_message = judged.native;
+        exchange.native_assistant_message = Some(judged.native);
 
         RawOutput {
             answer: ProviderAnswer::Text(judged.raw_output),
@@ -478,11 +465,6 @@ impl TurnRequest {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
     /// The exchange as far as the request: what the answer adds comes on
     /// top of it.
     fn exchange(&self, model: &str, endpoint: &Url) -> ExchangeRecord {
@@ -492,7 +474,6 @@ impl TurnRequest {
                 model: Some(model.to_owned()),
                 endpoint: Some(endpoint.to_string()),
             },
-            capabilities: CAPABILITIES,
             reasoning_params: serde_json::to_value(THINKING).expect("plain data always serializes"),
             rendered_messages: self.messages.clone(),
             rendered_tools: self.tools.clone(),
@@ -581,8 +562,7 @@ fn completion_text(body: &Value) -> Result<String, String> {
     message
         .get("content")
         .and_then(Value::as_str)
-        .and_then(|content| scrub_reasoning_blocks(content).ok())
-        .map(|text| text.trim_matches(is_blank).to_owned())
+        .map(|content| scrub_reasoning_blocks(content).trim().to_owned())
         .filter(|text| !text.is_empty())
         .ok_or_else(no_text)
 }
@@ -592,9 +572,8 @@ struct Judged {
     raw_output: String,
     finish_reason: String,
     usage: Option<Value>,
-    /// The message as the provider returned it, when the model's text could
-    /// be read: one the parser must refuse goes to it as written instead.
-    native: Option<ChatMessage>,
+    /// The message as the provider returned it.
+    native: ChatMessage,
 }
 
 /// The streamed message as a decision for the parser: content alone is
@@ -623,22 +602,9 @@ fn judge(
             ));
         }
     };
-    let content = match completion.content {
-        None => None,
-        Some(content) => match scrub_reasoning_blocks(&content) {
-            Ok(clean) => Some(clean),
-            // Not a provider fault: the model wrote what the runtime cannot
-            // use, so the parser refuses it and the model is told.
-            Err(_) => {
-                return Ok(Judged {
-                    raw_output: content,
-                    finish_reason,
-                    usage: completion.usage,
-                    native: None,
-                });
-            }
-        },
-    };
+    let content = completion
+        .content
+        .map(|content| scrub_reasoning_blocks(&content));
     let calls = completion
         .calls
         .into_iter()
@@ -677,10 +643,10 @@ fn judge(
         raw_output: raw_decision(content.as_deref(), &calls, mappings),
         finish_reason,
         usage: completion.usage,
-        native: Some(ChatMessage::Assistant {
+        native: ChatMessage::Assistant {
             content,
             tool_calls: calls,
-        }),
+        },
     })
 }
 

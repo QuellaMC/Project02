@@ -1,6 +1,6 @@
-//! The seam every Mem0 deployment is reached through: search, write and
-//! ping, over the hosted platform, a self-hosted server, or the embedded
-//! engine. A failure is told in one fixed sentence per kind, so neither a
+//! The seam every Mem0 deployment is reached through: search and write,
+//! over the hosted platform, a self-hosted server, or the embedded engine.
+//! A failure is told in one fixed sentence per kind, so neither a
 //! credential nor an address ever leaves through it.
 
 use std::error::Error;
@@ -49,20 +49,10 @@ pub(super) struct Found {
     pub(super) score: Option<f64>,
 }
 
-/// What a ping established: verified only when it proved the backend
-/// serves, which the embedded engine's local check does only once its
-/// model and embedder have answered.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Readiness {
-    pub(super) verified: bool,
-    pub(super) summary: String,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Operation {
     Search,
     Add,
-    Ping,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +60,6 @@ pub(super) enum Failure {
     Http(u16),
     Unreachable,
     Unreadable,
-    NothingStored,
     /// The caller stopped waiting: the write may have landed all the same.
     Abandoned,
     /// The embedded engine's own account of what failed.
@@ -121,16 +110,6 @@ impl Backend {
             Self::Embedded(embedded) => embedded.write(scope, write, databases).await,
         }
     }
-
-    pub(super) async fn ping(
-        &self,
-        databases: Option<&PluginDatabase>,
-    ) -> Result<Readiness, BackendError> {
-        match self {
-            Self::Rest(rest) => rest.ping().await,
-            Self::Embedded(embedded) => embedded.ping(databases).await,
-        }
-    }
 }
 
 impl Operation {
@@ -138,7 +117,6 @@ impl Operation {
         match self {
             Self::Search => "search",
             Self::Add => "add",
-            Self::Ping => "ping",
         }
     }
 }
@@ -146,15 +124,6 @@ impl Operation {
 impl BackendError {
     pub(super) fn new(operation: Operation, failure: Failure) -> Self {
         Self { operation, failure }
-    }
-
-    /// Whether the backend cannot be reached at all, which health reports
-    /// as unavailable rather than degraded.
-    pub(super) fn is_unavailable(&self) -> bool {
-        matches!(
-            self.failure,
-            Failure::Unreachable | Failure::StoreUnopened(_)
-        )
     }
 }
 
@@ -170,10 +139,6 @@ impl fmt::Display for BackendError {
             Failure::Unreadable => write!(
                 formatter,
                 "mem0 {operation} failed: backend returned an unreadable response body."
-            ),
-            Failure::NothingStored => write!(
-                formatter,
-                "mem0 {operation} failed: the backend created no memory for it."
             ),
             Failure::Abandoned => write!(
                 formatter,

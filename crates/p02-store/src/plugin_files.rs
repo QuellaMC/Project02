@@ -93,7 +93,6 @@ struct NotAStorePath;
 /// A store's ledger: how many writes it committed, and the one it journaled
 /// and has not committed yet.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Ledger {
     revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +103,7 @@ struct Ledger {
 /// it found there, so whoever finds it after a crash can tell how far it
 /// came.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
 enum Pending {
     /// A document replaced by `content`; `replaces` is the digest of the
     /// document it found, none when there was none.
@@ -183,22 +182,18 @@ impl LeasedPluginFiles {
             .transpose()
     }
 
-    /// The log's committed lines, each a value; what follows the last
-    /// newline is an append cut short and no line.
+    /// The log's committed lines, each a value, and a line that is no JSON
+    /// value within the limits null, for its plugin to pass over as it
+    /// passes over any line it cannot use; what follows the last newline is
+    /// an append cut short and no line.
     pub(crate) fn read_log(&self, path: &str) -> Result<Vec<Value>, StorageError> {
         let path = StorePath::named(path, FileKind::Log)?;
         let target = self.located(&path)?;
         let bytes = read_entry(&target)?.unwrap_or_default();
 
-        committed_lines(&bytes)
-            .map(|(line, text)| {
-                value_of(text, &path.text).map_err(|source| StorageError::MalformedLine {
-                    path: target.clone(),
-                    line,
-                    source,
-                })
-            })
-            .collect()
+        Ok(committed_lines(&bytes)
+            .map(|(_, text)| value_of(text, &path.text).unwrap_or(Value::Null))
+            .collect())
     }
 
     fn replace_with(

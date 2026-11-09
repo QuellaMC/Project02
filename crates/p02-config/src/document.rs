@@ -1,17 +1,15 @@
-//! A settings document: read from its file, judged, and written back.
+//! A settings document: read from its file forgivingly, and written back.
 
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
-use p02_shared::{BoundJsonError, Credentials, JsonLimits, bound_json_object, read_at_most};
+use p02_shared::read_file;
 use serde_json::{Map, Value};
 
-use crate::declaration::{HostField, Namespace, VERSION, host_field, host_fields};
+use crate::declaration::{HostField, Namespace, VERSION, host_fields};
 use crate::diagnostic::{Code, Diagnostic};
-
-/// The most a document may weigh on disk, and in all its text together.
-const MAX_BYTES: usize = 256 * 1_024;
 
 const TOP_LEVEL: [&str; 4] = ["version", "project02", "plugins", "connectors"];
 const STANZA: [&str; 2] = ["enabled", "config"];
@@ -20,97 +18,66 @@ const STANZA: [&str; 2] = ["enabled", "config"];
 #[derive(Debug)]
 pub(crate) enum Read {
     Absent,
-    /// The file is there but holds no document: it cannot be read, is no
-    /// JSON object, or is past the limits. Nothing is taken from it, and
-    /// nothing is written over it.
+    /// The file is there but holds no document: it cannot be read, is not
+    /// JSON, or is no object. Nothing is taken from it, and nothing is
+    /// written over it.
     Unreadable(Diagnostic),
     Document(Document),
 }
 
 impl Read {
-    /// Reads the document at `path`, no more of it than a document may
-    /// weigh, a file that is not there being no document at all.
+    /// Reads the document at `path`, a file that is not there being no
+    /// document at all.
     pub(crate) fn file(path: &Path) -> Self {
-        let bytes = match read_at_most(path, MAX_BYTES + 1) {
+        let bytes = match read_file(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Self::Absent,
-            Err(_) => {
-                return Self::Unreadable(Diagnostic::error(
-                    Code::ReadFailed,
-                    format!("Runtime config file could not be read: {}.", path.display()),
-                ));
-            }
+            Err(_) => return unreadable(path, "could not be read"),
         };
 
-        Self::bytes(&bytes)
-    }
-
-    /// The document `bytes` hold, judged as a document's file is when it
-    /// is read: no heavier than a document may weigh, JSON, an object, and
-    /// within the JSON limits. A document made in memory is judged by this
-    /// same rule before it is written, so nothing is written that would
-    /// not be read back.
-    pub(crate) fn bytes(bytes: &[u8]) -> Self {
-        if bytes.len() > MAX_BYTES {
-            return Self::Unreadable(Diagnostic::error(
-                Code::LimitExceeded,
-                format!("Runtime config file exceeds the {MAX_BYTES}-byte size limit."),
-            ));
-        }
-
-        let value: Value = match serde_json::from_slice(bytes) {
-            Ok(value) => value,
-            Err(error) => {
-                return Self::Unreadable(Diagnostic::error(
-                    Code::MalformedJson,
-                    format!("Runtime config file is not valid JSON: {error}."),
-                ));
-            }
-        };
-        let limits = JsonLimits {
-            total_string_bytes: MAX_BYTES,
-            ..JsonLimits::default()
-        };
-
-        match bound_json_object(value, "config", limits, Credentials::Keep) {
-            Ok(raw) => Self::Document(Document::parse(raw)),
-            Err(BoundJsonError::NotAnObject { .. }) => Self::Unreadable(Diagnostic::error(
-                Code::NotObject,
-                "Runtime config must be an object.",
-            )),
-            Err(error) => Self::Unreadable(Diagnostic::error(
-                Code::LimitExceeded,
-                format!("Runtime config exceeds safe JSON limits: {error}."),
-            )),
+        match serde_json::from_slice(&bytes) {
+            Ok(Value::Object(raw)) => Self::Document(Document::parse(raw)),
+            Ok(_) => unreadable(path, "is not a JSON object"),
+            Err(error) => unreadable(path, format_args!("is not valid JSON ({error})")),
         }
     }
 
-    /// The document read, an absent file being an empty one, or the
-    /// diagnostics that keep it from being used.
-    pub(crate) fn usable(self) -> Result<Document, Vec<Diagnostic>> {
+    /// The document read, an absent file being an empty one, or what keeps
+    /// it from being read.
+    pub(crate) fn usable(self) -> Result<Document, Box<Diagnostic>> {
         match self {
             Self::Absent => Ok(Document::empty()),
-            Self::Unreadable(diagnostic) => Err(vec![diagnostic]),
-            Self::Document(document) if document.problems.is_empty() => Ok(document),
-            Self::Document(document) => Err(document.problems),
+            Self::Unreadable(diagnostic) => Err(Box::new(diagnostic)),
+            Self::Document(document) => Ok(document),
         }
     }
 }
 
+fn unreadable(path: &Path, why: impl Display) -> Read {
+    Read::Unreadable(Diagnostic::error(
+        Code::Unreadable,
+        format!(
+            "The settings file {} {why}: fix it or remove it.",
+            path.display()
+        ),
+    ))
+}
+
 /// A document that is a JSON object, as authored, beside what of it is
-/// valid. A problem of the document as a whole leaves it unusable; a
-/// problem of one section's stanza stays with that section.
+/// used: the host's fields and each section's stanza, by id. What it holds
+/// that the settings do not know is not used, and said.
 #[derive(Clone, Debug)]
 pub(crate) struct Document {
     raw: Map<String, Value>,
-    problems: Vec<Diagnostic>,
+    ignored: Vec<Diagnostic>,
     host: Map<String, Value>,
     plugins: BTreeMap<String, Stanza>,
     connectors: BTreeMap<String, Stanza>,
 }
 
-/// A section's stanza, `{enabled?, config?}`, as authored, with the
-/// problems of its shape.
+/// A section's stanza, `{enabled?, config?}`, as authored, with what is
+/// wrong with its shape: a key it does not know, a warning, and a stanza or
+/// config that is no object, an error of the section.
 #[derive(Clone, Debug)]
 pub(crate) struct Stanza {
     /// The switch as authored, whatever it holds: one that is not a
@@ -118,7 +85,7 @@ pub(crate) struct Stanza {
     /// nearest, as a field's value is.
     pub(crate) enabled: Option<Value>,
     pub(crate) config: Option<Map<String, Value>>,
-    pub(crate) problems: Vec<Diagnostic>,
+    pub(crate) findings: Vec<Diagnostic>,
 }
 
 impl Document {
@@ -131,49 +98,26 @@ impl Document {
         Self::parse(raw)
     }
 
-    fn parse(raw: Map<String, Value>) -> Self {
-        let mut problems = Vec::new();
-
-        for key in unknown(&raw, &TOP_LEVEL) {
-            problems.push(
-                Diagnostic::error(
-                    Code::UnknownTopLevelField,
-                    format!("Unknown runtime config field \"{key}\"."),
-                )
-                .at(key),
-            );
-        }
-
-        if raw.get("version").and_then(Value::as_str) != Some(VERSION) {
-            problems.push(
-                Diagnostic::error(
-                    Code::VersionUnsupported,
-                    format!("Runtime config version must be \"{VERSION}\"."),
-                )
-                .at("version"),
-            );
-        }
-
+    /// `raw`, every part the settings know taken as authored. Its version
+    /// is not judged: a home a newer build wrote is refused by its marker.
+    pub(crate) fn parse(raw: Map<String, Value>) -> Self {
+        let mut ignored: Vec<Diagnostic> = unknown(&raw, &TOP_LEVEL)
+            .map(|key| ignored_key(key, key.clone()))
+            .collect();
         let host = match raw.get("project02") {
             None => Map::new(),
-            Some(Value::Object(fields)) => host_values(fields, &mut problems),
+            Some(Value::Object(fields)) => host_values(fields, &mut ignored),
             Some(_) => {
-                problems.push(
-                    Diagnostic::error(
-                        Code::Project02NotObject,
-                        "Runtime config project02 section must be an object.",
-                    )
-                    .at("project02"),
-                );
+                ignored.push(not_an_object("project02"));
                 Map::new()
             }
         };
-        let plugins = stanzas(Namespace::Plugins, raw.get("plugins"), &mut problems);
-        let connectors = stanzas(Namespace::Connectors, raw.get("connectors"), &mut problems);
+        let plugins = stanzas(Namespace::Plugins, raw.get("plugins"), &mut ignored);
+        let connectors = stanzas(Namespace::Connectors, raw.get("connectors"), &mut ignored);
 
         Self {
             raw,
-            problems,
+            ignored,
             host,
             plugins,
             connectors,
@@ -184,8 +128,12 @@ impl Document {
         &self.raw
     }
 
-    /// The value the document gives host field `name`, when it is one the
-    /// field takes.
+    /// What of the document is not used, outside any section.
+    pub(crate) fn ignored(&self) -> &[Diagnostic] {
+        &self.ignored
+    }
+
+    /// The value the document gives host field `name`, whatever it is.
     pub(crate) fn host_value(&self, name: &str) -> Option<&Value> {
         self.host.get(name)
     }
@@ -212,40 +160,38 @@ pub(crate) fn encode(document: &Map<String, Value>) -> Vec<u8> {
     bytes
 }
 
-fn host_values(fields: &Map<String, Value>, problems: &mut Vec<Diagnostic>) -> Map<String, Value> {
+/// The warning for a key at `path` the settings do not know.
+pub(crate) fn ignored_key(name: &str, path: String) -> Diagnostic {
+    Diagnostic::warning(
+        Code::Ignored,
+        format!("\"{name}\" is not a setting, so it is not used."),
+    )
+    .at(path)
+}
+
+fn not_an_object(path: &str) -> Diagnostic {
+    Diagnostic::warning(
+        Code::Ignored,
+        format!("{path} must be an object, so nothing in it is used."),
+    )
+    .at(path)
+}
+
+fn host_values(fields: &Map<String, Value>, ignored: &mut Vec<Diagnostic>) -> Map<String, Value> {
     let known: Vec<&str> = host_fields().iter().map(HostField::name).collect();
 
-    for key in unknown(fields, &known) {
-        problems.push(
-            Diagnostic::error(
-                Code::UnknownProject02Field,
-                format!("Unknown Project02 config field \"{key}\"."),
-            )
-            .at(format!("project02.{key}")),
-        );
-    }
-
-    let mut values = Map::new();
-
-    for (name, value) in fields {
-        let Some(field) = host_field(name) else {
-            continue;
-        };
-
-        if field.accepts(value) {
-            values.insert(name.clone(), value.clone());
-        } else {
-            problems.push(Diagnostic::error(field.code, field.sentence.clone()).at(field.path()));
-        }
-    }
-
-    values
+    ignored.extend(unknown(fields, &known).map(|key| ignored_key(key, format!("project02.{key}"))));
+    fields
+        .iter()
+        .filter(|(name, _)| known.contains(&name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
 }
 
 fn stanzas(
     namespace: Namespace,
     value: Option<&Value>,
-    problems: &mut Vec<Diagnostic>,
+    ignored: &mut Vec<Diagnostic>,
 ) -> BTreeMap<String, Stanza> {
     match value {
         None => BTreeMap::new(),
@@ -254,18 +200,7 @@ fn stanzas(
             .map(|(id, value)| (id.clone(), Stanza::parse(namespace, id, value)))
             .collect(),
         Some(_) => {
-            let code = match namespace {
-                Namespace::Plugins => Code::PluginsNotObject,
-                Namespace::Connectors => Code::ConnectorsNotObject,
-            };
-
-            problems.push(
-                Diagnostic::error(
-                    code,
-                    format!("Runtime config {} must be an object.", namespace.as_str()),
-                )
-                .at(namespace.as_str()),
-            );
+            ignored.push(not_an_object(namespace.as_str()));
             BTreeMap::new()
         }
     }
@@ -274,8 +209,8 @@ fn stanzas(
 impl Stanza {
     fn parse(namespace: Namespace, id: &str, value: &Value) -> Self {
         let path = format!("{}.{id}", namespace.as_str());
-        let problem = |code, message: String, at: String| {
-            Diagnostic::error(code, message)
+        let refused = |at: String| {
+            Diagnostic::error(Code::ValueInvalid, format!("{at} must be an object."))
                 .at(at)
                 .in_section(namespace, id)
         };
@@ -283,43 +218,25 @@ impl Stanza {
             return Self {
                 enabled: None,
                 config: None,
-                problems: vec![problem(
-                    Code::PluginNotObject,
-                    format!("{path} must be an object."),
-                    path.clone(),
-                )],
+                findings: vec![refused(path)],
             };
         };
-        let mut problems: Vec<Diagnostic> = unknown(entries, &STANZA)
-            .map(|key| {
-                problem(
-                    Code::UnknownPluginWrapperField,
-                    format!(
-                        "{path} has unknown field \"{key}\": a section holds only enabled and \
-                         config."
-                    ),
-                    format!("{path}.{key}"),
-                )
-            })
+        let mut findings: Vec<Diagnostic> = unknown(entries, &STANZA)
+            .map(|key| ignored_key(key, format!("{path}.{key}")).in_section(namespace, id))
             .collect();
-        let enabled = entries.get("enabled").cloned();
         let config = match entries.get("config") {
             None => None,
             Some(Value::Object(config)) => Some(config.clone()),
             Some(_) => {
-                problems.push(problem(
-                    Code::PluginConfigNotObject,
-                    format!("{path}.config must be an object."),
-                    format!("{path}.config"),
-                ));
+                findings.push(refused(format!("{path}.config")));
                 None
             }
         };
 
         Self {
-            enabled,
+            enabled: entries.get("enabled").cloned(),
             config,
-            problems,
+            findings,
         }
     }
 }

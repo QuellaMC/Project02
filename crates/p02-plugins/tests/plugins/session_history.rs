@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Gate, Scripted, Spec, bundled_manifest, call, run_round, turn, turn_in,
+    Enable, Gate, Scripted, Spec, builder, bundled_manifest, call, run_round, turn, turn_in,
 };
 
 const INDEX: &str = "session-index";
 
 /// A host of session-history alone, under a budget of `timeout_ms`.
 fn history_host(storage: &Arc<Storage>, timeout_ms: u64) -> PluginHost {
-    PluginHost::builder(Arc::clone(storage) as _)
+    builder(Arc::clone(storage) as _)
         .plugin(
             bundled_manifest("session-history", |manifest| {
                 manifest["runtimePolicy"]["timeoutMs"] = json!(timeout_ms);
@@ -211,8 +211,6 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
     }
 
     history.exchange("chat.1", "Tell me a story.", &story);
-    history.damage("chat.1");
-    history.damage_catalog();
 
     let now = turn_in("chat.2", "evt_2", &[]);
     let host = history_host(&storage, 5_000);
@@ -249,12 +247,8 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
         "a window written 2.0 is the whole number its contract admitted"
     );
     assert_eq!(
-        (
-            &output(&around)["hasBefore"],
-            &output(&around)["hasAfter"],
-            &output(&around)["damagedRecordsSkipped"],
-        ),
-        (&json!(true), &json!(true), &json!(2))
+        (&output(&around)["hasBefore"], &output(&around)["hasAfter"]),
+        (&json!(true), &json!(true))
     );
     assert_eq!(
         numbers(&output(&latest)["messages"]),
@@ -304,7 +298,7 @@ async fn with_session_history_on_the_trusted_notes_carry_its_recall_guidance() {
     let guided = history_host(&storage, 5_000)
         .before_role_model_call(&turn())
         .await;
-    let unguided = PluginHost::builder(Storage::new())
+    let unguided = builder(Storage::new())
         .enable(
             &Spec::new("other"),
             Arc::new(Scripted::answering(ContextItemKind::RuntimeNote, 1)),
@@ -386,12 +380,8 @@ async fn the_index_holds_what_the_history_committed_and_is_rebuilt_from_it() {
         "rebuilt at the plugin's version"
     );
 
-    opener.corrupt(INDEX);
-    assert_eq!(kraken(&history_host(&storage, 5_000)).await, ["chat.2"]);
-    assert_eq!(opener.version(INDEX), version);
-
     let off = Storage::new();
-    let without = PluginHost::builder(Arc::clone(&off) as _)
+    let without = builder(Arc::clone(&off) as _)
         .enable(
             &Spec {
                 declared: json!(["after_turn_committed"]),

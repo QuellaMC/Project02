@@ -6,28 +6,25 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, CharacterVersion, PluginExpectations};
+use p02_contracts::{ConfigField, ConfigValueType};
 use p02_shared::Identifier;
 use p02_store::{CharacterData, Home, StorageError};
 use serde_json::{Map, Value};
 
-use crate::declaration::{
-    Declared, Layer, Namespace, Sections, VERSION, authorable, expectation, outside_scope,
-};
+use crate::change::{Edit, Operation};
+use crate::declaration::{Namespace, Sections, Target};
 use crate::diagnostic::{Code, Diagnostic};
-use crate::document::{Document, Read, encode};
-use crate::resolve::{Overlay, Written, WrittenOverlay, in_overlay};
+use crate::document::{Document, Read};
+use crate::resolve::{Overlay, Written, WrittenOverlay};
 use crate::transaction::{settle, with_character};
 
 /// Why a character's package's settings were not merged into her overlay;
 /// in every case nothing was written for her.
 #[derive(Debug, thiserror::Error)]
 pub enum MaterializeError {
-    /// Her package's settings are not ones her overlay may hold.
-    #[error("the character package's plugin settings are invalid")]
-    Package { diagnostics: Vec<Diagnostic> },
-    /// The home's document, or her overlay, does not load.
+    /// The home's document, or her overlay, cannot be read.
     #[error("a settings document does not load")]
-    Unloadable { diagnostics: Vec<Diagnostic> },
+    Unreadable(Box<Diagnostic>),
     #[error(transparent)]
     Storage(#[from] StorageError),
 }
@@ -38,14 +35,14 @@ pub enum MaterializeError {
 /// start after a new version of her package, filling in only what she
 /// lacks; otherwise not at all, so an edit of hers always stands. A change
 /// to her settings made before then merges them as this does, and leaves
-/// it nothing to merge. Her data directory is made only once her package's
-/// settings and both documents are known to be good, and a lock another
-/// writer holds is waited for as long as `wait` while it changes hands.
+/// it nothing to merge. Her data directory is made only once both
+/// documents are known to be readable, and a lock another writer holds is
+/// waited for as long as `wait` while it changes hands.
 ///
 /// # Errors
 ///
-/// [`MaterializeError`] when her package's settings are invalid, a
-/// document does not load, or the store fails.
+/// [`MaterializeError`] when a document cannot be read, or the store
+/// fails.
 pub fn materialize(
     home: &Home,
     sections: &Sections,
@@ -64,21 +61,18 @@ fn start(
     written: Written,
     overlay: WrittenOverlay,
 ) -> Result<CharacterData, MaterializeError> {
-    let id = &character.profile.id;
-
     written
         .read
         .usable()
-        .map_err(|diagnostics| MaterializeError::Unloadable { diagnostics })?;
+        .map_err(MaterializeError::Unreadable)?;
 
     let absent = matches!(overlay.read, Read::Absent);
-    let file = overlay
-        .read
-        .usable()
-        .map_err(|diagnostics| MaterializeError::Unloadable {
-            diagnostics: in_overlay(diagnostics, id, &overlay.path),
-        })?;
-    let (mut merged, problems) = merged_overlay(
+    let file = overlay.read.usable().map_err(|diagnostic| {
+        let id = &character.profile.id;
+
+        MaterializeError::Unreadable(Box::new(diagnostic.in_overlay(id, &overlay.path)))
+    })?;
+    let (mut merged, _) = merged_overlay(
         sections,
         character,
         overlay.path,
@@ -86,12 +80,6 @@ fn start(
         absent,
         overlay.package_version.as_ref(),
     );
-
-    if !problems.is_empty() {
-        return Err(MaterializeError::Package {
-            diagnostics: problems,
-        });
-    }
 
     Ok(settle(home, &mut merged)?)
 }
@@ -101,8 +89,7 @@ fn start(
 /// settings merged in while they are still to be merged, at her first
 /// start and the first after her package changes version, as her start
 /// merges them: what her settings are shown as, and what a change to them
-/// edits. Beside it, why her package's settings cannot be merged, when
-/// they cannot; she is then read as written.
+/// edits. Beside it, what of her package's settings is skipped.
 pub(crate) fn merged_overlay(
     sections: &Sections,
     character: &CharacterDefinition,
@@ -111,40 +98,39 @@ pub(crate) fn merged_overlay(
     absent: bool,
     recorded: Option<&CharacterVersion>,
 ) -> (Overlay, Vec<Diagnostic>) {
+    let id = &character.profile.id;
+    let (package, skipped) = package_document(sections, id, &character.plugins);
     let pending = absent || recorded != Some(&character.version);
-    let (read, merges, problems) = match pending.then(|| {
-        package_document(sections, &character.plugins).and_then(|package| {
-            Read::bytes(&encode(&merge_package(written.raw(), &package))).usable()
-        })
-    }) {
-        None => (written.clone(), None, Vec::new()),
-        Some(Ok(read)) => (read, Some(character.version.clone()), Vec::new()),
-        Some(Err(problems)) => (written.clone(), None, problems),
+    let read = if pending {
+        Document::parse(merge_package(written.raw(), &package))
+    } else {
+        written.clone()
     };
 
     (
         Overlay {
-            character: character.profile.id.clone(),
+            character: id.clone(),
             path,
             written,
             read,
-            merges,
+            merges: pending.then(|| character.version.clone()),
         },
-        problems,
+        skipped,
     )
 }
 
 /// What her package contributes to her settings, as an overlay holding
-/// only that: each plugin of this build it requires or recommends switched
-/// on, and the values it gives; a plugin this build lacks configures
-/// nothing, so nothing of it is copied. Or why it cannot: a package is
-/// shared, so a credential in one would reach everyone who installs it,
-/// and every value it gives must be one its field takes, set where a
-/// character may set it.
+/// only that: each plugin of this build it expects switched on, and the
+/// values it gives, each made as a change on her own screen would make it.
+/// A plugin this build lacks configures nothing. A value her screen could
+/// not set is skipped, as is a credential, a server or a path: a package
+/// may come from a stranger, and those are the person's to choose.
 pub(crate) fn package_document(
     sections: &Sections,
+    character: &Identifier,
     expectations: &PluginExpectations,
-) -> Result<Map<String, Value>, Vec<Diagnostic>> {
+) -> (Map<String, Value>, Vec<Diagnostic>) {
+    let target = Target::Character(character.clone());
     let switched_on: BTreeSet<&Identifier> = expectations
         .required()
         .iter()
@@ -155,90 +141,73 @@ pub(crate) fn package_document(
         .copied()
         .chain(expectations.config().keys())
         .collect();
-    let mut plugins = Map::new();
-    let mut problems = Vec::new();
+    let mut document = Document::empty().raw().clone();
+    let mut skipped = Vec::new();
 
     for id in ids {
         let Some(declared) = sections.find(Namespace::Plugins, id.as_str()) else {
             continue;
         };
-        let switches = switched_on.contains(id);
-        let config = expectations.config().get(id);
-        let mut stanza = Map::new();
+        let mut operations = Vec::new();
 
-        if switches {
-            stanza.insert("enabled".to_owned(), Value::Bool(true));
+        if switched_on.contains(id) {
+            operations.push((
+                format!("{}.enabled", declared.path()),
+                Ok(Operation::SectionEnabled {
+                    namespace: Namespace::Plugins,
+                    id: id.to_string(),
+                    enabled: Some(true),
+                }),
+            ));
         }
 
-        if let Some(config) = config {
-            stanza.insert("config".to_owned(), Value::Object(config.clone()));
+        for (name, value) in expectations.config().get(id).into_iter().flatten() {
+            let operation = match declared.config().field(name) {
+                Some(field) if !package_may_set(field) => Err(
+                    "A package never sets a credential, a server or a path: those are the \
+                     person's to choose."
+                        .to_owned(),
+                ),
+                _ => Ok(Operation::SectionFieldSet {
+                    namespace: Namespace::Plugins,
+                    id: id.to_string(),
+                    field: name.clone(),
+                    value: value.clone(),
+                }),
+            };
+
+            operations.push((declared.field_path(name), operation));
         }
 
-        problems.extend(package_problems(declared, switches, config));
-        plugins.insert(id.to_string(), Value::Object(stanza));
+        for (path, operation) in operations {
+            let made = operation
+                .and_then(|operation| Edit::new(sections, &target, &operation))
+                .and_then(|edit| edit.apply(&mut document));
+
+            if let Err(why) = made {
+                skipped.push(
+                    Diagnostic::warning(
+                        Code::PackageValueSkipped,
+                        format!("Her package's {path} is not used. {why}"),
+                    )
+                    .at(path)
+                    .in_section(Namespace::Plugins, id.as_str()),
+                );
+            }
+        }
     }
 
-    if !problems.is_empty() {
-        return Err(problems);
-    }
-
-    let mut document = Map::new();
-
-    document.insert("version".to_owned(), Value::from(VERSION));
-
-    if !plugins.is_empty() {
-        document.insert("plugins".to_owned(), Value::Object(plugins));
-    }
-
-    Ok(document)
+    (document, skipped)
 }
 
-fn package_problems(
-    declared: Declared<'_>,
-    switches: bool,
-    config: Option<&Map<String, Value>>,
-) -> Vec<Diagnostic> {
-    let id = declared.id().as_str();
-    let mut problems = Vec::new();
-
-    if switches && !authorable(declared.config().scope(), Layer::Overlay) {
-        problems.push((
-            format!("{}.enabled", declared.path()),
-            outside_scope(id, None, Layer::Overlay),
-        ));
-    }
-
-    for (name, value) in config.into_iter().flatten() {
-        let path = declared.field_path(name);
-        let sentence = match declared.config().field(name) {
-            None => format!("Unknown config field \"{name}\" for section \"{id}\"."),
-            Some(field) if field.secret() => format!(
-                "Character package must not carry a credential for {path}; secret fields are \
-                 the operator's to set."
-            ),
-            Some(field) if !authorable(declared.scope_of(field), Layer::Overlay) => {
-                outside_scope(id, Some(name), Layer::Overlay)
-            }
-            Some(field) if !field.accepts(value) => format!(
-                "Config field \"{name}\" of \"{id}\" must be {}.",
-                expectation(field)
-            ),
-            Some(_) => continue,
-        };
-
-        problems.push((path, sentence));
-    }
-
-    problems
-        .into_iter()
-        .map(|(path, sentence)| {
-            Diagnostic::error(
-                Code::CharacterPackagePluginConfigInvalid,
-                format!("Character package plugin config is invalid: {sentence}"),
-            )
-            .at(path)
-        })
-        .collect()
+/// Whether a package may give `field` a value: never a credential, a
+/// server the plugin sends to, or a place on the person's machine.
+fn package_may_set(field: &ConfigField) -> bool {
+    !field.secret()
+        && !matches!(
+            field.value_type(),
+            Some(ConfigValueType::Url | ConfigValueType::Path)
+        )
 }
 
 /// Her overlay with her package's settings filled in where she has none:

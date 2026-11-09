@@ -50,20 +50,11 @@ pub struct ToolRound {
     pub tool_calls: Vec<ConversationToolCall>,
 }
 
-/// A finished tool call: what the model asked, and what came back.
+/// A finished tool call: what the model asked, and what came back. A
+/// record of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedToolCall")]
-pub struct ConversationToolCall {
-    tool_call_id: ToolCallId,
-    plugin_id: Identifier,
-    tool_name: Identifier,
-    input: Map<String, Value>,
-    result: ToolCallResult,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UncheckedToolCall {
+pub struct ConversationToolCall {
     tool_call_id: ToolCallId,
     plugin_id: Identifier,
     tool_name: Identifier,
@@ -166,20 +157,6 @@ impl ConversationToolCall {
     #[must_use]
     pub fn result(&self) -> &ToolCallResult {
         &self.result
-    }
-}
-
-impl TryFrom<UncheckedToolCall> for ConversationToolCall {
-    type Error = BoundJsonError;
-
-    fn try_from(unchecked: UncheckedToolCall) -> Result<Self, Self::Error> {
-        Self::new(
-            unchecked.tool_call_id,
-            unchecked.plugin_id,
-            unchecked.tool_name,
-            unchecked.input,
-            unchecked.result,
-        )
     }
 }
 

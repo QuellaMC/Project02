@@ -14,19 +14,14 @@ export type Frame = {
 export type Events = {
   /** Every frame so far, in order. */
   readonly frames: readonly Frame[];
-  /** The newest id the stream carried: what a client that returns sends. */
-  readonly lastEventId: () => string | undefined;
   /** The first frame after the one `next` last returned that matches, as soon as it is here. */
   readonly next: (match: (frame: Frame) => boolean) => Promise<Frame>;
   /** Settles when the daemon ends the stream, and fails if it breaks off instead. */
   readonly ended: () => Promise<void>;
 };
 
-/** `GET /api/events`, resuming after `lastEventId` when one is given. */
-export async function openEvents(
-  daemon: Address,
-  lastEventId?: string,
-): Promise<Events> {
+/** `GET /api/events`, from the ready frame that opens it. */
+export async function openEvents(daemon: Address): Promise<Events> {
   const abort = new AbortController();
 
   onTestFinished(() => {
@@ -36,10 +31,7 @@ export async function openEvents(
   const response = await within(
     'the event stream to open',
     fetch(new URL('/api/events', daemon.origin), {
-      headers: {
-        authorization: `Bearer ${daemon.token}`,
-        ...(lastEventId === undefined ? {} : {'last-event-id': lastEventId}),
-      },
+      headers: {authorization: `Bearer ${daemon.token}`},
       signal: abort.signal,
     }),
   );
@@ -110,7 +102,6 @@ export async function openEvents(
 
   return {
     frames,
-    lastEventId: () => frames.findLast(frame => frame.id !== undefined)?.id,
     next: match =>
       within(
         'the next matching frame',
@@ -173,17 +164,6 @@ function holds(value: unknown, pattern: unknown): boolean {
   return Object.entries(pattern).every(([key, expected]) =>
     holds(Reflect.get(value, key), expected),
   );
-}
-
-/** The frames of a stream's whole text, as the live stream would have parsed them. */
-export function framesOf(text: string): Frame[] {
-  const frames: Frame[] = [];
-  const parser = createFrameParser(frame => frames.push(frame));
-
-  parser.feed(text);
-  parser.end();
-
-  return frames;
 }
 
 /**

@@ -10,7 +10,7 @@ use p02_contracts::{
 use p02_core::VisibleMessageRole;
 use serde_json::json;
 
-use crate::prompt::{is_blank, json_text};
+use crate::prompt::json_text;
 
 /// Answers the first line it hears with the same sentence, and every later
 /// one by quoting the line before it.
@@ -37,13 +37,11 @@ impl RoleModelAdapter for DeterministicAdapter {
         // Spoken in word-sized pieces first, so the reply streams the way a
         // model's does, after the scrub the parser gives the whole, so a
         // draft never shows what the commit will not.
-        if let Ok(shown) = scrub_reasoning_blocks(&reply) {
-            for piece in word_pieces(&shown) {
-                invocation.hear(ReplyDelta {
-                    reply: 0,
-                    text: piece.to_owned(),
-                });
-            }
+        for piece in word_pieces(&scrub_reasoning_blocks(&reply)) {
+            invocation.hear(ReplyDelta {
+                reply: 0,
+                text: piece.to_owned(),
+            });
         }
 
         RawOutput::text(json_text(
@@ -54,7 +52,7 @@ impl RoleModelAdapter for DeterministicAdapter {
 
 /// `text` cut after each blank character.
 fn word_pieces(text: &str) -> impl Iterator<Item = &str> {
-    text.split_inclusive(is_blank)
+    text.split_inclusive(char::is_whitespace)
 }
 
 #[cfg(test)]

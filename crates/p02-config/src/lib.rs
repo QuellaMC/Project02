@@ -14,7 +14,7 @@ mod view;
 
 pub use change::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Operation, apply_change,
-    create_home_document,
+    check_change, create_home_document,
 };
 pub use declaration::{Connector, Namespace, RoleModelProvider, Sections, Source, connectors};
 pub use diagnostic::{Code, Diagnostic, Severity};

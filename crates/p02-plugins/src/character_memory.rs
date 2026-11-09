@@ -15,9 +15,9 @@ use p02_contracts::{
     StoreError, ToolCall, ToolCallOutcome, contains_forbidden_control_character,
 };
 use p02_core::SessionId;
-use p02_shared::{Identifier, JsonLimits};
+use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::package::{FilesError, leased, rejected, tool};
 
@@ -142,13 +142,16 @@ enum Target {
     UserProfile,
 }
 
-/// The two notebooks, as `memory.json` keeps them.
+/// The two notebooks, as `memory.json` keeps them; a field this build does
+/// not know is kept as it was.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Memory {
     version: u64,
     notes: Vec<String>,
     user_profile: Vec<String>,
+    #[serde(flatten)]
+    unknown: Map<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -222,24 +225,9 @@ impl RuntimePlugin for CharacterMemoryPlugin {
             sections
         };
         let summary = if sections.is_empty() {
-            "Curated memory is empty.".to_owned()
+            "Curated memory is empty."
         } else {
-            let shown: Vec<String> = sections
-                .iter()
-                .map(|section| {
-                    format!(
-                        "{} {}/{} chars",
-                        section.id(),
-                        section.used_chars().map_or(0, NonZeroU32::get),
-                        section.cap_chars().map_or(0, NonZeroU32::get)
-                    )
-                })
-                .collect();
-
-            format!(
-                "Provided the curated memory snapshot ({}).",
-                shown.join(", ")
-            )
+            "Provided the curated memory snapshot."
         };
 
         Ok(BeforeRoleModelCallOutput {
@@ -494,33 +482,16 @@ impl Memory {
             });
         }
 
-        let entry_limit = JsonLimits::default().entries_per_container;
-
         for target in Target::ALL {
-            let name = target.name();
-            let held = self.entries(target).len();
             let used = self.rendered(target).chars().count();
             let capacity = target.capacity();
-
-            // Many short entries fit the characters and not the document
-            // the store writes, which must be refused here rather than
-            // fail the write of an accepted batch.
-            if held > entry_limit {
-                return Err(Refusal {
-                    reason: "memory_capacity_exceeded",
-                    message: format!(
-                        "{name} would hold {held}/{entry_limit} entries; merge or remove \
-                         entries first."
-                    ),
-                });
-            }
 
             if used > capacity {
                 return Err(Refusal {
                     reason: "memory_capacity_exceeded",
                     message: format!(
-                        "{name} would hold {used}/{capacity} chars; compress or remove entries \
-                         first."
+                        "{} would hold {used}/{capacity} chars; compress or remove entries first.",
+                        target.name()
                     ),
                 });
             }

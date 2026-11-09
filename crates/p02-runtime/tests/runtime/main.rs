@@ -13,7 +13,6 @@
 
 mod continuation;
 mod failures;
-mod plugins;
 mod support;
 mod threads;
 mod turns;

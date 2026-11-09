@@ -1,7 +1,7 @@
 //! `schema.json`, the marker that makes a directory a home or a
 //! character's data directory: what it vouches for, at which version of the
-//! store, since when. Without it nothing below is read or written; with any
-//! other version, nothing is either.
+//! store, since when. Without it nothing below is read or written; with a
+//! newer version than this build's, nothing is either.
 
 use std::path::Path;
 
@@ -15,7 +15,7 @@ use crate::error::StorageError;
 use crate::layout::{LOCKS_DIRECTORY, SCHEMA_FILE};
 use crate::lock::{Resource, with_lock};
 
-/// The version of the store this build reads and writes, and no other.
+/// The version of the store this build writes, and the newest it reads.
 pub(crate) const SCHEMA_VERSION: u64 = 15;
 
 /// What a marker vouches its directory is.
@@ -75,7 +75,7 @@ pub(crate) enum Marker {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireMarker {
     schema_version: u64,
     scope: Scope,
@@ -115,8 +115,8 @@ impl Marker {
         bytes
     }
 
-    /// The version is read first, so a marker of another version is refused
-    /// as that, whatever else it holds.
+    /// The version is read first, so a marker a newer build wrote is
+    /// refused as that, whatever else it holds.
     fn decode(bytes: &[u8], path: &Path) -> Result<Self, StorageError> {
         let malformed = |problem| StorageError::MalformedMarker {
             path: path.to_path_buf(),
@@ -126,13 +126,13 @@ impl Marker {
             .map_err(|error| malformed(MarkerProblem::NotJson(error)))?;
 
         match value.get("schemaVersion").and_then(Value::as_u64) {
-            Some(SCHEMA_VERSION) => {}
-            Some(found) => {
-                return Err(StorageError::UnsupportedSchemaVersion {
+            Some(found) if found > SCHEMA_VERSION => {
+                return Err(StorageError::NewerSchemaVersion {
                     path: path.to_path_buf(),
                     found,
                 });
             }
+            Some(_) => {}
             None => return Err(malformed(MarkerProblem::NoVersion)),
         }
 

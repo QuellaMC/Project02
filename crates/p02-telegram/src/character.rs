@@ -6,7 +6,6 @@
 //! history.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use p02_app::{
     CharacterState, Event, OpenOutcome, PendingConfirmation, RunningTurn, RunningTurns,
@@ -15,9 +14,7 @@ use p02_app::{
 use p02_core::{ClientStamp, ConversationId};
 use p02_gateway::{GatewayMessage, Text};
 use p02_shared::Identifier;
-use tokio::time::Instant;
 
-use crate::backoff;
 use crate::bot::{Chat, DAEMON_DOWN, Done, Rules};
 use crate::bot_api::{CallbackQuery, Update};
 use crate::cards::{CardKind, CardText, Press, confirm, confirmation_ending};
@@ -44,15 +41,6 @@ struct Line {
     text: Text,
 }
 
-/// Where opening her thread stands.
-#[derive(Debug)]
-enum Opening {
-    Idle,
-    Asked,
-    /// Asked again at this instant: the daemon could not be reached.
-    Again(Instant),
-}
-
 #[derive(Debug)]
 pub(crate) struct Character {
     id: Identifier,
@@ -62,15 +50,16 @@ pub(crate) struct Character {
     /// is the one shown.
     turns: RunningTurns,
     /// Her turn frames from before her thread was known, followed once it
-    /// is.
-    held: Vec<Arc<Event>>,
+    /// is. She opens it only after the turn she is running, so a whole turn
+    /// can pass before it is known.
+    held: Vec<Event>,
     /// The lines waiting to be carried, oldest first.
     lines: VecDeque<Line>,
     /// The line handed to her that she has not taken yet: the next waits
     /// for it, since she takes lines in the order they reach her.
     handed: Option<ClientStamp>,
-    opening: Opening,
-    open_failures: u32,
+    /// Whether her thread is being opened.
+    opening: bool,
 }
 
 impl Character {
@@ -83,8 +72,7 @@ impl Character {
             held: Vec::new(),
             lines: VecDeque::new(),
             handed: None,
-            opening: Opening::Idle,
-            open_failures: 0,
+            opening: false,
         }
     }
 
@@ -105,7 +93,7 @@ impl Character {
 
     /// Opens her thread, unless it is open or being opened.
     fn open(&mut self, chat: &mut Chat) {
-        if self.thread.is_some() || matches!(self.opening, Opening::Asked) {
+        if self.thread.is_some() || self.opening {
             return;
         }
 
@@ -114,7 +102,7 @@ impl Character {
         };
         let id = self.id.clone();
 
-        self.opening = Opening::Asked;
+        self.opening = true;
         chat.spawn(async move { Done::Opened(daemon.open(&id).await) });
     }
 
@@ -165,7 +153,6 @@ impl Character {
     }
 
     fn opened(&mut self, chat: &mut Chat, thread: Thread) {
-        self.open_failures = 0;
         self.thread = Some(thread);
         self.show_drafts(chat);
 
@@ -444,7 +431,7 @@ impl Rules for Character {
                 conversation_id,
                 ..
             } => match &self.thread {
-                None if *character_id == self.id => self.held.push(Arc::new(event.clone())),
+                None if *character_id == self.id => self.held.push(event.clone()),
                 None => {}
                 Some(thread) => {
                     let hers = *conversation_id == thread.conversation;
@@ -477,7 +464,7 @@ impl Rules for Character {
         match done {
             Done::Toasted => {}
             Done::Opened(opened) => {
-                self.opening = Opening::Idle;
+                self.opening = false;
 
                 match opened {
                     Ok(OpenOutcome::Opened {
@@ -492,8 +479,8 @@ impl Rules for Character {
                         },
                     ),
                     // She cannot take a line yet: the line waiting is told
-                    // why, and her thread is opened once she is ready, or by
-                    // the next line.
+                    // why, and her thread is opened once she is ready, by
+                    // the next line, or by the next snapshot.
                     Ok(
                         OpenOutcome::Refused { message, .. }
                         | OpenOutcome::Failed(StorageFailure { message, .. }),
@@ -503,11 +490,7 @@ impl Rules for Character {
 
                         self.unopened(chat, told);
                     }
-                    Err(_) => {
-                        self.opening = Opening::Again(Instant::now() + backoff(self.open_failures));
-                        self.open_failures = self.open_failures.saturating_add(1);
-                        self.unopened(chat, DAEMON_DOWN.to_owned());
-                    }
+                    Err(_) => self.unopened(chat, DAEMON_DOWN.to_owned()),
                 }
             }
             // How a turn that ran ended is the stream's to tell; a refusal
@@ -541,18 +524,6 @@ impl Rules for Character {
                 }
             }
         }
-    }
-
-    fn due(&self) -> Option<Instant> {
-        match self.opening {
-            Opening::Again(at) => Some(at),
-            Opening::Idle | Opening::Asked => None,
-        }
-    }
-
-    fn at_due(&mut self, chat: &mut Chat) {
-        self.opening = Opening::Idle;
-        self.open(chat);
     }
 }
 

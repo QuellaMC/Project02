@@ -74,7 +74,11 @@ function contentsOf(path: string): string | string[] {
     : readFileSync(path, 'utf8');
 }
 
-/** The session ids a character's catalog names, in its order. */
+/**
+ * The session ids a character's catalog names, by segment: the catalog
+ * orders its rows by when each was made, which the wall clock decides, and
+ * a clock that steps back reorders them.
+ */
 function catalogOf(home: string, characterId: string): string[] {
   return readFileSync(
     join(home, 'character-data', characterId, 'sessions.jsonl'),
@@ -82,7 +86,8 @@ function catalogOf(home: string, characterId: string): string[] {
   )
     .trimEnd()
     .split('\n')
-    .map(row => (JSON.parse(row) as {readonly sessionId: string}).sessionId);
+    .map(row => (JSON.parse(row) as {readonly sessionId: string}).sessionId)
+    .sort((left, right) => left.localeCompare(right, 'en', {numeric: true}));
 }
 
 it("storage.layout: a character's history lives under character-data/<id>: the sessions catalog, a directory per segment <conversationId>.N holding its raw events, the taken-lines record and the locks; the conversation lives at conversations/<id>/conversation.json", async () => {
@@ -461,7 +466,7 @@ it('storage.taken-lines: after a restart a line from any earlier segment is refu
   });
 });
 
-it("storage.schema-marker: the home and each character's data directory carry a version 15 schema.json naming its scope, the character's her id and package version too; one of another version, the TypeScript daemon's 14 among them, or one malformed or no regular file, is refused and left as it was", async () => {
+it("storage.schema-marker: the home and each character's data directory carry a version 15 schema.json naming its scope, the character's her id and package version too; one an older build wrote, the TypeScript daemon's 14 among them, is read as it is, and one a newer build wrote, or one malformed or no regular file, is refused and left as it was", async () => {
   const home = createHome();
   const first = await startDaemon(home, fixedReplies);
 
@@ -494,11 +499,7 @@ it("storage.schema-marker: the home and each character's data directory carry a 
   // place: none for a directory.
   const damages = (marker: unknown): [string, string | undefined][] => [
     [
-      'schema version 14',
-      JSON.stringify({...(marker as object), schemaVersion: 14}),
-    ],
-    [
-      'schema version 99',
+      'written by a newer Project02',
       JSON.stringify({...(marker as object), schemaVersion: 99}),
     ],
     ['not valid JSON', '{"schemaVersion":'],
@@ -513,6 +514,25 @@ it("storage.schema-marker: the home and each character's data directory carry a 
       writeFileSync(path, bytes);
     }
   };
+
+  for (const [path, marker] of [
+    [miraMarker, markers.mira],
+    [homeMarker, markers.home],
+  ] as const) {
+    const older = JSON.stringify({...(marker as object), schemaVersion: 14});
+
+    plant(path, older);
+
+    const daemon = await startDaemon(home, fixedReplies);
+
+    expect(await wireOf(daemon).start('mira'), path).toMatchObject({
+      character: {state: 'ready'},
+    });
+    daemon.signal('SIGINT');
+    await daemon.exit();
+    expect(contentsOf(path), path).toBe(older);
+    plant(path, JSON.stringify(marker));
+  }
 
   for (const [says, bytes] of damages(markers.mira)) {
     plant(miraMarker, bytes);

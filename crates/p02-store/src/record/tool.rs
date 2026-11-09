@@ -42,7 +42,7 @@ pub struct ToolCallFinished {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireStarted {
     round: NonZeroU32,
     tool_call_id: ToolCallId,
@@ -52,7 +52,7 @@ struct WireStarted {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct WireFinished {
     round: NonZeroU32,
     tool_call_id: ToolCallId,
@@ -118,20 +118,14 @@ impl TryFrom<WireStarted> for ToolCallStarted {
     type Error = RecordError;
 
     fn try_from(wire: WireStarted) -> Result<Self, Self::Error> {
-        let kept = ConversationToolCall::kept_input(wire.tool_input.clone())
-            .map_err(|error| RecordError::UnkeptToolCall(Some(error)))?;
-
-        if kept != wire.tool_input {
-            return Err(RecordError::UnkeptToolCall(None));
-        }
-
-        Ok(Self {
-            round: wire.round,
-            tool_call_id: wire.tool_call_id,
-            tool_name: wire.tool_name,
-            tool_plugin_id: wire.tool_plugin_id,
-            tool_input: wire.tool_input,
-        })
+        Self::new(
+            wire.round,
+            wire.tool_call_id,
+            wire.tool_name,
+            wire.tool_plugin_id,
+            wire.tool_input,
+        )
+        .map_err(RecordError::UnkeptToolCall)
     }
 }
 
@@ -161,8 +155,8 @@ impl ToolCallFinished {
         result: ToolCallResult,
         evidence: Vec<Evidence>,
     ) -> Result<Self, RecordError> {
-        let tool_result = ConversationToolCall::kept_result(result)
-            .map_err(|error| RecordError::UnkeptToolCall(Some(error)))?;
+        let tool_result =
+            ConversationToolCall::kept_result(result).map_err(RecordError::UnkeptToolCall)?;
 
         check_dispatch(dispatch, &tool_result)?;
 
@@ -217,14 +211,10 @@ impl TryFrom<WireFinished> for ToolCallFinished {
     type Error = RecordError;
 
     fn try_from(wire: WireFinished) -> Result<Self, Self::Error> {
-        let kept = ConversationToolCall::kept_result(wire.tool_result.clone())
-            .map_err(|error| RecordError::UnkeptToolCall(Some(error)))?;
+        let tool_result = ConversationToolCall::kept_result(wire.tool_result)
+            .map_err(RecordError::UnkeptToolCall)?;
 
-        if kept != wire.tool_result {
-            return Err(RecordError::UnkeptToolCall(None));
-        }
-
-        check_dispatch(ToolDispatch::of(wire.dispatched_to_host), &wire.tool_result)?;
+        check_dispatch(ToolDispatch::of(wire.dispatched_to_host), &tool_result)?;
 
         Ok(Self {
             round: wire.round,
@@ -232,7 +222,7 @@ impl TryFrom<WireFinished> for ToolCallFinished {
             tool_name: wire.tool_name,
             tool_plugin_id: wire.tool_plugin_id,
             dispatched_to_host: wire.dispatched_to_host,
-            tool_result: wire.tool_result,
+            tool_result,
             runtime_plugin_evidence: wire.runtime_plugin_evidence,
         })
     }

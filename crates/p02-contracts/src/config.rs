@@ -151,9 +151,12 @@ impl ConfigField {
     pub(crate) fn of_its_type(&self, value: &Value) -> bool {
         match self.value_type {
             None => true,
-            Some(ConfigValueType::String | ConfigValueType::Path | ConfigValueType::Enum) => {
-                value.is_string()
-            }
+            Some(
+                ConfigValueType::String
+                | ConfigValueType::Path
+                | ConfigValueType::Url
+                | ConfigValueType::Enum,
+            ) => value.is_string(),
             Some(ConfigValueType::Number) => value.is_number(),
             Some(ConfigValueType::Boolean) => value.is_boolean(),
             Some(ConfigValueType::Object) => value.is_object(),

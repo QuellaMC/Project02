@@ -83,18 +83,15 @@ impl EvidenceNote {
                 EvidenceStatus::Rejected | EvidenceStatus::Failed
             ) || matches!(
                 self.policy_outcome,
-                Some(
-                    PolicyOutcome::HandlerRejected
-                        | PolicyOutcome::RequiredRejected
-                        | PolicyOutcome::DisallowedToolCall
-                )
+                Some(PolicyOutcome::HandlerRejected | PolicyOutcome::RequiredRejected)
             ))
     }
 }
 
-/// One step a plugin, or the host on its behalf, took in a turn.
+/// One step a plugin, or the host on its behalf, took in a turn. A record
+/// of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedEvidence")]
+#[serde(rename_all = "camelCase")]
 pub struct Evidence {
     #[serde(flatten)]
     identity: EventIdentity,
@@ -103,24 +100,9 @@ pub struct Evidence {
     kind: EvidenceKind,
     status: EvidenceStatus,
     summary: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     policy_outcome: Option<PolicyOutcome>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    source_references: Vec<SourceReference>,
-    redaction_labels: Vec<RedactionLabel>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UncheckedEvidence {
-    #[serde(flatten)]
-    identity: EventIdentity,
-    plugin_id: Identifier,
-    evidence_kind: EvidenceKind,
-    status: EvidenceStatus,
-    summary: String,
-    policy_outcome: Option<PolicyOutcome>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     source_references: Vec<SourceReference>,
     redaction_labels: Vec<RedactionLabel>,
 }
@@ -212,25 +194,6 @@ impl Evidence {
     }
 }
 
-impl TryFrom<UncheckedEvidence> for Evidence {
-    type Error = EvidenceError;
-
-    fn try_from(unchecked: UncheckedEvidence) -> Result<Self, Self::Error> {
-        Self::new(
-            unchecked.identity,
-            unchecked.plugin_id,
-            EvidenceNote {
-                kind: unchecked.evidence_kind,
-                status: unchecked.status,
-                summary: unchecked.summary,
-                policy_outcome: unchecked.policy_outcome,
-                source_references: unchecked.source_references,
-            },
-            unchecked.redaction_labels,
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use p02_core::{EventId, Timestamp, TraceId};
@@ -291,11 +254,11 @@ mod tests {
         assert!(tool(EvidenceStatus::Failed).blocks_tool_invocation());
         assert!(
             tool(EvidenceStatus::Accepted)
-                .with_policy_outcome(PolicyOutcome::DisallowedToolCall)
+                .with_policy_outcome(PolicyOutcome::HandlerRejected)
                 .blocks_tool_invocation()
         );
         assert!(
-            !EvidenceNote::new(EvidenceKind::Health, EvidenceStatus::Failed, "Down.")
+            !EvidenceNote::new(EvidenceKind::Shutdown, EvidenceStatus::Failed, "Down.")
                 .blocks_tool_invocation()
         );
         assert!(!before(EvidenceStatus::Degraded).blocks_before_role_model_call());

@@ -3,5 +3,4 @@
 //! what it is granted once its character enables it.
 
 pub(crate) mod access;
-pub(crate) mod tools;
 pub(crate) mod trusted_context;

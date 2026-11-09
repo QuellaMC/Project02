@@ -7,8 +7,7 @@ use serde_json::{Map, Value};
 
 /// Asks the person whether a prepared approval-gated call may take effect.
 /// The host's caller supplies it, and how long a question waits is its own
-/// to decide; the host stops waiting when the turn is abandoned. Without
-/// one, no approval-gated tool is offered.
+/// to decide; the host stops waiting when the turn is abandoned.
 #[async_trait]
 pub trait Confirmer: Send + Sync + fmt::Debug {
     async fn confirm(&self, request: ConfirmationRequest) -> ConfirmationDecision;

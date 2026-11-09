@@ -8,7 +8,6 @@ use crate::database::OpenDatabaseError;
 use crate::layout::EntryKind;
 use crate::marker::{MarkerProblem, SCHEMA_VERSION, Scope};
 use crate::plugin_files::{FileKind, ValueProblem};
-use crate::record::RecordError;
 use crate::replay::ReplayError;
 
 /// Why the store refused or could not do what it was asked. Each is
@@ -16,12 +15,12 @@ use crate::replay::ReplayError;
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     #[error(
-        "{} uses storage schema version {found}, but this build reads only version \
-         {SCHEMA_VERSION}: to keep it, run the build that made it; to go on here, choose \
-         another home or start a new one",
+        "{} was written by a newer Project02, at storage schema version {found}, and this build \
+         reads up to version {SCHEMA_VERSION}: update Project02 to open it, or choose another \
+         home",
         .path.display()
     )]
-    UnsupportedSchemaVersion { path: PathBuf, found: u64 },
+    NewerSchemaVersion { path: PathBuf, found: u64 },
     #[error("storage schema marker {} {problem}", .path.display())]
     MalformedMarker {
         path: PathBuf,
@@ -77,33 +76,6 @@ pub enum StorageError {
     UncataloguedSession { path: PathBuf },
     #[error("sessions directory {} holds an entry that is no session", .path.display())]
     UnsupportedEntry { path: PathBuf },
-    #[error("line {line} of {} is no record", .path.display())]
-    MalformedRecord {
-        path: PathBuf,
-        line: usize,
-        #[source]
-        source: RecordError,
-    },
-    #[error("line {line} of {} does not follow the records before it", .path.display())]
-    BrokenLog {
-        path: PathBuf,
-        line: usize,
-        #[source]
-        source: ReplayError,
-    },
-    #[error("line {line} of sessions catalog {} is no session row", .path.display())]
-    MalformedCatalogRow {
-        path: PathBuf,
-        line: usize,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("line {line} of sessions catalog {} lists session \"{session}\" again", .path.display())]
-    RepeatedCatalogRow {
-        path: PathBuf,
-        line: usize,
-        session: SessionId,
-    },
     #[error("conversation record {} is malformed", .path.display())]
     MalformedConversation {
         path: PathBuf,
@@ -115,7 +87,7 @@ pub enum StorageError {
         path: PathBuf,
         named: ConversationId,
     },
-    #[error("the record does not follow the session's log")]
+    #[error("the record does not fit the session's log")]
     Refused(#[source] ReplayError),
     #[error("{} changed while it was read, twice", .path.display())]
     ConcurrentWrite { path: PathBuf },
@@ -158,13 +130,6 @@ pub enum StorageError {
     #[error("{} is no JSON document within the JSON limits", .path.display())]
     MalformedDocument {
         path: PathBuf,
-        #[source]
-        source: ValueProblem,
-    },
-    #[error("line {line} of {} is no JSON value within the JSON limits", .path.display())]
-    MalformedLine {
-        path: PathBuf,
-        line: usize,
         #[source]
         source: ValueProblem,
     },
@@ -212,7 +177,7 @@ impl StorageError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
+            Self::NewerSchemaVersion { .. } => "unsupported_schema_version",
             Self::MalformedMarker { .. }
             | Self::WrongScope { .. }
             | Self::InsideCharacterData { .. } => "malformed_schema_marker",
@@ -228,16 +193,11 @@ impl StorageError {
             | Self::MissingCatalog { .. }
             | Self::UncataloguedSession { .. } => "missing_file",
             Self::UnsupportedEntry { .. }
-            | Self::MalformedRecord { .. }
-            | Self::BrokenLog { .. }
-            | Self::MalformedCatalogRow { .. }
-            | Self::RepeatedCatalogRow { .. }
             | Self::MalformedConversation { .. }
             | Self::MisplacedConversation { .. }
             | Self::Refused(_)
             | Self::InvalidParticipants(_)
             | Self::MalformedDocument { .. }
-            | Self::MalformedLine { .. }
             | Self::MalformedLedger { .. }
             | Self::InterruptedWriteConflict { .. } => "malformed_record",
             Self::UnsafeStorePath { .. } | Self::WrongFileKind { .. } => "invalid_store_path",

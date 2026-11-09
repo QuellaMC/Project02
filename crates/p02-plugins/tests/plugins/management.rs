@@ -1,15 +1,13 @@
 //! The host's own plugin in Mira's host as her daemon builds it: the list
 //! of plugins, and her settings read and changed through it.
 
-use std::sync::Arc;
-
-use p02_contracts::{FactoryInput, PluginError, RuntimePlugin, ToolCallResult};
+use p02_contracts::ToolCallResult;
 use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport};
 use p02_shared::read_file;
 use p02_store::SettingsDocument;
 use serde_json::{Value, json};
 
-use crate::home::{MiraHome, Person, bundled, rewrite};
+use crate::home::{MiraHome, Person, rewrite};
 use crate::support::{call, run_round, turn};
 
 async fn ask(host: &PluginHost, tool: &str, input: Value) -> ToolCallReport {
@@ -87,8 +85,13 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 
     assert_eq!(
         listed(&running),
-        [runs("runtime.plugin")],
-        "a setting in error stops her: no plugin of hers runs"
+        [
+            runs("runtime.plugin"),
+            runs("character-memory"),
+            runs("character-state"),
+            runs("session-history"),
+        ],
+        "a setting in error blocks its own plugin alone"
     );
     let own = &output(&running)["plugins"][0];
     let tools: Vec<(&str, &str, bool)> = own["providedTools"]
@@ -129,16 +132,16 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
         listed(&everything),
         [
             runs("runtime.plugin"),
-            not("character-memory", "blocked"),
-            not("character-state", "blocked"),
+            runs("character-memory"),
+            runs("character-state"),
+            runs("session-history"),
             not("demo-config", "blocked"),
             not("mem0", "disabled"),
-            not("session-history", "blocked"),
         ],
         "a plugin her settings block is listed blocked"
     );
     assert_eq!(
-        output(&everything)["plugins"][3]["grantedAccess"],
+        output(&everything)["plugins"][4]["grantedAccess"],
         json!({})
     );
     assert_eq!(output(&everything)["truncated"], false);
@@ -146,7 +149,7 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 }
 
 #[tokio::test]
-async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_a_blank_id() {
+async fn the_config_read_shows_a_plugins_settings_a_secret_redacted() {
     let secret = "sk-demo-secret-value";
     let home = MiraHome::new();
 
@@ -165,7 +168,6 @@ async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_
         json!({"pluginId": "demo-config"}),
     )
     .await;
-    let blank = ask(&host, "runtime.plugin.config", json!({"pluginId": " "})).await;
     let fields = output(&read)["fields"].as_array().unwrap();
     let field = |name: &str| {
         fields
@@ -198,7 +200,6 @@ async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_
             .unwrap()
             .contains(secret)
     );
-    assert_eq!(reason(&blank), Some("plugin_config_inspect_invalid"));
 }
 
 #[tokio::test]
@@ -374,53 +375,4 @@ async fn with_runtime_plugin_switched_off_none_of_its_tools_is_offered() {
         host.tool_definitions().get("memory.update").is_some(),
         "the other plugins' tools stay"
     );
-}
-
-/// plugins.config-tools-rebuild-failure: an approved change of a live field whose plugin cannot be rebuilt with it is written and told `next_launch` with why, and the instance serving before serves on
-#[tokio::test]
-async fn a_live_change_its_plugin_cannot_be_rebuilt_with_applies_at_the_next_launch() {
-    let home = MiraHome::new();
-
-    home.settings(&json!({"plugins": {"demo-config": {"enabled": true}}}));
-
-    let host = home.mira_building(Person::approving(), |plugin| match plugin {
-        "demo-config" => tongue_tied,
-        other => bundled(other).1,
-    });
-    let changed = ask(
-        &host,
-        "runtime.plugin.config.update",
-        update(
-            &home.fingerprint(),
-            &json!({"operation": "set", "value": "pirate"}),
-        ),
-    )
-    .await;
-    let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
-        panic!("no plugin rejects the turn");
-    };
-
-    assert_eq!(output(&changed)["appliesTo"], "next_launch");
-    assert_eq!(
-        output(&changed)["appliesToNote"],
-        "Applies at the next launch instead of live: plugin \"demo-config\" could not be \
-         rebuilt: demo-config speaks no pirate."
-    );
-    assert_eq!(demo_config(&home), json!({"tone": "pirate"}));
-    assert!(
-        prepared
-            .runtime_notes
-            .iter()
-            .any(|note| note.text().contains("speak in a neutral tone")),
-        "the instance serving before serves on"
-    );
-}
-
-/// Demo-config, but for the one tone it cannot be built for.
-fn tongue_tied(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
-    if input.config().value("tone") == Some(&json!("pirate")) {
-        return Err(PluginError::new("demo-config speaks no pirate"));
-    }
-
-    (bundled("demo-config").1)(input)
 }

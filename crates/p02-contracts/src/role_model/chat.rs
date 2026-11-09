@@ -135,41 +135,6 @@ pub struct ToolNameMapping {
     pub provider_name: String,
 }
 
-/// What a provider can do, which shapes how a prompt is rendered for it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "the wire record of independent provider abilities"
-)]
-pub struct ProviderCapabilities {
-    pub supports_native_tools: bool,
-    pub supports_developer_or_system_context: bool,
-    pub preferred_model_context_role: ContextRole,
-    pub supports_strict_tool_schema: bool,
-    pub supports_reasoning: bool,
-    pub reasoning_parameter_style: ReasoningParameterStyle,
-    pub requires_reasoning_block_round_trip: bool,
-    pub supports_tool_choice: bool,
-    pub supports_parallel_tool_calls: bool,
-}
-
-/// The role the runtime's own context travels in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextRole {
-    Developer,
-    System,
-}
-
-/// How a provider is asked to reason, if at all.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningParameterStyle {
-    None,
-    Nvidia,
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;

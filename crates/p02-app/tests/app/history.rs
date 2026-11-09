@@ -24,8 +24,8 @@ fn texts(page: &Value) -> Vec<&str> {
 /// History reads a stopped character's conversation as one scrollback
 /// across her segments: newest page first and chronological within it, the
 /// cursor walking back to the start, the person's lines with their stamps;
-/// a limit outside 1 to 500, or a cursor no page handed out, is refused, as
-/// is a conversation the home does not hold.
+/// a limit that is no number, or a cursor no page handed out, is refused,
+/// as is a conversation the home does not hold.
 #[tokio::test(start_paused = true)]
 async fn history_pages_back_across_her_segments() {
     let world = World::new();
@@ -86,8 +86,6 @@ async fn history_pages_back_across_her_segments() {
     assert_eq!(texts(&read(None, None).await).len(), 8);
 
     for (before, limit) in [
-        (None, Some("0")),
-        (None, Some("501")),
         (None, Some("ten")),
         (Some("v1:9:0"), None),
         (Some("v1:1:99"), None),

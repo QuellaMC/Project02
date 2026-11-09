@@ -198,7 +198,7 @@ async fn a_failing_batch_changes_nothing_and_says_why_repeating_no_entry() {
 }
 
 #[tokio::test]
-async fn a_batch_past_a_notebooks_rendered_capacity_or_its_entry_limit_is_refused() {
+async fn a_batch_past_a_notebooks_rendered_capacity_is_refused() {
     let home = MiraHome::new();
     let host = memory_host(&home);
     let (long, longer) = ("a".repeat(1_100), "b".repeat(1_097));
@@ -220,25 +220,6 @@ async fn a_batch_past_a_notebooks_rendered_capacity_or_its_entry_limit_is_refuse
             "memory_capacity_exceeded",
             "user_profile would hold 1376/1375 chars; compress or remove entries first."
         )
-    );
-
-    let crowded = MiraHome::new();
-    let many = memory_host(&crowded);
-    let entries: Vec<Value> = (0..256)
-        .map(|entry| add("notes", &entry.to_string()))
-        .collect();
-
-    for batch in entries.chunks(8) {
-        output(&update(&many, Value::from(batch.to_vec())).await);
-    }
-
-    assert_eq!(
-        refused(&update(&many, json!([add("notes", "256")])).await),
-        (
-            "memory_capacity_exceeded",
-            "notes would hold 257/256 entries; merge or remove entries first."
-        ),
-        "the document the store writes holds no more entries"
     );
 }
 

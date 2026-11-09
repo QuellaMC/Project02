@@ -54,86 +54,79 @@ fn a_home_without_settings_has_no_findings_and_shows_each_default() {
 }
 
 #[test]
-fn a_document_that_cannot_be_used_is_told_apart_and_one_of_hers_names_her() {
-    let unusable = [
-        (b"{not json".to_vec(), Code::MalformedJson),
-        (b"[]".to_vec(), Code::NotObject),
-        (vec![b' '; 256 * 1024 + 1], Code::LimitExceeded),
-        (
-            br#"{"version":"project02.config.v1"}"#.to_vec(),
-            Code::VersionUnsupported,
-        ),
-    ];
-
-    for (content, code) in unusable {
+fn a_document_that_is_no_json_object_refuses_its_targets_and_one_of_hers_names_her() {
+    for content in ["{not json", "[]"] {
         let world = World::new();
 
         std::fs::write(world.home_document(), content).unwrap();
 
-        let Err(ReadSettingsError::Unloadable { diagnostics }) =
+        let Err(ReadSettingsError::Unreadable(diagnostic)) =
             Resolution::home(&world.home, &world.sections)
         else {
-            panic!("{code:?}");
+            panic!("{content}");
         };
 
-        assert_eq!(diagnostics[0].code(), code);
+        assert_eq!(diagnostic.code(), Code::Unreadable);
         assert_eq!(
             world.view(&home())["reason"],
             "config_unloadable",
-            "{code:?}"
+            "{content}"
+        );
+        assert_eq!(
+            world.view(&of("mira"))["reason"],
+            "config_unloadable",
+            "{content}"
         );
     }
 
     let world = World::new();
 
-    world.write_overlay(
-        "mira",
-        &json!({"version": "project02.config.v2", "nope": 1}),
-    );
+    world.write_overlay("mira", &json!("not a document"));
 
-    let Err(ReadSettingsError::Unloadable { diagnostics }) =
+    let Err(ReadSettingsError::Unreadable(diagnostic)) =
         Resolution::character(&world.home, &world.sections, &world.character("mira"))
     else {
-        panic!("her overlay loads");
+        panic!("her overlay reads");
     };
 
-    assert_eq!(diagnostics[0].code(), Code::UnknownTopLevelField);
     assert_eq!(
-        diagnostics[0]
-            .character()
-            .map(p02_shared::Identifier::as_str),
+        diagnostic.character().map(p02_shared::Identifier::as_str),
         Some("mira")
     );
     assert_eq!(world.resolve(&home()).diagnostics(), []);
 }
 
-#[cfg(unix)]
 #[test]
-fn a_document_its_reader_may_not_open_is_unreadable_and_no_other_finding() {
-    use std::os::unix::fs::PermissionsExt as _;
-
+fn what_a_document_holds_that_the_settings_do_not_know_is_not_used_and_said() {
     let world = World::new();
 
-    world.write_home(&document(json!({})));
-    std::fs::set_permissions(
-        world.home_document(),
-        std::fs::Permissions::from_mode(0o000),
-    )
-    .unwrap();
+    world.write_home(&json!({
+        "version": "project02.config.v1",
+        "storeRoot": "/elsewhere",
+        "project02": {"storeRoot": "/elsewhere", "userDisplayName": "Robin"},
+        "plugins": [],
+    }));
 
-    // Permissions do not bind root, who reads the document anyway.
-    if std::fs::read(world.home_document()).is_err() {
-        let view = world.view(&home());
+    let resolution = world.resolve(&of("mira"));
+    let found: Vec<(Code, Option<&str>)> = resolution
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| (diagnostic.code(), diagnostic.path()))
+        .collect();
 
-        assert_eq!(view["reason"], "config_unloadable");
-        assert!(
-            view["message"]
-                .as_str()
-                .unwrap()
-                .contains("could not be read"),
-            "{view}"
-        );
-    }
+    assert_eq!(
+        found,
+        [
+            (Code::Ignored, Some("storeRoot")),
+            (Code::Ignored, Some("project02.storeRoot")),
+            (Code::Ignored, Some("plugins")),
+        ]
+    );
+    assert_eq!(resolution.stopping().count(), 0);
+    assert_eq!(
+        resolution.settings().host().user_display_name.as_str(),
+        "Robin"
+    );
 }
 
 #[test]

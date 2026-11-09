@@ -254,7 +254,7 @@ mod tests {
             ),
             (
                 json!({"toolCalls": [reply("<think>still thinking")]}).to_string(),
-                "visible_reply text contains an unterminated reasoning block.",
+                "visible_reply text must not be empty.",
             ),
             (
                 json!({"toolCalls": [reply("   ")]}).to_string(),

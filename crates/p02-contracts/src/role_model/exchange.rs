@@ -2,9 +2,7 @@ use p02_shared::{BoundJsonError, Credentials, JsonLimits, bound_json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::role_model::chat::{
-    ChatCompletionTool, ChatMessage, ProviderCapabilities, ToolNameMapping,
-};
+use crate::role_model::chat::{ChatCompletionTool, ChatMessage, ToolNameMapping};
 
 /// A provider a model call can go to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +33,6 @@ const EXCHANGE_LIMITS: JsonLimits = JsonLimits {
 #[serde(rename_all = "camelCase")]
 pub struct ExchangeRecord {
     pub provider: ExchangeProvider,
-    pub capabilities: ProviderCapabilities,
     pub reasoning_params: Value,
     pub rendered_messages: Vec<ChatMessage>,
     pub rendered_tools: Vec<ChatCompletionTool>,
@@ -64,9 +61,9 @@ pub struct ExchangeProvider {
 /// limits, every credential-named value redacted wherever it sits, in the
 /// request body, a tool's schema or the provider's usage alike. A tool
 /// call's arguments stay the text the wire carried; the call they parse to
-/// is recorded redacted.
+/// is recorded redacted. A record of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "ExchangeRecord", into = "Value")]
+#[serde(transparent)]
 pub struct ProviderExchange(Value);
 
 impl ProviderExchange {
@@ -92,20 +89,6 @@ impl ProviderExchange {
     #[must_use]
     pub fn as_value(&self) -> &Value {
         &self.0
-    }
-}
-
-impl TryFrom<ExchangeRecord> for ProviderExchange {
-    type Error = BoundJsonError;
-
-    fn try_from(record: ExchangeRecord) -> Result<Self, Self::Error> {
-        Self::new(record)
-    }
-}
-
-impl From<ProviderExchange> for Value {
-    fn from(exchange: ProviderExchange) -> Self {
-        exchange.0
     }
 }
 
@@ -150,7 +133,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::role_model::chat::{ChatToolFunction, ContextRole, ReasoningParameterStyle};
+    use crate::role_model::chat::ChatToolFunction;
     use crate::schema::ToolInputContract;
 
     fn record(messages: Vec<ChatMessage>, request_body: Value) -> ExchangeRecord {
@@ -159,17 +142,6 @@ mod tests {
                 name: ProviderName::Nvidia,
                 model: Some("nvidia/test-model".to_owned()),
                 endpoint: None,
-            },
-            capabilities: ProviderCapabilities {
-                supports_native_tools: true,
-                supports_developer_or_system_context: true,
-                preferred_model_context_role: ContextRole::System,
-                supports_strict_tool_schema: true,
-                supports_reasoning: true,
-                reasoning_parameter_style: ReasoningParameterStyle::Nvidia,
-                requires_reasoning_block_round_trip: false,
-                supports_tool_choice: true,
-                supports_parallel_tool_calls: true,
             },
             reasoning_params: json!({"chat_template_kwargs": {"thinking": true}}),
             rendered_messages: messages,

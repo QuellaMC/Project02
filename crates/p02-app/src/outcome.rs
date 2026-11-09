@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
-use p02_characters::{PackageDiagnostic, PackageLocation, PackageProblem};
-use p02_config::{Diagnostic, Severity};
+use p02_characters::{PackageDiagnostic, PackageLocation};
+use p02_config::Diagnostic;
 use p02_contracts::vocabulary;
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessage,
@@ -143,13 +143,8 @@ vocabulary! {
     #[ts(rename = "GatewayRefusalReason")]
     #[schemars(rename = "GatewayRefusalReason")]
     TurnRefusal {
-        UnknownCharacter = "unknown_character",
         UnknownConversation = "unknown_conversation",
-        /// The conversation's record could not be read; the message says why.
-        ConversationUnreadable = "conversation_unreadable",
-        SenderNotSupported = "sender_not_supported",
         CharacterUnavailable = "character_unavailable",
-        InvalidMessage = "invalid_message",
         DuplicateSubmission = "duplicate_submission",
     }
 }
@@ -201,7 +196,6 @@ pub enum OpenOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenRefusal {
-    UnknownCharacter,
     CharacterUnavailable,
 }
 
@@ -370,32 +364,6 @@ pub enum CancelReason {
     Stopped,
 }
 
-/// Who a reconcile pass started, stopped and reloaded.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReconcilePlan {
-    pub starting: Vec<Identifier>,
-    pub stopping: Vec<Identifier>,
-    pub reloading: Vec<Identifier>,
-}
-
-impl ReconcilePlan {
-    /// This plan and the one after it, each character named once.
-    pub(crate) fn merge(&mut self, next: Self) {
-        for (names, more) in [
-            (&mut self.starting, next.starting),
-            (&mut self.stopping, next.stopping),
-            (&mut self.reloading, next.reloading),
-        ] {
-            for id in more {
-                if !names.contains(&id) {
-                    names.push(id);
-                }
-            }
-        }
-    }
-}
-
 /// One installed character, as health reports her.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -443,7 +411,8 @@ impl From<Option<CharacterState>> for RosterState {
 
 /// A background failure the conversation never sees: the plugins' work
 /// after a turn's commit, a segment rotation that failed, which the next
-/// turn plans again, or a closed segment's end hooks that did not finish.
+/// turn plans again, what closing a segment left undone, or what opening
+/// her thread skipped because it could not be read.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct MaintenanceFailure {
     pub at: Timestamp,
@@ -478,54 +447,22 @@ pub struct PackagesHealth {
 
 /// A package discovery could not publish, and why, where.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
 pub struct PackageReport {
-    /// Always an error: the package is not in the roster.
-    pub severity: Severity,
-    pub code: String,
     pub message: String,
     pub path: String,
-    pub provenance: PackageProvenance,
-    /// The folder the package was found in.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub character_id: Option<String>,
-    /// The id its descriptor claims, when that is not its folder's.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub claimed_character_id: Option<Identifier>,
 }
 
 impl From<&PackageDiagnostic> for PackageReport {
     fn from(diagnostic: &PackageDiagnostic) -> Self {
-        let (path, provenance) = match &diagnostic.location {
-            PackageLocation::Bundled => ("bundled".to_owned(), PackageProvenance::Bundled),
-            PackageLocation::Home(path) => {
-                (path.display().to_string(), PackageProvenance::Operator)
-            }
-        };
-
         Self {
-            severity: Severity::Error,
-            code: diagnostic.problem.code().to_owned(),
             // As a refused start embeds it, so the one reads in the other.
             message: diagnostic.problem.to_string(),
-            path,
-            provenance,
-            character_id: diagnostic.folder.clone(),
-            claimed_character_id: match &diagnostic.problem {
-                PackageProblem::IdMismatch { claimed } => Some(claimed.clone()),
-                _ => None,
+            path: match &diagnostic.location {
+                PackageLocation::Bundled => "bundled".to_owned(),
+                PackageLocation::Home(path) => path.display().to_string(),
             },
         }
     }
-}
-
-/// Where a package comes from: compiled in, or added by the person.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum PackageProvenance {
-    Bundled,
-    Operator,
 }
 
 /// Whether a process of a built-in connector is on the event stream now.
@@ -606,7 +543,6 @@ pub enum PairingOutcome {
 pub enum PairingRefusal {
     UnknownConnector,
     ConfigUnloadable,
-    InvalidSubject,
 }
 
 /// What an answer to a pairing request came to. `expired`: the deadline had

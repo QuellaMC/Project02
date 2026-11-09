@@ -14,12 +14,12 @@ use crate::outcome::{HistoryMessage, HistoryOutcome, HistoryRefusal, StorageFail
 
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 500;
-const INVALID_PAGE: &str = "A history page takes a limit from 1 to 500 and, to read further \
+const INVALID_PAGE: &str = "A history page takes a number as its limit and, to read further \
      back, the cursor the previous page returned.";
 
 /// Which page of a scrollback to read, as a client asks for it: the
 /// cursor a previous page returned, for older messages than it held, and
-/// how many messages, 1 to 500, 100 unless given.
+/// how many messages, 100 unless given, held to 1 to 500.
 #[derive(Clone, Debug, Default)]
 pub struct HistoryPage {
     pub before: Option<String>,
@@ -39,40 +39,26 @@ struct Position {
     index: usize,
 }
 
-/// The one reading of a page request: a limit of one to three digits
-/// within bounds, and a cursor this module hands out, `v1:<segment>:<index>`.
+/// The one reading of a page request: a limit, and a cursor this module
+/// hands out, `v1:<segment>:<index>`.
 fn page(asked: &HistoryPage) -> Option<Page> {
     let limit = match &asked.limit {
         None => DEFAULT_LIMIT,
-        Some(text) => digits(text, 3)?,
+        Some(text) => text.parse::<usize>().ok()?.clamp(1, MAX_LIMIT),
     };
-
-    if !(1..=MAX_LIMIT).contains(&limit) {
-        return None;
-    }
-
     let before = match &asked.before {
         None => None,
         Some(cursor) => {
             let (segment, index) = cursor.strip_prefix("v1:")?.split_once(':')?;
 
             Some(Position {
-                segment: u64::try_from(digits(segment, 9)?).ok()?,
-                index: digits(index, 9)?,
+                segment: segment.parse().ok()?,
+                index: index.parse().ok()?,
             })
         }
     };
 
     Some(Page { limit, before })
-}
-
-/// `text` as a number of 1 to `most` ASCII digits.
-fn digits(text: &str, most: usize) -> Option<usize> {
-    if text.is_empty() || text.len() > most || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-
-    text.parse().ok()
 }
 
 fn cursor(segment: NonZeroU64, index: usize) -> String {
@@ -100,10 +86,7 @@ pub(crate) fn read(home: &Home, conversation: &str, asked: &HistoryPage) -> Hist
         Err(error) => return HistoryOutcome::Failed(StorageFailure::of(&error)),
     };
     let Some(character) = character_of(&record) else {
-        return refused(
-            HistoryRefusal::UnknownConversation,
-            format!("Conversation \"{id}\" has no character to answer it."),
-        );
+        return unknown();
     };
     let scrolled = CharacterData::open(home, &character).and_then(|data| {
         let Some(data) = data else {
@@ -145,6 +128,7 @@ impl Segments {
     fn of(data: CharacterData, conversation: Conversation) -> Result<Self, StorageError> {
         let mut numbers: Vec<NonZeroU64> = data
             .sessions()?
+            .sessions
             .iter()
             .map(SessionEntry::session_id)
             .filter(|session| session.conversation_id() == conversation.id())

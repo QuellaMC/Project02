@@ -97,10 +97,7 @@ pub(crate) fn home_of(store: Option<PathBuf>) -> Result<Home, ResolvePathError> 
 
 /// A package discovery could not publish, where and why.
 pub(crate) fn package_problem(package: &PackageReport) -> String {
-    format!(
-        "Character package {} ({}): {}",
-        package.path, package.code, package.message
-    )
+    format!("Character package {}: {}", package.path, package.message)
 }
 
 /// Where a command speaks: `out` carries the address and what a person

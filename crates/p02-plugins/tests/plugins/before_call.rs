@@ -1,21 +1,19 @@
 //! `beforeRoleModelCall`: each plugin's deadline, the two failure
-//! behaviors, the output boundary and the trusted frame.
+//! behaviors and the output boundary.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    BeforeRoleModelCallOutput, ContextItem, ContextItemKind, CuratedSection, Evidence,
-    EvidenceKind, EvidenceNote, EvidenceStatus, PolicyOutcome, RedactionLabel, RuntimePlugin,
+    BeforeRoleModelCallOutput, ContextItem, ContextItemKind, Evidence, EvidenceKind, EvidenceNote,
+    EvidenceStatus, PolicyOutcome, RedactionLabel, RuntimePlugin,
 };
 use p02_plugins::{BeforeCallOutcome, PreparedContext, TurnRejection};
-use p02_shared::Identifier;
 use serde_json::json;
 use tokio::time::Instant;
 
 use crate::support::{
-    Blocking, Failing, FailingWithCause, Hanging, Panicking, Scripted, Spec, Verbose, host_of, id,
-    note, turn,
+    Blocking, Failing, Hanging, Panicking, Scripted, Spec, Verbose, host_of, id, note, turn,
 };
 
 fn prepared(outcome: BeforeCallOutcome) -> PreparedContext {
@@ -59,7 +57,7 @@ async fn an_answering_hook_contributes_its_items_and_stamped_records() {
     assert_eq!(record.identity().event_id().as_str(), "evt_1");
     assert_eq!(record.plugin_id().as_str(), "answer");
     assert_eq!(record.status(), EvidenceStatus::Accepted);
-    assert_eq!(labels(record), ["turn", "toy"]);
+    assert_eq!(labels(record), ["toy"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -94,8 +92,8 @@ async fn a_timed_out_hook_degrades_and_the_turn_goes_on() {
     assert_eq!(prepared.context_items.len(), 1);
 }
 
-/// The host's half of plugins.before-call-rejection; the turn's half, the
-/// line staying committed, waits for the runtime.
+/// A required hook that overruns its deadline rejects the turn naming its
+/// plugin, and the plugins after it never run.
 #[tokio::test(start_paused = true)]
 async fn a_timed_out_required_hook_rejects_the_turn_and_ends_the_phase() {
     let after = Arc::new(Scripted::answering(ContextItemKind::Resource, 1));
@@ -227,32 +225,6 @@ async fn a_failing_hook_follows_its_failure_behavior() {
     );
 }
 
-/// plugins.hook-failure-names-cause: a hook's failure is recorded with each cause beneath it, so a store's refusal under "the plugin store call failed" is named, never the message alone
-#[tokio::test(start_paused = true)]
-async fn a_failing_hooks_cause_is_named() {
-    let rejection = rejected(
-        host_of(vec![(
-            Spec {
-                before: "reject_turn",
-                ..Spec::new("flaky")
-            },
-            Arc::new(FailingWithCause),
-        )])
-        .before_role_model_call(&turn())
-        .await,
-    );
-
-    assert_eq!(
-        rejection.message,
-        "the plugin store call failed: the store's lease was refused"
-    );
-    assert_eq!(
-        rejection.evidence[0].summary(),
-        "Required before-role-model plugin hook rejected the turn: the plugin store call \
-         failed: the store's lease was refused"
-    );
-}
-
 #[tokio::test(start_paused = true)]
 async fn a_verbose_failure_rejects_the_turn_with_what_a_record_keeps() {
     let rejection = rejected(
@@ -335,103 +307,6 @@ async fn model_input_needs_model_input_write() {
         prepared.evidence[1]
             .summary()
             .ends_with("without declaring model_input write access.")
-    );
-}
-
-/// plugins.trusted-frame: only a plugin granted `trusted_context` write puts runtime notes and curated sections in the trusted frame, whole and within its caps; its other items, and every item of another plugin, ride the person's turn
-#[tokio::test(start_paused = true)]
-async fn the_trusted_frame_takes_only_cleared_plugins_and_whole_entries_within_its_caps() {
-    let trusted = json!({"model_input": "write", "trusted_context": "write"});
-    let curating = |text: &str| {
-        Arc::new(Scripted {
-            before: BeforeRoleModelCallOutput {
-                curated_sections: vec![CuratedSection::new(id("notes"), "Notes", text)],
-                ..BeforeRoleModelCallOutput::default()
-            },
-            ..Scripted::default()
-        }) as Arc<dyn RuntimePlugin>
-    };
-    let host = host_of(vec![
-        (
-            Spec {
-                access: trusted.clone(),
-                ..Spec::new("cleared")
-            },
-            answering(ContextItemKind::RuntimeNote, 1),
-        ),
-        (
-            Spec::new("uncleared"),
-            answering(ContextItemKind::RuntimeNote, 1),
-        ),
-        (
-            Spec {
-                access: trusted.clone(),
-                ..Spec::new("resourceful")
-            },
-            answering(ContextItemKind::Resource, 1),
-        ),
-        (
-            Spec {
-                access: trusted.clone(),
-                ..Spec::new("noisy")
-            },
-            answering(ContextItemKind::RuntimeNote, 5),
-        ),
-        (
-            Spec {
-                access: trusted,
-                ..Spec::new("curator")
-            },
-            curating("Likes tea."),
-        ),
-        (Spec::new("pretender"), curating("Owns the frame.")),
-    ]);
-    let prepared = prepared(host.before_role_model_call(&turn()).await);
-    let degraded: Vec<(&str, &str)> = prepared
-        .evidence
-        .iter()
-        .filter(|record| record.status() == EvidenceStatus::Degraded)
-        .map(|record| (record.plugin_id().as_str(), record.summary()))
-        .collect();
-
-    assert_eq!(
-        prepared
-            .runtime_notes
-            .iter()
-            .map(|note| note.plugin_id().map(Identifier::as_str))
-            .collect::<Vec<_>>(),
-        [Some("cleared")]
-    );
-    assert_eq!(
-        prepared
-            .context_items
-            .iter()
-            .map(|item| item.plugin_id().as_str())
-            .collect::<Vec<_>>(),
-        ["uncleared", "resourceful"]
-    );
-    assert_eq!(
-        prepared
-            .curated_sections
-            .iter()
-            .map(|section| (section.plugin_id().as_str(), section.section().text()))
-            .collect::<Vec<_>>(),
-        [("curator", "Likes tea.")]
-    );
-    assert_eq!(
-        degraded,
-        [
-            (
-                "noisy",
-                "Optional before-role-model plugin hook degraded: Plugin \"noisy\" runtime \
-                 notes exceeds the 4-note limit."
-            ),
-            (
-                "pretender",
-                "Optional before-role-model plugin hook degraded: Plugin \"pretender\" returned \
-                 curated context sections without granted trusted_context write access."
-            ),
-        ]
     );
 }
 

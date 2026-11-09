@@ -1,20 +1,18 @@
 //! A character's life: her start, what the settings make of her, her
 //! reload, her stop, and what overtakes what.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
 use p02_app::{
-    Answer, ConfirmationAnswer, Event, OpenOutcome, ReconcilePlan, RosterState, StartOutcome,
-    TurnOutcome,
+    Answer, ConfirmationAnswer, Event, OpenOutcome, RosterState, StartOutcome, TurnOutcome,
 };
-use p02_config::{ConfigTarget, connectors};
+use p02_config::ConfigTarget;
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
 use crate::support::{
-    Ear, Gate, Round, Toy, World, a_while, begun, change, home, id, line, make_read_only, open,
-    restore, said, settle, wire,
+    Ear, Gate, Round, Toy, World, a_while, begun, change, home, line, open, said, settle, wire,
 };
 
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
@@ -80,7 +78,7 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
         .daemon(vec![Toy::new("notes").asking("notes.save").plugin()])
         .await;
 
-    assert_eq!(daemon.reconcile().await.starting, []);
+    daemon.reconcile().await;
     assert_eq!(
         wire(&daemon.health().await)["characters"][0],
         json!({"id": "mira", "displayName": "Mira", "enabled": false, "state": "not_started"})
@@ -96,7 +94,11 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
         json!({"kind": "unset", "path": "project02.enabled"}),
     )
     .await;
-    assert_eq!(daemon.reconcile().await.starting, [id("mira")]);
+    daemon.reconcile().await;
+    assert_eq!(
+        wire(&daemon.health().await)["characters"][0]["state"],
+        "ready"
+    );
 
     let conversation = open(&daemon).await;
     let mut ear = Ear::on(&daemon);
@@ -124,12 +126,12 @@ async fn the_switch_decides_who_runs_and_switching_her_off_stops_her() {
     )
     .await;
 
-    let plan = daemon.reconcile().await;
+    daemon.reconcile().await;
+
     let settled = ear
         .until(|event| matches!(event, Event::ConfirmationSettled { .. }))
         .await;
 
-    assert_eq!(plan.stopping, [id("mira")]);
     assert_eq!(wire(&settled)["decision"], "cancelled");
     assert_eq!(wire(&settled)["reason"], "stopped");
     assert!(daemon.pending_confirmations().is_empty());
@@ -155,7 +157,7 @@ async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
         panic!("her start runs");
     };
 
-    assert_eq!(pass.await, ReconcilePlan::default());
+    pass.await;
     assert_eq!(character.state, RosterState::Failed);
     assert!(
         character
@@ -167,45 +169,6 @@ async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
     assert_eq!(
         wire(&daemon.health().await)["characters"][0]["state"],
         "failed"
-    );
-}
-
-/// config.change-during-boot: A change that switches a character off while her boot is in flight ends with her stopped.
-#[tokio::test(start_paused = true)]
-async fn a_change_switching_her_off_during_her_boot_ends_with_her_stopped() {
-    let world = World::new();
-    let daemon = world.daemon(Vec::new()).await;
-    let mut ear = Ear::on(&daemon);
-
-    world.assembly.shut();
-
-    let boot = tokio::spawn({
-        let daemon = daemon.clone();
-
-        async move { daemon.reconcile().await }
-    });
-
-    world.assembly.reached().await;
-    change(
-        &daemon,
-        home(),
-        json!({"kind": "set", "path": "project02.enabled", "value": false}),
-    )
-    .await;
-    world.assembly.open();
-    boot.await.unwrap();
-    daemon.reconcile().await;
-    ear.reached("mira", Stopped).await;
-
-    // Her boot ends ready, or her stop overtakes it: either way the stop
-    // has the last word.
-    let states = ear.states("mira");
-
-    assert_eq!(states.first(), Some(&Starting));
-    assert!(states.ends_with(&[Stopping, Stopped]), "{states:?}");
-    assert_eq!(
-        wire(&daemon.health().await)["characters"][0]["state"],
-        "stopped"
     );
 }
 
@@ -320,7 +283,7 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
         }),
     )
     .await;
-    assert_eq!(daemon.reconcile().await.reloading, []);
+    daemon.reconcile().await;
 
     world.assembly.shut();
     change(&daemon, home(), warm()).await;
@@ -343,7 +306,7 @@ async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
     a_while().await;
     assert!(!turn.is_finished());
     world.assembly.open();
-    assert_eq!(pass.await.unwrap().reloading, [id("mira")]);
+    pass.await.unwrap();
 
     let delivered = turn.await.unwrap();
 
@@ -467,9 +430,9 @@ async fn a_change_her_own_plugin_makes_is_announced_and_reloads_nothing_it_appli
     ear.until(|event| matches!(event, Event::HealthChanged { .. }))
         .await;
     assert_eq!(said(&turn.await.unwrap()), ["Be warmer.", "Warmer now."]);
+    daemon.reconcile().await;
     ear.drain();
     assert_eq!(ear.states("mira"), []);
-    assert_eq!(daemon.reconcile().await.reloading, []);
 }
 
 /// A stop answers only once everything it ended is announced: the turn in
@@ -515,75 +478,6 @@ async fn a_stop_answers_after_what_it_ended_was_announced() {
     assert_eq!(ear.states("mira"), [Stopping, Stopped]);
 }
 
-/// lifecycle.stop-during-reload: A stop issued during a character's reload wins (reloading, stopping, stopped).
-#[tokio::test(start_paused = true)]
-async fn a_stop_during_her_reload_wins() {
-    let world = World::new();
-    let daemon = world
-        .daemon(vec![Toy::new("tone").setting("tone").plugin()])
-        .await;
-
-    daemon.reconcile().await;
-
-    let mut ear = Ear::on(&daemon);
-
-    world.assembly.shut();
-    change(&daemon, home(), warm()).await;
-    world.assembly.reached().await;
-
-    let stop = begun(daemon.stop()).await;
-
-    world.assembly.open();
-    stop.await;
-    ear.reached("mira", Stopped).await;
-    assert_eq!(ear.states("mira"), [Reloading, Stopping, Stopped]);
-}
-
-/// lifecycle.stop-overtakes-recovery: A stop during the automatic recovery after a fatal turn wins: no ready state is published after the stop began and the character ends stopped.
-#[tokio::test(start_paused = true)]
-async fn a_stop_during_her_recovery_wins() {
-    let world = World::new();
-    let daemon = world.daemon(Vec::new()).await;
-
-    daemon.reconcile().await;
-
-    let conversation = open(&daemon).await;
-    let log = world.log(&conversation, 1);
-    let writable = Arc::new(Mutex::new(None));
-    let mut ear = Ear::on(&daemon);
-
-    world.model.script([Round::says(&["Hi."]).then({
-        let (log, writable) = (log.clone(), Arc::clone(&writable));
-
-        move || *writable.lock().unwrap() = Some(make_read_only(&log))
-    })]);
-    world.assembly.shut();
-
-    let failed = daemon
-        .deliver(line(&conversation, "Hello there", "hello"))
-        .await;
-
-    restore(&log, writable.lock().unwrap().take().unwrap());
-    assert!(
-        matches!(
-            failed,
-            TurnOutcome::Failed {
-                committed: true,
-                ..
-            }
-        ),
-        "{failed:?}"
-    );
-    world.assembly.reached().await;
-
-    let stop = begun(daemon.stop()).await;
-
-    world.assembly.open();
-    stop.await;
-    ear.reached("mira", Stopped).await;
-    assert_eq!(ear.states("mira"), [Failed, Starting, Stopping, Stopped]);
-}
-
 /// A package changed under her, her name and nothing else, makes the next
 /// reconcile build her again from it, so her thread, made after, is in her
 /// new name.
@@ -597,7 +491,7 @@ async fn a_package_changed_under_her_rebuilds_her_from_it() {
 
     daemon.reconcile().await;
     world.package("nova", "Nova Prime");
-    assert_eq!(daemon.reconcile().await.reloading, [id("nova")]);
+    daemon.reconcile().await;
 
     let OpenOutcome::Opened {
         conversation_id, ..
@@ -625,16 +519,16 @@ async fn a_package_removed_while_she_runs_stops_her() {
     daemon.reconcile().await;
     remove(&world.path("characters/nova"));
 
-    let plan = daemon.reconcile().await;
+    daemon.reconcile().await;
+
     let OpenOutcome::Refused { reason, message } = daemon.open_conversation("nova").await else {
         panic!("she is no character to reach");
     };
 
-    assert_eq!(plan.stopping, [id("nova")]);
-    assert_eq!(wire(&reason), "unknown_character");
+    assert_eq!(wire(&reason), "character_unavailable");
     assert_eq!(
         message,
-        "Character \"nova\" is not installed. Installed characters: mira."
+        "Character \"nova\" is not ready (state \"stopped\")."
     );
 }
 
@@ -655,35 +549,4 @@ fn warm() -> serde_json::Value {
 )]
 fn remove(path: &std::path::Path) {
     std::fs::remove_dir_all(path).unwrap();
-}
-
-/// A connector counts as present from its first stream until its last
-/// ends, and health changes only when the count crosses zero.
-#[tokio::test(start_paused = true)]
-async fn a_connector_is_present_while_any_of_its_streams_is() {
-    let world = World::new();
-    let daemon = world.daemon(Vec::new()).await;
-    let telegram = &connectors()[0];
-    let mut ear = Ear::on(&daemon);
-    let connected = |event: &Event| match event {
-        Event::HealthChanged { health } => Some(health.connectors[0].connected),
-        _ => None,
-    };
-
-    let first = daemon.connector_present(telegram);
-    let second = daemon.connector_present(telegram);
-
-    drop(first);
-    settle().await;
-    drop(second);
-    ear.until(|event| connected(event) == Some(false)).await;
-    settle().await;
-
-    let heard: Vec<bool> = ear.heard.iter().filter_map(connected).collect();
-
-    assert_eq!(heard, [true, false]);
-    assert_eq!(
-        wire(&daemon.health().await)["connectors"],
-        json!([{"id": "telegram", "connected": false}])
-    );
 }

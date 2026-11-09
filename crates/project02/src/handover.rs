@@ -7,7 +7,6 @@
 //! tried and the address asked again, so a stop then a start takes the
 //! home over and a start twice hands the address back.
 
-use std::error::Error;
 use std::num::NonZeroU32;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -21,10 +20,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Console;
 use crate::serve::{address_line, failed};
-use crate::switches::Switches;
 
 /// Between two tries of the lease.
 const RETRY: Duration = Duration::from_millis(500);
+
+/// How long a second serve waits for a holder that does not answer.
+const HOLD: Duration = Duration::from_secs(30);
+
+/// How long one question to that holder waits for its answer.
+const PROBE: Duration = Duration::from_secs(5);
 
 /// How a second serve ended, or the home it took over.
 #[derive(Debug)]
@@ -39,8 +43,9 @@ enum Asked {
         line: String,
         pid: Option<NonZeroU32>,
     },
-    /// Why it is not taken as running here, the rest of a sentence.
-    Silent(String),
+    Stopping,
+    /// It did not answer as this home's daemon.
+    Silent,
 }
 
 /// Hands back the address of the daemon serving `home`, as its `record`
@@ -51,7 +56,6 @@ enum Asked {
 pub(crate) async fn hand_over(
     home: &Home,
     mut record: Option<DaemonRecord>,
-    switches: &Switches,
     stop: &CancellationToken,
     console: &mut Console,
 ) -> HandedOver {
@@ -59,11 +63,11 @@ pub(crate) async fn hand_over(
         Ok(client) => client,
         Err(error) => return HandedOver::Ended(failed(console, &error)),
     };
-    let deadline = Instant::now() + switches.hold;
+    let deadline = Instant::now() + HOLD;
     let mut waiting = false;
 
     loop {
-        let why = match ask(&client, home, record.as_ref(), switches.probe, stop).await {
+        let why = match ask(&client, home, record.as_ref(), stop).await {
             Asked::Running { line, pid } => {
                 console.say(&match pid {
                     Some(pid) => format!("Already running on this home (pid {pid})."),
@@ -72,7 +76,8 @@ pub(crate) async fn hand_over(
                 console.say(&line);
                 return HandedOver::Ended(ExitCode::SUCCESS);
             }
-            Asked::Silent(why) => why,
+            Asked::Stopping => "is stopping",
+            Asked::Silent => "has not answered",
         };
 
         if stop.is_cancelled() {
@@ -109,23 +114,21 @@ pub(crate) async fn hand_over(
 }
 
 /// One question to the daemon `record` names, `GET /api/health` with its
-/// token, under the probe and the stop: running here, or why not.
+/// token, under the probe and the stop: running here, stopping, or neither.
 async fn ask(
     client: &reqwest::Client,
     home: &Home,
     record: Option<&DaemonRecord>,
-    probe: Duration,
     stop: &CancellationToken,
 ) -> Asked {
     let Some(record) = record else {
-        return Asked::Silent("has not published its address yet".to_owned());
+        return Asked::Silent;
     };
-    let origin = format!("http://127.0.0.1:{}/", record.port);
     let health = async {
         let response = client
-            .get(format!("{origin}api/health"))
+            .get(format!("http://127.0.0.1:{}/api/health", record.port))
             .bearer_auth(record.token.as_str())
-            .timeout(probe)
+            .timeout(PROBE)
             .send()
             .await?;
         let status = response.status();
@@ -134,63 +137,26 @@ async fn ask(
     };
     let answered = tokio::select! {
         biased;
-        () = stop.cancelled() => return Asked::Silent(format!("did not answer at {origin}")),
+        () = stop.cancelled() => return Asked::Silent,
         answered = health => answered,
     };
 
     match answered {
-        Err(error) if error.is_timeout() => Asked::Silent(format!(
-            "did not answer at {origin} within {} seconds",
-            seconds(probe)
-        )),
-        Err(error) => Asked::Silent(format!("did not answer at {origin}: {}", innermost(&error))),
-        Ok((status, _)) if status.as_u16() == 503 => Asked::Silent("is stopping".to_owned()),
-        Ok((status, _)) if !status.is_success() => {
-            Asked::Silent(format!("did not answer at {origin}: it answered {status}"))
-        }
-        Ok((_, body)) => {
-            let health: Option<Value> = serde_json::from_slice(&body).ok();
-            let served = health
-                .as_ref()
-                .and_then(|health| health.get("homeRoot"))
-                .and_then(Value::as_str);
+        Ok((status, _)) if status.as_u16() == 503 => Asked::Stopping,
+        Ok((status, body)) if status.is_success() => {
+            let served = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|health| Some(health.get("homeRoot")?.as_str()?.to_owned()));
 
-            match served {
-                Some(served) if served == home.root().display().to_string() => Asked::Running {
+            if served == Some(home.root().display().to_string()) {
+                Asked::Running {
                     line: address_line(record.port, &record.token),
                     pid: record.running.as_ref().map(|run| run.pid),
-                },
-                Some(served) => Asked::Silent(format!("the one at {origin} serves {served}")),
-                None => Asked::Silent(format!(
-                    "did not answer at {origin}: its answer is no daemon's health"
-                )),
+                }
+            } else {
+                Asked::Silent
             }
         }
-    }
-}
-
-/// The cause at the bottom of `error`, which says what a person can act on:
-/// a refused connection, say, rather than the request it failed.
-fn innermost(error: &(dyn Error + 'static)) -> String {
-    let mut deepest = error;
-
-    while let Some(cause) = deepest.source() {
-        deepest = cause;
-    }
-
-    deepest.to_string()
-}
-
-/// `wait` in seconds as a person writes them: `0.5`, `5`, `1.25`.
-fn seconds(wait: Duration) -> String {
-    let millis = wait.as_millis();
-    let (whole, part) = (millis / 1000, millis % 1000);
-
-    if part == 0 {
-        whole.to_string()
-    } else {
-        format!("{whole}.{part:03}")
-            .trim_end_matches('0')
-            .to_owned()
+        _ => Asked::Silent,
     }
 }

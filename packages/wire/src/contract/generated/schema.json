@@ -175,42 +175,41 @@
       "description": "What a client stamps on a line it carries: the surface it came from, or\nthe id it submitted the line under, which a repeat of the line reuses. An\nASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`\nor `-`."
     },
     "Code": {
-      "type": "string",
-      "enum": [
-        "runtime_config_read_failed",
-        "runtime_config_malformed_json",
-        "runtime_config_not_object",
-        "runtime_config_limit_exceeded",
-        "runtime_config_version_unsupported",
-        "runtime_config_unknown_top_level_field",
-        "runtime_config_project02_not_object",
-        "runtime_config_unknown_project02_field",
-        "runtime_config_plugins_not_object",
-        "runtime_config_connectors_not_object",
-        "runtime_config_unknown_plugin",
-        "runtime_config_unknown_connector",
-        "runtime_config_plugin_not_object",
-        "runtime_config_unknown_plugin_wrapper_field",
-        "runtime_config_boolean_invalid",
-        "runtime_config_plugin_config_not_object",
-        "runtime_config_unknown_plugin_config_field",
-        "runtime_config_string_invalid",
-        "runtime_config_role_model_provider_invalid",
-        "runtime_config_secret_value_invalid",
-        "runtime_config_nvidia_base_url_invalid",
-        "runtime_config_context_window_tokens_invalid",
-        "runtime_config_value_type_invalid",
-        "runtime_config_required_value_missing",
-        "runtime_config_required_secret_missing",
-        "runtime_config_authored_outside_scope",
-        "character_package_plugin_config_invalid",
-        "default_memory_provider_unavailable",
-        "default_memory_provider_not_memory_provider",
-        "ambiguous_memory_provider_selection",
-        "character_required_plugin_missing",
-        "character_required_plugin_disabled",
-        "character_recommended_plugin_missing",
-        "character_recommended_plugin_disabled"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "runtime_config_unknown_plugin",
+            "runtime_config_unknown_connector",
+            "runtime_config_authored_outside_scope",
+            "default_memory_provider_unavailable"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_unreadable",
+          "description": "A document that cannot be read, is not JSON, or is no object."
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_ignored",
+          "description": "A key the settings do not know, or a namespace that is no\nobject: not used."
+        },
+        {
+          "type": "string",
+          "const": "runtime_config_value_invalid",
+          "description": "A value its field does not take: not used, and nothing stands in\nfor it."
+        },
+        {
+          "type": "string",
+          "const": "character_package_value_skipped",
+          "description": "A value her package gives that a package may not set."
+        },
+        {
+          "type": "string",
+          "const": "character_plugin_not_running",
+          "description": "A plugin her package expects that she does not run."
+        }
       ],
       "description": "What a finding is, in the one spelling clients read."
     },
@@ -342,15 +341,28 @@
       "description": "Whose settings a view reads or a change writes: the home's, or one\ncharacter's."
     },
     "ConfigValueType": {
-      "type": "string",
-      "enum": [
-        "string",
-        "number",
-        "boolean",
-        "object",
-        "array",
-        "path",
-        "enum"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "enum"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "path",
+          "description": "A place on the person's machine."
+        },
+        {
+          "type": "string",
+          "const": "url",
+          "description": "A server the plugin sends to."
+        }
       ],
       "description": "The kind of value a config field holds. Whether it holds a\ncredential is the field's `secret` flag alone to say."
     },
@@ -892,7 +904,7 @@
             "at",
             "message"
           ],
-          "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, or a closed segment's end hooks that did not finish."
+          "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, what closing a segment left undone, or what opening\nher thread skipped because it could not be read."
         }
       ],
       "description": "What every surface hears."
@@ -1004,23 +1016,11 @@
       "description": "The first frame of a stream that cannot be caught up: the state every\nlater frame moves on from."
     },
     "GatewayRefusalReason": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "unknown_character",
-            "unknown_conversation",
-            "sender_not_supported",
-            "character_unavailable",
-            "invalid_message",
-            "duplicate_submission"
-          ]
-        },
-        {
-          "type": "string",
-          "const": "conversation_unreadable",
-          "description": "The conversation's record could not be read; the message says why."
-        }
+      "type": "string",
+      "enum": [
+        "unknown_conversation",
+        "character_unavailable",
+        "duplicate_submission"
       ],
       "description": "Why a line was refused before any turn ran."
     },
@@ -1179,7 +1179,7 @@
         "at",
         "message"
       ],
-      "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, or a closed segment's end hooks that did not finish."
+      "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, what closing a segment left undone, or what opening\nher thread skipped because it could not be read."
     },
     "MessageId": {
       "type": "string",
@@ -1264,7 +1264,6 @@
     "OpenRefusal": {
       "type": "string",
       "enum": [
-        "unknown_character",
         "character_unavailable"
       ]
     },
@@ -1410,48 +1409,19 @@
         }
       ]
     },
-    "PackageProvenance": {
-      "type": "string",
-      "enum": [
-        "bundled",
-        "operator"
-      ],
-      "description": "Where a package comes from: compiled in, or added by the person."
-    },
     "PackageReport": {
       "type": "object",
       "properties": {
-        "severity": {
-          "$ref": "#/$defs/Severity",
-          "description": "Always an error: the package is not in the roster."
-        },
-        "code": {
-          "type": "string"
-        },
         "message": {
           "type": "string"
         },
         "path": {
           "type": "string"
-        },
-        "provenance": {
-          "$ref": "#/$defs/PackageProvenance"
-        },
-        "characterId": {
-          "type": "string",
-          "description": "The folder the package was found in."
-        },
-        "claimedCharacterId": {
-          "description": "The id its descriptor claims, when that is not its folder's.",
-          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
-        "severity",
-        "code",
         "message",
-        "path",
-        "provenance"
+        "path"
       ],
       "description": "A package discovery could not publish, and why, where."
     },
@@ -1482,8 +1452,7 @@
       "type": "string",
       "enum": [
         "unknown_connector",
-        "config_unloadable",
-        "invalid_subject"
+        "config_unloadable"
       ]
     },
     "PairingRequest": {
@@ -1968,10 +1937,6 @@
           "items": {
             "$ref": "#/$defs/RuntimeConfigDiagnostic"
           }
-        },
-        "fingerprint": {
-          "$ref": "#/$defs/Fingerprint",
-          "description": "What a change to this section alone may present."
         }
       },
       "required": [
@@ -1983,8 +1948,7 @@
         "enabledSource",
         "activation",
         "fields",
-        "diagnostics",
-        "fingerprint"
+        "diagnostics"
       ],
       "description": "One section as a screen shows it."
     },
@@ -2087,7 +2051,7 @@
     },
     "Text": {
       "type": "string",
-      "description": "A line's text: at least one character, and as long as any text of a\nbody may be."
+      "description": "A line's text, as long as a line may be."
     },
     "Timestamp": {
       "type": "string",

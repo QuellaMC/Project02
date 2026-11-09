@@ -23,40 +23,22 @@ pub enum Severity {
 vocabulary! {
     /// What a finding is, in the one spelling clients read.
     Code {
-        ReadFailed = "runtime_config_read_failed",
-        MalformedJson = "runtime_config_malformed_json",
-        NotObject = "runtime_config_not_object",
-        LimitExceeded = "runtime_config_limit_exceeded",
-        VersionUnsupported = "runtime_config_version_unsupported",
-        UnknownTopLevelField = "runtime_config_unknown_top_level_field",
-        Project02NotObject = "runtime_config_project02_not_object",
-        UnknownProject02Field = "runtime_config_unknown_project02_field",
-        PluginsNotObject = "runtime_config_plugins_not_object",
-        ConnectorsNotObject = "runtime_config_connectors_not_object",
+        /// A document that cannot be read, is not JSON, or is no object.
+        Unreadable = "runtime_config_unreadable",
+        /// A key the settings do not know, or a namespace that is no
+        /// object: not used.
+        Ignored = "runtime_config_ignored",
         UnknownPlugin = "runtime_config_unknown_plugin",
         UnknownConnector = "runtime_config_unknown_connector",
-        PluginNotObject = "runtime_config_plugin_not_object",
-        UnknownPluginWrapperField = "runtime_config_unknown_plugin_wrapper_field",
-        BooleanInvalid = "runtime_config_boolean_invalid",
-        PluginConfigNotObject = "runtime_config_plugin_config_not_object",
-        UnknownPluginConfigField = "runtime_config_unknown_plugin_config_field",
-        StringInvalid = "runtime_config_string_invalid",
-        RoleModelProviderInvalid = "runtime_config_role_model_provider_invalid",
-        SecretValueInvalid = "runtime_config_secret_value_invalid",
-        NvidiaBaseUrlInvalid = "runtime_config_nvidia_base_url_invalid",
-        ContextWindowTokensInvalid = "runtime_config_context_window_tokens_invalid",
-        ValueTypeInvalid = "runtime_config_value_type_invalid",
-        RequiredValueMissing = "runtime_config_required_value_missing",
-        RequiredSecretMissing = "runtime_config_required_secret_missing",
+        /// A value its field does not take: not used, and nothing stands in
+        /// for it.
+        ValueInvalid = "runtime_config_value_invalid",
         AuthoredOutsideScope = "runtime_config_authored_outside_scope",
-        CharacterPackagePluginConfigInvalid = "character_package_plugin_config_invalid",
-        DefaultMemoryProviderUnavailable = "default_memory_provider_unavailable",
-        DefaultMemoryProviderNotMemoryProvider = "default_memory_provider_not_memory_provider",
-        AmbiguousMemoryProviderSelection = "ambiguous_memory_provider_selection",
-        CharacterRequiredPluginMissing = "character_required_plugin_missing",
-        CharacterRequiredPluginDisabled = "character_required_plugin_disabled",
-        CharacterRecommendedPluginMissing = "character_recommended_plugin_missing",
-        CharacterRecommendedPluginDisabled = "character_recommended_plugin_disabled",
+        /// A value her package gives that a package may not set.
+        PackageValueSkipped = "character_package_value_skipped",
+        MemoryProviderUnavailable = "default_memory_provider_unavailable",
+        /// A plugin her package expects that she does not run.
+        PluginNotRunning = "character_plugin_not_running",
     }
 }
 
@@ -190,20 +172,17 @@ impl Diagnostic {
     }
 
     /// Whether the finding stops the character whose settings hold it: an
-    /// error about anything she runs, which a connector, a process of its
-    /// own, is not.
+    /// error about her settings as a whole. One about a section blocks that
+    /// section alone.
     pub(crate) fn stops_character(&self) -> bool {
-        self.is_error() && !self.about_connector()
+        self.is_error() && matches!(self.concerns, Concerns::Global)
     }
 
-    /// Whether the finding concerns a connector's section.
-    pub(crate) fn about_connector(&self) -> bool {
+    /// Whether the finding concerns a section of `namespace`.
+    pub(crate) fn about(&self, namespace: Namespace) -> bool {
         matches!(
-            self.concerns,
-            Concerns::Section {
-                namespace: Namespace::Connectors,
-                ..
-            }
+            &self.concerns,
+            Concerns::Section { namespace: found, .. } if *found == namespace
         )
     }
 

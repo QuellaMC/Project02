@@ -7,11 +7,9 @@ use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared, join_all};
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{CharacterSettings, Diagnostic, ReadSettingsError, Resolution};
-use p02_shared::Identifier;
 
-use crate::character::{Built, CharacterHandle, Reconciled};
+use crate::character::{Built, CharacterHandle};
 use crate::daemon::{Actor, Daemon, World};
-use crate::outcome::ReconcilePlan;
 
 /// The installed roster as the disk says it is now: what discovery found,
 /// what the home's settings say of themselves, and each character's
@@ -30,7 +28,7 @@ impl Roster {
         let discovery = discover(world.home.root());
         let home_diagnostics = match Resolution::home(&world.home, &world.sections) {
             Ok(resolution) => resolution.diagnostics().to_vec(),
-            Err(ReadSettingsError::Unloadable { diagnostics }) => diagnostics,
+            Err(ReadSettingsError::Unreadable(diagnostic)) => vec![*diagnostic],
             Err(ReadSettingsError::Storage(_) | ReadSettingsError::UnknownCharacter(_)) => {
                 Vec::new()
             }
@@ -79,7 +77,7 @@ pub(crate) struct Reconciler {
 
 #[derive(Default)]
 struct Passes {
-    running: Option<Shared<BoxFuture<'static, ReconcilePlan>>>,
+    running: Option<Shared<BoxFuture<'static, ()>>>,
     /// A request came while a pass ran: one more pass follows it.
     again: bool,
 }
@@ -96,14 +94,13 @@ impl std::fmt::Debug for Passes {
 
 impl Reconciler {
     /// Runs `pass` as a task of its own, again for as long as requests come
-    /// while it runs, and answers with what every run set in motion; a
-    /// request while it runs joins it. The first pass is made at the
-    /// request, so it judges what runs at that moment, and each after it as
-    /// it begins.
+    /// while it runs, and answers once the last run ended; a request while
+    /// it runs joins it. The first pass is made at the request, so it
+    /// judges what runs at that moment, and each after it as it begins.
     pub(crate) fn reconcile(
         self: &Arc<Self>,
-        pass: impl Fn() -> BoxFuture<'static, ReconcilePlan> + Send + Sync + 'static,
-    ) -> Shared<BoxFuture<'static, ReconcilePlan>> {
+        pass: impl Fn() -> BoxFuture<'static, ()> + Send + Sync + 'static,
+    ) -> Shared<BoxFuture<'static, ()>> {
         let first = pass();
         let mut passes = self.passes();
 
@@ -114,22 +111,19 @@ impl Reconciler {
 
         let reconciler = Arc::clone(self);
         let task = tokio::spawn(async move {
-            let mut plan = first.await;
+            first.await;
 
             while reconciler.more() {
-                plan.merge(pass().await);
+                pass().await;
             }
-
-            plan
         });
         let reconciler = Arc::clone(self);
         let running = async move {
-            task.await.unwrap_or_else(|_| {
+            if task.await.is_err() {
                 // A pass that broke ends the run, so the next request starts
                 // one afresh.
                 *reconciler.passes() = Passes::default();
-                ReconcilePlan::default()
-            })
+            }
         }
         .boxed()
         .shared();
@@ -166,14 +160,6 @@ impl Reconciler {
     }
 }
 
-/// What one character's part of a pass did.
-enum Did {
-    Started(Identifier),
-    Stopped(Identifier),
-    Reloaded(Identifier),
-    Nothing,
-}
-
 impl Daemon {
     /// One pass of the rule over the characters running now, against the
     /// roster as the pass reads it: an enabled character who runs nothing
@@ -182,7 +168,7 @@ impl Daemon {
     /// disabled one who runs stops, as does one whose package left the
     /// roster. One started after now, by a client, is the next pass's to
     /// judge.
-    pub(crate) fn pass(&self) -> BoxFuture<'static, ReconcilePlan> {
+    pub(crate) fn pass(&self) -> BoxFuture<'static, ()> {
         let running: Vec<Arc<CharacterHandle>> = self
             .handles()
             .into_iter()
@@ -193,9 +179,9 @@ impl Daemon {
         Box::pin(async move { daemon.judge(running).await })
     }
 
-    async fn judge(&self, running: Vec<Arc<CharacterHandle>>) -> ReconcilePlan {
+    async fn judge(&self, running: Vec<Arc<CharacterHandle>>) {
         let roster = self.roster().await;
-        let mut work: Vec<BoxFuture<'_, Did>> = Vec::new();
+        let mut work: Vec<BoxFuture<'_, ()>> = Vec::new();
 
         for (definition, settings) in roster.characters() {
             let id = definition.profile.id.clone();
@@ -211,29 +197,19 @@ impl Daemon {
                 });
 
                 work.push(Box::pin(async move {
-                    let Some(handle) = running else {
+                    match running {
+                        Some(handle) => handle.reconcile(now).await,
                         // One a client started since the pass was asked
                         // for is the client's.
-                        return match self.actor(&id).await {
-                            Some(Actor::Built(handle)) => {
+                        None => {
+                            if let Some(Actor::Built(handle)) = self.actor(&id).await {
                                 handle.start().await;
-                                Did::Started(id)
                             }
-                            Some(Actor::Running(_)) | None => Did::Nothing,
-                        };
-                    };
-
-                    match handle.reconcile(now).await {
-                        Reconciled::Started => Did::Started(id),
-                        Reconciled::Reloaded => Did::Reloaded(id),
-                        Reconciled::Unchanged => Did::Nothing,
+                        }
                     }
                 }));
             } else if let Some(handle) = running {
-                work.push(Box::pin(async move {
-                    handle.stop().await;
-                    Did::Stopped(id)
-                }));
+                work.push(Box::pin(async move { handle.stop().await }));
             }
         }
 
@@ -243,24 +219,10 @@ impl Daemon {
                 .any(|(definition, _)| definition.profile.id == *handle.id());
 
             if left && !handle.ended() {
-                work.push(Box::pin(async move {
-                    handle.stop().await;
-                    Did::Stopped(handle.id().clone())
-                }));
+                work.push(Box::pin(async move { handle.stop().await }));
             }
         }
 
-        let mut plan = ReconcilePlan::default();
-
-        for did in join_all(work).await {
-            match did {
-                Did::Started(id) => plan.starting.push(id),
-                Did::Stopped(id) => plan.stopping.push(id),
-                Did::Reloaded(id) => plan.reloading.push(id),
-                Did::Nothing => {}
-            }
-        }
-
-        plan
+        join_all(work).await;
     }
 }

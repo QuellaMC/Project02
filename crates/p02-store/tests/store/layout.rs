@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::num::{NonZeroU16, NonZeroU32};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use p02_characters::CharacterVersion;
 use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
@@ -110,38 +110,54 @@ fn the_merged_package_version_is_recorded_beside_her_marker() {
     );
 }
 
-/// What each damage is refused as, and the marker put in its place: none
-/// stands for a directory there.
-#[test]
-fn a_marker_of_another_version_or_one_that_is_no_marker_is_refused_and_left_as_it_was() {
-    let world = World::new();
-    let damages = |marker: &Value| -> Vec<(&str, &str, Option<String>)> {
-        let mut older = marker.clone();
-        let mut newer = marker.clone();
+/// A read that judges a marker.
+type Judge<'w> = Box<dyn Fn() -> Result<(), StorageError> + 'w>;
 
-        older["schemaVersion"] = json!(14);
-        newer["schemaVersion"] = json!(99);
-
-        vec![
-            ("unsupported_schema_version", "schema version 14", Some(older.to_string())),
-            ("unsupported_schema_version", "schema version 99", Some(newer.to_string())),
-            ("malformed_schema_marker", "not valid JSON", Some(r#"{"schemaVersion":"#.to_owned())),
-            ("malformed_schema_marker", "whole-number schemaVersion", Some(r#"{"schemaVersion":15.0}"#.to_owned())),
-            ("malformed_schema_marker", "malformed", Some(json!({"schemaVersion": 15, "scope": "home", "createdAt": "2026-10-21T00:00:00.000Z", "storeRoot": "/elsewhere"}).to_string())),
-            ("malformed_schema_marker", "must be a regular file", None),
-        ]
-    };
-
-    for (path, open) in [
+/// The home's marker and her data's, each with the read that judges it.
+fn markers(world: &World) -> Vec<(PathBuf, Judge<'_>)> {
+    vec![
         (
             world.root().join("schema.json"),
-            Box::new(|| world.home.check()) as Box<dyn Fn() -> Result<(), StorageError>>,
+            Box::new(|| world.home.check()),
         ),
         (
             world.data.root().join("schema.json"),
             Box::new(|| CharacterData::open(&world.home, &mira().id).map(drop)),
         ),
-    ] {
+    ]
+}
+
+/// What each damage is refused as, and the marker put in its place: none
+/// stands for a directory there.
+#[test]
+fn a_marker_of_a_newer_version_or_one_that_is_no_marker_is_refused_and_left_as_it_was() {
+    let world = World::new();
+    let damages = |marker: &Value| -> Vec<(&str, &str, Option<String>)> {
+        let mut newer = marker.clone();
+
+        newer["schemaVersion"] = json!(99);
+
+        vec![
+            (
+                "unsupported_schema_version",
+                "written by a newer Project02, at storage schema version 99",
+                Some(newer.to_string()),
+            ),
+            (
+                "malformed_schema_marker",
+                "not valid JSON",
+                Some(r#"{"schemaVersion":"#.to_owned()),
+            ),
+            (
+                "malformed_schema_marker",
+                "whole-number schemaVersion",
+                Some(r#"{"schemaVersion":15.0}"#.to_owned()),
+            ),
+            ("malformed_schema_marker", "must be a regular file", None),
+        ]
+    };
+
+    for (path, open) in markers(&world) {
         let original = std::fs::read(&path).unwrap();
 
         for (code, says, bytes) in damages(&marker(&path)) {
@@ -167,6 +183,24 @@ fn a_marker_of_another_version_or_one_that_is_no_marker_is_refused_and_left_as_i
         std::fs::remove_dir(&path).unwrap();
         std::fs::write(&path, &original).unwrap();
         open().unwrap();
+    }
+}
+
+/// A marker an older build wrote is read as it is, a field this build does
+/// not know beside its own, and left as it was.
+#[test]
+fn an_older_marker_is_read_and_left_as_it_was() {
+    let world = World::new();
+
+    for (path, open) in markers(&world) {
+        let mut older = marker(&path);
+
+        older["schemaVersion"] = json!(14);
+        older["storeRoot"] = json!("/elsewhere");
+        std::fs::write(&path, older.to_string()).unwrap();
+
+        open().unwrap();
+        assert_eq!(marker(&path), older);
     }
 }
 

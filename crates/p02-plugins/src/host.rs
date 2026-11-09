@@ -37,8 +37,8 @@ pub struct PluginHost {
 pub struct PluginHostBuilder {
     storage: Arc<dyn CharacterStorage>,
     plugins: Vec<Setup>,
-    confirmer: Option<Arc<dyn Confirmer>>,
-    config_control: Option<Arc<dyn ConfigControl>>,
+    confirmer: Arc<dyn Confirmer>,
+    config_control: Arc<dyn ConfigControl>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -53,7 +53,7 @@ pub(crate) struct Core {
     pub(crate) slots: Vec<Slot>,
     /// The tools the model is offered, by which a call is routed.
     offered: PluginToolDefinitions,
-    pub(crate) confirmer: Option<Arc<dyn Confirmer>>,
+    pub(crate) confirmer: Arc<dyn Confirmer>,
     /// How many times a plugin was rebuilt live.
     rebuilds: AtomicU64,
 }
@@ -84,12 +84,10 @@ pub(crate) struct Capabilities {
     pub(crate) databases: Option<Arc<dyn DatabaseOpener>>,
 }
 
-/// A call the host routes: the plugin that offers the tool, the tool, and,
-/// for a tool that asks first, who asks the person.
+/// A call the host routes: the plugin that offers the tool, and the tool.
 pub(crate) struct Route<'a> {
     pub(crate) slot: &'a Slot,
     pub(crate) tool: &'a ProvidedTool,
-    pub(crate) asking: Option<&'a dyn Confirmer>,
 }
 
 /// The host its own plugin manages, once the host is built. It is held
@@ -150,13 +148,21 @@ pub enum BuildPluginError {
 }
 
 impl PluginHost {
+    /// The plugins of a character whose storage is `storage`, who is asked
+    /// through `confirmer` before an approval-gated call takes effect, and
+    /// whose settings `config_control` reads and changes for the host's own
+    /// plugin.
     #[must_use]
-    pub fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
+    pub fn builder(
+        storage: Arc<dyn CharacterStorage>,
+        confirmer: Arc<dyn Confirmer>,
+        config_control: Arc<dyn ConfigControl>,
+    ) -> PluginHostBuilder {
         PluginHostBuilder {
             storage,
             plugins: Vec::new(),
-            confirmer: None,
-            config_control: None,
+            confirmer,
+            config_control,
         }
     }
 
@@ -260,21 +266,6 @@ impl PluginHostBuilder {
         self
     }
 
-    /// Who asks the person before an approval-gated call takes effect.
-    #[must_use]
-    pub fn confirmer(mut self, confirmer: Arc<dyn Confirmer>) -> Self {
-        self.confirmer = Some(confirmer);
-        self
-    }
-
-    /// Who reads and changes the settings of the character the host serves,
-    /// for the config tools of the host's own plugin.
-    #[must_use]
-    pub fn config_control(mut self, control: Arc<dyn ConfigControl>) -> Self {
-        self.config_control = Some(control);
-        self
-    }
-
     /// Builds every plugin and holds the set to the host's rules: one
     /// instance per plugin, each matching its manifest and with labels its
     /// records can carry, and each tool name offered to the model by one
@@ -310,7 +301,7 @@ impl PluginHostBuilder {
             )?;
 
             let factory = if plugin_id.as_str() == HOST_PLUGIN {
-                management::factory(&host, self.config_control.clone())
+                management::factory(&host, Arc::clone(&self.config_control))
             } else {
                 factory
             };
@@ -341,11 +332,10 @@ impl PluginHostBuilder {
             });
         }
 
-        let tools =
-            PluginToolDefinitions::new(definitions).map_err(ActivationError::DuplicateTool)?;
         let core = Arc::new(Core {
             slots,
-            offered: policy::tools::offered(&tools, self.confirmer.is_some()),
+            offered: PluginToolDefinitions::new(definitions)
+                .map_err(ActivationError::DuplicateTool)?,
             confirmer: self.confirmer,
             rebuilds: AtomicU64::new(0),
         });
@@ -401,16 +391,10 @@ impl Core {
             .slots
             .iter()
             .find(|slot| slot.manifest.id() == &definition.plugin_id)?;
-        let asking = if definition.tool.is_approval_gated() {
-            Some(self.confirmer.as_deref()?)
-        } else {
-            None
-        };
 
         Some(Route {
             slot,
             tool: &definition.tool,
-            asking,
         })
     }
 

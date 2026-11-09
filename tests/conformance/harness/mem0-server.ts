@@ -24,10 +24,9 @@ export type Mem0Request = {
   readonly body: unknown;
 };
 
-/** The status, headers beside the content type, and a body sent as its JSON, or as written when it is a string. */
+/** The status, and a body sent as its JSON. */
 export type Mem0Answer = {
   readonly status: number;
-  readonly headers?: Readonly<Record<string, string>>;
   readonly body?: unknown;
 };
 
@@ -136,13 +135,6 @@ export async function startMem0Server(): Promise<Mem0Server> {
 
 function give(answer: Mem0Answer, response: ServerResponse): void {
   response
-    .writeHead(answer.status, {
-      'content-type': 'application/json',
-      ...answer.headers,
-    })
-    .end(
-      typeof answer.body === 'string'
-        ? answer.body
-        : JSON.stringify(answer.body ?? {}),
-    );
+    .writeHead(answer.status, {'content-type': 'application/json'})
+    .end(JSON.stringify(answer.body ?? {}));
 }

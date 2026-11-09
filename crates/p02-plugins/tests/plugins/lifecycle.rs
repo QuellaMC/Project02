@@ -15,19 +15,20 @@ use serde_json::{Map, Value, json};
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Failing, Hanging, Panicking, Scripted, Spec, Stalling, host_of, id, note, tool, turn,
+    Enable, Failing, Hanging, Panicking, Scripted, Spec, Stalling, builder, host_of, id, note,
+    tool, turn,
 };
 
 fn committed() -> CommittedTurn {
     CommittedTurn::new(Timestamp::new("2026-10-18T00:00:01.000Z").unwrap())
 }
 
-/// The host's half of plugins.after-turn-hooks; the turn's half, the
-/// follow-up record in the log, waits for the runtime.
+/// The after-turn hooks' failures, timeouts and panics are collected and
+/// reported with the phase, never thrown.
 #[tokio::test(start_paused = true)]
 async fn after_turn_failures_are_collected_and_reported_never_thrown() {
     let after = |id| Spec {
-        declared: json!(["after_turn_committed", "on_session_end"]),
+        declared: json!(["after_turn_committed"]),
         timeout_ms: 50,
         ..Spec::new(id)
     };
@@ -98,22 +99,7 @@ async fn after_turn_failures_are_collected_and_reported_never_thrown() {
             ("clean", EvidenceStatus::Accepted, "Indexed the turn.", None),
         ]
     );
-
-    let ended = host.session_end(&turn()).await;
-    let reported = ended
-        .evidence
-        .iter()
-        .find(|record| record.plugin_id().as_str() == "reporting")
-        .unwrap();
-
-    assert_eq!(ended.status, PhaseStatus::CompletedWithFailures);
-    assert_eq!(reported.kind(), EvidenceKind::SessionEnd);
-    assert_eq!(
-        reported.summary(),
-        "onSessionEnd plugin hook reported failure."
-    );
-    assert_eq!(reported.policy_outcome(), None);
-    assert_eq!(clean.calls(), 2);
+    assert_eq!(clean.calls(), 1);
 }
 
 #[tokio::test(start_paused = true)]
@@ -197,7 +183,7 @@ async fn a_reload_serves_later_hooks_with_the_rebuilt_plugin_unless_the_rebuild_
         }]),
         ..Spec::new("speaker")
     };
-    let host = PluginHost::builder(Storage::new())
+    let host = builder(Storage::new())
         .plugin(spec.manifest(), line("first"), speaking)
         .activate()
         .unwrap();
@@ -227,7 +213,7 @@ async fn a_reload_serves_later_hooks_with_the_rebuilt_plugin_unless_the_rebuild_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_reload_and_a_shutdown_never_wait_on_a_blocking_job() {
     let (stalling, gate, job_ended) = Stalling::new(Vec::new());
-    let host = PluginHost::builder(Storage::new())
+    let host = builder(Storage::new())
         .enable(
             &Spec {
                 declared: json!(["after_turn_committed", "on_shutdown"]),

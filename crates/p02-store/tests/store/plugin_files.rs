@@ -225,16 +225,14 @@ fn a_value_past_the_json_limits_is_refused_whether_written_or_read() {
     std::fs::write(root.join("memory.json"), format!("{}\n", deep(17))).unwrap();
     std::fs::write(root.join("events.jsonl"), format!("{crowded}\n")).unwrap();
 
-    for refused in [
-        files.read_json("memory.json").unwrap_err(),
-        files.read_jsonl("events.jsonl").unwrap_err(),
-    ] {
-        assert_eq!(code(&refused), "malformed_record", "{refused}");
-    }
+    let refused = files.read_json("memory.json").unwrap_err();
+
+    assert_eq!(code(&refused), "malformed_record", "{refused}");
+    assert_eq!(files.read_jsonl("events.jsonl").unwrap(), [Value::Null]);
 }
 
 #[test]
-fn a_log_drops_a_torn_or_blank_tail_and_refuses_a_damaged_line() {
+fn a_log_drops_a_torn_or_blank_tail_and_reads_a_damaged_line_as_null() {
     let world = World::new();
     let state = store(&world, "character-state");
     let events = world
@@ -274,15 +272,13 @@ fn a_log_drops_a_torn_or_blank_tail_and_refuses_a_damaged_line() {
     )
     .unwrap();
 
-    let refused = files.read_jsonl("events.jsonl").unwrap_err();
-
-    assert_eq!(code(&refused), "malformed_record");
-    assert!(
-        std::error::Error::source(&refused)
-            .unwrap()
-            .to_string()
-            .starts_with("line 2 of "),
-        "{refused}"
+    assert_eq!(
+        files.read_jsonl("events.jsonl").unwrap(),
+        [
+            json!({"mood": "calm"}),
+            Value::Null,
+            json!({"mood": "tired"})
+        ]
     );
 }
 
