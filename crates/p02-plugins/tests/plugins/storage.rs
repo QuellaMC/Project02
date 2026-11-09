@@ -136,6 +136,10 @@ impl LeasedFiles for Leased<'_> {
         Ok(Vec::new())
     }
 
+    fn count_jsonl(&self, _path: &str) -> Result<u64, StoreError> {
+        Ok(0)
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.0.insert(path.to_owned(), value.clone());
         Ok(())
@@ -143,10 +147,6 @@ impl LeasedFiles for Leased<'_> {
 
     fn append_jsonl(&mut self, _path: &str, _value: &Value) -> Result<(), StoreError> {
         Ok(())
-    }
-
-    fn revision(&self) -> Result<u64, StoreError> {
-        Ok(0)
     }
 }
 

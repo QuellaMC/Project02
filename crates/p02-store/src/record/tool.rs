@@ -5,8 +5,6 @@ use p02_shared::{BoundJsonError, Identifier};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::RecordError;
-
 /// A tool call a round made, recorded before it runs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "WireStarted")]
@@ -115,7 +113,7 @@ impl ToolCallStarted {
 }
 
 impl TryFrom<WireStarted> for ToolCallStarted {
-    type Error = RecordError;
+    type Error = BoundJsonError;
 
     fn try_from(wire: WireStarted) -> Result<Self, Self::Error> {
         Self::new(
@@ -125,7 +123,6 @@ impl TryFrom<WireStarted> for ToolCallStarted {
             wire.tool_plugin_id,
             wire.tool_input,
         )
-        .map_err(RecordError::UnkeptToolCall)
     }
 }
 
@@ -141,32 +138,24 @@ impl ToolDispatch {
 
 impl ToolCallFinished {
     /// The call `started` came back with `result`, kept as its session
-    /// keeps a call's result, and the evidence the call made. A call no
-    /// plugin offers comes back as the runtime's refusal of it.
+    /// keeps a call's result, and the evidence the call made.
     ///
     /// # Errors
     ///
-    /// [`RecordError::UnkeptToolCall`] when the result breaks the JSON
-    /// limits, and [`RecordError::UndeclaredAnswered`] when a call no
-    /// plugin offers comes back accepted.
+    /// [`BoundJsonError`] when the result breaks the JSON limits.
     pub fn new(
         started: &ToolCallStarted,
         dispatch: ToolDispatch,
         result: ToolCallResult,
         evidence: Vec<Evidence>,
-    ) -> Result<Self, RecordError> {
-        let tool_result =
-            ConversationToolCall::kept_result(result).map_err(RecordError::UnkeptToolCall)?;
-
-        check_dispatch(dispatch, &tool_result)?;
-
+    ) -> Result<Self, BoundJsonError> {
         Ok(Self {
             round: started.round,
             tool_call_id: started.tool_call_id.clone(),
             tool_name: started.tool_name.clone(),
             tool_plugin_id: started.tool_plugin_id.clone(),
             dispatched_to_host: dispatch == ToolDispatch::Host,
-            tool_result,
+            tool_result: ConversationToolCall::kept_result(result)?,
             runtime_plugin_evidence: evidence,
         })
     }
@@ -200,40 +189,20 @@ impl ToolCallFinished {
     pub fn tool_result(&self) -> &ToolCallResult {
         &self.tool_result
     }
-
-    #[must_use]
-    pub fn evidence(&self) -> &[Evidence] {
-        &self.runtime_plugin_evidence
-    }
 }
 
 impl TryFrom<WireFinished> for ToolCallFinished {
-    type Error = RecordError;
+    type Error = BoundJsonError;
 
     fn try_from(wire: WireFinished) -> Result<Self, Self::Error> {
-        let tool_result = ConversationToolCall::kept_result(wire.tool_result)
-            .map_err(RecordError::UnkeptToolCall)?;
-
-        check_dispatch(ToolDispatch::of(wire.dispatched_to_host), &tool_result)?;
-
         Ok(Self {
             round: wire.round,
             tool_call_id: wire.tool_call_id,
             tool_name: wire.tool_name,
             tool_plugin_id: wire.tool_plugin_id,
             dispatched_to_host: wire.dispatched_to_host,
-            tool_result,
+            tool_result: ConversationToolCall::kept_result(wire.tool_result)?,
             runtime_plugin_evidence: wire.runtime_plugin_evidence,
         })
-    }
-}
-
-/// A call no plugin offers was never run, so what came back is the
-/// runtime's refusal of it, never an answer.
-fn check_dispatch(dispatch: ToolDispatch, result: &ToolCallResult) -> Result<(), RecordError> {
-    if dispatch == ToolDispatch::Undeclared && matches!(result, ToolCallResult::Accepted { .. }) {
-        Err(RecordError::UndeclaredAnswered)
-    } else {
-        Ok(())
     }
 }

@@ -1,8 +1,6 @@
 //! The records of a session log, one per line. Each record names the event
 //! it belongs to, says what kind it is, and holds the fields its kind has,
-//! in the order they are written; a field it does not know is ignored. What
-//! one record may say about itself is checked here, by the one constructor
-//! every record is made through, read or written.
+//! in the order they are written; a field it does not know is ignored.
 
 mod commit;
 mod continuation;
@@ -10,17 +8,13 @@ mod round;
 mod terminal;
 mod tool;
 
-use p02_contracts::Evidence;
 use p02_core::{EventIdentity, VisibleText};
-use p02_shared::BoundJsonError;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 pub use commit::MessageCommitted;
-pub use continuation::{
-    ContinuedFrom, MAX_SUMMARY_CHARS, SessionContinuation, Summarizer, SummaryProvider,
-};
+pub use continuation::{ContinuedFrom, SessionContinuation, Summarizer, SummaryProvider};
 pub use round::RoundRecord;
 pub use terminal::{
     AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnRejected, TurnRejection,
@@ -92,7 +86,7 @@ pub struct SessionContinued {
     pub session_continuation: SessionContinuation,
 }
 
-/// Why a line is no record, or a record cannot be made.
+/// Why a line is no record.
 #[derive(Debug, thiserror::Error)]
 pub enum RecordError {
     #[error("the line is not JSON")]
@@ -109,59 +103,13 @@ pub enum RecordError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("the record carries evidence of another event")]
-    ForeignEvidence,
-    #[error("a finished tool call carries evidence of a plugin other than its own")]
-    EvidenceOfAnotherPlugin,
-    #[error("a tool call's input or result is past the JSON limits")]
-    UnkeptToolCall(#[source] BoundJsonError),
-    #[error("a call no plugin offers comes back as the runtime's refusal of it, never an answer")]
-    UndeclaredAnswered,
-    #[error(
-        "a user commit holds the person's message and no round, a character commit the character's and its round, each anchoring its own message alone"
-    )]
-    Commit,
-    #[error("a turn rejected for a model's reason names the round it judged, and only then")]
-    RejectionRound,
-    #[error("the turn records no reason this build knows: \"{0}\"")]
-    UnknownReason(String),
-    #[error("a rejection's message must not be blank")]
-    BlankMessage,
-    #[error("a continuation summary is trimmed text of 1 to {MAX_SUMMARY_CHARS} characters")]
-    Summary,
-    #[error("a session continues the segment before it")]
-    ContinuedFrom,
-    #[error("a continuation names its summarizer's model, or says why there was none")]
-    Summarizer,
 }
 
 impl LogRecord {
     /// A record of `body` about the event `identity`.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError`] when the record speaks of another event than its own:
-    /// evidence of another event or, for a finished call, of another
-    /// plugin.
-    pub fn new(identity: EventIdentity, body: RecordBody) -> Result<Self, RecordError> {
-        if body
-            .evidence()
-            .iter()
-            .any(|evidence| evidence.identity() != &identity)
-        {
-            return Err(RecordError::ForeignEvidence);
-        }
-
-        if let RecordBody::ToolCallFinished(call) = &body
-            && call
-                .evidence()
-                .iter()
-                .any(|evidence| evidence.plugin_id() != call.tool_plugin_id())
-        {
-            return Err(RecordError::EvidenceOfAnotherPlugin);
-        }
-
-        Ok(Self { identity, body })
+    #[must_use]
+    pub fn new(identity: EventIdentity, body: RecordBody) -> Self {
+        Self { identity, body }
     }
 
     #[must_use]
@@ -213,7 +161,7 @@ impl LogRecord {
         let body = RecordBody::from_fields(kind, Value::Object(fields))
             .map_err(|source| RecordError::Fields { kind, source })?;
 
-        Self::new(identity, body)
+        Ok(Self::new(identity, body))
     }
 }
 
@@ -256,22 +204,6 @@ impl RecordBody {
             Self::AfterTurnCommitted(_) => RecordKind::AfterTurnCommitted,
             Self::TurnRejected(_) => RecordKind::RuntimeTurnRejected,
             Self::SessionContinued(_) => RecordKind::SessionContinued,
-        }
-    }
-
-    /// The plugin evidence the record carries.
-    #[must_use]
-    pub fn evidence(&self) -> &[Evidence] {
-        match self {
-            Self::ToolCallFinished(call) => call.evidence(),
-            Self::MessageCommitted(commit) => commit.evidence(),
-            Self::TurnCompleted(completed) => &completed.runtime_plugin_evidence,
-            Self::AfterTurnCommitted(after) => &after.runtime_plugin_evidence,
-            Self::TurnRejected(rejected) => &rejected.runtime_plugin_evidence,
-            Self::EventReceived(_)
-            | Self::ModelRound(_)
-            | Self::ToolCallStarted(_)
-            | Self::SessionContinued(_) => &[],
         }
     }
 

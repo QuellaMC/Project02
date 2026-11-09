@@ -238,8 +238,7 @@ impl Script {
     }
 
     pub(crate) fn push(&mut self, identity: &EventIdentity, body: RecordBody) {
-        self.records
-            .push(LogRecord::new(identity.clone(), body).unwrap());
+        self.records.push(LogRecord::new(identity.clone(), body));
     }
 
     /// A turn whose event came in as `raw`, taken as the line it trims to.
@@ -283,13 +282,10 @@ impl Script {
         );
         self.push(
             &identity,
-            RecordBody::TurnRejected(
-                TurnRejected::new(
-                    TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
-                    "Provide a non-empty message.".to_owned(),
-                )
-                .unwrap(),
-            ),
+            RecordBody::TurnRejected(TurnRejected::new(
+                TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
+                "Provide a non-empty message.".to_owned(),
+            )),
         );
     }
 }
@@ -340,12 +336,11 @@ impl TurnScript<'_> {
     pub(crate) fn user(&mut self, client_message_id: &str) -> &mut Self {
         let line = self.line.clone();
         let message = self.script.message(VisibleMessageRole::User, &line);
-        let commit = MessageCommitted::user(message.clone())
-            .unwrap()
-            .with_source(ClientStamp::new("web").unwrap())
-            .unwrap()
-            .with_client_message_id(ClientStamp::new(client_message_id).unwrap())
-            .unwrap();
+        let commit = MessageCommitted::user(
+            message.clone(),
+            Some(ClientStamp::new("web").unwrap()),
+            Some(ClientStamp::new(client_message_id).unwrap()),
+        );
 
         self.messages.push(message.id);
         self.push(RecordBody::MessageCommitted(commit));
@@ -398,9 +393,11 @@ impl TurnScript<'_> {
                 );
 
                 self.messages.push(message.id.clone());
-                self.push(RecordBody::MessageCommitted(
-                    MessageCommitted::character(message, round, vec![evidence]).unwrap(),
-                ));
+                self.push(RecordBody::MessageCommitted(MessageCommitted::character(
+                    message,
+                    round,
+                    vec![evidence],
+                )));
             }
         }
 
@@ -497,7 +494,7 @@ impl TurnScript<'_> {
 
     /// The turn rejected as `rejection` says, `message` saying why.
     pub(crate) fn rejected(&mut self, rejection: TurnRejection, message: &str) {
-        let mut rejected = TurnRejected::new(rejection, message.to_owned()).unwrap();
+        let mut rejected = TurnRejected::new(rejection, message.to_owned());
 
         rejected.visible_message_ids.clone_from(&self.messages);
         rejected.tool_call_ids.clone_from(&self.finished);

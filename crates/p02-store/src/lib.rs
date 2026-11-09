@@ -38,11 +38,10 @@ pub use log::{SessionLog, SessionWriter};
 pub use marker::{MarkerProblem, Scope};
 pub use plugin_files::{FileKind, ValueProblem};
 pub use record::{
-    AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MAX_SUMMARY_CHARS,
-    MessageCommitted, PayloadSummary, RecordBody, RecordError, RecordKind, RoundRecord,
-    RuntimeRejection, SessionContinuation, SessionContinued, Summarizer, SummaryProvider,
-    ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection,
-    TurnStatus,
+    AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MessageCommitted,
+    PayloadSummary, RecordBody, RecordError, RecordKind, RoundRecord, RuntimeRejection,
+    SessionContinuation, SessionContinued, Summarizer, SummaryProvider, ToolCallFinished,
+    ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
 };
 pub use replay::{ReplayError, SessionReplay};
 pub use sessions::{SessionCatalog, SessionEntry};

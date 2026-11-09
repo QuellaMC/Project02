@@ -105,10 +105,10 @@ async fn a_patch_lands_in_her_log_then_its_checkpoint_and_shows_in_the_next_note
         checkpoint,
         json!({
             "version": 1,
-            "storeRevision": 4,
+            "logLines": 2,
             "state": state("curious", "medium"),
         }),
-        "each patch's checkpoint lands after its line, the store's last write"
+        "each patch's checkpoint lands after its line"
     );
     assert_eq!(
         notes(&host).await,

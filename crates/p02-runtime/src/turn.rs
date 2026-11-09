@@ -27,9 +27,8 @@ use p02_role_model::{
 use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
-    PayloadSummary, RecordBody, RecordError, RoundRecord, RuntimeRejection, StorageError,
-    ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection,
-    TurnStatus,
+    PayloadSummary, RecordBody, RoundRecord, RuntimeRejection, StorageError, ToolCallFinished,
+    ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected, TurnRejection, TurnStatus,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinError;
@@ -95,8 +94,6 @@ pub struct RejectedTurn {
 pub enum RunTurnError {
     #[error("the session's storage failed")]
     Storage(#[from] StorageError),
-    #[error("the turn made a record its log cannot hold")]
-    Record(#[from] RecordError),
     #[error("a tool call is past the JSON limits")]
     ToolCall(#[from] BoundJsonError),
     #[error("the earlier conversation's summary is blank")]
@@ -215,7 +212,7 @@ async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) ->
                 RecordBody::TurnRejected(TurnRejected::new(
                     TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
                     message,
-                )?),
+                )),
             )
         })
         .await
@@ -263,17 +260,15 @@ async fn begin(
         let replay = disk.writer.replay()?;
         let history = replay.history();
         let message = replay.session().user_message(line);
-        let mut commit = MessageCommitted::user(message.clone())?;
 
-        if let Some(stamp) = source {
-            commit = commit.with_source(stamp)?;
-        }
-
-        if let Some(stamp) = client_message_id {
-            commit = commit.with_client_message_id(stamp)?;
-        }
-
-        disk.append(&identity, RecordBody::MessageCommitted(commit))?;
+        disk.append(
+            &identity,
+            RecordBody::MessageCommitted(MessageCommitted::user(
+                message.clone(),
+                source,
+                client_message_id,
+            )),
+        )?;
         Ok(Begun {
             history,
             message,
@@ -298,7 +293,7 @@ async fn failed(
         let mut rejected = TurnRejected::new(
             TurnRejection::Runtime(RuntimeRejection::RuntimeFailure),
             RUNTIME_FAILURE.to_owned(),
-        )?;
+        );
 
         rejected.visible_message_ids = committed;
         rejected.tool_call_ids = finished;
@@ -519,7 +514,7 @@ impl OpenTurn<'_> {
         message: String,
         evidence: Vec<Evidence>,
     ) -> Result<(), RunTurnError> {
-        let mut rejected = TurnRejected::new(rejection, message)?;
+        let mut rejected = TurnRejected::new(rejection, message);
 
         {
             let ledger = self.ledger.lock().await;
@@ -688,7 +683,7 @@ impl TurnSink for Round<'_, '_> {
                     message.clone(),
                     round,
                     evidence,
-                )?),
+                )),
             )?;
             Ok(message)
         })

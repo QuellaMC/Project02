@@ -282,14 +282,14 @@ impl CharacterData {
                 .is_some_and(|id| catalog.contains_key(&id));
 
             if !matches!(entry, PathEntry::Directory) {
-                return Err(if listed {
-                    StorageError::NotReal {
+                if listed {
+                    return Err(StorageError::NotReal {
                         path: directory,
                         expected: EntryKind::Directory,
-                    }
-                } else {
-                    StorageError::UnsupportedEntry { path: directory }
-                });
+                    });
+                }
+
+                continue;
             }
 
             if !listed && holds_evidence(&directory)? {

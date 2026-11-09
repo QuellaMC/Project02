@@ -211,18 +211,7 @@ fn read_conversation(directory: &Path) -> Result<Option<Conversation>, StorageEr
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(StorageError::Read { path, source }),
     };
-    let conversation: Conversation =
-        serde_json::from_slice(&content).map_err(|source| StorageError::MalformedConversation {
-            path: path.clone(),
-            source,
-        })?;
-
-    if directory.file_name() != Some(conversation.id().as_str().as_ref()) {
-        return Err(StorageError::MisplacedConversation {
-            path,
-            named: conversation.id().clone(),
-        });
-    }
-
-    Ok(Some(conversation))
+    serde_json::from_slice(&content)
+        .map(Some)
+        .map_err(|source| StorageError::MalformedConversation { path, source })
 }

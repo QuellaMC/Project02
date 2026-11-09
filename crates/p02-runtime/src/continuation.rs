@@ -13,11 +13,13 @@ use p02_role_model::{
     Person, Recollection, newest_turns_within, select_history_window, summarizer_instructions,
 };
 use p02_shared::Identifier;
-use p02_store::{MAX_SUMMARY_CHARS, Summarizer, SummaryProvider};
+use p02_store::{Summarizer, SummaryProvider};
 
 /// The least a summary may hold, however small the window: anything less
 /// is too thin to continue from.
 const MIN_SUMMARY_CHARS: usize = 1_000;
+/// The most a summary may hold, however large the window.
+const MAX_SUMMARY_CHARS: usize = 6_000;
 /// How much of a line the summarizer reads from its start, and from its
 /// end, when the line is longer than the two together.
 const LINE_HEAD_CHARS: usize = 1_200;
@@ -131,7 +133,7 @@ pub(crate) async fn summarize(
 
 /// The most a summary may hold for a window of `window` tokens: a twentieth
 /// of the window at four characters a token, at least
-/// [`MIN_SUMMARY_CHARS`] and at most what the record holds.
+/// [`MIN_SUMMARY_CHARS`] and at most [`MAX_SUMMARY_CHARS`].
 fn summary_budget(window: NonZeroU64) -> NonZeroUsize {
     let share = usize::try_from(window.get() / 5).unwrap_or(usize::MAX);
 

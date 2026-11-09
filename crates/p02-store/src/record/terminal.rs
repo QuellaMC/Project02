@@ -6,8 +6,6 @@ use p02_contracts::{
 use p02_core::{MessageId, VisibleText};
 use serde::{Deserialize, Serialize};
 
-use super::RecordError;
-
 /// How the work of a turn's plugins ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -119,22 +117,15 @@ impl TurnRejection {
 
 impl TurnRejected {
     /// A turn rejected as `rejection` says, `message` saying why.
-    ///
-    /// # Errors
-    ///
-    /// [`RecordError::BlankMessage`] when `message` is blank.
-    pub fn new(rejection: TurnRejection, message: String) -> Result<Self, RecordError> {
-        if message.trim().is_empty() {
-            return Err(RecordError::BlankMessage);
-        }
-
-        Ok(Self {
+    #[must_use]
+    pub fn new(rejection: TurnRejection, message: String) -> Self {
+        Self {
             rejection,
             message,
             visible_message_ids: Vec::new(),
             tool_call_ids: Vec::new(),
             runtime_plugin_evidence: Vec::new(),
-        })
+        }
     }
 
     #[must_use]
@@ -235,31 +226,27 @@ struct WireRejected {
 }
 
 impl TryFrom<WireRejected> for TurnRejected {
-    type Error = RecordError;
+    type Error = &'static str;
 
     fn try_from(wire: WireRejected) -> Result<Self, Self::Error> {
         let rejection = match (DecisionRejectionReason::parse(&wire.reason), wire.round) {
             (Some(reason), Some(round)) => TurnRejection::Judged { round, reason },
-            (Some(_), None) => return Err(RecordError::RejectionRound),
-            (None, round) => {
-                let rejection = RuntimeRejection::ALL
+            (Some(_), None) => return Err("a turn a verdict rejected names the round it judged"),
+            (None, _) => TurnRejection::Runtime(
+                RuntimeRejection::ALL
                     .into_iter()
                     .find(|rejection| rejection.as_str() == wire.reason)
-                    .ok_or_else(|| RecordError::UnknownReason(wire.reason.clone()))?;
-
-                if round.is_some() {
-                    return Err(RecordError::RejectionRound);
-                }
-
-                TurnRejection::Runtime(rejection)
-            }
+                    .ok_or("the turn records no reason this build knows")?,
+            ),
         };
-        let mut rejected = Self::new(rejection, wire.message)?;
 
-        rejected.visible_message_ids = wire.visible_message_ids;
-        rejected.tool_call_ids = wire.tool_call_ids;
-        rejected.runtime_plugin_evidence = wire.runtime_plugin_evidence;
-        Ok(rejected)
+        Ok(Self {
+            rejection,
+            message: wire.message,
+            visible_message_ids: wire.visible_message_ids,
+            tool_call_ids: wire.tool_call_ids,
+            runtime_plugin_evidence: wire.runtime_plugin_evidence,
+        })
     }
 }
 

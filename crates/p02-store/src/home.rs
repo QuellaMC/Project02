@@ -107,15 +107,15 @@ impl Home {
     }
 
     /// Refuses, writing nothing, a folder that is no home and could not be
-    /// made one: one marked as something else; one with no marker that lies
-    /// inside a character's data, or holds history or anything else a home
-    /// does not hold before its marker; or one whose control entries are not
-    /// the real files and directories a home's state lives in, since a link
-    /// would carry that state outside it. Every way into a home asks this
-    /// first. The folder is judged from one listing of it: by its marker
-    /// when the listing holds one, else by what lies there, so a marker
-    /// written as the folder is judged, by a character's first data, never
-    /// reads as a foreign file.
+    /// made one: one marked as something else; one with no marker that
+    /// holds history or anything else a home does not hold before its
+    /// marker; or one whose control entries are not the real files and
+    /// directories a home's state lives in, since a link would carry that
+    /// state outside it. Every way into a home asks this first. The folder
+    /// is judged from one listing of it: by its marker when the listing
+    /// holds one, else by what lies there, so a marker written as the
+    /// folder is judged, by a character's first data, never reads as a
+    /// foreign file.
     ///
     /// # Errors
     ///
@@ -147,7 +147,6 @@ impl Home {
             };
         }
 
-        self.check_outside_character_data()?;
         self.check_unmarked(entries)
     }
 
@@ -193,33 +192,6 @@ impl Home {
         let lease = acquire(&[(&self.locks_root(), &Resource::Daemon)])?;
 
         Ok(DaemonLease::new(self.clone(), lease))
-    }
-
-    /// A folder inside a character's data is hers, whatever it holds: the
-    /// nearest marker above it says so, hers, or a home's whose character
-    /// data it lies in. A path that merely runs through a folder named
-    /// `character-data` is no such folder.
-    fn check_outside_character_data(&self) -> Result<(), StorageError> {
-        for above in self.root.ancestors().skip(1) {
-            let data = match marker::read(above) {
-                Ok(Some(Marker::CharacterData { .. })) => above.to_path_buf(),
-                Ok(Some(Marker::Home { .. })) => above.join(CHARACTER_DATA_DIRECTORY),
-                // A folder above that is no store, or whose marker cannot be
-                // read, says nothing of this one.
-                Ok(None) | Err(_) => continue,
-            };
-
-            return if self.root.starts_with(&data) {
-                Err(StorageError::InsideCharacterData {
-                    path: self.root.clone(),
-                    data,
-                })
-            } else {
-                Ok(())
-            };
-        }
-
-        Ok(())
     }
 
     fn check_unmarked(&self, entries: Vec<(OsString, PathEntry)>) -> Result<(), StorageError> {

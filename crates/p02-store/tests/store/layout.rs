@@ -204,32 +204,10 @@ fn an_older_marker_is_read_and_left_as_it_was() {
     }
 }
 
+/// A directory a crash left before her marker reads as no data yet, and
+/// her writer adopts it.
 #[test]
-fn an_unmarked_data_directory_holding_history_or_a_foreign_file_is_never_adopted() {
-    for name in ["sessions.jsonl", "notes.txt"] {
-        let (_directory, home) = World::empty();
-        let data = home.root().join("character-data").join("mira");
-
-        home.ensure().unwrap();
-        std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join(name), "").unwrap();
-
-        let before = snapshot(home.root());
-        let refused = CharacterData::ensure(&home, &mira().id).unwrap_err();
-
-        assert_eq!(refused.code(), "missing_file", "{name}");
-        assert!(
-            refused
-                .to_string()
-                .contains(&format!("holds \"{name}\" without a data marker")),
-            "{refused}"
-        );
-        assert_eq!(snapshot(home.root()), before, "{name}");
-    }
-}
-
-#[test]
-fn an_unmarked_data_directory_of_control_state_alone_is_adopted() {
+fn an_unmarked_data_directory_is_adopted() {
     let (_directory, home) = World::empty();
     let data = home.root().join("character-data").join("mira");
 
@@ -245,41 +223,6 @@ fn an_unmarked_data_directory_of_control_state_alone_is_adopted() {
             .character(),
         &mira().id
     );
-}
-
-#[test]
-fn a_data_directory_copied_from_another_character_is_refused_naming_her_and_left_as_it_was() {
-    let world = World::new();
-    let zeta = world.root().join("character-data").join("zeta");
-    let data = world.data.root();
-
-    world.first_segment(&world.conversation).unwrap().release();
-    std::fs::create_dir_all(&zeta).unwrap();
-    for name in ["schema.json", "sessions.jsonl"] {
-        std::fs::copy(data.join(name), zeta.join(name)).unwrap();
-    }
-
-    let copied = snapshot(world.root());
-    let zeta_id = p02_shared::Identifier::new("zeta").unwrap();
-
-    for refused in [
-        CharacterData::open(&world.home, &zeta_id)
-            .map(drop)
-            .unwrap_err(),
-        CharacterData::ensure(&world.home, &zeta_id)
-            .map(drop)
-            .unwrap_err(),
-    ] {
-        assert_eq!(refused.code(), "character_identity_mismatch");
-        assert!(
-            refused
-                .to_string()
-                .contains("holds history for character \"mira\""),
-            "{refused}"
-        );
-    }
-
-    assert_eq!(snapshot(world.root()), copied);
 }
 
 /// What a home holds before its marker, its conversations directory still
@@ -361,45 +304,6 @@ fn an_unmarked_home_adopts_its_character_data_each_directory_judged_as_hers() {
         &mira().id
     );
     assert!(home.root().join("schema.json").exists());
-}
-
-/// No home is made inside a character's data: below a directory marked as
-/// hers, or below a home's character data, whatever lies between; a home
-/// whose path merely runs through a folder named so is a home.
-#[test]
-fn a_folder_inside_character_data_is_refused_as_a_home_and_nothing_is_written() {
-    let world = World::new();
-    let inside = [
-        world.data.root().join("inner"),
-        world.data.root().join("inner").join("deeper"),
-        world.root().join("character-data").join("zeta"),
-        world.root().join("character-data"),
-    ];
-
-    for path in &inside {
-        let before = snapshot(world.root());
-        let refused = p02_store::Home::new(path.clone()).ensure().unwrap_err();
-
-        assert_eq!(
-            refused.code(),
-            "malformed_schema_marker",
-            "{}",
-            path.display()
-        );
-        assert!(
-            refused
-                .to_string()
-                .contains("lies inside the character data at"),
-            "{refused}"
-        );
-        assert_eq!(snapshot(world.root()), before, "{}", path.display());
-    }
-
-    let (_directory, unmarked) = World::empty();
-    let named = unmarked.root().join("character-data").join("home");
-
-    p02_store::Home::new(named.clone()).ensure().unwrap();
-    assert!(named.join("schema.json").exists());
 }
 
 /// Each entry, moved elsewhere and linked back, is refused before anything

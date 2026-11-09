@@ -122,14 +122,13 @@ fn a_continued_session_opens_with_its_summary_and_the_turns_it_carried() {
             session_id: world.segment(1),
             last_event_id: EventId::new("evt_1").unwrap(),
         },
-        "  They talked about tea.  ",
+        "They talked about tea.".to_owned(),
         NonZeroU32::MIN,
         carried.clone(),
         Summarizer::Fallback {
             reason: "The provider has no model to ask.".to_owned(),
         },
-    )
-    .unwrap();
+    );
 
     second.push(
         &p02_core::EventIdentity::new(

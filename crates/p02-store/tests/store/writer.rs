@@ -50,8 +50,7 @@ fn a_record_the_log_does_not_take_is_refused_and_nothing_lands() {
             },
             runtime_plugin_evidence: Vec::new(),
         }),
-    )
-    .unwrap();
+    );
 
     writer.append(script.records[0].clone()).unwrap();
 

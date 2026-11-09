@@ -1,24 +1,23 @@
 //! A character's data directory, `<home>/character-data/<id>/`: her
 //! sessions and their catalog, the record of the lines her conversations
-//! took, her plugins' data, her locks, her settings overlay. Its marker
-//! names her; nothing in it is read or written for anyone else.
+//! took, her plugins' data, her locks, her settings overlay, and her
+//! marker.
 
 use std::path::{Path, PathBuf};
 
 use p02_characters::CharacterVersion;
 use p02_core::Timestamp;
-use p02_shared::{Identifier, PathEntry, create_directories, describe_entry, list_directory};
+use p02_shared::{Identifier, create_directories};
 
 use crate::error::StorageError;
 use crate::home::{Home, check_real};
 use crate::layout::{
-    CONFIG_FILE, EntryKind, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY, SCHEMA_FILE,
-    SESSION_CATALOG_FILE, SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
+    CONFIG_FILE, EntryKind, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY, SESSION_CATALOG_FILE,
+    SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
 };
 use crate::marker::{self, Marker, Scope};
-use p02_shared::temporary_target;
 
-/// A character's data directory whose marker names her.
+/// A character's data directory, marked as one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterData {
     home: Home,
@@ -42,7 +41,7 @@ impl CharacterData {
 
         home.check()?;
 
-        if let Some(marker) = adoptable_marker(home, &root)? {
+        if let Some(marker) = checked_marker(home, &root)? {
             Self::of_marker(home, character, root.clone(), marker)?;
         }
 
@@ -56,29 +55,26 @@ impl CharacterData {
                 created_at: Timestamp::now(),
                 package_version: None,
             },
-            || adoptable_marker(home, &root).map(drop),
+            || checked_marker(home, &root).map(drop),
         )?;
 
         Self::of_marker(home, character, root, marker)
     }
 
-    /// The reader's way in: the character's data as it is, `None` while she
-    /// has none, writing nothing. The home is judged first, as
-    /// [`Home::check`] judges it. A directory without a marker is never
-    /// adopted when it holds history or anything foreign, and one marked
-    /// for another character is refused, naming her.
+    /// The reader's way in: the character's data as it is, `None` while
+    /// her directory has no marker yet, writing nothing. The home is judged
+    /// first, as [`Home::check`] judges it.
     ///
     /// # Errors
     ///
     /// [`StorageError`] for a refused home, or a refused directory: one
-    /// marked as another character's or as something else, an unmarked one
-    /// holding more than control files, a control entry that is not a real
-    /// file or directory, or a marker of another schema version.
+    /// marked as a home, a control entry that is not a real file or
+    /// directory, or a marker that is malformed or a newer build's.
     pub fn open(home: &Home, character: &Identifier) -> Result<Option<Self>, StorageError> {
         let root = home.data_root(character);
 
         home.check()?;
-        adoptable_marker(home, &root)?
+        checked_marker(home, &root)?
             .map(|marker| Self::of_marker(home, character, root, marker))
             .transpose()
     }
@@ -125,7 +121,7 @@ impl CharacterData {
                 },
                 home @ Marker::Home { .. } => home,
             },
-            || adoptable_marker(&self.home, &self.root).map(drop),
+            || checked_marker(&self.home, &self.root).map(drop),
         )?;
 
         *self = Self::of_marker(&self.home, &self.character, self.root.clone(), marker)?;
@@ -176,21 +172,12 @@ impl CharacterData {
     ) -> Result<Self, StorageError> {
         match marker {
             Marker::CharacterData {
-                character: holds,
-                package_version,
-                ..
-            } if holds == *character => Ok(Self {
+                package_version, ..
+            } => Ok(Self {
                 home: home.clone(),
-                character: holds,
+                character: character.clone(),
                 root,
                 package_version,
-            }),
-            Marker::CharacterData {
-                character: holds, ..
-            } => Err(StorageError::CharacterMismatch {
-                path: root,
-                holds,
-                requested: character.clone(),
             }),
             Marker::Home { .. } => Err(StorageError::WrongScope {
                 path: root,
@@ -200,29 +187,12 @@ impl CharacterData {
     }
 }
 
-/// The marker of the data directory at `root` once the directory is known
-/// to be one this store may read and write: real, with real control
-/// entries, and, while unmarked, holding nothing but control files. `None`
-/// for a directory that is absent, or unmarked and holding no history yet.
-fn adoptable_marker(home: &Home, root: &Path) -> Result<Option<Marker>, StorageError> {
+/// The marker of the data directory at `root`, `None` while it has none,
+/// once it and its control entries are known to be real: a link there
+/// would carry her state outside it.
+fn checked_marker(home: &Home, root: &Path) -> Result<Option<Marker>, StorageError> {
     check_real(&home.character_data_root(), EntryKind::Directory)?;
-
-    match describe_entry(root) {
-        PathEntry::Absent => return Ok(None),
-        PathEntry::Directory => {}
-        PathEntry::Unreadable(source) => {
-            return Err(StorageError::Read {
-                path: root.to_path_buf(),
-                source,
-            });
-        }
-        PathEntry::File | PathEntry::Link | PathEntry::Other => {
-            return Err(StorageError::NotReal {
-                path: root.to_path_buf(),
-                expected: EntryKind::Directory,
-            });
-        }
-    }
+    check_real(root, EntryKind::Directory)?;
 
     for (name, expected) in [
         (LOCKS_DIRECTORY, EntryKind::Directory),
@@ -235,45 +205,5 @@ fn adoptable_marker(home: &Home, root: &Path) -> Result<Option<Marker>, StorageE
         check_real(&root.join(name), expected)?;
     }
 
-    if let Some(marker) = marker::read(root)? {
-        return Ok(Some(marker));
-    }
-
-    match foreign_entry(root)? {
-        None => Ok(None),
-        // A sibling making the same character's directory may have written
-        // its marker and its first session since the marker was read.
-        Some(entry) => marker::read(root)?
-            .map(Some)
-            .ok_or_else(|| StorageError::UnmarkedData {
-                path: root.to_path_buf(),
-                entry,
-            }),
-    }
-}
-
-/// The first entry of an unmarked data directory that is more than the
-/// control state a directory holds before its first session: the overlay,
-/// the locks, an empty sessions directory, and what a writer of the marker
-/// or the overlay left when it died.
-fn foreign_entry(root: &Path) -> Result<Option<String>, StorageError> {
-    let entries = list_directory(root).map_err(StorageError::read(root))?;
-
-    for (name, _) in entries {
-        let control = match name.to_str() {
-            Some(CONFIG_FILE | LOCKS_DIRECTORY) => true,
-            Some(SESSIONS_DIRECTORY) => list_directory(&root.join(SESSIONS_DIRECTORY))
-                .map_err(StorageError::read(root.join(SESSIONS_DIRECTORY)))?
-                .is_empty(),
-            Some(name) => temporary_target(name.as_ref())
-                .is_some_and(|target| [SCHEMA_FILE, CONFIG_FILE].contains(&target)),
-            None => false,
-        };
-
-        if !control {
-            return Ok(Some(name.to_string_lossy().into_owned()));
-        }
-    }
-
-    Ok(None)
+    marker::read(root)
 }

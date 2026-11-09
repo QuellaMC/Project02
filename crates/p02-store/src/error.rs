@@ -29,28 +29,6 @@ pub enum StorageError {
     #[error("{} is {}, not {}", .path.display(), .found.article(), .found.other().article())]
     WrongScope { path: PathBuf, found: Scope },
     #[error(
-        "{} lies inside the character data at {}, not a Project02 home",
-        .path.display(),
-        .data.display()
-    )]
-    InsideCharacterData { path: PathBuf, data: PathBuf },
-    #[error(
-        "character data directory {} holds history for character \"{holds}\" but character \
-         \"{requested}\" was requested: select \"{holds}\", or start fresh data for \
-         \"{requested}\"",
-        .path.display()
-    )]
-    CharacterMismatch {
-        path: PathBuf,
-        holds: Identifier,
-        requested: Identifier,
-    },
-    #[error(
-        "character data directory {} holds \"{entry}\" without a data marker; refusing to adopt it",
-        .path.display()
-    )]
-    UnmarkedData { path: PathBuf, entry: String },
-    #[error(
         "{} holds \"{entry}\" and no home marker; choose an empty folder or an existing \
          Project02 home",
         .path.display()
@@ -74,18 +52,11 @@ pub enum StorageError {
         .path.display()
     )]
     UncataloguedSession { path: PathBuf },
-    #[error("sessions directory {} holds an entry that is no session", .path.display())]
-    UnsupportedEntry { path: PathBuf },
     #[error("conversation record {} is malformed", .path.display())]
     MalformedConversation {
         path: PathBuf,
         #[source]
         source: serde_json::Error,
-    },
-    #[error("conversation record {} names \"{named}\", not its own directory", .path.display())]
-    MisplacedConversation {
-        path: PathBuf,
-        named: ConversationId,
     },
     #[error("the record does not fit the session's log")]
     Refused(#[source] ReplayError),
@@ -111,16 +82,11 @@ pub enum StorageError {
     #[error("a conversation cannot be made between these participants")]
     InvalidParticipants(#[source] ParseConversationError),
     #[error(
-        "\"{path}\" is no path of a plugin's store: segments of letters, digits, '.', '_' and \
-         '-', each beginning with a letter or a digit, the last ending in .json or .jsonl"
+        "\"{path}\" is no {expected} of a plugin's store: segments of letters, digits, '.', '_' \
+         and '-', each beginning with a letter or a digit, a document's last ending in .json and \
+         a log's in .jsonl"
     )]
-    UnsafeStorePath { path: String },
-    #[error("\"{path}\" names a {found}, not a {expected}")]
-    WrongFileKind {
-        path: String,
-        found: FileKind,
-        expected: FileKind,
-    },
+    InvalidStorePath { path: String, expected: FileKind },
     #[error("the value for \"{path}\" is not within the JSON limits")]
     StoreValueLimits {
         path: String,
@@ -133,17 +99,6 @@ pub enum StorageError {
         #[source]
         source: ValueProblem,
     },
-    #[error("the ledger {} of a plugin's store is malformed", .path.display())]
-    MalformedLedger {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error(
-        "{} is neither what the write its store journaled found there nor what it wrote",
-        .path.display()
-    )]
-    InterruptedWriteConflict { path: PathBuf },
     #[error("could not open database {}", .path.display())]
     Database {
         path: PathBuf,
@@ -178,29 +133,20 @@ impl StorageError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NewerSchemaVersion { .. } => "unsupported_schema_version",
-            Self::MalformedMarker { .. }
-            | Self::WrongScope { .. }
-            | Self::InsideCharacterData { .. } => "malformed_schema_marker",
-            Self::CharacterMismatch { .. } | Self::NotAParticipant { .. } => {
-                "character_identity_mismatch"
-            }
-            Self::UnmarkedData { .. }
-            | Self::UnmarkedHome { .. }
+            Self::MalformedMarker { .. } | Self::WrongScope { .. } => "malformed_schema_marker",
+            Self::NotAParticipant { .. } => "character_identity_mismatch",
+            Self::UnmarkedHome { .. }
             | Self::NotReal { .. }
             | Self::NoMarker { .. }
             | Self::MissingSessionDirectory { .. }
             | Self::MissingLog { .. }
             | Self::MissingCatalog { .. }
             | Self::UncataloguedSession { .. } => "missing_file",
-            Self::UnsupportedEntry { .. }
-            | Self::MalformedConversation { .. }
-            | Self::MisplacedConversation { .. }
+            Self::MalformedConversation { .. }
             | Self::Refused(_)
             | Self::InvalidParticipants(_)
-            | Self::MalformedDocument { .. }
-            | Self::MalformedLedger { .. }
-            | Self::InterruptedWriteConflict { .. } => "malformed_record",
-            Self::UnsafeStorePath { .. } | Self::WrongFileKind { .. } => "invalid_store_path",
+            | Self::MalformedDocument { .. } => "malformed_record",
+            Self::InvalidStorePath { .. } => "invalid_store_path",
             Self::StoreValueLimits { .. } => "invalid_store_value",
             Self::ConcurrentWrite { .. } => "concurrent_write",
             Self::Busy {

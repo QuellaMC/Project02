@@ -526,8 +526,8 @@ it("storage.plugin-store-damage: a plugin's damaged state is passed over and sai
   const outOfRange = JSON.parse(kept) as {
     readonly state: Record<string, string>;
   };
-  // The checkpoint first, while it still names the store's revision, so it
-  // is read and not merely outgrown.
+  // The checkpoint first, while the log still holds the lines it counts,
+  // so it is read and not merely outgrown.
   const damages = [
     [
       'a checkpoint value out of range',

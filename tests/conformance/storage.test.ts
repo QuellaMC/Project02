@@ -22,7 +22,6 @@ import {
   configJson,
   createHome,
   sessionLog,
-  snapshot,
 } from './harness/home.ts';
 import {
   calling,
@@ -578,78 +577,6 @@ it("storage.schema-marker: the home and each character's data directory carry a 
     expect(await refused.exit(), says).toBe(1);
     expect(refused.stderr(), says).toContain(says);
     expect(contentsOf(homeMarker), says).toEqual(bytes ?? []);
-  }
-});
-
-it('storage.data-marker-mismatch: a data directory copied from another character is refused for every read and write, naming the character it holds history for, and its files stay as they were', async () => {
-  const home = createHome({
-    characters: {
-      zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
-    },
-  });
-  const first = await startDaemon(home, fixedReplies);
-  const firstWire = wireOf(first);
-
-  for (const characterId of ['mira', 'zeta']) {
-    const say = await converse(firstWire, characterId);
-
-    await say('Hello.', characterId);
-  }
-
-  const {conversationId} = await conversationOf(firstWire, 'zeta');
-
-  first.signal('SIGINT');
-  await first.exit();
-
-  const zetaData = join(home, 'character-data', 'zeta');
-
-  rmSync(zetaData, {recursive: true});
-  cpSync(join(home, 'character-data', 'mira'), zetaData, {recursive: true});
-
-  const copied = snapshot(zetaData);
-  const wire = wireOf(await startDaemon(home, fixedReplies));
-  const holdsMira = expect.stringContaining(
-    'holds history for character "mira"',
-  ) as string;
-
-  expect(await wire.start('zeta')).toMatchObject({
-    character: {state: 'failed', diagnostic: holdsMira},
-  });
-  await expect(wire.open('zeta')).resolves.toMatchObject({
-    status: 'refused',
-    message: holdsMira,
-  });
-  await expect(wire.history(conversationId)).resolves.toMatchObject({
-    status: 'failed',
-    message: holdsMira,
-  });
-  expect(snapshot(zetaData)).toEqual(copied);
-});
-
-it("storage.marker-less-history: a character data directory holding history or a foreign file but no marker is never adopted: the character fails, and nothing is written, not even the home's schema.json", async () => {
-  for (const [name, bytes] of [
-    ['sessions.jsonl', ''],
-    ['notes.txt', 'Mine.'],
-  ] as const) {
-    const home = createHome({
-      'character-data': {mira: {[name]: bytes}},
-    });
-    const daemon = await startDaemon(home, fixedReplies);
-
-    expect(await wireOf(daemon).start('mira'), name).toMatchObject({
-      character: {
-        state: 'failed',
-        diagnostic: expect.stringContaining(
-          `holds "${name}" without a data marker`,
-        ) as string,
-      },
-    });
-    daemon.signal('SIGINT');
-    await daemon.exit();
-    expect(readdirSync(join(home, 'character-data', 'mira')), name).toEqual([
-      name,
-    ]);
-    expect(readdirSync(home), name).not.toContain('schema.json');
   }
 });
 

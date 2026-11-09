@@ -2,10 +2,10 @@
 //! aspects of her own inner state, shown to her before each turn and
 //! changed by her alone through one tool. Each accepted patch is a line of
 //! her log, `events.jsonl`, the one truth of the state; `checkpoint.json`
-//! holds what the log folds to, so a read folds nothing. The checkpoint is
-//! a cache: one the log has outgrown, none, or one that does not read is
-//! folded anew from the log, and a line of the log that is no patch is
-//! passed over and said.
+//! holds what the log folds to and how many lines it held then, so a read
+//! folds nothing. The checkpoint is a cache: one the log has outgrown,
+//! none, or one that does not read is folded anew from the log, and a line
+//! of the log that is no patch is passed over and said.
 
 use std::sync::Arc;
 
@@ -246,8 +246,9 @@ fn current(files: &LeasedStore<'_>) -> Result<(Folded, bool), FilesError> {
     Ok((fold(&files.read_jsonl(EVENTS)?), false))
 }
 
-/// The state the checkpoint holds, while it reads and was written at the
-/// store's revision; it is refused only when a newer build wrote it.
+/// The state the checkpoint holds, while it reads and her log holds the
+/// lines it folded and no more; it is refused only when a newer build
+/// wrote it.
 fn checkpointed(files: &LeasedStore<'_>) -> Result<Option<State>, FilesError> {
     let Ok(Some(checkpoint)) = files.read_json(CHECKPOINT) else {
         return Ok(None);
@@ -264,9 +265,9 @@ fn checkpointed(files: &LeasedStore<'_>) -> Result<Option<State>, FilesError> {
         )));
     }
 
-    let written_at = checkpoint.get("storeRevision").and_then(Value::as_u64);
+    let folded = checkpoint.get("logLines").and_then(Value::as_u64);
 
-    Ok(if written_at == Some(files.revision()?) {
+    Ok(if folded == Some(files.count_jsonl(EVENTS)?) {
         checkpoint.get("state").and_then(State::from_value)
     } else {
         None
@@ -309,16 +310,16 @@ fn line(event: &str, call: &str, patch: Patch, before: State, after: State) -> V
     })
 }
 
-/// Writes the checkpoint of `state`, naming the store's revision once it
-/// lands, which any later write moves on.
+/// Writes the checkpoint of `state`, what her log folds to now, with the
+/// number of lines it holds.
 fn write_checkpoint(files: &mut LeasedStore<'_>, state: State) -> Result<(), FilesError> {
-    let revision = files.revision()? + 1;
+    let lines = files.count_jsonl(EVENTS)?;
 
     files.write_json(
         CHECKPOINT,
         &json!({
             "version": CHECKPOINT_VERSION,
-            "storeRevision": revision,
+            "logLines": lines,
             "state": state.to_value(),
         }),
     )?;

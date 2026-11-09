@@ -575,8 +575,7 @@ impl Disk {
         identity: &EventIdentity,
         body: RecordBody,
     ) -> Result<(), RunTurnError> {
-        self.writer
-            .append(LogRecord::new(identity.clone(), body)?)?;
+        self.writer.append(LogRecord::new(identity.clone(), body))?;
         Ok(())
     }
 
@@ -592,24 +591,19 @@ impl Disk {
             .continue_session(&self.holder, &from)
             .map_err(|error| error_chain(&error))?;
         let to = writer.session_id().clone();
-        let committed = SessionContinuation::new(
-            to.clone(),
-            next.continued_from,
-            &next.summary,
-            next.summarized_turn_count,
-            next.carried_turns,
-            next.summarizer,
-        )
-        .and_then(|continuation| {
-            LogRecord::new(
-                EventIdentity::mint(),
-                RecordBody::SessionContinued(SessionContinued {
-                    session_continuation: continuation,
-                }),
-            )
-        })
-        .map_err(RunTurnError::from)
-        .and_then(|record| Ok(writer.append(record)?));
+        let committed = writer.append(LogRecord::new(
+            EventIdentity::mint(),
+            RecordBody::SessionContinued(SessionContinued {
+                session_continuation: SessionContinuation::new(
+                    to.clone(),
+                    next.continued_from,
+                    next.summary,
+                    next.summarized_turn_count,
+                    next.carried_turns,
+                    next.summarizer,
+                ),
+            }),
+        ));
 
         match committed {
             Ok(()) => Ok((std::mem::replace(&mut self.writer, writer), to)),
