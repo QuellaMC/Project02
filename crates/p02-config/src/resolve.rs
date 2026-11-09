@@ -5,13 +5,11 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
-use std::num::NonZeroU64;
 use std::path::PathBuf;
 
 use p02_characters::{CharacterDefinition, CharacterVersion, Discovery};
 use p02_contracts::{ConfigField, ConfigScope};
-use p02_core::SpeakerName;
-use p02_shared::{BaseUrl, Fingerprint, Identifier};
+use p02_shared::{Fingerprint, Identifier};
 use p02_store::{CharacterData, Home, SettingsDocument, StorageError};
 use serde_json::{Map, Value, json};
 
@@ -19,12 +17,11 @@ use crate::activation;
 use crate::change::ConfigTarget;
 use crate::conceal::conceal_document;
 use crate::declaration::{
-    Declared, Layer, Namespace, RoleModelProvider, Sections, Source, Target, authorable, base_url,
-    context_window_tokens, host_fields, outside_scope, role_model_provider, text,
-    user_display_name,
+    Declared, Layer, Namespace, Sections, Source, Target, authorable, outside_scope,
 };
 use crate::diagnostic::{Code, Diagnostic};
 use crate::document::{Document, Read, Stanza, ignored_key, unknown};
+use crate::host::{DEFAULT_MEMORY_PROVIDER, HostSettings, host_fields};
 use crate::materialize::merged_overlay;
 
 /// A target's settings, resolved: the home's, or one character's over the
@@ -333,7 +330,11 @@ impl<'s> Resolution<'s> {
             },
             skipped,
         );
-        let found = activation::judge(character, resolution.chosen_memory(), &resolution.resolved);
+        let found = activation::judge(
+            character,
+            DEFAULT_MEMORY_PROVIDER.value(&resolution.host).as_deref(),
+            &resolution.resolved,
+        );
 
         resolution.diagnostics.extend(found);
         Ok(resolution)
@@ -370,10 +371,10 @@ impl<'s> Resolution<'s> {
                 }
             })
             .collect();
-        let chosen_memory = memory_choice(&host);
+        let chosen_memory = DEFAULT_MEMORY_PROVIDER.value(&host);
         let resolved: Vec<Section<'s>> = sections
             .declared()
-            .map(|declared| section(declared, &target, &layers, chosen_memory))
+            .map(|declared| section(declared, &target, &layers, chosen_memory.as_deref()))
             .collect();
         let mut all: Vec<Diagnostic> = layers
             .present()
@@ -439,49 +440,14 @@ impl<'s> Resolution<'s> {
         })
     }
 
-    /// The memory provider the settings choose, when they choose one.
-    fn chosen_memory(&self) -> Option<&str> {
-        memory_choice(&self.host)
-    }
-
     /// What a character runs on by these settings: the host's values, and
     /// the plugins that run by them, each with its values in effect, so a
     /// field left to its default and one set to the same value run her
     /// alike. Two that are equal run the same character, so a running one
     /// is rebuilt only when hers differ from those she was built from.
     #[must_use]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "a host field with a default resolves to a value: each default meets its rule"
-    )]
     pub fn settings(&self) -> CharacterSettings {
-        let field = |name: &str| {
-            self.host
-                .iter()
-                .find(|field| field.declaration.name().as_str() == name)
-        };
-        let value = |name: &str| field(name).and_then(|field| field.effective.value());
-        // A refused name or window stops her start, so until it is put
-        // right the default stands in for it only here.
-        let or_default = |name: &str| {
-            value(name).or_else(|| field(name).and_then(|field| field.declaration.default_value()))
-        };
-        let host = HostSettings {
-            user_display_name: or_default("userDisplayName")
-                .and_then(user_display_name)
-                .expect("userDisplayName resolves to a name"),
-            role_model_provider: value("roleModelProvider").and_then(role_model_provider),
-            nvidia_api_key: value("nvidiaApiKey").and_then(text).map(str::to_owned),
-            nvidia_model: value("nvidiaModel").and_then(text).map(str::to_owned),
-            nvidia_base_url: value("nvidiaBaseUrl").and_then(base_url),
-            context_window_tokens: or_default("contextWindowTokens")
-                .and_then(context_window_tokens)
-                .expect("contextWindowTokens resolves to a number of tokens"),
-            default_memory_provider: value("defaultMemoryProvider")
-                .and_then(text)
-                .map(str::to_owned),
-            enabled: value("enabled").and_then(Value::as_bool) == Some(true),
-        };
+        let host = HostSettings::of(&self.host);
         let plugins = self
             .resolved
             .iter()
@@ -545,41 +511,6 @@ impl<'s> Resolution<'s> {
     }
 }
 
-/// The host's values a character runs on.
-#[derive(Clone, PartialEq, Eq)]
-pub struct HostSettings {
-    /// The name the person goes by, trimmed.
-    pub user_display_name: SpeakerName,
-    /// None until the person chooses one, and no character starts before.
-    pub role_model_provider: Option<RoleModelProvider>,
-    pub nvidia_api_key: Option<String>,
-    pub nvidia_model: Option<String>,
-    pub nvidia_base_url: Option<BaseUrl>,
-    pub context_window_tokens: NonZeroU64,
-    pub default_memory_provider: Option<String>,
-    /// Whether the character is switched on.
-    pub enabled: bool,
-}
-
-impl fmt::Debug for HostSettings {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("HostSettings")
-            .field("user_display_name", &self.user_display_name)
-            .field("role_model_provider", &self.role_model_provider)
-            .field(
-                "nvidia_api_key",
-                &self.nvidia_api_key.as_ref().map(|_| "[redacted]"),
-            )
-            .field("nvidia_model", &self.nvidia_model)
-            .field("nvidia_base_url", &self.nvidia_base_url)
-            .field("context_window_tokens", &self.context_window_tokens)
-            .field("default_memory_provider", &self.default_memory_provider)
-            .field("enabled", &self.enabled)
-            .finish()
-    }
-}
-
 /// What a character runs on: the host's values, and each plugin that runs
 /// by her settings with each of its values in effect by field name, a
 /// declared default among them, secrets in the clear, for the plugin host
@@ -620,14 +551,6 @@ impl fmt::Debug for CharacterSettings {
             )
             .finish()
     }
-}
-
-/// The memory provider `host`'s values choose, when they choose one.
-fn memory_choice<'h>(host: &'h [Field<'_>]) -> Option<&'h str> {
-    host.iter()
-        .find(|field| field.declaration.name().as_str() == "defaultMemoryProvider")
-        .and_then(|field| field.effective.value())
-        .and_then(Value::as_str)
 }
 
 /// The value the nearest of `layers` holds, judged by `accepts`, else the

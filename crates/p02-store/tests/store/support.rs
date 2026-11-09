@@ -52,8 +52,8 @@ impl World {
         let data = CharacterData::ensure(&home, &mira().id).unwrap();
         let conversation = home
             .ensure_conversation(vec![
-                Participant::character(mira()),
-                Participant::local_user(sam()),
+                Participant::character(mira().id),
+                Participant::local_user(),
             ])
             .unwrap();
 
@@ -141,10 +141,7 @@ pub(crate) fn sam() -> SpeakerName {
 pub(crate) fn conversation_named(id: &str) -> Conversation {
     Conversation::new(
         ConversationId::new(id).unwrap(),
-        vec![
-            Participant::character(mira()),
-            Participant::local_user(sam()),
-        ],
+        vec![Participant::character(mira().id), Participant::local_user()],
         Timestamp::new("2026-10-21T00:00:00.000Z").unwrap(),
     )
     .unwrap()

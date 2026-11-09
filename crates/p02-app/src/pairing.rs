@@ -7,7 +7,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use p02_config::{
     ChangeOutcome, ConfigChange, ConfigTarget, Connector, Namespace, Operation, Resolution,
-    connectors,
 };
 use p02_core::{ClientStamp, SpeakerName, Timestamp};
 use p02_shared::Fingerprint;
@@ -73,14 +72,14 @@ impl Daemon {
         label: SpeakerName,
         source: ClientStamp,
     ) -> PairingOutcome {
-        let Some(connector) = connectors()
-            .iter()
-            .find(|known| known.id().as_str() == connector)
-        else {
-            return PairingOutcome::Refused {
-                reason: PairingRefusal::UnknownConnector,
-                message: format!("Connector \"{connector}\" does not pair."),
-            };
+        let connector = match p02_config::connector(connector) {
+            Ok(connector) => connector,
+            Err(unknown) => {
+                return PairingOutcome::Refused {
+                    reason: PairingRefusal::UnknownConnector,
+                    message: unknown.to_string(),
+                };
+            }
         };
         let daemon = self.clone();
 

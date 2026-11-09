@@ -449,7 +449,6 @@ impl Toy {
         self.fields.push(json!({
             "name": name,
             "description": "A toy setting.",
-            "required": false,
             "secret": false,
             "valueType": "string",
             "redactionLabels": [],

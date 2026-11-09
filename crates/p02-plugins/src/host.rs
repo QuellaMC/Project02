@@ -3,9 +3,9 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use p02_contracts::{
     CharacterStorage, DatabaseOpener, Declaration, DuplicateToolError, FactoryInput,
-    FileStoreBackend, HOST_PLUGIN, Manifest, MissingConfigValueError, PluginError,
-    PluginToolDefinition, PluginToolDefinitions, ProvidedTool, Registration, RegistrationError,
-    RuntimePlugin, SessionHistoryFeed, StoreAccess,
+    FileStoreBackend, HOST_PLUGIN, Manifest, PluginError, PluginToolDefinition,
+    PluginToolDefinitions, ProvidedTool, Registration, RegistrationError, RuntimePlugin,
+    SessionHistoryFeed, StoreAccess,
 };
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
@@ -102,13 +102,10 @@ pub enum ActivationError {
     DuplicateTool(DuplicateToolError),
 }
 
-/// Why a plugin gave the host no instance to serve: its settings leave a
-/// required field without a value it accepts, its factory failed, or the
-/// instance contradicts its manifest.
+/// Why a plugin gave the host no instance to serve: its factory failed, or
+/// the instance contradicts its manifest.
 #[derive(Debug, thiserror::Error)]
 pub enum BuildPluginError {
-    #[error(transparent)]
-    Config(#[from] MissingConfigValueError),
     #[error(transparent)]
     Factory(PluginError),
     #[error(transparent)]
@@ -263,7 +260,7 @@ fn build(
     factory: &Factory,
 ) -> Result<Registration, BuildPluginError> {
     let plugin =
-        factory(&FactoryInput::new(manifest, authored)?).map_err(BuildPluginError::Factory)?;
+        factory(&FactoryInput::new(manifest, authored)).map_err(BuildPluginError::Factory)?;
 
     Ok(Registration::new(manifest.clone(), plugin)?)
 }

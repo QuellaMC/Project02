@@ -45,7 +45,6 @@ function field(
   return {
     name,
     description: `${name}.`,
-    required: false,
     secret: false,
     valueType: 'string',
     agentMutable: false,

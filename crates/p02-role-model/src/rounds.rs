@@ -18,7 +18,7 @@ use p02_core::{EventIdentity, VisibleMessage, VisibleText};
 use p02_shared::{BoundJsonError, Identifier};
 use serde_json::{Map, Value};
 
-use crate::prompt::{InputEnvelope, Person, render, unusable_reply_note};
+use crate::prompt::{InputEnvelope, render, unusable_reply_note};
 use drafts::Drafts;
 pub use drafts::{DraftEvent, DraftId};
 
@@ -39,7 +39,6 @@ pub struct TurnInput<'a> {
     /// The earlier turns to replay, oldest first.
     pub history: &'a [ConversationTurn],
     pub persona: &'a Persona,
-    pub person: Person<'a>,
 }
 
 /// A model round to record before anything it decided happens: what its
@@ -170,7 +169,6 @@ pub struct Rounds<'a> {
     envelope: InputEnvelope,
     history: &'a [ConversationTurn],
     persona: &'a Persona,
-    person: Person<'a>,
     /// What the runtime could not use of the last reply, which the next
     /// round alone carries.
     refusal_note: Option<String>,
@@ -192,7 +190,6 @@ impl<'a> Rounds<'a> {
             ),
             history: input.history,
             persona: input.persona,
-            person: input.person,
             refusal_note: None,
             spent: 0,
             next: NonZeroU32::MIN,
@@ -235,13 +232,7 @@ impl<'a> Rounds<'a> {
     ) -> Result<Option<TurnOutcome>, S::Error> {
         let round = drafts.round();
         let note = self.refusal_note.take();
-        let prompt = render(
-            &self.envelope,
-            self.history,
-            self.persona,
-            self.person,
-            note.as_deref(),
-        );
+        let prompt = render(&self.envelope, self.history, self.persona, note.as_deref());
         let listener = |delta: ReplyDelta| drafts.speak(delta);
         let invocation = Invocation::new(prompt.messages(), prompt.tools())
             .with_history(self.history)

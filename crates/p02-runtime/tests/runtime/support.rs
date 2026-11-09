@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use async_trait::async_trait;
 use p02_characters::discover;
@@ -100,7 +100,7 @@ impl World {
     /// The thread between Sam and Mira, opened as the character's actor
     /// opens it.
     pub(crate) fn open(&self) -> Conversation {
-        Conversation::open(&self.home, mira(), SpeakerName::new("Sam").unwrap()).unwrap()
+        Conversation::open(&self.home, mira()).unwrap()
     }
 
     pub(crate) fn data(&self) -> CharacterData {
@@ -169,6 +169,9 @@ impl World {
     }
 }
 
+/// The name the person goes by in the thread's tests.
+static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unwrap());
+
 /// What the thread's tests answer a line with: settings never change it.
 pub(crate) struct Fixed<'c> {
     pub(crate) model: &'c Model,
@@ -178,6 +181,10 @@ pub(crate) struct Fixed<'c> {
 
 #[async_trait]
 impl Mind for Fixed<'_> {
+    fn person(&self) -> &SpeakerName {
+        &SAM
+    }
+
     fn adapter(&self) -> &dyn RoleModelAdapter {
         self.model
     }

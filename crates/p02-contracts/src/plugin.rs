@@ -7,7 +7,7 @@ use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::capability::{DatabaseError, SessionHistoryError, StoreError};
-use crate::config::{MissingConfigValueError, ResolvedConfig};
+use crate::config::ResolvedConfig;
 use crate::context::HookContext;
 use crate::manifest::Manifest;
 use crate::output::{BeforeRoleModelCallOutput, CommittedTurn, HookReport};
@@ -269,19 +269,12 @@ impl<'a> FactoryInput<'a> {
     /// The input for `manifest`'s plugin, its config resolved against the
     /// manifest's section from `authored`, the values the settings set for
     /// it, so a plugin is never handed another's.
-    ///
-    /// # Errors
-    ///
-    /// [`MissingConfigValueError`] for the first required field left
-    /// without a value it accepts.
-    pub fn new(
-        manifest: &'a Manifest,
-        authored: &Map<String, Value>,
-    ) -> Result<Self, MissingConfigValueError> {
-        Ok(Self {
+    #[must_use]
+    pub fn new(manifest: &'a Manifest, authored: &Map<String, Value>) -> Self {
+        Self {
             manifest,
-            config: ResolvedConfig::resolve(manifest.config(), authored)?,
-        })
+            config: ResolvedConfig::resolve(manifest.config(), authored),
+        }
     }
 
     #[must_use]
@@ -422,7 +415,7 @@ mod tests {
             &json!(["tool_provider", "handle_tool_call"]),
             &json!({"model_input": "write"}),
         );
-        let plugin = FACTORY(&FactoryInput::new(&manifest, &Map::new()).unwrap()).unwrap();
+        let plugin = FACTORY(&FactoryInput::new(&manifest, &Map::new())).unwrap();
         let registration = Registration::new(manifest, plugin).unwrap();
 
         assert_eq!(registration.manifest().id().as_str(), "toolbox");

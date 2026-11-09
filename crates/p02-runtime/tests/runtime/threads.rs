@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU64;
 
-use p02_core::{MessageId, SessionId, SpeakerName};
+use p02_core::{MessageId, SessionId};
 use p02_runtime::{Conversation, Delivery};
 
 use crate::support::{Chat, Round, mira, reply, stamp};
@@ -148,8 +148,7 @@ async fn a_line_taken_before_is_a_duplicate_wherever_it_was_taken() {
 #[tokio::test]
 async fn closing_a_thread_lets_it_open_again() {
     let mut chat = Chat::new(&[]);
-    let refused =
-        Conversation::open(&chat.world.home, mira(), SpeakerName::new("Sam").unwrap()).unwrap_err();
+    let refused = Conversation::open(&chat.world.home, mira()).unwrap_err();
 
     assert_eq!(refused.code(), "storage_busy");
     assert_eq!(chat.reopen().await, None);

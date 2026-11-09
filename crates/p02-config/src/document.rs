@@ -8,8 +8,9 @@ use std::path::Path;
 use p02_shared::read_file;
 use serde_json::{Map, Value};
 
-use crate::declaration::{HostField, Namespace, VERSION, host_fields};
+use crate::declaration::{Namespace, VERSION};
 use crate::diagnostic::{Code, Diagnostic};
+use crate::host::{HostField, host_fields};
 
 const TOP_LEVEL: [&str; 4] = ["version", "project02", "plugins", "connectors"];
 const STANZA: [&str; 2] = ["enabled", "config"];

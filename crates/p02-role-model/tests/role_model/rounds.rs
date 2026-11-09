@@ -14,7 +14,7 @@ use p02_contracts::{
 };
 use p02_core::{MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
+    DraftEvent, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
 };
 use serde_json::{Value, json};
 
@@ -223,7 +223,6 @@ async fn run(
         .unwrap(),
         history,
         persona,
-        person: Person::Unnamed,
     });
 
     loop {

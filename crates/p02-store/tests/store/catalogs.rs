@@ -7,11 +7,11 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::num::NonZeroU64;
 
-use p02_core::{ClientStamp, ConversationId, MessageId, Participant, SpeakerName};
+use p02_core::{ClientStamp, ConversationId, MessageId, Participant};
 use p02_store::{SessionEntry, TakenLines};
 use serde_json::{Value, json};
 
-use crate::support::{Script, World, answer, conversation_named, id, lines_of, sam};
+use crate::support::{Script, World, answer, conversation_named, id, lines_of};
 
 fn ids(sessions: &[SessionEntry]) -> Vec<String> {
     sessions
@@ -35,23 +35,17 @@ fn catalog_ids(world: &World) -> Vec<String> {
 #[test]
 fn a_conversation_is_one_record_per_set_of_participants_found_again_in_any_order() {
     let world = World::new();
-    let renamed = vec![
-        Participant::local_user(SpeakerName::new("Samuel").unwrap()),
-        Participant::character(p02_core::CharacterProfile {
-            id: id("mira"),
-            display_name: SpeakerName::new("Mira Two").unwrap(),
-        }),
+    let reversed = vec![
+        Participant::local_user(),
+        Participant::character(id("mira")),
     ];
     let zeta = vec![
-        Participant::character(p02_core::CharacterProfile {
-            id: id("zeta"),
-            display_name: SpeakerName::new("Zeta").unwrap(),
-        }),
-        Participant::local_user(sam()),
+        Participant::character(id("zeta")),
+        Participant::local_user(),
     ];
 
     assert_eq!(
-        world.home.ensure_conversation(renamed).unwrap(),
+        world.home.ensure_conversation(reversed).unwrap(),
         world.conversation
     );
 
@@ -74,8 +68,8 @@ fn a_conversation_is_one_record_per_set_of_participants_found_again_in_any_order
         json!({
             "id": world.conversation.id(),
             "participants": [
-                {"kind": "character", "id": "mira", "displayName": "Mira"},
-                {"kind": "user", "id": "local-user", "displayName": "Sam"},
+                {"kind": "character", "id": "mira"},
+                {"kind": "user", "id": "local-user"},
             ],
             "createdAt": world.conversation.created_at(),
         })

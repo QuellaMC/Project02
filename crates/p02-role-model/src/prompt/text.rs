@@ -7,7 +7,7 @@ use std::num::NonZeroUsize;
 
 use jiff::civil::Date;
 use p02_contracts::{PLUGIN_LIST_TOOL, RuntimeNote};
-use p02_core::SpeakerName;
+use p02_core::{Participant, SpeakerName};
 use p02_shared::Identifier;
 
 /// The fence around what the character remembers of its own accord.
@@ -26,7 +26,18 @@ pub enum Person<'a> {
     Named(&'a SpeakerName),
 }
 
-impl Person<'_> {
+impl<'a> Person<'a> {
+    /// The person going by `name`, as no one in particular while it is the
+    /// name they go by until they choose one.
+    #[must_use]
+    pub fn of(name: &'a SpeakerName) -> Self {
+        if name.as_str() == Participant::DEFAULT_LOCAL_USER_NAME {
+            Self::Unnamed
+        } else {
+            Self::Named(name)
+        }
+    }
+
     fn name(self) -> String {
         match self {
             Self::Unnamed => "they".to_owned(),

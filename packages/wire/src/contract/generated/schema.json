@@ -1832,9 +1832,6 @@
         "description": {
           "type": "string"
         },
-        "required": {
-          "type": "boolean"
-        },
         "secret": {
           "type": "boolean"
         },
@@ -1863,7 +1860,6 @@
       "required": [
         "name",
         "description",
-        "required",
         "secret",
         "agentMutable",
         "authored",

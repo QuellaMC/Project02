@@ -208,7 +208,6 @@ function FieldRow({
       <span className="field-name">{name}</span>
       <p className="field-meta muted small">
         {field.name} · {whereText(field, scope)}
-        {field.required ? ' · required' : ''}
       </p>
       <p className="field-description small">{field.description}</p>
       <div className="field-control">
@@ -230,8 +229,7 @@ function FieldRow({
             {saved ? 'Saved' : field.secret ? 'Replace' : 'Save'}
           </button>
         )}
-        {/* A required field always holds a value: the daemon refuses to unset one, so the row does not offer it. */}
-        {field.authored.configured && !field.required ? (
+        {field.authored.configured ? (
           <button
             type="button"
             className="secondary"

@@ -76,8 +76,7 @@ pub(crate) fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<S
 /// opened with, through the provider's plain completion. When the provider
 /// has no model for it, fails, or answers nothing, the mechanical summary
 /// says what it can, and the summarizer says why. Both speak of the person
-/// by `person`, the name the conversation recorded for them, as the
-/// transcript they condense names them.
+/// by `person`, the name they go by now.
 pub(crate) async fn summarize(
     adapter: &dyn RoleModelAdapter,
     turns: &[ConversationTurn],

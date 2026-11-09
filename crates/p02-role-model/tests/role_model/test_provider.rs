@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use p02_contracts::{ConversationToolCall, PluginToolDefinitions};
 use p02_core::{MessageId, SessionId, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, NvidiaSettings, Person, Reply, Rounds, RoutedToolCall, TestProvider,
-    TurnInput, TurnOutcome, TurnSink, UnknownTestProviderError, select_adapter,
+    DraftEvent, ModelRound, NvidiaSettings, Reply, Rounds, RoutedToolCall, TestProvider, TurnInput,
+    TurnOutcome, TurnSink, UnknownTestProviderError, select_adapter,
 };
 
 use crate::stub::Stub;
@@ -80,7 +80,6 @@ async fn the_test_switch_answers_in_the_fixed_voice_whatever_the_settings_choose
             plugin_tools: PluginToolDefinitions::default(),
             history: replayed,
             persona: &persona,
-            person: Person::Unnamed,
         })
         .run(adapter.as_ref(), &said)
         .await;

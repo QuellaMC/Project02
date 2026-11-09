@@ -12,7 +12,7 @@ import {
   startModelServer,
   undecided,
 } from './harness/model-server.ts';
-import {conversationOf, converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 // A window this small rotates the segment after every turn.
@@ -440,61 +440,76 @@ it('turns.history-paging: history reads a conversation across its segments as on
   ).resolves.toEqual({...whole, messages: whole.messages.slice(0, 2)});
 });
 
-it('turns.user-name-per-session: a thread keeps the names it began with, even in its next segment, when the user is renamed in config and the character in its package; a thread begun after takes the new names', async () => {
-  const packageOf = (id: string) =>
-    join('characters', id, 'project02.character.json');
-  const zeta = packageOf('zeta');
+it("turns.rename-from-now-on: a rename reaches the thread from the next line on, the person's in the settings at once and the character's in her package from her next start: a new line carries the new name, an old line keeps its own, and the model is shown every line as written while it is told the new names", async () => {
+  const model = await startModelServer();
+  const zeta = join('characters', 'zeta', 'project02.character.json');
   const home = createHome({
     'config.json': configJson({
-      project02: {userDisplayName: 'Mike', contextWindowTokens: 1},
+      project02: {...model.settings, userDisplayName: 'Mike'},
     }),
     characters: {
       zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
-      nova: {'project02.character.json': characterJson('nova', 'Nova')},
     },
   });
-  const earlier = await startDaemon(home, fixedReplies);
+  const earlier = await startDaemon(home);
   const earlierWire = wireOf(earlier);
   const sayEarlier = await converse(earlierWire, 'zeta');
   const {conversationId} = await conversationOf(earlierWire, 'zeta');
-
-  await sayEarlier('First.', 'first');
-  await stop(earlier);
-  writeFileSync(
-    join(home, 'config.json'),
-    configJson({
-      project02: {userDisplayName: 'Michael', contextWindowTokens: 1},
-    }),
-  );
-  writeFileSync(join(home, zeta), characterJson('zeta', 'Zed'));
-  // Renamed before her first thread: it begins under the new name.
-  writeFileSync(join(home, packageOf('nova')), characterJson('nova', 'Nora'));
-
-  const wire = wireOf(await startDaemon(home, fixedReplies));
   const named = (user: string, character: string) => [
     {speakerName: user},
     {speakerName: character},
   ];
+  const told = (request: number) =>
+    messagesOf(model.requests[request])
+      .filter(message => message.role === 'system')
+      .map(message => message.content)
+      .join('\n');
+  const shown = (request: number) =>
+    messagesOf(model.requests[request])
+      .filter(message => message.role !== 'system')
+      .map(({role, content}) => ({role, content}));
 
-  const sayToZeta = await converse(wire, 'zeta');
-  const sayToMira = await converse(wire, 'mira');
-
-  expect(await sayToZeta('Second.', 'second')).toMatchObject({
-    messages: [
-      {messageId: `${conversationId}.2:message-1`, speakerName: 'Mike'},
-      {speakerName: 'Zeta'},
-    ],
+  model.answer(reply('Hello, Mike.'), reply('Hello, Michael.'));
+  await sayEarlier('I am Mike.', 'first');
+  await saveConfig(
+    earlierWire,
+    {scope: 'global'},
+    {kind: 'set', path: 'project02.userDisplayName', value: 'Michael'},
+  );
+  expect(await sayEarlier('Call me Michael.', 'second')).toMatchObject({
+    messages: named('Michael', 'Zeta'),
   });
+  expect(told(1)).toContain('Michael');
+  expect(told(1)).not.toContain('Mike');
+  expect(shown(1)).toEqual([
+    {role: 'user', content: 'I am Mike.'},
+    {role: 'assistant', content: 'Hello, Mike.'},
+    {role: 'user', content: 'Call me Michael.'},
+  ]);
+  await stop(earlier);
+  writeFileSync(join(home, zeta), characterJson('zeta', 'Zed'));
+
+  const wire = wireOf(await startDaemon(home));
+  const say = await converse(wire, 'zeta');
+
+  model.answer(reply('I am Zed now.'));
+  expect(await say('Who are you?', 'third')).toMatchObject({
+    messages: named('Michael', 'Zed'),
+  });
+  expect(told(2)).toContain('Zed');
+  expect(told(2)).not.toContain('Zeta');
+  expect(shown(2)).toEqual([
+    {role: 'user', content: 'I am Mike.'},
+    {role: 'assistant', content: 'Hello, Mike.'},
+    {role: 'user', content: 'Call me Michael.'},
+    {role: 'assistant', content: 'Hello, Michael.'},
+    {role: 'user', content: 'Who are you?'},
+  ]);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
-    messages: [...named('Mike', 'Zeta'), ...named('Mike', 'Zeta')],
-  });
-  expect(await sayToMira('Hello, Mira.', 'mira')).toMatchObject({
-    messages: named('Michael', 'Mira'),
-  });
-
-  const sayToNova = await converse(wire, 'nova');
-
-  expect(await sayToNova('Hello, Nova.', 'nova')).toMatchObject({
-    messages: named('Michael', 'Nora'),
+    messages: [
+      ...named('Mike', 'Zeta'),
+      ...named('Michael', 'Zeta'),
+      ...named('Michael', 'Zed'),
+    ],
   });
 });

@@ -1,18 +1,17 @@
-//! What the settings may hold: the host's own fields, each plugin's section
-//! as its manifest declares it and each connector's as this build declares
-//! it, and from which document a scope lets each target take a value.
+//! What the settings may hold beside the host's own fields: each plugin's
+//! section as its manifest declares it and each connector's as this build
+//! declares it, and from which document a scope lets each target take a
+//! value.
 
-use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
 use p02_contracts::{
     ConfigField, ConfigScope, ConfigSection, ConfigValueType, Manifest, PluginKind,
 };
-use p02_core::{Participant, SpeakerName};
-use p02_shared::{BASE_URL_RULE, BaseUrl, Identifier};
+use p02_shared::Identifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use ts_rs::TS;
 
 /// The version a document this build writes names. A document's version is
@@ -171,265 +170,6 @@ pub(crate) fn expectation(field: &ConfigField) -> String {
     .to_owned()
 }
 
-/// Who answers as a character. Only real providers are here: the test
-/// provider is a test harness's switch, never a setting, and a home has no
-/// provider until its person chooses one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RoleModelProvider {
-    /// A model on NVIDIA's cloud, or on a server of the person's own that
-    /// speaks its wire.
-    Nvidia,
-}
-
-impl RoleModelProvider {
-    pub const ALL: [Self; 1] = [Self::Nvidia];
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Nvidia => "nvidia",
-        }
-    }
-
-    fn parse(text: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|provider| provider.as_str() == text)
-    }
-}
-
-/// One of the host's own fields: its declaration, as a plugin's field is
-/// declared, and the rule its values meet beyond their type, with the
-/// sentence a value that breaks it is reported by.
-#[derive(Debug)]
-pub(crate) struct HostField {
-    pub(crate) declaration: ConfigField,
-    rule: fn(&Value) -> bool,
-    pub(crate) sentence: String,
-}
-
-impl HostField {
-    pub(crate) fn name(&self) -> &str {
-        self.declaration.name().as_str()
-    }
-
-    pub(crate) fn path(&self) -> String {
-        format!("project02.{}", self.name())
-    }
-
-    /// The one judge of a value of this field, for the loader and every
-    /// writer alike. A blank text is never a value: unsetting is its own
-    /// operation.
-    pub(crate) fn accepts(&self, value: &Value) -> bool {
-        self.declaration.accepts(value) && (self.rule)(value)
-    }
-}
-
-/// The name a person goes by, trimmed, as a speaker takes it.
-pub(crate) fn user_display_name(value: &Value) -> Option<SpeakerName> {
-    value
-        .as_str()
-        .and_then(|text| SpeakerName::new(text.trim()).ok())
-}
-
-pub(crate) fn role_model_provider(value: &Value) -> Option<RoleModelProvider> {
-    value.as_str().and_then(RoleModelProvider::parse)
-}
-
-pub(crate) fn base_url(value: &Value) -> Option<BaseUrl> {
-    value.as_str().and_then(|text| BaseUrl::parse(text).ok())
-}
-
-pub(crate) fn context_window_tokens(value: &Value) -> Option<NonZeroU64> {
-    value.as_u64().and_then(NonZeroU64::new)
-}
-
-pub(crate) fn text(value: &Value) -> Option<&str> {
-    value.as_str().filter(|text| !text.trim().is_empty())
-}
-
-/// The rule each host field meets beyond its declaration, and what a value
-/// that breaks it must be instead when its declaration does not say.
-struct HostRule {
-    name: &'static str,
-    accepts: fn(&Value) -> bool,
-    must_be: Option<&'static str>,
-}
-
-const HOST_RULES: [HostRule; 8] = [
-    HostRule {
-        name: "userDisplayName",
-        accepts: |value| user_display_name(value).is_some(),
-        must_be: Some("a non-empty single-line string of at most 128 characters"),
-    },
-    HostRule {
-        name: "roleModelProvider",
-        accepts: |value| role_model_provider(value).is_some(),
-        must_be: None,
-    },
-    HostRule {
-        name: "nvidiaApiKey",
-        accepts: |_| true,
-        must_be: Some("a non-empty string"),
-    },
-    HostRule {
-        name: "nvidiaModel",
-        accepts: |value| text(value).is_some(),
-        must_be: Some("a non-empty string"),
-    },
-    HostRule {
-        name: "nvidiaBaseUrl",
-        accepts: |value| base_url(value).is_some(),
-        must_be: Some(BASE_URL_RULE),
-    },
-    HostRule {
-        name: "contextWindowTokens",
-        accepts: |value| context_window_tokens(value).is_some(),
-        must_be: Some("a positive whole number of tokens"),
-    },
-    HostRule {
-        name: "defaultMemoryProvider",
-        accepts: |value| text(value).is_some(),
-        must_be: Some("a non-empty string"),
-    },
-    HostRule {
-        name: "enabled",
-        accepts: |_| true,
-        must_be: None,
-    },
-];
-
-/// The host's fields in the order the settings page shows them: what a
-/// person decides first, then the knobs, then the switch.
-fn host_declaration() -> Value {
-    let providers: Vec<&str> = RoleModelProvider::ALL
-        .iter()
-        .map(|provider| provider.as_str())
-        .collect();
-
-    json!({
-        "scope": "global_with_character_overrides",
-        "fields": [
-            {
-                "name": "userDisplayName",
-                "description": "The name you go by in conversation. Applies to new \
-                    conversations; earlier ones keep the name they were started with.",
-                "required": false,
-                "secret": false,
-                "valueType": "string",
-                "defaultValue": Participant::DEFAULT_LOCAL_USER_NAME,
-                "redactionLabels": [],
-            },
-            {
-                "name": "roleModelProvider",
-                "description": "Who answers as the character: nvidia is a model on NVIDIA's \
-                    cloud, or on the server nvidiaBaseUrl names. No character starts until one \
-                    is chosen.",
-                "required": false,
-                "secret": false,
-                "valueType": "enum",
-                "allowedValues": providers,
-                "redactionLabels": [],
-            },
-            {
-                "name": "nvidiaApiKey",
-                "description": "Your NVIDIA API key. Needed when the provider is nvidia; never \
-                    shown back once saved.",
-                "required": false,
-                "secret": true,
-                "valueType": "string",
-                "redactionLabels": ["secret"],
-            },
-            {
-                "name": "nvidiaModel",
-                "description": "The NVIDIA model to talk to; the provider's default when left \
-                    unset.",
-                "required": false,
-                "secret": false,
-                "valueType": "string",
-                "redactionLabels": [],
-            },
-            {
-                "name": "nvidiaBaseUrl",
-                "description": "Where the model runs: the base address of an NVIDIA NIM or any \
-                    OpenAI-compatible server, such as http://localhost:1234/v1. NVIDIA's cloud \
-                    when left unset. Use https:// for a server on another machine: http:// \
-                    sends the key and the conversation in the clear.",
-                "required": false,
-                "secret": false,
-                "valueType": "url",
-                "redactionLabels": [],
-            },
-            {
-                "name": "contextWindowTokens",
-                "description": "How much conversation the model can hold at once, in tokens; up \
-                    to half of it replays past messages. Lower it if the model runs out of room.",
-                "required": false,
-                "secret": false,
-                "valueType": "number",
-                "defaultValue": 32768,
-                "redactionLabels": [],
-            },
-            {
-                "name": "defaultMemoryProvider",
-                "description": "Which enabled memory plugin keeps what the character remembers, \
-                    when more than one is enabled.",
-                "required": false,
-                "secret": false,
-                "valueType": "string",
-                "redactionLabels": [],
-            },
-            {
-                "name": "enabled",
-                "description": "Whether the character is switched on. A character that is off \
-                    is not started and cannot be reached; turning it back on starts it.",
-                "required": false,
-                "secret": false,
-                "valueType": "boolean",
-                "defaultValue": true,
-                "redactionLabels": [],
-            },
-        ],
-    })
-}
-
-static HOST: LazyLock<Vec<HostField>> = LazyLock::new(|| {
-    // The declaration is this build's own, so a refusal is a defect a test
-    // of the registry shows before any build ships it.
-    let section = ConfigSection::from_value(&host_declaration())
-        .expect("the host's declaration meets the rules of a manifest");
-
-    section
-        .fields()
-        .iter()
-        .map(|declaration| {
-            let rule = HOST_RULES
-                .iter()
-                .find(|rule| rule.name == declaration.name().as_str())
-                .expect("every host field has its rule");
-            let must_be = rule
-                .must_be
-                .map_or_else(|| expectation(declaration), str::to_owned);
-
-            HostField {
-                sentence: format!("Project02 {} must be {must_be}.", declaration.name()),
-                declaration: declaration.clone(),
-                rule: rule.accepts,
-            }
-        })
-        .collect()
-});
-
-/// The host's fields, in page order.
-pub(crate) fn host_fields() -> &'static [HostField] {
-    &HOST
-}
-
-pub(crate) fn host_field(name: &str) -> Option<&'static HostField> {
-    host_fields().iter().find(|field| field.name() == name)
-}
-
 /// A messaging connector this build has: its section of the settings,
 /// declared as a plugin's is, and the field pairing writes an approved
 /// account into.
@@ -466,7 +206,6 @@ fn telegram() -> Connector {
                 "description": "This character's bot, as @BotFather gave it. The character \
                     answers in Telegram as that bot.",
                 "scope": "character_only",
-                "required": false,
                 "secret": true,
                 "valueType": "string",
                 "redactionLabels": ["secret"],
@@ -476,7 +215,6 @@ fn telegram() -> Connector {
                 "description": "Optional. A bot for the home itself: who is on, what is \
                     waiting for your approval, pairing.",
                 "scope": "global_only",
-                "required": false,
                 "secret": true,
                 "valueType": "string",
                 "redactionLabels": ["secret"],
@@ -485,7 +223,6 @@ fn telegram() -> Connector {
                 "name": "mirror",
                 "description": "Show in this chat what you and the character said on other \
                     surfaces, like the web page.",
-                "required": false,
                 "secret": false,
                 "valueType": "boolean",
                 "defaultValue": true,
@@ -496,7 +233,6 @@ fn telegram() -> Connector {
                 "description": "Accounts allowed to talk to your characters, each id with a \
                     name. Pairing adds one; remove a line to unpair it.",
                 "scope": "global_only",
-                "required": false,
                 "secret": false,
                 "valueType": "object",
                 "defaultValue": {},
@@ -522,6 +258,34 @@ static CONNECTORS: LazyLock<Vec<Connector>> = LazyLock::new(|| vec![telegram()])
 #[must_use]
 pub fn connectors() -> &'static [Connector] {
     &CONNECTORS
+}
+
+/// No connector of this build answers to the id asked for.
+#[derive(Debug, thiserror::Error)]
+#[error("Unknown connector \"{id}\". Connectors: {known}.", known = known_connectors())]
+pub struct UnknownConnector {
+    id: String,
+}
+
+fn known_connectors() -> String {
+    let ids: Vec<&str> = connectors()
+        .iter()
+        .map(|connector| connector.id().as_str())
+        .collect();
+
+    ids.join(", ")
+}
+
+/// The connector this build has under `id`.
+///
+/// # Errors
+///
+/// [`UnknownConnector`] when this build has none of that id.
+pub fn connector(id: &str) -> Result<&'static Connector, UnknownConnector> {
+    connectors()
+        .iter()
+        .find(|connector| connector.id().as_str() == id)
+        .ok_or_else(|| UnknownConnector { id: id.to_owned() })
 }
 
 /// The sections a home's settings are judged against: the plugins this

@@ -1,4 +1,4 @@
-use p02_core::CharacterProfile;
+use p02_core::{CharacterProfile, SpeakerName};
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 
@@ -144,10 +144,12 @@ fn non_blank(text: String) -> Result<String, BlankContextTextError> {
 }
 
 /// What a model call is told besides the conversation: who the character
-/// is, and what the runtime and the plugins contribute.
+/// is, the name the person goes by, and what the runtime and the plugins
+/// contribute.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecisionContext {
     character: CharacterProfile,
+    person: SpeakerName,
     /// The condensed earlier conversation a continued session opens with.
     context_summary: Option<String>,
     runtime_notes: Vec<RuntimeNote>,
@@ -157,9 +159,10 @@ pub struct DecisionContext {
 
 impl DecisionContext {
     #[must_use]
-    pub fn new(character: CharacterProfile) -> Self {
+    pub fn new(character: CharacterProfile, person: SpeakerName) -> Self {
         Self {
             character,
+            person,
             context_summary: None,
             runtime_notes: Vec::new(),
             plugin_context_items: Vec::new(),
@@ -201,6 +204,11 @@ impl DecisionContext {
     }
 
     #[must_use]
+    pub fn person(&self) -> &SpeakerName {
+        &self.person
+    }
+
+    #[must_use]
     pub fn context_summary(&self) -> Option<&str> {
         self.context_summary.as_deref()
     }
@@ -223,8 +231,6 @@ impl DecisionContext {
 
 #[cfg(test)]
 mod tests {
-    use p02_core::SpeakerName;
-
     use super::*;
 
     fn id(text: &str) -> Identifier {
@@ -233,10 +239,13 @@ mod tests {
 
     #[test]
     fn notes_and_summaries_say_something() {
-        let context = DecisionContext::new(CharacterProfile {
-            id: id("mira"),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        });
+        let context = DecisionContext::new(
+            CharacterProfile {
+                id: id("mira"),
+                display_name: SpeakerName::new("Mira").unwrap(),
+            },
+            SpeakerName::new("Sam").unwrap(),
+        );
 
         assert!(RuntimeNote::new(id("today"), "Today is Saturday, August 15, 2026.").is_ok());
         assert_eq!(

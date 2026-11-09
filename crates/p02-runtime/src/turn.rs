@@ -14,14 +14,14 @@ use p02_contracts::{
     TurnIdentity, TurnText,
 };
 use p02_core::{
-    BlankTextError, ClientStamp, EventIdentity, MessageId, Participant, SpeakerName, Timestamp,
-    UserLine, VisibleMessage, VisibleText,
+    BlankTextError, ClientStamp, EventIdentity, MessageId, SpeakerName, Timestamp, UserLine,
+    VisibleMessage, VisibleText,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    DraftEvent, DraftId, ModelRound, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
+    DraftEvent, DraftId, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
     TurnSink, select_history_window, today_note,
 };
 use p02_shared::{BoundJsonError, Identifier, error_chain};
@@ -33,7 +33,7 @@ use p02_store::{
 use tokio::sync::Mutex;
 use tokio::task::JoinError;
 
-use crate::conversation::{Cast, Disk, Mind, Submission, on_disk};
+use crate::conversation::{Character, Disk, Mind, Submission, on_disk};
 
 /// What a turn announces, in order. A message is announced once its record
 /// is on disk, so the stream never says more than the log; a draft, a reply
@@ -124,12 +124,12 @@ const BLANK_REFUSAL: &str = "Provide a non-empty message.";
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
 /// Takes `submission` through the turn under `identity`, on the thread's
-/// `disk`.
+/// `disk`, `character` answering.
 pub(crate) async fn run(
     disk: &mut Option<Disk>,
     identity: &EventIdentity,
     submission: Submission<'_>,
-    cast: &Cast,
+    character: &Character,
     mind: &mut dyn Mind,
     listener: &Listener<'_>,
 ) -> Ended {
@@ -137,7 +137,8 @@ pub(crate) async fn run(
         Ok(line) => line,
         Err(BlankTextError) => return refuse(disk, identity, submission.line).await,
     };
-    let begun = match begin(disk, identity, &submission, line).await {
+    let person = mind.person().clone();
+    let begun = match begin(disk, identity, &submission, line, person).await {
         Ok(begun) => begun,
         Err(error) => return failed(disk, identity, Vec::new(), Vec::new(), error).await,
     };
@@ -153,12 +154,12 @@ pub(crate) async fn run(
         identity: identity.clone(),
         line: begun.message.text.clone(),
         day: begun.day,
-        cast,
+        character,
         listener,
         hooks: p02_plugins::Turn::new(TurnIdentity {
             session_id: begun.message.id.session_id().clone(),
             event: identity.clone(),
-            character: cast.character.clone(),
+            character: character.profile.clone(),
         }),
         window: window
             .iter()
@@ -178,16 +179,6 @@ pub(crate) async fn run(
 
     *disk = turn.ledger.into_inner().disk;
     ended
-}
-
-/// The person as the prompt speaks of them: by their name, or as no one in
-/// particular while they go by the default.
-pub(crate) fn person(name: &SpeakerName) -> Person<'_> {
-    if name.as_str() == Participant::DEFAULT_LOCAL_USER_NAME {
-        Person::Unnamed
-    } else {
-        Person::Named(name)
-    }
 }
 
 /// Records a blank text as its event, taken as no line, and the runtime's
@@ -234,12 +225,14 @@ struct Begun {
 }
 
 /// Records the event, reads the history, then commits the person's line,
-/// and reads the machine's time zone, all on the disk's side.
+/// said under `person`, and reads the machine's time zone, all on the
+/// disk's side.
 async fn begin(
     disk: &mut Option<Disk>,
     identity: &EventIdentity,
     submission: &Submission<'_>,
     line: UserLine,
+    person: SpeakerName,
 ) -> Result<Begun, RunTurnError> {
     let identity = identity.clone();
     let raw = submission.line.to_owned();
@@ -259,7 +252,7 @@ async fn begin(
 
         let replay = disk.writer.replay()?;
         let history = replay.history();
-        let message = replay.session().user_message(line);
+        let message = replay.session().user_message(line, person);
 
         disk.append(
             &identity,
@@ -320,7 +313,7 @@ struct OpenTurn<'a> {
     line: VisibleText,
     /// The day the model is told it is, first of its notes.
     day: Option<Date>,
-    cast: &'a Cast,
+    character: &'a Character,
     listener: &'a Listener<'a>,
     /// The turn as its hooks are shown it, without its text: each phase is
     /// shown a clone with the text as it stands then, which shares its
@@ -377,7 +370,7 @@ impl OpenTurn<'_> {
         mind: &mut dyn Mind,
         window: &[ConversationTurn],
     ) -> Result<Ended, RunTurnError> {
-        let context = match self.prepare(mind.host()).await? {
+        let context = match self.prepare(&*mind).await? {
             Preparation::Prepared(context) => context,
             Preparation::Refused(rejection) => {
                 let refused =
@@ -397,8 +390,7 @@ impl OpenTurn<'_> {
             context,
             plugin_tools: mind.host().tool_definitions().clone(),
             history: window,
-            persona: &self.cast.persona,
-            person: person(&self.cast.person),
+            persona: &self.character.persona,
         });
         let outcome = loop {
             let round = Round {
@@ -414,7 +406,7 @@ impl OpenTurn<'_> {
                 // A plugin refuses a turn only before its first round, so a
                 // refusal now leaves the call prepared as it was, and its
                 // records go with what the replies carry.
-                match self.prepare(mind.host()).await? {
+                match self.prepare(&*mind).await? {
                     Preparation::Prepared(context) => {
                         rounds.prepared(context, mind.host().tool_definitions().clone());
                     }
@@ -448,12 +440,16 @@ impl OpenTurn<'_> {
         }
     }
 
-    /// The model's call as `host`'s plugins prepare it now, the day first of
-    /// its notes and the summary ahead of the replayed turns, what they
-    /// recorded kept for the replies to carry; or the refusal of a plugin
-    /// whose failure refuses the turn.
-    async fn prepare(&self, host: &PluginHost) -> Result<Preparation, RunTurnError> {
-        let outcome = host.before_role_model_call(&self.shown().await).await;
+    /// The model's call as `mind` stands now: her plugins prepare it, the
+    /// day first of its notes and the summary ahead of the replayed turns,
+    /// for the person by the name they go by now, what the plugins recorded
+    /// kept for the replies to carry; or the refusal of a plugin whose
+    /// failure refuses the turn.
+    async fn prepare(&self, mind: &dyn Mind) -> Result<Preparation, RunTurnError> {
+        let outcome = mind
+            .host()
+            .before_role_model_call(&self.shown().await)
+            .await;
         let PreparedContext {
             runtime_notes,
             context_items,
@@ -469,9 +465,10 @@ impl OpenTurn<'_> {
             .into_iter()
             .chain(runtime_notes)
             .collect();
-        let mut context = DecisionContext::new(self.cast.character.clone())
-            .with_runtime_notes(notes)
-            .with_plugin_context(context_items, curated_sections);
+        let mut context =
+            DecisionContext::new(self.character.profile.clone(), mind.person().clone())
+                .with_runtime_notes(notes)
+                .with_plugin_context(context_items, curated_sections);
 
         if let Some(summary) = &self.summary {
             context = context.with_summary(summary)?;
@@ -674,8 +671,13 @@ impl TurnSink for Round<'_, '_> {
         let round = reply.draft.round();
         let mut ledger = turn.ledger.lock().await;
         let evidence = ledger.prepared.clone();
+        let name = turn.character.profile.display_name.clone();
         let message = on_disk(&mut ledger.disk, move |disk| {
-            let message = disk.writer.replay()?.session().character_message(text);
+            let message = disk
+                .writer
+                .replay()?
+                .session()
+                .character_message(text, name);
 
             disk.append(
                 &identity,

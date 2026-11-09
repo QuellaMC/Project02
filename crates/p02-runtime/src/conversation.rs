@@ -26,7 +26,7 @@ use crate::turn::{self, CompletedTurn, Ended, Progress, RejectedTurn, RunTurnErr
 /// is given.
 #[derive(Clone, Debug)]
 pub struct Character {
-    /// Her id, and the name a thread made now gives her.
+    /// Her id, and the name her replies carry.
     pub profile: CharacterProfile,
     pub persona: Persona,
 }
@@ -50,7 +50,7 @@ pub struct Submission<'a> {
 #[must_use = "a thread holds its writers until it is closed"]
 pub struct Conversation {
     id: ConversationId,
-    cast: Cast,
+    character: Character,
     /// None once a panic on the blocking pool, or a delivery dropped before
     /// it ended, lost it.
     disk: Option<Disk>,
@@ -106,21 +106,14 @@ pub enum Rotation {
     Failed { from: SessionId, message: String },
 }
 
-/// Who a thread is between, under the names they had when it began, and
-/// what the character is given to play herself.
-#[derive(Debug)]
-pub(crate) struct Cast {
-    pub(crate) character: CharacterProfile,
-    pub(crate) person: SpeakerName,
-    pub(crate) persona: Persona,
-}
-
-/// What a line is answered with: the character's model, her plugins, and
-/// the size of her model's window in tokens, as her settings say. Its
-/// keeper brings it up to date before her turn, and the turn before each
-/// request to the model after its first.
+/// What a line is answered with: the name the person goes by, the
+/// character's model, her plugins, and the size of her model's window in
+/// tokens, as her settings say. Its keeper brings it up to date before her
+/// turn, and the turn before each request to the model after its first.
 #[async_trait]
 pub trait Mind: Send + Sync {
+    fn person(&self) -> &SpeakerName;
+
     fn adapter(&self) -> &dyn RoleModelAdapter;
 
     fn host(&self) -> &PluginHost;
@@ -179,25 +172,20 @@ impl Conversation {
     /// Opens the one thread between the person and `character` on `home`:
     /// her data directory and the thread are made the first time, the
     /// thread's writer lease is taken, and its latest segment resumed under
-    /// its own writer lease, or its first made. The thread keeps the names
-    /// its participants had when it began, so `person` names the person only
-    /// in a thread made now. The store's work is synchronous and may wait on
-    /// a lock, so the caller runs this on the blocking pool.
+    /// its own writer lease, or its first made. The store's work is
+    /// synchronous and may wait on a lock, so the caller runs this on the
+    /// blocking pool.
     ///
     /// # Errors
     ///
     /// [`StorageError`] when the home, her data or the thread is refused, a
     /// lease is held elsewhere, or a segment cannot be read; a lease already
     /// taken is released first.
-    pub fn open(
-        home: &Home,
-        character: Character,
-        person: SpeakerName,
-    ) -> Result<Self, StorageError> {
+    pub fn open(home: &Home, character: Character) -> Result<Self, StorageError> {
         let data = CharacterData::ensure(home, &character.profile.id)?;
         let conversation = home.ensure_conversation(vec![
-            Participant::character(character.profile),
-            Participant::local_user(person),
+            Participant::character(character.profile.id.clone()),
+            Participant::local_user(),
         ])?;
         let holder = home.conversation_writer(conversation)?;
         let current = match current_segment(&data, &holder) {
@@ -210,11 +198,7 @@ impl Conversation {
 
         Ok(Self {
             id: holder.conversation().id().clone(),
-            cast: Cast {
-                character: current.character,
-                person: current.person,
-                persona: character.persona,
-            },
+            character,
             disk: Some(Disk {
                 data,
                 holder,
@@ -283,7 +267,7 @@ impl Conversation {
             &mut self.disk,
             &identity,
             submission,
-            &self.cast,
+            &self.character,
             &mut *mind,
             listener,
         )
@@ -363,8 +347,8 @@ impl Conversation {
             mind.adapter(),
             selection.summarized,
             history.summary.as_deref(),
-            &self.cast.person,
-            &self.cast.character.display_name,
+            mind.person(),
+            &self.character.profile.display_name,
             mind.context_window(),
         )
         .await;
@@ -415,13 +399,11 @@ impl Conversation {
     }
 }
 
-/// A thread's current segment under its writer, who the thread is between,
-/// the lines its closed segments took, and what reading it skipped; the
-/// writer is released again on a failure after it was taken.
+/// A thread's current segment under its writer, the lines its closed
+/// segments took, and what reading it skipped; the writer is released again
+/// on a failure after it was taken.
 struct Current {
     writer: SessionWriter,
-    character: CharacterProfile,
-    person: SpeakerName,
     taken: TakenLines,
     skipped: Option<String>,
 }
@@ -433,10 +415,8 @@ fn current_segment(
     let mut writer = resume(data, holder)?;
 
     match read_current(data, holder, &mut writer) {
-        Ok((character, person, taken, skipped)) => Ok(Current {
+        Ok((taken, skipped)) => Ok(Current {
             writer,
-            character,
-            person,
             taken,
             skipped,
         }),
@@ -452,20 +432,15 @@ fn read_current(
     data: &CharacterData,
     holder: &ConversationWriter,
     writer: &mut SessionWriter,
-) -> Result<(CharacterProfile, SpeakerName, TakenLines, Option<String>), StorageError> {
+) -> Result<(TakenLines, Option<String>), StorageError> {
     let session = writer.session_id().clone();
-    let replay = writer.replay()?;
-    let character = replay.session().character().clone();
-    let person = replay.session().user_name().clone();
     let skipped = skipped(
         &data.sessions()?.skipped_lines,
         &session,
-        replay.skipped_lines(),
+        writer.replay()?.skipped_lines(),
     );
 
     Ok((
-        character,
-        person,
         taken_lines(data, holder.conversation(), session.segment())?,
         skipped,
     ))

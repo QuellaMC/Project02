@@ -248,10 +248,9 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 }
 
 /// What she is built of, from her package and her settings as they were
-/// when she was built: who she is and the person's name, for a thread made
-/// now, the model and the plugins she answers with, her model's window,
-/// and those settings, which her next request compares with what they say
-/// then.
+/// when she was built: who she is, the name the person goes by, the model
+/// and the plugins she answers with, her model's window, and those
+/// settings, which her next request compares with what they say then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -454,14 +453,9 @@ impl Actor {
                 };
             }
         };
-        let held = hold(
-            &self.her,
-            &mut parts.thread,
-            &parts.built.character,
-            &parts.built.person,
-        )
-        .await
-        .map(|thread| thread.id().clone());
+        let held = hold(&self.her, &mut parts.thread, &parts.built.character)
+            .await
+            .map(|thread| thread.id().clone());
 
         self.parts = Some(parts);
 
@@ -748,6 +742,10 @@ struct Current<'a> {
 
 #[async_trait]
 impl Mind for Current<'_> {
+    fn person(&self) -> &SpeakerName {
+        &self.built.person
+    }
+
     fn adapter(&self) -> &dyn RoleModelAdapter {
         self.built.adapter.as_ref()
     }
@@ -806,14 +804,15 @@ async fn take_line(
     let Request { stamp, text } = request;
     let conversation = stamp.conversation_id.clone();
     let Parts { built, thread } = parts;
-    let thread = hold(her, thread, &built.character, &built.person)
-        .await
-        .map_err(|error| TurnOutcome::Failed {
-            character_id: her.id.clone(),
-            conversation_id: conversation.clone(),
-            message: error_sentence(&error),
-            committed: false,
-        })?;
+    let thread =
+        hold(her, thread, &built.character)
+            .await
+            .map_err(|error| TurnOutcome::Failed {
+                character_id: her.id.clone(),
+                conversation_id: conversation.clone(),
+                message: error_sentence(&error),
+                committed: false,
+            })?;
 
     if *thread.id() != conversation {
         return Err(TurnOutcome::refused(
@@ -862,14 +861,13 @@ async fn hold<'t>(
     her: &Her,
     thread: &'t mut Option<Conversation>,
     character: &Character,
-    person: &SpeakerName,
 ) -> Result<&'t mut Conversation, StorageError> {
     let held = if let Some(held) = thread.take() {
         held
     } else {
         let home = her.world.home.clone();
-        let (character, person) = (character.clone(), person.clone());
-        let opened = blocking(move || Conversation::open(&home, character, person)).await?;
+        let character = character.clone();
+        let opened = blocking(move || Conversation::open(&home, character)).await?;
 
         if let Some(skipped) = opened.skipped() {
             her.note_maintenance(skipped.to_owned());

@@ -15,11 +15,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use ts_rs::TS;
 
-use crate::declaration::{
-    Declared, HostField, Namespace, Sections, Target, expectation, host_field, host_fields,
-    outside_scope,
-};
+use crate::declaration::{Declared, Namespace, Sections, Target, expectation, outside_scope};
 use crate::document::{Document, Read};
+use crate::host::{HostField, host_field, host_fields};
 use crate::materialize::merged_overlay;
 use crate::resolve::{Layers, Overlay, Written, WrittenOverlay, target_fingerprint};
 use crate::transaction::{settle, with_character, with_home, write};

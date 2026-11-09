@@ -4,21 +4,18 @@ use p02_shared::Identifier;
 
 use crate::id::{MessageId, SessionId};
 use crate::message::{
-    CharacterProfile, LOCAL_USER, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole,
-    VisibleText,
+    LOCAL_USER, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole, VisibleText,
 };
 
 /// One character's session: the messages of one segment of a conversation,
 /// in the order they were committed. Each is numbered after the one before
-/// it and said by the session's character or by the person, under the
-/// names the session began with; a renamed character or person keeps their
-/// old name here. Every message joins through [`Session::append`], whether
-/// it is said now or read back.
+/// it and said by the session's character or by the person, under the name
+/// its speaker had then. Every message joins through [`Session::append`],
+/// whether it is said now or read back.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
     id: SessionId,
-    character: CharacterProfile,
-    user_name: SpeakerName,
+    character: Identifier,
     messages: Vec<VisibleMessage>,
 }
 
@@ -29,19 +26,17 @@ pub enum AppendMessageError {
     OtherSession(MessageId),
     #[error("message \"{id}\" does not climb after message {after}")]
     OutOfOrder { id: MessageId, after: NonZeroU64 },
-    #[error("message \"{0}\" is not under its speaker's id and name in this session")]
+    #[error("message \"{0}\" is not under its speaker's id in this session")]
     WrongSpeaker(MessageId),
 }
 
 impl Session {
-    /// A session with no messages yet, whose character is `character` and
-    /// whose person goes by `user_name`.
+    /// A session with no messages yet, whose character is `character`.
     #[must_use]
-    pub fn new(id: SessionId, character: CharacterProfile, user_name: SpeakerName) -> Self {
+    pub fn new(id: SessionId, character: Identifier) -> Self {
         Self {
             id,
             character,
-            user_name,
             messages: Vec::new(),
         }
     }
@@ -52,41 +47,31 @@ impl Session {
     }
 
     #[must_use]
-    pub fn character(&self) -> &CharacterProfile {
-        &self.character
-    }
-
-    /// The name the person goes by in this session.
-    #[must_use]
-    pub fn user_name(&self) -> &SpeakerName {
-        &self.user_name
-    }
-
-    #[must_use]
     pub fn messages(&self) -> &[VisibleMessage] {
         &self.messages
     }
 
-    /// The person's line as the session's next message.
+    /// The person's line, said under `name`, as the session's next message.
     #[must_use]
-    pub fn user_message(&self, line: UserLine) -> VisibleMessage {
+    pub fn user_message(&self, line: UserLine, name: SpeakerName) -> VisibleMessage {
         VisibleMessage {
             id: self.next_id(),
             role: VisibleMessageRole::User,
             speaker_id: LOCAL_USER.clone(),
-            speaker_name: self.user_name.clone(),
+            speaker_name: name,
             text: line.into(),
         }
     }
 
-    /// The character's reply as the session's next message.
+    /// The character's reply, said under `name`, as the session's next
+    /// message.
     #[must_use]
-    pub fn character_message(&self, text: VisibleText) -> VisibleMessage {
+    pub fn character_message(&self, text: VisibleText, name: SpeakerName) -> VisibleMessage {
         VisibleMessage {
             id: self.next_id(),
             role: VisibleMessageRole::Character,
-            speaker_id: self.character.id.clone(),
-            speaker_name: self.character.display_name.clone(),
+            speaker_id: self.character.clone(),
+            speaker_name: name,
             text,
         }
     }
@@ -97,8 +82,8 @@ impl Session {
     /// # Errors
     ///
     /// [`AppendMessageError`] when `message` belongs to another session,
-    /// does not climb after the last message, or is not under the id and
-    /// name its role has in this session. The session is left as it was.
+    /// does not climb after the last message, or is not under the id its
+    /// role has in this session. The session is left as it was.
     pub fn append(
         &mut self,
         message: VisibleMessage,
@@ -116,20 +101,16 @@ impl Session {
             });
         }
 
-        let (speaker_id, speaker_name) = self.speaker(message.role);
+        let speaker = match message.role {
+            VisibleMessageRole::Character => &self.character,
+            VisibleMessageRole::User => &*LOCAL_USER,
+        };
 
-        if &message.speaker_id != speaker_id || &message.speaker_name != speaker_name {
+        if &message.speaker_id != speaker {
             return Err(AppendMessageError::WrongSpeaker(message.id));
         }
 
         Ok(self.messages.push_mut(message))
-    }
-
-    fn speaker(&self, role: VisibleMessageRole) -> (&Identifier, &SpeakerName) {
-        match role {
-            VisibleMessageRole::Character => (&self.character.id, &self.character.display_name),
-            VisibleMessageRole::User => (&LOCAL_USER, &self.user_name),
-        }
     }
 
     /// The largest number has no successor; the repeat given in its place
@@ -148,27 +129,25 @@ impl Session {
 mod tests {
     use super::*;
 
-    fn mira() -> CharacterProfile {
-        CharacterProfile {
-            id: Identifier::new("mira").unwrap(),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        }
-    }
-
     fn session() -> Session {
         Session::new(
             SessionId::parse("conv_a.1").unwrap(),
-            mira(),
-            SpeakerName::new("Sam").unwrap(),
+            Identifier::new("mira").unwrap(),
         )
     }
 
-    fn line(text: &str) -> UserLine {
-        UserLine::new(text).unwrap()
+    fn name(text: &str) -> SpeakerName {
+        SpeakerName::new(text).unwrap()
     }
 
-    fn reply(text: &str) -> VisibleText {
-        VisibleText::normalize(text).unwrap()
+    /// Sam's line `text`, as the session's next message.
+    fn said(session: &Session, text: &str) -> VisibleMessage {
+        session.user_message(UserLine::new(text).unwrap(), name("Sam"))
+    }
+
+    /// Mira's reply `text`, as the session's next message.
+    fn replied(session: &Session, text: &str) -> VisibleMessage {
+        session.character_message(VisibleText::normalize(text).unwrap(), name("Mira"))
     }
 
     fn numbered(mut message: VisibleMessage, number: u64) -> VisibleMessage {
@@ -183,17 +162,15 @@ mod tests {
     fn messages_are_numbered_one_after_another_whoever_speaks() {
         let mut session = session();
 
+        session.append(said(&session, "do the thing")).unwrap();
         session
-            .append(session.user_message(line("do the thing")))
+            .append(replied(&session, "Looking into it."))
             .unwrap();
         session
-            .append(session.character_message(reply("Looking into it.")))
-            .unwrap();
-        session
-            .append(session.character_message(reply("Done:\n- the thing")))
+            .append(replied(&session, "Done:\n- the thing"))
             .unwrap();
 
-        let said: Vec<(String, VisibleMessageRole, &str, &str, &str)> = session
+        let committed: Vec<(String, VisibleMessageRole, &str, &str, &str)> = session
             .messages()
             .iter()
             .map(|message| {
@@ -208,7 +185,7 @@ mod tests {
             .collect();
 
         assert_eq!(
-            said,
+            committed,
             [
                 (
                     "conv_a.1:message-1".to_owned(),
@@ -238,14 +215,14 @@ mod tests {
     #[test]
     fn a_session_read_back_with_a_gap_numbers_its_next_message_after_the_last() {
         let mut session = session();
-        let first = session.user_message(line("first"));
-        let after_gap = numbered(session.character_message(reply("third")), 3);
+        let first = said(&session, "first");
+        let after_gap = numbered(replied(&session, "third"), 3);
 
         session.append(first).unwrap();
         session.append(after_gap).unwrap();
 
         assert_eq!(
-            session.user_message(line("fourth")).id.to_string(),
+            said(&session, "fourth").id.to_string(),
             "conv_a.1:message-4"
         );
     }
@@ -253,7 +230,7 @@ mod tests {
     #[test]
     fn a_message_joins_only_in_its_session_climbing_under_its_speaker() {
         let mut session = session();
-        let first = session.user_message(line("first"));
+        let first = said(&session, "first");
 
         session.append(first.clone()).unwrap();
 
@@ -261,17 +238,13 @@ mod tests {
             id: MessageId::parse("conv_b.1:message-2").unwrap(),
             ..first.clone()
         };
-        let renamed = VisibleMessage {
-            speaker_name: SpeakerName::new("Mira Two").unwrap(),
-            ..session.character_message(reply("hello"))
-        };
         let impostor = VisibleMessage {
             speaker_id: Identifier::new("mira").unwrap(),
-            ..session.user_message(line("hello"))
+            ..said(&session, "hello")
         };
         let user_named_as_character = VisibleMessage {
             role: VisibleMessageRole::User,
-            ..session.character_message(reply("hello"))
+            ..replied(&session, "hello")
         };
 
         assert_eq!(
@@ -286,7 +259,7 @@ mod tests {
             })
         );
 
-        for refused in [renamed, impostor, user_named_as_character] {
+        for refused in [impostor, user_named_as_character] {
             assert_eq!(
                 session.append(refused.clone()),
                 Err(AppendMessageError::WrongSpeaker(refused.id))

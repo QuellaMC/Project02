@@ -18,7 +18,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use p02_app::{Answer, Daemon, HistoryPage, Message};
-use p02_config::{ConfigChange, ConfigTarget, Connector, connectors};
+use p02_config::{ConfigChange, ConfigTarget, connector};
 use p02_core::{ClientStamp, SpeakerName};
 use p02_shared::DaemonToken;
 use schemars::JsonSchema;
@@ -408,7 +408,7 @@ async fn events(
     let connector = match parameter(query.as_deref(), "connector").map(|id| connector(&id)) {
         None => None,
         Some(Ok(connector)) => Some(connector),
-        Some(Err(refusal)) => return refusal.into_response(),
+        Some(Err(unknown)) => return Refusal::invalid(unknown.to_string()).into_response(),
     };
     let last_event_id = headers.get("last-event-id").and_then(|id| id.to_str().ok());
 
@@ -424,14 +424,6 @@ fn answer(outcome: &impl Serialize) -> Response {
         serde_json::to_vec(outcome).expect("an outcome holds no map with keys that are not text");
 
     ([(CONTENT_TYPE, "application/json")], body).into_response()
-}
-
-/// The connector this build has under `id`.
-fn connector(id: &str) -> Result<&'static Connector, Refusal> {
-    connectors()
-        .iter()
-        .find(|connector| connector.id().as_str() == id)
-        .ok_or_else(|| Refusal::invalid(format!("No connector is called \"{id}\".")))
 }
 
 /// The body of a request as `T`, `subject` naming the request in what a

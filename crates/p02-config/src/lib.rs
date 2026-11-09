@@ -7,6 +7,7 @@ mod conceal;
 mod declaration;
 mod diagnostic;
 mod document;
+mod host;
 mod materialize;
 mod resolve;
 mod transaction;
@@ -16,10 +17,13 @@ pub use change::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Operation, apply_change,
     check_change, create_home_document,
 };
-pub use declaration::{Connector, Namespace, RoleModelProvider, Sections, Source, connectors};
+pub use declaration::{
+    Connector, Namespace, Sections, Source, UnknownConnector, connector, connectors,
+};
 pub use diagnostic::{Code, Diagnostic, Severity};
+pub use host::{HostSettings, RoleModelProvider};
 pub use materialize::{MaterializeError, materialize};
-pub use resolve::{CharacterSettings, HostSettings, ReadSettingsError, Resolution};
+pub use resolve::{CharacterSettings, ReadSettingsError, Resolution};
 pub use view::{
     ActivationStatus, Authored, CharacterConnectorEntry, ConfigReport, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, ConnectorReport, EffectiveView,

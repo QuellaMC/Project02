@@ -17,10 +17,9 @@ use ts_rs::TS;
 
 use crate::change::ConfigTarget;
 use crate::conceal::conceal;
-use crate::declaration::{
-    Declared, Namespace, RoleModelProvider, Sections, Source, Target, connectors,
-};
+use crate::declaration::{Declared, Namespace, Sections, Source, Target, connector};
 use crate::diagnostic::Diagnostic;
+use crate::host::RoleModelProvider;
 use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, Status};
 
 /// What a settings screen renders: the fingerprint a change must present,
@@ -59,7 +58,6 @@ pub enum ViewRefusal {
 pub struct FieldView {
     name: Identifier,
     description: String,
-    required: bool,
     secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     value_type: Option<ConfigValueType>,
@@ -259,7 +257,6 @@ fn field_view(field: &Field<'_>) -> FieldView {
     FieldView {
         name: declaration.name().clone(),
         description: declaration.description().to_owned(),
-        required: declaration.required(),
         secret,
         value_type: declaration.value_type(),
         allowed_values: declaration.allowed_values().map(<[String]>::to_vec),
@@ -419,22 +416,14 @@ impl ConnectorConfigView {
         discovery: &Discovery,
         connector_id: &str,
     ) -> Self {
-        let Some(connector) = connectors()
-            .iter()
-            .find(|connector| connector.id().as_str() == connector_id)
-        else {
-            let known: Vec<&str> = connectors()
-                .iter()
-                .map(|connector| connector.id().as_str())
-                .collect();
-
-            return Self::Refused {
-                reason: ConnectorRefusal::UnknownConnector,
-                message: format!(
-                    "Unknown connector \"{connector_id}\". Connectors: {}.",
-                    known.join(", ")
-                ),
-            };
+        let connector = match connector(connector_id) {
+            Ok(connector) => connector,
+            Err(unknown) => {
+                return Self::Refused {
+                    reason: ConnectorRefusal::UnknownConnector,
+                    message: unknown.to_string(),
+                };
+            }
         };
         let id = connector.id().as_str();
         let home_settings = match Resolution::home(home, sections) {

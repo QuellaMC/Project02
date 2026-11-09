@@ -551,7 +551,7 @@ fn written() -> Vec<(&'static str, Value)> {
             "ConnectorConfigView",
             &ConnectorConfigView::Refused {
                 reason: ConnectorRefusal::UnknownConnector,
-                message: "Unknown connector \"discord\".".to_owned(),
+                message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
             },
         ),
         read_back(
@@ -564,7 +564,7 @@ fn written() -> Vec<(&'static str, Value)> {
             "PairingRequestOutcome",
             &PairingOutcome::Refused {
                 reason: PairingRefusal::UnknownConnector,
-                message: "Connector \"discord\" does not pair.".to_owned(),
+                message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
             },
         ),
         read_back(

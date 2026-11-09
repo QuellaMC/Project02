@@ -97,11 +97,6 @@ pub enum ManifestError {
     )]
     SecretDefault(Identifier),
     #[error(
-        "plugin config field \"{0}\" is required and cannot declare a defaultValue: a required \
-         field is one its operator must set"
-    )]
-    RequiredDefault(Identifier),
-    #[error(
         "plugin config field \"{0}\" allowedValues must name one value at least, each a value of \
          its valueType"
     )]
@@ -391,7 +386,6 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
             &[
                 "name",
                 "description",
-                "required",
                 "secret",
                 "scope",
                 "valueType",
@@ -432,7 +426,6 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
 fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     let name = fields.identifier("name")?;
     let description = fields.text("description")?;
-    let required = fields.boolean("required")?;
     let secret = fields.boolean("secret")?;
     let scope = fields.optional_vocabulary("scope", ConfigScope::ALL)?;
     let value_type = fields.optional_vocabulary("valueType", ConfigValueType::ALL)?;
@@ -465,7 +458,6 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     Ok(ConfigField {
         name,
         description,
-        required,
         secret,
         scope,
         value_type,
@@ -478,9 +470,9 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
 
 /// Every value a manifest names for a field is one the field accepts: each
 /// allowed value, of which there is one at least, and the default, which is
-/// what the field takes wherever nothing sets it. A credential, or a value
-/// its operator must choose, is never a default a manifest decides, and a
-/// secret's type is one that holds a string, since a credential is one.
+/// what the field takes wherever nothing sets it. A credential is never a
+/// default a manifest decides, and a secret's type is one that holds a
+/// string, since a credential is one.
 fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
     if field.secret && !field.of_its_type(&Value::from("")) {
         return Err(ManifestError::SecretNotText(field.name.clone()));
@@ -501,8 +493,6 @@ fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
 
     if field.secret {
         Err(ManifestError::SecretDefault(field.name.clone()))
-    } else if field.required {
-        Err(ManifestError::RequiredDefault(field.name.clone()))
     } else if field.accepts(default_value) {
         Ok(())
     } else {
@@ -701,7 +691,6 @@ mod tests {
                     {
                         "name": "tone",
                         "description": "Reply tone.",
-                        "required": false,
                         "secret": false,
                         "valueType": "string",
                         "allowedValues": ["warm", "formal"],
@@ -710,7 +699,6 @@ mod tests {
                     {
                         "name": "apiKey",
                         "description": "A credential.",
-                        "required": false,
                         "secret": true,
                         "valueType": "string",
                         "redactionLabels": ["secret"],
@@ -821,13 +809,6 @@ mod tests {
             (
                 |m| m["config"]["fields"][1]["valueType"] = json!("number"),
                 ManifestError::SecretNotText(name("apiKey")),
-            ),
-            (
-                |m| {
-                    m["config"]["fields"][0]["required"] = json!(true);
-                    m["config"]["fields"][0]["defaultValue"] = json!("warm");
-                },
-                ManifestError::RequiredDefault(name("tone")),
             ),
             (
                 |m| m["config"]["fields"][0]["valueType"] = json!("number"),

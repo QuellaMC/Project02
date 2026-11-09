@@ -5,7 +5,8 @@ use p02_contracts::ConfigField;
 use p02_shared::{is_credential_key, redact_credentials};
 use serde_json::{Map, Value};
 
-use crate::declaration::{Namespace, Sections, host_field};
+use crate::declaration::{Namespace, Sections};
+use crate::host::host_field;
 
 const REDACTED: &str = "[redacted]";
 

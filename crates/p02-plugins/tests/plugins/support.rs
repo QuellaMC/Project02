@@ -105,7 +105,6 @@ pub(crate) struct Spec {
     pub(crate) before: &'static str,
     pub(crate) tool: &'static str,
     pub(crate) access: Value,
-    pub(crate) config_fields: Value,
 }
 
 impl Spec {
@@ -118,7 +117,6 @@ impl Spec {
             before: "degrade",
             tool: "reject_tool_call",
             access: json!({"model_input": "write"}),
-            config_fields: json!([]),
         }
     }
 
@@ -139,7 +137,7 @@ impl Spec {
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
             "declaredPlugins": self.declared,
-            "config": {"scope": "global_with_character_overrides", "fields": self.config_fields},
+            "config": {"scope": "global_with_character_overrides", "fields": []},
             "runtimePolicy": {
                 "timeoutMs": self.timeout_ms,
                 "redactionLabels": self.labels,

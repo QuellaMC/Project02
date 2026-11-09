@@ -19,9 +19,7 @@ use crate::lock::{Lease, Resource, acquire, with_lock};
 
 /// One process's hold on an open conversation, refused at once to every
 /// other: only its holder makes the conversation's segments and writes the
-/// record of its taken lines. It holds the conversation as it began, so
-/// every segment it makes speaks of its participants by the names they had
-/// then.
+/// record of its taken lines.
 #[derive(Debug)]
 #[must_use = "a writer holds its conversation until it is released"]
 pub struct ConversationWriter {
@@ -44,8 +42,6 @@ impl ConversationWriter {
 impl Home {
     /// The one conversation between exactly `participants`, made the first
     /// time it is asked for, with a new id, `conv_` and a random UUID.
-    /// Participants are told apart by kind and id: their names are the ones
-    /// they had when the thread began.
     ///
     /// # Errors
     ///

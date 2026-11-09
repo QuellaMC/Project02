@@ -12,13 +12,13 @@ only on tokio's blocking pool, where a lock's wait blocks.
   conversation's writer lease, and resumes its latest segment under that
   segment's writer lease, or makes the first. A latest segment past the
   first that holds no record is what a rotation interrupted before its
-  first record left: it is discarded and the one before it resumed. The
-  thread keeps the names its participants had when it began, so a renamed
-  person renames no thread. What the open skipped because it could not be
-  read, rows of her sessions catalog or lines of the segment it resumed,
-  the thread says in a sentence. An open that fails after the
-  conversation's lease was taken releases it. Closing the thread releases
-  the segment's lease and then the conversation's.
+  first record left: it is discarded and the one before it resumed. Who
+  she is, her name and persona, is her package's as the thread opened.
+  What the open skipped because it could not be read, rows of her
+  sessions catalog or lines of the segment it resumed, the thread says in
+  a sentence. An open that fails after the conversation's lease was taken
+  releases it. Closing the thread releases the segment's lease and then
+  the conversation's.
 - **One line at a time.** The thread takes a line only once the one before
   it ended. A line its client submitted under an id a run before this one
   took, in the current segment or a closed one, is answered with the
@@ -38,15 +38,17 @@ only on tokio's blocking pool, where a lock's wait blocks.
   the plugins' work after its commit, which can change nothing about it.
   A text that is no line is refused with its event, and nothing is
   committed.
-- **What she answers with.** Her model, her plugins and her model's
-  window are her caller's, kept as her settings say: the caller brings
-  them up to date before her turn, and the turn before each request to
-  the model after its first, so every request starts from her settings as
-  they are then. Once she was built again, the model's call is prepared
-  again with her new plugins; a plugin refuses a turn only before its
-  first round, so a refusal then leaves the call as it was prepared. The
-  history the model is shown is chosen at the turn's start, and the
-  continuation after it runs on what the turn ended on.
+- **What she answers with.** The name the person goes by, her model, her
+  plugins and her model's window are her caller's, kept as her settings
+  say: the caller brings them up to date before her turn, and the turn
+  before each request to the model after its first, so every request
+  starts from her settings as they are then, and the person's line
+  carries the name they go by when they say it. Once she was built again,
+  the model's call is prepared again with her new plugins; a plugin
+  refuses a turn only before its first round, so a refusal then leaves
+  the call as it was prepared. The history the model is shown is chosen
+  at the turn's start, and the continuation after it runs on what the
+  turn ended on.
 - **What the turn says.** The person's line, each reply, the pieces of a
   reply the model is still writing and their withdrawal, and the tool
   calls requested and each completed as it finishes, in order, on the
@@ -72,12 +74,11 @@ only on tokio's blocking pool, where a lock's wait blocks.
   least and 6,000 at most. A provider that cannot, a failure, or a blank
   answer leaves a mechanical summary of how many turns went by, when, what
   the person last said there and which tools were used. Both speak of the
-  person by the name the conversation recorded for them, as the transcript
-  they condense names them. The continuation
-  record is the commit point: the store makes the new segment with its
-  writer, taking it back when it cannot give it one, a record that fails to
-  land discards it through that writer, or leaves it empty for the next open
-  to discard when the discard fails too, and the thread stays where it was,
+  person by the name they go by now. The continuation record is the commit
+  point: the store makes the new segment with its writer, taking it back
+  when it cannot give it one, a record that fails to land discards it
+  through that writer, or leaves it empty for the next open to discard
+  when the discard fails too, and the thread stays where it was,
   to plan again after the next turn; after it the old segment's lines are
   recorded and its lease is released, and what of that fails is reported,
   never undone. Every length is counted in characters.

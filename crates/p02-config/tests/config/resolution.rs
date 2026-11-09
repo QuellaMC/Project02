@@ -390,8 +390,8 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
         "global_with_character_overrides",
         true,
         &json!([{
-            "name": "mirror", "description": "Not the connector's.", "required": false,
-            "secret": false, "valueType": "string", "redactionLabels": [],
+            "name": "mirror", "description": "Not the connector's.", "secret": false,
+            "valueType": "string", "redactionLabels": [],
         }]),
     ));
 

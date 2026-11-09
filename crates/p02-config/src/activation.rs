@@ -9,9 +9,8 @@ use p02_shared::Identifier;
 
 use crate::declaration::Namespace;
 use crate::diagnostic::{Code, Diagnostic};
+use crate::host::DEFAULT_MEMORY_PROVIDER;
 use crate::resolve::{Section, Status};
-
-const MEMORY_PROVIDER: &str = "project02.defaultMemoryProvider";
 
 /// What `character`'s settings make of her plugins, `resolved` being her
 /// sections and `chosen` her memory provider.
@@ -37,14 +36,16 @@ fn memory_provider(chosen: Option<&str>, resolved: &[Section<'_>]) -> Option<Dia
     });
 
     (!runs).then(|| {
+        let path = DEFAULT_MEMORY_PROVIDER.path();
+
         Diagnostic::error(
             Code::MemoryProviderUnavailable,
             format!(
                 "The memory provider \"{chosen}\" her settings choose is not a memory plugin she \
-                 runs. Switch it on, or choose another in {MEMORY_PROVIDER}."
+                 runs. Switch it on, or choose another in {path}."
             ),
         )
-        .at(MEMORY_PROVIDER)
+        .at(path)
     })
 }
 

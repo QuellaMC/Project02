@@ -102,10 +102,10 @@ pub(crate) fn render(
     envelope: &InputEnvelope,
     history: &[ConversationTurn],
     persona: &Persona,
-    person: Person<'_>,
     unusable_reply: Option<&str>,
 ) -> Prompt {
     let prepared = &envelope.decision_context;
+    let person = Person::of(prepared.person());
     let inventory = if envelope
         .plugin_tool_definitions
         .get(PLUGIN_LIST_TOOL)
@@ -311,11 +311,16 @@ pub(crate) mod tests {
         )
     }
 
+    /// Mira's context, the person going by the name they have until they
+    /// choose one.
     fn context() -> DecisionContext {
-        DecisionContext::new(CharacterProfile {
-            id: id("mira"),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        })
+        DecisionContext::new(
+            CharacterProfile {
+                id: id("mira"),
+                display_name: SpeakerName::new("Mira").unwrap(),
+            },
+            SpeakerName::new("You").unwrap(),
+        )
     }
 
     fn item(plugin: &str, item: &str, kind: ContextItemKind, text: &str) -> PluginContextItem {
@@ -371,13 +376,7 @@ pub(crate) mod tests {
                 ],
                 Vec::new(),
             );
-        let prompt = render(
-            &envelope("Hello.", context),
-            &[],
-            &mira(),
-            Person::Unnamed,
-            None,
-        );
+        let prompt = render(&envelope("Hello.", context), &[], &mira(), None);
         let trusted: Vec<&str> = prompt
             .messages()
             .iter()
@@ -447,7 +446,7 @@ pub(crate) mod tests {
         ])
         .unwrap();
 
-        let prompt = render(&envelope, &[], &mira(), Person::Unnamed, None);
+        let prompt = render(&envelope, &[], &mira(), None);
         let names: Vec<&str> = prompt
             .tools()
             .iter()

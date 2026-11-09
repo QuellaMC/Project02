@@ -394,7 +394,7 @@ export type RuntimeConfigDiagnostic = { severity: Severity, code: Code, message:
  * document holds for it, and the value in effect with where it comes
  * from, a secret's as `[redacted]`.
  */
-export type RuntimeConfigFieldInspectShape = { name: Identifier, description: string, required: boolean, secret: boolean, valueType?: ConfigValueType, allowedValues?: ReadonlyArray<string>, agentMutable: boolean, authored: Authored, effectiveSource: Source, effective: EffectiveView, };
+export type RuntimeConfigFieldInspectShape = { name: Identifier, description: string, secret: boolean, valueType?: ConfigValueType, allowedValues?: ReadonlyArray<string>, agentMutable: boolean, authored: Authored, effectiveSource: Source, effective: EffectiveView, };
 
 /**
  * Whether a section runs, as its settings decide it, and why.

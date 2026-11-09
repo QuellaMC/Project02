@@ -5,8 +5,8 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use p02_contracts::{ConversationTurn, ToolCallResult};
 use p02_core::{
-    Conversation, ConversationId, EventId, Participant, SessionId, SpeakerName, Timestamp,
-    UserLine, VisibleMessageRole,
+    Conversation, ConversationId, EventId, Participant, SessionId, Timestamp, UserLine,
+    VisibleMessageRole,
 };
 use p02_store::{
     ContinuedFrom, LogRecord, RecordBody, SessionContinuation, SessionContinued, SessionWriter,
@@ -203,7 +203,7 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
     );
     assert_eq!(
         session
-            .user_message(UserLine::new("Five?").unwrap())
+            .user_message(UserLine::new("Five?").unwrap(), sam())
             .id
             .number(),
         NonZeroU64::new(5).unwrap()
@@ -226,7 +226,6 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
     let alice = Participant {
         kind: VisibleMessageRole::User,
         id: id("alice"),
-        display_name: SpeakerName::new("Alice").unwrap(),
     };
     let between = |id: &str, participants| {
         Conversation::new(
@@ -239,9 +238,9 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
     let group = between(
         "conv_group",
         vec![
-            Participant::character(mira()),
+            Participant::character(mira().id),
             alice.clone(),
-            Participant::local_user(sam()),
+            Participant::local_user(),
         ],
     );
     let mut script = Script::new(SessionId::new(group.id().clone(), NonZeroU64::MIN));
@@ -260,11 +259,17 @@ fn a_session_is_the_person_s_whoever_else_its_conversation_is_between() {
             .read()
             .unwrap()
             .session()
-            .user_name(),
-        &sam()
+            .messages()
+            .iter()
+            .map(|message| &message.speaker_id)
+            .collect::<Vec<_>>(),
+        [Participant::local_user_id(), &id("mira")]
     );
 
-    let without = between("conv_without", vec![Participant::character(mira()), alice]);
+    let without = between(
+        "conv_without",
+        vec![Participant::character(mira().id), alice],
+    );
 
     assert_eq!(
         world.first_segment(&without).unwrap_err().code(),

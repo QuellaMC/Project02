@@ -262,7 +262,7 @@ pub struct VisibleMessage {
     pub text: VisibleText,
 }
 
-/// A character as a conversation knows it.
+/// A character: her id, and the name she goes by.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterProfile {

@@ -35,11 +35,16 @@ pub(crate) fn event() -> EventIdentity {
     .unwrap()
 }
 
+/// Mira's context, the person going by the name they have until they
+/// choose one.
 pub(crate) fn context() -> DecisionContext {
-    DecisionContext::new(CharacterProfile {
-        id: id("mira"),
-        display_name: SpeakerName::new("Mira").unwrap(),
-    })
+    DecisionContext::new(
+        CharacterProfile {
+            id: id("mira"),
+            display_name: SpeakerName::new("Mira").unwrap(),
+        },
+        SpeakerName::new("You").unwrap(),
+    )
 }
 
 /// A tool `name` of `plugin`, taking anything an object holds.

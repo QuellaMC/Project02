@@ -71,22 +71,22 @@ pub(crate) fn plugins() -> Vec<Manifest> {
             false,
             &json!([
                 {
-                    "name": "tone", "description": "The tone.", "required": false,
+                    "name": "tone", "description": "The tone.",
                     "secret": false, "valueType": "string",
                     "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
                     "agentMutable": true, "redactionLabels": [],
                 },
                 {
-                    "name": "signoff", "description": "The signoff.", "required": false,
+                    "name": "signoff", "description": "The signoff.",
                     "secret": false, "valueType": "string", "agentMutable": true,
                     "redactionLabels": [],
                 },
                 {
-                    "name": "operatorNote", "description": "A note.", "required": false,
+                    "name": "operatorNote", "description": "A note.",
                     "secret": false, "valueType": "string", "redactionLabels": [],
                 },
                 {
-                    "name": "apiKey", "description": "A key.", "required": false,
+                    "name": "apiKey", "description": "A key.",
                     "secret": true, "valueType": "string", "redactionLabels": [],
                 },
             ]),
@@ -106,17 +106,17 @@ pub(crate) fn plugins() -> Vec<Manifest> {
             &json!([
                 {
                     "name": "backend", "description": "Where memories are kept.",
-                    "required": false, "secret": false, "valueType": "string",
+                    "secret": false, "valueType": "string",
                     "allowedValues": ["platform", "server", "oss"], "defaultValue": "platform",
                     "redactionLabels": [],
                 },
                 {
                     "name": "baseUrl", "description": "Where memories are sent.",
-                    "required": false, "secret": false, "valueType": "url",
+                    "secret": false, "valueType": "url",
                     "redactionLabels": [],
                 },
                 {
-                    "name": "apiKey", "description": "The key.", "required": false,
+                    "name": "apiKey", "description": "The key.",
                     "secret": true, "valueType": "string", "redactionLabels": ["memory"],
                 },
             ]),
