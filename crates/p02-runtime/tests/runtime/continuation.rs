@@ -1,17 +1,14 @@
 //! A session that outgrows the model's window, continued in a new segment,
-//! and the thread when the rotation, or the old segment's end, fails.
+//! and the thread when the rotation fails.
 
 use std::num::{NonZeroU32, NonZeroU64};
-use std::sync::Arc;
 
-use p02_contracts::{
-    ConversationTurn, HookReport, HookStatus, PluginError, ProviderName, TextCompletion,
-};
+use p02_contracts::{ConversationTurn, ProviderName, TextCompletion};
 use p02_core::{MessageId, SessionId};
 use p02_runtime::{CompletedTurn, Delivery, Rotation};
 use p02_store::{RecordBody, SessionContinuation, Summarizer, SummaryProvider, TakenLines};
 
-use crate::support::{Chat, Round, Toy, make_read_only, reply, restore, stamp};
+use crate::support::{Chat, Round, make_read_only, reply, restore, stamp};
 
 /// A window that holds two of the turns these tests say, never three, and
 /// whose quarter holds one.
@@ -43,8 +40,8 @@ fn continuation(chat: &Chat, segment: u64) -> SessionContinuation {
 /// segment after the turn that outgrew it: the newest turn that fits a
 /// quarter of the window carried whole and the rest condensed, by the
 /// model when it can and mechanically when it cannot; the next turn is
-/// shown the carried turn and the summary, the old segment's lines are
-/// recorded, and its end hooks run.
+/// shown the carried turn and the summary, and the old segment's lines are
+/// recorded.
 #[tokio::test]
 async fn a_history_that_outgrows_the_window_continues_in_a_new_segment() {
     continues(Some("We spoke of two lines.")).await;
@@ -54,13 +51,7 @@ async fn a_history_that_outgrows_the_window_continues_in_a_new_segment() {
 /// Three turns in a small window, `summary` what the model condenses the
 /// first two into, if it does, then the turn after them.
 async fn continues(summary: Option<&str>) {
-    let ender = Arc::new(Toy::new("ender").end(|_| {
-        Ok(HookReport {
-            status: HookStatus::Completed,
-            evidence: Vec::new(),
-        })
-    }));
-    let mut chat = Chat::new(&[Arc::clone(&ender)]);
+    let mut chat = Chat::new(&[]);
     let id = chat.id();
 
     chat.window = SMALL;
@@ -114,7 +105,6 @@ async fn continues(summary: Option<&str>) {
         Some(written.as_str())
     );
     assert_eq!(said(&asked[3].history), ["Line 3."]);
-    assert_eq!(*ender.ended.lock().unwrap(), [session(&format!("{id}.1"))]);
     assert_eq!(
         TakenLines::read(&chat.world.data(), &id).taken(&stamp("line-1")),
         Some(&MessageId::parse(&format!("{id}.1:message-1")).unwrap())
@@ -217,31 +207,4 @@ async fn a_rotation_that_fails_leaves_the_turn_completed_and_the_thread_in_its_s
         matches!(rotation, Some(Rotation::Rotated { .. })),
         "{rotation:?}"
     );
-}
-
-/// storage.continuation-end-hook-failure: a rotation whose old segment's session-end hook fails still adopts the continuation, reports the failure, and chatting goes on in the new segment
-#[tokio::test]
-async fn a_failed_end_hook_reports_the_failure_and_the_continuation_stands() {
-    let archive = Toy::new("archive").end(|_| Err(PluginError::new("The archive is unreachable.")));
-    let mut chat = Chat::new(&[Arc::new(archive)]);
-    let id = chat.id();
-
-    chat.window = SMALL;
-    line(&mut chat, 1).await;
-    line(&mut chat, 2).await;
-
-    let Some(Rotation::Rotated {
-        to, end_failure, ..
-    }) = line(&mut chat, 3).await.1
-    else {
-        panic!("the rotation is committed");
-    };
-    let (turn, _) = line(&mut chat, 4).await;
-
-    assert_eq!(to, session(&format!("{id}.2")));
-    assert_eq!(
-        end_failure.as_deref(),
-        Some("onSessionEnd plugin hook failed: The archive is unreachable.")
-    );
-    assert_eq!(turn.messages[0].id.to_string(), format!("{id}.2:message-1"));
 }

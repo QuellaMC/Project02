@@ -23,8 +23,8 @@ pub use continuation::{
 };
 pub use round::{RoundRecord, RoundSnapshot};
 pub use terminal::{
-    AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnEvidence, TurnRejected,
-    TurnRejection, TurnStatus,
+    AfterTurnCommitted, Judgement, RuntimeRejection, TurnCompleted, TurnRejected, TurnRejection,
+    TurnStatus,
 };
 pub use tool::{ToolCallFinished, ToolCallStarted, ToolDispatch};
 

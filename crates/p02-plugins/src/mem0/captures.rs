@@ -40,26 +40,15 @@ pub(super) struct Captures {
 struct Shared {
     /// Captures queued or running.
     pending: watch::Sender<usize>,
-    record: Mutex<Record>,
+    record: Mutex<Outcomes>,
 }
 
-/// What the captures that settled came to.
-#[derive(Clone, Debug, Default)]
-struct Record {
-    incomplete: u64,
-    loss: Option<String>,
-    last: Option<String>,
-}
-
-/// What the captures came to so far.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the captures that did not complete came to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Outcomes {
-    pub(super) pending: usize,
     pub(super) incomplete: u64,
     /// The most recent loss, said with the count of every loss.
     pub(super) loss: Option<String>,
-    /// What the last capture that completed came to.
-    pub(super) last: Option<String>,
 }
 
 #[derive(Debug)]
@@ -121,24 +110,11 @@ impl Captures {
     }
 
     pub(super) fn outcomes(&self) -> Outcomes {
-        let pending = *self.shared.pending.borrow();
-        let Record {
-            incomplete,
-            loss,
-            last,
-        } = self
-            .shared
+        self.shared
             .record
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-
-        Outcomes {
-            pending,
-            incomplete,
-            loss,
-            last,
-        }
+            .clone()
     }
 
     /// Waits until every queued capture is done or `stop` is cancelled;
@@ -184,7 +160,7 @@ impl Captures {
                 // A capture that panics is lost like one that failed, so
                 // the worker, and the captures queued behind it, go on.
                 match tokio::time::timeout(BOUND, AssertUnwindSafe(job).catch_unwind()).await {
-                    Ok(Ok(Ok(written))) => shared.completed(&written),
+                    Ok(Ok(Ok(_))) => {}
                     Ok(Ok(Err(error))) => shared.lose(1, &error.to_string()),
                     Ok(Err(_)) => {
                         shared.lose(1, "mem0 add panicked; whether it completed is unknown.");
@@ -215,24 +191,6 @@ impl Shared {
             record.incomplete
         ));
     }
-
-    fn completed(&self, written: &Written) {
-        let last = match written {
-            Written::Stored(stored) if stored.is_empty() => {
-                "No memory extracted from the last captured turn.".to_owned()
-            }
-            Written::Stored(stored) => format!(
-                "Stored {} memory item(s) from the last captured turn.",
-                stored.len()
-            ),
-            Written::Queued(_) => "Queued the last captured turn with the backend.".to_owned(),
-        };
-
-        self.record
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .last = Some(last);
-    }
 }
 
 #[cfg(test)]
@@ -251,14 +209,12 @@ mod tests {
         assert_eq!(
             captures.drain(&CancellationToken::new()).await,
             Outcomes {
-                pending: 0,
                 incomplete: 1,
                 loss: Some(
                     "1 capture(s) did not complete; most recent: mem0 add panicked; whether it \
                      completed is unknown."
                         .to_owned()
                 ),
-                last: Some("Stored 1 memory item(s) from the last captured turn.".to_owned()),
             }
         );
     }

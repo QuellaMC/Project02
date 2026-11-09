@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 
 use p02_contracts::{
     ContextItemKind, DECISION_CONTRACT_VERSION, DecisionResult, Evidence, EvidenceKind,
-    EvidenceStatus, HealthSnapshot, HistoryWindow, InputEnvelope, ModelToolCall, PluginContextItem,
+    EvidenceStatus, HistoryWindow, InputEnvelope, ModelToolCall, PluginContextItem,
     PluginCuratedSection, PolicyOutcome, PromptSize, ProviderExchange, ProviderMetadata,
     RedactionLabel, RuntimeNote, SourceReference, ToolCallId, ToolCallResult,
 };
@@ -21,7 +21,7 @@ use p02_role_model::estimated_tokens;
 use p02_shared::Identifier;
 use p02_store::{
     LogRecord, RecordBody, RecordKind, RoundRecord, SessionContinuation, SessionEntry,
-    SessionReplay, SkippedLines, ToolCallFinished, ToolCallStarted, TurnEvidence, TurnRejection,
+    SessionReplay, SkippedLines, ToolCallFinished, ToolCallStarted, TurnRejection,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -256,14 +256,13 @@ enum Verdict {
 }
 
 /// What the plugins said of the turn: each step one took, recorded with
-/// the turn's ending and after its commit, the outcomes their policies
-/// reached, and their health as the turn found it.
+/// the turn's ending and after its commit, and the outcomes their policies
+/// reached.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PluginEvidence<'r> {
     evidence: Vec<EvidenceEntry<'r>>,
     policy_outcomes: Vec<PolicyOutcome>,
-    health: &'r [HealthSnapshot],
 }
 
 /// One step a plugin took, without the turn it belongs to, which the
@@ -329,7 +328,6 @@ struct Ended<'r> {
     committed: &'r [MessageId],
     finished: &'r [ToolCallId],
     evidence: &'r [Evidence],
-    health: Option<&'r TurnEvidence>,
     verdict: Option<CommitValidation<'r>>,
     /// The reason and the sentence of a rejection.
     refusal: Option<(&'static str, &'r str)>,
@@ -344,7 +342,6 @@ impl<'r> Ended<'r> {
                 committed: &completed.visible_message_ids,
                 finished: &completed.tool_call_ids,
                 evidence: &completed.runtime_plugin_evidence,
-                health: completed.runtime_plugin_turn_evidence.as_ref(),
                 verdict: Some(CommitValidation {
                     round: completed.judgement.round,
                     status: Verdict::Accepted,
@@ -359,7 +356,6 @@ impl<'r> Ended<'r> {
                 committed: &rejected.visible_message_ids,
                 finished: &rejected.tool_call_ids,
                 evidence: &rejected.runtime_plugin_evidence,
-                health: rejected.runtime_plugin_turn_evidence.as_ref(),
                 verdict: match rejected.rejection() {
                     TurnRejection::Judged { round, reason } => Some(CommitValidation {
                         round,
@@ -442,7 +438,7 @@ fn turn<'r>(
             })
             .collect(),
         commit_validation: ended.verdict,
-        plugin_evidence: (ended.health.is_some() || !said.is_empty()).then(|| PluginEvidence {
+        plugin_evidence: (!said.is_empty()).then(|| PluginEvidence {
             policy_outcomes: said.iter().fold(Vec::new(), |mut outcomes, evidence| {
                 if let Some(outcome) = evidence.policy_outcome()
                     && !outcomes.contains(&outcome)
@@ -453,9 +449,6 @@ fn turn<'r>(
                 outcomes
             }),
             evidence: said.into_iter().map(entry).collect(),
-            health: ended
-                .health
-                .map_or(&[], |evidence| evidence.health.as_slice()),
         }),
         reason: ended.refusal.map(|(reason, _)| reason),
         message: ended.refusal.map(|(_, message)| message),
@@ -623,7 +616,7 @@ mod tests {
     use p02_store::{
         AfterTurnCommitted, CharacterData, EventReceived, Home, Judgement, LogRecord,
         MessageCommitted, PayloadSummary, RecordBody, RoundRecord, RoundSnapshot, ToolCallFinished,
-        ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence, TurnStatus,
+        ToolCallStarted, ToolDispatch, TurnCompleted, TurnStatus,
     };
     use serde_json::{Value, json};
 
@@ -673,8 +666,7 @@ mod tests {
                     chars: NonZeroU64::new(chars).unwrap(),
                 }],
                 0,
-            )
-            .unwrap(),
+            ),
             provider_metadata: None,
             provider_exchange: None,
         };
@@ -813,7 +805,6 @@ mod tests {
                     "session-history",
                     EvidenceKind::ToolInvocation,
                 )],
-                runtime_plugin_turn_evidence: Some(TurnEvidence { health: Vec::new() }),
             }),
             RecordBody::AfterTurnCommitted(AfterTurnCommitted {
                 status: TurnStatus::Completed,
@@ -965,7 +956,6 @@ mod tests {
                             done("mem0", "after_turn_committed"),
                         ],
                         "policyOutcomes": [],
-                        "health": [],
                     },
                 }],
             })

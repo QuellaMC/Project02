@@ -190,19 +190,14 @@ it("memory.mem0-wire: the server backend recalls and captures under its X-API-Ke
     'mira',
     'runtime_turn_completed',
   );
-  const health = (
-    completed?.['runtimePluginTurnEvidence'] as
-      | {
-          readonly health: readonly {
-            readonly pluginId: string;
-            readonly status: string;
-          }[];
-        }
+  const recalled = (
+    completed?.['runtimePluginEvidence'] as
+      | readonly {readonly pluginId: string; readonly status: string}[]
       | undefined
-  )?.health.find(entry => entry.pluginId === 'mem0');
+  )?.find(entry => entry.pluginId === 'mem0');
 
   // Judged unusable, and recorded so without the credentials it carries.
-  expect(health?.status).toBe('unavailable');
+  expect(recalled?.status).toBe('degraded');
   expect(
     JSON.stringify(
       sessionLog(credentialed, 'mira', `${thread.conversationId}.1`),

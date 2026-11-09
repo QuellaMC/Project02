@@ -8,7 +8,6 @@ mod character_state;
 mod config_control;
 mod confirmation;
 mod demo_config;
-mod health;
 mod host;
 mod invoke;
 mod lifecycle;
@@ -29,7 +28,6 @@ pub use config_control::{
     ReadConfigError, Rebuild,
 };
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
-pub use health::{HealthCheck, HealthRejection};
 pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder, ReloadError};
 pub use lifecycle::{HookPhaseReport, PhaseStatus};
 pub use tool_call::{ProposedToolCall, ToolCallReport};

@@ -11,13 +11,16 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
-    BeforeRoleModelCallOutput, ConversationTurn, HealthReport, HookContext, HookReport,
-    InputEnvelope, Invocation, Manifest, PluginError, ProvidedTool, ProviderAnswer, RawOutput,
-    ReplyDelta, RoleModelAdapter, RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall,
-    ToolCallOutcome, ToolInputContract,
+    BeforeRoleModelCallOutput, ConversationTurn, HookContext, InputEnvelope, Invocation, Manifest,
+    PluginError, ProvidedTool, ProviderAnswer, RawOutput, ReplyDelta, RoleModelAdapter,
+    RuntimePlugin, TextCompletion, TextCompletionRequest, ToolCall, ToolCallOutcome,
+    ToolInputContract,
 };
-use p02_core::{ClientStamp, ConversationId, SessionId, SpeakerName};
-use p02_plugins::PluginHost;
+use p02_core::{ClientStamp, ConversationId, SpeakerName};
+use p02_plugins::{
+    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, Rebuild,
+};
 use p02_runtime::{Character, Conversation, Delivery, Progress, Submission};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
@@ -96,12 +99,17 @@ impl World {
             .unwrap()
     }
 
-    /// A host of `plugins` over Mira's storage.
+    /// A host of `plugins` over Mira's storage, with nobody to ask and no
+    /// settings.
     pub(crate) fn host(&self, plugins: &[Arc<Toy>]) -> PluginHost {
         plugins
             .iter()
             .fold(
-                PluginHost::builder(Arc::new(self.data())),
+                PluginHost::builder(
+                    Arc::new(self.data()),
+                    Arc::new(Nobody),
+                    Arc::new(NoSettings),
+                ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;
 
@@ -218,7 +226,7 @@ impl Chat {
     /// Closes the thread, saying what failed of its end, and opens it
     /// again, as a restarted character does.
     pub(crate) async fn reopen(&mut self) -> Option<String> {
-        let closed = self.conversation.take().unwrap().close(&self.host).await;
+        let closed = self.conversation.take().unwrap().close().await;
 
         self.conversation = Some(self.world.open());
         closed
@@ -414,16 +422,13 @@ type Hook<T> = Box<dyn Fn(&HookContext) -> Result<T, PluginError> + Send + Sync>
 type Handler = Box<dyn Fn(&ToolCall) -> ToolCallOutcome + Send + Sync>;
 
 /// A plugin whose hooks are what a test scripts, each one it is given
-/// declared, with the sessions its end hook ended.
+/// declared.
 pub(crate) struct Toy {
     id: &'static str,
     access: Value,
     tools: Vec<ProvidedTool>,
     before: Option<Hook<BeforeRoleModelCallOutput>>,
     tool: Option<Handler>,
-    health: Option<HealthReport>,
-    end: Option<Hook<HookReport>>,
-    pub(crate) ended: Mutex<Vec<SessionId>>,
 }
 
 impl Toy {
@@ -434,9 +439,6 @@ impl Toy {
             tools: Vec::new(),
             before: None,
             tool: None,
-            health: None,
-            end: None,
-            ended: Mutex::new(Vec::new()),
         }
     }
 
@@ -474,19 +476,6 @@ impl Toy {
         self
     }
 
-    pub(crate) fn health(mut self, report: HealthReport) -> Self {
-        self.health = Some(report);
-        self
-    }
-
-    pub(crate) fn end(
-        mut self,
-        hook: impl Fn(&HookContext) -> Result<HookReport, PluginError> + Send + Sync + 'static,
-    ) -> Self {
-        self.end = Some(Box::new(hook));
-        self
-    }
-
     fn manifest(&self) -> Manifest {
         let mut declared = Vec::new();
 
@@ -498,14 +487,6 @@ impl Toy {
             declared.extend(["tool_provider", "handle_tool_call"]);
         }
 
-        if self.health.is_some() {
-            declared.push("health");
-        }
-
-        if self.end.is_some() {
-            declared.push("on_session_end");
-        }
-
         Manifest::from_value(&json!({
             "id": self.id,
             "displayName": self.id,
@@ -513,17 +494,14 @@ impl Toy {
             "kind": "context_provider",
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
-            "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
             "declaredPlugins": declared,
             "config": {"scope": "global_with_character_overrides", "fields": []},
-            "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": 10_000,
                 "redactionLabels": [],
                 "failureBehavior": {
                     "beforeRoleModelCall": "degrade",
                     "handleToolCall": "reject_tool_call",
-                    "health": "degrade",
                 },
             },
             "activation": {"defaultEnabled": false, "reasons": ["test"]},
@@ -570,19 +548,46 @@ impl RuntimePlugin for Toy {
             .as_ref()
             .map_or_else(|| unscripted("handleToolCall"), |handler| Ok(handler(call)))
     }
+}
 
-    async fn on_session_end(&self, context: &HookContext) -> Result<HookReport, PluginError> {
-        self.ended
-            .lock()
-            .unwrap()
-            .push(context.turn().session_id.clone());
-        self.end
-            .as_ref()
-            .map_or_else(|| unscripted("onSessionEnd"), |hook| hook(context))
+/// Nobody to ask: every question goes unanswered.
+#[derive(Debug)]
+struct Nobody;
+
+#[async_trait]
+impl Confirmer for Nobody {
+    async fn confirm(&self, _request: ConfirmationRequest) -> ConfirmationDecision {
+        ConfirmationDecision::Cancelled
+    }
+}
+
+/// Settings that never load, as no test of the thread asks for them.
+#[derive(Debug)]
+struct NoSettings;
+
+const NO_SETTINGS: &str = "the thread's tests keep no settings";
+
+impl ConfigControl for NoSettings {
+    fn inspect(&self, _plugin: &Identifier) -> Result<PluginSettings, ReadConfigError> {
+        Err(ReadConfigError {
+            sentence: NO_SETTINGS.to_owned(),
+        })
     }
 
-    async fn health(&self, _context: &HookContext) -> Result<HealthReport, PluginError> {
-        self.health.clone().map_or_else(|| unscripted("health"), Ok)
+    fn check(&self, _change: &FieldChange) -> Result<(), String> {
+        Err(NO_SETTINGS.to_owned())
+    }
+
+    fn change(&self, _change: &FieldChange, _rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+        FieldChangeOutcome::Failed {
+            message: NO_SETTINGS.to_owned(),
+        }
+    }
+
+    fn activations(&self) -> Result<Vec<(Identifier, ActivationStatus)>, ReadConfigError> {
+        Err(ReadConfigError {
+            sentence: NO_SETTINGS.to_owned(),
+        })
     }
 }
 

@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use p02_contracts::{
-    BEFORE_ROLE_MODEL_CALL_REJECTION, DecisionRejectionReason, Evidence, HealthSnapshot, ToolCallId,
+    BEFORE_ROLE_MODEL_CALL_REJECTION, DecisionRejectionReason, Evidence, ToolCallId,
 };
 use p02_core::{MessageId, VisibleText};
 use serde::{Deserialize, Serialize};
@@ -16,12 +16,6 @@ pub enum TurnStatus {
     CompletedWithFailures,
 }
 
-/// What the turn's plugins reported about their health.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnEvidence {
-    pub health: Vec<HealthSnapshot>,
-}
-
 /// A turn completed: what it committed and the verdict on the round it
 /// ended on.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -33,7 +27,6 @@ pub struct TurnCompleted {
     pub tool_call_ids: Vec<ToolCallId>,
     pub judgement: Judgement,
     pub runtime_plugin_evidence: Vec<Evidence>,
-    pub runtime_plugin_turn_evidence: Option<TurnEvidence>,
 }
 
 /// The verdict on the round a completed turn ended on: accepted, anchoring
@@ -62,7 +55,6 @@ pub struct TurnRejected {
     pub visible_message_ids: Vec<MessageId>,
     pub tool_call_ids: Vec<ToolCallId>,
     pub runtime_plugin_evidence: Vec<Evidence>,
-    pub runtime_plugin_turn_evidence: Option<TurnEvidence>,
 }
 
 /// Who rejected a turn.
@@ -142,7 +134,6 @@ impl TurnRejected {
             visible_message_ids: Vec::new(),
             tool_call_ids: Vec::new(),
             runtime_plugin_evidence: Vec::new(),
-            runtime_plugin_turn_evidence: None,
         })
     }
 
@@ -169,8 +160,6 @@ struct WireCompleted {
     commit_validation: CommitValidation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     runtime_plugin_evidence: Vec<Evidence>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    runtime_plugin_turn_evidence: Option<TurnEvidence>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -208,7 +197,6 @@ impl From<WireCompleted> for TurnCompleted {
                 accepted_reply: wire.commit_validation.result.accepted_visible_reply_text,
             },
             runtime_plugin_evidence: wire.runtime_plugin_evidence,
-            runtime_plugin_turn_evidence: wire.runtime_plugin_turn_evidence,
         }
     }
 }
@@ -227,7 +215,6 @@ impl From<TurnCompleted> for WireCompleted {
                 },
             },
             runtime_plugin_evidence: completed.runtime_plugin_evidence,
-            runtime_plugin_turn_evidence: completed.runtime_plugin_turn_evidence,
         }
     }
 }
@@ -245,8 +232,6 @@ struct WireRejected {
     round: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     runtime_plugin_evidence: Vec<Evidence>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    runtime_plugin_turn_evidence: Option<TurnEvidence>,
 }
 
 impl TryFrom<WireRejected> for TurnRejected {
@@ -274,7 +259,6 @@ impl TryFrom<WireRejected> for TurnRejected {
         rejected.visible_message_ids = wire.visible_message_ids;
         rejected.tool_call_ids = wire.tool_call_ids;
         rejected.runtime_plugin_evidence = wire.runtime_plugin_evidence;
-        rejected.runtime_plugin_turn_evidence = wire.runtime_plugin_turn_evidence;
         Ok(rejected)
     }
 }
@@ -288,7 +272,6 @@ impl From<TurnRejected> for WireRejected {
             tool_call_ids: rejected.tool_call_ids,
             round: rejected.rejection.round(),
             runtime_plugin_evidence: rejected.runtime_plugin_evidence,
-            runtime_plugin_turn_evidence: rejected.runtime_plugin_turn_evidence,
         }
     }
 }

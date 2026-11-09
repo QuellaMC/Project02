@@ -1,15 +1,15 @@
 //! The mem0 package through the host: recall before a turn, capture after
-//! it, the search and add tools, and health, over a Mem0 backend and over
-//! the embedded engine, each standing on a stub service on the loopback
-//! interface.
+//! it, the search and add tools, and re-embedding, over a Mem0 backend and
+//! over the embedded engine, each standing on a stub service on the
+//! loopback interface.
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    CommittedTurn, ContextItemKind, EvidenceStatus, HealthStatus, SourceKind, ToolCallResult,
-    TurnIdentity, TurnText,
+    CommittedTurn, ContextItemKind, EvidenceStatus, SourceKind, ToolCallResult, TurnIdentity,
+    TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::storage::Storage;
 use crate::stub::{Answer, Stub, embedding};
-use crate::support::{bundled_manifest, call, id, run_round};
+use crate::support::{builder, bundled_manifest, call, id, run_round};
 
 const SERVER_KEY: &str = "m0sk_server-secret";
 const PLATFORM_KEY: &str = "platform-secret";
@@ -33,7 +33,7 @@ fn host(storage: &Arc<Storage>, settings: &Value) -> PluginHost {
 }
 
 fn host_within(storage: &Arc<Storage>, settings: &Value, timeout_ms: u64) -> PluginHost {
-    PluginHost::builder(Arc::clone(storage) as _)
+    builder(Arc::clone(storage) as _)
         .plugin(
             manifest(timeout_ms),
             settings.as_object().unwrap().clone(),
@@ -156,27 +156,27 @@ fn refusal(report: &ToolCallReport) -> (&str, &str) {
     }
 }
 
-async fn health(host: &PluginHost, turn: &Turn) -> (HealthStatus, String) {
-    let check = host.health(turn).await;
-    let snapshot = &check.snapshots[0];
-
-    (snapshot.status(), snapshot.summary().to_owned())
+/// Ends `host` once the captures it queued settled, and says what its
+/// shutdown recorded.
+async fn drained(host: PluginHost, turn: &Turn) -> String {
+    host.shutdown(turn).await.evidence[0].summary().to_owned()
 }
 
-/// Health once its summary says `words`.
-async fn health_saying(host: &PluginHost, turn: &Turn, words: &str) -> (HealthStatus, String) {
+/// Recalls `turn` until `count` memories come back, as re-embedding
+/// catches up.
+async fn recalls(host: &PluginHost, turn: &Turn, count: usize) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 
     loop {
-        let checked = health(host, turn).await;
+        let found = recall(host, turn).await.context_items.len();
 
-        if checked.1.contains(words) {
-            return checked;
+        if found == count {
+            return;
         }
 
         assert!(
             tokio::time::Instant::now() < deadline,
-            "health never said {words:?}: {checked:?}"
+            "recall found {found} memories, never {count}"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -218,6 +218,15 @@ fn embedded_texts(stub: &Stub, model: &str) -> Vec<String> {
         .into_iter()
         .filter(|request| request.body["model"] == model)
         .map(|request| request.body["input"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// Which of `facts` `model` embedded, in the order they were asked for:
+/// what re-embedding asked, without the lines recalls asked for.
+fn embedded_facts(stub: &Stub, model: &str, facts: &[&str]) -> Vec<String> {
+    embedded_texts(stub, model)
+        .into_iter()
+        .filter(|text| facts.contains(&text.as_str()))
         .collect()
 }
 
@@ -329,15 +338,7 @@ async fn the_platform_backend_speaks_version_3_under_token_auth() {
     );
 
     capture(&host, &turn, &committed).await;
-
-    assert_eq!(
-        health_saying(&host, &turn, "Queued the last").await,
-        (
-            HealthStatus::Ok,
-            "Mem0 platform API reachable. Queued the last captured turn with the backend."
-                .to_owned()
-        )
-    );
+    stub.requests_once("/v3/memories/add/", 1).await;
 
     let requests = stub.requests();
     let asked: Vec<(&str, &str)> = requests
@@ -346,17 +347,11 @@ async fn the_platform_backend_speaks_version_3_under_token_auth() {
         .collect();
 
     assert_eq!(
-        asked[..3],
+        asked,
         [
             ("POST", "/v3/memories/search/"),
             ("POST", "/v3/memories/add/"),
-            ("GET", "/v1/ping/"),
         ]
-    );
-    assert!(
-        asked[3..]
-            .iter()
-            .all(|asked| *asked == ("GET", "/v1/ping/"))
     );
     assert_eq!(
         requests[0].body,
@@ -520,7 +515,7 @@ async fn a_turn_is_captured_behind_the_turn_under_the_names_its_session_recorded
 }
 
 #[tokio::test]
-async fn once_eight_captures_wait_the_next_turn_is_not_queued_and_health_says_so() {
+async fn once_eight_captures_wait_the_next_turn_is_not_queued_and_the_one_after_counts_it() {
     let mem0 = Stub::mem0().await;
     let host = host(&Storage::new(), &server(&mem0));
     let mut held = mem0.hold("/memories");
@@ -551,18 +546,18 @@ async fn once_eight_captures_wait_the_next_turn_is_not_queued_and_health_says_so
     );
     assert_eq!(recorded[8..], [not_queued.clone(), not_queued]);
 
-    let (status, summary) = health(&host, &line("hello")).await;
-
-    assert_eq!(status, HealthStatus::Degraded);
-    assert!(
-        summary.starts_with(
-            "2 capture(s) did not complete; most recent: extraction backlog is full (8 queued), \
-             so the turn was never sent. Mem0 server reachable."
-        ),
-        "{summary}"
-    );
-
     held.release(Answer::json(200, &json!({"results": []})));
+    mem0.requests_once("/memories", 2).await;
+
+    let (turn, committed) = exchange("chat.1", "evt_11", "Line 11.", "Noted.");
+
+    assert_eq!(
+        capture(&host, &turn, &committed).await,
+        (
+            EvidenceStatus::Accepted,
+            "Queued turn for memory extraction. 2 earlier capture(s) did not complete.".to_owned()
+        )
+    );
 }
 
 #[tokio::test]
@@ -890,7 +885,7 @@ async fn an_add_abandoned_at_the_deadline_warns_that_it_may_have_landed() {
 }
 
 #[tokio::test]
-async fn health_names_what_the_settings_lack_and_a_malformed_address_without_echoing_it() {
+async fn a_call_says_what_the_settings_lack_and_never_echoes_a_malformed_address() {
     let storage = Storage::new();
     let turn = line("hello");
     let rule = "an absolute http:// or https:// address with no embedded credentials, query, or \
@@ -920,9 +915,8 @@ async fn health_names_what_the_settings_lack_and_a_malformed_address_without_ech
                 .to_owned(),
         ),
     ] {
-        let misconfigured = host(&storage, &settings);
         let report = ask(
-            &misconfigured,
+            &host(&storage, &settings),
             "mem0.search",
             json!({"query": "tea"}),
             &turn,
@@ -930,122 +924,24 @@ async fn health_names_what_the_settings_lack_and_a_malformed_address_without_ech
         .await;
 
         assert_eq!(
-            health(&misconfigured, &turn).await,
-            (HealthStatus::Unavailable, sentence.clone()),
+            refusal(&report),
+            ("handler_failed", sentence.as_str()),
             "{settings}"
         );
-        assert_eq!(refusal(&report), ("handler_failed", sentence.as_str()));
         assert!(!format!("{report:?}").contains("hunter2"));
     }
 
-    let (status, summary) = health(&host(&storage, &json!({"backend": "oss"})), &turn).await;
+    let report = ask(
+        &host(&storage, &json!({"backend": "oss"})),
+        "mem0.search",
+        json!({"query": "tea"}),
+        &turn,
+    )
+    .await;
 
-    assert_eq!(status, HealthStatus::Unavailable);
-    assert!(summary.contains("MEM0_OSS_LLM_API_KEY"), "{summary}");
-    assert!(summary.chars().count() <= 160);
-}
-
-#[tokio::test]
-async fn health_pings_the_backend_and_is_unavailable_while_it_cannot_be_reached() {
-    let mem0 = Stub::mem0().await;
-    let storage = Storage::new();
-    let turn = line("hello");
-    let unreachable = {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-
-        format!("http://{}", listener.local_addr().unwrap())
-    };
-
-    assert_eq!(
-        health(&host(&storage, &server(&mem0)), &turn).await,
-        (HealthStatus::Ok, "Mem0 server reachable.".to_owned())
-    );
-    assert_eq!(
-        mem0.requests()
-            .iter()
-            .map(|request| (request.method.as_str(), request.path.as_str()))
-            .collect::<Vec<_>>(),
-        [("GET", "/")]
-    );
-    assert_eq!(
-        health(
-            &host(
-                &storage,
-                &json!({"backend": "server", "baseUrl": unreachable})
-            ),
-            &turn
-        )
-        .await,
-        (
-            HealthStatus::Unavailable,
-            "mem0 ping failed: backend unreachable.".to_owned()
-        )
-    );
-}
-
-#[tokio::test]
-async fn health_stays_degraded_after_a_lost_capture_and_leads_with_it() {
-    let mem0 = Stub::mem0().await;
-    let host = host(&Storage::new(), &server(&mem0));
-    let (first, first_committed) = exchange("chat.1", "evt_1", "Line 1.", "Noted.");
-    let (second, second_committed) = exchange("chat.1", "evt_2", "Line 2.", "Noted.");
-    let lost = "1 capture(s) did not complete; most recent: mem0 add failed: HTTP 500.";
-
-    mem0.answer("/memories", Answer::json(500, &json!({})));
-    capture(&host, &first, &first_committed).await;
-
-    assert_eq!(
-        health_saying(&host, &first, "did not complete").await,
-        (
-            HealthStatus::Degraded,
-            format!("{lost} Mem0 server reachable.")
-        )
-    );
-    assert_eq!(
-        capture(&host, &second, &second_committed).await,
-        (
-            EvidenceStatus::Accepted,
-            "Queued turn for memory extraction. 1 earlier capture(s) did not complete.".to_owned()
-        )
-    );
-
-    mem0.requests_once("/memories", 2).await;
-
-    let (status, summary) = health(&host, &second).await;
-
-    assert_eq!(status, HealthStatus::Degraded);
-    assert!(summary.starts_with(lost), "{summary}");
-}
-
-#[tokio::test]
-async fn the_engine_claims_readiness_only_once_its_model_and_embedder_both_answered() {
-    let openai = Stub::openai().await;
-    let storage = Storage::new();
-    let host = host(&storage, &embedded(&openai, "embed-a"));
-    let (turn, committed) = exchange("chat.1", "evt_1", "I like tea.", "Noted.");
-    let unproven = (
-        HealthStatus::Degraded,
-        "Mem0 engine loaded; its model and embedder are contacted on first capture or recall."
-            .to_owned(),
-    );
-
-    assert_eq!(health(&host, &turn).await, unproven);
-
-    recall(&host, &turn).await;
-
-    assert_eq!(health(&host, &turn).await, unproven);
-
-    openai.answer(COMPLETIONS, Answer::extraction(&["Sam likes tea."]));
-    capture(&host, &turn, &committed).await;
-
-    assert_eq!(
-        health_saying(&host, &turn, "Stored").await,
-        (
-            HealthStatus::Ok,
-            "Mem0 engine loaded; its model and embedder have answered. Stored 1 memory item(s) \
-             from the last captured turn."
-                .to_owned()
-        )
+    assert!(
+        refusal(&report).1.contains("MEM0_OSS_LLM_API_KEY"),
+        "{report:?}"
     );
 }
 
@@ -1064,7 +960,6 @@ async fn a_turn_is_extracted_with_mem0s_prompt_its_sessions_messages_and_its_nea
 
     openai.answer(COMPLETIONS, Answer::extraction(&["Sam loves green tea."]));
     capture(&host, &first, &first_committed).await;
-    health_saying(&host, &first, "Stored 1").await;
     capture(&host, &second, &second_committed).await;
 
     let extraction = openai.requests_once(COMPLETIONS, 2).await.remove(1);
@@ -1126,7 +1021,7 @@ async fn an_add_is_stored_while_a_capture_waits_on_the_extraction_model() {
 async fn recall_ranks_each_memory_by_the_vector_of_its_own_text_and_leaves_out_the_unalike() {
     let openai = Stub::openai().await;
     let storage = Storage::new();
-    let host = host(&storage, &embedded(&openai, "embed-a"));
+    let capturing = host(&storage, &embedded(&openai, "embed-a"));
     let (turn, committed) = exchange("chat.1", "evt_1", "Tell me about yourself.", "Gladly.");
     let tea = "Sam likes green tea.";
     let cat = "Sam has a cat named Biscuit.";
@@ -1135,11 +1030,11 @@ async fn recall_ranks_each_memory_by_the_vector_of_its_own_text_and_leaves_out_t
         COMPLETIONS,
         Answer::extraction(&[tea, cat, "Biscuit sleeps all day."]),
     );
-    capture(&host, &turn, &committed).await;
-    health_saying(&host, &turn, "Stored 3").await;
+    capture(&capturing, &turn, &committed).await;
+    assert_eq!(drained(capturing, &turn).await, "Closed memory provider.");
 
     let query = "What tea does Sam like?";
-    let recalled = recall(&host, &line(query)).await;
+    let recalled = recall(&host(&storage, &embedded(&openai, "embed-a")), &line(query)).await;
     let alike = |text| cosine(&embedding("embed-a", query), &embedding("embed-a", text));
 
     assert_eq!(
@@ -1172,17 +1067,15 @@ async fn a_crash_in_the_middle_of_re_embedding_resumes_where_it_stopped() {
     }
 
     drop(first);
-    openai.pass(EMBEDDINGS, 2);
+    // The recall's own line and the first two memories pass; the third
+    // memory is held while the engine that asked for it goes.
+    openai.pass(EMBEDDINGS, 3);
 
     let mut held = openai.hold(EMBEDDINGS);
     let second = host(&storage, &embedded(&openai, "embed-b"));
-    let (status, summary) = health(&second, &turn).await;
 
-    assert_eq!(status, HealthStatus::Degraded);
-    assert!(
-        summary.starts_with("Mem0 engine is re-embedding its memories for a new embedder;"),
-        "{summary}"
-    );
+    recall(&second, &turn).await;
+
     assert_eq!(held.arrived().await.body["input"], json!(facts[2]));
 
     drop(second);
@@ -1190,13 +1083,12 @@ async fn a_crash_in_the_middle_of_re_embedding_resumes_where_it_stopped() {
 
     let resumed = host(&storage, &embedded(&openai, "embed-b"));
 
-    health_saying(&resumed, &turn, "contacted on first capture or recall").await;
+    recalls(&resumed, &turn, 5).await;
 
     assert_eq!(
-        embedded_texts(&openai, "embed-b"),
+        embedded_facts(&openai, "embed-b", &facts),
         [&facts[..3], &facts[2..]].concat()
     );
-    assert_eq!(recall(&resumed, &turn).await.context_items.len(), 5);
 }
 
 #[tokio::test]
@@ -1218,12 +1110,12 @@ async fn a_second_embedder_change_in_the_middle_of_re_embedding_re_embeds_for_th
     }
 
     drop(first);
-    openai.pass(EMBEDDINGS, 2);
+    openai.pass(EMBEDDINGS, 3);
 
     let mut held = openai.hold(EMBEDDINGS);
     let changing = host(&storage, &embedded(&openai, "embed-b"));
 
-    health(&changing, &turn).await;
+    recall(&changing, &turn).await;
 
     assert_eq!(held.arrived().await.body["input"], json!(facts[2]));
 
@@ -1234,49 +1126,48 @@ async fn a_second_embedder_change_in_the_middle_of_re_embedding_re_embeds_for_th
         )
         .unwrap();
     drop(held);
-    health_saying(&changing, &turn, "contacted on first capture or recall").await;
+    recalls(&changing, &turn, 5).await;
 
-    assert_eq!(embedded_texts(&openai, "embed-b"), &facts[..3]);
-    assert_eq!(embedded_texts(&openai, "embed-c"), facts);
-    assert_eq!(recall(&changing, &turn).await.context_items.len(), 5);
+    assert_eq!(embedded_facts(&openai, "embed-b", &facts), &facts[..3]);
+    assert_eq!(embedded_facts(&openai, "embed-c", &facts), facts);
 }
 
 #[tokio::test]
-async fn health_says_why_re_embedding_stopped_and_it_resumes_once_the_embedder_answers() {
+async fn re_embedding_that_stopped_on_a_failure_resumes_once_the_embedder_answers() {
     let openai = Stub::openai().await;
     let storage = Storage::new();
     let turn = line("Sam likes tea");
+    let facts = ["Sam likes tea at dawn.", "Sam likes tea at dusk."];
     let first = host(&storage, &embedded(&openai, "embed-a"));
 
-    for fact in ["Sam likes tea at dawn.", "Sam likes tea at dusk."] {
+    for fact in facts {
         output(&ask(&first, "mem0.add", json!({"text": fact}), &turn).await);
     }
 
     drop(first);
-    openai.answer(
-        EMBEDDINGS,
-        Answer::json(404, &json!({"error": "no such model"})),
-    );
+
+    // The embedder refuses the recall's own line and the first memory.
+    for _ in 0..2 {
+        openai.answer(
+            EMBEDDINGS,
+            Answer::json(404, &json!({"error": "no such model"})),
+        );
+    }
 
     let second = host(&storage, &embedded(&openai, "embed-b"));
 
+    recall(&second, &turn).await;
+    openai.requests_once(EMBEDDINGS, 4).await;
+    recalls(&second, &turn, 2).await;
+
     assert_eq!(
-        health_saying(&second, &turn, "could not").await,
-        (
-            HealthStatus::Degraded,
-            "Mem0 engine could not re-embed its memories for a new embedder (2 to go): the \
-             embedder answered HTTP 404."
-                .to_owned()
-        )
+        embedded_facts(&openai, "embed-b", &facts),
+        [facts[0], facts[0], facts[1]]
     );
-
-    health_saying(&second, &turn, "contacted on first capture or recall").await;
-
-    assert_eq!(recall(&second, &turn).await.context_items.len(), 2);
 }
 
 #[tokio::test]
-async fn an_extraction_with_no_memory_list_loses_the_capture_and_health_says_why() {
+async fn an_extraction_with_no_memory_list_loses_the_capture_and_the_shutdown_says_why() {
     let openai = Stub::openai().await;
     let storage = Storage::new();
     let host = host(&storage, &embedded(&openai, "embed-a"));
@@ -1285,15 +1176,10 @@ async fn an_extraction_with_no_memory_list_loses_the_capture_and_health_says_why
     openai.answer(COMPLETIONS, Answer::completion("I cannot help with that."));
     capture(&host, &turn, &committed).await;
 
-    let (status, summary) = health_saying(&host, &turn, "did not complete").await;
-
-    assert_eq!(status, HealthStatus::Degraded);
-    assert!(
-        summary.starts_with(
-            "1 capture(s) did not complete; most recent: mem0 add failed: the extraction \
-             model's answer held no memory list."
-        ),
-        "{summary}"
+    assert_eq!(
+        drained(host, &turn).await,
+        "Closed memory provider. 1 capture(s) did not complete; most recent: mem0 add failed: \
+         the extraction model's answer held no memory list."
     );
 }
 
@@ -1307,8 +1193,8 @@ async fn the_engine_writes_nothing_but_the_database_it_is_handed() {
     openai.answer(COMPLETIONS, Answer::extraction(&["Sam likes tea."]));
     recall(&host, &turn).await;
     capture(&host, &turn, &committed).await;
-    health_saying(&host, &turn, "Stored 1").await;
     output(&ask(&host, "mem0.add", json!({"text": "Sam likes cake."}), &turn).await);
+    assert_eq!(drained(host, &turn).await, "Closed memory provider.");
 
     let files = storage.files_on_disk();
 

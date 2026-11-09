@@ -8,9 +8,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderName, HeaderValue};
 use reqwest::{Method, Response};
 use serde_json::{Map, Value, json};
 
-use super::backend::{
-    BackendError, Failure, Found, Operation, RECALL_LIMIT, Readiness, Write, Written,
-};
+use super::backend::{BackendError, Failure, Found, Operation, RECALL_LIMIT, Write, Written};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Dialect {
@@ -159,21 +157,6 @@ impl Rest {
         };
 
         written.ok_or_else(|| BackendError::new(Operation::Add, Failure::Unreadable))
-    }
-
-    /// Reachability needs the status line alone: a body is not read.
-    pub(super) async fn ping(&self) -> Result<Readiness, BackendError> {
-        let (path, summary) = match self.dialect {
-            Dialect::Platform => ("v1/ping/", "Mem0 platform API reachable."),
-            Dialect::Server => ("", "Mem0 server reachable."),
-        };
-
-        self.send(Operation::Ping, Method::GET, path, None).await?;
-
-        Ok(Readiness {
-            verified: true,
-            summary: summary.to_owned(),
-        })
     }
 
     /// The JSON document a successful request answered with.

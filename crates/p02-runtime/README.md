@@ -17,9 +17,8 @@ only on tokio's blocking pool, where a lock's wait blocks.
   person renames no thread. What the open skipped because it could not be
   read, rows of her sessions catalog or lines of the segment it resumed,
   the thread says in a sentence. An open that fails after the
-  conversation's lease was taken releases it. Closing the thread runs the
-  segment's end hooks, then releases the segment's lease and then the
-  conversation's.
+  conversation's lease was taken releases it. Closing the thread releases
+  the segment's lease and then the conversation's.
 - **One line at a time.** The thread takes a line only once the one before
   it ended. A line its client submitted under an id a run before this one
   took, in the current segment or a closed one, is answered with the
@@ -37,9 +36,8 @@ only on tokio's blocking pool, where a lock's wait blocks.
   happens, each reply committed in the round's order and each tool call
   started in the model's and finished as it finishes, so a call that
   finished outlasts a crash before the rest, while the model reads the
-  results in its own order; the health gate, which may refuse a reply
-  already shown and keeps it; and the record that ends the turn, before
-  the plugins' work after its commit, which can change nothing about it.
+  results in its own order; and the record that ends the turn, before the
+  plugins' work after its commit, which can change nothing about it.
   A text that is no line is refused with its event, and nothing is
   committed.
 - **What the turn says.** The person's line, each reply, the pieces of a
@@ -73,5 +71,5 @@ only on tokio's blocking pool, where a lock's wait blocks.
   land discards it through that writer, or leaves it empty for the next open
   to discard when the discard fails too, and the thread stays where it was,
   to plan again after the next turn; after it the old segment's lines are
-  recorded, its end hooks run and its lease is released, and what of that
-  fails is reported, never undone. Every length is counted in characters.
+  recorded and its lease is released, and what of that fails is reported,
+  never undone. Every length is counted in characters.

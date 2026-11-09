@@ -443,8 +443,8 @@ impl From<Option<CharacterState>> for RosterState {
 
 /// A background failure the conversation never sees: the plugins' work
 /// after a turn's commit, a segment rotation that failed, which the next
-/// turn plans again, a closed segment's end hooks that did not finish, or
-/// what opening her thread skipped because it could not be read.
+/// turn plans again, what closing a segment left undone, or what opening
+/// her thread skipped because it could not be read.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct MaintenanceFailure {
     pub at: Timestamp,

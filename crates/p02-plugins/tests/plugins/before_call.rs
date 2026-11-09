@@ -57,7 +57,7 @@ async fn an_answering_hook_contributes_its_items_and_stamped_records() {
     assert_eq!(record.identity().event_id().as_str(), "evt_1");
     assert_eq!(record.plugin_id().as_str(), "answer");
     assert_eq!(record.status(), EvidenceStatus::Accepted);
-    assert_eq!(labels(record), ["turn", "toy"]);
+    assert_eq!(labels(record), ["toy"]);
 }
 
 #[tokio::test(start_paused = true)]

@@ -461,17 +461,14 @@ impl Toy {
             "kind": "first_party",
             "description": "A toy plugin.",
             "contractVersion": "mvp-008.runtime_plugin.v2",
-            "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
             "declaredPlugins": declared,
             "config": {"scope": "global_with_character_overrides", "fields": self.fields},
-            "firstParty": true,
             "runtimePolicy": {
                 "timeoutMs": 10_000,
                 "redactionLabels": [],
                 "failureBehavior": {
                     "beforeRoleModelCall": "degrade",
                     "handleToolCall": "reject_tool_call",
-                    "health": "degrade",
                 },
             },
             "activation": {"defaultEnabled": true, "reasons": ["test"]},

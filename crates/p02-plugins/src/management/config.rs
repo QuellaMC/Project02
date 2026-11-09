@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use p02_contracts::{
-    ConfigField, ConfigValueType, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
-    Manifest, PluginError, PreparedEffect, ToolCall, ToolCallOutcome, ToolPreparation,
+    ConfigField, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext, Manifest, PluginError,
+    PreparedEffect, ToolCall, ToolCallOutcome, ToolPreparation,
 };
-use p02_shared::{Identifier, error_chain, is_credential_key, redact_credentials};
+use p02_shared::{Identifier, error_chain};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
@@ -21,7 +21,6 @@ use crate::config_control::{
 use crate::host::HostLink;
 use crate::package::{blocking, rejected};
 
-const INSPECT_INVALID: &str = "plugin_config_inspect_invalid";
 const UNKNOWN_PLUGIN: &str = "plugin_config_unknown_plugin";
 const UPDATE_INVALID: &str = "plugin_config_update_invalid";
 const CONFLICT: &str = "plugin_config_fingerprint_conflict";
@@ -33,22 +32,11 @@ const CONFLICT_SENTENCE: &str = "Plugin config changed after it was inspected. I
 /// What a client shown the person a change's preview reads it as.
 const PREVIEW_KIND: &str = "runtime_plugin_config_change";
 
-/// What a reader of the settings is shown in place of a concealed value,
-/// which the model must not write back as one.
-const REDACTED: &str = "[redacted]";
-
 pub(super) async fn inspect(
     control: Arc<dyn ConfigControl>,
     call: &ToolCall,
 ) -> Result<ToolCallOutcome, PluginError> {
     let Inspected { plugin_id } = admitted(call)?;
-
-    if plugin_id.trim().is_empty() {
-        let message = blank("pluginId");
-
-        return Ok(rejected(INSPECT_INVALID, message.clone(), &message));
-    }
-
     let Some(manifest) = installed(&plugin_id)? else {
         let message = unknown(&plugin_id);
 
@@ -87,6 +75,19 @@ pub(super) async fn prepare(
             reason: CONFLICT,
             message: CONFLICT_SENTENCE.to_owned(),
         }));
+    }
+
+    let change = request.change();
+
+    // The person is asked only about a change her settings would take.
+    if let Err(message) = blocking({
+        let control = Arc::clone(&control);
+
+        move || control.check(&change)
+    })
+    .await?
+    {
+        return Ok(unasked(Refusal::invalid(message)));
     }
 
     let field = request.field.name();
@@ -180,17 +181,6 @@ impl Request {
     fn of(call: &ToolCall) -> Result<Result<Self, Refusal>, PluginError> {
         let asked: Asked = admitted(call)?;
         let value = call.input().get("value");
-
-        for (name, text) in [
-            ("pluginId", &asked.plugin_id),
-            ("fieldName", &asked.field_name),
-            ("expectedFingerprint", &asked.expected_fingerprint),
-        ] {
-            if text.trim().is_empty() {
-                return Ok(Err(Refusal::invalid(blank(name))));
-            }
-        }
-
         let Some(manifest) = installed(&asked.plugin_id)? else {
             return Ok(Err(Refusal {
                 reason: UNKNOWN_PLUGIN,
@@ -227,17 +217,7 @@ impl Request {
                 "Plugin config field \"{name}\" is not one you may change."
             ))
         } else {
-            match &value {
-                None if field.required() => {
-                    Some(format!("Required config field \"{name}\" cannot be unset."))
-                }
-                Some(value) if !field.accepts(value) => Some(expectation(field)),
-                Some(value) if concealed(field, value) => Some(format!(
-                    "Plugin config field \"{name}\" cannot be set to a value holding a \
-                     credential or a redaction."
-                )),
-                _ => None,
-            }
+            None
         };
 
         Ok(match refusal {
@@ -255,6 +235,16 @@ impl Request {
         if self.value.is_some() { "set" } else { "unset" }
     }
 
+    /// The change of her settings this request asks for.
+    fn change(&self) -> FieldChange {
+        FieldChange {
+            plugin: self.plugin.clone(),
+            field: self.field.name().clone(),
+            value: self.value.clone(),
+            expected_fingerprint: self.expected_fingerprint.clone(),
+        }
+    }
+
     /// Writes the change, its plugin rebuilt live as part of it when its
     /// field takes effect so and the host runs it. A change written is
     /// told as applied, live or at the next launch, whatever keeps it from
@@ -268,12 +258,7 @@ impl Request {
                 .map_err(|error| error_chain(&error))
         };
         let outcome = control.change(
-            &FieldChange {
-                plugin: self.plugin.clone(),
-                field: self.field.name().clone(),
-                value: self.value.clone(),
-                expected_fingerprint: self.expected_fingerprint.clone(),
-            },
+            &self.change(),
             live.then_some(&mut rebuild_live as Rebuild<'_>),
         );
         let (fingerprint, rebuilt) = match outcome {
@@ -446,48 +431,6 @@ fn authored<'a>(section: &'a Map<String, Value>, name: &str) -> Option<&'a Value
         .get("authored")
 }
 
-/// Whether `value` holds what no reader of the settings is shown: a value
-/// under a credential's name, or a redaction read back.
-fn concealed(field: &ConfigField, value: &Value) -> bool {
-    let mut redacted = value.clone();
-
-    redact_credentials(&mut redacted);
-    is_credential_key(field.name().as_str()) || redacted != *value || holds_redaction(value)
-}
-
-fn holds_redaction(value: &Value) -> bool {
-    match value {
-        Value::String(text) => text == REDACTED,
-        Value::Array(items) => items.iter().any(holds_redaction),
-        Value::Object(entries) => entries.values().any(holds_redaction),
-        Value::Null | Value::Bool(_) | Value::Number(_) => false,
-    }
-}
-
-/// What a value of `field` must be, which never repeats the value refused.
-fn expectation(field: &ConfigField) -> String {
-    let name = field.name();
-
-    match field.allowed_values() {
-        Some(allowed) => format!(
-            "Plugin config field \"{name}\" must be one of: {}.",
-            allowed.join(", ")
-        ),
-        None => format!(
-            "Plugin config field \"{name}\" must be {}.",
-            match field.value_type() {
-                Some(ConfigValueType::String | ConfigValueType::Path | ConfigValueType::Enum) =>
-                    "a string",
-                Some(ConfigValueType::Number) => "a number",
-                Some(ConfigValueType::Boolean) => "a boolean",
-                Some(ConfigValueType::Object) => "an object",
-                Some(ConfigValueType::Array) => "an array",
-                None => "a JSON value",
-            }
-        ),
-    }
-}
-
 /// The call's input as its tool's contract admits it.
 fn admitted<T: DeserializeOwned>(call: &ToolCall) -> Result<T, PluginError> {
     serde_json::from_value(Value::Object(call.input().clone())).map_err(|error| {
@@ -496,10 +439,6 @@ fn admitted<T: DeserializeOwned>(call: &ToolCall) -> Result<T, PluginError> {
             error,
         )
     })
-}
-
-fn blank(name: &str) -> String {
-    format!("Plugin config tool input \"{name}\" must be a non-empty string.")
 }
 
 fn unknown(plugin: &str) -> String {

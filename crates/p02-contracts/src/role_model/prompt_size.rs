@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// frames sum to the wire messages and tokens are an estimate applied when
 /// read, so nothing stored can disagree with anything else.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedPromptSize")]
+#[serde(rename_all = "camelCase")]
 pub struct PromptSize {
     frames: Vec<FrameSize>,
     tool_chars: u64,
@@ -24,50 +24,12 @@ pub struct FrameSize {
     pub chars: NonZeroU64,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UncheckedPromptSize {
-    frames: Vec<FrameSize>,
-    tool_chars: u64,
-}
-
-/// Why a prompt size is refused.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum PromptSizeError {
-    #[error("a prompt size has at least the frames every prompt carries")]
-    NoFrames,
-    #[error("a prompt size frame must name its kind")]
-    UnnamedFrame,
-    #[error("a prompt size lists frame kind \"{kind}\" twice, which would count it twice")]
-    RepeatedKind { kind: String },
-}
-
 impl PromptSize {
-    /// # Errors
-    ///
-    /// [`PromptSizeError`] for no frames, a frame without a kind, or a kind
-    /// listed twice.
-    pub fn new(frames: Vec<FrameSize>, tool_chars: u64) -> Result<Self, PromptSizeError> {
-        if frames.is_empty() {
-            return Err(PromptSizeError::NoFrames);
-        }
-
-        for (index, frame) in frames.iter().enumerate() {
-            if frame.kind.is_empty() {
-                return Err(PromptSizeError::UnnamedFrame);
-            }
-
-            if frames[..index]
-                .iter()
-                .any(|earlier| earlier.kind == frame.kind)
-            {
-                return Err(PromptSizeError::RepeatedKind {
-                    kind: frame.kind.clone(),
-                });
-            }
-        }
-
-        Ok(Self { frames, tool_chars })
+    /// The size of a prompt of `frames`, each kind listed once in wire
+    /// order, and of tools taking `tool_chars`.
+    #[must_use]
+    pub fn new(frames: Vec<FrameSize>, tool_chars: u64) -> Self {
+        Self { frames, tool_chars }
     }
 
     #[must_use]
@@ -82,14 +44,6 @@ impl PromptSize {
     }
 }
 
-impl TryFrom<UncheckedPromptSize> for PromptSize {
-    type Error = PromptSizeError;
-
-    fn try_from(unchecked: UncheckedPromptSize) -> Result<Self, Self::Error> {
-        Self::new(unchecked.frames, unchecked.tool_chars)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -97,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_prompt_size_lists_each_sent_frame_kind_once() {
+    fn a_prompt_size_reads_back_as_written() {
         let size = json!({
             "frames": [
                 {"kind": "system_protocol", "count": 1, "chars": 2048},
@@ -108,33 +62,5 @@ mod tests {
         let parsed: PromptSize = serde_json::from_value(size.clone()).unwrap();
 
         assert_eq!(serde_json::to_value(&parsed).unwrap(), size);
-
-        let frame = |kind: &str| FrameSize {
-            kind: kind.to_owned(),
-            count: NonZeroU64::MIN,
-            chars: NonZeroU64::MIN,
-        };
-
-        assert_eq!(
-            PromptSize::new(Vec::new(), 0),
-            Err(PromptSizeError::NoFrames)
-        );
-        assert_eq!(
-            PromptSize::new(vec![frame("")], 0),
-            Err(PromptSizeError::UnnamedFrame)
-        );
-        assert_eq!(
-            PromptSize::new(vec![frame("user"), frame("user")], 0),
-            Err(PromptSizeError::RepeatedKind {
-                kind: "user".to_owned()
-            })
-        );
-        assert!(
-            serde_json::from_value::<PromptSize>(json!({
-                "frames": [{"kind": "system_protocol", "count": 0, "chars": 1}],
-                "toolChars": 0,
-            }))
-            .is_err()
-        );
     }
 }

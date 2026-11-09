@@ -2,13 +2,11 @@
 //! before this one took, and what closing a thread lets go.
 
 use std::num::NonZeroU64;
-use std::sync::Arc;
 
-use p02_contracts::{HookReport, HookStatus};
 use p02_core::{MessageId, SessionId, SpeakerName};
 use p02_runtime::{Conversation, Delivery};
 
-use crate::support::{Chat, Round, Toy, mira, reply, stamp};
+use crate::support::{Chat, Round, mira, reply, stamp};
 
 fn session(text: &str) -> SessionId {
     SessionId::parse(text).unwrap()
@@ -28,7 +26,7 @@ async fn a_reopened_thread_resumes_its_latest_whole_segment() {
     ]);
     chat.say("Tea?", "tea").await;
 
-    let closed = chat.conversation.take().unwrap().close(&chat.host).await;
+    let closed = chat.conversation.take().unwrap().close().await;
     let holder = chat
         .world
         .home
@@ -111,7 +109,7 @@ async fn a_line_taken_before_is_a_duplicate_wherever_it_was_taken() {
     let closed_log = chat.log(1);
     let whole = std::fs::read_to_string(&closed_log).unwrap();
 
-    chat.conversation.take().unwrap().close(&chat.host).await;
+    chat.conversation.take().unwrap().close().await;
     std::fs::write(
         &closed_log,
         format!("{whole}{{\"eventId\": \"evt_torn\"}}\n"),
@@ -120,7 +118,7 @@ async fn a_line_taken_before_is_a_duplicate_wherever_it_was_taken() {
     chat.conversation = Some(chat.world.open());
     assert_duplicate(&chat.say("Coffee?", "coffee").await, "coffee", &coffee);
 
-    chat.conversation.take().unwrap().close(&chat.host).await;
+    chat.conversation.take().unwrap().close().await;
     std::fs::write(&closed_log, &whole).unwrap();
     std::fs::remove_file(
         chat.world
@@ -146,22 +144,13 @@ async fn a_line_taken_before_is_a_duplicate_wherever_it_was_taken() {
     );
 }
 
-/// Closing a thread runs its segment's end hooks and lets both its leases
-/// go, so the thread opens again.
+/// Closing a thread lets both its leases go, so the thread opens again.
 #[tokio::test]
-async fn closing_a_thread_ends_its_segment_and_lets_it_open_again() {
-    let ender = Arc::new(Toy::new("ender").end(|_| {
-        Ok(HookReport {
-            status: HookStatus::Completed,
-            evidence: Vec::new(),
-        })
-    }));
-    let mut chat = Chat::new(&[Arc::clone(&ender)]);
-    let id = chat.id();
+async fn closing_a_thread_lets_it_open_again() {
+    let mut chat = Chat::new(&[]);
     let refused =
         Conversation::open(&chat.world.home, mira(), SpeakerName::new("Sam").unwrap()).unwrap_err();
 
     assert_eq!(refused.code(), "storage_busy");
     assert_eq!(chat.reopen().await, None);
-    assert_eq!(*ender.ended.lock().unwrap(), [session(&format!("{id}.1"))]);
 }

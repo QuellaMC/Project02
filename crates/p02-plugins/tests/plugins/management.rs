@@ -144,7 +144,7 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 }
 
 #[tokio::test]
-async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_a_blank_id() {
+async fn the_config_read_shows_a_plugins_settings_a_secret_redacted() {
     let secret = "sk-demo-secret-value";
     let home = MiraHome::new();
 
@@ -163,7 +163,6 @@ async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_
         json!({"pluginId": "demo-config"}),
     )
     .await;
-    let blank = ask(&host, "runtime.plugin.config", json!({"pluginId": " "})).await;
     let fields = output(&read)["fields"].as_array().unwrap();
     let field = |name: &str| {
         fields
@@ -196,7 +195,6 @@ async fn the_config_read_shows_a_plugins_settings_a_secret_redacted_and_refuses_
             .unwrap()
             .contains(secret)
     );
-    assert_eq!(reason(&blank), Some("plugin_config_inspect_invalid"));
 }
 
 #[tokio::test]

@@ -15,10 +15,7 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   without trust in two fences of its own; this turn's tool rounds on the
   history's wire; and the note about an unusable last reply. Text a plugin
   or a note supplies can neither close its fence nor reach a system
-  message. The bytes are the ones the prompt fixtures record, the
-  TypeScript daemon's as it last sent them, but for the three listed
-  exceptions: characters counted as code points, tool payloads spelled by
-  `serde_json`, and the parser's rejection wording.
+  message.
 - **The history window** is the newest whole earlier turns that fit half
   the context window, at four characters a token, rounded up, the
   runtime's one estimate, in which a recorded prompt's size is read too;
@@ -35,14 +32,13 @@ p02-core and p02-shared; the runtime drives it through `run_turn` and a
   calls stays on the decision and is never a message. A round of calls that
   changed what prepared the turn, a plugin rebuilt live, has the rounds
   after it shown the turn as the sink prepares it again.
-- **NVIDIA.** A round is a streamed chat completion: the request body as
-  the prompt fixtures record it, the tools under names the provider takes,
-  the stream reassembled whatever bytes it is cut into, and a reply drafted
-  only from a native `visible_reply` call's arguments as they arrive. The
-  provider's silence is bounded at 30 seconds unless shortened, before the
-  headers and between chunks; a transport fault, a 408, a 429 or a 5xx is
-  tried again after 250 ms and after 1 s, a timeout never; no failure
-  carries the key. A plain completion on the same model condenses earlier
-  conversation.
+- **NVIDIA.** A round is a streamed chat completion: the tools under
+  names the provider takes, the stream reassembled whatever bytes it is
+  cut into, and a reply drafted only from a native `visible_reply` call's
+  arguments as they arrive. The provider's silence is bounded at 30
+  seconds unless shortened, before the headers and between chunks; a
+  transport fault, a 408, a 429 or a 5xx is tried again after 250 ms and
+  after 1 s, a timeout never; no failure carries the key. A plain
+  completion on the same model condenses earlier conversation.
 - **The test provider** answers with fixed sentences, and only a test
   harness's switch reaches it: no setting names it.

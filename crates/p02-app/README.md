@@ -46,8 +46,8 @@ tokio's blocking pool.
   to differ from those she was built from; it happens once no turn runs,
   before her next line, and lines sent meanwhile wait and land on her
   thread opened again. Her stop cancels her
-  parked confirmations first, closes her thread, its end hooks run, and
-  shuts her plugins down, saying what failed of that. Her
+  parked confirmations first, closes her thread, and shuts her plugins
+  down, saying what failed of that. Her
   host is handed her settings, which its own plugin reads and changes in
   her overlay alone, by the one change of settings below.
 - **Confirmations.** A question an approval-gated call raises is parked

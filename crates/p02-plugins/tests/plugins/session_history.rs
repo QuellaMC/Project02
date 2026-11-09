@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Gate, Scripted, Spec, bundled_manifest, call, run_round, turn, turn_in,
+    Enable, Gate, Scripted, Spec, builder, bundled_manifest, call, run_round, turn, turn_in,
 };
 
 const INDEX: &str = "session-index";
 
 /// A host of session-history alone, under a budget of `timeout_ms`.
 fn history_host(storage: &Arc<Storage>, timeout_ms: u64) -> PluginHost {
-    PluginHost::builder(Arc::clone(storage) as _)
+    builder(Arc::clone(storage) as _)
         .plugin(
             bundled_manifest("session-history", |manifest| {
                 manifest["runtimePolicy"]["timeoutMs"] = json!(timeout_ms);
@@ -304,7 +304,7 @@ async fn with_session_history_on_the_trusted_notes_carry_its_recall_guidance() {
     let guided = history_host(&storage, 5_000)
         .before_role_model_call(&turn())
         .await;
-    let unguided = PluginHost::builder(Storage::new())
+    let unguided = builder(Storage::new())
         .enable(
             &Spec::new("other"),
             Arc::new(Scripted::answering(ContextItemKind::RuntimeNote, 1)),
@@ -391,7 +391,7 @@ async fn the_index_holds_what_the_history_committed_and_is_rebuilt_from_it() {
     assert_eq!(opener.version(INDEX), version);
 
     let off = Storage::new();
-    let without = PluginHost::builder(Arc::clone(&off) as _)
+    let without = builder(Arc::clone(&off) as _)
         .enable(
             &Spec {
                 declared: json!(["after_turn_committed"]),

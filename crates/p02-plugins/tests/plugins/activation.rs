@@ -9,23 +9,21 @@ use p02_contracts::{
     CommittedTurn, FactoryInput, MissingConfigValueError, PluginError, RedactionLabel, StoreAccess,
 };
 use p02_core::Timestamp;
-use p02_plugins::{
-    ActivationError, BeforeCallOutcome, BuildPluginError, PluginHost, RecordLabelsError, list,
-};
+use p02_plugins::{ActivationError, BeforeCallOutcome, BuildPluginError, list};
 use p02_shared::Identifier;
 use serde_json::{Map, json};
 
 use crate::storage::Storage;
-use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, turn};
+use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, builder, turn};
 
 #[test]
 fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_at_activation() {
-    let twice = PluginHost::builder(Storage::new())
+    let twice = builder(Storage::new())
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
         .enable(&Spec::new("notes"), Arc::new(Scripted::default()))
         .activate()
         .unwrap_err();
-    let unset = PluginHost::builder(Storage::new())
+    let unset = builder(Storage::new())
         .enable(
             &Spec {
                 config_fields: json!([{
@@ -42,7 +40,7 @@ fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_a
         )
         .activate()
         .unwrap_err();
-    let in_vain = PluginHost::builder(Storage::new())
+    let in_vain = builder(Storage::new())
         .plugin(
             Spec::new("notes").manifest(),
             Map::new(),
@@ -76,15 +74,12 @@ fn a_plugin_enabled_twice_missing_a_required_value_or_built_in_vain_is_refused_a
 }
 
 #[tokio::test(start_paused = true)]
-async fn labels_are_held_where_they_enter_to_what_a_record_has_room_for() {
-    let fullest = |source: &str| {
-        (0..16)
-            .map(|index| RedactionLabel::new(&format!("{source}{index:0>124}")).unwrap())
-            .collect::<Vec<_>>()
-    };
-    let one_more =
-        |source: &str| [fullest(source), vec![RedactionLabel::new("extra").unwrap()]].concat();
-    let chatty = |labels: Vec<RedactionLabel>| Spec {
+async fn a_plugins_labels_are_held_at_activation_to_what_a_record_has_room_for() {
+    let fullest = (0..16)
+        .map(|index| RedactionLabel::new(&format!("plug{index:0>124}")).unwrap())
+        .collect::<Vec<_>>();
+    let one_more = [fullest.clone(), vec![RedactionLabel::new("extra").unwrap()]].concat();
+    let chatty = |labels: &[RedactionLabel]| Spec {
         before: "reject_turn",
         labels: json!(
             labels
@@ -94,21 +89,20 @@ async fn labels_are_held_where_they_enter_to_what_a_record_has_room_for() {
         ),
         ..Spec::new("chatty")
     };
-    let host = PluginHost::builder(Storage::new())
-        .enable(&chatty(fullest("plug")), Arc::new(Verbose::default()))
+    let host = builder(Storage::new())
+        .enable(&chatty(&fullest), Arc::new(Verbose::default()))
         .activate()
         .unwrap();
-    let labeled = turn().with_privacy_labels(fullest("turn")).unwrap();
-    let BeforeCallOutcome::Rejected(rejection) = host.before_role_model_call(&labeled).await else {
+    let BeforeCallOutcome::Rejected(rejection) = host.before_role_model_call(&turn()).await else {
         panic!("a verbose required hook rejects the turn");
     };
-    let refused = PluginHost::builder(Storage::new())
-        .enable(&chatty(one_more("plug")), Arc::new(Verbose::default()))
+    let refused = builder(Storage::new())
+        .enable(&chatty(&one_more), Arc::new(Verbose::default()))
         .activate()
         .unwrap_err();
 
-    // The fullest labels of a turn and of a plugin ride even the longest record.
-    assert_eq!(rejection.evidence[0].redaction_labels().len(), 32);
+    // The fullest labels of a plugin ride even the longest record.
+    assert_eq!(rejection.evidence[0].redaction_labels().len(), 16);
     assert_eq!(
         refused.to_string(),
         r#"plugin "chatty" has redaction labels its records cannot carry"#
@@ -116,20 +110,9 @@ async fn labels_are_held_where_they_enter_to_what_a_record_has_room_for() {
     assert_eq!(
         refused.source().map(ToString::to_string),
         Some(
-            "a turn or a plugin brings at most 16 labels to each record, each of at most 128 \
-             bytes"
+            "a plugin brings at most 16 labels to each record, each of at most 128 bytes"
                 .to_owned()
         )
-    );
-    assert_eq!(
-        turn().with_privacy_labels(one_more("turn")).unwrap_err(),
-        RecordLabelsError
-    );
-    assert_eq!(
-        turn()
-            .with_privacy_labels(vec![RedactionLabel::new(&"x".repeat(129)).unwrap()])
-            .unwrap_err(),
-        RecordLabelsError
     );
 }
 
@@ -138,10 +121,9 @@ async fn the_listed_plugins_activate_together() {
     let host = list::plugins()
         .unwrap()
         .iter()
-        .fold(
-            PluginHost::builder(Storage::new()),
-            |builder, (manifest, factory)| builder.plugin(manifest.clone(), Map::new(), *factory),
-        )
+        .fold(builder(Storage::new()), |builder, (manifest, factory)| {
+            builder.plugin(manifest.clone(), Map::new(), *factory)
+        })
         .activate()
         .unwrap();
 
@@ -166,14 +148,15 @@ async fn the_listed_plugins_activate_together() {
             .collect::<Vec<_>>(),
         [
             "runtime.plugin.list",
+            "runtime.plugin.config",
+            "runtime.plugin.config.update",
             "memory.update",
             "character_state.patch",
             "mem0.search",
             "mem0.add",
             "sessions.search",
             "sessions.read"
-        ],
-        "without the character's settings, the host's own plugin offers its list alone"
+        ]
     );
 
     let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
@@ -204,7 +187,7 @@ async fn a_plugin_reaches_what_its_manifest_requests_and_an_ending_one_only_read
         "after_turn_committed",
         "on_shutdown"
     ]);
-    let host = PluginHost::builder(Storage::new())
+    let host = builder(Storage::new())
         .enable(
             &Spec {
                 declared: declared.clone(),
@@ -288,7 +271,7 @@ async fn a_stores_lease_is_waited_for_by_what_remains_of_the_hooks_budget() {
     let probe = Arc::new(Probe::default());
     let storage = Storage::new();
     let files = storage.files("probe");
-    let host = PluginHost::builder(storage)
+    let host = builder(storage)
         .enable(
             &Spec {
                 access: json!({"character_file_store": "write"}),

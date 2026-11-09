@@ -25,7 +25,7 @@ const TEXT_CHARS: usize = 160;
 
 pub(super) async fn answer(
     core: &Core,
-    control: Option<Arc<dyn ConfigControl>>,
+    control: Arc<dyn ConfigControl>,
     call: &ToolCall,
 ) -> Result<ToolCallOutcome, PluginError> {
     let input = call.input();
@@ -42,10 +42,7 @@ pub(super) async fn answer(
         .collect();
 
     if everything {
-        let statuses = match control {
-            Some(control) => statuses(control).await?,
-            None => BTreeMap::new(),
-        };
+        let statuses = statuses(control).await?;
         let installed =
             crate::list::plugins().map_err(|error| PluginError::new(error_chain(error)))?;
 
@@ -148,9 +145,7 @@ fn hooks(manifest: &Manifest) -> Vec<&'static str> {
             Declaration::BeforeRoleModelCall => Some(Hook::BeforeRoleModelCall),
             Declaration::HandleToolCall => Some(Hook::HandleToolCall),
             Declaration::AfterTurnCommitted => Some(Hook::AfterTurnCommitted),
-            Declaration::OnSessionEnd => Some(Hook::OnSessionEnd),
             Declaration::OnShutdown => Some(Hook::OnShutdown),
-            Declaration::Health => Some(Hook::Health),
         })
         .map(Hook::name)
         .collect()

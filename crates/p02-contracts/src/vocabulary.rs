@@ -52,9 +52,6 @@ pub const HOST_PLUGIN: &str = "runtime.plugin";
 /// The reason a turn records when a plugin's `beforeRoleModelCall` rejects it.
 pub const BEFORE_ROLE_MODEL_CALL_REJECTION: &str = "plugin_before_role_model_call_rejected";
 
-/// The reason a turn records when a plugin's health check rejects it.
-pub const HEALTH_REJECTION: &str = "plugin_health_rejected";
-
 vocabulary! {
     /// What a plugin is for. Only a memory provider changes what the host
     /// does with it: the default memory provider is chosen among them.
@@ -75,9 +72,7 @@ vocabulary! {
         BeforeRoleModelCall = "before_role_model_call",
         HandleToolCall = "handle_tool_call",
         AfterTurnCommitted = "after_turn_committed",
-        OnSessionEnd = "on_session_end",
         OnShutdown = "on_shutdown",
-        Health = "health",
     }
 }
 
@@ -127,21 +122,11 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// What a failed health check does to the turn.
-    HealthFailure {
-        Degrade = "degrade",
-        RejectTurn = "reject_turn",
-    }
-}
-
-vocabulary! {
     /// What a context item is, which decides where the host renders it.
     ContextItemKind {
         Memory = "memory",
         Resource = "resource",
         RuntimeNote = "runtime_note",
-        ToolResult = "tool_result",
-        Discovery = "discovery",
     }
 }
 
@@ -159,13 +144,10 @@ vocabulary! {
 vocabulary! {
     /// The step an evidence record describes.
     EvidenceKind {
-        Registration = "registration",
         BeforeRoleModelCall = "before_role_model_call",
         ToolInvocation = "tool_invocation",
         AfterTurnCommitted = "after_turn_committed",
-        SessionEnd = "session_end",
         Shutdown = "shutdown",
-        Health = "health",
         Policy = "policy",
     }
 }
@@ -183,25 +165,12 @@ vocabulary! {
 vocabulary! {
     /// The rule that decided the described step.
     PolicyOutcome {
-        RegistrationAccepted = "registration_accepted",
-        AvailableForTurn = "available_for_turn",
         OptionalDegraded = "optional_degraded",
         RequiredRejected = "required_rejected",
-        DisallowedToolCall = "disallowed_tool_call",
         HandlerRejected = "handler_rejected",
         UserApproved = "user_approved",
         Timeout = "timeout",
-        HealthDegraded = "health_degraded",
         AfterCommitFailed = "after_commit_failed",
-    }
-}
-
-vocabulary! {
-    /// A health check's verdict.
-    HealthStatus {
-        Ok = "ok",
-        Degraded = "degraded",
-        Unavailable = "unavailable",
     }
 }
 
@@ -226,20 +195,5 @@ vocabulary! {
         GlobalWithCharacterOverrides = "global_with_character_overrides",
         CharacterOnly = "character_only",
         GlobalOnly = "global_only",
-    }
-}
-
-vocabulary! {
-    /// The machine reason a refused manifest, tool or plugin output names.
-    ValidationFailureReason {
-        MalformedManifest = "malformed_manifest",
-        UnsupportedContractVersion = "unsupported_contract_version",
-        UnsupportedPluginKind = "unsupported_plugin_kind",
-        DuplicateDeclaration = "duplicate_declaration",
-        MissingRequiredDeclaration = "missing_required_declaration",
-        MalformedToolDefinition = "malformed_tool_definition",
-        MalformedContextItem = "malformed_context_item",
-        MalformedCuratedContextSection = "malformed_curated_context_section",
-        DuplicatePluginId = "duplicate_plugin_id",
     }
 }

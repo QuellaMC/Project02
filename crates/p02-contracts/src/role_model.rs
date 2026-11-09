@@ -13,13 +13,13 @@ pub use adapter::{
     TextCompletionRequest,
 };
 pub use chat::{
-    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction, ContextRole,
-    ProviderCapabilities, ReasoningParameterStyle, ToolNameMapping,
+    ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction,
+    ToolNameMapping,
 };
 pub use decision::{
-    BlankContextTextError, CharacterDecision, DECISION_CONTRACT_VERSION, DECISION_OUTPUT_CONTRACT,
-    DecisionContext, DecisionRejection, DecisionRejectionReason, DecisionResult, InputEnvelope,
-    OutputContract, ParseDecisionError, RuntimeNote,
+    BlankContextTextError, CharacterDecision, DECISION_CONTRACT_VERSION, DecisionContext,
+    DecisionRejection, DecisionRejectionReason, DecisionResult, InputEnvelope, OutputContract,
+    RuntimeNote,
 };
 pub use exchange::{
     ExchangeProvider, ExchangeRecord, ProviderExchange, ProviderFailure, ProviderMetadata,
@@ -28,8 +28,8 @@ pub use exchange::{
 pub use history::{
     ConversationToolCall, ConversationTurn, HistoryWindow, ToolCallResult, ToolRound,
 };
-pub use prompt_size::{FrameSize, PromptSize, PromptSizeError};
-pub use reasoning::{ReasoningFilter, ReasoningLeakError, scrub_reasoning_blocks};
+pub use prompt_size::{FrameSize, PromptSize};
+pub use reasoning::{ReasoningFilter, scrub_reasoning_blocks};
 pub use tools::{
     DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,
     ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, VISIBLE_REPLY,

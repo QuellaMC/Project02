@@ -17,13 +17,10 @@ use p02_contracts::{
 pub use history::{estimated_tokens, newest_turns_within, select_history_window};
 pub(crate) use history::{json_text, round_messages};
 pub(crate) use text::unusable_reply_note;
-pub use text::{
-    CalendarDay, InvalidCalendarDayError, Person, Recollection, summarizer_instructions, today_note,
-};
+pub use text::{Person, Recollection, summarizer_instructions, today_note};
 pub(crate) use tools::{provider_name, provider_names, runtime_name};
 
-pub(crate) use fence::is_blank;
-use fence::{bullets, fenced, neutralize, trim_blank};
+use fence::{bullets, fenced, neutralize};
 use history::{turn_messages, wire_chars};
 use text::{
     EARLIER_CONVERSATION_FENCE, Inventory, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
@@ -253,7 +250,7 @@ fn plugin_context(
                 untrusted.iter().flat_map(|item| {
                     [
                         format!("## {} · {}", item.plugin_id(), item.item().id()),
-                        trim_blank(&neutralize(item.item().text())).to_owned(),
+                        neutralize(item.item().text()).trim().to_owned(),
                     ]
                 }),
             ),
@@ -354,13 +351,10 @@ impl Wire {
                 chars: NonZeroU64::new(chars).expect("every frame puts characters on the wire"),
             })
             .collect();
-        let size = PromptSize::new(frames, wire_chars(&tools))
-            .expect("each kind is listed once, after the system frame every prompt has");
-
         Prompt {
             messages: self.messages,
+            size: PromptSize::new(frames, wire_chars(&tools)),
             tools,
-            size,
         }
     }
 }

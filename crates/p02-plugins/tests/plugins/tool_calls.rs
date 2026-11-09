@@ -20,8 +20,8 @@ use tokio::time::Instant;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Scripted, Settings, SlowTools, Spec, Verbose, call, host_of, id, note, run_round, tool,
-    turn,
+    Enable, NoSettings, Scripted, Settings, SlowTools, Spec, Verbose, call, host_of, id, note,
+    run_round, tool, turn,
 };
 
 async fn one(host: &PluginHost, call: ProposedToolCall, turn: &Turn) -> ToolCallReport {
@@ -340,21 +340,24 @@ impl Confirmer for Asking {
 /// A host of `settings`, granted its store in `storage`, that asks the
 /// person through `asking`.
 fn settings_host(storage: &Arc<Storage>, settings: Settings, asking: &Arc<Asking>) -> PluginHost {
-    PluginHost::builder(Arc::clone(storage) as _)
-        .enable(
-            &Spec {
-                access: json!({
-                    "model_input": "write",
-                    "character_file_store": "write",
-                    "plugin_database": "write",
-                }),
-                ..Spec::tools("settings")
-            },
-            Arc::new(settings),
-        )
-        .confirmer(Arc::clone(asking) as _)
-        .activate()
-        .unwrap()
+    PluginHost::builder(
+        Arc::clone(storage) as _,
+        Arc::clone(asking) as _,
+        Arc::new(NoSettings),
+    )
+    .enable(
+        &Spec {
+            access: json!({
+                "model_input": "write",
+                "character_file_store": "write",
+                "plugin_database": "write",
+            }),
+            ..Spec::tools("settings")
+        },
+        Arc::new(settings),
+    )
+    .activate()
+    .unwrap()
 }
 
 #[tokio::test(start_paused = true)]

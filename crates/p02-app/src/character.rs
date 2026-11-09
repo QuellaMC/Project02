@@ -737,8 +737,8 @@ impl Actor {
     }
 
     /// Her stop: what is still asked of her is answered as stopping, her
-    /// thread is closed, its end hooks run, and her host shut down; what
-    /// failed of that is said as she stops.
+    /// thread is closed, and her host shut down; what failed of that is
+    /// said as she stops.
     async fn stop_now(&mut self) {
         self.publish(Change::Stopping);
         self.commands.close();
@@ -785,8 +785,8 @@ impl Actor {
         }
     }
 
-    /// Closes her thread, its end hooks run, then shuts her host down: what
-    /// failed, a sentence each.
+    /// Closes her thread, then shuts her host down: what failed, a sentence
+    /// each.
     async fn release(&mut self) -> Vec<String> {
         let Some(Parts {
             character,
@@ -800,7 +800,7 @@ impl Actor {
         let mut failures = Vec::new();
 
         if let Some(thread) = thread {
-            failures.extend(thread.close(&host).await);
+            failures.extend(thread.close().await);
         }
 
         // Her end belongs to no session, but a hook is handed the turn it
@@ -1018,17 +1018,15 @@ fn assemble(
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
         .fold(
-            PluginHost::builder(Arc::new(data)),
+            PluginHost::builder(
+                Arc::new(data),
+                broker,
+                Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
+            ),
             |builder, (plugin, values)| {
                 builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
             },
         )
-        .confirmer(broker)
-        .config_control(Arc::new(CharacterConfig::new(
-            Arc::clone(world),
-            daemon,
-            id.clone(),
-        )))
         .activate()
         .map_err(|error| error_sentence(&error))?;
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::evidence::EvidenceNote;
 use crate::label::RedactionLabel;
-use crate::vocabulary::{ContextItemKind, HealthStatus, SourceKind, ValidationFailureReason};
+use crate::vocabulary::{ContextItemKind, SourceKind};
 
 /// Where something a plugin returns came from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,8 +16,6 @@ pub struct SourceReference {
     id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    uri: Option<String>,
 }
 
 /// Why source references cannot be kept.
@@ -44,19 +42,12 @@ impl SourceReference {
             kind,
             id: id.into(),
             title: None,
-            uri: None,
         }
     }
 
     #[must_use]
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_uri(mut self, uri: impl Into<String>) -> Self {
-        self.uri = Some(uri.into());
         self
     }
 
@@ -75,11 +66,6 @@ impl SourceReference {
         self.title.as_deref()
     }
 
-    #[must_use]
-    pub fn uri(&self) -> Option<&str> {
-        self.uri.as_deref()
-    }
-
     pub(crate) fn check_all(references: &[Self]) -> Result<(), SourceReferenceError> {
         if references.len() > Self::MAX_PER_RECORD {
             return Err(SourceReferenceError::TooMany);
@@ -89,7 +75,6 @@ impl SourceReference {
             for (field, text) in [
                 ("id", Some(reference.id.as_str())),
                 ("title", reference.title.as_deref()),
-                ("uri", reference.uri.as_deref()),
             ] {
                 if text.is_some_and(|text| text.trim().is_empty()) {
                     return Err(SourceReferenceError::Blank { field });
@@ -179,18 +164,11 @@ impl ContextItem {
     }
 }
 
-/// A context item as the host keeps it, under the plugin that gave it.
+/// A context item as the host keeps it, under the plugin that gave it. A
+/// record of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedContextItem")]
-pub struct PluginContextItem {
-    plugin_id: Identifier,
-    #[serde(flatten)]
-    item: ContextItem,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UncheckedContextItem {
+pub struct PluginContextItem {
     plugin_id: Identifier,
     #[serde(flatten)]
     item: ContextItem,
@@ -207,13 +185,6 @@ pub enum ContextItemError {
     Sources(#[source] SourceReferenceError),
     #[error("a plugin context item's confidence must be a finite number from 0 to 1")]
     Confidence,
-}
-
-impl ContextItemError {
-    #[must_use]
-    pub fn reason(&self) -> ValidationFailureReason {
-        ValidationFailureReason::MalformedContextItem
-    }
 }
 
 impl PluginContextItem {
@@ -254,14 +225,6 @@ impl PluginContextItem {
     #[must_use]
     pub fn item(&self) -> &ContextItem {
         &self.item
-    }
-}
-
-impl TryFrom<UncheckedContextItem> for PluginContextItem {
-    type Error = ContextItemError;
-
-    fn try_from(unchecked: UncheckedContextItem) -> Result<Self, Self::Error> {
-        Self::new(unchecked.plugin_id, unchecked.item)
     }
 }
 
@@ -351,18 +314,10 @@ impl CuratedSection {
 }
 
 /// A curated section as the host keeps it: under its plugin, with its
-/// line endings made `\n`.
+/// line endings made `\n`. A record of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedCuratedSection")]
-pub struct PluginCuratedSection {
-    plugin_id: Identifier,
-    #[serde(flatten)]
-    section: CuratedSection,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UncheckedCuratedSection {
+pub struct PluginCuratedSection {
     plugin_id: Identifier,
     #[serde(flatten)]
     section: CuratedSection,
@@ -388,13 +343,6 @@ pub enum CuratedSectionError {
         CuratedSection::TEXT_CHAR_LIMIT
     )]
     TextTooLong,
-}
-
-impl CuratedSectionError {
-    #[must_use]
-    pub fn reason(&self) -> ValidationFailureReason {
-        ValidationFailureReason::MalformedCuratedContextSection
-    }
 }
 
 impl PluginCuratedSection {
@@ -452,14 +400,6 @@ impl PluginCuratedSection {
     }
 }
 
-impl TryFrom<UncheckedCuratedSection> for PluginCuratedSection {
-    type Error = CuratedSectionError;
-
-    fn try_from(unchecked: UncheckedCuratedSection) -> Result<Self, Self::Error> {
-        Self::new(unchecked.plugin_id, unchecked.section)
-    }
-}
-
 /// Whether `text` holds a character the curated frame refuses: a C0 or C1
 /// control other than `\n`, DEL, or a Unicode line or paragraph separator.
 /// Each would break the frame's single-line titles or its newline-only
@@ -490,119 +430,11 @@ pub enum HookStatus {
     Failed,
 }
 
-/// What `afterTurnCommitted`, `onSessionEnd` and `onShutdown` report.
+/// What `afterTurnCommitted` and `onShutdown` report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HookReport {
     pub status: HookStatus,
     pub evidence: Vec<EvidenceNote>,
-}
-
-/// What a plugin's health check says; the host stamps who and when.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HealthReport {
-    pub status: HealthStatus,
-    pub summary: String,
-}
-
-/// A health check as the host keeps it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedHealthSnapshot")]
-pub struct HealthSnapshot {
-    plugin_id: Identifier,
-    status: HealthStatus,
-    checked_at: Timestamp,
-    summary: String,
-    redaction_labels: Vec<RedactionLabel>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UncheckedHealthSnapshot {
-    plugin_id: Identifier,
-    status: HealthStatus,
-    checked_at: Timestamp,
-    summary: String,
-    redaction_labels: Vec<RedactionLabel>,
-}
-
-/// Why a health report cannot be kept.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum HealthSnapshotError {
-    #[error("a plugin health snapshot is past the JSON limits")]
-    TooLarge(#[source] BoundJsonError),
-    #[error("a plugin health summary must not be blank")]
-    BlankSummary,
-}
-
-impl HealthSnapshot {
-    /// # Errors
-    ///
-    /// [`HealthSnapshotError`] when the summary is blank or the record is
-    /// past the JSON limits.
-    pub fn new(
-        plugin_id: Identifier,
-        checked_at: Timestamp,
-        report: HealthReport,
-        redaction_labels: Vec<RedactionLabel>,
-    ) -> Result<Self, HealthSnapshotError> {
-        let snapshot = Self {
-            plugin_id,
-            status: report.status,
-            checked_at,
-            summary: report.summary,
-            redaction_labels,
-        };
-
-        within_limits(&snapshot, "Plugin health snapshot")
-            .map_err(HealthSnapshotError::TooLarge)?;
-
-        if snapshot.summary.trim().is_empty() {
-            return Err(HealthSnapshotError::BlankSummary);
-        }
-
-        Ok(snapshot)
-    }
-
-    #[must_use]
-    pub fn plugin_id(&self) -> &Identifier {
-        &self.plugin_id
-    }
-
-    #[must_use]
-    pub fn status(&self) -> HealthStatus {
-        self.status
-    }
-
-    #[must_use]
-    pub fn checked_at(&self) -> &Timestamp {
-        &self.checked_at
-    }
-
-    #[must_use]
-    pub fn summary(&self) -> &str {
-        &self.summary
-    }
-
-    #[must_use]
-    pub fn redaction_labels(&self) -> &[RedactionLabel] {
-        &self.redaction_labels
-    }
-}
-
-impl TryFrom<UncheckedHealthSnapshot> for HealthSnapshot {
-    type Error = HealthSnapshotError;
-
-    fn try_from(unchecked: UncheckedHealthSnapshot) -> Result<Self, Self::Error> {
-        Self::new(
-            unchecked.plugin_id,
-            unchecked.checked_at,
-            HealthReport {
-                status: unchecked.status,
-                summary: unchecked.summary,
-            },
-            unchecked.redaction_labels,
-        )
-    }
 }
 
 /// A turn that is already durable, for `afterTurnCommitted`.
@@ -689,18 +521,6 @@ mod tests {
         )
     }
 
-    fn health(summary: String) -> Result<HealthSnapshot, HealthSnapshotError> {
-        HealthSnapshot::new(
-            id("memory.fixture"),
-            Timestamp::new("2026-07-11T00:00:00.000Z").unwrap(),
-            HealthReport {
-                status: HealthStatus::Ok,
-                summary,
-            },
-            Vec::new(),
-        )
-    }
-
     fn string_limit(path: &str) -> BoundJsonError {
         BoundJsonError::StringBytes {
             path: path.to_owned(),
@@ -738,13 +558,6 @@ mod tests {
             evidence(note().with_source(SourceReference::new(SourceKind::Memory, &over))),
             Err(EvidenceError::TooLarge(string_limit(
                 "Plugin evidence snapshot.sourceReferences[0].id"
-            )))
-        );
-        assert!(health(exact).is_ok());
-        assert_eq!(
-            health(over),
-            Err(HealthSnapshotError::TooLarge(string_limit(
-                "Plugin health snapshot.summary"
             )))
         );
 
@@ -794,10 +607,10 @@ mod tests {
         assert_eq!(
             keep(
                 item("safe")
-                    .with_source(SourceReference::new(SourceKind::Memory, "1").with_uri(""))
+                    .with_source(SourceReference::new(SourceKind::Memory, "1").with_title(""))
             ),
             Err(ContextItemError::Sources(SourceReferenceError::Blank {
-                field: "uri"
+                field: "title"
             }))
         );
     }

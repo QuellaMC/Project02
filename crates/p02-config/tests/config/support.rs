@@ -45,17 +45,14 @@ pub(crate) fn manifest(id: &str, kind: &str, scope: &str, on: bool, fields: &Val
         "kind": kind,
         "description": "A plugin of the test's.",
         "contractVersion": "mvp-008.runtime_plugin.v2",
-        "compatibility": {"hostContractVersions": ["mvp-008.runtime_plugin.v2"]},
         "declaredPlugins": ["before_role_model_call"],
         "config": {"scope": scope, "fields": fields},
-        "firstParty": true,
         "runtimePolicy": {
             "timeoutMs": 1000,
             "redactionLabels": [],
             "failureBehavior": {
                 "beforeRoleModelCall": "degrade",
                 "handleToolCall": "reject_tool_call",
-                "health": "degrade",
             },
         },
         "activation": {"defaultEnabled": on, "reasons": [format!("bundled_{id}")]},

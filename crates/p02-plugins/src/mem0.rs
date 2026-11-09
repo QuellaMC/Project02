@@ -17,19 +17,17 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, EvidenceKind,
-    EvidenceNote, EvidenceStatus, FactoryInput, HealthReport, HealthStatus, HookContext,
-    HookReport, HookStatus, PluginError, ProvidedTool, RedactionLabel, RuntimePlugin, SourceKind,
-    SourceReference, ToolCall, ToolCallOutcome, TurnText,
+    EvidenceNote, EvidenceStatus, FactoryInput, HookContext, HookReport, HookStatus, PluginError,
+    ProvidedTool, RedactionLabel, RuntimePlugin, SourceKind, SourceReference, ToolCall,
+    ToolCallOutcome, TurnText,
 };
 use p02_core::VisibleMessageRole;
 use p02_memory::{Message, ObservedOn, Role, Scope, Turn};
 use p02_shared::Identifier;
 use serde_json::{Value, json};
 
-use self::backend::{
-    BackendError, Failure, Found, Operation, RECALL_LIMIT, Readiness, Write, Written,
-};
-use self::captures::{Captures, Outcomes, Queued};
+use self::backend::{BackendError, Failure, Found, Operation, RECALL_LIMIT, Write, Written};
+use self::captures::{Captures, Queued};
 use self::settings::Setup;
 use crate::text::excerpt;
 
@@ -39,8 +37,7 @@ const MEMORY_CHARS: usize = 600;
 /// How much of a memory's id a search result repeats.
 const ID_CHARS: usize = 120;
 
-/// How much of a summary the records keep: the warning that leads one
-/// must survive the cut.
+/// How much of a summary the records keep.
 const SUMMARY_CHARS: usize = 160;
 
 static MEMORY_LABEL: LazyLock<RedactionLabel> =
@@ -67,12 +64,6 @@ struct Mem0Plugin {
     /// Where memories are kept, or what the settings must set first.
     setup: Result<Arc<Setup>, String>,
     captures: Captures,
-}
-
-/// Why health found no backend to vouch for.
-enum Unready {
-    Misconfigured(String),
-    Failed(BackendError),
 }
 
 #[async_trait]
@@ -229,19 +220,6 @@ impl RuntimePlugin for Mem0Plugin {
         }
     }
 
-    async fn health(&self, context: &HookContext) -> Result<HealthReport, PluginError> {
-        let checked = match &self.setup {
-            Ok(setup) => setup
-                .backend
-                .ping(context.plugin_database())
-                .await
-                .map_err(Unready::Failed),
-            Err(message) => Err(Unready::Misconfigured(message.clone())),
-        };
-
-        Ok(health_report(&self.captures.outcomes(), checked))
-    }
-
     /// Drains the queued captures until the host cancels the hook at its
     /// deadline, then abandons the rest. Nothing runs after this, and the
     /// next launch counts from nothing, so a capture lost to now is
@@ -278,61 +256,6 @@ impl Setup {
     /// The person's and the turn's character's memories.
     fn scope(&self, context: &HookContext) -> Scope {
         Scope::new(&self.user, context.turn().character.id.as_str())
-    }
-}
-
-/// Health from the backend's readiness and what the captures came to. A
-/// lost capture leads every summary, so the cut never takes the warning.
-fn health_report(outcomes: &Outcomes, checked: Result<Readiness, Unready>) -> HealthReport {
-    let losses = outcomes
-        .loss
-        .as_deref()
-        .map(|loss| format!("{loss} "))
-        .unwrap_or_default();
-    let (status, summary) = match checked {
-        Ok(readiness) => {
-            let running = if outcomes.pending == 0 {
-                String::new()
-            } else {
-                format!(" {} capture(s) still running.", outcomes.pending)
-            };
-
-            if outcomes.incomplete > 0 {
-                (
-                    HealthStatus::Degraded,
-                    format!("{losses}{}{running}", readiness.summary),
-                )
-            } else {
-                let status = if readiness.verified {
-                    HealthStatus::Ok
-                } else {
-                    HealthStatus::Degraded
-                };
-                let last = outcomes
-                    .last
-                    .as_deref()
-                    .map(|last| format!(" {last}"))
-                    .unwrap_or_default();
-
-                (status, format!("{}{last}{running}", readiness.summary))
-            }
-        }
-        Err(Unready::Failed(error)) => (
-            if error.is_unavailable() {
-                HealthStatus::Unavailable
-            } else {
-                HealthStatus::Degraded
-            },
-            format!("{losses}{error}"),
-        ),
-        Err(Unready::Misconfigured(message)) => {
-            (HealthStatus::Unavailable, format!("{losses}{message}"))
-        }
-    };
-
-    HealthReport {
-        status,
-        summary: excerpt(summary.trim(), SUMMARY_CHARS).into_owned(),
     }
 }
 

@@ -10,23 +10,14 @@ use crate::evidence::EvidenceNote;
 use crate::plugin::PluginError;
 use crate::role_model::VISIBLE_REPLY;
 use crate::schema::{ToolInputContract, ToolInputRejection};
-use crate::vocabulary::{ToolConcurrency, ValidationFailureReason};
+use crate::vocabulary::ToolConcurrency;
 
 /// A tool a plugin offers the model. Every plugin tool is shown to the
-/// model and has its input judged by the host against its contract.
+/// model and has its input judged by the host against its contract. A
+/// record of it reads back as it was written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "UncheckedTool")]
-pub struct ProvidedTool {
-    name: Identifier,
-    description: String,
-    input_contract: ToolInputContract,
-    concurrency: ToolConcurrency,
-    requires_confirmation: Confirmation,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UncheckedTool {
+pub struct ProvidedTool {
     name: Identifier,
     description: String,
     input_contract: ToolInputContract,
@@ -51,13 +42,6 @@ pub enum ToolDefinitionError {
     BlankDescription { name: Identifier },
     #[error("tool \"{name}\" is built in, and no plugin may provide it")]
     BuiltInName { name: Identifier },
-}
-
-impl ToolDefinitionError {
-    #[must_use]
-    pub fn reason(&self) -> ValidationFailureReason {
-        ValidationFailureReason::MalformedToolDefinition
-    }
 }
 
 impl ProvidedTool {
@@ -132,20 +116,6 @@ impl ProvidedTool {
     #[must_use]
     pub fn is_approval_gated(&self) -> bool {
         self.requires_confirmation == Confirmation::Required
-    }
-}
-
-impl TryFrom<UncheckedTool> for ProvidedTool {
-    type Error = ToolDefinitionError;
-
-    fn try_from(unchecked: UncheckedTool) -> Result<Self, Self::Error> {
-        Ok(Self::new(
-            unchecked.name,
-            unchecked.description,
-            unchecked.input_contract,
-        )?
-        .with_concurrency(unchecked.concurrency)
-        .with_confirmation(unchecked.requires_confirmation))
     }
 }
 

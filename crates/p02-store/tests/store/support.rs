@@ -7,11 +7,10 @@ use std::path::{Path, PathBuf};
 
 use p02_characters::{CharacterRef, CharacterVersion};
 use p02_contracts::{
-    ContextRole, DecisionContext, DecisionRejection, DecisionRejectionReason, DecisionResult,
-    Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, ExchangeProvider, ExchangeRecord,
-    FrameSize, HealthReport, HealthSnapshot, HealthStatus, InputEnvelope, PluginToolDefinitions,
-    PromptSize, ProviderCapabilities, ProviderExchange, ProviderMetadata, ProviderName,
-    ReasoningParameterStyle, ToolCallId, ToolCallResult,
+    DecisionContext, DecisionRejection, DecisionRejectionReason, DecisionResult, Evidence,
+    EvidenceKind, EvidenceNote, EvidenceStatus, ExchangeProvider, ExchangeRecord, FrameSize,
+    InputEnvelope, PluginToolDefinitions, PromptSize, ProviderExchange, ProviderMetadata,
+    ProviderName, ToolCallId, ToolCallResult,
 };
 use p02_core::{
     CharacterProfile, ClientStamp, Conversation, ConversationId, EventId, EventIdentity, MessageId,
@@ -22,8 +21,8 @@ use p02_shared::{Credentials, DanglingLinks, Fingerprint, Identifier, canonical_
 use p02_store::{
     CharacterData, EventReceived, Home, Judgement, LogRecord, MessageCommitted, PayloadSummary,
     RecordBody, RoundRecord, RoundSnapshot, RuntimeRejection, SessionLog, SessionWriter,
-    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnEvidence,
-    TurnRejected, TurnRejection, TurnStatus,
+    StorageError, ToolCallFinished, ToolCallStarted, ToolDispatch, TurnCompleted, TurnRejected,
+    TurnRejection, TurnStatus,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -347,8 +346,7 @@ fn snapshot(envelope: InputEnvelope, raw: Option<String>) -> RoundSnapshot {
                 chars: NonZeroU64::new(2_048).unwrap(),
             }],
             0,
-        )
-        .unwrap(),
+        ),
         provider_metadata: Some(ProviderMetadata {
             provider: ProviderName::Nvidia,
             model: Some("nvidia/fixture-model".to_owned()),
@@ -368,17 +366,6 @@ fn exchange() -> ProviderExchange {
             name: ProviderName::Nvidia,
             model: Some("nvidia/fixture-model".to_owned()),
             endpoint: None,
-        },
-        capabilities: ProviderCapabilities {
-            supports_native_tools: true,
-            supports_developer_or_system_context: true,
-            preferred_model_context_role: ContextRole::System,
-            supports_strict_tool_schema: true,
-            supports_reasoning: true,
-            reasoning_parameter_style: ReasoningParameterStyle::Nvidia,
-            requires_reasoning_block_round_trip: false,
-            supports_tool_choice: true,
-            supports_parallel_tool_calls: true,
         },
         reasoning_params: json!({}),
         rendered_messages: Vec::new(),
@@ -550,24 +537,11 @@ impl TurnScript<'_> {
                     p02_contracts::ModelToolCall::Plugin { .. } => None,
                 }),
         };
-        let health = HealthSnapshot::new(
-            id("mem0"),
-            self.identity.created_at().clone(),
-            HealthReport {
-                status: HealthStatus::Ok,
-                summary: "Ready.".to_owned(),
-            },
-            Vec::new(),
-        )
-        .unwrap();
         let body = RecordBody::TurnCompleted(TurnCompleted {
             visible_message_ids: self.messages.clone(),
             tool_call_ids: self.finished.clone(),
             judgement,
             runtime_plugin_evidence: Vec::new(),
-            runtime_plugin_turn_evidence: Some(TurnEvidence {
-                health: vec![health],
-            }),
         });
 
         self.push(body);

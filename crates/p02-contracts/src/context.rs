@@ -9,7 +9,6 @@ use crate::capability::{
     DatabaseOpener, FileStore, FileStoreBackend, PluginDatabase, SessionHistory,
     SessionHistoryFeed, StoreAccess, WriteHold,
 };
-use crate::label::RedactionLabel;
 
 /// Which turn a hook serves. The host stamps it on everything the plugin
 /// returns, so a plugin cannot write a record of another turn.
@@ -46,7 +45,6 @@ pub struct HookContext {
     deadline: Instant,
     cancellation: CancellationToken,
     turn_text: Option<Arc<TurnText>>,
-    privacy_labels: Arc<[RedactionLabel]>,
     character_file_store: Option<FileStore>,
     session_history: Option<SessionHistory>,
     plugin_database: Option<PluginDatabase>,
@@ -69,7 +67,6 @@ impl HookContext {
             deadline,
             cancellation,
             turn_text: None,
-            privacy_labels: Arc::from([]),
             character_file_store: None,
             session_history: None,
             plugin_database: None,
@@ -80,13 +77,6 @@ impl HookContext {
     #[must_use]
     pub fn with_turn_text(mut self, turn_text: Arc<TurnText>) -> Self {
         self.turn_text = Some(turn_text);
-        self
-    }
-
-    /// The privacy labels the runtime attached to the turn.
-    #[must_use]
-    pub fn with_privacy_labels(mut self, labels: Arc<[RedactionLabel]>) -> Self {
-        self.privacy_labels = labels;
         self
     }
 
@@ -142,11 +132,6 @@ impl HookContext {
     #[must_use]
     pub fn turn_text(&self) -> Option<&TurnText> {
         self.turn_text.as_deref()
-    }
-
-    #[must_use]
-    pub fn privacy_labels(&self) -> &[RedactionLabel] {
-        &self.privacy_labels
     }
 
     #[must_use]

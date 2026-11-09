@@ -1,7 +1,7 @@
-//! The hooks that follow what already happened: `afterTurnCommitted`,
-//! `onSessionEnd` and `onShutdown`. Each runs for every plugin that
-//! declares it, in the host's order, and a failure is collected and
-//! reported, never thrown: it undoes nothing, and the next plugin runs.
+//! The hooks that follow what already happened: `afterTurnCommitted` and
+//! `onShutdown`. Each runs for every plugin that declares it, in the host's
+//! order, and a failure is collected and reported, never thrown: it undoes
+//! nothing, and the next plugin runs.
 
 use p02_contracts::{
     CommittedTurn, Evidence, EvidenceKind, EvidenceStatus, Hook, HookReport, HookStatus,
@@ -47,7 +47,6 @@ impl HookPhaseReport {
 
 pub(crate) enum Lifecycle {
     AfterTurnCommitted(CommittedTurn),
-    SessionEnd,
     Shutdown,
 }
 
@@ -55,7 +54,6 @@ impl Lifecycle {
     fn hook(&self) -> Hook {
         match self {
             Self::AfterTurnCommitted(_) => Hook::AfterTurnCommitted,
-            Self::SessionEnd => Hook::OnSessionEnd,
             Self::Shutdown => Hook::OnShutdown,
         }
     }
@@ -63,7 +61,6 @@ impl Lifecycle {
     fn evidence_kind(&self) -> EvidenceKind {
         match self {
             Self::AfterTurnCommitted(_) => EvidenceKind::AfterTurnCommitted,
-            Self::SessionEnd => EvidenceKind::SessionEnd,
             Self::Shutdown => EvidenceKind::Shutdown,
         }
     }
@@ -75,7 +72,7 @@ impl Lifecycle {
             (Self::AfterTurnCommitted(_), FailureKind::Exception) => {
                 Some(PolicyOutcome::AfterCommitFailed)
             }
-            (Self::SessionEnd | Self::Shutdown, FailureKind::Exception) => None,
+            (Self::Shutdown, FailureKind::Exception) => None,
         }
     }
 }
@@ -91,13 +88,6 @@ impl PluginHost {
     ) -> HookPhaseReport {
         self.core()
             .run_lifecycle(&Lifecycle::AfterTurnCommitted(committed.clone()), turn)
-            .await
-    }
-
-    /// Runs every declared `onSessionEnd` for a session that ended.
-    pub async fn session_end(&self, turn: &Turn) -> HookPhaseReport {
-        self.core()
-            .run_lifecycle(&Lifecycle::SessionEnd, turn)
             .await
     }
 }
@@ -178,12 +168,6 @@ impl Slot {
 
                 self.invoke(hook, turn, |context| async move {
                     plugin.after_turn_committed(&committed, &context).await
-                })
-                .await
-            }
-            Lifecycle::SessionEnd => {
-                self.invoke(hook, turn, |context| async move {
-                    plugin.on_session_end(&context).await
                 })
                 .await
             }

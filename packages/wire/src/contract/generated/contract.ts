@@ -239,8 +239,8 @@ export type JsonValue = number | string | boolean | ReadonlyArray<JsonValue> | {
 /**
  * A background failure the conversation never sees: the plugins' work
  * after a turn's commit, a segment rotation that failed, which the next
- * turn plans again, a closed segment's end hooks that did not finish, or
- * what opening her thread skipped because it could not be read.
+ * turn plans again, what closing a segment left undone, or what opening
+ * her thread skipped because it could not be read.
  */
 export type MaintenanceFailure = { at: Timestamp, message: string, };
 

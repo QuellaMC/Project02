@@ -185,24 +185,9 @@ pub fn apply_change(
     change: &ConfigChange,
     wait: Duration,
 ) -> ChangeOutcome {
-    let character = match &change.target {
-        ConfigTarget::Global => None,
-        ConfigTarget::Character { character_id } => match discovery.find(character_id) {
-            Ok(character) => Some(character),
-            Err(error) => {
-                return refused(
-                    ChangeRefusal::UnknownCharacter,
-                    sentence(&error.to_string()),
-                );
-            }
-        },
-    };
-    let target = character.map_or(Target::Home, |character| {
-        Target::Character(character.profile.id.clone())
-    });
-    let edit = match Edit::new(sections, &target, &change.operation) {
-        Ok(edit) => edit,
-        Err(message) => return refused(ChangeRefusal::Invalid, message),
+    let (character, edit) = match admitted(sections, discovery, change) {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal,
     };
     let expected = change.expected_fingerprint.as_str();
     let committed = match character {
@@ -238,6 +223,46 @@ pub fn create_home_document(home: &Home, wait: Duration) -> Result<(), StorageEr
         Read::Absent => write(&written.path, Document::empty().raw()),
         Read::Unreadable(_) | Read::Document(_) => Ok(()),
     })
+}
+
+/// The refusal [`apply_change`] would meet before reading any document: no
+/// character answers to the change's target, or the change breaks its own
+/// rules, a field that does not exist, a scope that does not let its
+/// target write it, or a value the field does not take. A caller that asks
+/// someone about a change checks it here first.
+#[must_use]
+pub fn check_change(
+    sections: &Sections,
+    discovery: &Discovery,
+    change: &ConfigChange,
+) -> Option<ChangeOutcome> {
+    admitted(sections, discovery, change).err()
+}
+
+/// The character `change` targets, if any, and the edit it makes.
+fn admitted<'d, 's>(
+    sections: &'s Sections,
+    discovery: &'d Discovery,
+    change: &ConfigChange,
+) -> Result<(Option<&'d CharacterDefinition>, Edit<'s>), ChangeOutcome> {
+    let character = match &change.target {
+        ConfigTarget::Global => None,
+        ConfigTarget::Character { character_id } => {
+            Some(discovery.find(character_id).map_err(|error| {
+                refused(
+                    ChangeRefusal::UnknownCharacter,
+                    sentence(&error.to_string()),
+                )
+            })?)
+        }
+    };
+    let target = character.map_or(Target::Home, |character| {
+        Target::Character(character.profile.id.clone())
+    });
+    let edit = Edit::new(sections, &target, &change.operation)
+        .map_err(|message| refused(ChangeRefusal::Invalid, message))?;
+
+    Ok((character, edit))
 }
 
 fn refused(reason: ChangeRefusal, message: String) -> ChangeOutcome {

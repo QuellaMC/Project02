@@ -892,7 +892,7 @@
             "at",
             "message"
           ],
-          "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, a closed segment's end hooks that did not finish, or\nwhat opening her thread skipped because it could not be read."
+          "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, what closing a segment left undone, or what opening\nher thread skipped because it could not be read."
         }
       ],
       "description": "What every surface hears."
@@ -1179,7 +1179,7 @@
         "at",
         "message"
       ],
-      "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, a closed segment's end hooks that did not finish, or\nwhat opening her thread skipped because it could not be read."
+      "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, what closing a segment left undone, or what opening\nher thread skipped because it could not be read."
     },
     "MessageId": {
       "type": "string",

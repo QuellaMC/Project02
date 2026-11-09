@@ -7,6 +7,7 @@ use std::sync::Arc;
 use p02_characters::discover;
 use p02_config::{
     ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation, Resolution,
+    check_change,
 };
 use p02_plugins::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
@@ -45,6 +46,31 @@ impl CharacterConfig {
 
         Ok(work(&resolution))
     }
+
+    /// `change` as a change of her own settings.
+    fn config_change(&self, change: &FieldChange) -> ConfigChange {
+        let (id, field) = (change.plugin.to_string(), change.field.to_string());
+
+        ConfigChange {
+            target: ConfigTarget::Character {
+                character_id: self.character.to_string(),
+            },
+            expected_fingerprint: change.expected_fingerprint.clone(),
+            operation: match &change.value {
+                Some(value) => Operation::SectionFieldSet {
+                    namespace: Namespace::Plugins,
+                    id,
+                    field,
+                    value: value.clone(),
+                },
+                None => Operation::SectionFieldUnset {
+                    namespace: Namespace::Plugins,
+                    id,
+                    field,
+                },
+            },
+        }
+    }
 }
 
 impl ConfigControl for CharacterConfig {
@@ -66,54 +92,39 @@ impl ConfigControl for CharacterConfig {
         })?
     }
 
+    fn check(&self, change: &FieldChange) -> Result<(), String> {
+        match check_change(
+            &self.world.sections,
+            &discover(self.world.home.root()),
+            &self.config_change(change),
+        ) {
+            Some(ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message }) => {
+                Err(message)
+            }
+            Some(ChangeOutcome::Applied { .. }) | None => Ok(()),
+        }
+    }
+
     fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
-        let FieldChange {
-            plugin,
-            field,
-            value,
-            expected_fingerprint,
-        } = change;
-        let (id, field) = (plugin.to_string(), field.to_string());
-        let operation = match value {
-            Some(value) => Operation::SectionFieldSet {
-                namespace: Namespace::Plugins,
-                id,
-                field,
-                value: value.clone(),
-            },
-            None => Operation::SectionFieldUnset {
-                namespace: Namespace::Plugins,
-                id,
-                field,
-            },
-        };
+        let plugin = &change.plugin;
         let Some(daemon) = self.daemon.upgrade() else {
             return FieldChangeOutcome::Failed {
                 message: "The daemon is stopped.".to_owned(),
             };
         };
         let mut rebuild_outcome = None;
-        let outcome = daemon.change_settings(
-            &ConfigChange {
-                target: ConfigTarget::Character {
-                    character_id: self.character.to_string(),
-                },
-                expected_fingerprint: expected_fingerprint.clone(),
-                operation,
-            },
-            || {
-                // Her plugin runs what her settings now say before the
-                // change is announced and judged, so the pass that follows
-                // finds nothing of hers to reload.
-                if let Some(rebuild) = rebuild {
-                    rebuild_outcome = match self.read(|resolution| running(resolution, plugin)) {
-                        Ok(Some(values)) => Some(rebuild(&values)),
-                        Ok(None) => None,
-                        Err(error) => Some(Err(error.sentence)),
-                    };
-                }
-            },
-        );
+        let outcome = daemon.change_settings(&self.config_change(change), || {
+            // Her plugin runs what her settings now say before the
+            // change is announced and judged, so the pass that follows
+            // finds nothing of hers to reload.
+            if let Some(rebuild) = rebuild {
+                rebuild_outcome = match self.read(|resolution| running(resolution, plugin)) {
+                    Ok(Some(values)) => Some(rebuild(&values)),
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error.sentence)),
+                };
+            }
+        });
 
         match outcome {
             ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied {
