@@ -5,7 +5,6 @@
 //! what happened; and every transport refusal is the one envelope
 //! `{"error":{"code","message"}}`.
 
-use std::fmt;
 use std::sync::Arc;
 
 use axum::Router;
@@ -17,30 +16,26 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use p02_app::{Answer, Daemon, HistoryPage, Message};
-use p02_config::{ConfigChange, ConfigTarget, connector};
-use p02_core::{ClientStamp, SpeakerName};
+use p02_app::{Daemon, HistoryPage, Message};
+use p02_config::connector;
+use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
-use schemars::JsonSchema;
+use p02_wire::{
+    AnswerBody, ConfigChange, ConfigTarget, ErrorBody, GatewayMessage, OpenConversationBody,
+    PairingRequestBody, Refusal,
+};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq as _;
 use tokio_util::sync::CancellationToken;
-use ts_rs::TS;
 
 use crate::events::Streams;
 use crate::page;
 
 /// A message is a few KiB; a body past this is not a message.
 const BODY_LIMIT: usize = 64 * 1024;
-/// The longest line, in characters, so a line in any script is held to the
-/// same length: well above any line a person types, and well below the
-/// body cap.
-const TEXT_LIMIT: usize = 16 * 1024;
-/// The bound of an id, and of the name a person goes by.
-const NAME_LIMIT: usize = 128;
 
 /// The host names a request may give: a page of another origin cannot make
 /// a browser name this host, which defends the daemon against DNS
@@ -77,9 +72,9 @@ impl App {
     }
 
     /// The transport's rules, in their order, for a request to the API.
-    fn admit(&self, headers: &HeaderMap) -> Result<(), Refusal> {
+    fn admit(&self, headers: &HeaderMap) -> Result<(), Refused> {
         if self.0.stopping.is_cancelled() {
-            return Err(Refusal::stopping());
+            return Err(Refused::stopping());
         }
 
         let host = headers
@@ -87,7 +82,7 @@ impl App {
             .map_or_else(String::new, |host| text(host).into_owned());
 
         if !LOOPBACK.contains(&hostname(&host)) {
-            return Err(Refusal::new(
+            return Err(Refused::new(
                 StatusCode::MISDIRECTED_REQUEST,
                 "misdirected_host",
                 format!("Host \"{host}\" is not this daemon; it answers on 127.0.0.1."),
@@ -97,7 +92,7 @@ impl App {
         if let Some(origin) = headers.get(ORIGIN)
             && origin.as_bytes() != format!("http://{host}").as_bytes()
         {
-            return Err(Refusal::new(
+            return Err(Refused::new(
                 StatusCode::FORBIDDEN,
                 "forbidden_origin",
                 format!("Origin \"{}\" is not this daemon's page.", text(origin)),
@@ -111,7 +106,7 @@ impl App {
 
         match presented {
             Some(presented) if bool::from(presented.ct_eq(&self.0.token)) => Ok(()),
-            _ => Err(Refusal::unauthorized()),
+            _ => Err(Refused::unauthorized()),
         }
     }
 }
@@ -145,36 +140,20 @@ pub(crate) fn router(app: App) -> Router {
 pub(crate) struct Link(pub(crate) CancellationToken);
 
 /// A transport refusal: its status, and the envelope's code and sentence.
-#[derive(Serialize, Deserialize, JsonSchema, TS)]
-pub struct Refusal {
-    #[serde(skip)]
+#[derive(Debug)]
+pub(crate) struct Refused {
     status: StatusCode,
-    code: String,
+    code: &'static str,
     message: String,
 }
 
-/// The one shape every transport refusal takes; a verb's outcome never
-/// uses it.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[ts(rename = "GatewayErrorBody")]
-#[schemars(rename = "GatewayErrorBody")]
-pub struct ErrorBody {
-    pub error: Refusal,
-}
-
-impl Refusal {
+impl Refused {
     pub(crate) fn new(status: StatusCode, code: &'static str, message: String) -> Self {
         Self {
             status,
-            code: code.to_owned(),
+            code,
             message,
         }
-    }
-
-    /// The sentence a client relays.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
     }
 
     fn stopping() -> Self {
@@ -210,23 +189,18 @@ impl Refusal {
     }
 }
 
-impl IntoResponse for Refusal {
+impl IntoResponse for Refused {
     fn into_response(self) -> Response {
-        let status = self.status;
+        let error = ErrorBody {
+            error: Refusal {
+                code: self.code.to_owned(),
+                message: self.message,
+            },
+        };
         // Two strings always spell as JSON.
-        let body = serde_json::to_vec(&ErrorBody { error: self }).unwrap_or_default();
+        let body = serde_json::to_vec(&error).unwrap_or_default();
 
-        (status, [(CONTENT_TYPE, "application/json")], body).into_response()
-    }
-}
-
-impl fmt::Debug for Refusal {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Refusal")
-            .field("status", &self.status)
-            .field("code", &self.code)
-            .finish_non_exhaustive()
+        (self.status, [(CONTENT_TYPE, "application/json")], body).into_response()
     }
 }
 
@@ -253,7 +227,7 @@ async fn fallback(method: Method, uri: Uri) -> Response {
     let path = uri.path();
 
     if is_api(path) {
-        Refusal::new(
+        Refused::new(
             StatusCode::NOT_FOUND,
             "not_found",
             format!("No API route at {path}."),
@@ -275,7 +249,7 @@ async fn start(State(app): State<App>, Path(id): Path<String>) -> Response {
 async fn open(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {
     match read::<OpenConversationBody>("The open request", body) {
         Ok(OpenConversationBody { character_id }) => {
-            answer(&app.0.daemon.open_conversation(&character_id.0).await)
+            answer(&app.0.daemon.open_conversation(character_id.as_str()).await)
         }
         Err(refusal) => refusal.into_response(),
     }
@@ -287,8 +261,8 @@ async fn turn(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Re
             &app.0
                 .daemon
                 .deliver(Message {
-                    conversation_id: line.conversation_id.0,
-                    text: line.text.0,
+                    conversation_id: line.conversation_id.into(),
+                    text: line.text.into(),
                     source: line.source,
                     client_message_id: line.client_message_id,
                 })
@@ -335,7 +309,7 @@ async fn config_view(State(app): State<App>, RawQuery(query): RawQuery) -> Respo
         (Some("global"), _) => ConfigTarget::Global,
         (Some("character"), Some(character_id)) => ConfigTarget::Character { character_id },
         _ => {
-            return Refusal::invalid(
+            return Refused::invalid(
                 "A config target is ?scope=global or ?scope=character&characterId=<id>.".to_owned(),
             )
             .into_response();
@@ -365,10 +339,10 @@ async fn request_pairing(
         Ok(PairingRequestBody { subject, source }) => (subject, source),
         Err(refusal) => return refusal.into_response(),
     };
-    let label = match SpeakerName::new(&subject.label.0) {
+    let label = match SpeakerName::new(subject.label.as_str()) {
         Ok(label) => label,
         Err(error) => {
-            return Refusal::invalid(format!("The pairing request.subject.label: {error}."))
+            return Refused::invalid(format!("The pairing request.subject.label: {error}."))
                 .into_response();
         }
     };
@@ -407,13 +381,13 @@ async fn events(
     let connector = match parameter(query.as_deref(), "connector").map(|id| connector(&id)) {
         None => None,
         Some(Ok(connector)) => Some(connector),
-        Some(Err(unknown)) => return Refusal::invalid(unknown.to_string()).into_response(),
+        Some(Err(unknown)) => return Refused::invalid(unknown.to_string()).into_response(),
     };
     let last_event_id = headers.get("last-event-id").and_then(|id| id.to_str().ok());
 
     match app.0.streams.open(last_event_id, connector, link).await {
         Some(stream) => stream,
-        None => Refusal::stopping().into_response(),
+        None => Refused::stopping().into_response(),
     }
 }
 
@@ -431,19 +405,19 @@ fn answer(outcome: &impl Serialize) -> Response {
 fn read<T: DeserializeOwned>(
     subject: &str,
     body: Result<Bytes, BytesRejection>,
-) -> Result<T, Refusal> {
+) -> Result<T, Refused> {
     let body = body.map_err(|rejection| match rejection {
         BytesRejection::FailedToBufferBody(FailedToBufferBody::LengthLimitError(_)) => {
-            Refusal::too_large()
+            Refused::too_large()
         }
-        _ => Refusal::unreadable(),
+        _ => Refused::unreadable(),
     })?;
 
     // Read as JSON first, so that a refusal of its shape names no place in
     // the text, which a person reads as noise.
     serde_json::from_slice::<Value>(&body)
         .and_then(serde_json::from_value::<T>)
-        .map_err(|error| Refusal::invalid(format!("{subject}: {error}.")))
+        .map_err(|error| Refused::invalid(format!("{subject}: {error}.")))
 }
 
 /// The first value of `name` in the query.
@@ -475,107 +449,4 @@ fn bearer(value: &[u8]) -> Option<&[u8]> {
 
 fn is_api(path: &str) -> bool {
     path == "/api" || path.starts_with("/api/")
-}
-
-/// A string of 1 to 128 characters, as an id is on the wire, and the name
-/// an account goes by.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-pub struct Short(String);
-
-/// Why a text is not a [`Short`].
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("an id or a name is 1 to 128 characters")]
-pub struct ParseShortError;
-
-impl Short {
-    /// # Errors
-    ///
-    /// [`ParseShortError`] when `text` is empty or longer than 128
-    /// characters.
-    pub fn new(text: &str) -> Result<Self, ParseShortError> {
-        if (1..=NAME_LIMIT).contains(&text.chars().count()) {
-            Ok(Self(text.to_owned()))
-        } else {
-            Err(ParseShortError)
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Short {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
-}
-
-/// A line's text, as long as a line may be.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-pub struct Text(String);
-
-/// Why a text is not a [`Text`].
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("a line is at most {} characters", TEXT_LIMIT)]
-pub struct ParseTextError;
-
-impl Text {
-    /// # Errors
-    ///
-    /// [`ParseTextError`] when `text` is longer than a line may be.
-    pub fn new(text: &str) -> Result<Self, ParseTextError> {
-        if text.chars().count() > TEXT_LIMIT {
-            Err(ParseTextError)
-        } else {
-            Ok(Self(text.to_owned()))
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Text {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-    }
-}
-
-/// The character whose thread with the person to open.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OpenConversationBody {
-    pub character_id: Short,
-}
-
-/// The person's line into one conversation, with the two stamps its client
-/// puts on it: which surface carried it, and the id a repeat of the same
-/// submission reuses.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GatewayMessage {
-    pub conversation_id: Short,
-    pub text: Text,
-    pub source: ClientStamp,
-    pub client_message_id: ClientStamp,
-}
-
-/// The person's answer, to a confirmation or a pairing request alike.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct AnswerBody {
-    pub decision: Answer,
-}
-
-/// The account a connector asks the person to let in, and where it wrote.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct PairingRequestBody {
-    pub subject: PairingSubjectBody,
-    /// The connector's endpoint the account wrote to, as the stamp its
-    /// lines will carry: for Telegram, `telegram:<bot username>`.
-    pub source: ClientStamp,
-}
-
-/// The account a pairing is for: its id a stamp, and its name within the
-/// bound of a name a person goes by, which the daemon judges further.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct PairingSubjectBody {
-    pub id: ClientStamp,
-    pub label: Short,
 }

@@ -6,14 +6,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, CharacterVersion, PluginExpectations};
-use p02_contracts::{ConfigField, ConfigValueType};
+use p02_contracts::ConfigField;
 use p02_shared::Identifier;
 use p02_store::{CharacterData, Home, StorageError};
+use p02_wire::{Code, ConfigValueType, Diagnostic, Namespace, Operation};
 use serde_json::{Map, Value};
 
-use crate::change::{Edit, Operation};
-use crate::declaration::{Namespace, Sections, Target};
-use crate::diagnostic::{Code, Diagnostic};
+use crate::change::Edit;
+use crate::declaration::{Sections, Target};
 use crate::document::{Document, Read};
 use crate::resolve::{Overlay, Written, WrittenOverlay};
 use crate::transaction::{settle, with_character};

@@ -11,44 +11,32 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_config::{
-    CharacterSettings, Diagnostic, HostSettings, MaterializeError, ReadSettingsError, Resolution,
+    CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
 };
-use p02_contracts::{RoleModelAdapter, vocabulary};
+use p02_contracts::RoleModelAdapter;
 use p02_core::{SpeakerName, Timestamp};
 use p02_plugins::PluginHost;
 use p02_role_model::{NvidiaSettings, select_adapter};
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
+use p02_wire::{
+    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, TurnRefusal,
+    TurnStamp, TurnStatus,
+};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
-use crate::outcome::{
-    Event, MaintenanceFailure, OpenOutcome, OpenRefusal, RunningTurn, StorageFailure, TurnRefusal,
-    TurnStamp, TurnStatus, duplicate,
-};
+use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::reconcile::settings_now;
 
 /// The sentence a character without a model gives, which the settings
 /// page answers.
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
-
-vocabulary! {
-    /// Where a character's runtime stands.
-    #[ts(rename = "CharacterRuntimeState")]
-    #[schemars(rename = "CharacterRuntimeState")]
-    CharacterState {
-        Starting = "starting",
-        Ready = "ready",
-        Stopping = "stopping",
-        Stopped = "stopped",
-        Failed = "failed",
-    }
-}
 
 /// What a character's actor publishes of her, read without a round trip.
 #[derive(Clone, Debug)]
@@ -502,7 +490,7 @@ impl Actor {
                 conversation_id,
                 character_id: self.her.id.clone(),
             },
-            Err(error) => OpenOutcome::Failed(StorageFailure::of(&error)),
+            Err(error) => OpenOutcome::Failed(storage_failure(&error)),
         }
     }
 
@@ -845,18 +833,18 @@ async fn take_line(
     line: &QueuedLine,
 ) -> (Delivery, bool) {
     let committed = AtomicBool::new(false);
-    let running = Mutex::new(RunningTurn::of(her.id.clone(), line));
+    let running = Mutex::new(running_turn(her.id.clone(), line));
     let listener = |progress: Progress| {
         if matches!(progress, Progress::UserMessage { .. }) {
             committed.store(true, Ordering::Relaxed);
         }
 
-        let told = running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .told(progress);
+        let events = told(
+            &mut running.lock().unwrap_or_else(PoisonError::into_inner),
+            progress,
+        );
 
-        for event in told {
+        for event in events {
             her.world.events.emit(event);
         }
     };

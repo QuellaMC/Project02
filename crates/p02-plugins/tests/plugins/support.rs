@@ -19,11 +19,12 @@ use p02_core::{
     TraceId, VisibleText,
 };
 use p02_plugins::{
-    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
-    ProposedToolCall, ReadConfigError, ToolCallReport, Turn, list,
+    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings, ProposedToolCall,
+    ReadConfigError, ToolCallReport, Turn, list,
 };
 use p02_shared::Identifier;
+use p02_wire::ActivationStatus;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
 

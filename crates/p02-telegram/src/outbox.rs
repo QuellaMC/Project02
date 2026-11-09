@@ -12,14 +12,14 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_app::RunningDraft;
+use p02_wire::RunningDraft;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::Lines;
-use crate::bot::capitalized;
+use crate::bot::unwritten;
 use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
@@ -365,7 +365,7 @@ impl Writer {
             .filter(|key| !key.starts_with('0') && key.bytes().all(|byte| byte.is_ascii_digit()))
             .filter_map(|key| key.parse::<i64>().ok())
             .chain(self.admitted.iter().copied())
-            .filter(|chat| *chat > 0 && !self.silent.contains(chat))
+            .filter(|chat| !self.silent.contains(chat))
             .collect::<BTreeSet<i64>>()
             .into_iter()
             .collect()
@@ -723,11 +723,8 @@ impl Writer {
                 None
             }
             Err(failure) => {
-                self.lines.report(&format!(
-                    "{} could not write to chat {chat}: {}",
-                    capitalized(&self.settings.borrow().owner.bot()),
-                    failure.description()
-                ));
+                self.lines
+                    .report(&unwritten(&self.settings.borrow().owner, chat, &failure));
                 None
             }
         }

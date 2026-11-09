@@ -5,11 +5,9 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-p02-app.workspace = true
-p02-config.workspace = true
 p02-core.workspace = true
-p02-gateway.workspace = true
 p02-shared = { workspace = true, features = ["http"] }
+p02-wire.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

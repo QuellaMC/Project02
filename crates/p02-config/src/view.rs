@@ -2,161 +2,41 @@
 //! a connector's read, and the report of `inspect`. Only a connector's
 //! read carries a secret, since a token is what a connector exists to use.
 
-use std::fmt;
 use std::num::NonZeroU64;
 
 use p02_characters::Discovery;
-use p02_contracts::{AccessMap, ConfigValueType, Manifest, PluginKind};
+use p02_contracts::{AccessMap, Manifest, PluginKind};
 use p02_core::SpeakerName;
 use p02_shared::{Fingerprint, Identifier, error_sentence, sentence};
 use p02_store::Home;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, Serializer};
+use p02_wire::{
+    ActivationStatus, Authored, CharacterConnectorEntry, ConfigTarget, ConfigView,
+    ConnectorConfigView, ConnectorEntry, ConnectorRefusal, Diagnostic, EffectiveView, FieldView,
+    Namespace, SectionActivation, SectionView, ValueSource, ViewRefusal,
+};
+use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
-use ts_rs::TS;
 
-use crate::change::ConfigTarget;
 use crate::conceal::conceal;
-use crate::declaration::{Declared, Namespace, Sections, Source, Target, connector};
-use crate::diagnostic::Diagnostic;
+use crate::declaration::{Declared, Sections, Target, connector};
 use crate::host::RoleModelProvider;
 use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, Status};
 
-/// What a settings screen renders: the fingerprint a change must present,
-/// the diagnostics, and the host's fields and every section the target may
-/// set, all in one field shape. A target whose settings cannot be resolved
-/// is refused with the reason, never shown as blank fields.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ConfigView {
-    Ok {
-        fingerprint: Fingerprint,
-        diagnostics: Vec<Diagnostic>,
-        project02: Vec<FieldView>,
-        sections: Vec<SectionView>,
-    },
-    Refused {
-        reason: ViewRefusal,
-        message: String,
-    },
-}
+/// The view of `target`'s settings.
+#[must_use]
+pub fn config_view(
+    home: &Home,
+    sections: &Sections,
+    discovery: &Discovery,
+    target: &ConfigTarget,
+) -> ConfigView {
+    match Resolution::read(home, sections, discovery, target) {
+        Ok(resolution) => resolution.view(),
+        Err(error) => {
+            let (reason, message) = refusal(&error);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewRefusal {
-    UnknownCharacter,
-    ConfigUnloadable,
-}
-
-/// One field as a screen shows it: its declaration, what the target's own
-/// document holds for it, and the value in effect with where it comes
-/// from, a secret's as `[redacted]`.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename = "RuntimeConfigFieldInspectShape", optional_fields)]
-#[schemars(rename = "RuntimeConfigFieldInspectShape")]
-pub struct FieldView {
-    name: Identifier,
-    description: String,
-    secret: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value_type: Option<ConfigValueType>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    allowed_values: Option<Vec<String>>,
-    agent_mutable: bool,
-    authored: Authored,
-    effective_source: Source,
-    effective: EffectiveView,
-}
-
-/// What the target's own document holds for a field.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-#[ts(optional_fields)]
-pub struct Authored {
-    configured: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<Value>,
-}
-
-/// The value in effect: authored in a document, `config`; the declared
-/// default, `default`; or none, `missing`. A refused value is in effect
-/// unresolved, its value shown unless it is a secret's.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-#[ts(optional_fields)]
-pub struct EffectiveView {
-    name: Identifier,
-    secret: bool,
-    source: ValueSource,
-    resolved: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<Value>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ValueSource {
-    Config,
-    Default,
-    Missing,
-}
-
-/// One section as a screen shows it.
-#[derive(Debug, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename = "RuntimeConfigSectionInspectShape")]
-#[schemars(rename = "RuntimeConfigSectionInspectShape")]
-pub struct SectionView {
-    namespace: Namespace,
-    id: Identifier,
-    display_name: String,
-    version: String,
-    enabled: bool,
-    /// Which document decides `enabled`, or the declaration's default.
-    enabled_source: Source,
-    activation: SectionActivation,
-    fields: Vec<FieldView>,
-    diagnostics: Vec<Diagnostic>,
-}
-
-/// Whether a section runs, as its settings decide it, and why.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[ts(rename = "RuntimeConfigSectionActivationShape")]
-#[schemars(rename = "RuntimeConfigSectionActivationShape")]
-pub struct SectionActivation {
-    enabled: bool,
-    status: ActivationStatus,
-    reasons: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ActivationStatus {
-    Active,
-    Disabled,
-    Blocked,
-}
-
-impl ConfigView {
-    /// The view of `target`'s settings.
-    #[must_use]
-    pub fn read(
-        home: &Home,
-        sections: &Sections,
-        discovery: &Discovery,
-        target: &ConfigTarget,
-    ) -> Self {
-        match Resolution::read(home, sections, discovery, target) {
-            Ok(resolution) => resolution.view(),
-            Err(error) => Self::refused(&error),
+            ConfigView::Refused { reason, message }
         }
-    }
-
-    /// The refusal of a view whose settings `error` keeps from resolving.
-    #[must_use]
-    pub fn refused(error: &ReadSettingsError) -> Self {
-        let (reason, message) = refusal(error);
-
-        Self::Refused { reason, message }
     }
 }
 
@@ -241,14 +121,6 @@ impl Resolution<'_> {
     }
 }
 
-impl SectionView {
-    /// Whether the section runs, as its settings decide.
-    #[must_use]
-    pub fn activation_status(&self) -> ActivationStatus {
-        self.activation.status
-    }
-}
-
 fn field_view(field: &Field<'_>) -> FieldView {
     let declaration = field.declaration;
     let name = declaration.name().as_str();
@@ -327,136 +199,55 @@ fn activation(section: &Section<'_>) -> SectionActivation {
     }
 }
 
-/// What a connector runs on: an entry for the home and one for each
-/// installed character that is switched on, in roster order, each with
-/// its section's activation and, while that is active, the values in
-/// effect for it, secrets in the clear. The home's switch is a default,
-/// not a master switch: each entry is judged by its own.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ConnectorConfigView {
-    #[serde(rename_all = "camelCase")]
-    Ok {
-        connector_id: Identifier,
-        home: ConnectorEntry,
-        characters: Vec<CharacterConnectorEntry>,
-    },
-    Refused {
-        reason: ConnectorRefusal,
-        message: String,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectorRefusal {
-    UnknownConnector,
-    ConfigUnloadable,
-}
-
-/// A connector's section for one target: its activation, and each field
-/// that has a value it takes for that target, the home's fields reaching
-/// every character's entry.
-#[derive(Serialize, Deserialize, JsonSchema, TS)]
-#[ts(rename = "ConnectorConfigEntry")]
-#[schemars(rename = "ConnectorConfigEntry")]
-pub struct ConnectorEntry {
-    activation: SectionActivation,
-    values: Map<String, Value>,
-}
-
-/// Names the fields with a value only: the values are its tokens, in the
-/// clear.
-impl fmt::Debug for ConnectorEntry {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ConnectorEntry")
-            .field("activation", &self.activation)
-            .field("values", &self.values.keys().collect::<Vec<_>>())
-            .finish()
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct CharacterConnectorEntry {
-    character_id: Identifier,
-    #[serde(flatten)]
-    entry: ConnectorEntry,
-}
-
-impl ConnectorEntry {
-    /// The values in effect, while the section is active: an entry that is
-    /// not runs nothing, whatever it holds.
-    #[must_use]
-    pub fn values(&self) -> Option<&Map<String, Value>> {
-        (self.activation.status == ActivationStatus::Active).then_some(&self.values)
-    }
-}
-
-impl CharacterConnectorEntry {
-    #[must_use]
-    pub fn character_id(&self) -> &Identifier {
-        &self.character_id
-    }
-
-    #[must_use]
-    pub fn entry(&self) -> &ConnectorEntry {
-        &self.entry
-    }
-}
-
-impl ConnectorConfigView {
-    /// The connector `connector_id`'s read. A character whose own documents
-    /// do not load cannot start either, and is left out.
-    #[must_use]
-    pub fn read(
-        home: &Home,
-        sections: &Sections,
-        discovery: &Discovery,
-        connector_id: &str,
-    ) -> Self {
-        let connector = match connector(connector_id) {
-            Ok(connector) => connector,
-            Err(unknown) => {
-                return Self::Refused {
-                    reason: ConnectorRefusal::UnknownConnector,
-                    message: unknown.to_string(),
-                };
-            }
-        };
-        let id = connector.id().as_str();
-        let home_settings = match Resolution::home(home, sections) {
-            Ok(resolution) => resolution,
-            Err(error) => {
-                return Self::Refused {
-                    reason: ConnectorRefusal::ConfigUnloadable,
-                    message: refusal(&error).1,
-                };
-            }
-        };
-        let characters = discovery
-            .characters
-            .iter()
-            .filter_map(|character| {
-                let resolution = Resolution::character(home, sections, character).ok()?;
-
-                resolution
-                    .settings()
-                    .host()
-                    .enabled
-                    .then(|| CharacterConnectorEntry {
-                        character_id: character.profile.id.clone(),
-                        entry: connector_entry(&resolution, id),
-                    })
-            })
-            .collect();
-
-        Self::Ok {
-            connector_id: connector.id().clone(),
-            home: connector_entry(&home_settings, id),
-            characters,
+/// The connector `connector_id`'s read. A character whose own documents do
+/// not load cannot start either, and is left out.
+#[must_use]
+pub fn connector_config_view(
+    home: &Home,
+    sections: &Sections,
+    discovery: &Discovery,
+    connector_id: &str,
+) -> ConnectorConfigView {
+    let connector = match connector(connector_id) {
+        Ok(connector) => connector,
+        Err(unknown) => {
+            return ConnectorConfigView::Refused {
+                reason: ConnectorRefusal::UnknownConnector,
+                message: unknown.to_string(),
+            };
         }
+    };
+    let id = connector.id().as_str();
+    let home_settings = match Resolution::home(home, sections) {
+        Ok(resolution) => resolution,
+        Err(error) => {
+            return ConnectorConfigView::Refused {
+                reason: ConnectorRefusal::ConfigUnloadable,
+                message: refusal(&error).1,
+            };
+        }
+    };
+    let characters = discovery
+        .characters
+        .iter()
+        .filter_map(|character| {
+            let resolution = Resolution::character(home, sections, character).ok()?;
+
+            resolution
+                .settings()
+                .host()
+                .enabled
+                .then(|| CharacterConnectorEntry {
+                    character_id: character.profile.id.clone(),
+                    entry: connector_entry(&resolution, id),
+                })
+        })
+        .collect();
+
+    ConnectorConfigView::Ok {
+        connector_id: connector.id().clone(),
+        home: connector_entry(&home_settings, id),
+        characters,
     }
 }
 

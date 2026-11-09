@@ -52,8 +52,9 @@
         speaks HTTP plus server-sent events on a loopback port. Every surface —
         the web page, a messaging connector — is a client of this API and
         nothing else, so what one surface sends, every surface sees. The
-        contract's types are generated from the Rust types the socket carries
-        into <code>packages/wire/src/contract/generated/</code>, as TypeScript
+        contract's types are generated from the Rust types the socket carries,
+        <code>crates/p02-wire</code>, into
+        <code>packages/wire/src/contract/generated/</code>, as TypeScript
         declarations and as a JSON Schema; this page is the wire.
       </p>
 

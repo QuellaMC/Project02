@@ -13,24 +13,23 @@ use futures_util::FutureExt;
 use futures_util::future::join_all;
 use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
-    ChangeOutcome, ConfigChange, ConfigTarget, ConfigView, Connector, ConnectorConfigView,
-    Sections, apply_change, connectors,
+    Connector, Sections, apply_change, config_view, connector_config_view, connectors,
 };
 use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
+use p02_wire::{
+    Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
+    ConfirmationAnswer, ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome,
+    OpenOutcome, OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome,
+    StartRefusal, SubmitOutcome, TurnRefusal,
+};
 use tokio::sync::mpsc;
 
 use crate::character::CharacterHandle;
-use crate::confirmation::Answer;
 use crate::history::{self, HistoryPage};
-use crate::outcome::{
-    CharacterSummary, ConfigHealth, ConfirmationAnswer, ConnectorPresence, Event, Health,
-    HistoryOutcome, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PendingConfirmation,
-    ProtocolVersion, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, TurnRefusal,
-    duplicate,
-};
+use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
 use crate::reconcile::{Reconciler, Roster, settings_now};
 
@@ -372,7 +371,7 @@ impl Daemon {
                     .discovery
                     .diagnostics
                     .iter()
-                    .map(PackageReport::from)
+                    .map(package_report)
                     .collect(),
             },
             characters: roster
@@ -493,7 +492,7 @@ impl Daemon {
                 reason: TurnRefusal::CharacterUnavailable,
                 message: self.unavailable(character.as_str()),
             },
-            Err(error) => SubmitOutcome::Failed(StorageFailure::of(&error)),
+            Err(error) => SubmitOutcome::Failed(storage_failure(&error)),
         }
     }
 
@@ -599,7 +598,7 @@ impl Daemon {
         let world = Arc::clone(&self.inner.world);
 
         blocking(move || {
-            ConfigView::read(
+            config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),
@@ -625,7 +624,7 @@ impl Daemon {
         let connector = connector.to_owned();
 
         blocking(move || {
-            ConnectorConfigView::read(
+            connector_config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),

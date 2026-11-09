@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use p02_shared::Identifier;
+use p02_wire::ConfigValueType;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::label::RedactionLabel;
-use crate::vocabulary::{ConfigScope, ConfigValueType};
+use crate::vocabulary::ConfigScope;
 
 /// A plugin's section of the config document, `plugins.<id>`: where it may
 /// be set, and the fields it declares in the order they are shown.

@@ -12,11 +12,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use p02_app::{
-    CharacterState, Daemon, DaemonSettings, Durations, Event, Message, OpenOutcome, Plugin,
-    RunningTurn, TurnProgress,
-};
-use p02_config::ChangeOutcome;
+use p02_app::{Daemon, DaemonSettings, Durations, Message, Plugin};
 use p02_contracts::{
     CommittedTurn, Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext,
     HookReport, HookStatus, Invocation, Manifest, ModelOutput, PluginError, PreparedEffect,
@@ -27,6 +23,7 @@ use p02_core::ClientStamp;
 use p02_plugins::list;
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
+use p02_wire::{ChangeOutcome, CharacterState, Event, OpenOutcome, RunningTurn, TurnProgress};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::{Notify, mpsc};

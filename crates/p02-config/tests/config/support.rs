@@ -5,13 +5,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, Discovery, discover};
-use p02_config::{
-    ChangeOutcome, ConfigChange, ConfigTarget, ConfigView, ConnectorConfigView, Resolution,
-    Sections, apply_change,
-};
+use p02_config::{Resolution, Sections, apply_change, config_view, connector_config_view};
 use p02_contracts::Manifest;
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
+use p02_wire::{ChangeOutcome, ConfigChange, ConfigTarget};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -221,7 +219,7 @@ impl World {
 
     /// The view of `target` as a page receives it.
     pub(crate) fn view(&self, target: &ConfigTarget) -> Value {
-        serde_json::to_value(ConfigView::read(
+        serde_json::to_value(config_view(
             &self.home,
             &self.sections,
             &self.discovery(),
@@ -231,7 +229,7 @@ impl World {
     }
 
     pub(crate) fn connector(&self, connector: &str) -> Value {
-        serde_json::to_value(ConnectorConfigView::read(
+        serde_json::to_value(connector_config_view(
             &self.home,
             &self.sections,
             &self.discovery(),

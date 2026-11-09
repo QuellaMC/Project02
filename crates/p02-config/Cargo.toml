@@ -10,6 +10,7 @@ p02-contracts.workspace = true
 p02-core.workspace = true
 p02-shared = { workspace = true, features = ["http"] }
 p02-store.workspace = true
+p02-wire.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

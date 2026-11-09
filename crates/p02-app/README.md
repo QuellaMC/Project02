@@ -5,7 +5,7 @@ her, the confirmations and pairing requests the person answers, the
 reconciler, the scrollback and the events. p02-gateway puts it on a
 socket. It reaches the disk only through the store and the settings, on
 tokio's blocking pool, and answers every condition a client can reach
-with an outcome, never an error; `outcome.rs` is the wire's source.
+with an outcome of p02-wire, never an error.
 
 - **Her actor** owns her state, her parts and her thread, and answers what
   it is asked in order. A line is routed by its conversation and queued in

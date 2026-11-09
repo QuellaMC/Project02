@@ -9,20 +9,21 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use p02_characters::discover;
-use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation, Resolution,
-    Sections, apply_change, check_change, materialize,
-};
+use p02_config::{Resolution, Sections, apply_change, check_change, materialize};
 use p02_contracts::{Manifest, PluginFactory};
 use p02_plugins::{
-    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, list,
+    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, list,
 };
 use p02_shared::{
     DanglingLinks, Identifier, canonical_path, create_directories, read_file, remove_file,
     write_file_atomically,
 };
 use p02_store::{CharacterData, Home, SettingsDocument};
+use p02_wire::{
+    ActivationStatus, ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace,
+    Operation,
+};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Notify;
@@ -376,13 +377,7 @@ impl ConfigControl for MiraSettings {
                     let view = resolution
                         .section_view(Namespace::Plugins, manifest.id().as_str())
                         .unwrap();
-                    let status = match view.activation_status() {
-                        p02_config::ActivationStatus::Active => ActivationStatus::Active,
-                        p02_config::ActivationStatus::Disabled => ActivationStatus::Disabled,
-                        p02_config::ActivationStatus::Blocked => ActivationStatus::Blocked,
-                    };
-
-                    (manifest.id().clone(), status)
+                    (manifest.id().clone(), view.activation.status)
                 })
                 .collect()
         })

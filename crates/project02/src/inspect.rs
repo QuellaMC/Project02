@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use p02_app::PackageReport;
+use p02_app::package_report;
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{ConfigReport, Resolution, Sections};
 use p02_core::{Conversation, SessionId, select_character};
@@ -80,7 +80,7 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
     for diagnostic in &discovery.diagnostics {
         console.warn(&format!(
             "Warning: {}",
-            package_problem(&PackageReport::from(diagnostic))
+            package_problem(&package_report(diagnostic))
         ));
     }
 

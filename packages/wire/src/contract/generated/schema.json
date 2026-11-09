@@ -1680,7 +1680,7 @@
         "code",
         "message"
       ],
-      "description": "A transport refusal: its status, and the envelope's code and sentence."
+      "description": "A transport refusal: the envelope's code and sentence."
     },
     "RosterState": {
       "type": "string",

@@ -2,7 +2,7 @@ use std::fmt;
 
 use p02_contracts::PluginError;
 use p02_shared::{Fingerprint, Identifier};
-use serde::Serialize;
+use p02_wire::ActivationStatus;
 use serde_json::{Map, Value};
 
 /// The settings of the character a plugin host serves, as the host's own
@@ -74,16 +74,6 @@ pub enum FieldChangeOutcome {
     Refused { message: String },
     /// The write could not be made, in a sentence.
     Failed { message: String },
-}
-
-/// Whether a plugin runs by a character's settings: on, switched off, or
-/// held back by an error in them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActivationStatus {
-    Active,
-    Disabled,
-    Blocked,
 }
 
 /// Why a character's settings cannot be read, in the sentence that says

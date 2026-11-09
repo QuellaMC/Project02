@@ -7,9 +7,9 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
-use p02_contracts::{ConfigField, ConfigSection, vocabulary};
+use p02_contracts::{ConfigField, ConfigSection};
 use p02_core::{Participant, SpeakerName};
-use p02_shared::{BASE_URL_RULE, BaseUrl};
+use p02_shared::{BASE_URL_RULE, BaseUrl, vocabulary};
 use serde_json::{Value, json};
 
 use crate::declaration::expectation;

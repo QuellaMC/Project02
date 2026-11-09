@@ -18,7 +18,7 @@ Nothing here prints, reads the environment or parses a flag.
   and the turns running, exactly as of the frame it goes on from. A client
   that does not take a frame within the grace is dropped.
 - **The contract.** `cargo test -p p02-gateway contract` writes
-  `packages/wire/src/contract/generated/` from the wire's Rust types: the
+  `packages/wire/src/contract/generated/` from p02-wire's types: the
   TypeScript the clients compile against, and the JSON Schema the
   conformance suite holds every answer and frame to.
 - **The stop** answers new requests 503, lets the daemon finish its turns

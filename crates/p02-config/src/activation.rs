@@ -6,9 +6,8 @@ use std::collections::BTreeSet;
 
 use p02_characters::CharacterDefinition;
 use p02_shared::Identifier;
+use p02_wire::{Code, Diagnostic, Namespace};
 
-use crate::declaration::Namespace;
-use crate::diagnostic::{Code, Diagnostic};
 use crate::host::DEFAULT_MEMORY_PROVIDER;
 use crate::resolve::{Section, Status};
 

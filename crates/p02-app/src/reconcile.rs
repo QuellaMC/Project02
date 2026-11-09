@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared, join_all};
 use p02_characters::{CharacterDefinition, Discovery, discover};
-use p02_config::{CharacterSettings, Diagnostic, ReadSettingsError, Resolution};
+use p02_config::{CharacterSettings, ReadSettingsError, Resolution};
+use p02_wire::Diagnostic;
 
 use crate::character::CharacterHandle;
 use crate::daemon::{Actor, Daemon, World};

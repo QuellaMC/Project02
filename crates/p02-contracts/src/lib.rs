@@ -52,7 +52,6 @@ pub use tool::{
 };
 pub use vocabulary::{
     AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,
-    CONTRACT_VERSION, ConfigScope, ConfigValueType, ContextItemKind, Declaration, EvidenceKind,
-    EvidenceStatus, HOST_PLUGIN, HandleToolCallFailure, PluginKind, PolicyOutcome, SourceKind,
-    ToolConcurrency,
+    CONTRACT_VERSION, ConfigScope, ContextItemKind, Declaration, EvidenceKind, EvidenceStatus,
+    HOST_PLUGIN, HandleToolCallFailure, PluginKind, PolicyOutcome, SourceKind, ToolConcurrency,
 };

@@ -18,12 +18,13 @@ use p02_contracts::{
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
-    ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
+    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
 };
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
+use p02_wire::ActivationStatus;
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 

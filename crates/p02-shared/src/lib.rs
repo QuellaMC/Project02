@@ -11,6 +11,7 @@ mod json_boundary;
 mod redaction;
 mod sentence;
 mod sse;
+mod vocabulary;
 
 pub use canonical_json::{Fingerprint, ParseFingerprintError, canonical_json};
 pub use daemon_record::{

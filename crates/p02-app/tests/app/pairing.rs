@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use p02_app::{Answer, Event, PairingAnswer, PairingOutcome};
 use p02_core::{ClientStamp, SpeakerName};
+use p02_wire::{Answer, Event, PairingAnswer, PairingOutcome};
 use serde_json::json;
 
 use crate::support::{Ear, World, wire};

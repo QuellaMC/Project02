@@ -15,19 +15,14 @@ use axum::body::{Body, Bytes};
 use axum::http::header::CONTENT_TYPE;
 use axum::response::{IntoResponse, Response};
 use hyper::body::Frame;
-use p02_app::{
-    Daemon, Event, Health, PairingRequest, PendingConfirmation, Presence, ProtocolVersion,
-    RunningTurn,
-};
+use p02_app::{Daemon, Presence};
 use p02_config::Connector;
 use p02_core::ConversationId;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use p02_wire::{Event, ProtocolVersion, Ready, RunningTurn};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use ts_rs::TS;
 
 /// How much of the stream is kept for a client that comes back, in UTF-8
 /// bytes of formatted frames. A client further behind gets the snapshot,
@@ -89,20 +84,6 @@ struct Tail {
     bytes: usize,
     /// The number of the newest frame; 0 before the first.
     latest: u64,
-}
-
-/// The first frame of a stream that cannot be caught up: the state every
-/// later frame moves on from.
-#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename = "GatewayReady")]
-#[schemars(rename = "GatewayReady")]
-pub struct Ready {
-    pub protocol_version: ProtocolVersion,
-    pub health: Health,
-    pub confirmations: Vec<PendingConfirmation>,
-    pub pairings: Vec<PairingRequest>,
-    pub turns: Vec<RunningTurn>,
 }
 
 impl Streams {

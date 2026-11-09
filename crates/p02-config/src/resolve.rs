@@ -11,15 +11,12 @@ use p02_characters::{CharacterDefinition, CharacterVersion, Discovery};
 use p02_contracts::{ConfigField, ConfigScope};
 use p02_shared::{Fingerprint, Identifier};
 use p02_store::{CharacterData, Home, SettingsDocument, StorageError};
+use p02_wire::{Code, ConfigTarget, Diagnostic, Namespace, Source};
 use serde_json::{Map, Value, json};
 
 use crate::activation;
-use crate::change::ConfigTarget;
 use crate::conceal::conceal_document;
-use crate::declaration::{
-    Declared, Layer, Namespace, Sections, Source, Target, authorable, outside_scope,
-};
-use crate::diagnostic::{Code, Diagnostic};
+use crate::declaration::{Declared, Layer, Sections, Target, authorable, outside_scope};
 use crate::document::{Document, Read, Stanza, ignored_key, unknown};
 use crate::host::{DEFAULT_MEMORY_PROVIDER, HostSettings, host_fields};
 use crate::materialize::merged_overlay;

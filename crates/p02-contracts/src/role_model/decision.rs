@@ -1,10 +1,9 @@
 use p02_core::{CharacterProfile, SpeakerName};
-use p02_shared::Identifier;
+use p02_shared::{Identifier, vocabulary};
 use serde::{Deserialize, Serialize};
 
 use crate::output::{PluginContextItem, PluginCuratedSection};
 use crate::role_model::tools::ModelToolCall;
-use crate::vocabulary;
 
 /// What a model round decided: its calls, in order, and the note it wrote
 /// beside them, which is shown to it again and never to the person. A

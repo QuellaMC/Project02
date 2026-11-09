@@ -2,165 +2,22 @@
 //! author read, judged by its own rules alone, made in the target's own
 //! document, and written whole.
 
-use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, Discovery};
 use p02_contracts::ConfigField;
-use p02_shared::{Fingerprint, error_sentence, sentence};
+use p02_shared::{error_sentence, sentence};
 use p02_store::{Home, StorageError};
-use schemars::JsonSchema;
-use serde::{Deserialize, Deserializer, Serialize};
+use p02_wire::{ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation};
 use serde_json::{Map, Value};
-use ts_rs::TS;
 
-use crate::declaration::{Declared, Namespace, Sections, Target, expectation, outside_scope};
+use crate::declaration::{Declared, Sections, Target, expectation, outside_scope};
 use crate::document::{Document, Read};
 use crate::host::{HostField, host_field, host_fields};
 use crate::materialize::merged_overlay;
 use crate::resolve::{Layers, Overlay, Written, WrittenOverlay, target_fingerprint};
 use crate::transaction::{settle, with_character, with_home, write};
-
-/// Whose settings a view reads or a change writes: the home's, or one
-/// character's.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, TS)]
-#[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ConfigTarget {
-    Global,
-    Character {
-        #[serde(rename = "characterId")]
-        character_id: String,
-    },
-}
-
-/// One change to one document, bound to the fingerprint its author read.
-#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ConfigChange {
-    pub target: ConfigTarget,
-    pub expected_fingerprint: String,
-    pub operation: Operation,
-}
-
-/// What a change does: sets or unsets a host field, by its path
-/// `project02.<name>`; switches a section on or off, or leaves it to the
-/// document beneath when `enabled` is absent; or sets or unsets one field
-/// of a section.
-#[derive(Clone, PartialEq, Deserialize, JsonSchema, TS)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Operation {
-    Set {
-        path: String,
-        value: Value,
-    },
-    Unset {
-        path: String,
-    },
-    SectionEnabled {
-        namespace: Namespace,
-        id: String,
-        #[serde(default, deserialize_with = "given_switch")]
-        #[schemars(with = "bool")]
-        #[ts(optional)]
-        enabled: Option<bool>,
-    },
-    SectionFieldSet {
-        namespace: Namespace,
-        id: String,
-        field: String,
-        value: Value,
-    },
-    SectionFieldUnset {
-        namespace: Namespace,
-        id: String,
-        field: String,
-    },
-}
-
-/// A switch a change gives: a boolean, or, when `enabled` is absent, none,
-/// which leaves the switch to the document beneath. A null is no switch.
-fn given_switch<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
-    bool::deserialize(deserializer).map(Some)
-}
-
-/// Says what the change does and where, never the value it sets: that may
-/// be a secret.
-impl fmt::Debug for Operation {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Set { path, .. } => formatter
-                .debug_struct("Set")
-                .field("path", path)
-                .finish_non_exhaustive(),
-            Self::Unset { path } => formatter.debug_struct("Unset").field("path", path).finish(),
-            Self::SectionEnabled {
-                namespace,
-                id,
-                enabled,
-            } => formatter
-                .debug_struct("SectionEnabled")
-                .field("namespace", namespace)
-                .field("id", id)
-                .field("enabled", enabled)
-                .finish(),
-            Self::SectionFieldSet {
-                namespace,
-                id,
-                field,
-                ..
-            } => formatter
-                .debug_struct("SectionFieldSet")
-                .field("namespace", namespace)
-                .field("id", id)
-                .field("field", field)
-                .finish_non_exhaustive(),
-            Self::SectionFieldUnset {
-                namespace,
-                id,
-                field,
-            } => formatter
-                .debug_struct("SectionFieldUnset")
-                .field("namespace", namespace)
-                .field("id", id)
-                .field("field", field)
-                .finish(),
-        }
-    }
-}
-
-/// What came of a change. `Applied` means the document is on disk, under
-/// the fingerprint it now has; `Refused` is the change itself, and
-/// `Failed` a write that could not be made, either leaving every document
-/// as it was.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
-#[serde(tag = "status", rename_all = "snake_case")]
-#[ts(rename = "ConfigChangeOutcome")]
-#[schemars(rename = "ConfigChangeOutcome")]
-pub enum ChangeOutcome {
-    Applied {
-        fingerprint: Fingerprint,
-    },
-    Refused {
-        reason: ChangeRefusal,
-        message: String,
-    },
-    Failed {
-        message: String,
-    },
-}
-
-/// Why a change was refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ChangeRefusal {
-    /// The documents changed after its author read them.
-    Conflict,
-    /// The change, or the settings it would leave, is not one to make.
-    Invalid,
-    /// No installed character answers to its target.
-    UnknownCharacter,
-}
 
 /// Makes `change`, waiting for a document another writer holds as long as
 /// `wait` while it changes hands. The fingerprint presented is the

@@ -1,8 +1,9 @@
 //! A character's package's settings, merged into her overlay as she
 //! starts.
 
-use p02_config::{Code, MaterializeError, Resolution, materialize};
+use p02_config::{MaterializeError, Resolution, materialize};
 use p02_store::CharacterData;
+use p02_wire::Code;
 use serde_json::{Value, json};
 
 use crate::support::{WAIT, World, document, id, of, section, tree};

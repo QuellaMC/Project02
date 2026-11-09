@@ -1,7 +1,8 @@
 //! The settings as a settings screen, a connector and `inspect` are shown
 //! them.
 
-use p02_config::{ConfigChange, ConnectorConfigView};
+use p02_config::connector_config_view;
+use p02_wire::ConfigChange;
 use serde_json::{Value, json};
 
 use crate::support::{World, document, field, findings, home, host_field, of, section};
@@ -263,7 +264,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
         format!("{:?}", world.resolve(&of("mira"))),
         format!(
             "{:?}",
-            ConnectorConfigView::read(&world.home, &world.sections, &world.discovery(), "telegram")
+            connector_config_view(&world.home, &world.sections, &world.discovery(), "telegram")
         ),
         format!("{change:?}"),
     ];

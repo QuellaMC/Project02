@@ -8,9 +8,10 @@ use std::ops::Range;
 
 use p02_core::{Conversation, ConversationId, SessionId};
 use p02_store::{CharacterData, Home, RecordBody, SessionEntry, SettingsDocument, StorageError};
+use p02_wire::{HistoryMessage, HistoryOutcome, HistoryRefusal};
 
 use crate::daemon::character_of;
-use crate::outcome::{HistoryMessage, HistoryOutcome, HistoryRefusal, StorageFailure};
+use crate::outcome::storage_failure;
 
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 500;
@@ -83,7 +84,7 @@ pub(crate) fn read(home: &Home, conversation: &str, asked: &HistoryPage) -> Hist
     let record = match home.conversation(&id) {
         Ok(record) => record,
         Err(StorageError::ConversationNotFound(_)) => return unknown(),
-        Err(error) => return HistoryOutcome::Failed(StorageFailure::of(&error)),
+        Err(error) => return HistoryOutcome::Failed(storage_failure(&error)),
     };
     let Some(character) = character_of(&record) else {
         return unknown();
@@ -109,7 +110,7 @@ pub(crate) fn read(home: &Home, conversation: &str, asked: &HistoryPage) -> Hist
             earlier,
         },
         Ok(None) => refused(HistoryRefusal::InvalidPage, INVALID_PAGE.to_owned()),
-        Err(error) => HistoryOutcome::Failed(StorageFailure::of(&error)),
+        Err(error) => HistoryOutcome::Failed(storage_failure(&error)),
     }
 }
 

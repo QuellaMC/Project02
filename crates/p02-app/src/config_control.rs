@@ -5,15 +5,15 @@
 use std::sync::Arc;
 
 use p02_characters::discover;
-use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace, Operation, Resolution,
-    check_change,
-};
+use p02_config::{Resolution, check_change};
 use p02_plugins::{
-    ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError,
+    ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, ReadConfigError,
 };
 use p02_shared::{Identifier, error_sentence};
+use p02_wire::{
+    ActivationStatus, ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, Namespace,
+    Operation,
+};
 use serde_json::Value;
 
 use crate::character::unresolved;
@@ -131,13 +131,8 @@ impl ConfigControl for CharacterConfig {
                 .filter_map(|plugin| {
                     let id = plugin.manifest().id();
                     let view = resolution.section_view(Namespace::Plugins, id.as_str())?;
-                    let status = match view.activation_status() {
-                        p02_config::ActivationStatus::Active => ActivationStatus::Active,
-                        p02_config::ActivationStatus::Disabled => ActivationStatus::Disabled,
-                        p02_config::ActivationStatus::Blocked => ActivationStatus::Blocked,
-                    };
 
-                    Some((id.clone(), status))
+                    Some((id.clone(), view.activation.status))
                 })
                 .collect()
         })

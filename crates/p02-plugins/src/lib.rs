@@ -24,8 +24,7 @@ mod turn;
 pub use before_call::{BeforeCallOutcome, PreparedContext, TurnRejection};
 pub use boundary::RecordLabelsError;
 pub use config_control::{
-    ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError,
+    ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings, ReadConfigError,
 };
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder};

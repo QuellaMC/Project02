@@ -16,17 +16,15 @@ p02-role-model.workspace = true
 p02-runtime.workspace = true
 p02-shared.workspace = true
 p02-store.workspace = true
+p02-wire.workspace = true
 rand.workspace = true
-schemars.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
-ts-rs.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
+serde.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "test-util", "time"] }
 

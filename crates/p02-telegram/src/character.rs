@@ -1,23 +1,20 @@
 //! A character's bot: her thread with the person, opened once the bot
-//! knows its name; the pairing gate on every message and press; a paired
-//! account's line handed to her inbox; her conversation shown in every
-//! paired chat as the stream tells it; and a card with Approve and Deny for
-//! each confirmation a turn of this bot's line raises. Nothing is read from
-//! history.
+//! knows its name; a paired account's line handed to her inbox; her
+//! conversation shown in every paired chat as the stream tells it; and a
+//! card with Approve and Deny for each confirmation a turn of this bot's
+//! line raises. Nothing is read from history.
 
-use p02_app::{
-    CharacterState, Event, OpenOutcome, PendingConfirmation, RunningTurn, StorageFailure,
-    SubmitOutcome, TurnProgress, TurnRefusal, TurnStatus,
-};
 use p02_core::{ClientStamp, ConversationId};
-use p02_gateway::{GatewayMessage, Text};
 use p02_shared::Identifier;
+use p02_wire::{
+    CharacterState, Event, GatewayMessage, OpenOutcome, PendingConfirmation, RunningTurn,
+    StorageFailure, SubmitOutcome, Text, TurnProgress, TurnRefusal, TurnStatus,
+};
 
 use crate::bot::{Chat, DAEMON_DOWN, Done, Rules};
-use crate::bot_api::{CallbackQuery, Update};
+use crate::bot_api::Message;
 use crate::cards::{CardKind, CardText, Press, confirm, confirmation_ending};
 use crate::daemon::short;
-use crate::gate::Gate;
 use crate::outbox::Target;
 use crate::table::{Owner, Snapshot};
 
@@ -26,7 +23,6 @@ const TEXT_ONLY: &str = "I can only read text here for now.";
 #[derive(Debug)]
 pub(crate) struct Character {
     id: Identifier,
-    gate: Gate,
     /// Her thread with the person, where her lines go, once it is open.
     thread: Option<ConversationId>,
     /// Her turn as the daemon last said it, while one runs.
@@ -39,7 +35,6 @@ impl Character {
     pub(crate) fn new(id: Identifier) -> Self {
         Self {
             id,
-            gate: Gate::default(),
             thread: None,
             turn: None,
             opening: false,
@@ -184,21 +179,6 @@ impl Character {
             _ => {}
         }
     }
-
-    async fn press(&mut self, chat: &mut Chat, press: CallbackQuery) {
-        chat.outbox.heard_from(press.from.id);
-
-        let mut toast = None;
-
-        if let Some(asked) = Press::parse(press.data.as_deref())
-            && self.gate.admit(chat, press.from.id, &press.from).await
-            && asked.kind == CardKind::Confirmation
-        {
-            toast = confirm(chat, &asked).await;
-        }
-
-        chat.toast(&press, toast);
-    }
 }
 
 impl Rules for Character {
@@ -206,25 +186,8 @@ impl Rules for Character {
         self.open(chat);
     }
 
-    async fn update(&mut self, chat: &mut Chat, update: Update) {
-        if let Some(press) = update.callback_query {
-            self.press(chat, press).await;
-            return;
-        }
-
-        let Some(message) = update.message else {
-            return;
-        };
-        let Some(from) = message.from.filter(|_| message.chat.kind == "private") else {
-            return;
-        };
+    async fn message(&mut self, chat: &mut Chat, message: Message) {
         let account = message.chat.id;
-
-        chat.outbox.heard_from(account);
-
-        if !self.gate.admit(chat, account, &from).await {
-            return;
-        }
 
         match message.text.filter(|text| !text.is_empty()) {
             None => chat.outbox.say_to_paired(account, TEXT_ONLY.to_owned()),
@@ -235,15 +198,9 @@ impl Rules for Character {
                 );
             }
             Some(text) => {
-                // The id names the bot, the chat and the message, so a
-                // message Telegram hands on again is the line it was:
-                // Telegram numbers messages within a chat, and a bot that
-                // replaces this one opens a chat of its own numbered from
-                // one again.
-                let (Ok(id), Ok(text)) = (
-                    ClientStamp::new(&format!("{}.{account}.{}", chat.id, message.id)),
-                    Text::new(&text),
-                ) else {
+                let (Some(id), Ok(text)) =
+                    (line_id(chat.id, account, message.id), Text::new(&text))
+                else {
                     return;
                 };
 
@@ -253,6 +210,14 @@ impl Rules for Character {
                     chat.outbox.say_to_paired(account, told);
                 }
             }
+        }
+    }
+
+    /// A card this bot shows is a confirmation's.
+    async fn press(&mut self, chat: &mut Chat, press: &Press) -> Option<String> {
+        match press.kind {
+            CardKind::Confirmation => confirm(chat, press).await,
+            CardKind::Pairing => None,
         }
     }
 
@@ -328,7 +293,6 @@ impl Rules for Character {
                 id.to_string(),
                 confirmation_ending(*settlement),
             ),
-            Event::PairingSettled { .. } => self.gate.settled(chat, event),
             _ => {}
         }
     }
@@ -377,8 +341,16 @@ fn unavailable(chat: &Chat, why: &str) -> String {
     )
 }
 
-/// The account whose chat a line of this bot's came from: its id names the
-/// bot, the chat and the message.
+/// The id of a line: it names the bot, the chat and the message, so a
+/// message Telegram hands on again is the line it was. Telegram numbers
+/// messages within a chat, and a bot that replaces this one opens a chat of
+/// its own, numbered from one again.
+fn line_id(bot: i64, chat: i64, message: i64) -> Option<ClientStamp> {
+    ClientStamp::new(&format!("{bot}.{chat}.{message}")).ok()
+}
+
+/// The account whose chat a line of this bot's came from, as its id names
+/// it.
 fn chat_of_line(id: &ClientStamp) -> Option<i64> {
     id.as_str().split('.').nth(1)?.parse().ok()
 }

@@ -3,8 +3,7 @@
 A home's settings: the documents they are written in, what each field may
 hold and where, the values in effect for the home and for each character,
 and the one way they change. It reaches its documents through the fs seam,
-under the store's locks, and its views and changes are the wire's own
-types.
+under the store's locks, and its views and changes are p02-wire's types.
 
 - **Documents.** The home's `config.json` and each character's overlay,
   `character-data/<id>/config.json`, are one format,

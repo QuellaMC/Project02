@@ -3,9 +3,8 @@
 
 use std::sync::Barrier;
 
-use p02_config::{
-    ChangeOutcome, ChangeRefusal, Code, ConfigChange, Namespace, Operation, create_home_document,
-};
+use p02_config::create_home_document;
+use p02_wire::{ChangeOutcome, ChangeRefusal, Code, ConfigChange, Namespace, Operation};
 use serde_json::{Value, json};
 
 use crate::support::{WAIT, World, document, home, of, section, tree};

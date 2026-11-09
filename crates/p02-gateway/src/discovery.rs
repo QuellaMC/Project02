@@ -7,10 +7,10 @@
 use std::num::{NonZeroU16, NonZeroU32};
 use std::process;
 
-use p02_app::PROTOCOL_VERSION;
 use p02_core::Timestamp;
 use p02_shared::{DaemonRecord, DaemonRun, DaemonToken, read_daemon_record};
 use p02_store::{DaemonLease, Home, StorageError};
+use p02_wire::PROTOCOL_VERSION;
 
 /// What came of claiming a home.
 #[derive(Debug)]

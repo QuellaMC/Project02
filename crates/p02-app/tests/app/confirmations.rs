@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use p02_app::{Answer, ConfirmationAnswer, Event};
 use p02_core::Timestamp;
+use p02_wire::{Answer, ConfirmationAnswer, Event};
 use serde_json::json;
 
 use crate::support::{Ear, Round, Toy, World, line, open, told, wire};

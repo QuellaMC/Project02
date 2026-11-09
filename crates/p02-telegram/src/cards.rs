@@ -5,9 +5,9 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use p02_app::{
+use p02_core::Timestamp;
+use p02_wire::{
     Answer, CancelReason, ConfirmationAnswer, PairingDecision, PairingRequest, PendingConfirmation,
     Settlement,
 };
@@ -29,11 +29,21 @@ pub(crate) enum CardKind {
 }
 
 impl CardKind {
-    fn letter(self) -> char {
+    const ALL: [Self; 2] = [Self::Confirmation, Self::Pairing];
+
+    fn letter(self) -> &'static str {
         match self {
-            Self::Confirmation => 'c',
-            Self::Pairing => 'p',
+            Self::Confirmation => "c",
+            Self::Pairing => "p",
         }
+    }
+}
+
+/// The letter a button carries, after the key, for `answer`.
+fn answer_letter(answer: Answer) -> &'static str {
+    match answer {
+        Answer::Approved => "a",
+        Answer::Denied => "d",
     }
 }
 
@@ -46,6 +56,16 @@ pub(crate) struct Press {
 }
 
 impl Press {
+    /// What the button of this press carries: `<kind>:<key>:<answer>`.
+    fn data(&self) -> String {
+        format!(
+            "{}:{}:{}",
+            self.kind.letter(),
+            self.key,
+            answer_letter(self.decision)
+        )
+    }
+
     /// The press `data` names; none for data no card carries. A key is a
     /// confirmation's UUID or a pairing code, and the daemon gets it in a
     /// URL path, so nothing else is let through.
@@ -56,16 +76,12 @@ impl Press {
         else {
             return None;
         };
-        let kind = match letter {
-            "c" => CardKind::Confirmation,
-            "p" => CardKind::Pairing,
-            _ => return None,
-        };
-        let decision = match answer {
-            "a" => Answer::Approved,
-            "d" => Answer::Denied,
-            _ => return None,
-        };
+        let kind = CardKind::ALL
+            .into_iter()
+            .find(|kind| kind.letter() == letter)?;
+        let decision = [Answer::Approved, Answer::Denied]
+            .into_iter()
+            .find(|decision| answer_letter(*decision) == answer)?;
         let keyed = (1..=36).contains(&key.len())
             && key
                 .bytes()
@@ -174,14 +190,11 @@ pub(crate) fn pairing_ending(decision: PairingDecision) -> &'static str {
 /// says it: a clock time would be this machine's, and the reader may be
 /// elsewhere.
 pub(crate) fn minutes_left(deadline_ms: i64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        });
-    let minutes = (deadline_ms.saturating_sub(now).saturating_add(59_999))
-        .div_euclid(60_000)
-        .max(1);
+    let minutes = (deadline_ms
+        .saturating_sub(Timestamp::now().unix_millis())
+        .saturating_add(59_999))
+    .div_euclid(60_000)
+    .max(1);
 
     format!(
         "{minutes} {}",
@@ -264,13 +277,21 @@ impl Cards {
     /// card that ended.
     pub(crate) fn message(&self, key: &str) -> Option<(String, Keyboard)> {
         let card = self.cards.iter().find(|card| card.key == key)?;
-        let data = |answer: char| format!("{}:{key}:{answer}", self.kind.letter());
+        let button = |label: &str, decision| {
+            let press = Press {
+                kind: self.kind,
+                key: key.to_owned(),
+                decision,
+            };
+
+            Button::new(label, press.data())
+        };
 
         Some((
             within(MAX_MESSAGE, &card.text.render(false), ""),
             Keyboard::row(vec![
-                Button::new("Approve", data('a')),
-                Button::new("Deny", data('d')),
+                button("Approve", Answer::Approved),
+                button("Deny", Answer::Denied),
             ]),
         ))
     }

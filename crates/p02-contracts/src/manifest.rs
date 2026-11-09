@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 use std::time::Duration;
 
 use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json};
+use p02_wire::ConfigValueType;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -11,8 +12,8 @@ use crate::access::{AccessMap, AccessMapError};
 use crate::config::{ConfigField, ConfigSection};
 use crate::label::RedactionLabel;
 use crate::vocabulary::{
-    BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope, ConfigValueType, Declaration,
-    HandleToolCallFailure, PluginKind,
+    BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope, Declaration, HandleToolCallFailure,
+    PluginKind,
 };
 
 /// A plugin's manifest, validated: it exists only once every rule holds.

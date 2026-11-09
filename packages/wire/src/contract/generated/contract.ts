@@ -351,7 +351,7 @@ deadlineAt: number,
 turn?: TurnIdentity, };
 
 /**
- * A transport refusal: its status, and the envelope's code and sentence.
+ * A transport refusal: the envelope's code and sentence.
  */
 export type Refusal = { code: string, message: string, };
 

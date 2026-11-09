@@ -5,53 +5,14 @@
 
 use std::sync::LazyLock;
 
-use p02_contracts::{
-    ConfigField, ConfigScope, ConfigSection, ConfigValueType, Manifest, PluginKind,
-};
+use p02_contracts::{ConfigField, ConfigScope, ConfigSection, Manifest, PluginKind};
 use p02_shared::Identifier;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use p02_wire::{ConfigValueType, Namespace, Source};
 use serde_json::json;
-use ts_rs::TS;
 
 /// The version a document this build writes names. A document's version is
 /// never judged when it is read.
 pub(crate) const VERSION: &str = "project02.config.v2";
-
-/// The two stanzas of a document that hold declared sections by id. A
-/// plugin and a connector may share an id: their sections never meet.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
-)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename = "RuntimeConfigSectionNamespace")]
-#[schemars(rename = "RuntimeConfigSectionNamespace")]
-pub enum Namespace {
-    Plugins,
-    Connectors,
-}
-
-impl Namespace {
-    pub(crate) const ALL: [Self; 2] = [Self::Plugins, Self::Connectors];
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Plugins => "plugins",
-            Self::Connectors => "connectors",
-        }
-    }
-}
-
-/// Where a value in effect comes from: its field's declared default, the
-/// home's settings, or the character's own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum Source {
-    Default,
-    Global,
-    Character,
-}
 
 /// One of the two documents settings are read from: the home's, or a
 /// character's overlay above it.

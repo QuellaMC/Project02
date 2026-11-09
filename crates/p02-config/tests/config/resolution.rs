@@ -1,7 +1,7 @@
 //! The settings in effect: each value from the nearest document its scope
 //! lets the target read, else its default, and what is wrong with them.
 
-use p02_config::Code;
+use p02_wire::Code;
 use serde_json::json;
 
 use crate::support::{
@@ -220,7 +220,7 @@ fn a_section_this_build_lacks_warns_for_its_id_in_each_document_naming_it() {
 fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switch_blocks_it() {
     let world = World::new();
     let misspelled = json!({"nope": 1, "tone": "shouty"});
-    let demo = |target: &p02_config::ConfigTarget| {
+    let demo = |target: &p02_wire::ConfigTarget| {
         let view = world.view(target);
 
         (

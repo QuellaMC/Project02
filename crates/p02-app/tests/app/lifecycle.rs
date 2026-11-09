@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use p02_app::CharacterState::{Failed, Ready, Starting, Stopped, Stopping};
-use p02_app::{Event, OpenOutcome, RosterState, StartOutcome};
 use p02_shared::{PathEntry, describe_entry};
+use p02_wire::CharacterState::{Failed, Ready, Starting, Stopped, Stopping};
+use p02_wire::{Event, OpenOutcome, RosterState, StartOutcome};
 use serde_json::json;
 
 use crate::support::{

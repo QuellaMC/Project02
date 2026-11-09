@@ -5,21 +5,18 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use p02_config::{
-    ChangeOutcome, ConfigChange, ConfigTarget, Connector, Namespace, Operation, Resolution,
-};
+use p02_config::{Connector, Resolution};
 use p02_core::{ClientStamp, SpeakerName, Timestamp};
 use p02_shared::Fingerprint;
+use p02_wire::{
+    Answer, ChangeOutcome, ConfigChange, ConfigTarget, Event, Namespace, Operation, PairingAnswer,
+    PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingSubject,
+};
 use serde_json::{Map, Value};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
-use crate::confirmation::Answer;
 use crate::daemon::{Daemon, World, blocking};
-use crate::outcome::{
-    Event, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingSubject,
-};
 
 /// The requests waiting, oldest first. None outlives the daemon's run.
 #[derive(Debug, Default)]

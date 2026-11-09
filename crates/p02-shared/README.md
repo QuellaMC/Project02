@@ -11,4 +11,5 @@ Domain-free primitives every other crate uses; it depends on none of them.
   elsewhere is held to.
 - The **daemon record**, `daemon.json`, and its token; HTTP clients and
   base URLs behind the `http` feature; identifiers; the server-sent event
-  splitter; and error sentences, what broke and then why.
+  splitter; error sentences, what broke and then why; and `vocabulary!`,
+  which spells each value of a closed vocabulary once.

@@ -9,35 +9,29 @@ use std::collections::{BTreeMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use p02_app::{
-    Answer, CancelReason, CharacterState, CharacterSummary, ConfigHealth, ConfirmationAnswer,
-    ConfirmationId, ConfirmationQuestion, ConnectorPresence, Event, Health, HistoryMessage,
-    HistoryOutcome, HistoryRefusal, MaintenanceFailure, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingSubject, PendingConfirmation, ProtocolVersion, RosterState, RunningDraft, RunningTurn,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, ToolCallStatus,
-    TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
-};
 use p02_characters::discover;
-use p02_config::{
-    ChangeOutcome, ChangeRefusal, ConfigChange, ConfigTarget, ConfigView, ConnectorConfigView,
-    ConnectorRefusal, Sections, ViewRefusal,
-};
+use p02_config::{Sections, config_view, connector_config_view};
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
 };
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
+use p02_wire::{
+    Answer, AnswerBody, CancelReason, ChangeOutcome, ChangeRefusal, CharacterState,
+    CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer,
+    ConfirmationId, ConfirmationQuestion, ConnectorConfigView, ConnectorPresence, ConnectorRefusal,
+    ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
+    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
+    RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal, StorageFailure,
+    SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+};
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
 use schemars::{JsonSchema, Schema};
 use serde_json::{Map, Value, json};
 use ts_rs::{Config, TS, TypeVisitor};
-
-use crate::events::Ready;
-use crate::http::{
-    AnswerBody, ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
-};
 
 const REGENERATE: &str = "cargo test -p p02-gateway contract";
 
@@ -581,11 +575,10 @@ fn written() -> Vec<(&'static str, Value)> {
         read_back(
             "GatewayErrorBody",
             &ErrorBody {
-                error: Refusal::new(
-                    axum::http::StatusCode::UNAUTHORIZED,
-                    "unauthorized",
-                    "A bearer token is required.".to_owned(),
-                ),
+                error: Refusal {
+                    code: "unauthorized".to_owned(),
+                    message: "A bearer token is required.".to_owned(),
+                },
             },
         ),
         read_back(
@@ -633,8 +626,8 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let discovery = discover(home.root());
 
     (
-        ConfigView::read(&home, &sections, &discovery, &ConfigTarget::Global),
-        ConfigView::read(
+        config_view(&home, &sections, &discovery, &ConfigTarget::Global),
+        config_view(
             &home,
             &sections,
             &discovery,
@@ -642,6 +635,6 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
                 character_id: mira.to_string(),
             },
         ),
-        ConnectorConfigView::read(&home, &sections, &discovery, "telegram"),
+        connector_config_view(&home, &sections, &discovery, "telegram"),
     )
 }

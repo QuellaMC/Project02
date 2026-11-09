@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use p02_app::CharacterState::{Ready, Starting};
-use p02_app::Event;
+use p02_wire::CharacterState::{Ready, Starting};
+use p02_wire::Event;
 use serde_json::json;
 
 use crate::support::{Ear, Gate, Round, Toy, World, line, open, told, wire};

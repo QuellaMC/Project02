@@ -18,9 +18,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use p02_app::PackageReport;
 use p02_shared::{DEFAULT_HOME, DanglingLinks, ResolvePathError, canonical_path};
 use p02_store::Home;
+use p02_wire::PackageReport;
 use tokio_util::sync::CancellationToken;
 
 use crate::flags::Command;

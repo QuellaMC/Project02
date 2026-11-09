@@ -1,6 +1,7 @@
 //! The documents as their files hold them: absent, unreadable, or judged.
 
-use p02_config::{Code, ReadSettingsError, Resolution, RoleModelProvider};
+use p02_config::{ReadSettingsError, Resolution, RoleModelProvider};
+use p02_wire::Code;
 use serde_json::{Value, json};
 
 use crate::support::{World, document, home, host_field, of};
