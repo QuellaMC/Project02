@@ -21,7 +21,7 @@ use p02_core::{
 use p02_plugins::{
     ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
     FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
-    ProposedToolCall, ReadConfigError, Rebuild, ToolCallReport, Turn, list,
+    ProposedToolCall, ReadConfigError, ToolCallReport, Turn, list,
 };
 use p02_shared::Identifier;
 use serde_json::{Map, Value, json};
@@ -202,7 +202,7 @@ impl ConfigControl for NoSettings {
         Err(NO_SETTINGS.to_owned())
     }
 
-    fn change(&self, _change: &FieldChange, _rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+    fn change(&self, _change: &FieldChange) -> FieldChangeOutcome {
         FieldChangeOutcome::Failed {
             message: NO_SETTINGS.to_owned(),
         }

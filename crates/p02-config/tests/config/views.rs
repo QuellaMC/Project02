@@ -104,14 +104,8 @@ fn the_homes_view_lists_its_fields_in_page_order_the_sections_it_may_set_and_a_f
             &provider["valueType"],
             &provider["allowedValues"],
             &provider["agentMutable"],
-            &provider["reloadRequired"],
         ),
-        (
-            &json!("enum"),
-            &json!(["nvidia"]),
-            &json!(false),
-            &json!(true)
-        )
+        (&json!("enum"), &json!(["nvidia"]), &json!(false))
     );
     assert_eq!(
         sections_of(&view),

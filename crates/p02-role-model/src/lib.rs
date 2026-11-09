@@ -13,7 +13,7 @@ pub use prompt::{
     today_note,
 };
 pub use rounds::{
-    DraftEvent, DraftId, ModelRound, Reply, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
-    run_turn,
+    DraftEvent, DraftId, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
+    TurnSink,
 };
 pub use select::{TestProvider, UnknownTestProviderError, select_adapter};

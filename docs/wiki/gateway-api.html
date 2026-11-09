@@ -687,10 +687,8 @@ data: {…}</code></pre>
             <td><code>state_changed</code></td>
             <td>
               A character's runtime state, with a message when something went
-              wrong. <code>reloading</code> is a pause, not an outage: the
-              character is assembling afresh from the config on disk between
-              turns, and a delivery sent meanwhile waits for it and lands on the
-              same conversation.
+              wrong. A character built afresh on changed config before a request
+              to her model says <code>ready</code> again.
             </td>
           </tr>
           <tr>
@@ -952,17 +950,16 @@ data: {…}</code></pre>
 
       <p class="rule">
         The daemon owns config: every write goes through its one control
-        transaction, and a change reaches a running character by a reload
-        between that character's turns.
+        transaction, and a running character runs on a change from her next
+        request to her model.
       </p>
 
       <p>
         A view is what a settings page renders. Its
         <code>project02</code> fields, in the order a page shows them, and each
         plugin's fields share one shape — what this scope authored, what is in
-        effect and which layer put it there, whether a change reloads the
-        character; a plugin's switch says the same of itself as
-        <code>enabledSource</code>. Whatever a view offers, the scope can save:
+        effect and which layer put it there; a plugin's switch says the same of
+        itself as <code>enabledSource</code>. Whatever a view offers, the scope can save:
         every host field is authorable at the home and per character, a plugin
         or field that belongs to a character (<code>"character_only"</code>) is
         absent from the home's view, and one that belongs to the home
@@ -1003,16 +1000,18 @@ data: {…}</code></pre>
 
       <p>
         <code>applied</code> means the bytes are on disk. What the change does
-        to the roster arrives as <code>health_changed</code> at once, and what
-        it does to running characters as <code>state_changed</code>: the daemon
-        reconciles behind the answer, and a ready character whose assembly would
-        now differ — its effective config, its plugin values including secrets,
-        its package version — publishes <code>reloading</code>, finishes the
-        turn in flight, assembles afresh, and publishes <code>ready</code>. A
-        global change a character overrides costs it nothing, and so does a
-        change to a connector's section, from which no character is built. A
-        reload that cannot assemble lands in <code>failed</code> with the
-        diagnostic, and the next change or start retries it.
+        to the roster arrives as <code>health_changed</code> at once, and the
+        daemon reconciles behind the answer: a character it switches on starts,
+        and one it switches off stops once her reply in flight ends. Every
+        other change a running character meets at her next request to her
+        model, her reply in flight included: when what she would be built from
+        differs — her effective config, her plugin values including secrets —
+        she assembles afresh before that request, on the same conversation, and
+        publishes <code>ready</code>. A global change a character overrides
+        costs it nothing, and so does a change to a connector's section, from
+        which no character is built. Config she cannot assemble from lands her
+        in <code>failed</code> with the diagnostic, the line refused or the
+        reply in flight failed, and the next change or start retries her.
       </p>
 
       <h2>Storage failures are outcomes</h2>

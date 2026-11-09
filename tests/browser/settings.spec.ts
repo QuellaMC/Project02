@@ -41,7 +41,7 @@ function homeConfig(home: string): unknown {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
 }
 
-test("page.settings-setup-frame: a fresh home with no model provider chosen opens on Set up your home with the home's messaging app rows; a chosen provider starts the character, a saved name shows Saved from the home and reloads her to ready, and Chat leads to the composer", async ({
+test("page.settings-setup-frame: a fresh home with no model provider chosen opens on Set up your home with the home's messaging app rows; a chosen provider starts the character, a saved name shows Saved from the home while she stays ready, and Chat leads to the composer", async ({
   page,
 }) => {
   const model = await startModelServer();
@@ -90,8 +90,6 @@ test("page.settings-setup-frame: a fresh home with no model provider chosen open
   await expect(name.getByRole('button', {name: 'Saved'})).toBeVisible();
   // The view is read again: the value is the home's now.
   await expect(name).toContainText('the home');
-  await settled('reloading');
-  await settled('ready');
   await expect(mira).toContainText('ready');
 
   // The exit is the person's.

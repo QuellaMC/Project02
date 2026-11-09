@@ -56,10 +56,6 @@ pub enum ViewRefusal {
 #[serde(rename_all = "camelCase")]
 #[ts(rename = "RuntimeConfigFieldInspectShape", optional_fields)]
 #[schemars(rename = "RuntimeConfigFieldInspectShape")]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each flag is one key of the field's shape on the wire"
-)]
 pub struct FieldView {
     name: Identifier,
     description: String,
@@ -70,7 +66,6 @@ pub struct FieldView {
     #[serde(skip_serializing_if = "Option::is_none")]
     allowed_values: Option<Vec<String>>,
     agent_mutable: bool,
-    reload_required: bool,
     authored: Authored,
     effective_source: Source,
     effective: EffectiveView,
@@ -269,7 +264,6 @@ fn field_view(field: &Field<'_>) -> FieldView {
         value_type: declaration.value_type(),
         allowed_values: declaration.allowed_values().map(<[String]>::to_vec),
         agent_mutable: declaration.agent_mutable() && !secret,
-        reload_required: declaration.reload_required(),
         authored: Authored {
             configured: field.authored.is_some(),
             value: field

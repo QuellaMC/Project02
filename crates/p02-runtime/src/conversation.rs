@@ -4,6 +4,7 @@
 
 use std::num::{NonZeroU32, NonZeroU64};
 
+use async_trait::async_trait;
 use p02_characters::Persona;
 use p02_contracts::{ConversationTurn, RoleModelAdapter};
 use p02_core::{
@@ -115,12 +116,24 @@ pub(crate) struct Cast {
 }
 
 /// What a line is answered with: the character's model, her plugins, and
-/// the size of the model's window in tokens.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Mind<'a> {
-    pub(crate) adapter: &'a dyn RoleModelAdapter,
-    pub(crate) host: &'a PluginHost,
-    pub(crate) context_window: NonZeroU64,
+/// the size of her model's window in tokens, as her settings say. Its
+/// keeper brings it up to date before her turn, and the turn before each
+/// request to the model after its first.
+#[async_trait]
+pub trait Mind: Send + Sync {
+    fn adapter(&self) -> &dyn RoleModelAdapter;
+
+    fn host(&self) -> &PluginHost;
+
+    fn context_window(&self) -> NonZeroU64;
+
+    /// Built again from her settings when they changed since it was
+    /// built: true when it was.
+    ///
+    /// # Errors
+    ///
+    /// The sentence that says why her settings no longer build her.
+    async fn refresh(&mut self) -> Result<bool, String>;
 }
 
 /// What a thread keeps on the disk, which only a blocking thread touches.
@@ -225,11 +238,11 @@ impl Conversation {
         self.skipped.as_deref()
     }
 
-    /// Takes one line through the turn, as `adapter` and `host` answer it
-    /// within a model window of `context_window` tokens, and continues the
-    /// session in a new segment after a completed turn whose history the
-    /// window would no longer hold whole. `listener` hears the turn's
-    /// progress on the turn's own task, in order, and is never awaited.
+    /// Takes one line through the turn, as `mind` answers it, and
+    /// continues the session in a new segment after a completed turn whose
+    /// history the model's window would no longer hold whole. `listener`
+    /// hears the turn's progress on the turn's own task, in order, and is
+    /// never awaited.
     ///
     /// A delivery dropped before it ends loses the thread, as a panic on
     /// the blocking pool does: every later step fails. The thread opens
@@ -238,9 +251,7 @@ impl Conversation {
     pub async fn deliver(
         &mut self,
         submission: Submission<'_>,
-        adapter: &dyn RoleModelAdapter,
-        host: &PluginHost,
-        context_window: NonZeroU64,
+        mind: &mut dyn Mind,
         listener: &(dyn Fn(Progress) + Send + Sync),
     ) -> Delivery {
         let identity = EventIdentity::mint();
@@ -268,18 +279,12 @@ impl Conversation {
                 error: RunTurnError::StateLost,
             };
         };
-        let mind = Mind {
-            adapter,
-            host,
-            context_window,
-        };
-
         match turn::run(
             &mut self.disk,
             &identity,
             submission,
             &self.cast,
-            mind,
+            &mut *mind,
             listener,
         )
         .await
@@ -331,11 +336,12 @@ impl Conversation {
     }
 
     /// Continues the session `from` in a new segment when the model's window
-    /// would no longer hold its history whole. The continuation record is
-    /// the commit point: until it lands the thread stays where it was, and
-    /// after it the old segment's lines are recorded and its lease is
-    /// released, what of that fails reported and never undone.
-    async fn rotate(&mut self, from: SessionId, mind: Mind<'_>) -> Option<Rotation> {
+    /// would no longer hold its history whole, as `mind` stands when the
+    /// turn ended. The continuation record is the commit point: until it
+    /// lands the thread stays where it was, and after it the old segment's
+    /// lines are recorded and its lease is released, what of that fails
+    /// reported and never undone.
+    async fn rotate(&mut self, from: SessionId, mind: &dyn Mind) -> Option<Rotation> {
         let read = on_disk(&mut self.disk, |disk| {
             let replay = disk.writer.replay()?;
 
@@ -351,15 +357,15 @@ impl Conversation {
                 });
             }
         };
-        let selection = continuation::select(&history.turns, mind.context_window)?;
+        let selection = continuation::select(&history.turns, mind.context_window())?;
         let last_event_id = history.turns.last()?.identity.event_id().clone();
         let summary = continuation::summarize(
-            mind.adapter,
+            mind.adapter(),
             selection.summarized,
             history.summary.as_deref(),
             &self.cast.person,
             &self.cast.character.display_name,
-            mind.context_window,
+            mind.context_window(),
         )
         .await;
         let next = Next {

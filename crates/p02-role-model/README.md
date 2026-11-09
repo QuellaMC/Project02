@@ -1,8 +1,11 @@
 # p02-role-model
 
 The character's model: the prompt a turn renders, the rounds she decides
-in, and the providers that answer. The runtime drives a turn with
-`run_turn` and a `TurnSink`, and picks a provider with `select_adapter`.
+in, and the providers that answer. The runtime runs a turn's `Rounds` one
+at a time through a `TurnSink`, each round's request made with the model
+the character runs on as it starts, and between two rounds may hand on
+what the plugins prepared again; it picks a provider with
+`select_adapter`.
 
 Every sentence the model is told lives in the prompt module; text from a
 plugin or an earlier summary is fenced and never reaches a system message.

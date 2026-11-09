@@ -11,10 +11,10 @@ use p02_config::{
 };
 use p02_plugins::{
     ActivationStatus, ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings,
-    ReadConfigError, Rebuild,
+    ReadConfigError,
 };
 use p02_shared::{Identifier, error_sentence};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::character::unresolved;
 use crate::daemon::{WeakDaemon, World};
@@ -105,32 +105,15 @@ impl ConfigControl for CharacterConfig {
         }
     }
 
-    fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
-        let plugin = &change.plugin;
+    fn change(&self, change: &FieldChange) -> FieldChangeOutcome {
         let Some(daemon) = self.daemon.upgrade() else {
             return FieldChangeOutcome::Failed {
                 message: "The daemon is stopped.".to_owned(),
             };
         };
-        let mut rebuild_outcome = None;
-        let outcome = daemon.change_settings(&self.config_change(change), || {
-            // Her plugin runs what her settings now say before the
-            // change is announced and judged, so the pass that follows
-            // finds nothing of hers to reload.
-            if let Some(rebuild) = rebuild {
-                rebuild_outcome = match self.read(|resolution| running(resolution, plugin)) {
-                    Ok(Some(values)) => Some(rebuild(&values)),
-                    Ok(None) => None,
-                    Err(error) => Some(Err(error.sentence)),
-                };
-            }
-        });
 
-        match outcome {
-            ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied {
-                fingerprint,
-                rebuilt: rebuild_outcome,
-            },
+        match daemon.change_settings(&self.config_change(change)) {
+            ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied { fingerprint },
             ChangeOutcome::Refused {
                 reason: ChangeRefusal::Conflict,
                 ..
@@ -159,15 +142,6 @@ impl ConfigControl for CharacterConfig {
                 .collect()
         })
     }
-}
-
-/// The values her settings give `plugin` while they run it.
-fn running(resolution: &Resolution<'_>, plugin: &Identifier) -> Option<Map<String, Value>> {
-    resolution
-        .settings()
-        .plugins()
-        .find(|(running, _)| *running == plugin)
-        .map(|(_, values)| values.clone())
 }
 
 fn unreadable(sentence: String) -> ReadConfigError {

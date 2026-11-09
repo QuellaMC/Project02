@@ -1,22 +1,19 @@
-//! The hooks that follow what happened, and a plugin rebuilt or ended
-//! while the host serves.
+//! The hooks that follow what happened, and the plugins' end.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, Evidence, EvidenceKind,
-    EvidenceNote, EvidenceStatus, FactoryInput, HookReport, HookStatus, PluginError, PolicyOutcome,
-    RuntimePlugin,
+    CommittedTurn, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus, HookReport, HookStatus,
+    PolicyOutcome,
 };
 use p02_core::Timestamp;
-use p02_plugins::{BeforeCallOutcome, PhaseStatus, PluginHost, ReloadError};
-use serde_json::{Map, Value, json};
+use p02_plugins::PhaseStatus;
+use serde_json::json;
 
 use crate::storage::Storage;
 use crate::support::{
-    Enable, Failing, Hanging, Panicking, Scripted, Spec, Stalling, builder, host_of, id, note,
-    tool, turn,
+    Enable, Failing, Hanging, Panicking, Scripted, Spec, Stalling, builder, host_of, note, turn,
 };
 
 fn committed() -> CommittedTurn {
@@ -136,82 +133,8 @@ async fn a_report_its_own_record_says_failed_fails_its_phase() {
     );
 }
 
-/// Answers its turns with the line its config gives it, and offers a tool
-/// when the line asks for one.
-fn speaking(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
-    let Some(line) = input.config().value("line").and_then(Value::as_str) else {
-        return Err(PluginError::new("no line is configured"));
-    };
-
-    Ok(Arc::new(Scripted {
-        tools: if line == "tooled" {
-            vec![tool("speaker.say")]
-        } else {
-            Vec::new()
-        },
-        before: BeforeRoleModelCallOutput {
-            context_items: vec![ContextItem::new(
-                id("line"),
-                ContextItemKind::Resource,
-                line,
-            )],
-            ..BeforeRoleModelCallOutput::default()
-        },
-        ..Scripted::default()
-    }))
-}
-
-fn line(text: &str) -> Map<String, Value> {
-    Map::from_iter([("line".to_owned(), json!(text))])
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_reload_serves_later_hooks_with_the_rebuilt_plugin_unless_the_rebuild_fails() {
-    let spec = Spec {
-        declared: json!([
-            "tool_provider",
-            "handle_tool_call",
-            "before_role_model_call"
-        ]),
-        config_fields: json!([{
-            "name": "line",
-            "description": "What the speaker says.",
-            "required": false,
-            "secret": false,
-            "valueType": "string",
-            "redactionLabels": [],
-        }]),
-        ..Spec::new("speaker")
-    };
-    let host = builder(Storage::new())
-        .plugin(spec.manifest(), line("first"), speaking)
-        .activate()
-        .unwrap();
-    let spoken = async |host: &PluginHost| match host.before_role_model_call(&turn()).await {
-        BeforeCallOutcome::Prepared(prepared) => prepared.context_items[0].item().text().to_owned(),
-        BeforeCallOutcome::Rejected(rejection) => panic!("rejected: {rejection:?}"),
-    };
-
-    assert_eq!(spoken(&host).await, "first");
-    host.reload(&id("speaker"), &line("second")).unwrap();
-    assert_eq!(spoken(&host).await, "second");
-
-    let unbuilt = host.reload(&id("speaker"), &Map::new()).unwrap_err();
-    let retooled = host.reload(&id("speaker"), &line("tooled")).unwrap_err();
-    let absent = host.reload(&id("ghost"), &line("third")).unwrap_err();
-
-    assert!(matches!(unbuilt, ReloadError::Build { .. }), "{unbuilt:?}");
-    assert_eq!(
-        retooled.to_string(),
-        "plugin \"speaker\" was rebuilt with other tools than the model is offered, so it \
-         serves on as it was"
-    );
-    assert!(matches!(absent, ReloadError::NotEnabled(_)), "{absent:?}");
-    assert_eq!(spoken(&host).await, "second", "the old instance serves on");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_reload_and_a_shutdown_never_wait_on_a_blocking_job() {
+async fn a_shutdown_never_waits_on_a_blocking_job() {
     let (stalling, gate, job_ended) = Stalling::new(Vec::new());
     let host = builder(Storage::new())
         .enable(
@@ -233,9 +156,6 @@ async fn a_reload_and_a_shutdown_never_wait_on_a_blocking_job() {
     );
 
     let started = std::time::Instant::now();
-
-    host.reload(&id("indexer"), &Map::new()).unwrap();
-
     let ended = tokio::time::timeout(Duration::from_secs(5), host.shutdown(&turn()))
         .await
         .expect("shutdown does not wait on the job");

@@ -65,7 +65,6 @@ it('plugins.tool-exposure: the model is offered the tools of each plugin she run
   );
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
-  const events = await openEvents(daemon);
   const management = [
     'runtime_plugin_list',
     'runtime_plugin_config',
@@ -90,9 +89,6 @@ it('plugins.tool-exposure: the model is offered the tools of each plugin she run
     id: 'runtime.plugin',
     enabled: false,
   });
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
-  );
   model.answer(reply('Hello again.'));
   await say('Hello?', 'off');
 
@@ -190,47 +186,66 @@ it('plugins.config-tools-update-refusals: an update to a secret setting, or to o
   expect(events.frames.filter(frameOf('confirmation_requested'))).toEqual([]);
 });
 
-it("plugins.config-tools-live-apply: an approved change of hers takes effect within its turn, the model's very next round already showing it", async () => {
+it('plugins.config-tools-live-apply: each change of hers the person approves is written at once and in effect from her very next request, a second change in the same reply as much as the first', async () => {
   const {model, wire, say, events} = await demoConfigHome();
-  const toneOf = (request: ModelRequest | undefined) =>
-    systemLines(request).filter(line => line.includes(' tone'));
-
-  model.answer(
+  const update = (fieldName: string, value: string, fingerprint: string) =>
     calling([
       'runtime_plugin_config_update',
       {
         pluginId: 'demo-config',
-        fieldName: 'tone',
+        fieldName,
         operation: 'set',
-        value: 'formal',
-        expectedFingerprint: await fingerprintOf(wire),
+        value,
+        expectedFingerprint: fingerprint,
       },
-    ]),
-    reply('Very well.'),
-  );
+    ]);
+  const approve = async () =>
+    wire.answer(
+      confirmationId(await events.next(frameOf('confirmation_requested'))),
+      'approved',
+    );
+  /** The fingerprint her settings have after the change the request was told of. */
+  const fingerprintAfter = (request: ModelRequest) =>
+    (toolResults(request).at(-1) as {readonly output: {fingerprint: string}})
+      .output.fingerprint;
+  const styleOf = (request: ModelRequest | undefined) =>
+    systemLines(request)
+      .filter(line => line.includes(' tone'))
+      .join('\n');
 
-  const turn = say('Be formal.', 'formal');
+  model.answer(update('tone', 'formal', await fingerprintOf(wire)));
 
-  await wire.answer(
-    confirmationId(await events.next(frameOf('confirmation_requested'))),
-    'approved',
+  const afterTone = model.hold();
+  const turn = say('Be formal, and sign off.', 'formal');
+
+  await approve();
+  model.answer(reply('Very well.'));
+  afterTone.release(
+    update('signoff', 'Yours.', fingerprintAfter(await afterTone.arrived())),
   );
-  expect(await turn).toMatchObject({status: 'completed'});
-  expect(model.requests.slice(-2).map(toneOf)).toEqual([
-    [expect.stringContaining('neutral tone') as string],
-    [expect.stringContaining('formal tone') as string],
-  ]);
+  await approve();
+  expect(await turn).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Very well.'}],
+  });
+
+  const [asked, toned, signed] = model.requests.map(styleOf);
+
+  expect(asked).toContain('neutral tone.');
+  expect(toned).toContain('formal tone.');
+  expect(toned).not.toContain('signoff');
+  expect(signed).toContain(
+    'formal tone. End everything you say with the exact signoff "Yours."',
+  );
 });
 
-it('plugins.memory-provider-selection: naming as her memory provider a plugin that is off fails her, saying so at that setting; she stays failed until the setting is put right, which starts her again', async () => {
+it('plugins.memory-provider-selection: naming as her memory provider a plugin that is off fails her at her next line, which is refused saying so, as her settings say at that setting; she stays failed until the setting is put right, which starts her again', async () => {
   const daemon = await startDaemon(createHome(), {
     ...fixedReplies,
     PROJECT02_TEST_DURATIONS: 'heartbeat=500',
   });
   const wire = wireOf(daemon);
-
-  await wire.start('mira');
-
+  const say = await converse(wire, 'mira');
   const events = await openEvents(daemon);
   const statesOfMira = () =>
     events.frames.filter(frameOf('state_changed', {characterId: 'mira'}));
@@ -240,6 +255,11 @@ it('plugins.memory-provider-selection: naming as her memory provider a plugin th
     {scope: 'global'},
     {kind: 'set', path: 'project02.defaultMemoryProvider', value: 'mem0'},
   );
+  expect(await say('Hello?', 'hello')).toMatchObject({
+    status: 'refused',
+    reason: 'character_unavailable',
+    message: expect.stringContaining('"mem0"') as string,
+  });
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'failed'}),
   );

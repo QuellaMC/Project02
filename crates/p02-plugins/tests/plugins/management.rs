@@ -2,7 +2,7 @@
 //! of plugins, and her settings read and changed through it.
 
 use p02_contracts::ToolCallResult;
-use p02_plugins::{BeforeCallOutcome, PluginHost, ToolCallReport};
+use p02_plugins::{PluginHost, ToolCallReport};
 use p02_shared::read_file;
 use p02_store::SettingsDocument;
 use serde_json::{Value, json};
@@ -236,7 +236,7 @@ async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
 }
 
 #[tokio::test]
-async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fingerprint_it_was_read_under()
+async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerprint_it_was_read_under()
  {
     let home = MiraHome::new();
 
@@ -267,12 +267,10 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
         output(&applied),
         &json!({
             "status": "applied",
-            "appliesTo": "now",
             "pluginId": "demo-config",
             "fieldName": "tone",
             "operation": "set",
             "fingerprint": home.fingerprint(),
-            "reloadRequired": false,
         })
     );
     assert_eq!(demo_config(&home), json!({"tone": "formal"}));
@@ -280,18 +278,6 @@ async fn an_approved_update_is_written_to_her_overlay_live_and_bound_to_the_fing
         read_file(&home.path(SettingsDocument::Home)).unwrap(),
         home_settings,
         "never the home's settings"
-    );
-
-    let BeforeCallOutcome::Prepared(prepared) = host.before_role_model_call(&turn()).await else {
-        panic!("no plugin rejects the turn");
-    };
-
-    assert!(
-        prepared
-            .runtime_notes
-            .iter()
-            .any(|note| note.text().contains("speak in a formal tone")),
-        "applied live, the plugin rebuilt with it"
     );
 
     let stale = ask(&host, "runtime.plugin.config.update", update(&read, &set)).await;
@@ -349,7 +335,6 @@ async fn an_unset_is_shown_as_an_unset_and_leaves_the_field_to_the_settings_bene
     );
     assert_eq!(preview["after"], json!({"configured": false}));
     assert_eq!(output(&unset)["operation"], "unset");
-    assert_eq!(output(&unset)["appliesTo"], "now");
     assert_eq!(demo_config(&home), Value::Null);
 }
 

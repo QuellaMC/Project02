@@ -721,8 +721,8 @@ mod tests {
         );
     }
 
-    /// Another engine on the store, such as the one a reload replaced,
-    /// keeps the generation it opened with.
+    /// Another engine on the store, such as the one a character ran on
+    /// before she was built again, keeps the generation it opened with.
     #[test]
     fn an_engine_whose_embedder_was_replaced_writes_no_vector_and_loses_no_memory() {
         let (_directory, mut connection, replaced) = store();

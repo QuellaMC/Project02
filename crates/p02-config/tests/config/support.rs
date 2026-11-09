@@ -74,12 +74,12 @@ pub(crate) fn plugins() -> Vec<Manifest> {
                     "name": "tone", "description": "The tone.", "required": false,
                     "secret": false, "valueType": "string",
                     "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
-                    "agentMutable": true, "reloadRequired": false, "redactionLabels": [],
+                    "agentMutable": true, "redactionLabels": [],
                 },
                 {
                     "name": "signoff", "description": "The signoff.", "required": false,
                     "secret": false, "valueType": "string", "agentMutable": true,
-                    "reloadRequired": false, "redactionLabels": [],
+                    "redactionLabels": [],
                 },
                 {
                     "name": "operatorNote", "description": "A note.", "required": false,

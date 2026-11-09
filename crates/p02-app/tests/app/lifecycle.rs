@@ -1,13 +1,10 @@
 //! A character's life: her start, what the settings make of her, her
-//! reload, her stop, and what overtakes what.
+//! being built again, her stop, and what overtakes what.
 
 use std::sync::Arc;
 
-use p02_app::CharacterState::{Failed, Ready, Reloading, Starting, Stopped, Stopping};
-use p02_app::{
-    Answer, ConfirmationAnswer, Event, OpenOutcome, RosterState, StartOutcome, TurnOutcome,
-};
-use p02_config::ConfigTarget;
+use p02_app::CharacterState::{Failed, Ready, Starting, Stopped, Stopping};
+use p02_app::{Event, OpenOutcome, RosterState, StartOutcome, TurnOutcome};
 use p02_shared::{PathEntry, describe_entry};
 use serde_json::json;
 
@@ -256,71 +253,12 @@ async fn a_start_whose_boot_fails_starts_her_once() {
     assert_eq!(ear.states("mira"), [Starting, Failed]);
 }
 
-/// A change to a plugin's settings makes the next reconcile reload her
-/// between turns, and a line sent meanwhile lands on her thread after it;
-/// a change that leaves what she runs on as it was reloads nothing.
+/// A change of her settings while her turn runs builds her again before
+/// the turn's next request, held here at her assembly: the turn goes on
+/// with what it did so far, and a line sent meanwhile waits and lands on
+/// her thread after it. Built again, she says she is ready.
 #[tokio::test]
-async fn a_changed_setting_reloads_her_and_a_line_sent_meanwhile_lands_after() {
-    let world = World::new();
-    let daemon = world
-        .daemon(vec![Toy::new("tone").setting("tone").plugin()])
-        .await;
-
-    daemon.reconcile().await;
-
-    let conversation = open(&daemon).await;
-    let mut ear = Ear::on(&daemon);
-
-    change(
-        &daemon,
-        home(),
-        json!({
-            "kind": "section_field_set",
-            "namespace": "connectors",
-            "id": "telegram",
-            "field": "mirror",
-            "value": false,
-        }),
-    )
-    .await;
-    daemon.reconcile().await;
-
-    world.assembly.shut();
-    change(&daemon, home(), warm()).await;
-
-    let pass = tokio::spawn({
-        let daemon = daemon.clone();
-
-        async move { daemon.reconcile().await }
-    });
-
-    world.assembly.reached().await;
-
-    let turn = tokio::spawn({
-        let daemon = daemon.clone();
-        let line = line(&conversation, "Still there?", "still");
-
-        async move { daemon.deliver(line).await }
-    });
-
-    a_while().await;
-    assert!(!turn.is_finished());
-    world.assembly.open();
-    pass.await.unwrap();
-
-    let delivered = turn.await.unwrap();
-
-    ear.reached("mira", Ready).await;
-    assert_eq!(said(&delivered), ["Still there?", "Hello."]);
-    assert_eq!(wire(&delivered)["conversationId"], conversation);
-    assert_eq!(ear.states("mira"), [Reloading, Ready]);
-}
-
-/// A change that would build her from something else while her turn runs
-/// says she is reloading at once; the turn finishes first, then the reload,
-/// and a line sent meanwhile lands on her thread after it.
-#[tokio::test(start_paused = true)]
-async fn a_reload_decided_during_her_turn_is_said_at_once_and_follows_the_turn() {
+async fn a_rebuild_between_her_requests_keeps_her_turn_and_a_line_sent_meanwhile_lands_after() {
     let world = World::new();
     let daemon = world
         .daemon(vec![Toy::new("tone").setting("tone").plugin()])
@@ -330,109 +268,44 @@ async fn a_reload_decided_during_her_turn_is_said_at_once_and_follows_the_turn()
 
     let conversation = open(&daemon).await;
     let gate = Arc::new(Gate::default());
+    let deliver = |text: &str, id: &str| {
+        let daemon = daemon.clone();
+        let line = line(&conversation, text, id);
+
+        tokio::spawn(async move { daemon.deliver(line).await })
+    };
 
     gate.shut();
-    world.model.script([Round::says(&["First."]).held(&gate)]);
+    world.model.script([
+        Round::calls("runtime.plugin.list", &json!({})).held(&gate),
+        Round::says(&["First."]),
+    ]);
 
     let mut ear = Ear::on(&daemon);
-    let first = tokio::spawn({
-        let daemon = daemon.clone();
-        let line = line(&conversation, "First?", "first");
-
-        async move { daemon.deliver(line).await }
-    });
+    let first = deliver("First?", "first");
 
     gate.reached().await;
     change(&daemon, home(), warm()).await;
-    ear.reached("mira", Reloading).await;
-
-    let second = tokio::spawn({
-        let daemon = daemon.clone();
-        let line = line(&conversation, "Second?", "second");
-
-        async move { daemon.deliver(line).await }
-    });
-
-    settle().await;
-    assert!(!first.is_finished());
+    world.assembly.shut();
     gate.open();
+    world.assembly.reached().await;
+
+    let second = deliver("Second?", "second");
+
+    a_while().await;
+    assert!(!first.is_finished() && !second.is_finished());
+    world.assembly.open();
     assert_eq!(said(&first.await.unwrap()), ["First?", "First."]);
-    assert_eq!(said(&second.await.unwrap()), ["Second?", "Hello."]);
+
+    let delivered = second.await.unwrap();
+
+    assert_eq!(said(&delivered), ["Second?", "Hello."]);
+    assert_eq!(wire(&delivered)["conversationId"], conversation);
     ear.until(|event| {
         matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == "second")
     })
     .await;
-
-    let order: Vec<String> = ear
-        .heard
-        .iter()
-        .filter_map(|event| match event {
-            Event::StateChanged { state, .. } => Some(wire(state).as_str()?.to_owned()),
-            Event::TurnCompleted {
-                client_message_id, ..
-            } => Some(client_message_id.to_string()),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(order, ["reloading", "first", "ready", "second"]);
-}
-
-/// A change her own plugin makes is the daemon's one change of settings:
-/// health goes out before the call's answer, and the plugin it changes,
-/// rebuilt live, already runs what her settings now say, so nothing
-/// reloads her.
-#[tokio::test(start_paused = true)]
-async fn a_change_her_own_plugin_makes_is_announced_and_reloads_nothing_it_applied_live() {
-    let world = World::new();
-
-    world.settings(json!({"plugins": {"demo-config": {"enabled": true}}}));
-
-    let daemon = world.daemon(Vec::new()).await;
-
-    daemon.reconcile().await;
-
-    let conversation = open(&daemon).await;
-    let view = daemon
-        .config_view(ConfigTarget::Character {
-            character_id: "mira".to_owned(),
-        })
-        .await;
-    let mut ear = Ear::on(&daemon);
-
-    world.model.script([
-        Round::calls(
-            "runtime.plugin.config.update",
-            &json!({
-                "pluginId": "demo-config",
-                "fieldName": "tone",
-                "operation": "set",
-                "value": "warm",
-                "expectedFingerprint": wire(&view)["fingerprint"],
-            }),
-        ),
-        Round::says(&["Warmer now."]),
-    ]);
-
-    let turn = tokio::spawn({
-        let daemon = daemon.clone();
-        let line = line(&conversation, "Be warmer.", "warmer");
-
-        async move { daemon.deliver(line).await }
-    });
-    let requested = ear
-        .until(|event| matches!(event, Event::ConfirmationRequested(_)))
-        .await;
-    let answered =
-        daemon.answer_confirmation(wire(&requested)["id"].as_str().unwrap(), Answer::Approved);
-
-    assert_eq!(answered, ConfirmationAnswer::Answered);
-    ear.until(|event| matches!(event, Event::HealthChanged { .. }))
-        .await;
-    assert_eq!(said(&turn.await.unwrap()), ["Be warmer.", "Warmer now."]);
-    daemon.reconcile().await;
-    ear.drain();
-    assert_eq!(ear.states("mira"), []);
+    assert_eq!(ear.states("mira"), [Ready]);
 }
 
 /// A stop answers only once everything it ended is announced: the turn in
@@ -476,34 +349,6 @@ async fn a_stop_answers_after_what_it_ended_was_announced() {
         ear.kinds()
     );
     assert_eq!(ear.states("mira"), [Stopping, Stopped]);
-}
-
-/// A package changed under her, her name and nothing else, makes the next
-/// reconcile build her again from it, so her thread, made after, is in her
-/// new name.
-#[tokio::test(start_paused = true)]
-async fn a_package_changed_under_her_rebuilds_her_from_it() {
-    let world = World::new();
-
-    world.package("nova", "Nova");
-
-    let daemon = world.daemon(Vec::new()).await;
-
-    daemon.reconcile().await;
-    world.package("nova", "Nova Prime");
-    daemon.reconcile().await;
-
-    let OpenOutcome::Opened {
-        conversation_id, ..
-    } = daemon.open_conversation("nova").await
-    else {
-        panic!("her thread opens");
-    };
-    let outcome = daemon
-        .deliver(line(conversation_id.as_str(), "Hello?", "hello"))
-        .await;
-
-    assert_eq!(wire(&outcome)["messages"][1]["speakerName"], "Nova Prime");
 }
 
 /// A character whose package leaves the home while she runs is stopped by

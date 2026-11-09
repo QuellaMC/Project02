@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use p02_contracts::{ConversationToolCall, PluginToolDefinitions};
 use p02_core::{MessageId, SessionId, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, NvidiaSettings, Person, Reply, RoutedToolCall, TestProvider, TurnInput,
-    TurnOutcome, TurnSink, UnknownTestProviderError, run_turn, select_adapter,
+    DraftEvent, ModelRound, NvidiaSettings, Person, Reply, Rounds, RoutedToolCall, TestProvider,
+    TurnInput, TurnOutcome, TurnSink, UnknownTestProviderError, select_adapter,
 };
 
 use crate::stub::Stub;
@@ -73,22 +73,19 @@ async fn the_test_switch_answers_in_the_fixed_voice_whatever_the_settings_choose
     let said = Said::default();
 
     for replayed in [&history[..0], &history[..]] {
-        let outcome = run_turn(
-            adapter.as_ref(),
-            &said,
-            TurnInput {
-                event: event(),
-                user_message: UserLine::new("Hello?").unwrap().into(),
-                context: context(),
-                plugin_tools: PluginToolDefinitions::default(),
-                history: replayed,
-                persona: &persona,
-                person: Person::Unnamed,
-            },
-        )
+        let outcome = Rounds::new(TurnInput {
+            event: event(),
+            user_message: UserLine::new("Hello?").unwrap().into(),
+            context: context(),
+            plugin_tools: PluginToolDefinitions::default(),
+            history: replayed,
+            persona: &persona,
+            person: Person::Unnamed,
+        })
+        .run(adapter.as_ref(), &said)
         .await;
 
-        assert!(matches!(outcome, Ok(TurnOutcome::Replied { .. })));
+        assert!(matches!(outcome, Ok(Some(TurnOutcome::Replied { .. }))));
     }
 
     assert_eq!(

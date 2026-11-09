@@ -19,8 +19,7 @@
           "valueType": "string",
           "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
           "agentMutable": true,
-          "redactionLabels": [],
-          "reloadRequired": false
+          "redactionLabels": []
         },
         {
           "name": "signoff",
@@ -29,8 +28,7 @@
           "secret": false,
           "valueType": "string",
           "agentMutable": true,
-          "redactionLabels": [],
-          "reloadRequired": false
+          "redactionLabels": []
         },
         {
           "name": "operatorNote",

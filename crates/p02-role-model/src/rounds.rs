@@ -1,6 +1,7 @@
 //! A turn's model rounds: one after another until the model replies or the
-//! rounds run out. Every round is judged once and handed to the turn as
-//! soon as it is judged, before anything it decided happens.
+//! rounds run out, each made with what the character runs on when it
+//! starts. Every round is judged once and handed to the turn as soon as it
+//! is judged, before anything it decided happens.
 
 mod drafts;
 
@@ -31,7 +32,8 @@ const MAX_TOOL_ROUNDS: u32 = 99;
 pub struct TurnInput<'a> {
     pub event: EventIdentity,
     pub user_message: VisibleText,
-    /// What the runtime and the plugins prepared for the model.
+    /// What the runtime and the plugins prepared for the model's first
+    /// round.
     pub context: DecisionContext,
     pub plugin_tools: PluginToolDefinitions,
     /// The earlier turns to replay, oldest first.
@@ -135,13 +137,6 @@ pub trait TurnSink: Send + Sync {
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, Self::Error>;
 
-    /// What the rounds after a round of tool calls are shown in place of
-    /// the turn's context, when a call changed what prepared it; none
-    /// while nothing did, as for a sink whose plugins never change.
-    async fn prepared_again(&self) -> Result<Option<DecisionContext>, Self::Error> {
-        Ok(None)
-    }
-
     /// Hears a draft, which is never awaited: the model writes on
     /// meanwhile.
     fn draft(&self, event: DraftEvent);
@@ -163,52 +158,15 @@ pub enum TurnOutcome {
     },
 }
 
-/// Runs a turn's rounds to their end. A round whose output is refused goes
-/// back to the model as part of its next round, counted like any other; a
-/// provider that gave nothing usable ends the turn. The only refusal of the
-/// loop's own is the round budget, recorded against the commit while the
-/// round stays what the model said.
-///
-/// # Errors
-///
-/// The sink's error, as soon as one of its calls fails: what the round had
-/// drafted and not committed is withdrawn first.
-pub async fn run_turn<S: TurnSink>(
-    adapter: &dyn RoleModelAdapter,
-    sink: &S,
-    input: TurnInput<'_>,
-) -> Result<TurnOutcome, S::Error> {
-    let mut turn = Turn {
-        envelope: InputEnvelope::new(
-            input.event,
-            input.user_message,
-            input.context,
-            input.plugin_tools,
-        ),
-        history: input.history,
-        persona: input.persona,
-        person: input.person,
-        refusal_note: None,
-        spent: 0,
-    };
-    let mut round = NonZeroU32::MIN;
-
-    loop {
-        // Every draft a round opens ends with it, whichever way it ends.
-        let drafts = Drafts::new(round, sink);
-        let ended = turn.round(adapter, sink, &drafts).await;
-
-        drafts.close();
-
-        if let Some(outcome) = ended? {
-            return Ok(outcome);
-        }
-
-        round = round.saturating_add(1);
-    }
-}
-
-struct Turn<'a> {
+/// A turn's rounds, run one at a time by its caller, who makes each round's
+/// request with the model the character runs on as it starts, and between
+/// two rounds may prepare again what the model is shown and offered. A
+/// round whose output is refused goes back to the model as part of its
+/// next round, counted like any other; a provider that gave nothing usable
+/// ends the turn. The only refusal of the rounds' own is their budget,
+/// recorded against the commit while the round stays what the model said.
+#[derive(Debug)]
+pub struct Rounds<'a> {
     envelope: InputEnvelope,
     history: &'a [ConversationTurn],
     persona: &'a Persona,
@@ -218,9 +176,57 @@ struct Turn<'a> {
     refusal_note: Option<String>,
     /// Rounds spent against [`MAX_TOOL_ROUNDS`].
     spent: u32,
+    /// The round to run next.
+    next: NonZeroU32,
 }
 
-impl Turn<'_> {
+impl<'a> Rounds<'a> {
+    #[must_use]
+    pub fn new(input: TurnInput<'a>) -> Self {
+        Self {
+            envelope: InputEnvelope::new(
+                input.event,
+                input.user_message,
+                input.context,
+                input.plugin_tools,
+            ),
+            history: input.history,
+            persona: input.persona,
+            person: input.person,
+            refusal_note: None,
+            spent: 0,
+            next: NonZeroU32::MIN,
+        }
+    }
+
+    /// What the model is shown and offered from the next round on: what
+    /// the runtime and the plugins prepared again.
+    pub fn prepared(&mut self, context: DecisionContext, tools: PluginToolDefinitions) {
+        self.envelope.decision_context = context;
+        self.envelope.plugin_tool_definitions = tools;
+    }
+
+    /// Runs the next round, its request made with `adapter`: how the turn
+    /// ended, once a round ends it, and none while another round follows.
+    ///
+    /// # Errors
+    ///
+    /// The sink's error, as soon as one of its calls fails: what the round
+    /// had drafted and not committed is withdrawn first.
+    pub async fn run<S: TurnSink>(
+        &mut self,
+        adapter: &dyn RoleModelAdapter,
+        sink: &S,
+    ) -> Result<Option<TurnOutcome>, S::Error> {
+        // Every draft a round opens ends with it, whichever way it ends.
+        let drafts = Drafts::new(self.next, sink);
+        let ended = self.round(adapter, sink, &drafts).await;
+
+        drafts.close();
+        self.next = self.next.saturating_add(1);
+        ended
+    }
+
     async fn round<S: TurnSink>(
         &mut self,
         adapter: &dyn RoleModelAdapter,
@@ -310,11 +316,6 @@ impl Turn<'_> {
             interim_replies,
             tool_calls,
         });
-
-        if let Some(context) = sink.prepared_again().await? {
-            self.envelope.decision_context = context;
-        }
-
         Ok(None)
     }
 

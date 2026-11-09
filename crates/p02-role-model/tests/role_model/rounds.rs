@@ -14,8 +14,7 @@ use p02_contracts::{
 };
 use p02_core::{MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, Person, Reply, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
-    run_turn,
+    DraftEvent, ModelRound, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
 };
 use serde_json::{Value, json};
 
@@ -206,30 +205,32 @@ impl TurnSink for Recording {
     }
 }
 
+/// The turn's rounds, one after another, to their end.
 async fn run(
     model: &Scripted,
     sink: &Recording,
     persona: &Persona,
     history: &[ConversationTurn],
 ) -> Result<TurnOutcome, &'static str> {
-    run_turn(
-        model,
-        sink,
-        TurnInput {
-            event: event(),
-            user_message: p02_core::UserLine::new("Hello?").unwrap().into(),
-            context: context(),
-            plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(
-                "memory.fixture",
-                "memory.search",
-            )])
-            .unwrap(),
-            history,
-            persona,
-            person: Person::Unnamed,
-        },
-    )
-    .await
+    let mut rounds = Rounds::new(TurnInput {
+        event: event(),
+        user_message: p02_core::UserLine::new("Hello?").unwrap().into(),
+        context: context(),
+        plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(
+            "memory.fixture",
+            "memory.search",
+        )])
+        .unwrap(),
+        history,
+        persona,
+        person: Person::Unnamed,
+    });
+
+    loop {
+        if let Some(outcome) = rounds.run(model, sink).await? {
+            return Ok(outcome);
+        }
+    }
 }
 
 fn round(number: u32) -> NonZeroU32 {

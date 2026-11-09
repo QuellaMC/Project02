@@ -30,16 +30,23 @@ only on tokio's blocking pool, where a lock's wait blocks.
 - **The turn.** Its records land in this order: the event as it came in;
   the person's line, committed once the history the model is shown was
   read; the plugins' preparation of the model's call, which may refuse
-  the turn and keeps the line, and which is made again for the rounds
-  after a call rebuilt one of the plugins live, a refusal then leaving it
-  as it was; each model round, recorded before anything it decided
-  happens, each reply committed in the round's order and each tool call
-  started in the model's and finished as it finishes, so a call that
-  finished outlasts a crash before the rest, while the model reads the
-  results in its own order; and the record that ends the turn, before the
-  plugins' work after its commit, which can change nothing about it.
+  the turn and keeps the line; each model round, recorded before anything
+  it decided happens, each reply committed in the round's order and each
+  tool call started in the model's and finished as it finishes, so a call
+  that finished outlasts a crash before the rest, while the model reads
+  the results in its own order; and the record that ends the turn, before
+  the plugins' work after its commit, which can change nothing about it.
   A text that is no line is refused with its event, and nothing is
   committed.
+- **What she answers with.** Her model, her plugins and her model's
+  window are her caller's, kept as her settings say: the caller brings
+  them up to date before her turn, and the turn before each request to
+  the model after its first, so every request starts from her settings as
+  they are then. Once she was built again, the model's call is prepared
+  again with her new plugins; a plugin refuses a turn only before its
+  first round, so a refusal then leaves the call as it was prepared. The
+  history the model is shown is chosen at the turn's start, and the
+  continuation after it runs on what the turn ended on.
 - **What the turn says.** The person's line, each reply, the pieces of a
   reply the model is still writing and their withdrawal, and the tool
   calls requested and each completed as it finishes, in order, on the
@@ -47,7 +54,8 @@ only on tokio's blocking pool, where a lock's wait blocks.
   message is announced once its record is on disk; a draft is the one
   exception and says so by its kind, and every draft ends exactly once.
 - **Failure.** When the runtime itself fails, a store write or a record
-  the store refuses, the turn is fatal and its caller restarts the
+  the store refuses, or her settings change under the turn to ones that no
+  longer build her, the turn is fatal and its caller restarts the
   character. The turn first records its own rejection, if it still can,
   naming what it committed, so the log says how it ended. A delivery its
   caller drops before it ends is fatal the same way, with nothing

@@ -131,12 +131,11 @@
       "enum": [
         "starting",
         "ready",
-        "reloading",
         "stopping",
         "stopped",
         "failed"
       ],
-      "description": "Where a character's runtime stands. `reloading` is a pause: a\ndelivery sent meanwhile waits for it and lands on the same thread."
+      "description": "Where a character's runtime stands."
     },
     "CharacterSummary": {
       "type": "object",
@@ -1708,7 +1707,6 @@
         "not_started",
         "starting",
         "ready",
-        "reloading",
         "stopping",
         "stopped",
         "failed"
@@ -1852,9 +1850,6 @@
         "agentMutable": {
           "type": "boolean"
         },
-        "reloadRequired": {
-          "type": "boolean"
-        },
         "authored": {
           "$ref": "#/$defs/Authored"
         },
@@ -1871,7 +1866,6 @@
         "required",
         "secret",
         "agentMutable",
-        "reloadRequired",
         "authored",
         "effectiveSource",
         "effective"

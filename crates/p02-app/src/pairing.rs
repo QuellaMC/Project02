@@ -300,7 +300,7 @@ impl Daemon {
             },
         };
 
-        match self.change_settings(&change, || {}) {
+        match self.change_settings(&change) {
             ChangeOutcome::Applied { .. } => Ok(()),
             ChangeOutcome::Refused { message, .. } | ChangeOutcome::Failed { message } => {
                 Err(message)

@@ -21,8 +21,8 @@ use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    DraftEvent, DraftId, ModelRound, Person, Reply, RoutedToolCall, TurnInput, TurnOutcome,
-    TurnSink, run_turn, select_history_window, today_note,
+    DraftEvent, DraftId, ModelRound, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
+    TurnSink, select_history_window, today_note,
 };
 use p02_shared::{BoundJsonError, Identifier, error_chain};
 use p02_store::{
@@ -105,6 +105,8 @@ pub enum RunTurnError {
     Interrupted(#[source] JoinError),
     #[error("the conversation lost its hold on the disk to an earlier failure")]
     StateLost,
+    #[error("her settings changed to ones that do not build her: {0}")]
+    Settings(String),
 }
 
 /// How a turn ended, for the thread to say.
@@ -131,7 +133,7 @@ pub(crate) async fn run(
     identity: &EventIdentity,
     submission: Submission<'_>,
     cast: &Cast,
-    mind: Mind<'_>,
+    mind: &mut dyn Mind,
     listener: &Listener<'_>,
 ) -> Ended {
     let line = match UserLine::new(submission.line) {
@@ -149,13 +151,12 @@ pub(crate) async fn run(
         client_message_id: submission.client_message_id,
     });
 
-    let window = select_history_window(&begun.history.turns, mind.context_window);
+    let window = select_history_window(&begun.history.turns, mind.context_window());
     let mut turn = OpenTurn {
         identity: identity.clone(),
         line: begun.message.text.clone(),
         day: begun.day,
         cast,
-        host: mind.host,
         listener,
         hooks: p02_plugins::Turn::new(TurnIdentity {
             session_id: begun.message.id.session_id().clone(),
@@ -173,7 +174,6 @@ pub(crate) async fn run(
             committed: vec![begun.message],
             finished: Vec::new(),
             prepared: Vec::new(),
-            rebuilds: 0,
             calls: Vec::new(),
         }),
     };
@@ -318,15 +318,14 @@ fn calendar_day(moment: &Timestamp) -> Option<Date> {
     Some(at.to_zoned(TimeZone::system()).date())
 }
 
-/// A turn from its committed line to its end: the sink of its model's
-/// rounds, the hooks' view of it, and what it has committed so far.
+/// A turn from its committed line to its end: the hooks' view of it, and
+/// what it has committed so far.
 struct OpenTurn<'a> {
     identity: EventIdentity,
     line: VisibleText,
     /// The day the model is told it is, first of its notes.
     day: Option<Date>,
     cast: &'a Cast,
-    host: &'a PluginHost,
     listener: &'a Listener<'a>,
     /// The turn as its hooks are shown it, without its text: each phase is
     /// shown a clone with the text as it stands then, which shares its
@@ -348,8 +347,6 @@ struct Ledger {
     /// What preparing the model's call recorded, which every reply after
     /// it carries.
     prepared: Vec<Evidence>,
-    /// The host's rebuilds when the model's call was last prepared.
-    rebuilds: u64,
     /// What the tool calls recorded, in the order they finished.
     calls: Vec<Evidence>,
 }
@@ -363,7 +360,7 @@ enum Preparation {
 impl OpenTurn<'_> {
     /// The turn to its end, or, when the runtime fails it, to the record of
     /// that failure.
-    async fn drive(&mut self, mind: Mind<'_>, window: &[ConversationTurn]) -> Ended {
+    async fn drive(&mut self, mind: &mut dyn Mind, window: &[ConversationTurn]) -> Ended {
         match self.answer(mind, window).await {
             Ok(ended) => ended,
             Err(error) => {
@@ -377,14 +374,15 @@ impl OpenTurn<'_> {
     }
 
     /// The plugins prepare the model's call or refuse the turn; the model's
-    /// rounds run to their end; and the record that ends the turn lands,
-    /// before the work after its commit.
+    /// rounds run to their end, each after the first made with `mind`
+    /// brought up to date with her settings; and the record that ends the
+    /// turn lands, before the work after its commit.
     async fn answer(
         &mut self,
-        mind: Mind<'_>,
+        mind: &mut dyn Mind,
         window: &[ConversationTurn],
     ) -> Result<Ended, RunTurnError> {
-        let context = match self.prepare().await? {
+        let context = match self.prepare(mind.host()).await? {
             Preparation::Prepared(context) => context,
             Preparation::Refused(rejection) => {
                 let refused =
@@ -398,20 +396,39 @@ impl OpenTurn<'_> {
                 }));
             }
         };
-        let outcome = run_turn(
-            mind.adapter,
-            &*self,
-            TurnInput {
-                event: self.identity.clone(),
-                user_message: self.line.clone(),
-                context,
-                plugin_tools: self.host.tool_definitions().clone(),
-                history: window,
-                persona: &self.cast.persona,
-                person: person(&self.cast.person),
-            },
-        )
-        .await?;
+        let mut rounds = Rounds::new(TurnInput {
+            event: self.identity.clone(),
+            user_message: self.line.clone(),
+            context,
+            plugin_tools: mind.host().tool_definitions().clone(),
+            history: window,
+            persona: &self.cast.persona,
+            person: person(&self.cast.person),
+        });
+        let outcome = loop {
+            let round = Round {
+                turn: self,
+                host: mind.host(),
+            };
+
+            if let Some(outcome) = rounds.run(mind.adapter(), &round).await? {
+                break outcome;
+            }
+
+            if mind.refresh().await.map_err(RunTurnError::Settings)? {
+                // A plugin refuses a turn only before its first round, so a
+                // refusal now leaves the call prepared as it was, and its
+                // records go with what the replies carry.
+                match self.prepare(mind.host()).await? {
+                    Preparation::Prepared(context) => {
+                        rounds.prepared(context, mind.host().tool_definitions().clone());
+                    }
+                    Preparation::Refused(rejection) => {
+                        self.ledger.lock().await.prepared.extend(rejection.evidence);
+                    }
+                }
+            }
+        };
 
         match outcome {
             TurnOutcome::Refused { round, rejection } => {
@@ -430,20 +447,18 @@ impl OpenTurn<'_> {
                     message,
                 }))
             }
-            TurnOutcome::Replied { round, decision } => self.complete(round, &decision).await,
+            TurnOutcome::Replied { round, decision } => {
+                self.complete(round, &decision, mind.host()).await
+            }
         }
     }
 
-    /// The model's call as the plugins prepare it now, the day first of its
-    /// notes and the summary ahead of the replayed turns, what they recorded
-    /// kept for the replies to carry; or the refusal of a plugin whose
-    /// failure refuses the turn.
-    async fn prepare(&self) -> Result<Preparation, RunTurnError> {
-        let rebuilds = self.host.rebuilds();
-        let outcome = self.host.before_role_model_call(&self.shown().await).await;
-
-        self.ledger.lock().await.rebuilds = rebuilds;
-
+    /// The model's call as `host`'s plugins prepare it now, the day first of
+    /// its notes and the summary ahead of the replayed turns, what they
+    /// recorded kept for the replies to carry; or the refusal of a plugin
+    /// whose failure refuses the turn.
+    async fn prepare(&self, host: &PluginHost) -> Result<Preparation, RunTurnError> {
+        let outcome = host.before_role_model_call(&self.shown().await).await;
         let PreparedContext {
             runtime_notes,
             context_items,
@@ -531,11 +546,12 @@ impl OpenTurn<'_> {
     }
 
     /// Ends the turn completed on round `round`, anchoring the last reply it
-    /// said, then runs the plugins' work after the commit.
+    /// said, then runs the work of `host`'s plugins after the commit.
     async fn complete(
         &self,
         round: NonZeroU32,
         decision: &CharacterDecision,
+        host: &PluginHost,
     ) -> Result<Ended, RunTurnError> {
         let accepted_reply = decision
             .tool_calls()
@@ -563,7 +579,7 @@ impl OpenTurn<'_> {
         }))
         .await?;
 
-        let post_commit_failures = self.after_commit(&messages).await;
+        let post_commit_failures = self.after_commit(&messages, host).await;
 
         Ok(Ended::Completed(CompletedTurn {
             messages,
@@ -574,11 +590,10 @@ impl OpenTurn<'_> {
     /// The plugins' work once the turn is durable, which can change nothing
     /// about it: what they record lands as a record of its own, and what
     /// failed is reported.
-    async fn after_commit(&self, messages: &[VisibleMessage]) -> Vec<String> {
+    async fn after_commit(&self, messages: &[VisibleMessage], host: &PluginHost) -> Vec<String> {
         let committed =
             CommittedTurn::new(self.identity.created_at().clone()).with_messages(messages.to_vec());
-        let report = self
-            .host
+        let report = host
             .after_turn_committed(&self.shown().await, &committed)
             .await;
         let mut failed = report.failures();
@@ -621,8 +636,17 @@ impl OpenTurn<'_> {
         ledger.calls.extend(evidence);
         Ok(())
     }
+}
 
-    /// A call of a tool the turn offered is the host's to run; any other
+/// A round of the turn: the turn, and the plugins the round's request was
+/// made with, which run the calls it makes.
+struct Round<'r, 'a> {
+    turn: &'r OpenTurn<'a>,
+    host: &'r PluginHost,
+}
+
+impl Round<'_, '_> {
+    /// A call of a tool the round offered is the host's to run; any other
     /// was refused unasked.
     fn dispatch(&self, call: &RoutedToolCall) -> ToolDispatch {
         if self
@@ -639,20 +663,21 @@ impl OpenTurn<'_> {
 }
 
 #[async_trait]
-impl TurnSink for OpenTurn<'_> {
+impl TurnSink for Round<'_, '_> {
     type Error = RunTurnError;
 
     async fn record_round(&self, round: &ModelRound) -> Result<(), RunTurnError> {
         let record = RoundRecord::new(round.round, &round.answer, &round.result);
 
-        self.append(RecordBody::ModelRound(record)).await
+        self.turn.append(RecordBody::ModelRound(record)).await
     }
 
     async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, RunTurnError> {
-        let identity = self.identity.clone();
+        let turn = self.turn;
+        let identity = turn.identity.clone();
         let text = reply.text.clone();
         let round = reply.draft.round();
-        let mut ledger = self.ledger.lock().await;
+        let mut ledger = turn.ledger.lock().await;
         let evidence = ledger.prepared.clone();
         let message = on_disk(&mut ledger.disk, move |disk| {
             let message = disk.writer.replay()?.session().character_message(text);
@@ -671,7 +696,7 @@ impl TurnSink for OpenTurn<'_> {
 
         ledger.committed.push(message.clone());
         drop(ledger);
-        (self.listener)(Progress::VisibleReply {
+        (turn.listener)(Progress::VisibleReply {
             message: message.clone(),
             draft: reply.draft,
         });
@@ -683,6 +708,7 @@ impl TurnSink for OpenTurn<'_> {
         round: NonZeroU32,
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, RunTurnError> {
+        let turn = self.turn;
         let started = calls
             .iter()
             .map(|call| {
@@ -697,9 +723,9 @@ impl TurnSink for OpenTurn<'_> {
             .collect::<Result<Vec<_>, _>>()?;
 
         {
-            let identity = self.identity.clone();
+            let identity = turn.identity.clone();
             let records = started.clone();
-            let mut ledger = self.ledger.lock().await;
+            let mut ledger = turn.ledger.lock().await;
 
             on_disk(&mut ledger.disk, move |disk| {
                 records
@@ -709,7 +735,7 @@ impl TurnSink for OpenTurn<'_> {
             .await?;
         }
 
-        (self.listener)(Progress::ToolCallsRequested {
+        (turn.listener)(Progress::ToolCallsRequested {
             round,
             tool_names: calls.iter().map(|call| call.tool_name().clone()).collect(),
         });
@@ -722,7 +748,7 @@ impl TurnSink for OpenTurn<'_> {
                 input: call.input().clone(),
             })
             .collect();
-        let shown = self.shown().await;
+        let shown = turn.shown().await;
         let mut landing = std::pin::pin!(self.host.handle_tool_calls(proposed, &shown));
         let mut landed: Vec<(usize, ToolCallReport)> = Vec::with_capacity(calls.len());
 
@@ -732,7 +758,7 @@ impl TurnSink for OpenTurn<'_> {
         while let Some((index, report)) = landing.next().await {
             let call = &calls[index];
 
-            self.finish(
+            turn.finish(
                 ToolCallFinished::new(
                     &started[index],
                     self.dispatch(call),
@@ -742,7 +768,7 @@ impl TurnSink for OpenTurn<'_> {
                 report.evidence.clone(),
             )
             .await?;
-            (self.listener)(Progress::ToolCallCompleted {
+            (turn.listener)(Progress::ToolCallCompleted {
                 round,
                 tool_name: call.tool_name().clone(),
                 accepted: matches!(report.result, ToolCallResult::Accepted { .. }),
@@ -762,27 +788,8 @@ impl TurnSink for OpenTurn<'_> {
         Ok(finished)
     }
 
-    /// The model's call prepared again once a call rebuilt one of the
-    /// plugins that prepared it, so the rounds after show what the plugin
-    /// now says. A plugin refuses a turn only before its first round, so a
-    /// refusal now leaves the call prepared as it was, and its records go
-    /// with what the replies carry.
-    async fn prepared_again(&self) -> Result<Option<DecisionContext>, RunTurnError> {
-        if self.host.rebuilds() == self.ledger.lock().await.rebuilds {
-            return Ok(None);
-        }
-
-        match self.prepare().await? {
-            Preparation::Prepared(context) => Ok(Some(context)),
-            Preparation::Refused(rejection) => {
-                self.ledger.lock().await.prepared.extend(rejection.evidence);
-                Ok(None)
-            }
-        }
-    }
-
     fn draft(&self, event: DraftEvent) {
-        (self.listener)(match event {
+        (self.turn.listener)(match event {
             DraftEvent::Delta { draft, text } => Progress::ReplyDelta { draft, text },
             DraftEvent::Withdrawn { draft } => Progress::ReplyWithdrawn { draft },
         });

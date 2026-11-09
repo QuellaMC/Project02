@@ -49,7 +49,6 @@ function field(
     secret: false,
     valueType: 'string',
     agentMutable: false,
-    reloadRequired: true,
     authored: {configured: false},
     effectiveSource: 'default',
     effective: {name, secret: false, source: 'missing', resolved: true},

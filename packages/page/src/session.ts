@@ -116,8 +116,8 @@ export function createSession(address: string): Session {
     }
   };
   /**
-   * An open can wait on a start or a reload, minutes when a turn is
-   * parked on a confirmation; the latest character asked for wins, and an
+   * An open can wait on a start or on the turn in flight, minutes when it
+   * is parked on a confirmation; the latest character asked for wins, and an
    * earlier open that settles later is let go. Asking for the character
    * already on screen is a refresh: its thread stays until the page comes.
    */

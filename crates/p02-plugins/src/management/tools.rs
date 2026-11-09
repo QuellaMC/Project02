@@ -14,9 +14,8 @@ const CONFIG_DESCRIPTION: &str = "Inspect one installed plugin config using mani
 
 const UPDATE_DESCRIPTION: &str = "Set or unset one declared non-secret, agent-mutable plugin config \
      field after exact user approval. This cannot change activation, permissions, paths, secrets, \
-     or Project02 host settings. An approved change is written at once and takes effect right \
-     away when the host can rebuild the plugin live (reported per update as appliesTo), \
-     otherwise at the next launch.";
+     or Project02 host settings. An approved change is written at once and is in effect from \
+     your very next response on.";
 
 const VALUE_DESCRIPTION: &str = "New JSON value. Required for set and unavailable for unset. Must \
      match the target field's declared valueType and allowedValues as returned by \

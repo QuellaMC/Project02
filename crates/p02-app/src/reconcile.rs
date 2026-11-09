@@ -8,7 +8,7 @@ use futures_util::future::{BoxFuture, Shared, join_all};
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{CharacterSettings, Diagnostic, ReadSettingsError, Resolution};
 
-use crate::character::{Built, CharacterHandle};
+use crate::character::CharacterHandle;
 use crate::daemon::{Actor, Daemon, World};
 
 /// The installed roster as the disk says it is now: what discovery found,
@@ -163,11 +163,9 @@ impl Reconciler {
 impl Daemon {
     /// One pass of the rule over the characters running now, against the
     /// roster as the pass reads it: an enabled character who runs nothing
-    /// starts, one who failed starts again, one who is ready and would be
-    /// built from another package or other settings now reloads, and a
-    /// disabled one who runs stops, as does one whose package left the
-    /// roster. One started after now, by a client, is the next pass's to
-    /// judge.
+    /// starts, one who failed starts again, and a disabled one who runs
+    /// stops, as does one whose package left the roster. One started after
+    /// now, by a client, is the next pass's to judge.
     pub(crate) fn pass(&self) -> BoxFuture<'static, ()> {
         let running: Vec<Arc<CharacterHandle>> = self
             .handles()
@@ -191,14 +189,9 @@ impl Daemon {
                 .cloned();
 
             if settings.is_none_or(|settings| settings.host().enabled) {
-                let now = settings.map(|settings| Built {
-                    definition: definition.clone(),
-                    settings: settings.clone(),
-                });
-
                 work.push(Box::pin(async move {
                     match running {
-                        Some(handle) => handle.reconcile(now).await,
+                        Some(handle) => handle.start().await,
                         // One a client started since the pass was asked
                         // for is the client's.
                         None => {

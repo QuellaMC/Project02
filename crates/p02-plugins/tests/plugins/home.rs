@@ -16,7 +16,7 @@ use p02_config::{
 use p02_contracts::{Manifest, PluginFactory};
 use p02_plugins::{
     ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, Rebuild, list,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, list,
 };
 use p02_shared::{
     DanglingLinks, Identifier, canonical_path, create_directories, read_file, remove_file,
@@ -347,7 +347,7 @@ impl ConfigControl for MiraSettings {
         }
     }
 
-    fn change(&self, change: &FieldChange, rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+    fn change(&self, change: &FieldChange) -> FieldChangeOutcome {
         let outcome = apply_change(
             &self.home,
             &self.sections,
@@ -357,25 +357,7 @@ impl ConfigControl for MiraSettings {
         );
 
         match outcome {
-            ChangeOutcome::Applied { fingerprint } => {
-                let running = self
-                    .read(|resolution| {
-                        resolution
-                            .settings()
-                            .plugins()
-                            .find(|(running, _)| *running == &change.plugin)
-                            .map(|(_, values)| values.clone())
-                    })
-                    .unwrap();
-
-                FieldChangeOutcome::Applied {
-                    fingerprint,
-                    rebuilt: match (rebuild, running) {
-                        (Some(rebuild), Some(values)) => Some(rebuild(&values)),
-                        _ => None,
-                    },
-                }
-            }
+            ChangeOutcome::Applied { fingerprint } => FieldChangeOutcome::Applied { fingerprint },
             ChangeOutcome::Refused {
                 reason: ChangeRefusal::Conflict,
                 ..

@@ -209,7 +209,6 @@ function FieldRow({
       <p className="field-meta muted small">
         {field.name} · {whereText(field, scope)}
         {field.required ? ' · required' : ''}
-        {field.reloadRequired ? '' : ' · applies at once'}
       </p>
       <p className="field-description small">{field.description}</p>
       <div className="field-control">

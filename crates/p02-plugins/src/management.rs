@@ -2,8 +2,7 @@
 //! about itself. It lists the plugins the host runs, and on asking every
 //! plugin this build has; it shows one plugin's settings, as the settings
 //! of the character the host serves hold them, and changes one field of
-//! them on the person's yes, rebuilding that plugin live where the field
-//! allows.
+//! them on the person's yes.
 
 mod config;
 mod inventory;
@@ -83,9 +82,7 @@ impl RuntimePlugin for ManagementPlugin {
         _context: &HookContext,
     ) -> Result<ToolPreparation, PluginError> {
         match call.tool_name().as_str() {
-            tools::UPDATE => {
-                config::prepare(Arc::clone(&self.control), self.host.clone(), call).await
-            }
+            tools::UPDATE => config::prepare(Arc::clone(&self.control), call).await,
             other => Err(PluginError::new(format!(
                 "{HOST_PLUGIN} prepares no tool \"{other}\""
             ))),

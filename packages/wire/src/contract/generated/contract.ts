@@ -32,10 +32,9 @@ export type ChangeRefusal = "conflict" | "invalid" | "unknown_character";
 export type CharacterConnectorEntry = { characterId: Identifier, activation: RuntimeConfigSectionActivationShape, values: { [key in string]: JsonValue }, };
 
 /**
- * Where a character's runtime stands. `reloading` is a pause: a
- * delivery sent meanwhile waits for it and lands on the same thread.
+ * Where a character's runtime stands.
  */
-export type CharacterRuntimeState = "starting" | "ready" | "reloading" | "stopping" | "stopped" | "failed";
+export type CharacterRuntimeState = "starting" | "ready" | "stopping" | "stopped" | "failed";
 
 /**
  * One installed character, as health reports her.
@@ -369,7 +368,7 @@ export type Refusal = { code: string, message: string, };
  * Where an installed character stands as health reports her: her
  * runtime's state, or `not_started` until the daemon built it.
  */
-export type RosterState = "not_started" | "starting" | "ready" | "reloading" | "stopping" | "stopped" | "failed";
+export type RosterState = "not_started" | "starting" | "ready" | "stopping" | "stopped" | "failed";
 
 /**
  * One open draft: the reply's text so far under its id.
@@ -395,7 +394,7 @@ export type RuntimeConfigDiagnostic = { severity: Severity, code: Code, message:
  * document holds for it, and the value in effect with where it comes
  * from, a secret's as `[redacted]`.
  */
-export type RuntimeConfigFieldInspectShape = { name: Identifier, description: string, required: boolean, secret: boolean, valueType?: ConfigValueType, allowedValues?: ReadonlyArray<string>, agentMutable: boolean, reloadRequired: boolean, authored: Authored, effectiveSource: Source, effective: EffectiveView, };
+export type RuntimeConfigFieldInspectShape = { name: Identifier, description: string, required: boolean, secret: boolean, valueType?: ConfigValueType, allowedValues?: ReadonlyArray<string>, agentMutable: boolean, authored: Authored, effectiveSource: Source, effective: EffectiveView, };
 
 /**
  * Whether a section runs, as its settings decide it, and why.

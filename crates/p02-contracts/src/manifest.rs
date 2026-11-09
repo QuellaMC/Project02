@@ -398,7 +398,6 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
                 "defaultValue",
                 "allowedValues",
                 "agentMutable",
-                "reloadRequired",
                 "redactionLabels",
             ],
         )?)?;
@@ -457,7 +456,6 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         .map(|_| fields.strings("allowedValues"))
         .transpose()?;
     let agent_mutable = fields.optional_boolean("agentMutable")?.unwrap_or(false);
-    let reload_required = fields.optional_boolean("reloadRequired")? != Some(false);
     let redaction_labels = fields.labels("redactionLabels")?;
 
     if secret && agent_mutable {
@@ -474,7 +472,6 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         default_value,
         allowed_values,
         agent_mutable,
-        reload_required,
         redaction_labels,
     })
 }
@@ -945,7 +942,6 @@ mod tests {
         manifest["config"]["fields"][0]["scope"] = json!("character_only");
         manifest["config"]["fields"][0]["defaultValue"] = json!("warm");
         manifest["config"]["fields"][0]["agentMutable"] = json!(true);
-        manifest["config"]["fields"][0]["reloadRequired"] = json!(false);
         manifest["config"]["fields"][1]["scope"] = json!("global_only");
         manifest["requestedAccess"] = json!({"model_input": "write", "trusted_context": "write"});
 
@@ -955,8 +951,7 @@ mod tests {
 
         assert_eq!(tone.scope(), Some(ConfigScope::CharacterOnly));
         assert_eq!(tone.default_value(), Some(&json!("warm")));
-        assert!(tone.agent_mutable() && !tone.reload_required());
-        assert!(!key.agent_mutable() && key.reload_required());
+        assert!(tone.agent_mutable() && !key.agent_mutable());
         assert!(
             accepted
                 .requested_access()

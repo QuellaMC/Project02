@@ -26,8 +26,7 @@
           "allowedValues": ["platform", "server", "oss"],
           "defaultValue": "platform",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "apiKey",
@@ -36,8 +35,7 @@
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "baseUrl",
@@ -46,8 +44,7 @@
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "userId",
@@ -57,8 +54,7 @@
           "valueType": "string",
           "defaultValue": "project02-user",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossLlmModel",
@@ -67,8 +63,7 @@
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossLlmApiKey",
@@ -77,8 +72,7 @@
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "ossLlmBaseUrl",
@@ -87,8 +81,7 @@
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossEmbedderModel",
@@ -97,8 +90,7 @@
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         },
         {
           "name": "ossEmbedderApiKey",
@@ -107,8 +99,7 @@
           "secret": true,
           "valueType": "string",
           "agentMutable": false,
-          "redactionLabels": ["memory"],
-          "reloadRequired": true
+          "redactionLabels": ["memory"]
         },
         {
           "name": "ossEmbedderBaseUrl",
@@ -117,8 +108,7 @@
           "secret": false,
           "valueType": "url",
           "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
+          "redactionLabels": []
         }
       ]
     },

@@ -469,7 +469,6 @@ fn telegram() -> Connector {
                 "required": false,
                 "secret": true,
                 "valueType": "string",
-                "reloadRequired": false,
                 "redactionLabels": ["secret"],
             },
             {
@@ -480,7 +479,6 @@ fn telegram() -> Connector {
                 "required": false,
                 "secret": true,
                 "valueType": "string",
-                "reloadRequired": false,
                 "redactionLabels": ["secret"],
             },
             {
@@ -491,7 +489,6 @@ fn telegram() -> Connector {
                 "secret": false,
                 "valueType": "boolean",
                 "defaultValue": true,
-                "reloadRequired": false,
                 "redactionLabels": [],
             },
             {
@@ -503,7 +500,6 @@ fn telegram() -> Connector {
                 "secret": false,
                 "valueType": "object",
                 "defaultValue": {},
-                "reloadRequired": false,
                 "redactionLabels": [],
             },
         ],

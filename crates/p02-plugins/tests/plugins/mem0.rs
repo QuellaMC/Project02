@@ -996,14 +996,12 @@ async fn a_second_embedder_change_in_the_middle_of_re_embedding_re_embeds_for_th
 
     assert_eq!(held.arrived().await.body["input"], json!(facts[2]));
 
-    changing
-        .reload(
-            &id("mem0"),
-            embedded(&openai, "embed-c").as_object().unwrap(),
-        )
-        .unwrap();
+    // Built again on a third embedder while the second still re-embeds.
+    let newest = host(&storage, &embedded(&openai, "embed-c"));
+
+    drop(changing);
     drop(held);
-    recalls(&changing, &turn, 5).await;
+    recalls(&newest, &turn, 5).await;
 
     assert_eq!(embedded_facts(&openai, "embed-b", &facts), &facts[..3]);
     assert_eq!(embedded_facts(&openai, "embed-c", &facts), facts);

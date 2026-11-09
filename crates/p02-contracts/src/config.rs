@@ -21,10 +21,6 @@ pub struct ConfigSection {
 /// settings page and the model's config tools.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "each flag is one authored key of the declaration"
-)]
 pub struct ConfigField {
     pub(crate) name: Identifier,
     pub(crate) description: String,
@@ -39,7 +35,6 @@ pub struct ConfigField {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) allowed_values: Option<Vec<String>>,
     pub(crate) agent_mutable: bool,
-    pub(crate) reload_required: bool,
     pub(crate) redaction_labels: Vec<RedactionLabel>,
 }
 
@@ -111,13 +106,6 @@ impl ConfigField {
     #[must_use]
     pub fn agent_mutable(&self) -> bool {
         self.agent_mutable
-    }
-
-    /// Whether an approved change waits for the next launch rather than
-    /// rebuilding the plugin at once; only an authored `false` applies live.
-    #[must_use]
-    pub fn reload_required(&self) -> bool {
-        self.reload_required
     }
 
     #[must_use]
@@ -245,7 +233,6 @@ mod tests {
             default_value: None,
             allowed_values: allowed.map(|values| values.iter().map(|&v| v.to_owned()).collect()),
             agent_mutable: false,
-            reload_required: true,
             redaction_labels: Vec::new(),
         }
     }

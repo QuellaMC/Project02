@@ -9,7 +9,8 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use p02_characters::{CharacterDefinition, discover};
+use async_trait::async_trait;
+use p02_characters::discover;
 use p02_config::{
     CharacterSettings, Diagnostic, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
@@ -19,7 +20,7 @@ use p02_core::{ConversationId, EventIdentity, Participant, SessionId, SpeakerNam
 use p02_plugins::{PluginHost, Turn};
 use p02_role_model::{NvidiaSettings, select_adapter};
 use p02_runtime::{
-    Character, CompletedTurn, Conversation, Delivery, Progress, Rotation, Submission,
+    Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Rotation, Submission,
 };
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{RuntimeRejection, StorageError};
@@ -33,20 +34,19 @@ use crate::outcome::{
     Event, MaintenanceFailure, OpenOutcome, OpenRefusal, StorageFailure, TurnOutcome, TurnRefusal,
     TurnStamp,
 };
+use crate::reconcile::settings_now;
 
 /// The sentence a character without a model gives, which the settings
 /// page answers.
 const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
 
 vocabulary! {
-    /// Where a character's runtime stands. `reloading` is a pause: a
-    /// delivery sent meanwhile waits for it and lands on the same thread.
+    /// Where a character's runtime stands.
     #[ts(rename = "CharacterRuntimeState")]
     #[schemars(rename = "CharacterRuntimeState")]
     CharacterState {
         Starting = "starting",
         Ready = "ready",
-        Reloading = "reloading",
         Stopping = "stopping",
         Stopped = "stopped",
         Failed = "failed",
@@ -63,15 +63,6 @@ pub(crate) struct CharacterHealth {
     pub(crate) maintenance: Option<MaintenanceFailure>,
 }
 
-/// What a character was built from, her package and her settings: what a
-/// later reconcile compares, her plugins as her host serves them, with
-/// what she would be built from now, to decide a reload.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Built {
-    pub(crate) definition: CharacterDefinition,
-    pub(crate) settings: CharacterSettings,
-}
-
 /// A line of the person's for a character, as the daemon routed it to her.
 #[derive(Debug)]
 pub(crate) struct Request {
@@ -85,7 +76,6 @@ enum Command {
     Start(oneshot::Sender<()>),
     Open(oneshot::Sender<OpenOutcome>),
     Deliver(Request, oneshot::Sender<TurnOutcome>),
-    Reconcile(Option<Box<Built>>, oneshot::Sender<()>),
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -120,14 +110,16 @@ impl CharacterHandle {
 
         tokio::spawn(
             Actor {
-                id: id.clone(),
-                world,
-                daemon: daemon.downgrade(),
+                her: Her {
+                    id: id.clone(),
+                    world,
+                    daemon: daemon.downgrade(),
+                    stop: stop.clone(),
+                    health: published,
+                    broker: Arc::clone(&broker),
+                },
                 commands: receiver,
                 deferred: VecDeque::new(),
-                stop: stop.clone(),
-                health: published,
-                broker: Arc::clone(&broker),
                 parts: None,
             }
             .run(),
@@ -164,20 +156,15 @@ impl CharacterHandle {
         self.health.borrow().state == CharacterState::Stopped || self.health.has_changed().is_err()
     }
 
-    /// Answered once her start settles. One in flight, a boot or a reload,
-    /// is joined, so a failure it ends in is answered and not tried again;
-    /// otherwise she is asked, and boots again when she has failed.
+    /// Answered once her start settles. A boot in flight is joined, so a
+    /// failure it ends in is answered and not tried again; otherwise she is
+    /// asked, and boots again when she has failed.
     pub(crate) async fn start(&self) {
-        let assembling = |health: &CharacterHealth| {
-            matches!(
-                health.state,
-                CharacterState::Starting | CharacterState::Reloading
-            )
-        };
+        let starting = |health: &CharacterHealth| health.state == CharacterState::Starting;
         let mut health = self.health.clone();
 
-        if assembling(&health.borrow()) {
-            let _ = health.wait_for(|health| !assembling(health)).await;
+        if starting(&health.borrow()) {
+            let _ = health.wait_for(|health| !starting(health)).await;
         } else {
             let _ = self.ask(Command::Start).await;
         }
@@ -209,14 +196,6 @@ impl CharacterHandle {
                 )
             })
         }
-    }
-
-    /// Makes her match `now`, what she would be built from now, which is
-    /// none when her settings cannot be resolved; answered once she does.
-    pub(crate) async fn reconcile(&self, now: Option<Built>) {
-        let _ = self
-            .ask(|reply| Command::Reconcile(now.map(Box::new), reply))
-            .await;
     }
 
     /// The sentence she answers with while she takes nothing.
@@ -268,23 +247,32 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
     }
 }
 
-/// What a character is assembled from: who she is, the model and the
-/// plugins she answers with, what she was built from, and her thread with
-/// the person once it is open.
+/// What she is built of, from her package and her settings as they were
+/// when she was built: who she is and the person's name, for a thread made
+/// now, the model and the plugins she answers with, her model's window,
+/// and those settings, which her next request compares with what they say
+/// then.
 #[derive(Debug)]
-struct Parts {
+struct Built {
     character: Character,
     person: SpeakerName,
     context_window: NonZeroU64,
     adapter: Arc<dyn RoleModelAdapter>,
     host: PluginHost,
+    settings: CharacterSettings,
+}
+
+/// What a character runs on: what she is built of, and her thread with the
+/// person once it is open, which outlasts her being built again.
+#[derive(Debug)]
+struct Parts {
     built: Built,
     thread: Option<Conversation>,
 }
 
-/// A character assembled, and what her start warns of.
+/// A character built, and what her start warns of.
 struct Assembled {
-    parts: Parts,
+    built: Built,
     warning: Option<String>,
 }
 
@@ -292,37 +280,42 @@ struct Assembled {
 enum Change {
     Starting,
     Ready { warning: Option<String> },
-    Reloading,
     Failed(String),
     Stopping,
     Stopped { failures: Option<String> },
 }
 
 struct Actor {
-    id: Identifier,
-    world: Arc<World>,
-    /// What her own settings change through.
-    daemon: WeakDaemon,
+    her: Her,
     commands: mpsc::UnboundedReceiver<Command>,
     /// What was asked of her during a turn, to answer once it ends.
     deferred: VecDeque<Command>,
+    parts: Option<Parts>,
+}
+
+/// What every step of hers reaches: who she is, the world she is built
+/// from, the daemon her own settings change through, her stop, her health
+/// as she publishes it, and her confirmations.
+struct Her {
+    id: Identifier,
+    world: Arc<World>,
+    daemon: WeakDaemon,
     stop: CancellationToken,
     health: watch::Sender<CharacterHealth>,
     broker: Arc<Broker>,
-    parts: Option<Parts>,
 }
 
 impl Actor {
     async fn run(mut self) {
         self.boot().await;
 
-        while !self.stop.is_cancelled() {
+        while !self.her.stop.is_cancelled() {
             let command = if let Some(command) = self.deferred.pop_front() {
                 Some(command)
             } else {
                 tokio::select! {
                     biased;
-                    () = self.stop.cancelled() => break,
+                    () = self.her.stop.cancelled() => break,
                     command = self.commands.recv() => command,
                 }
             };
@@ -340,7 +333,7 @@ impl Actor {
     async fn handle(&mut self, command: Command) {
         match command {
             Command::Start(reply) => {
-                if self.state() == CharacterState::Failed {
+                if self.her.state() == CharacterState::Failed {
                     self.boot().await;
                 }
 
@@ -351,75 +344,32 @@ impl Actor {
                 let _ = reply.send(opened);
             }
             Command::Deliver(request, reply) => self.deliver(request, reply).await,
-            Command::Reconcile(now, reply) => {
-                match self.state() {
-                    CharacterState::Failed => self.boot().await,
-                    CharacterState::Ready
-                        if self.parts.as_ref().is_some_and(|parts| {
-                            !runs(&parts.built, &parts.host, now.as_deref())
-                        }) =>
-                    {
-                        self.reload().await;
-                    }
-                    _ => {}
-                }
-
-                let _ = reply.send(());
-            }
         }
     }
 
     /// Takes a line through her thread while she still hears what she is
     /// asked: a start is answered at once, since she runs, and so is an open
-    /// of her thread once it is open; a reconcile that would build her from
-    /// something else says she is reloading at once, and the reload follows
-    /// the turn, before her next line; a line waits its turn, in the order
-    /// it came. A turn the runtime fails leaves her failed, and she is built
-    /// again behind it, the lines sent meanwhile waiting as for a reload.
+    /// of her thread once it is open; a line waits its turn, in the order it
+    /// came. A turn the runtime fails leaves her failed, and she is built
+    /// again behind it, the lines sent meanwhile waiting for her.
     async fn deliver(&mut self, request: Request, reply: oneshot::Sender<TurnOutcome>) {
-        let mut parts = match self.parts.take() {
-            Some(parts) if self.state() == CharacterState::Ready => parts,
-            unready => {
-                self.parts = unready;
-
+        let mut parts = match self.current().await {
+            Ok(parts) => parts,
+            Err(refusal) => {
                 let _ = reply.send(TurnOutcome::refused(
                     TurnRefusal::CharacterUnavailable,
-                    not_ready(&self.id, &self.health.borrow()),
+                    refusal,
                 ));
                 return;
             }
         };
-        let mut reload = None;
+        let opened = parts.thread.as_ref().map(|thread| OpenOutcome::Opened {
+            conversation_id: thread.id().clone(),
+            character_id: self.her.id.clone(),
+            user_participant_id: Participant::local_user_id().clone(),
+        });
         let taken = {
-            let Parts {
-                character,
-                person,
-                context_window,
-                adapter,
-                host,
-                built,
-                thread,
-            } = &mut parts;
-            let opened = thread.as_ref().map(|thread| OpenOutcome::Opened {
-                conversation_id: thread.id().clone(),
-                character_id: self.id.clone(),
-                user_participant_id: Participant::local_user_id().clone(),
-            });
-            let mut turn = std::pin::pin!(take_line(
-                &self.world,
-                &self.health,
-                &self.id,
-                &self.broker,
-                TurnParts {
-                    thread,
-                    character,
-                    person,
-                    adapter: adapter.as_ref(),
-                    host,
-                    context_window: *context_window,
-                },
-                request,
-            ));
+            let mut turn = std::pin::pin!(take_line(&self.her, &mut parts, request));
 
             loop {
                 tokio::select! {
@@ -433,13 +383,7 @@ impl Actor {
                             // The turn opens her thread: it is answered after.
                             None => self.deferred.push_back(Command::Open(answer)),
                         },
-                        Command::Reconcile(now, answer)
-                            if reload.is_none() && !runs(built, host, now.as_deref()) =>
-                        {
-                            self.publish(Change::Reloading);
-                            reload = Some(answer);
-                        }
-                        Command::Start(answer) | Command::Reconcile(_, answer) => {
+                        Command::Start(answer) => {
                             let _ = answer.send(());
                         }
                         line @ Command::Deliver(..) => self.deferred.push_back(line),
@@ -458,99 +402,73 @@ impl Actor {
         };
         let _ = reply.send(outcome);
 
-        if fatal || reload.is_some() {
-            self.rebuild().await;
-        }
-
-        if let Some(answer) = reload {
-            let _ = answer.send(());
+        if fatal {
+            self.restart().await;
         }
     }
 
-    fn state(&self) -> CharacterState {
-        self.health.borrow().state
-    }
-
-    fn publish(&self, change: Change) {
-        let (state, diagnostic, message) = match change {
-            Change::Starting => (CharacterState::Starting, None, None),
-            Change::Ready { warning } => (CharacterState::Ready, warning, None),
-            Change::Reloading => (CharacterState::Reloading, None, None),
-            Change::Failed(failure) => {
-                (CharacterState::Failed, Some(failure.clone()), Some(failure))
+    /// Her parts to use, brought up to date with her settings first; or
+    /// the sentence she refuses with while she is not ready, or once her
+    /// settings no longer build her, which fails her and lets go of what
+    /// she ran on.
+    async fn current(&mut self) -> Result<Parts, String> {
+        let mut parts = match self.parts.take() {
+            Some(parts) if self.her.state() == CharacterState::Ready => parts,
+            unready => {
+                self.parts = unready;
+                return Err(self.her.not_ready());
             }
-            Change::Stopping => (CharacterState::Stopping, None, None),
-            Change::Stopped { failures } => (CharacterState::Stopped, None, failures),
         };
 
-        // The change is made and announced before anyone reading her
-        // health sees it or anyone waiting on it wakes: a surface that
-        // reads health after the event has the change, and a stop that
-        // waits for her last state finds it announced.
-        self.health.send_modify(|health| {
-            health.state = state;
-            health.diagnostic = diagnostic;
-            self.world.events.emit(Event::StateChanged {
-                character_id: self.id.clone(),
-                state,
-                message,
-            });
-        });
+        if let Err(failure) = self.her.refresh(&mut parts.built).await {
+            self.her.settle(Change::Failed(failure));
+            self.her.noted(&parts.release().await);
+            return Err(self.her.not_ready());
+        }
+
+        Ok(parts)
     }
 
     async fn boot(&mut self) {
-        self.publish(Change::Starting);
-        self.assemble().await;
-    }
+        self.her.publish(Change::Starting);
 
-    /// Assembles her afresh from what the disk holds now, and publishes how
-    /// that went, unless a stop came meanwhile: the stop has the last word,
-    /// and releases what was built.
-    async fn assemble(&mut self) {
-        let world = Arc::clone(&self.world);
-        let id = self.id.clone();
-        let broker = Arc::clone(&self.broker);
-        let daemon = self.daemon.clone();
-        let assembled = blocking(move || assemble(&world, &id, broker, daemon)).await;
-
-        match assembled {
-            Ok(Assembled { parts, warning }) => {
-                self.parts = Some(parts);
-
-                if !self.stop.is_cancelled() {
-                    self.publish(Change::Ready { warning });
-                }
+        match self.her.assemble().await {
+            Ok(Assembled { built, warning }) => {
+                self.parts = Some(Parts {
+                    built,
+                    thread: None,
+                });
+                self.her.settle(Change::Ready { warning });
             }
-            Err(failure) => {
-                if !self.stop.is_cancelled() {
-                    self.publish(Change::Failed(failure));
-                }
-            }
+            Err(failure) => self.her.settle(Change::Failed(failure)),
         }
     }
 
     async fn open(&mut self) -> OpenOutcome {
-        let state = self.state();
-        let (CharacterState::Ready, Some(parts)) = (state, self.parts.as_mut()) else {
-            return OpenOutcome::Refused {
-                reason: OpenRefusal::CharacterUnavailable,
-                message: not_ready(&self.id, &self.health.borrow()),
-            };
+        let mut parts = match self.current().await {
+            Ok(parts) => parts,
+            Err(message) => {
+                return OpenOutcome::Refused {
+                    reason: OpenRefusal::CharacterUnavailable,
+                    message,
+                };
+            }
         };
-
-        match hold(
-            &self.world,
-            &self.health,
-            &self.id,
+        let held = hold(
+            &self.her,
             &mut parts.thread,
-            &parts.character,
-            &parts.person,
+            &parts.built.character,
+            &parts.built.person,
         )
         .await
-        {
-            Ok(thread) => OpenOutcome::Opened {
-                conversation_id: thread.id().clone(),
-                character_id: self.id.clone(),
+        .map(|thread| thread.id().clone());
+
+        self.parts = Some(parts);
+
+        match held {
+            Ok(conversation_id) => OpenOutcome::Opened {
+                conversation_id,
+                character_id: self.her.id.clone(),
                 user_participant_id: Participant::local_user_id().clone(),
             },
             Err(error) => OpenOutcome::Failed(StorageFailure::of(&error)),
@@ -561,12 +479,12 @@ impl Actor {
     /// failed the turn; `committed` says whether the line was heard
     /// committed.
     fn answered(
-        &mut self,
+        &self,
         delivery: Delivery,
         conversation: ConversationId,
         committed: bool,
     ) -> (TurnOutcome, bool) {
-        let character_id = self.id.clone();
+        let character_id = self.her.id.clone();
 
         match delivery {
             Delivery::Duplicate {
@@ -622,9 +540,7 @@ impl Actor {
                     })
                     .collect();
 
-                if !failures.is_empty() {
-                    note_maintenance(&self.world, &self.health, &self.id, failures.join("; "));
-                }
+                self.her.noted(&failures);
 
                 (
                     TurnOutcome::Completed {
@@ -638,7 +554,7 @@ impl Actor {
             Delivery::Failed { error, .. } => {
                 let message = error_sentence(&error);
 
-                self.publish(Change::Failed(message.clone()));
+                self.her.publish(Change::Failed(message.clone()));
                 (
                     TurnOutcome::Failed {
                         character_id,
@@ -652,31 +568,16 @@ impl Actor {
         }
     }
 
-    /// Between turns, when what she would be built from now is not what she
-    /// was built from: deliveries that arrive meanwhile wait, and land on
-    /// her thread opened again.
-    async fn reload(&mut self) {
-        self.publish(Change::Reloading);
-        self.rebuild().await;
-    }
-
-    /// Lets go of what she runs on, what failed of that noted as
-    /// maintenance, and assembles her again, unless a stop came meanwhile.
-    async fn rebuild(&mut self) {
-        let failures = self.release().await;
-
-        if !failures.is_empty() {
-            note_maintenance(&self.world, &self.health, &self.id, failures.join("; "));
+    /// After a turn the runtime failed: lets go of what she ran on, what
+    /// failed of that noted as maintenance, and boots her again, unless her
+    /// stop came meanwhile.
+    async fn restart(&mut self) {
+        if let Some(parts) = self.parts.take() {
+            self.her.noted(&parts.release().await);
         }
 
-        if self.stop.is_cancelled() {
-            return;
-        }
-
-        if self.state() == CharacterState::Failed {
+        if !self.her.stop.is_cancelled() {
             self.boot().await;
-        } else {
-            self.assemble().await;
         }
     }
 
@@ -684,7 +585,7 @@ impl Actor {
     /// thread is closed, and her host shut down; what failed of that is
     /// said as she stops.
     async fn stop_now(&mut self) {
-        self.publish(Change::Stopping);
+        self.her.publish(Change::Stopping);
         self.commands.close();
 
         let mut unanswered: Vec<Command> = self.deferred.drain(..).collect();
@@ -697,122 +598,230 @@ impl Actor {
             self.answer_stopping(command);
         }
 
-        let failures = self.release().await;
+        let failures = match self.parts.take() {
+            Some(parts) => parts.release().await,
+            None => Vec::new(),
+        };
 
-        self.publish(Change::Stopped {
+        self.her.publish(Change::Stopped {
             failures: (!failures.is_empty()).then(|| failures.join("; ")),
         });
     }
 
     fn answer_stopping(&self, command: Command) {
-        let refusal = || not_ready(&self.id, &self.health.borrow());
-
         match command {
-            Command::Start(reply) | Command::Reconcile(_, reply) => {
+            Command::Start(reply) => {
                 let _ = reply.send(());
             }
             Command::Open(reply) => {
                 let _ = reply.send(OpenOutcome::Refused {
                     reason: OpenRefusal::CharacterUnavailable,
-                    message: refusal(),
+                    message: self.her.not_ready(),
                 });
             }
             Command::Deliver(_, reply) => {
                 let _ = reply.send(TurnOutcome::refused(
                     TurnRefusal::CharacterUnavailable,
-                    refusal(),
+                    self.her.not_ready(),
                 ));
             }
         }
     }
+}
 
-    /// Closes her thread, then shuts her host down: what failed, a sentence
-    /// each.
-    async fn release(&mut self) -> Vec<String> {
-        let Some(Parts {
-            character,
-            host,
-            thread,
-            ..
-        }) = self.parts.take()
-        else {
-            return Vec::new();
+impl Her {
+    fn state(&self) -> CharacterState {
+        self.health.borrow().state
+    }
+
+    /// The sentence she answers with while she takes nothing.
+    fn not_ready(&self) -> String {
+        not_ready(&self.id, &self.health.borrow())
+    }
+
+    fn publish(&self, change: Change) {
+        let (state, diagnostic, message) = match change {
+            Change::Starting => (CharacterState::Starting, None, None),
+            Change::Ready { warning } => (CharacterState::Ready, warning, None),
+            Change::Failed(failure) => {
+                (CharacterState::Failed, Some(failure.clone()), Some(failure))
+            }
+            Change::Stopping => (CharacterState::Stopping, None, None),
+            Change::Stopped { failures } => (CharacterState::Stopped, None, failures),
         };
-        let mut failures = Vec::new();
 
-        if let Some(thread) = thread {
-            failures.extend(thread.close().await);
+        // The change is made and announced before anyone reading her
+        // health sees it or anyone waiting on it wakes: a surface that
+        // reads health after the event has the change, and a stop that
+        // waits for her last state finds it announced.
+        self.health.send_modify(|health| {
+            health.state = state;
+            health.diagnostic = diagnostic;
+            self.world.events.emit(Event::StateChanged {
+                character_id: self.id.clone(),
+                state,
+                message,
+            });
+        });
+    }
+
+    /// Publishes how her being built went, unless her stop came meanwhile:
+    /// the stop has the last word.
+    fn settle(&self, change: Change) {
+        if !self.stop.is_cancelled() {
+            self.publish(change);
+        }
+    }
+
+    /// A background failure of hers, which the turn's outcome never says.
+    fn note_maintenance(&self, message: String) {
+        let failure = MaintenanceFailure {
+            at: Timestamp::now(),
+            message,
+        };
+
+        self.health
+            .send_modify(|health| health.maintenance = Some(failure.clone()));
+        self.world.events.emit(Event::MaintenanceFailed {
+            character_id: self.id.clone(),
+            failure,
+        });
+    }
+
+    /// `failures` as one maintenance failure, when there are any.
+    fn noted(&self, failures: &[String]) {
+        if !failures.is_empty() {
+            self.note_maintenance(failures.join("; "));
+        }
+    }
+
+    /// Builds her afresh from what the disk holds now, on the blocking pool.
+    async fn assemble(&self) -> Result<Assembled, String> {
+        let world = Arc::clone(&self.world);
+        let id = self.id.clone();
+        let broker = Arc::clone(&self.broker);
+        let daemon = self.daemon.clone();
+
+        blocking(move || assemble(&world, &id, broker, daemon)).await
+    }
+
+    /// Brings `built` up to date with her settings: she is built again, as
+    /// her boot builds her, when what they say now is not what she was
+    /// built from, unless they now switch her off, which her stop answers
+    /// once the turn in flight ends. True when she was built again; what
+    /// she ran on until then is let go, what failed of that noted as
+    /// maintenance.
+    ///
+    /// # Errors
+    ///
+    /// The sentence that says why her settings no longer build her; `built`
+    /// is left as it was.
+    async fn refresh(&self, built: &mut Built) -> Result<bool, String> {
+        let world = Arc::clone(&self.world);
+        let id = self.id.clone();
+        let now = blocking(move || {
+            settings_now(&world, discover(world.home.root()).find(id.as_str()).ok()?)
+        })
+        .await;
+
+        if now.is_some_and(|now| now == built.settings || !now.host().enabled) {
+            return Ok(false);
         }
 
+        let Assembled {
+            built: rebuilt,
+            warning,
+        } = self.assemble().await?;
+
+        self.noted(&std::mem::replace(built, rebuilt).shut_down().await);
+        self.settle(Change::Ready { warning });
+        Ok(true)
+    }
+}
+
+/// Her parts as a turn runs on them, brought up to date with her settings
+/// before each of its requests after the first.
+struct Current<'a> {
+    her: &'a Her,
+    built: &'a mut Built,
+}
+
+#[async_trait]
+impl Mind for Current<'_> {
+    fn adapter(&self) -> &dyn RoleModelAdapter {
+        self.built.adapter.as_ref()
+    }
+
+    fn host(&self) -> &PluginHost {
+        &self.built.host
+    }
+
+    fn context_window(&self) -> NonZeroU64 {
+        self.built.context_window
+    }
+
+    async fn refresh(&mut self) -> Result<bool, String> {
+        self.her.refresh(self.built).await
+    }
+}
+
+impl Built {
+    /// Ends her plugins: what failed, a sentence each.
+    async fn shut_down(self) -> Vec<String> {
         // Her end belongs to no session, but a hook is handed the turn it
         // serves, so it names a session of no conversation.
         let ending = Turn::new(TurnIdentity {
             session_id: SessionId::new(ConversationId::mint(), NonZeroU64::MIN),
             event: EventIdentity::mint(),
-            character: character.profile,
+            character: self.character.profile,
         });
 
-        failures.extend(host.shutdown(&ending).await.failures());
+        self.host.shutdown(&ending).await.failures()
+    }
+}
+
+impl Parts {
+    /// Closes her thread, then ends her plugins: what failed, a sentence
+    /// each.
+    async fn release(self) -> Vec<String> {
+        let mut failures = Vec::new();
+
+        if let Some(thread) = self.thread {
+            failures.extend(thread.close().await);
+        }
+
+        failures.extend(self.built.shut_down().await);
         failures
     }
 }
 
-/// Whether she runs what she would be built from now, `now`, which is none
-/// when her settings cannot be resolved: her package, her host's values,
-/// and each plugin as her host serves it, one her own plugin rebuilt live
-/// serving the values it was rebuilt from.
-fn runs(built: &Built, host: &PluginHost, now: Option<&Built>) -> bool {
-    now.is_some_and(|now| {
-        built.definition == now.definition
-            && built.settings.host() == now.settings.host()
-            && host.serves(now.settings.plugins())
-    })
-}
-
-/// What a turn runs on: her thread, opened the first time it is needed,
-/// and the parts she answers with.
-struct TurnParts<'p> {
-    thread: &'p mut Option<Conversation>,
-    character: &'p Character,
-    person: &'p SpeakerName,
-    adapter: &'p dyn RoleModelAdapter,
-    host: &'p PluginHost,
-    context_window: NonZeroU64,
-}
-
-/// Takes `request` through her thread: what the runtime made of it, on
-/// which conversation, and whether the line was heard committed; or what a
-/// line her thread cannot take comes to.
+/// Takes `request` through her thread on `parts`: what the runtime made of
+/// it, on which conversation, and whether the line was heard committed; or
+/// what a line her thread cannot take comes to.
 async fn take_line(
-    world: &World,
-    health: &watch::Sender<CharacterHealth>,
-    id: &Identifier,
-    broker: &Broker,
-    parts: TurnParts<'_>,
+    her: &Her,
+    parts: &mut Parts,
     request: Request,
 ) -> Result<(Delivery, ConversationId, bool), TurnOutcome> {
     let Request { stamp, text } = request;
     let conversation = stamp.conversation_id.clone();
-    let thread = hold(
-        world,
-        health,
-        id,
-        parts.thread,
-        parts.character,
-        parts.person,
-    )
-    .await
-    .map_err(|error| TurnOutcome::Failed {
-        character_id: id.clone(),
-        conversation_id: conversation.clone(),
-        message: error_sentence(&error),
-        committed: false,
-    })?;
+    let Parts { built, thread } = parts;
+    let thread = hold(her, thread, &built.character, &built.person)
+        .await
+        .map_err(|error| TurnOutcome::Failed {
+            character_id: her.id.clone(),
+            conversation_id: conversation.clone(),
+            message: error_sentence(&error),
+            committed: false,
+        })?;
 
     if *thread.id() != conversation {
         return Err(TurnOutcome::refused(
             TurnRefusal::UnknownConversation,
-            format!("Character \"{id}\" holds no open conversation \"{conversation}\"."),
+            format!(
+                "Character \"{}\" holds no open conversation \"{conversation}\".",
+                her.id
+            ),
         ));
     }
 
@@ -822,14 +831,14 @@ async fn take_line(
             committed.store(true, Ordering::Relaxed);
         }
 
-        world.events.emit(Event::TurnProgress {
-            character_id: id.clone(),
+        her.world.events.emit(Event::TurnProgress {
+            character_id: her.id.clone(),
             conversation_id: conversation.clone(),
             progress: progress.into(),
         });
     };
 
-    broker.running(Some(stamp.clone()));
+    her.broker.running(Some(stamp.clone()));
 
     let delivery = thread
         .deliver(
@@ -838,23 +847,19 @@ async fn take_line(
                 source: Some(stamp.source),
                 client_message_id: Some(stamp.client_message_id),
             },
-            parts.adapter,
-            parts.host,
-            parts.context_window,
+            &mut Current { her, built },
             &listener,
         )
         .await;
 
-    broker.running(None);
+    her.broker.running(None);
     Ok((delivery, conversation, committed.into_inner()))
 }
 
 /// Her thread with the person, opened on the blocking pool the first time
 /// it is asked for; what the open read past is noted as maintenance.
 async fn hold<'t>(
-    world: &World,
-    health: &watch::Sender<CharacterHealth>,
-    id: &Identifier,
+    her: &Her,
     thread: &'t mut Option<Conversation>,
     character: &Character,
     person: &SpeakerName,
@@ -862,38 +867,18 @@ async fn hold<'t>(
     let held = if let Some(held) = thread.take() {
         held
     } else {
-        let home = world.home.clone();
+        let home = her.world.home.clone();
         let (character, person) = (character.clone(), person.clone());
         let opened = blocking(move || Conversation::open(&home, character, person)).await?;
 
         if let Some(skipped) = opened.skipped() {
-            note_maintenance(world, health, id, skipped.to_owned());
+            her.note_maintenance(skipped.to_owned());
         }
 
         opened
     };
 
     Ok(thread.insert(held))
-}
-
-/// A background failure of character `id`'s, which the turn's outcome never
-/// says.
-fn note_maintenance(
-    world: &World,
-    health: &watch::Sender<CharacterHealth>,
-    id: &Identifier,
-    message: String,
-) {
-    let failure = MaintenanceFailure {
-        at: Timestamp::now(),
-        message,
-    };
-
-    health.send_modify(|health| health.maintenance = Some(failure.clone()));
-    world.events.emit(Event::MaintenanceFailed {
-        character_id: id.clone(),
-        failure,
-    });
 }
 
 /// Assembles character `id` from what the disk holds now: her package, her
@@ -956,7 +941,7 @@ fn assemble(
 
     Ok(Assembled {
         warning: (!cautions.is_empty()).then(|| cautions.join(" ")),
-        parts: Parts {
+        built: Built {
             character: Character {
                 profile: definition.profile.clone(),
                 persona: definition.persona.clone(),
@@ -965,11 +950,7 @@ fn assemble(
             context_window: settings.host().context_window_tokens,
             adapter,
             host,
-            built: Built {
-                definition: definition.clone(),
-                settings,
-            },
-            thread: None,
+            settings,
         },
     })
 }

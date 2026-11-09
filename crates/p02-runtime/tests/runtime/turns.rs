@@ -8,7 +8,7 @@ use p02_runtime::{CompletedTurn, Delivery, Progress, RejectedTurn, Submission};
 use p02_store::{LogRecord, RecordBody, RecordKind, ToolDispatch, TurnRejected};
 use serde_json::{Value, json};
 
-use crate::support::{Chat, Round, Toy, calling, reply, stamp, told, written};
+use crate::support::{Chat, Fixed, Round, Toy, calling, reply, stamp, told, written};
 
 const RECEIVED: RecordKind = RecordKind::RuntimeEventReceived;
 const COMMITTED: RecordKind = RecordKind::VisibleMessageCommitted;
@@ -54,9 +54,11 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
                 source: Some(stamp("web")),
                 client_message_id: Some(stamp("hello")),
             },
-            &*model,
-            host,
-            *window,
+            &mut Fixed {
+                model,
+                host,
+                window: *window,
+            },
             &|progress: Progress| {
                 let on_disk = world
                     .records(&id, 1)

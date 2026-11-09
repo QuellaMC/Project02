@@ -19,9 +19,9 @@ use p02_contracts::{
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
     ActivationStatus, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, Rebuild,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
 };
-use p02_runtime::{Character, Conversation, Delivery, Progress, Submission};
+use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
 use serde_json::{Map, Value, json};
@@ -169,6 +169,32 @@ impl World {
     }
 }
 
+/// What the thread's tests answer a line with: settings never change it.
+pub(crate) struct Fixed<'c> {
+    pub(crate) model: &'c Model,
+    pub(crate) host: &'c PluginHost,
+    pub(crate) window: NonZeroU64,
+}
+
+#[async_trait]
+impl Mind for Fixed<'_> {
+    fn adapter(&self) -> &dyn RoleModelAdapter {
+        self.model
+    }
+
+    fn host(&self) -> &PluginHost {
+        self.host
+    }
+
+    fn context_window(&self) -> NonZeroU64 {
+        self.window
+    }
+
+    async fn refresh(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+}
+
 /// An open thread with what answers it and what hears it.
 pub(crate) struct Chat {
     pub(crate) world: World,
@@ -222,9 +248,11 @@ impl Chat {
                     source: Some(stamp("web")),
                     client_message_id: Some(stamp(client_message_id)),
                 },
-                &self.model,
-                &self.host,
-                self.window,
+                &mut Fixed {
+                    model: &self.model,
+                    host: &self.host,
+                    window: self.window,
+                },
                 &|progress| {
                     hearing(&progress);
                     heard.push(progress);
@@ -584,7 +612,7 @@ impl ConfigControl for NoSettings {
         Err(NO_SETTINGS.to_owned())
     }
 
-    fn change(&self, _change: &FieldChange, _rebuild: Option<Rebuild<'_>>) -> FieldChangeOutcome {
+    fn change(&self, _change: &FieldChange) -> FieldChangeOutcome {
         FieldChangeOutcome::Failed {
             message: NO_SETTINGS.to_owned(),
         }

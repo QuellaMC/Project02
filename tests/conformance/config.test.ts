@@ -7,9 +7,11 @@ import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {characterJson, chmod, configJson, createHome} from './harness/home.ts';
 import {
+  calling,
   messagesOf,
   reply,
   startModelServer,
+  toolResults,
   type ModelRequest,
 } from './harness/model-server.ts';
 import {
@@ -370,7 +372,7 @@ it("config.overlay-merge: what a character's screen saves is written into her ov
   }
 });
 
-it('config.applied-reload: a change to what a running character runs, her key among them, reloads her once the turn in flight has finished, and the turns after it, one sent during the reload among them, land on the same conversation under the new settings', async () => {
+it("config.applied-reload: a change saved while her reply runs is in effect from her next request, inside that reply, which goes on with what it did so far and lands on the same conversation, as does a line sent meanwhile; a key changed between her turns is her next turn's", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({
@@ -383,12 +385,10 @@ it('config.applied-reload: a change to what a running character runs, her key am
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
-  const events = await openEvents(daemon);
-  const ready = frameOf('state_changed', {characterId: 'mira', state: 'ready'});
   const held = model.hold();
   const inFlight = say('First?', 'in-flight');
 
-  expect(toneIn(await held.arrived())).toContain('neutral tone');
+  await held.arrived();
   await saveConfig(wire, mira, {
     kind: 'section_field_set',
     namespace: 'plugins',
@@ -396,31 +396,34 @@ it('config.applied-reload: a change to what a running character runs, her key am
     field: 'tone',
     value: 'pirate',
   });
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'reloading'}),
-  );
 
-  const duringReload = say('Second?', 'during-reload');
+  const meanwhile = say('Second?', 'meanwhile');
 
-  model.answer(reply('Second.'));
-  held.release(reply('First.'));
+  model.answer(reply('First.'), reply('Second.'));
+  held.release(calling(['runtime_plugin_list', {}]));
   expect(await inFlight).toMatchObject({
     status: 'completed',
+    conversationId,
     messages: [{}, {text: 'First.'}],
   });
-  expect(await duringReload).toMatchObject({
+  expect(await meanwhile).toMatchObject({
     status: 'completed',
     conversationId,
     messages: [{}, {text: 'Second.'}],
   });
-  expect(toneIn(model.requests.at(-1))).toContain('pirate tone');
-  await events.next(ready);
+  expect(model.requests.map(toneIn)).toEqual([
+    expect.stringContaining('neutral tone'),
+    expect.stringContaining('pirate tone'),
+    expect.stringContaining('pirate tone'),
+  ]);
+  expect(toolResults(model.requests[1])).toMatchObject([
+    {status: 'accepted', toolName: 'runtime.plugin.list'},
+  ]);
   await saveConfig(
     wire,
     {scope: 'global'},
     {kind: 'set', path: 'project02.nvidiaApiKey', value: 'rekeyed'},
   );
-  await events.next(ready);
   model.answer(reply('Third.'));
   expect(await say('Third?', 'third')).toMatchObject({conversationId});
   expect(model.requests.at(-1)?.authorization).toBe('Bearer rekeyed');
