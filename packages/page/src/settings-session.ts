@@ -177,14 +177,25 @@ function characterVerbs({
   SettingsVerbs,
   'chooseCharacterFile' | 'addCharacter' | 'removeCharacter'
 > {
+  /** Files chosen, numbered as they are: only the newest one's preview is shown. */
+  let chosen = 0;
+
   return {
     async chooseCharacterFile(file) {
+      const mine = (chosen += 1);
+      // What is said of a file is shown only while it is the one last chosen.
+      const show = (reduce: (state: WebState) => WebState): void => {
+        if (mine === chosen) {
+          apply(reduce);
+        }
+      };
+
       apply(noticeSpent);
 
       const read = await textOf(file);
 
       if ('refused' in read) {
-        apply(current =>
+        show(current =>
           characterPreviewed(
             current,
             {name: file.name},
@@ -198,7 +209,7 @@ function characterVerbs({
       try {
         const preview = await client.previewCharacter(read.text);
 
-        apply(current =>
+        show(current =>
           characterPreviewed(
             current,
             {name: file.name, text: read.text},
@@ -206,7 +217,7 @@ function characterVerbs({
           ),
         );
       } catch (error: unknown) {
-        apply(current => noticed(current, problem(error)));
+        show(current => noticed(current, problem(error)));
       }
     },
     async addCharacter() {
