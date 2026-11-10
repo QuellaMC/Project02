@@ -410,9 +410,25 @@ it('connectors.telegram-mirror-before-open: a web line that opens her thread aft
   first.signal('SIGINT');
   await first.exit();
 
-  const wire = wireOf(await startDaemon(home));
+  const restarted = await startDaemon(home);
+  const wire = wireOf(restarted);
   const held = model.hold();
+  const boot = await openEvents(restarted);
 
+  // Her roster comes up behind the address, and until the boot pass
+  // reaches her she takes no line: the line goes once it has, which her
+  // state in the stream's snapshot, or its first change after, says.
+  await boot.holding('the boot pass to reach her', frames =>
+    frames.find(
+      frame =>
+        frameOf('state_changed', {characterId: 'mira'})(frame) ||
+        ['starting', 'ready'].some(state =>
+          frameOf('ready', {health: {characters: [{id: 'mira', state}]}})(
+            frame,
+          ),
+        ),
+    ),
+  );
   await expect(
     wire.turn({
       conversationId,
