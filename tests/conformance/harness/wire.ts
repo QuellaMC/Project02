@@ -121,6 +121,16 @@ export function wireOf(daemon: Address) {
         'PairingRequestOutcome',
         request,
       ),
+    connectorBots: (
+      connectorId: string,
+      table: {readonly bots: readonly object[]},
+    ) =>
+      call(
+        'POST',
+        `/api/connectors/${segment(connectorId)}/bots`,
+        'ConnectorBotsOutcome',
+        table,
+      ),
     pendingPairings: () =>
       call('GET', '/api/pairing', {listOf: 'PairingRequest'}),
     pairingAnswer: (code: string, decision: Decision) =>

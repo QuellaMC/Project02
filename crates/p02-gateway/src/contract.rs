@@ -17,15 +17,17 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    Answer, AnswerBody, CancelReason, ChangeOutcome, ChangeRefusal, CharacterState,
-    CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer,
-    ConfirmationId, ConfirmationQuestion, ConnectorConfigView, ConnectorPresence, ConnectorRefusal,
-    ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
-    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
-    RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal, StorageFailure,
-    SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    Answer, AnswerBody, BotState, BotUsername, CancelReason, ChangeOutcome, ChangeRefusal,
+    CharacterState, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
+    ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
+    ConnectorBotsOutcome, ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence,
+    ConnectorRefusal, ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome,
+    HistoryRefusal, MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal,
+    PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal,
+    PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion,
+    Ready, Refusal, RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal,
+    StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
+    TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -55,6 +57,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<ChangeOutcome>();
     wire.written::<ConnectorConfigView>();
     wire.written::<PairingOutcome>();
+    wire.written::<ConnectorBotsOutcome>();
     wire.written::<PairingRequest>();
     wire.written::<PairingAnswer>();
     wire.written::<ErrorBody>();
@@ -67,6 +70,7 @@ fn walk(wire: &mut impl Wire) {
     wire.read::<GatewayMessage>();
     wire.read::<AnswerBody>();
     wire.read::<PairingRequestBody>();
+    wire.read::<ConnectorBotsBody>();
     wire.read::<ConfigChange>();
     wire.read::<ConfigTarget>();
 }
@@ -311,6 +315,19 @@ fn read() -> Vec<(&'static str, Value)> {
                 "source": "telegram:mira_bot",
             }),
         ),
+        reads::<ConnectorBotsBody>(
+            "ConnectorBotsBody",
+            json!({
+                "bots": [
+                    {
+                        "target": {"scope": "character", "characterId": "mira"},
+                        "username": "mira_bot",
+                        "state": "on",
+                    },
+                    {"target": {"scope": "global"}, "state": "refused"},
+                ],
+            }),
+        ),
         reads::<ConfigChange>(
             "ConfigChange",
             json!({
@@ -363,7 +380,21 @@ fn written() -> Vec<(&'static str, Value)> {
         }],
         connectors: vec![ConnectorPresence {
             id: id("telegram"),
-            connected: false,
+            connected: true,
+            bots: vec![
+                ConnectorBot {
+                    target: ConfigTarget::Global,
+                    username: None,
+                    state: BotState::Unreachable,
+                },
+                ConnectorBot {
+                    target: ConfigTarget::Character {
+                        character_id: "mira".to_owned(),
+                    },
+                    username: Some(BotUsername::new("mira_bot").unwrap()),
+                    state: BotState::On,
+                },
+            ],
         }],
     };
     let turn = TurnStamp {
@@ -564,6 +595,14 @@ fn written() -> Vec<(&'static str, Value)> {
             &PairingOutcome::Refused {
                 reason: PairingRefusal::UnknownConnector,
                 message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
+            },
+        ),
+        read_back("ConnectorBotsOutcome", &ConnectorBotsOutcome::Kept),
+        read_back(
+            "ConnectorBotsOutcome",
+            &ConnectorBotsOutcome::Refused {
+                reason: ConnectorBotsRefusal::NotConnected,
+                message: "Connector \"telegram\" has no event stream open.".to_owned(),
             },
         ),
         read_back(

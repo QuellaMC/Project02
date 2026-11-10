@@ -36,6 +36,17 @@ export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } |
 export type Authored = { configured: boolean, value?: JsonValue, };
 
 /**
+ * How a bot stands. A bot that does not know yet is in no table.
+ */
+export type BotState = "on" | "refused" | "unreachable" | "conflict" | "webhook";
+
+/**
+ * The name a bot goes by on its connector's service, without the `@`: 1
+ * to 32 ASCII letters, digits or underscores, as Telegram spells one.
+ */
+export type BotUsername = string;
+
+/**
  * Why a change was refused.
  */
 export type ChangeRefusal = "conflict" | "invalid" | "unknown_character";
@@ -89,8 +100,8 @@ export type ConfigChangeOutcome = { "status": "applied", fingerprint: Fingerprin
 export type ConfigHealth = { diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, };
 
 /**
- * Whose settings a view reads or a change writes: the home's, or one
- * character's.
+ * Whose settings a view reads or a change writes, and whose bot a
+ * connector's is: the home's, or one character's.
  */
 export type ConfigTarget = { "scope": "global" } | { "scope": "character", characterId: string, };
 
@@ -129,6 +140,27 @@ export type ConfirmationQuestion = { pluginId: Identifier, toolName: Identifier,
 export type ConfirmationSettlement = { "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, };
 
 /**
+ * One bot a connector runs, as the connector says it stands: whose it is,
+ * the home's own or one character's, the name it goes by once its service
+ * has said who it is, and its state. Its token is no part of it.
+ */
+export type ConnectorBot = { target: ConfigTarget, username?: BotUsername, state: BotState, };
+
+/**
+ * A connector's bot table, whole every time: the daemon holds it in place
+ * of the one it held, never beside it.
+ */
+export type ConnectorBotsBody = { bots: ReadonlyArray<ConnectorBot>, };
+
+/**
+ * What came of a connector's bot table. `kept`: health shows it from now
+ * on, until the connector's last stream ends.
+ */
+export type ConnectorBotsOutcome = { "status": "kept" } | { "status": "refused", reason: ConnectorBotsRefusal, message: string, };
+
+export type ConnectorBotsRefusal = "unknown_connector" | "not_connected";
+
+/**
  * A connector's section for one target: its activation, and each field
  * that has a value it takes for that target, the home's fields reaching
  * every character's entry.
@@ -145,9 +177,10 @@ export type ConnectorConfigEntry = { activation: RuntimeConfigSectionActivationS
 export type ConnectorConfigView = { "status": "ok", connectorId: Identifier, home: ConnectorConfigEntry, characters: ReadonlyArray<CharacterConnectorEntry>, } | { "status": "refused", reason: ConnectorRefusal, message: string, };
 
 /**
- * Whether a process of a built-in connector is on the event stream now.
+ * Whether a process of a built-in connector is on the event stream now,
+ * and the bots it last said it runs, none while it is not.
  */
-export type ConnectorPresence = { id: Identifier, connected: boolean, };
+export type ConnectorPresence = { id: Identifier, connected: boolean, bots: ReadonlyArray<ConnectorBot>, };
 
 export type ConnectorRefusal = "unknown_connector" | "config_unloadable";
 

@@ -272,9 +272,9 @@ pub struct CharacterConnectorEntry {
     pub entry: ConnectorEntry,
 }
 
-/// Whose settings a view reads or a change writes: the home's, or one
-/// character's.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, TS)]
+/// Whose settings a view reads or a change writes, and whose bot a
+/// connector's is: the home's, or one character's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigTarget {
     Global,

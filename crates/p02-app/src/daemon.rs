@@ -21,9 +21,10 @@ use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
     Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
-    ConfirmationAnswer, ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome,
-    OpenOutcome, OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome,
-    StartRefusal, SubmitOutcome, TurnRefusal,
+    ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
+    ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, OpenOutcome,
+    OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome, StartRefusal,
+    SubmitOutcome, TurnRefusal,
 };
 use tokio::sync::mpsc;
 
@@ -228,9 +229,16 @@ struct Inner {
     /// and deliveries take it in the order they came.
     routes: tokio::sync::Mutex<HashMap<ConversationId, Identifier>>,
     reconciler: Arc<Reconciler>,
-    /// How many streams of each connector are open.
-    presence: Mutex<BTreeMap<Identifier, usize>>,
+    presence: Mutex<BTreeMap<Identifier, Connected>>,
     pairings: Pairings,
+}
+
+/// A connector on the stream: how many streams of it are open, and the
+/// bots it last said it runs, none once the last stream ended.
+#[derive(Clone, Debug, Default)]
+struct Connected {
+    streams: usize,
+    bots: Vec<ConnectorBot>,
 }
 
 /// The daemon, held by what it owns without keeping it alive: a
@@ -253,7 +261,8 @@ struct Characters {
 }
 
 /// A connector's stream counted as present while this is held: health
-/// shows the connector connected, and the stream's end lets it go.
+/// shows the connector connected, and the stream's end lets it go, the
+/// last stream's end the connector's bots with it.
 #[derive(Debug)]
 #[must_use = "a connector counts as present only while its presence is held"]
 pub struct Presence {
@@ -277,10 +286,15 @@ impl Drop for Presence {
     fn drop(&mut self) {
         let last = {
             let mut presence = self.daemon.inner.presence();
-            let count = presence.entry(self.connector.clone()).or_default();
+            let connected = presence.entry(self.connector.clone()).or_default();
 
-            *count = count.saturating_sub(1);
-            *count == 0
+            connected.streams = connected.streams.saturating_sub(1);
+
+            if connected.streams == 0 {
+                connected.bots.clear();
+            }
+
+            connected.streams == 0
         };
 
         if last {
@@ -296,7 +310,7 @@ impl Inner {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn presence(&self) -> MutexGuard<'_, BTreeMap<Identifier, usize>> {
+    fn presence(&self) -> MutexGuard<'_, BTreeMap<Identifier, Connected>> {
         self.presence.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -348,7 +362,7 @@ impl Daemon {
 
     /// The daemon's whole state, read now: the roster as the disk says it
     /// is, each character's state as her actor published it, and the
-    /// connectors on the stream.
+    /// connectors on the stream, each with its bots.
     pub async fn health(&self) -> Health {
         let daemon = self.clone();
 
@@ -388,9 +402,15 @@ impl Daemon {
 
                 connectors()
                     .iter()
-                    .map(|connector| ConnectorPresence {
-                        id: connector.id().clone(),
-                        connected: presence.get(connector.id()).is_some_and(|count| *count > 0),
+                    .map(|connector| {
+                        let Connected { streams, bots } =
+                            presence.get(connector.id()).cloned().unwrap_or_default();
+
+                        ConnectorPresence {
+                            id: connector.id().clone(),
+                            connected: streams > 0,
+                            bots,
+                        }
                     })
                     .collect()
             },
@@ -670,10 +690,10 @@ impl Daemon {
         };
         let first = {
             let mut counts = self.inner.presence();
-            let count = counts.entry(connector.id().clone()).or_default();
+            let connected = counts.entry(connector.id().clone()).or_default();
 
-            *count += 1;
-            *count == 1
+            connected.streams += 1;
+            connected.streams == 1
         };
 
         if first {
@@ -681,6 +701,55 @@ impl Daemon {
         }
 
         presence
+    }
+
+    /// Keeps `bots` as the table of connector `connector`, in place of the
+    /// one it held, while a stream of it is open: health shows it from then
+    /// on, and goes out to every surface, before the answer does, when the
+    /// table changed. A connector with no stream open is refused, so health
+    /// never shows the bots of one that is off the stream.
+    pub async fn connector_bots(
+        &self,
+        connector: &str,
+        bots: Vec<ConnectorBot>,
+    ) -> ConnectorBotsOutcome {
+        let connector = match p02_config::connector(connector) {
+            Ok(connector) => connector,
+            Err(unknown) => {
+                return ConnectorBotsOutcome::Refused {
+                    reason: ConnectorBotsRefusal::UnknownConnector,
+                    message: unknown.to_string(),
+                };
+            }
+        };
+        let changed = {
+            let mut presence = self.inner.presence();
+            let Some(connected) = presence
+                .get_mut(connector.id())
+                .filter(|connected| connected.streams > 0)
+            else {
+                return ConnectorBotsOutcome::Refused {
+                    reason: ConnectorBotsRefusal::NotConnected,
+                    message: format!(
+                        "Connector \"{}\" has no event stream open, and its bots are kept only \
+                         while one is.",
+                        connector.id()
+                    ),
+                };
+            };
+            let changed = connected.bots != bots;
+
+            connected.bots = bots;
+            changed
+        };
+
+        if changed {
+            let daemon = self.clone();
+
+            blocking(move || daemon.announce_health()).await;
+        }
+
+        ConnectorBotsOutcome::Kept
     }
 
     /// Stops every character, for good: no start follows. A boot or a

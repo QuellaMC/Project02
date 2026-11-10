@@ -1,6 +1,7 @@
 import {expect, it} from 'vitest';
 
 import {connector, startDaemon} from './harness/daemon.ts';
+import {frameOf, openEvents} from './harness/events.ts';
 import {characterJson, configJson, createHome} from './harness/home.ts';
 import {
   messageFrom,
@@ -10,6 +11,7 @@ import {
   type TelegramCall,
   type TelegramServer,
 } from './harness/telegram-server.ts';
+import {wireOf} from './harness/wire.ts';
 
 const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
 const novaBot = {token: '555555:nova', id: 555555, username: 'nova_bot'};
@@ -39,6 +41,21 @@ function miraHome(paired: readonly Account[] = []): string {
       },
     },
   });
+}
+
+/** Mira's bot as health shows it once Telegram said who it is. */
+const miraOn = {
+  target: {scope: 'character', characterId: 'mira'},
+  username: 'mira_bot',
+  state: 'on',
+};
+
+/** Health's connectors: whether the Telegram connector is on the stream, and its bots. */
+function presence(
+  connected: boolean,
+  bots: readonly object[],
+): readonly object[] {
+  return [{id: 'telegram', connected, bots}];
 }
 
 /** Settles on the bot's call of this method at this place among those calls, once it was made. */
@@ -132,4 +149,78 @@ it('connectors.telegram-token-refused: a bot token Telegram refuses is named on 
     "Telegram refused Mira's bot token. Replace it on Mira's settings page.",
   );
   await run.printed('Telegram: @nova_bot answers for Nova.');
+});
+
+it("connectors.telegram-bots-in-health: health says how each of the connector's bots stands, one Telegram named as on under its username and one whose token Telegram refuses as refused, and every surface hears of it; none is left once the connector stops, and a table sent while it is off the stream is refused", async () => {
+  const home = createHome({
+    characters: {
+      nova: {'project02.character.json': characterJson('nova', 'Nova')},
+    },
+    'character-data': {
+      mira: {
+        'config.json': configJson({
+          connectors: {telegram: {config: {botToken: miraBot.token}}},
+        }),
+      },
+      nova: {
+        'config.json': configJson({
+          connectors: {telegram: {config: {botToken: '111111:unknown'}}},
+        }),
+      },
+    },
+  });
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const watching = await openEvents(daemon);
+  const telegram = await startTelegramServer([miraBot]);
+  const run = connector(['--store', home], telegram.env);
+  const bots = [
+    miraOn,
+    {target: {scope: 'character', characterId: 'nova'}, state: 'refused'},
+  ];
+  const heard = (connected: boolean, table: readonly object[]) =>
+    watching.next(
+      frameOf('health_changed', {
+        health: {connectors: presence(connected, table)},
+      }),
+    );
+
+  await heard(true, bots);
+  // Nothing but these fields: no token is among them.
+  expect(await wire.health()).toHaveProperty(
+    'connectors',
+    presence(true, bots),
+  );
+  run.signal('SIGINT');
+  await run.exit();
+  await heard(false, []);
+  expect(await wire.connectorBots('telegram', {bots})).toMatchObject({
+    status: 'refused',
+    reason: 'not_connected',
+  });
+  expect(await wire.health()).toHaveProperty('connectors', presence(false, []));
+});
+
+it('connectors.telegram-bots-told-again: the connector tells a daemon started again how its bots stand, once it is back on the stream', async () => {
+  const home = miraHome();
+  const first = await startDaemon(home);
+  const before = await openEvents(first);
+  const telegram = await startTelegramServer([miraBot]);
+  const told = {health: {connectors: presence(true, [miraOn])}};
+
+  connector(['--store', home], telegram.env);
+  await before.next(frameOf('health_changed', told));
+  first.signal('SIGINT');
+  await first.exit();
+
+  const again = await openEvents(await startDaemon(home));
+
+  // In the snapshot when the connector was back first, in a frame after
+  // it otherwise.
+  await again.holding('the bots to be told again', frames =>
+    frames.find(
+      frame =>
+        frameOf('ready', told)(frame) || frameOf('health_changed', told)(frame),
+    ),
+  );
 });

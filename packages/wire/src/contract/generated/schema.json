@@ -94,6 +94,40 @@
       ],
       "description": "What the target's own document holds for a field."
     },
+    "BotState": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "on",
+          "description": "It is receiving messages."
+        },
+        {
+          "type": "string",
+          "const": "refused",
+          "description": "Its service refused its token."
+        },
+        {
+          "type": "string",
+          "const": "unreachable",
+          "description": "Its service cannot be reached."
+        },
+        {
+          "type": "string",
+          "const": "conflict",
+          "description": "Another program is polling its token."
+        },
+        {
+          "type": "string",
+          "const": "webhook",
+          "description": "Its token is set to a webhook."
+        }
+      ],
+      "description": "How a bot stands. A bot that does not know yet is in no table."
+    },
+    "BotUsername": {
+      "type": "string",
+      "description": "The name a bot goes by on its connector's service, without the `@`: 1\nto 32 ASCII letters, digits or underscores, as Telegram spells one."
+    },
     "ChangeRefusal": {
       "oneOf": [
         {
@@ -345,7 +379,7 @@
           ]
         }
       ],
-      "description": "Whose settings a view reads or a change writes: the home's, or one\ncharacter's."
+      "description": "Whose settings a view reads or a change writes, and whose bot a\nconnector's is: the home's, or one character's."
     },
     "ConfigValueType": {
       "oneOf": [
@@ -523,6 +557,95 @@
       ],
       "description": "How a confirmation ended: with the person's answer, or cancelled and\nwhy."
     },
+    "ConnectorBot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ConfigTarget"
+        },
+        "username": {
+          "$ref": "#/$defs/BotUsername"
+        },
+        "state": {
+          "$ref": "#/$defs/BotState"
+        }
+      },
+      "required": [
+        "target",
+        "state"
+      ],
+      "description": "One bot a connector runs, as the connector says it stands: whose it is,\nthe home's own or one character's, the name it goes by once its service\nhas said who it is, and its state. Its token is no part of it."
+    },
+    "ConnectorBotsBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectorBot"
+          },
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "bots"
+      ],
+      "description": "A connector's bot table, whole every time: the daemon holds it in place\nof the one it held, never beside it."
+    },
+    "ConnectorBotsOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "kept"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/ConnectorBotsRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        }
+      ],
+      "description": "What came of a connector's bot table. `kept`: health shows it from now\non, until the connector's last stream ends."
+    },
+    "ConnectorBotsRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_connector"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "not_connected",
+          "description": "No stream of the connector is open, and a table is kept only while\none is."
+        }
+      ]
+    },
     "ConnectorConfigEntry": {
       "type": "object",
       "properties": {
@@ -600,13 +723,20 @@
         },
         "connected": {
           "type": "boolean"
+        },
+        "bots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConnectorBot"
+          }
         }
       },
       "required": [
         "id",
-        "connected"
+        "connected",
+        "bots"
       ],
-      "description": "Whether a process of a built-in connector is on the event stream now."
+      "description": "Whether a process of a built-in connector is on the event stream now,\nand the bots it last said it runs, none while it is not."
     },
     "ConnectorRefusal": {
       "type": "string",

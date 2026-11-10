@@ -139,7 +139,7 @@ const health: GatewayHealth = {
   characters: [
     {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
   ],
-  connectors: [{id: 'telegram', connected: false}],
+  connectors: [{id: 'telegram', connected: false, bots: []}],
 };
 
 /** A live tab with Mira's thread open and her settings screen in front of it. */
@@ -577,7 +577,7 @@ describe('web settings', () => {
   it("says whether a connector's process is on the stream", () => {
     const running: GatewayHealth = {
       ...health,
-      connectors: [{id: 'telegram', connected: true}],
+      connectors: [{id: 'telegram', connected: true, bots: []}],
     };
 
     expect(connectorPresenceSentence(running, 'telegram')).toBe(

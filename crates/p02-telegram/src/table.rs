@@ -1,8 +1,9 @@
 //! The bot table: one bot per configured token, kept from one connection
 //! to the next, by the daemon's own judgment of each settings entry; the
-//! reading rule that keeps the bots' settings current; and the hold, which
+//! reading rule that keeps the bots' settings current; the hold, which
 //! keeps every bot from showing or judging anything by settings a change
-//! may have left behind.
+//! may have left behind; and the word to the daemon on how each bot
+//! stands, which its health shows.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -11,13 +12,14 @@ use std::time::Duration;
 
 use p02_shared::{Identifier, error_sentence};
 use p02_wire::{
-    ConnectorConfigView, ConnectorEntry, Event, Health, PairingRequest, PendingConfirmation, Ready,
-    RunningTurn,
+    ConfigTarget, ConnectorBot, ConnectorConfigView, ConnectorEntry, Event, Health, PairingRequest,
+    PendingConfirmation, Ready, RunningTurn,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 use tokio::task::AbortHandle;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -79,6 +81,16 @@ impl Owner {
         match self {
             Self::Management { .. } => "the home's settings page".to_owned(),
             Self::Character { name, .. } => format!("{name}'s settings page"),
+        }
+    }
+
+    /// Whose settings hold its token.
+    pub(crate) fn target(&self) -> ConfigTarget {
+        match self {
+            Self::Management { .. } => ConfigTarget::Global,
+            Self::Character { id, .. } => ConfigTarget::Character {
+                character_id: id.to_string(),
+            },
         }
     }
 }
@@ -200,6 +212,12 @@ pub(crate) struct Table {
     notice: Notice,
     /// The tokens two entries share, as said last.
     shared: BTreeSet<String>,
+    /// Rung by a bot whenever how it stands changed.
+    bell: Arc<Notify>,
+    /// How the bots stand, as the daemon is told it while a stream is
+    /// open: all of it each time it is set.
+    told: watch::Sender<Option<Vec<ConnectorBot>>>,
+    telling: AbortHandle,
 }
 
 impl Table {
@@ -210,6 +228,14 @@ impl Table {
         stop: &CancellationToken,
     ) -> Self {
         let (answer, answers) = mpsc::unbounded_channel();
+        let daemon = watch::Sender::new(None);
+        let told = watch::Sender::new(None);
+        let telling = tokio::spawn(tell(
+            daemon.subscribe(),
+            told.subscribe(),
+            Arc::clone(&lines),
+        ))
+        .abort_handle();
 
         Self {
             telegram,
@@ -218,7 +244,7 @@ impl Table {
             stop: stop.clone(),
             bots: Vec::new(),
             tracker: TaskTracker::new(),
-            daemon: watch::Sender::new(None),
+            daemon,
             held: watch::Sender::new(false),
             latest: watch::Sender::new(None),
             health: None,
@@ -229,11 +255,15 @@ impl Table {
             answer,
             notice: Notice::default(),
             shared: BTreeSet::new(),
+            bell: Arc::default(),
+            told,
+            telling,
         }
     }
 
-    /// Waits for `future`, applying every read's answer meanwhile; none
-    /// once the stop came.
+    /// Waits for `future`, applying every read's answer and telling the
+    /// daemon of every bot whose standing changed meanwhile; none once the
+    /// stop came.
     pub(crate) async fn during<T>(
         &mut self,
         future: impl Future<Output = T>,
@@ -246,6 +276,7 @@ impl Table {
                 biased;
                 () = stop.cancelled() => return None,
                 Some(answer) = self.answers.recv() => self.answered(answer),
+                () = self.bell.notified() => self.retell(),
                 output = &mut future => return Some(output),
             }
         }
@@ -279,6 +310,7 @@ impl Table {
             snapshot: snapshot.clone(),
         }));
         self.read();
+        self.tell_whole();
 
         let snapshot = Arc::new(snapshot);
 
@@ -293,6 +325,45 @@ impl Table {
     /// A stream the daemon resumed: what waited since the loss is read for.
     pub(crate) fn resumed(&mut self) {
         self.read();
+        self.tell_whole();
+    }
+
+    /// The stream is lost, and the settings may change before it is back:
+    /// the bots are held until a read begun on the next one lands. The
+    /// daemon let go of how the bots stand with the stream, and is told
+    /// nothing until the next one is open.
+    pub(crate) fn lost(&mut self) {
+        self.hold();
+        self.told.send_replace(None);
+    }
+
+    /// How the bots stand, as the daemon's health shows it: a bot that does
+    /// not know yet is left out.
+    fn standing(&self) -> Vec<ConnectorBot> {
+        self.bots
+            .iter()
+            .filter_map(|running| running.bot.report())
+            .collect()
+    }
+
+    /// A stream opened: the daemon, which let the bots go with the one
+    /// before, is told how each stands, changed or not.
+    fn tell_whole(&self) {
+        self.told.send_replace(Some(self.standing()));
+    }
+
+    /// Tells the daemon how the bots stand, when a stream is open and that
+    /// is other than it was last told.
+    fn retell(&self) {
+        let now = self.standing();
+
+        self.told.send_if_modified(|told| match told {
+            Some(told) if *told != now => {
+                *told = now;
+                true
+            }
+            _ => false,
+        });
     }
 
     pub(crate) fn event(&mut self, event: Event) {
@@ -328,10 +399,9 @@ impl Table {
         }
     }
 
-    /// Holds the bots until a read begun from now lands: the stream is
-    /// lost, and the settings may change before it is back. A read under
-    /// way is dropped.
-    pub(crate) fn hold(&mut self) {
+    /// Holds the bots until a read begun from now lands. A read under way
+    /// is dropped.
+    fn hold(&mut self) {
         self.held.send_replace(true);
         self.newest += 1;
 
@@ -417,6 +487,7 @@ impl Table {
                         daemon: self.daemon.subscribe(),
                         held: self.held.subscribe(),
                         latest: self.latest.subscribe(),
+                        bell: Arc::clone(&self.bell),
                         lines: Arc::clone(&self.lines),
                         stop: self.stop.child_token(),
                     },
@@ -438,6 +509,8 @@ impl Table {
             ),
             ConnectorConfigView::Ok { .. } => self.notice.forget(),
         }
+
+        self.retell();
     }
 
     /// The bots the config asks for, by the daemon's own judgment of each
@@ -522,6 +595,8 @@ impl Table {
 
     /// Stops every bot, and answers once each has ended.
     pub(crate) async fn stop_all(&mut self) {
+        self.telling.abort();
+
         if let Some(reading) = self.reading.take() {
             reading.abort();
         }
@@ -532,5 +607,42 @@ impl Table {
 
         self.tracker.close();
         self.tracker.wait().await;
+    }
+}
+
+/// Tells the daemon how the bots stand each time that is set, one post at a
+/// time and always the newest, so the daemon never ends on an older one. A
+/// post that fails is said once and made again, until it is answered, a
+/// newer one takes its place, or the stream is lost: the next stream is
+/// told the whole of it anyway.
+async fn tell(
+    followed: watch::Receiver<Option<Daemon>>,
+    mut told: watch::Receiver<Option<Vec<ConnectorBot>>>,
+    lines: Arc<dyn Lines>,
+) {
+    while told.changed().await.is_ok() {
+        for failures in 0.. {
+            let Some(daemon) = followed.borrow().clone() else {
+                break;
+            };
+            let Some(bots) = told.borrow_and_update().clone() else {
+                break;
+            };
+
+            match daemon.tell_bots(bots).await {
+                // Kept, or refused for a stream that ended meanwhile.
+                Ok(_) => break,
+                Err(error) if failures == 0 => lines.report(&format!(
+                    "Telegram connector: the daemon could not be told how the bots stand ({}); \
+                     trying again.",
+                    error_sentence(&error)
+                )),
+                Err(_) => {}
+            }
+
+            if let Ok(Err(_)) = timeout(backoff(failures), told.changed()).await {
+                return;
+            }
+        }
     }
 }

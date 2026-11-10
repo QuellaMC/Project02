@@ -325,7 +325,8 @@
               → <code>GatewayHealth</code>: protocol version, home root, config
               and package diagnostics, the roster with each character's state
               and last maintenance failure, and <code>connectors</code>: for
-              each built-in connector, whether a process of it is on the stream.
+              each built-in connector, whether a process of it is on the stream,
+              and the bots it last said it runs.
             </td>
           </tr>
           <tr>
@@ -454,6 +455,16 @@
               <code>paired</code> when the home's allowlist already holds the
               account, or <code>refused</code> (<code>unknown_connector</code>,
               <code>config_unloadable</code>). Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>connector bots</td>
+            <td><code>POST /api/connectors/:id/bots</code></td>
+            <td>
+              <code>{bots: [{target, username?, state}]}</code> →
+              <code>ConnectorBotsOutcome</code>: <code>kept</code>, or
+              <code>refused</code> (<code>unknown_connector</code>,
+              <code>not_connected</code>). Described below.
             </td>
           </tr>
           <tr>
@@ -604,7 +615,7 @@ data: {…}</code></pre>
             <td>
               The protocol version and the daemon's snapshot at that instant:
               <code>health</code> (the roster, each character's state and last
-              maintenance failure, the connectors on the stream),
+              maintenance failure, the connectors on the stream and their bots),
               <code>confirmations</code> and <code>pairings</code> still
               waiting, and <code>turns</code> — each turn in progress, named by
               its submission's <code>conversationId</code>,
@@ -718,9 +729,10 @@ data: {…}</code></pre>
             <td>
               The daemon's whole state, read again the moment a config change
               landed and before the pass that acts on it, or the moment a
-              connector's process came onto the stream or left it: the roster as
-              config now says it, the connectors on the stream, and the config
-              and package problems as they stand, the shape
+              connector's process came onto the stream, left it, or said its
+              bots stand otherwise than the daemon held: the roster as config
+              now says it, the connectors on the stream with their bots, and the
+              config and package problems as they stand, the shape
               <code>GET /api/health</code> returns. Every surface hears it, not
               only the one that wrote, and one showing config reads its view
               again on it, so two windows on one screen stay in step; what the
@@ -783,6 +795,33 @@ data: {…}</code></pre>
         when its first stream opens and when its last one ends, and the settings
         page says on the connector's block whether it is running. The connector
         keeps its config by the rule above.
+      </p>
+
+      <p>
+        A connector tells the daemon how its bots stand:
+        <code>POST /api/connectors/:id/bots</code> with its whole table every
+        time, <code>{bots: […]}</code>, at most 256 entries. An entry is one
+        bot: its <code>target</code>, <code>{scope: "global"}</code> for the
+        home's own bot and
+        <code>{scope: "character", characterId}</code> for a character's; its
+        <code>username</code> once its service has said who it is, 1 to 32
+        ASCII letters, digits or underscores, without the <code>@</code>; and
+        its <code>state</code> — <code>on</code> (it is receiving messages),
+        <code>refused</code> (the service refused its token),
+        <code>unreachable</code> (the service cannot be reached),
+        <code>conflict</code> (another program is polling its token) or
+        <code>webhook</code> (its token is set to a webhook). A bot whose state
+        is not known yet is left out, and a token is no part of an entry. A
+        table that breaks a rule is a 400. The daemon holds the table in place
+        of the one before, shows it as the connector's <code>bots</code> in
+        health, and sends <code>health_changed</code> when it differs from the
+        one it held. It lets the table go when the connector's last stream
+        ends, and answers a table sent while no stream of the connector is
+        open <code>refused</code> (<code>not_connected</code>), so health
+        never shows the bots of a connector that is off the stream. A
+        connector therefore sends its table after the first frame of every
+        stream it opens, the daemon having counted it by then, and again
+        whenever the table changes.
       </p>
 
       <p>

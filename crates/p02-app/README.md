@@ -24,3 +24,6 @@ with an outcome of p02-wire, never an error.
   and a reconcile pass starts or stops whom the change switched.
 - **Confirmations and pairing requests** wait for the person under a
   deadline the daemon judges, and each settles once.
+- **A connector** is on the stream while a stream of its own is open, and
+  the bots it last said it runs are kept as long; health shows both, and
+  goes to every surface when either changes.

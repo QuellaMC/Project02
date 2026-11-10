@@ -21,8 +21,8 @@ use p02_config::connector;
 use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
 use p02_wire::{
-    AnswerBody, ConfigChange, ConfigTarget, ErrorBody, GatewayMessage, OpenConversationBody,
-    PairingRequestBody, Refusal,
+    AnswerBody, ConfigChange, ConfigTarget, ConnectorBotsBody, ErrorBody, GatewayMessage,
+    OpenConversationBody, PairingRequestBody, Refusal,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -124,6 +124,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/config", get(config_view).post(config_change))
         .route("/api/connectors/{id}/config", get(connector_config))
         .route("/api/connectors/{id}/pairing", post(request_pairing))
+        .route("/api/connectors/{id}/bots", post(connector_bots))
         .route("/api/pairing", get(pairings))
         .route("/api/pairing/{code}", post(settle_pairing))
         .route("/api/events", get(events))
@@ -353,6 +354,19 @@ async fn request_pairing(
             .request_pairing(&connector, subject.id, label, source)
             .await,
     )
+}
+
+async fn connector_bots(
+    State(app): State<App>,
+    Path(connector): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match read::<ConnectorBotsBody>("The bot table", body) {
+        Ok(ConnectorBotsBody { bots }) => {
+            answer(&app.0.daemon.connector_bots(&connector, bots).await)
+        }
+        Err(refusal) => refusal.into_response(),
+    }
 }
 
 async fn pairings(State(app): State<App>) -> Response {

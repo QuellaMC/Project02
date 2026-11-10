@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::bots::ConnectorBot;
 use crate::diagnostic::Diagnostic;
 use crate::protocol::ProtocolVersion;
 
@@ -43,11 +44,13 @@ pub struct PackageReport {
     pub path: String,
 }
 
-/// Whether a process of a built-in connector is on the event stream now.
+/// Whether a process of a built-in connector is on the event stream now,
+/// and the bots it last said it runs, none while it is not.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ConnectorPresence {
     pub id: Identifier,
     pub connected: bool,
+    pub bots: Vec<ConnectorBot>,
 }
 
 /// One installed character, as health reports her.

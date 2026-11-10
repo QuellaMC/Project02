@@ -10,6 +10,8 @@ use ts_rs::TS;
 const TEXT_LIMIT: usize = 16 * 1024;
 /// The bound of an id, and of the name a person goes by.
 const NAME_LIMIT: usize = 128;
+/// The longest username Telegram gives a bot.
+const USERNAME_LIMIT: usize = 32;
 
 /// A string of 1 to 128 characters, as an id is on the wire, and the name
 /// an account goes by.
@@ -81,6 +83,40 @@ impl From<Text> for String {
 }
 
 impl<'de> Deserialize<'de> for Text {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The name a bot goes by on its connector's service, without the `@`: 1
+/// to 32 ASCII letters, digits or underscores, as Telegram spells one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+pub struct BotUsername(String);
+
+/// Why a text is not a [`BotUsername`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a bot's username is 1 to 32 ASCII letters, digits or underscores")]
+pub struct ParseBotUsernameError;
+
+impl BotUsername {
+    /// # Errors
+    ///
+    /// [`ParseBotUsernameError`] when `text` is not in the pattern.
+    pub fn new(text: &str) -> Result<Self, ParseBotUsernameError> {
+        let in_pattern = (1..=USERNAME_LIMIT).contains(&text.len())
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+
+        if in_pattern {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ParseBotUsernameError)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BotUsername {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Self::new(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }

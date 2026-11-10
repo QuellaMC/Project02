@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod bots;
 mod config;
 mod confirmation;
 mod conversation;
@@ -12,6 +13,9 @@ mod protocol;
 mod refusal;
 mod text;
 
+pub use bots::{
+    BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
+};
 pub use config::{
     AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
@@ -41,4 +45,4 @@ pub use pairing::{
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};
-pub use text::{ParseShortError, ParseTextError, Short, Text};
+pub use text::{BotUsername, ParseBotUsernameError, ParseShortError, ParseTextError, Short, Text};
