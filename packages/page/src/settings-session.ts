@@ -129,7 +129,7 @@ type Tab = {
 function welcomeVerbs(
   {getState, apply}: Tab,
   save: SettingsVerbs['save'],
-): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack' | 'finishWelcome'> {
+): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack'> {
   return {
     async welcomeNext() {
       const screen = getState().settings?.screen;
@@ -155,9 +155,6 @@ function welcomeVerbs(
       if (screen?.kind === 'welcome' && screen.step > 1) {
         apply(current => welcomeStepped(current, screen.step === 3 ? 2 : 1));
       }
-    },
-    finishWelcome() {
-      apply(current => settingsClosed(noticeSpent(current)));
     },
   };
 }
@@ -337,6 +334,19 @@ export function createSettingsVerbs(tab: Tab): {
       await change(row, sent.value);
     });
 
+  /**
+   * Back to the chat, from the window or the welcome, once the saves
+   * already asked for have gone: a box left by the very click that
+   * closes is saved, not let go with what is typed.
+   */
+  const close = (): void => {
+    const closed = () => {
+      apply(current => settingsClosed(noticeSpent(current)));
+    };
+
+    void queue.then(closed, closed);
+  };
+
   return {
     verbs: {
       async openSettings(page) {
@@ -346,15 +356,7 @@ export function createSettingsVerbs(tab: Tab): {
       goTo(page) {
         apply(current => settingsOpened(noticeSpent(current), page));
       },
-      closeSettings() {
-        // The saves already asked for go first: a box left by the very
-        // click that closes the window is saved, not let go with it.
-        const close = () => {
-          apply(current => settingsClosed(noticeSpent(current)));
-        };
-
-        void queue.then(close, close);
-      },
+      closeSettings: close,
       edit(row, text) {
         apply(current => fieldEdited(current, row, text));
       },
@@ -382,6 +384,7 @@ export function createSettingsVerbs(tab: Tab): {
         apply(current => advancedSet(current, on));
       },
       ...welcomeVerbs(tab, save),
+      finishWelcome: close,
     },
     async changed() {
       if (getState().settings !== undefined) {
