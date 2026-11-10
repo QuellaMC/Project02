@@ -31,17 +31,24 @@ pub enum Event {
         conversation_id: ConversationId,
         progress: TurnProgress,
     },
-    /// A turn as it runs now, said whenever that changes, from the commit
-    /// of her line until the completion that ends it.
+    /// A turn as it runs now, said whenever that changes, until the
+    /// completion that ends it: from the commit of the line that began it,
+    /// or from its beginning for a turn of her own.
     TurnRunning(RunningTurn),
-    /// How a turn ended, with its line's stamps, so that a surface knows
-    /// whose turn ended and whether its line is in the log.
+    /// How a turn ended, with the stamps of the line that began it, both or
+    /// neither, so that a surface knows whose turn ended and whether its
+    /// line is in the log.
     TurnCompleted {
         character_id: Identifier,
         conversation_id: ConversationId,
-        source: ClientStamp,
-        client_message_id: ClientStamp,
+        /// Absent for a turn of her own, which no line began.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<ClientStamp>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        client_message_id: Option<ClientStamp>,
         status: TurnStatus,
+        /// Whether the line that began it is in the log; true for a turn of
+        /// her own, which has none: nothing of the person's waits on it.
         committed: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
@@ -94,7 +101,7 @@ pub enum TurnStatus {
 }
 
 impl Event {
-    /// Whether this ends `turn`: its completion, never another line's.
+    /// Whether this ends `turn`: its completion, never another turn's.
     #[must_use]
     pub fn ends(&self, turn: &RunningTurn) -> bool {
         matches!(
@@ -155,15 +162,20 @@ pub enum ToolCallStatus {
     Rejected,
 }
 
-/// A turn as it runs: the line that started it, her character, and her
-/// drafts so far, each its whole text, in the order they opened.
+/// A turn as it runs: her character, her thread, the stamps of the line
+/// that began it, both or neither, and her drafts so far, each its whole
+/// text, in the order they opened.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct RunningTurn {
     pub character_id: Identifier,
     pub conversation_id: ConversationId,
-    pub source: ClientStamp,
-    pub client_message_id: ClientStamp,
+    /// Absent for a turn of her own, which no line began.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ClientStamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<ClientStamp>,
     pub drafts: Vec<RunningDraft>,
 }
 

@@ -106,15 +106,18 @@ pub struct Durations {
     /// characters start together and one's first start on a loaded disk
     /// holds the home's lock a while.
     pub settings_lock: Duration,
-    /// How long an event stream stays silent before it says it is alive,
-    /// so that a client's own timeout never takes a quiet stream for a
-    /// dead one.
-    pub heartbeat: Duration,
+    /// How long an event stream stays silent before it pings, to say it is
+    /// alive, so that a client's own timeout never takes a quiet stream for
+    /// a dead one.
+    pub ping: Duration,
     /// How long a client may leave what it was sent untaken, a frame of
     /// its stream or at a stop an answer, before it is taken for gone: a
     /// client that reads takes it in milliseconds, whatever burst it
     /// comes in, so this only ever meets one that stopped.
     pub grace: Duration,
+    /// The minute a character's heartbeat counts in: her settings space
+    /// her moments of her own so many of them apart.
+    pub minute: Duration,
 }
 
 impl Default for Durations {
@@ -124,8 +127,9 @@ impl Default for Durations {
             pairing: Duration::from_hours(1),
             model_silence: None,
             settings_lock: Duration::from_secs(10),
-            heartbeat: Duration::from_secs(15),
+            ping: Duration::from_secs(15),
             grace: Duration::from_secs(2),
+            minute: Duration::from_mins(1),
         }
     }
 }

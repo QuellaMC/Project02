@@ -21,6 +21,6 @@ the same daemon in another program's process, as the desktop shell does.
 - **The test switches** are read once at start and are never settings:
   `PROJECT02_TEST_PROVIDER=deterministic` answers for every character;
   `PROJECT02_TEST_DURATIONS` shortens the waits, `key=milliseconds` over
-  `confirmation`, `pairing`, `silence`, `heartbeat` and `grace`, and for
-  the connector `edit`; and `PROJECT02_TEST_TELEGRAM_API` names the Bot
-  API the connector reaches.
+  `confirmation`, `pairing`, `silence`, the stream's `ping`, `grace` and
+  the `minute` a heartbeat counts in, and for the connector `edit`; and
+  `PROJECT02_TEST_TELEGRAM_API` names the Bot API the connector reaches.

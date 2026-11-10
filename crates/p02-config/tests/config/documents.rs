@@ -1,5 +1,7 @@
 //! The documents as their files hold them: unreadable, or judged.
 
+use std::num::NonZeroU32;
+
 use p02_config::{ReadSettingsError, Resolution, RoleModelProvider};
 use p02_wire::Code;
 use serde_json::json;
@@ -97,7 +99,10 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
                 "contextWindowTokens": 4096,
             },
         })))
-        .write_overlay("mira", &document(json!({"project02": {"enabled": false}})));
+        .write_overlay(
+            "mira",
+            &document(json!({"project02": {"enabled": false, "heartbeat": "2h"}})),
+        );
 
     let settings = world.resolve(&of("mira")).settings();
     let host = settings.host();
@@ -106,6 +111,7 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
     assert_eq!(host.role_model_provider, Some(RoleModelProvider::Nvidia));
     assert_eq!(host.nvidia_model.as_deref(), Some("meta/llama"));
     assert!(!host.enabled);
+    assert_eq!(host.heartbeat, NonZeroU32::new(120));
     assert_eq!(host.context_window_tokens.get(), 4096);
     assert_eq!(
         host.nvidia_base_url

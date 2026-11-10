@@ -22,6 +22,9 @@ token.
   that moved no setting: nothing is read for it, and no bot is held.
 - A character's bot lets Telegram go of a message only once its line is in
   her inbox, shows her reply as she writes it, and makes a confirmation its
-  line raised a card with Approve and Deny. The management bot answers
+  line raised a card with Approve and Deny. A turn of her own shows in
+  every paired chat whatever "Show Other Chats" says: her drafts and her
+  messages, with nothing before them; one in which she says nothing sends
+  nothing, and its end says nothing. The management bot answers
   `/status`, `/pending`, `/approve` and `/deny`, and shows every
   confirmation and pairing request as a card.

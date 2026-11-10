@@ -5,10 +5,11 @@ takes, or each moment of her own, and the session's continuation once it
 outgrows the model's window. It reaches the disk only through the store,
 on tokio's blocking pool.
 
-Her actor opens the thread with `Conversation::open`, hands it each line
-with `deliver`, starts a moment of hers with `moment`, and closes it when
-she stops or restarts. A `Submission` is the line and its client's two
-stamps, a `Mind` answers the turn as her settings stand before each
+Her actor asks `Conversation::exists` whether the thread was ever made,
+which makes nothing, opens it with `Conversation::open`, hands it each
+line with `deliver`, starts a moment of hers with `moment`, and closes it
+when she stops or restarts. A `Submission` is the line and its client's
+two stamps, a `Mind` answers the turn as her settings stand before each
 request to the model, and a `Delivery` says how the turn ended.
 
 - **One turn at a time.** A line a turn took already is answered with the

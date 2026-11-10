@@ -16,10 +16,18 @@ with an outcome of p02-wire, never an error.
   her thread opens and her lines wait until a change gives her one. Her
   stop lets the turn in flight finish; the lines behind it wait for her
   next start.
+- **Her heartbeat.** While she is ready and her heartbeat is not off, a
+  moment of her own is due one period after she has been quiet since:
+  since her thread opened in this run, her last turn ended, or her boot
+  found her thread made before. A character whose thread was never made
+  has none, and a moment missed is never made up. A waiting line always
+  goes first, and one that comes during a moment waits for its end. The
+  moment runs as a line's turn does, and nothing leaves her inbox.
 - **The stream** hears each turn as it goes: its messages once they are
   on disk, the turn as it runs now, her drafts whole, whenever that
   changes, and then its completion, which says whether its line is in the
-  log.
+  log. A turn of her own carries no line's stamps, and is said running as
+  it begins.
 - **Settings** change one way, a client's change or her own plugin's,
   through p02-config; health then goes to every surface, and a reconcile
   pass starts or stops whom the change switched and brings every other

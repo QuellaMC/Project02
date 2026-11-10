@@ -1080,7 +1080,7 @@
           "required": [
             "kind"
           ],
-          "description": "A turn as it runs now, said whenever that changes, from the commit\nof her line until the completion that ends it."
+          "description": "A turn as it runs now, said whenever that changes, until the\ncompletion that ends it: from the commit of the line that began it,\nor from its beginning for a turn of her own."
         },
         {
           "type": "object",
@@ -1092,6 +1092,7 @@
               "$ref": "#/$defs/ConversationId"
             },
             "source": {
+              "description": "Absent for a turn of her own, which no line began.",
               "$ref": "#/$defs/ClientStamp"
             },
             "clientMessageId": {
@@ -1101,7 +1102,8 @@
               "$ref": "#/$defs/TurnStatus"
             },
             "committed": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Whether the line that began it is in the log; true for a turn of\nher own, which has none: nothing of the person's waits on it."
             },
             "reason": {
               "type": "string"
@@ -1118,12 +1120,10 @@
             "kind",
             "characterId",
             "conversationId",
-            "source",
-            "clientMessageId",
             "status",
             "committed"
           ],
-          "description": "How a turn ended, with its line's stamps, so that a surface knows\nwhose turn ended and whether its line is in the log."
+          "description": "How a turn ended, with the stamps of the line that began it, both or\nneither, so that a surface knows whose turn ended and whether its\nline is in the log."
         },
         {
           "$ref": "#/$defs/PendingConfirmation",
@@ -1315,7 +1315,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 9
+          "const": 10
         },
         "homeRoot": {
           "type": "string"
@@ -1380,7 +1380,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 9
+          "const": 10
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2293,6 +2293,7 @@
           "$ref": "#/$defs/ConversationId"
         },
         "source": {
+          "description": "Absent for a turn of her own, which no line began.",
           "$ref": "#/$defs/ClientStamp"
         },
         "clientMessageId": {
@@ -2308,11 +2309,9 @@
       "required": [
         "characterId",
         "conversationId",
-        "source",
-        "clientMessageId",
         "drafts"
       ],
-      "description": "A turn as it runs: the line that started it, her character, and her\ndrafts so far, each its whole text, in the order they opened."
+      "description": "A turn as it runs: her character, her thread, the stamps of the line\nthat began it, both or neither, and her drafts so far, each its whole\ntext, in the order they opened."
     },
     "RuntimeConfigDiagnostic": {
       "type": "object",

@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 9,
+  "protocolVersion": 10,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -596,6 +596,17 @@ Content-Type: application/json
         <code>invalid_request</code>.
       </p>
 
+      <p>
+        A character also has turns of her own: while she is ready and the
+        person is quiet, her heartbeat gives her a moment every so often, as
+        her own settings say. Such a turn begins from no line, so it carries
+        neither stamp: <code>turn_running</code> says it as it begins, with no
+        drafts, then as it changes, and its <code>turn_completed</code> ends
+        it. Most moments end with nothing on the stream between the two; a
+        message she sends is a <code>visible_reply</code> of that turn. A
+        confirmation raised in one has no <code>turn</code>.
+      </p>
+
       <h2>The event stream</h2>
 
       <p>
@@ -614,7 +625,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":9,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":10,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -676,10 +687,10 @@ data: {…}</code></pre>
               maintenance failure, the connectors on the stream and their bots),
               <code>confirmations</code> and <code>pairings</code> still
               waiting, and <code>turns</code> — each turn in progress, named by
-              its submission's <code>conversationId</code>,
-              <code>source</code> and <code>clientMessageId</code>, with its
-              character and its open drafts' text so far. A client installs it
-              on every one it sees.
+              its <code>conversationId</code> and, when a line began it, the
+              line's <code>source</code> and <code>clientMessageId</code>, with
+              its character and its open drafts' text so far. A client installs
+              it on every one it sees.
             </td>
           </tr>
           <tr>
@@ -704,12 +715,13 @@ data: {…}</code></pre>
             <td><code>turn_running</code></td>
             <td>
               A turn as it runs now, whenever that changes, from the commit of
-              its line until its completion: its line's
-              <code>conversationId</code>, <code>source</code> and
-              <code>clientMessageId</code>, its character, and her
-              <code>drafts</code> so far, each its whole text — a reply the
-              model is still writing, the one thing the stream says before the
-              log. A client replaces its copy of the turn with each.
+              its line, or from its beginning for a turn of her own, until its
+              completion: its <code>conversationId</code>, the
+              <code>source</code> and <code>clientMessageId</code> of the line
+              that began it, both absent for a turn of her own, its character,
+              and her <code>drafts</code> so far, each its whole text — a reply
+              the model is still writing, the one thing the stream says before
+              the log. A client replaces its copy of the turn with each.
             </td>
           </tr>
           <tr>
@@ -723,7 +735,10 @@ data: {…}</code></pre>
               log: a surface holding the line hands back one that was not, and
               leaves one that was to the thread. Nothing else answers it, since
               the log is read in pages and a busy turn can put a hundred
-              messages between a line and now.
+              messages between a line and now. A turn of her own carries
+              neither stamp and says <code>committed: true</code>: nothing of
+              the person's waits on it, and nobody asked for anything, so a
+              surface says nothing of how it ended.
             </td>
           </tr>
           <tr>
@@ -1008,7 +1023,7 @@ data: {…}</code></pre>
             <td>
               Replaces its copy of the turn under its
               <code>conversationId</code>: a bubble per draft with its text, or
-              a typing indicator while there is none.
+              a typing indicator while there is none, for a turn a line began.
             </td>
           </tr>
           <tr>

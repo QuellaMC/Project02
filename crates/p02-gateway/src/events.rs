@@ -172,7 +172,7 @@ impl Streams {
             queued,
             body,
             Waits {
-                heartbeat: durations.heartbeat,
+                ping: durations.ping,
                 grace: durations.grace,
             },
             link,
@@ -384,12 +384,12 @@ fn frame(id: &str, event: &str, data: &str) -> Bytes {
 
 #[derive(Clone, Copy)]
 struct Waits {
-    heartbeat: Duration,
+    ping: Duration,
     grace: Duration,
 }
 
 /// Writes a stream's frames in order, each once the one before it was
-/// taken, and a ping whenever it has been idle a heartbeat; the stream
+/// taken, and a ping whenever it has been idle that long; the stream
 /// ends once its queue is closed and every frame of it written. A client
 /// that has not taken a frame within the grace is not slow, it is gone:
 /// its connection is closed and nothing more is queued for it, however
@@ -410,7 +410,7 @@ async fn write(
                 Some(frame) => frame,
                 None => return,
             },
-            () = tokio::time::sleep(waits.heartbeat) => Bytes::from_static(PING),
+            () = tokio::time::sleep(waits.ping) => Bytes::from_static(PING),
         };
 
         match tokio::time::timeout(waits.grace, taken(&body, frame)).await {

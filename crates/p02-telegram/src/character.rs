@@ -1,8 +1,8 @@
 //! A character's bot: her thread with the person, opened once the bot
 //! knows its name; a paired account's line handed to her inbox; her
-//! conversation shown in every paired chat as the stream tells it; and a
-//! card with Approve and Deny for each confirmation a turn of this bot's
-//! line raises. Nothing is read from history.
+//! conversation shown in every paired chat as the stream tells it, her own
+//! turns always; and a card with Approve and Deny for each confirmation a
+//! turn of this bot's line raises. Nothing is read from history.
 
 use p02_core::{ClientStamp, ConversationId};
 use p02_shared::Identifier;
@@ -45,11 +45,14 @@ impl Character {
         chat.settings().owner.name().to_owned()
     }
 
-    /// Whether a turn of the line `source` carried is shown here: this bot
-    /// carried it, or Mirror is on.
-    fn shown(chat: &Chat, source: &ClientStamp) -> bool {
-        *source == chat.source
-            || matches!(chat.settings().owner, Owner::Character { mirror: true, .. })
+    /// Whether a turn the line `source` carried is shown here: this bot
+    /// carried it, or Mirror is on; and a turn of her own, which no line
+    /// began, always.
+    fn shown(chat: &Chat, source: Option<&ClientStamp>) -> bool {
+        source.is_none_or(|source| {
+            *source == chat.source
+                || matches!(chat.settings().owner, Owner::Character { mirror: true, .. })
+        })
     }
 
     /// Opens her thread, unless it is open or being opened.
@@ -123,7 +126,7 @@ impl Character {
     /// is shown here, and a draft shown that it no longer holds withdrawn.
     fn running(&mut self, chat: &Chat, turn: Option<RunningTurn>) {
         let (drafts, shown) = turn.as_ref().map_or((Vec::new(), false), |turn| {
-            (turn.drafts.clone(), Self::shown(chat, &turn.source))
+            (turn.drafts.clone(), Self::shown(chat, turn.source.as_ref()))
         });
 
         chat.outbox.drafts(drafts, shown);
@@ -164,7 +167,7 @@ impl Character {
     /// committed.
     fn progressed(&self, chat: &Chat, progress: &TurnProgress) {
         match progress {
-            TurnProgress::UserMessage { source, text, .. } if Self::shown(chat, source) => {
+            TurnProgress::UserMessage { source, text, .. } if Self::shown(chat, Some(source)) => {
                 chat.outbox
                     .started((*source != chat.source).then(|| format!("You ({source}): {text}")));
             }
@@ -172,7 +175,7 @@ impl Character {
                 let shown = self
                     .turn
                     .as_ref()
-                    .is_some_and(|turn| Self::shown(chat, &turn.source));
+                    .is_some_and(|turn| Self::shown(chat, turn.source.as_ref()));
 
                 chat.outbox.commit(draft_id, text.to_string(), shown);
             }
@@ -268,9 +271,9 @@ impl Rules for Character {
                 message,
                 ..
             } if *character_id == self.id => {
-                if *source == chat.source
+                if source.as_ref() == Some(&chat.source)
                     && matches!(status, TurnStatus::Rejected | TurnStatus::Failed)
-                    && let Some(account) = chat_of_line(client_message_id)
+                    && let Some(account) = client_message_id.as_ref().and_then(chat_of_line)
                 {
                     chat.outbox.say_to_paired(
                         account,

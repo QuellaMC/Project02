@@ -33,6 +33,8 @@ no longer waiting — and an approval that could not be written keeps the
 card and says why. Each turn in progress is the daemon's own word on it,
 replaced whole by each `turn_running` frame and installed from every
 `ready`; a stream the daemon resumed is live again with nothing installed.
+A turn of her own, which no line began, shows nothing until she drafts,
+and its end raises no notice.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.

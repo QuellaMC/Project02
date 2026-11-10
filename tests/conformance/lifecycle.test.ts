@@ -114,7 +114,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
   const home = createHome();
   const daemon = await startDaemon(home);
   const address = {
-    protocolVersion: 9,
+    protocolVersion: 10,
     token: daemon.token,
     port: Number(new URL(daemon.origin).port),
   };
@@ -132,7 +132,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
 it("lifecycle.port-default-and-fallback: when another program holds the home's port, serve says so before its address line, binds a free port and records it for the next run", async () => {
   const port = await occupiedPort();
   const home = createHome({
-    'daemon.json': JSON.stringify({protocolVersion: 9, token: 'kept', port}),
+    'daemon.json': JSON.stringify({protocolVersion: 10, token: 'kept', port}),
   });
   const moved = await startDaemon(home);
 
@@ -325,7 +325,7 @@ it('lifecycle.no-model: with no AI service chosen she needs a model, saying what
   const {roleModelProvider, ...endpoint} = model.settings;
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: endpoint})}),
-    {PROJECT02_TEST_DURATIONS: 'heartbeat=500'},
+    {PROJECT02_TEST_DURATIONS: 'ping=500'},
   );
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
@@ -371,10 +371,10 @@ it('lifecycle.no-model: with no AI service chosen she needs a model, saying what
   );
   expect(await line('Still there?', 'stranded')).toEqual({status: 'queued'});
 
-  // Tried again by nothing: two heartbeats on, nothing more has happened to her.
+  // Tried again by nothing: two pings on, nothing more has happened to her.
   const needingSoFar = statesOfMira().length;
 
-  for (let beat = 0; beat < 2; beat += 1) {
+  for (let ping = 0; ping < 2; ping += 1) {
     await events.next(frame => frame.comment === 'ping');
   }
 

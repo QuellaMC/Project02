@@ -435,12 +435,19 @@ fn written() -> Vec<(&'static str, Value)> {
     let running = RunningTurn {
         character_id: id("mira"),
         conversation_id: conversation.clone(),
-        source: stamp("web"),
-        client_message_id: stamp("line-1"),
+        source: Some(stamp("web")),
+        client_message_id: Some(stamp("line-1")),
         drafts: vec![RunningDraft {
             draft_id: "1.1".to_owned(),
             text: "Hel".to_owned(),
         }],
+    };
+    // A turn of her own, which no line began.
+    let own = RunningTurn {
+        source: None,
+        client_message_id: None,
+        drafts: Vec::new(),
+        ..running.clone()
     };
     let events = [
         Event::TurnProgress {
@@ -468,11 +475,22 @@ fn written() -> Vec<(&'static str, Value)> {
         Event::TurnCompleted {
             character_id: id("mira"),
             conversation_id: conversation.clone(),
-            source: stamp("web"),
-            client_message_id: stamp("line-1"),
+            source: Some(stamp("web")),
+            client_message_id: Some(stamp("line-1")),
             status: TurnStatus::Rejected,
             committed: true,
             reason: Some("malformed_output".to_owned()),
+            message: None,
+        },
+        Event::TurnRunning(own.clone()),
+        Event::TurnCompleted {
+            character_id: own.character_id,
+            conversation_id: own.conversation_id,
+            source: None,
+            client_message_id: None,
+            status: TurnStatus::Completed,
+            committed: true,
+            reason: None,
             message: None,
         },
         Event::ConfirmationRequested(pending.clone()),

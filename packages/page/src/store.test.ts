@@ -45,7 +45,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 9,
+    protocolVersion: 10,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -59,7 +59,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 9,
+    protocolVersion: 10,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -139,6 +139,26 @@ function completed(
     clientMessageId,
     status,
     committed,
+    ...(message === undefined ? {} : {message}),
+  };
+}
+
+/** A turn of Mira's own, which no line began, as the daemon says it runs now. */
+function ownRunning(drafts: readonly RunningDraft[] = []): GatewayEvent {
+  return {kind: 'turn_running', characterId: 'mira', conversationId, drafts};
+}
+
+/** A turn of Mira's own as it ends: it carries no line's stamps. */
+function ownCompleted(
+  status: 'completed' | 'rejected' | 'failed',
+  message?: string,
+): GatewayEvent {
+  return {
+    kind: 'turn_completed',
+    characterId: 'mira',
+    conversationId,
+    status,
+    committed: true,
     ...(message === undefined ? {} : {message}),
   };
 }
@@ -452,6 +472,55 @@ describe('web store', () => {
     expect(state.turns.has(conversationId)).toBe(false);
     expect(state.notices).toEqual([]);
     expect(state.thread?.conversationId).toBe('conv-2');
+  });
+
+  it("holds a turn of her own, which no line began, as the daemon says it, ends it at its own end and never at a line's, and says nothing of how it ended", () => {
+    let state = applyEvent(opened(), ownRunning());
+
+    expect(state.turns.get(conversationId)).toEqual({
+      characterId: 'mira',
+      conversationId,
+      drafts: [],
+    });
+
+    state = applyEvent(state, ownRunning([{draftId: '1.0', text: 'Found'}]));
+    state = applyEvent(
+      state,
+      progress({
+        kind: 'visible_reply',
+        messageId: 'm-1',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'Found your keys yet?',
+        draftId: '1.0',
+      }),
+    );
+    state = applyEvent(state, ownRunning());
+
+    expect(state.thread?.messages.map(message => message.text)).toEqual([
+      'Found your keys yet?',
+    ]);
+    expect(
+      applyEvent(state, completed('line-1', 'refused', 'wrong sender', false))
+        .turns,
+    ).toBe(state.turns);
+
+    for (const status of ['completed', 'rejected', 'failed'] as const) {
+      const ended = applyEvent(
+        state,
+        ownCompleted(status, 'The provider answered 503.'),
+      );
+
+      expect(ended.turns.size).toBe(0);
+      expect(ended.notices).toEqual([]);
+    }
+
+    // Her own turn's end leaves a line's turn running.
+    const answering = applyEvent(state, running('line-1'));
+
+    expect(applyEvent(answering, ownCompleted('completed')).turns).toBe(
+      answering.turns,
+    );
   });
 
   it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {

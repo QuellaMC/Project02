@@ -100,7 +100,7 @@ it('connectors.telegram-draft-edits: a reply is posted with its first words and 
   });
   // The stream pings every tenth of a second: a piece of the reply on each.
   const daemon = await startDaemon(home, {
-    PROJECT02_TEST_DURATIONS: 'heartbeat=100',
+    PROJECT02_TEST_DURATIONS: 'ping=100',
   });
   const events = await openEvents(daemon);
   const telegram = await startTelegramServer([miraBot]);

@@ -212,8 +212,8 @@ export type WebState = {
   /**
    * Conversation id → the turn in progress there, for every conversation
    * and not only the one on screen, as the daemon last said it: the typing
-   * indicator until her first draft or the end, and each draft's text so
-   * far.
+   * indicator until her first draft or the end, for a turn a line began,
+   * and each draft's text so far.
    */
   readonly turns: ReadonlyMap<string, RunningTurn>;
   /**
@@ -779,21 +779,23 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         ...state,
         turns: new Map(state.turns).set(event.conversationId, runningOf(event)),
       };
-    case 'turn_completed':
-      return lineEnded(
-        withoutTurnEnded(state, event),
-        event.characterId,
-        event.clientMessageId,
-        {
-          status: event.status,
-          committed: event.committed,
-          ...(event.message === undefined
-            ? event.reason === undefined
-              ? {}
-              : {message: event.reason}
-            : {message: event.message}),
-        },
-      );
+    case 'turn_completed': {
+      const ended = withoutTurnEnded(state, event);
+
+      // A turn of her own, which no line began, ends unsaid: nobody asked
+      // for anything.
+      return event.clientMessageId === undefined
+        ? ended
+        : lineEnded(ended, event.characterId, event.clientMessageId, {
+            status: event.status,
+            committed: event.committed,
+            ...(event.message === undefined
+              ? event.reason === undefined
+                ? {}
+                : {message: event.reason}
+              : {message: event.message}),
+          });
+    }
   }
 }
 
@@ -829,21 +831,25 @@ function withThread(
   return thread === state.thread ? state : {...state, thread};
 }
 
+/** The turn the frame says, with the stamps of the line that began it when one did. */
 function runningOf(
   event: Extract<GatewayEvent, {kind: 'turn_running'}>,
 ): RunningTurn {
   return {
     characterId: event.characterId,
     conversationId: event.conversationId,
-    source: event.source,
-    clientMessageId: event.clientMessageId,
+    ...(event.source === undefined ? {} : {source: event.source}),
+    ...(event.clientMessageId === undefined
+      ? {}
+      : {clientMessageId: event.clientMessageId}),
     drafts: event.drafts,
   };
 }
 
 /**
- * A turn ends at the completion of its own line, never at another's: a
- * line's end that names another submission leaves the turn running.
+ * A turn ends at its own completion, never at another's: the end of
+ * another line's turn, or of a turn of her own, which names no line,
+ * leaves it running.
  */
 function withoutTurnEnded(
   state: WebState,
@@ -852,7 +858,8 @@ function withoutTurnEnded(
   const turn = state.turns.get(ended.conversationId);
 
   if (
-    turn?.source !== ended.source ||
+    turn === undefined ||
+    turn.source !== ended.source ||
     turn.clientMessageId !== ended.clientMessageId
   ) {
     return state;

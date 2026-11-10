@@ -370,6 +370,7 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "userDisplayName": "You",
             "nvidiaApiKey": "[redacted]",
             "contextWindowTokens": 4096,
+            "heartbeatMinutes": 30,
         })
     );
     assert_eq!(

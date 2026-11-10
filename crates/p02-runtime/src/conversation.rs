@@ -12,7 +12,7 @@ use p02_core::{
     SessionId, SpeakerName,
 };
 use p02_plugins::PluginHost;
-use p02_shared::error_chain;
+use p02_shared::{Identifier, error_chain};
 use p02_store::{
     CharacterData, ContinuedFrom, ConversationWriter, Home, LogRecord, RecordBody,
     SessionContinuation, SessionContinued, SessionWriter, SkippedLines, StorageError, Summarizer,
@@ -157,10 +157,7 @@ impl Conversation {
     /// taken is released first.
     pub fn open(home: &Home, character: Character) -> Result<Self, StorageError> {
         let data = CharacterData::ensure(home, &character.profile.id)?;
-        let conversation = home.ensure_conversation(vec![
-            Participant::character(character.profile.id.clone()),
-            Participant::local_user(),
-        ])?;
+        let conversation = home.ensure_conversation(participants(&character.profile.id))?;
         let holder = home.conversation_writer(conversation)?;
         let current = match current_segment(&data, &holder) {
             Ok(current) => current,
@@ -181,6 +178,17 @@ impl Conversation {
             }),
             skipped: current.skipped,
         })
+    }
+
+    /// Whether the thread between the person and the character `id` was
+    /// ever made on `home`: found, never made.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the home is refused, or a thread there cannot
+    /// be read.
+    pub fn exists(home: &Home, id: &Identifier) -> Result<bool, StorageError> {
+        Ok(home.find_conversation(&participants(id))?.is_some())
     }
 
     #[must_use]
@@ -276,6 +284,14 @@ impl Conversation {
         })
         .await
     }
+}
+
+/// Who the thread between the person and the character `id` is between.
+fn participants(id: &Identifier) -> Vec<Participant> {
+    vec![
+        Participant::character(id.clone()),
+        Participant::local_user(),
+    ]
 }
 
 /// A thread's current segment under its writer, the lines its closed

@@ -4,13 +4,13 @@
 //! values meet beyond their type.
 
 use std::fmt;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::LazyLock;
 
 use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
 use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl, vocabulary};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::declaration::{Layer, expectation, outside_scope};
 use crate::resolve::Field;
@@ -170,6 +170,47 @@ const ENABLED: HostSetting<bool> = HostSetting {
     must_be: None,
 };
 
+/// The rhythms of her heartbeat: each choice, its words, and how many
+/// minutes apart her moments come, none when it is off.
+const RHYTHMS: [(&str, &str, Option<NonZeroU32>); 6] = [
+    ("off", "Off", None),
+    ("15m", "15 min", NonZeroU32::new(15)),
+    ("30m", "30 min", NonZeroU32::new(30)),
+    ("1h", "1 hour", NonZeroU32::new(60)),
+    ("2h", "2 hours", NonZeroU32::new(120)),
+    ("4h", "4 hours", NonZeroU32::new(240)),
+];
+
+const HEARTBEAT: HostSetting<Option<NonZeroU32>> = HostSetting {
+    name: "heartbeat",
+    field: || {
+        json!({
+            "label": "A Moment to Herself",
+            "description": "How often she gets a moment of her own while you are quiet, to \
+                think, use what she has, or write to you. Each moment uses your AI model.",
+            "scope": "character_only",
+            "secret": false,
+            "valueType": "enum",
+            "allowedValues": RHYTHMS.iter().map(|(choice, ..)| *choice).collect::<Vec<_>>(),
+            "choices": RHYTHMS
+                .iter()
+                .map(|(choice, words, _)| ((*choice).to_owned(), Value::from(*words)))
+                .collect::<Map<String, Value>>(),
+            "defaultValue": "30m",
+            "redactionLabels": [],
+        })
+    },
+    read: |value| {
+        let value = value.as_str()?;
+
+        RHYTHMS
+            .iter()
+            .find(|(choice, ..)| *choice == value)
+            .map(|(.., minutes)| *minutes)
+    },
+    must_be: None,
+};
+
 fn text(value: &Value) -> Option<String> {
     value
         .as_str()
@@ -178,8 +219,9 @@ fn text(value: &Value) -> Option<String> {
 }
 
 /// The host's settings in the order the settings page shows them: what a
-/// person decides first, then the knobs, then each character's own switch.
-static SETTINGS: [&dyn Setting; 7] = [
+/// person decides first, then the knobs, then what is each character's own:
+/// her switch and her heartbeat.
+static SETTINGS: [&dyn Setting; 8] = [
     &USER_DISPLAY_NAME,
     &ROLE_MODEL_PROVIDER,
     &NVIDIA_API_KEY,
@@ -187,6 +229,7 @@ static SETTINGS: [&dyn Setting; 7] = [
     &NVIDIA_BASE_URL,
     &CONTEXT_WINDOW_TOKENS,
     &ENABLED,
+    &HEARTBEAT,
 ];
 
 /// A host setting, whatever the type of its value.
@@ -337,6 +380,9 @@ pub struct HostSettings {
     pub context_window_tokens: NonZeroU64,
     /// Whether the character is switched on.
     pub enabled: bool,
+    /// How many minutes apart her moments of her own come while the person
+    /// is quiet; none when her heartbeat is off.
+    pub heartbeat: Option<NonZeroU32>,
 }
 
 impl HostSettings {
@@ -350,6 +396,7 @@ impl HostSettings {
             nvidia_base_url: NVIDIA_BASE_URL.value(fields),
             context_window_tokens: CONTEXT_WINDOW_TOKENS.value_or_default(fields),
             enabled: ENABLED.value(fields) == Some(true),
+            heartbeat: HEARTBEAT.value_or_default(fields),
         }
     }
 }
@@ -368,6 +415,7 @@ impl fmt::Debug for HostSettings {
             .field("nvidia_base_url", &self.nvidia_base_url)
             .field("context_window_tokens", &self.context_window_tokens)
             .field("enabled", &self.enabled)
+            .field("heartbeat", &self.heartbeat)
             .finish()
     }
 }
