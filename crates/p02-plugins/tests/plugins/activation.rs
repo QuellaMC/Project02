@@ -100,8 +100,8 @@ async fn the_listed_plugins_activate_together() {
             "runtime.plugin",
             "character-memory",
             "character-state",
-            "demo-config",
             "mem0",
+            "reply-style",
             "session-history"
         ]
     );
@@ -136,7 +136,7 @@ async fn the_listed_plugins_activate_together() {
             .collect::<Vec<_>>(),
         [
             Some("character-state"),
-            Some("demo-config"),
+            Some("reply-style"),
             Some("session-history")
         ]
     );

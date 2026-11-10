@@ -2,10 +2,17 @@
   "format": "project02.plugin.v2",
   "manifest": {
     "id": "character-state",
-    "displayName": "Character State",
+    "displayName": "Inner State",
     "version": "1.0.0",
     "kind": "first_party",
     "description": "First-party Character State: the character's own inner state as a trusted runtime note, with a tool to adjust it.",
+    "page": {
+      "summary": "Her mood and feelings",
+      "icon": "heart",
+      "tint": "pink",
+      "placement": "mind_body",
+      "order": 4
+    },
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "declaredPlugins": [
       "tool_provider",

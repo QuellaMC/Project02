@@ -15,7 +15,7 @@ use crate::support::{Ear, Gate, Round, World, a_while, begun, line, open, settle
 async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
     let world = World::new();
 
-    world.settings(json!({"project02": {"enabled": false}}));
+    world.her_settings(json!({"project02": {"enabled": false}}));
 
     let daemon = world.daemon().await;
     let pass = daemon.reconcile();
@@ -29,7 +29,7 @@ async fn a_pass_judges_only_the_characters_running_when_it_was_asked_for() {
         character
             .diagnostic
             .as_deref()
-            .is_some_and(|diagnostic| diagnostic.contains("is disabled")),
+            .is_some_and(|diagnostic| diagnostic.contains("is switched off")),
         "{character:?}"
     );
     assert_eq!(

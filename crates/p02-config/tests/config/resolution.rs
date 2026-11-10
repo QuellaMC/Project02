@@ -13,6 +13,7 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
     world
         .package("zeta", &json!({}), "1.0.0")
         .write_home(&document(json!({
+            "project02": {"enabled": false},
             "plugins": {"character-state": {"enabled": true}},
             "connectors": {"telegram": {"config": {"botToken": "111111:home"}}},
         })))
@@ -35,6 +36,7 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
     assert_eq!(
         outside(&world.view(&home())),
         [
+            "project02.enabled",
             "plugins.character-state.enabled",
             "connectors.telegram.config.botToken"
         ]
@@ -42,6 +44,7 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
     assert_eq!(
         outside(&world.view(&of("mira"))),
         [
+            "project02.enabled",
             "plugins.character-state.enabled",
             "connectors.telegram.config.botToken",
             "connectors.telegram.config.managementBotToken",
@@ -71,13 +74,13 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
 #[test]
 fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switch_blocks_it() {
     let world = World::new();
-    let misspelled = json!({"nope": 1, "tone": "shouty"});
-    let demo = |target: &p02_wire::ConfigTarget| {
+    let misspelled = json!({"nope": 1, "backend": "cloud"});
+    let memory = |target: &p02_wire::ConfigTarget| {
         let view = world.view(target);
 
         (
             findings(&view["diagnostics"]),
-            section(&view, "plugins", "demo-config").unwrap()["activation"]["reasons"].clone(),
+            section(&view, "plugins", "mem0").unwrap()["activation"]["reasons"].clone(),
         )
     };
 
@@ -88,91 +91,44 @@ fn a_section_off_by_its_switch_or_its_default_is_never_judged_and_a_broken_switc
             "disabled_by_config",
         ),
     ] {
-        world.write_home(&document(json!({"plugins": {"demo-config": stanza}})));
-        assert_eq!(demo(&home()), (Vec::new(), json!([reason])), "{stanza}");
+        world.write_home(&document(json!({"plugins": {"mem0": stanza}})));
+        assert_eq!(memory(&home()), (Vec::new(), json!([reason])), "{stanza}");
     }
 
     world.write_overlay(
         "mira",
-        &document(json!({"plugins": {"demo-config": {"enabled": true}}})),
+        &document(json!({"plugins": {"mem0": {"enabled": true}}})),
     );
 
     assert_eq!(
-        demo(&of("mira")).0,
+        memory(&of("mira")).0,
         [
             (
                 "runtime_config_ignored".to_owned(),
-                "plugins.demo-config.config.nope".to_owned()
+                "plugins.mem0.config.nope".to_owned()
             ),
             (
                 "runtime_config_value_invalid".to_owned(),
-                "plugins.demo-config.config.tone".to_owned()
+                "plugins.mem0.config.backend".to_owned()
             ),
         ]
     );
 
-    world.write_home(&document(
-        json!({"plugins": {"demo-config": {"enabled": "yes"}}}),
-    ));
+    world.write_home(&document(json!({"plugins": {"mem0": {"enabled": "yes"}}})));
 
     assert_eq!(
-        demo(&home()),
+        memory(&home()),
         (
             vec![(
                 "runtime_config_value_invalid".to_owned(),
-                "plugins.demo-config.enabled".to_owned()
+                "plugins.mem0.enabled".to_owned()
             )],
             json!(["blocked_by_config_errors"])
         )
     );
     assert_eq!(
-        demo(&of("mira")),
-        (
-            Vec::new(),
-            json!(["bundled_demo-config", "enabled_by_config"])
-        )
-    );
-}
-
-#[test]
-fn a_memory_provider_the_settings_do_not_choose_never_runs_and_is_never_judged() {
-    let world = World::new();
-    let mem0 = json!({"enabled": true, "config": {"backend": "cloud"}});
-
-    world.write_home(&document(json!({
-        "project02": {"defaultMemoryProvider": "another"},
-        "plugins": {"mem0": mem0},
-    })));
-
-    let view = world.view(&home());
-
-    assert_eq!(view["diagnostics"], json!([]));
-    assert_eq!(
-        section(&view, "plugins", "mem0").unwrap()["activation"],
-        json!({
-            "enabled": false,
-            "status": "disabled",
-            "reasons": ["not_selected_as_default_memory_provider"],
-        })
-    );
-    assert!(
-        world
-            .resolve(&of("mira"))
-            .settings()
-            .plugins()
-            .all(|(id, _)| id.as_str() != "mem0")
-    );
-
-    world.write_home(&document(json!({
-        "project02": {"defaultMemoryProvider": "mem0"},
-        "plugins": {"mem0": mem0},
-    })));
-    assert_eq!(
-        findings(&world.view(&home())["diagnostics"]),
-        [(
-            "runtime_config_value_invalid".to_owned(),
-            "plugins.mem0.config.backend".to_owned()
-        )]
+        memory(&of("mira")),
+        (Vec::new(), json!(["bundled_mem0", "enabled_by_config"]))
     );
 }
 
@@ -182,12 +138,15 @@ fn a_finding_in_her_overlay_names_her_and_one_in_the_homes_document_no_one() {
 
     world
         .write_home(&document(json!({
-            "plugins": {"demo-config": {"enabled": true, "config": {"signoff": 1}}, "ghost": {}},
+            "plugins": {"mem0": {"enabled": true, "config": {"backend": "cloud"}}, "ghost": {}},
         })))
         .write_overlay(
             "mira",
             &document(json!({
-                "plugins": {"demo-config": {"config": {"tone": "shouty", "nope": 1}}, "spirit": {}},
+                "plugins": {
+                    "reply-style": {"enabled": true, "config": {"tone": "shouty", "nope": 1}},
+                    "spirit": {},
+                },
             })),
         );
 
@@ -214,19 +173,19 @@ fn a_finding_in_her_overlay_names_her_and_one_in_the_homes_document_no_one() {
                 Some("mira")
             ),
             (
-                "runtime_config_ignored",
-                "plugins.demo-config.config.nope",
-                Some("mira")
-            ),
-            (
                 "runtime_config_value_invalid",
-                "plugins.demo-config.config.tone",
-                Some("mira")
-            ),
-            (
-                "runtime_config_value_invalid",
-                "plugins.demo-config.config.signoff",
+                "plugins.mem0.config.backend",
                 None
+            ),
+            (
+                "runtime_config_ignored",
+                "plugins.reply-style.config.nope",
+                Some("mira")
+            ),
+            (
+                "runtime_config_value_invalid",
+                "plugins.reply-style.config.tone",
+                Some("mira")
             ),
         ]
     );
@@ -298,10 +257,6 @@ fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() 
         })),
         document(json!({
             "project02": key("nvapi-first"),
-            "plugins": {"mem0": mem0, "demo-config": {"config": {"tone": "warm"}}},
-        })),
-        document(json!({
-            "project02": key("nvapi-first"),
             "plugins": {"mem0": mem0},
             "connectors": {"telegram": {"config": {"mirror": false}}},
         })),
@@ -313,6 +268,16 @@ fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() 
         world.write_home(&unchanged);
         assert_eq!(settings(), before, "{unchanged}");
     }
+
+    // A plugin she does not run is none of what she runs on.
+    world.write_overlay(
+        "mira",
+        &document(json!({
+            "project02": {"userDisplayName": "Sam"},
+            "plugins": {"reply-style": {"config": {"tone": "warm"}}},
+        })),
+    );
+    assert_eq!(settings(), before);
 
     world.write_home(&document(
         json!({"project02": key("nvapi-second"), "plugins": {"mem0": mem0}}),

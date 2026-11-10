@@ -20,7 +20,9 @@ under the store's locks, and its views and changes are p02-wire's types.
   connector's from this build. A scope says which document may set a
   value: the home's for every character, a character's alone, or the
   home's alone. A value outside its scope is a warning and never in
-  effect.
+  effect. A view hands a page what a declaration says of drawing it: a
+  field's words, a plugin's row, and a section's cards with the rows of
+  the fields its target may set.
 - **Reading.** For the home a value is the home's, else its default; for
   a character it is hers, else the home's, else the default. A value its
   field refuses stays in effect, refused, so no farther value stands in

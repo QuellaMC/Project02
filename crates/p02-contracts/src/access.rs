@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 
+use p02_wire::{AccessLevel, AccessName};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::vocabulary::{AccessLevel, AccessName};
-
-/// The level of each host service a plugin asks for or holds; a service
-/// the map leaves out is `none`.
+/// The level of each access a plugin asks for or holds; one the map
+/// leaves out is `none`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "Value")]
 pub struct AccessMap(BTreeMap<AccessName, AccessLevel>);
@@ -24,12 +23,12 @@ pub enum AccessMapError {
 
 impl AccessMap {
     /// Reads an authored access map: absent is empty, and every key must
-    /// name a service and every value a level.
+    /// name an access and every value a level.
     ///
     /// # Errors
     ///
     /// [`AccessMapError`] for a value that is not an object, a key that
-    /// names no service, or a value that is not a level.
+    /// names no access, or a value that is not a level.
     pub fn from_json(value: Option<&Value>) -> Result<Self, AccessMapError> {
         let Some(value) = value else {
             return Ok(Self::default());
@@ -51,6 +50,12 @@ impl AccessMap {
                 Ok((name, level))
             })
             .collect()
+    }
+
+    /// The level of each access the map names.
+    #[must_use]
+    pub fn levels(&self) -> &BTreeMap<AccessName, AccessLevel> {
+        &self.0
     }
 
     #[must_use]
@@ -102,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn an_access_map_refuses_what_is_not_a_service_and_a_level() {
+    fn an_access_map_refuses_what_is_not_an_access_and_a_level() {
         for (value, refusal) in [
             (json!(["model_input"]), AccessMapError::NotAnObject),
             (json!(null), AccessMapError::NotAnObject),

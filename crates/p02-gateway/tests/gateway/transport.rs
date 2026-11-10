@@ -36,7 +36,7 @@ async fn a_body_or_query_the_route_cannot_take_is_400() {
             json!({
                 "target": {"scope": "global"},
                 "expectedFingerprint": "fingerprint",
-                "operation": {"kind": "set", "path": "project02.enabled"},
+                "operation": {"kind": "set", "path": "project02.userDisplayName"},
             })
             .to_string(),
             "value",

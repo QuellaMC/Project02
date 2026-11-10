@@ -17,6 +17,7 @@ import {bearer, exchange} from './harness/http.ts';
 import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
+const mira = {scope: 'character', characterId: 'mira'} as const;
 
 function dataOf(frame: Frame | undefined): unknown {
   return JSON.parse(frame?.data ?? 'null');
@@ -451,19 +452,15 @@ it('stream.maintenance-failed: a segment rotation that fails behind a completed 
     state: 'ready',
     maintenance: {at, message},
   });
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {kind: 'set', path: 'project02.enabled', value: false},
-  );
+  await saveConfig(wire, mira, {
+    kind: 'set',
+    path: 'project02.enabled',
+    value: false,
+  });
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'stopped'}),
   );
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {kind: 'unset', path: 'project02.enabled'},
-  );
+  await saveConfig(wire, mira, {kind: 'unset', path: 'project02.enabled'});
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
   );

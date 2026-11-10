@@ -362,13 +362,17 @@ it("connectors.telegram-mirror: another surface's turn is shown in each paired c
   model.answer(reply('Hello, Alice.'));
   telegram.push(miraBot.token, messageFrom(alice, 1, 'Hello, Mira.'));
   await telegram.shows(miraBot.token, bob.id, 'Hello, Alice.');
-  await saveConfig(wire, mira, {
-    kind: 'section_field_set',
-    namespace: 'connectors',
-    id: 'telegram',
-    field: 'mirror',
-    value: false,
-  });
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {
+      kind: 'section_field_set',
+      namespace: 'connectors',
+      id: 'telegram',
+      field: 'mirror',
+      value: false,
+    },
+  );
   model.answer(reply('Quietly, web.'));
   await sayOnWeb('Quiet now.', 'web-2');
   model.answer(reply('Hello again, Alice.'));

@@ -83,15 +83,17 @@ impl World {
             .fold(self.home.root().to_path_buf(), |path, name| path.join(name))
     }
 
-    /// Writes the home's settings as `document` says them.
-    pub(crate) fn settings(&self, document: Value) {
+    /// Writes Mira's own settings as `document` says them.
+    pub(crate) fn her_settings(&self, document: Value) {
         let Value::Object(mut fields) = document else {
             panic!("settings are an object");
         };
+        let folder = self.path("character-data/mira");
 
         fields.insert("version".to_owned(), json!("project02.config.v2"));
+        create_directories(&folder);
         write(
-            &self.path("config.json"),
+            &folder.join("config.json"),
             &serde_json::to_string_pretty(&Value::Object(fields)).unwrap(),
         );
     }

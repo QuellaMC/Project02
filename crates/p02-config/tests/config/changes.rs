@@ -24,7 +24,7 @@ fn refusal(outcome: &ChangeOutcome) -> Option<ChangeRefusal> {
 fn a_switch_a_change_gives_is_a_boolean_and_absent_one_leaves_it_to_the_document_beneath() {
     let operation = |enabled: Option<Value>| {
         let mut operation =
-            json!({"kind": "section_enabled", "namespace": "plugins", "id": "demo-config"});
+            json!({"kind": "section_enabled", "namespace": "plugins", "id": "mem0"});
 
         if let Some(enabled) = enabled {
             operation["enabled"] = enabled;
@@ -51,7 +51,7 @@ fn a_switch_a_change_gives_is_a_boolean_and_absent_one_leaves_it_to_the_document
             operation(given).unwrap(),
             Operation::SectionEnabled {
                 namespace: Namespace::Plugins,
-                id: "demo-config".to_owned(),
+                id: "mem0".to_owned(),
                 enabled,
             }
         );
@@ -90,8 +90,8 @@ fn a_document_is_written_indented_with_a_trailing_newline_its_sections_in_their_
         .save(
             &home(),
             json!({
-                "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
-                "field": "tone", "value": "warm",
+                "kind": "section_field_set", "namespace": "plugins", "id": "mem0",
+                "field": "backend", "value": "server",
             }),
         )
         .save(
@@ -111,9 +111,9 @@ fn a_document_is_written_indented_with_a_trailing_newline_its_sections_in_their_
             "    \"userDisplayName\": \"Robin\"\n",
             "  },\n",
             "  \"plugins\": {\n",
-            "    \"demo-config\": {\n",
+            "    \"mem0\": {\n",
             "      \"config\": {\n",
-            "        \"tone\": \"warm\"\n",
+            "        \"backend\": \"server\"\n",
             "      }\n",
             "    }\n",
             "  },\n",
@@ -246,21 +246,18 @@ fn a_host_value_its_rule_refuses_is_refused_and_the_refusal_never_repeats_it() {
 #[test]
 fn a_change_its_own_rules_refuse_is_refused_and_makes_no_data_directory() {
     let world = World::new();
-
-    world.write_home(&document(json!({"project02": {"enabled": false}})));
-
-    let demo = |field: &str, value: Value| {
+    let style = |field: &str, value: Value| {
         json!({
-            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
+            "kind": "section_field_set", "namespace": "plugins", "id": "reply-style",
             "field": field, "value": value,
         })
     };
 
     for operation in [
         json!({"kind": "set", "path": "project02.contextWindowTokens", "value": "many"}),
-        demo("tone", json!("shouty")),
+        style("tone", json!("shouty")),
         json!({"kind": "set", "path": "project02.storeRoot", "value": "/elsewhere"}),
-        demo("volume", json!(11)),
+        style("volume", json!(11)),
         json!({
             "kind": "section_field_set", "namespace": "plugins", "id": "nope",
             "field": "tone", "value": "warm",
@@ -304,14 +301,16 @@ fn each_target_lists_and_writes_only_what_its_scope_lets_it_set() {
         json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096}),
     );
 
-    let telegram_fields = |view: &Value| -> Vec<Value> {
-        section(view, "connectors", "telegram").unwrap()["fields"]
+    let names = |fields: &Value| -> Vec<Value> {
+        fields
             .as_array()
             .unwrap()
             .iter()
             .map(|field| field["name"].clone())
             .collect()
     };
+    let telegram_fields =
+        |view: &Value| names(&section(view, "connectors", "telegram").unwrap()["fields"]);
     let home_view = world.view(&home());
     let mira_view = world.view(&of("mira"));
 
@@ -325,10 +324,9 @@ fn each_target_lists_and_writes_only_what_its_scope_lets_it_set() {
             json!("pairedUsers")
         ]
     );
-    assert_eq!(
-        telegram_fields(&mira_view),
-        [json!("botToken"), json!("mirror")]
-    );
+    assert_eq!(telegram_fields(&mira_view), [json!("botToken")]);
+    assert!(!names(&home_view["project02"]).contains(&json!("enabled")));
+    assert!(names(&mira_view["project02"]).contains(&json!("enabled")));
 
     let documents =
         || [world.home_document(), world.overlay("mira")].map(|path| std::fs::read(path).unwrap());
@@ -349,6 +347,10 @@ fn each_target_lists_and_writes_only_what_its_scope_lets_it_set() {
             }),
         ),
         (home(), telegram("botToken", json!("987654:bot"))),
+        (
+            home(),
+            json!({"kind": "set", "path": "project02.enabled", "value": false}),
+        ),
         (
             of("mira"),
             telegram("managementBotToken", json!("123456:bot")),
@@ -402,22 +404,22 @@ fn a_change_applies_beside_values_a_document_refuses_so_each_is_put_right_in_tur
         .write_home(&document(json!({"project02": {"contextWindowTokens": -5}})))
         .write_overlay(
             "mira",
-            &document(json!({"plugins": {"demo-config": {
+            &document(json!({"plugins": {"reply-style": {
                 "enabled": true,
                 "config": {"nope": 1, "tone": "shouty", "signoff": 7},
             }}})),
         );
 
-    let demo = |field: &str, value: Value| {
+    let style = |field: &str, value: Value| {
         json!({
-            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
+            "kind": "section_field_set", "namespace": "plugins", "id": "reply-style",
             "field": field, "value": value,
         })
     };
 
     world
-        .save(&of("mira"), demo("tone", json!("warm")))
-        .save(&of("mira"), demo("signoff", json!("Yours.")))
+        .save(&of("mira"), style("tone", json!("warm")))
+        .save(&of("mira"), style("signoff", json!("Yours.")))
         .save(
             &home(),
             json!({"kind": "set", "path": "project02.contextWindowTokens", "value": 4096}),
@@ -431,7 +433,7 @@ fn a_change_applies_beside_values_a_document_refuses_so_each_is_put_right_in_tur
             .iter()
             .map(|diagnostic| (diagnostic.code(), diagnostic.path()))
             .collect::<Vec<_>>(),
-        [(Code::Ignored, Some("plugins.demo-config.config.nope"))]
+        [(Code::Ignored, Some("plugins.reply-style.config.nope"))]
     );
     assert_eq!(
         resolution.settings().host().context_window_tokens.get(),

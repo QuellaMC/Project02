@@ -923,8 +923,7 @@ fn assemble(
 
     if !settings.host().enabled {
         return Err(format!(
-            "Character \"{id}\" is disabled. Set project02.enabled to true in its character \
-             config, or remove the global project02.enabled."
+            "Character \"{id}\" is switched off. Switch her on in her settings to start her."
         ));
     }
 

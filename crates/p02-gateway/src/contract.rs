@@ -377,8 +377,8 @@ fn written() -> Vec<(&'static str, Value)> {
         request: ConfirmationQuestion {
             plugin_id: id("runtime.plugin"),
             tool_name: id("runtime.plugin.config_update"),
-            summary: "Turn the demo plugin on.".to_owned(),
-            preview: json!({"enabled": true}).as_object().unwrap().clone(),
+            summary: "Change her tone.".to_owned(),
+            preview: json!({"fieldName": "tone"}).as_object().unwrap().clone(),
         },
         deadline_at: 1_793_000_000_000,
         turn: Some(turn.clone()),

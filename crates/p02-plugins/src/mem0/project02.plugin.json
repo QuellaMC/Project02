@@ -2,10 +2,18 @@
   "format": "project02.plugin.v2",
   "manifest": {
     "id": "mem0",
-    "displayName": "Mem0 Memory",
+    "displayName": "Long-Term Memory",
     "version": "1.0.0",
     "kind": "memory_provider",
     "description": "Retrieval-driven long-term memory backed by a Mem0 platform account, a self-hosted Mem0 server, or the embedded Mem0 engine running on this device with its own extraction model and embedder.",
+    "page": {
+      "summary": "Remembers across all chats",
+      "icon": "archive",
+      "tint": "brown",
+      "placement": "mind_body",
+      "order": 3,
+      "connection": "Memory"
+    },
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "declaredPlugins": [
       "before_role_model_call",
@@ -19,34 +27,49 @@
       "fields": [
         {
           "name": "backend",
+          "label": "Kept At",
           "description": "Which Mem0 deployment to talk to: the hosted platform API, a self-hosted server, or the embedded engine on this device (oss).",
           "secret": false,
+          "scope": "global_only",
           "valueType": "string",
           "allowedValues": ["platform", "server", "oss"],
+          "choices": {
+            "platform": "Mem0 Cloud",
+            "server": "Your Server",
+            "oss": "This Computer"
+          },
           "defaultValue": "platform",
           "agentMutable": false,
           "redactionLabels": []
         },
         {
           "name": "apiKey",
+          "label": "API Key",
           "description": "Mem0 credential: the platform API key, or the server's JWT or m0sk_ API key.",
+          "placeholder": "Paste key",
           "secret": true,
+          "scope": "global_only",
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": ["memory"]
         },
         {
           "name": "baseUrl",
-          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
+          "label": "Server Address",
+          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. The credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
+          "placeholder": "https://",
           "secret": false,
+          "scope": "global_only",
           "valueType": "url",
           "agentMutable": false,
           "redactionLabels": []
         },
         {
           "name": "userId",
+          "label": "Memory Owner",
           "description": "Mem0 user identity memories are stored under.",
           "secret": false,
+          "scope": "global_only",
           "valueType": "string",
           "defaultValue": "project02-user",
           "agentMutable": false,
@@ -54,51 +77,113 @@
         },
         {
           "name": "ossLlmModel",
+          "label": "Remembering Model",
           "description": "Embedded engine only: extraction model name; unset uses the engine default (gpt-5-mini). Some models return empty extractions for the engine's prompt even though the API works; test yours, and prefer small instruction-following models.",
+          "placeholder": "gpt-5-mini",
           "secret": false,
+          "scope": "global_only",
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": []
         },
         {
           "name": "ossLlmApiKey",
+          "label": "API Key",
           "description": "Embedded engine only: API key for the extraction endpoint. Required when ossLlmBaseUrl is unset (the OpenAI cloud); local servers ignore keys.",
+          "placeholder": "Paste key",
           "secret": true,
+          "scope": "global_only",
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": ["memory"]
         },
         {
           "name": "ossLlmBaseUrl",
+          "label": "Server",
           "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
+          "placeholder": "OpenAI",
           "secret": false,
+          "scope": "global_only",
           "valueType": "url",
           "agentMutable": false,
           "redactionLabels": []
         },
         {
           "name": "ossEmbedderModel",
+          "label": "Searching Model",
           "description": "Embedded engine only: embedding model name; unset uses the engine default (text-embedding-3-small).",
+          "placeholder": "text-embedding-3-small",
           "secret": false,
+          "scope": "global_only",
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": []
         },
         {
           "name": "ossEmbedderApiKey",
+          "label": "API Key",
           "description": "Embedded engine only: API key for the embedding endpoint; unset reuses ossLlmApiKey only while the embedding endpoint matches the extraction endpoint -- a separate endpoint needs its own key.",
+          "placeholder": "Same as Remembering",
           "secret": true,
+          "scope": "global_only",
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": ["memory"]
         },
         {
           "name": "ossEmbedderBaseUrl",
+          "label": "Server",
           "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
+          "placeholder": "Same as Remembering",
           "secret": false,
+          "scope": "global_only",
           "valueType": "url",
           "agentMutable": false,
           "redactionLabels": []
+        }
+      ],
+      "layout": [
+        {"rows": ["backend"]},
+        {
+          "when": {"field": "backend", "is": ["platform"]},
+          "rows": ["apiKey"],
+          "footer": "Get a key at app.mem0.ai."
+        },
+        {
+          "when": {"field": "backend", "is": ["server"]},
+          "rows": ["baseUrl", "apiKey"],
+          "footer": "The key is only needed if your server has one."
+        },
+        {
+          "title": "Remembering",
+          "when": {"field": "backend", "is": ["oss"]},
+          "rows": ["ossLlmApiKey", "ossLlmBaseUrl"],
+          "footer": "The model that picks what to remember. Name a server like Ollama to keep everything on this computer."
+        },
+        {
+          "title": "Searching",
+          "when": {"field": "backend", "is": ["oss"]},
+          "rows": ["ossEmbedderApiKey", "ossEmbedderBaseUrl"],
+          "footer": "The model that files memories so she can find them. Empty uses the same as Remembering."
+        },
+        {
+          "title": "Advanced",
+          "advanced": true,
+          "rows": [
+            "userId",
+            {
+              "field": "baseUrl",
+              "when": {"field": "backend", "is": ["platform"]}
+            },
+            {
+              "field": "ossLlmModel",
+              "when": {"field": "backend", "is": ["oss"]}
+            },
+            {
+              "field": "ossEmbedderModel",
+              "when": {"field": "backend", "is": ["oss"]}
+            }
+          ]
         }
       ]
     },
@@ -117,7 +202,8 @@
     "requestedAccess": {
       "turn_context": "read",
       "model_input": "write",
-      "plugin_database": "write"
+      "plugin_database": "write",
+      "network": "write"
     }
   }
 }

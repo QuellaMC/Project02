@@ -303,8 +303,8 @@ mod tests {
             "meta": {"version": "1.0.0"},
             "plugins": {
                 "required": ["character-state"],
-                "recommended": ["demo-config"],
-                "config": {"demo-config": {"tone": "warm"}},
+                "recommended": ["reply-style"],
+                "config": {"reply-style": {"tone": "warm"}},
             },
         })
     }
@@ -369,7 +369,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["character-state", "mem0"]
         );
-        assert_eq!(definition.plugins.recommended()[0].as_str(), "demo-config");
+        assert_eq!(definition.plugins.recommended()[0].as_str(), "reply-style");
         assert_eq!(
             config.keys().map(Identifier::as_str).collect::<Vec<_>>(),
             ["alpha-plugin", "zeta-plugin"]
@@ -432,7 +432,7 @@ mod tests {
             (with(&[("/meta", json!("1.0.0"))]), "meta must be an object"),
             (with(&[("/meta/version", json!("v1"))]), "meta.version"),
             (
-                with(&[("/plugins", json!(["demo-config"]))]),
+                with(&[("/plugins", json!(["reply-style"]))]),
                 "plugins must be an object",
             ),
             (
@@ -440,7 +440,7 @@ mod tests {
                 "plugins.recommended must be an array of plugin ids",
             ),
             (
-                with(&[("/plugins/config", json!(["demo-config"]))]),
+                with(&[("/plugins/config", json!(["reply-style"]))]),
                 "plugins.config must be an object",
             ),
             (

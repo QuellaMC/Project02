@@ -173,10 +173,12 @@ it("storage.torn-final-record: a log whose last line a crash cut short reads bac
 it('storage.crash-open-turn-readable: a log a crash left in the middle of a turn, the line committed and no ending, reads back and the next turn completes after it; one left in the middle of a tool call reads back too', async () => {
   const model = await startModelServer();
   const home = createHome({
-    'config.json': configJson({
-      project02: model.settings,
-      plugins: {'demo-config': {enabled: true}},
-    }),
+    'config.json': configJson({project02: model.settings}),
+    'character-data': {
+      mira: {
+        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+      },
+    },
   });
   const run = async () => {
     const daemon = await startDaemon(home);
@@ -220,7 +222,7 @@ it('storage.crash-open-turn-readable: a log a crash left in the middle of a turn
     calling([
       'runtime_plugin_config_update',
       {
-        pluginId: 'demo-config',
+        pluginId: 'reply-style',
         fieldName: 'tone',
         operation: 'set',
         value: 'warm',

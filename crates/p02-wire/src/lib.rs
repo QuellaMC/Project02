@@ -13,9 +13,10 @@ mod refusal;
 mod text;
 
 pub use config::{
-    ActivationStatus, Authored, ChangeOutcome, ChangeRefusal, CharacterConnectorEntry,
-    ConfigChange, ConfigTarget, ConfigValueType, ConfigView, ConnectorConfigView, ConnectorEntry,
-    ConnectorRefusal, EffectiveView, FieldView, Namespace, Operation, SectionActivation,
+    AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
+    CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
+    ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
+    LayoutRow, LayoutWhen, Namespace, Operation, Placement, PluginPage, SectionActivation,
     SectionView, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{

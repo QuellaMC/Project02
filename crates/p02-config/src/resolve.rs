@@ -8,7 +8,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use p02_characters::{CharacterDefinition, CharacterVersion, Discovery};
-use p02_contracts::{ConfigField, ConfigScope};
+use p02_contracts::ConfigField;
 use p02_shared::{Fingerprint, Identifier};
 use p02_store::{CharacterData, Home, SettingsDocument, StorageError};
 use p02_wire::{Code, ConfigTarget, Diagnostic, Namespace, Source};
@@ -18,7 +18,7 @@ use crate::activation;
 use crate::conceal::conceal_document;
 use crate::declaration::{Declared, Layer, Sections, Target, authorable, outside_scope};
 use crate::document::{Document, Read, Stanza, ignored_key, unknown};
-use crate::host::{DEFAULT_MEMORY_PROVIDER, HostSettings, host_fields};
+use crate::host::{HostSettings, host_fields};
 use crate::materialize::merged_overlay;
 
 /// A target's settings, resolved: the home's, or one character's over the
@@ -327,13 +327,9 @@ impl<'s> Resolution<'s> {
             },
             skipped,
         );
-        let found = activation::judge(
-            character,
-            DEFAULT_MEMORY_PROVIDER.value(&resolution.host).as_deref(),
-            &resolution.resolved,
-        );
+        let unmet = activation::expected(character, &resolution.resolved);
 
-        resolution.diagnostics.extend(found);
+        resolution.diagnostics.extend(unmet);
         Ok(resolution)
     }
 
@@ -348,7 +344,7 @@ impl<'s> Resolution<'s> {
         let host: Vec<Field<'s>> = host_fields()
             .iter()
             .map(|field| {
-                let read = target.layers(ConfigScope::GlobalWithCharacterOverrides);
+                let read = target.layers(field.scope());
                 let value_in = |layer| {
                     layers
                         .document(layer)
@@ -368,10 +364,9 @@ impl<'s> Resolution<'s> {
                 }
             })
             .collect();
-        let chosen_memory = DEFAULT_MEMORY_PROVIDER.value(&host);
         let resolved: Vec<Section<'s>> = sections
             .declared()
-            .map(|declared| section(declared, &target, &layers, chosen_memory.as_deref()))
+            .map(|declared| section(declared, &target, &layers))
             .collect();
         let mut all: Vec<Diagnostic> = layers
             .present()
@@ -385,6 +380,7 @@ impl<'s> Resolution<'s> {
             .collect();
 
         all.extend(unknown_sections(sections, &layers));
+        all.extend(host_values_outside_scope(&layers));
         all.extend(refused_host_values(&host, &layers));
         all.append(&mut diagnostics);
         all.extend(
@@ -412,9 +408,10 @@ impl<'s> Resolution<'s> {
     }
 
     /// Every finding about the target's settings: what of the documents is
-    /// not used, sections named that this build lacks, host values refused,
-    /// what of her package's settings is skipped, what is wrong with each
-    /// section, and what they make of her plugins.
+    /// not used, sections named that this build lacks, host values held
+    /// outside their scope or refused, what of her package's settings is
+    /// skipped, what is wrong with each section, and the plugins her
+    /// package expects that she does not run.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
@@ -575,12 +572,7 @@ fn resolve(
     })
 }
 
-fn section<'s>(
-    declared: Declared<'s>,
-    target: &Target,
-    layers: &Layers,
-    chosen_memory: Option<&str>,
-) -> Section<'s> {
+fn section<'s>(declared: Declared<'s>, target: &Target, layers: &Layers) -> Section<'s> {
     let namespace = declared.namespace();
     let id = declared.id().as_str();
     let stanza = |layer| {
@@ -624,16 +616,14 @@ fn section<'s>(
     let switched = matches!(switch, Effective::Authored { .. });
 
     // A section that does not run, switched off by a document or by its
-    // default, or a memory provider the settings do not choose, stops
-    // nothing, so what its settings lack or misspell is not judged.
+    // default, stops nothing, so what its settings lack or misspell is not
+    // judged.
     let status = if switch.value() == Some(&Value::Bool(false)) {
         Status::Disabled(if switched {
             "disabled_by_config"
         } else {
             "not_enabled"
         })
-    } else if declared.is_memory_provider() && chosen_memory.is_some_and(|chosen| chosen != id) {
-        Status::Disabled("not_selected_as_default_memory_provider")
     } else {
         diagnostics.extend(judge(declared, &fields, &switch, &read, layers));
 
@@ -729,6 +719,29 @@ fn judge(
     }
 
     diagnostics
+}
+
+/// A warning for each host value a document holds that its field's scope
+/// keeps from that document: it never takes effect, and stops no one.
+fn host_values_outside_scope(layers: &Layers) -> Vec<Diagnostic> {
+    layers
+        .present()
+        .flat_map(|(layer, document)| {
+            host_fields()
+                .iter()
+                .filter(move |field| {
+                    document.host_value(field.name()).is_some() && !authorable(field.scope(), layer)
+                })
+                .map(move |field| (layer, field))
+        })
+        .map(|(layer, field)| {
+            layers.found_in(
+                layer,
+                Diagnostic::warning(Code::AuthoredOutsideScope, field.outside_scope(layer))
+                    .at(field.path()),
+            )
+        })
+        .collect()
 }
 
 /// An error for each host value in effect that its field refuses, made in

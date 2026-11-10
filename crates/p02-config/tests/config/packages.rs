@@ -6,7 +6,7 @@ use p02_store::CharacterData;
 use p02_wire::Code;
 use serde_json::{Value, json};
 
-use crate::support::{WAIT, World, document, id, of, section, tree};
+use crate::support::{WAIT, World, document, id, manifest, of, plugins, section, tree};
 
 fn overlay_of(world: &World, character: &str) -> Value {
     serde_json::from_slice(&std::fs::read(world.overlay(character)).unwrap()).unwrap()
@@ -38,14 +38,14 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
 
     world
         .write_home(&document(
-            json!({"plugins": {"demo-config": {"enabled": false}}}),
+            json!({"plugins": {"session-history": {"enabled": false}}}),
         ))
         .package(
             "nova",
             &json!({
-                "required": ["demo-config"],
+                "required": ["reply-style", "session-history"],
                 "recommended": ["ghost"],
-                "config": {"demo-config": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
+                "config": {"reply-style": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
             }),
             "1.0.0",
         );
@@ -60,11 +60,14 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
     assert_eq!(
         overlay_of(&world, "nova"),
         document(json!({
-            "plugins": {"demo-config": {"enabled": true, "config": {"tone": "warm"}}},
+            "plugins": {
+                "reply-style": {"enabled": true, "config": {"tone": "warm"}},
+                "session-history": {"enabled": true},
+            },
         }))
     );
     assert_eq!(
-        section(&world.view(&of("nova")), "plugins", "demo-config").unwrap()["activation"]["status"],
+        section(&world.view(&of("nova")), "plugins", "session-history").unwrap()["activation"]["status"],
         "active"
     );
 
@@ -82,7 +85,7 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
     let package = |config: Value, version: &str| {
         world.package(
             "nova",
-            &json!({"recommended": ["demo-config"], "config": {"demo-config": config}}),
+            &json!({"recommended": ["reply-style"], "config": {"reply-style": config}}),
             version,
         );
     };
@@ -92,13 +95,13 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
     world.save(
         &of("nova"),
         json!({
-            "kind": "section_field_set", "namespace": "plugins", "id": "demo-config",
+            "kind": "section_field_set", "namespace": "plugins", "id": "reply-style",
             "field": "tone", "value": "playful",
         }),
     );
     world.save(
         &of("nova"),
-        json!({"kind": "section_enabled", "namespace": "plugins", "id": "demo-config"}),
+        json!({"kind": "section_enabled", "namespace": "plugins", "id": "reply-style"}),
     );
 
     let edited = std::fs::read(world.overlay("nova")).unwrap();
@@ -120,7 +123,7 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
         overlay_of(&world, "nova"),
         document(json!({
             "plugins": {
-                "demo-config": {"config": {"tone": "playful", "signoff": "Upgraded."}, "enabled": true},
+                "reply-style": {"config": {"tone": "playful", "signoff": "Upgraded."}, "enabled": true},
             },
         }))
     );
@@ -129,19 +132,19 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
 #[test]
 fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start_merges_them() {
     let world = World::new();
-    let demo = |kind: &str| json!({"kind": kind, "namespace": "plugins", "id": "demo-config"});
+    let style = |kind: &str| json!({"kind": kind, "namespace": "plugins", "id": "reply-style"});
     let package = |tone: &str, signoff: &str, version: &str| {
         world.package(
             "nova",
             &json!({
-                "recommended": ["demo-config"],
-                "config": {"demo-config": {"tone": tone, "signoff": signoff}},
+                "recommended": ["reply-style"],
+                "config": {"reply-style": {"tone": tone, "signoff": signoff}},
             }),
             version,
         );
     };
-    let mut signoff = demo("section_field_set");
-    let mut tone = demo("section_field_unset");
+    let mut signoff = style("section_field_set");
+    let mut tone = style("section_field_unset");
 
     signoff["field"] = json!("signoff");
     signoff["value"] = json!("Yours.");
@@ -151,7 +154,7 @@ fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start
     package("formal", "Cheers.", "2.0.0");
     world
         .save(&of("nova"), tone)
-        .save(&of("nova"), demo("section_enabled"));
+        .save(&of("nova"), style("section_enabled"));
 
     let data = start(&world, "nova").unwrap();
 
@@ -162,19 +165,19 @@ fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start
     );
     assert_eq!(
         overlay_of(&world, "nova"),
-        document(json!({"plugins": {"demo-config": {"config": {"signoff": "Yours."}}}}))
+        document(json!({"plugins": {"reply-style": {"config": {"signoff": "Yours."}}}}))
     );
 }
 
 #[test]
 fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
     let world = World::new();
-    let hers = document(json!({"plugins": {"demo-config": {"enabled": true, "config": "warm"}}}));
+    let hers = document(json!({"plugins": {"reply-style": {"enabled": true, "config": "warm"}}}));
 
     world
         .package(
             "nova",
-            &json!({"config": {"demo-config": {"tone": "warm"}}}),
+            &json!({"config": {"reply-style": {"tone": "warm"}}}),
             "1.0.0",
         )
         .write_overlay("nova", &hers);
@@ -201,24 +204,49 @@ fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
         named,
         [(
             Code::ValueInvalid,
-            Some("plugins.demo-config.config"),
-            "plugins.demo-config.config must be an object.".to_owned()
+            Some("plugins.reply-style.config"),
+            "plugins.reply-style.config must be an object.".to_owned()
         )]
     );
 }
 
 #[test]
 fn a_package_never_sets_a_credential_or_a_server_she_starts_without_them() {
-    let world = World::new();
+    // No plugin of this build lets a character set a server or a key of
+    // her own, so the rule is shown on one that does.
+    let mut declared = plugins();
+
+    declared.push(manifest(
+        "courier",
+        "tool_provider",
+        "global_with_character_overrides",
+        false,
+        &json!([
+            {
+                "name": "mode", "description": "How it sends.", "secret": false,
+                "valueType": "string", "redactionLabels": [],
+            },
+            {
+                "name": "baseUrl", "description": "Where it sends.", "secret": false,
+                "valueType": "url", "redactionLabels": [],
+            },
+            {
+                "name": "apiKey", "description": "The key.", "secret": true,
+                "valueType": "string", "redactionLabels": [],
+            },
+        ]),
+    ));
+
+    let world = World::with_plugins(declared);
 
     world.package(
         "nova",
         &json!({
-            "recommended": ["mem0"],
-            "config": {"mem0": {
-                "backend": "server",
+            "recommended": ["courier"],
+            "config": {"courier": {
+                "mode": "express",
                 "baseUrl": "https://collector.example.test",
-                "apiKey": "m0-shipped",
+                "apiKey": "sk-shipped",
             }},
         }),
         "1.0.0",
@@ -227,13 +255,13 @@ fn a_package_never_sets_a_credential_or_a_server_she_starts_without_them() {
 
     assert_eq!(
         overlay_of(&world, "nova"),
-        document(json!({"plugins": {"mem0": {"enabled": true, "config": {"backend": "server"}}}}))
+        document(json!({"plugins": {"courier": {"enabled": true, "config": {"mode": "express"}}}}))
     );
     assert_eq!(
         skipped(&world, "nova"),
         [
-            "plugins.mem0.config.baseUrl".to_owned(),
-            "plugins.mem0.config.apiKey".to_owned(),
+            "plugins.courier.config.baseUrl".to_owned(),
+            "plugins.courier.config.apiKey".to_owned(),
         ]
     );
 }
@@ -244,20 +272,20 @@ fn a_package_value_her_screen_could_not_set_is_skipped_and_the_rest_merged() {
 
     world.package(
         "nova",
-        &json!({"config": {"demo-config": {"tone": 42, "volume": 11, "signoff": "Yours."}}}),
+        &json!({"config": {"reply-style": {"tone": 42, "volume": 11, "signoff": "Yours."}}}),
         "1.0.0",
     );
     start(&world, "nova").unwrap();
 
     assert_eq!(
         overlay_of(&world, "nova"),
-        document(json!({"plugins": {"demo-config": {"config": {"signoff": "Yours."}}}}))
+        document(json!({"plugins": {"reply-style": {"config": {"signoff": "Yours."}}}}))
     );
     assert_eq!(
         skipped(&world, "nova"),
         [
-            "plugins.demo-config.config.tone".to_owned(),
-            "plugins.demo-config.config.volume".to_owned(),
+            "plugins.reply-style.config.tone".to_owned(),
+            "plugins.reply-style.config.volume".to_owned(),
         ]
     );
 }

@@ -147,7 +147,7 @@ function confirmation(id: string): PendingConfirmation {
     characterId: 'mira',
     id,
     request: {
-      pluginId: 'demo-config',
+      pluginId: 'runtime.plugin',
       toolName: 'runtime.plugin.config.update',
       summary: 'Set tone to warm',
       preview: {tone: 'warm'},

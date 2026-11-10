@@ -86,18 +86,18 @@ fn what_a_document_holds_that_the_settings_do_not_know_is_not_used_and_said() {
 fn a_hand_written_document_keeps_every_value_its_fields_take() {
     let world = World::new();
 
-    world.write_home(&document(json!({
-        "project02": {
-            "userDisplayName": "  Robin  ",
-            "roleModelProvider": "nvidia",
-            "nvidiaApiKey": "  nvapi-as typed  ",
-            "nvidiaModel": "meta/llama",
-            "nvidiaBaseUrl": "https://nim.example.test/v1/",
-            "contextWindowTokens": 4096,
-            "defaultMemoryProvider": "mem0",
-            "enabled": false,
-        },
-    })));
+    world
+        .write_home(&document(json!({
+            "project02": {
+                "userDisplayName": "  Robin  ",
+                "roleModelProvider": "nvidia",
+                "nvidiaApiKey": "  nvapi-as typed  ",
+                "nvidiaModel": "meta/llama",
+                "nvidiaBaseUrl": "https://nim.example.test/v1/",
+                "contextWindowTokens": 4096,
+            },
+        })))
+        .write_overlay("mira", &document(json!({"project02": {"enabled": false}})));
 
     let settings = world.resolve(&of("mira")).settings();
     let host = settings.host();
@@ -105,7 +105,6 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
     assert_eq!(host.user_display_name.as_str(), "Robin");
     assert_eq!(host.role_model_provider, Some(RoleModelProvider::Nvidia));
     assert_eq!(host.nvidia_model.as_deref(), Some("meta/llama"));
-    assert_eq!(host.default_memory_provider.as_deref(), Some("mem0"));
     assert!(!host.enabled);
     assert_eq!(host.context_window_tokens.get(), 4096);
     assert_eq!(

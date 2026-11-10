@@ -2,10 +2,17 @@
   "format": "project02.plugin.v2",
   "manifest": {
     "id": "session-history",
-    "displayName": "Session History",
+    "displayName": "Look Back",
     "version": "1.0.0",
     "kind": "first_party",
     "description": "Cross-session recall over this character's own conversation history: full-text search with anchored context windows, and transcript scrolling by message anchor.",
+    "page": {
+      "summary": "Searches your past chats",
+      "icon": "history",
+      "tint": "cyan",
+      "placement": "mind_body",
+      "order": 2
+    },
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "declaredPlugins": [
       "tool_provider",

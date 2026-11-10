@@ -82,13 +82,15 @@ it('characters.package-discovery-symlinks: a package that is a link, its folder 
 
 it('characters.package-version-upgrade: her first start and each new version of her package fill in only the settings she lacks, so what the person set on her screen, before her first start or after, stays', async () => {
   const home = createHome({
-    'config.json': configJson({project02: {enabled: false}}),
     characters: {
       nova: {
         'project02.character.json': characterJson('nova', 'Nova', {
-          plugins: {config: {'demo-config': {tone: 'warm'}}},
+          plugins: {config: {'reply-style': {tone: 'warm'}}},
         }),
       },
+    },
+    'character-data': {
+      nova: {'config.json': configJson({project02: {enabled: false}})},
     },
   });
   const nova = {scope: 'character', characterId: 'nova'} as const;
@@ -106,12 +108,12 @@ it('characters.package-version-upgrade: her first start and each new version of 
   expect(overlayOf(home, 'nova')).toEqual({
     version: 'project02.config.v2',
     project02: {enabled: true},
-    plugins: {'demo-config': {config: {tone: 'warm'}}},
+    plugins: {'reply-style': {config: {tone: 'warm'}}},
   });
   await saveConfig(wire, nova, {
     kind: 'section_field_set',
     namespace: 'plugins',
-    id: 'demo-config',
+    id: 'reply-style',
     field: 'tone',
     value: 'playful',
   });
@@ -122,8 +124,8 @@ it('characters.package-version-upgrade: her first start and each new version of 
     characterJson('nova', 'Nova', {
       meta: {version: '2.0.0'},
       plugins: {
-        recommended: ['demo-config'],
-        config: {'demo-config': {tone: 'formal', signoff: 'Upgraded.'}},
+        recommended: ['reply-style'],
+        config: {'reply-style': {tone: 'formal', signoff: 'Upgraded.'}},
       },
     }),
   );
@@ -134,7 +136,7 @@ it('characters.package-version-upgrade: her first start and each new version of 
     version: 'project02.config.v2',
     project02: {enabled: true},
     plugins: {
-      'demo-config': {
+      'reply-style': {
         enabled: true,
         config: {tone: 'playful', signoff: 'Upgraded.'},
       },

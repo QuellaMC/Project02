@@ -1,7 +1,6 @@
-//! The demo-config package: a reply style its settings choose, there for
-//! the host's config tools to have a plugin to change. Before each turn it
-//! tells the character the tone to speak in and, when one is set, the
-//! signoff to end with.
+//! The reply-style package: how she writes, as her own settings choose
+//! it. Before each turn it tells the character the tone to speak in and,
+//! when one is set, the signoff to end with.
 
 use std::sync::Arc;
 
@@ -34,12 +33,12 @@ pub(crate) fn create(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>,
                 .and_then(<[String]>::first)
                 .map(String::as_str)
         })
-        .ok_or_else(|| PluginError::new("demo-config declares the tones it speaks in"))?;
+        .ok_or_else(|| PluginError::new("reply-style declares the tones it speaks in"))?;
     let signoff = text("signoff")
         .map(|signoff| format!(" End everything you say with the exact signoff \"{signoff}\"."))
         .unwrap_or_default();
 
-    Ok(Arc::new(DemoConfigPlugin {
+    Ok(Arc::new(ReplyStylePlugin {
         style: format!(
             "Your speaking style right now (adjustable through the runtime.plugin.config tools): \
              speak in a {tone} tone.{signoff}"
@@ -48,12 +47,12 @@ pub(crate) fn create(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>,
 }
 
 #[derive(Debug)]
-struct DemoConfigPlugin {
+struct ReplyStylePlugin {
     style: String,
 }
 
 #[async_trait]
-impl RuntimePlugin for DemoConfigPlugin {
+impl RuntimePlugin for ReplyStylePlugin {
     async fn before_role_model_call(
         &self,
         _context: &HookContext,
@@ -71,7 +70,7 @@ impl RuntimePlugin for DemoConfigPlugin {
             evidence: vec![EvidenceNote::new(
                 EvidenceKind::BeforeRoleModelCall,
                 EvidenceStatus::Accepted,
-                "Provided demo config style directives.",
+                "Provided her reply style.",
             )],
         })
     }

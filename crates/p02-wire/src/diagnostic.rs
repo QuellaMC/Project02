@@ -35,7 +35,6 @@ vocabulary! {
         AuthoredOutsideScope = "runtime_config_authored_outside_scope",
         /// A value her package gives that a package may not set.
         PackageValueSkipped = "character_package_value_skipped",
-        MemoryProviderUnavailable = "default_memory_provider_unavailable",
         /// A plugin her package expects that she does not run.
         PluginNotRunning = "character_plugin_not_running",
     }

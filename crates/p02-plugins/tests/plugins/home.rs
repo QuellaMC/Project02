@@ -43,19 +43,24 @@ pub(crate) struct MiraHome {
 
 impl MiraHome {
     pub(crate) fn new() -> Self {
-        let directory = TempDir::new().unwrap();
-        let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
-        let sections = Sections::new(
+        Self::judged_by(
             list::plugins()
                 .unwrap()
                 .iter()
                 .map(|(manifest, _)| manifest.clone()),
-        );
+        )
+    }
+
+    /// A home whose settings are judged against `manifests` in place of
+    /// the listed plugins' own.
+    pub(crate) fn judged_by(manifests: impl IntoIterator<Item = Manifest>) -> Self {
+        let directory = TempDir::new().unwrap();
+        let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
 
         Self {
             _directory: directory,
             home,
-            sections: Arc::new(sections),
+            sections: Arc::new(Sections::new(manifests)),
         }
     }
 

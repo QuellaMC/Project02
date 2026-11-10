@@ -17,14 +17,16 @@ import {converse, wireOf, type Wire} from './harness/wire.ts';
 
 const mira = {scope: 'character', characterId: 'mira'} as const;
 
-/** Mira on the model server, beside the bundled plugin whose fields the model may ask to change. */
-async function demoConfigHome(env: Readonly<Record<string, string>> = {}) {
+/** Mira on the model server, her reply style on: the plugin whose fields the model may ask to change. */
+async function replyStyleHome(env: Readonly<Record<string, string>> = {}) {
   const model = await startModelServer();
   const home = createHome({
-    'config.json': configJson({
-      project02: model.settings,
-      plugins: {'demo-config': {enabled: true}},
-    }),
+    'config.json': configJson({project02: model.settings}),
+    'character-data': {
+      mira: {
+        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+      },
+    },
   });
   const daemon = await startDaemon(home, env);
   const wire = wireOf(daemon);
@@ -42,7 +44,7 @@ async function asksForTone(wire: Wire, tone: string): Promise<Answer> {
   return calling([
     'runtime_plugin_config_update',
     {
-      pluginId: 'demo-config',
+      pluginId: 'reply-style',
       fieldName: 'tone',
       operation: 'set',
       value: tone,
@@ -63,7 +65,7 @@ function miraOverlay(home: string): string {
 }
 
 it("confirmations.answer: an approval is heard settled by every client before the turn completes and is written into her overlay, never the home's settings; a denial writes nothing and the model is told so", async () => {
-  const {model, home, daemon, wire, say} = await demoConfigHome();
+  const {model, home, daemon, wire, say} = await replyStyleHome();
   const first = await openEvents(daemon);
   const second = await openEvents(daemon);
   const homeSettings = readFileSync(join(home, 'config.json'), 'utf8');
@@ -89,7 +91,7 @@ it("confirmations.answer: an approval is heard settled by every client before th
   }
 
   expect(JSON.parse(miraOverlay(home))).toMatchObject({
-    plugins: {'demo-config': {config: {tone: 'pirate'}}},
+    plugins: {'reply-style': {config: {tone: 'pirate'}}},
   });
   expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe(homeSettings);
 
@@ -110,7 +112,7 @@ it("confirmations.answer: an approval is heard settled by every client before th
 });
 
 it('confirmations.reconnect-finds-pending: a client that reconnects while a confirmation waits finds it in ready, answers it, and the waiting turn completes', async () => {
-  const {model, daemon, wire, say} = await demoConfigHome();
+  const {model, daemon, wire, say} = await replyStyleHome();
   const before = await openEvents(daemon);
 
   model.answer(await asksForTone(wire, 'pirate'), reply('Arr.'));
@@ -125,7 +127,7 @@ it('confirmations.reconnect-finds-pending: a client that reconnects while a conf
 });
 
 it('confirmations.expire: a confirmation nobody answers by its deadline settles cancelled expired, the turn completes, nothing is written, and a later answer is unknown', async () => {
-  const {model, home, daemon, wire, say} = await demoConfigHome({
+  const {model, home, daemon, wire, say} = await replyStyleHome({
     PROJECT02_TEST_DURATIONS: 'confirmation=500',
   });
   const events = await openEvents(daemon);
@@ -152,7 +154,7 @@ it('confirmations.expire: a confirmation nobody answers by its deadline settles 
 });
 
 it("confirmations.approval-window: an approval that comes after the tool's five-second execution timeout, inside the approval window, still applies", async () => {
-  const {model, home, daemon, wire, say} = await demoConfigHome({
+  const {model, home, daemon, wire, say} = await replyStyleHome({
     PROJECT02_TEST_DURATIONS: 'heartbeat=6000',
   });
   const events = await openEvents(daemon);
@@ -171,12 +173,12 @@ it("confirmations.approval-window: an approval that comes after the tool's five-
   expect(await wire.answer(id, 'approved')).toEqual({status: 'answered'});
   expect(await turn).toMatchObject({status: 'completed'});
   expect(JSON.parse(miraOverlay(home))).toMatchObject({
-    plugins: {'demo-config': {config: {tone: 'pirate'}}},
+    plugins: {'reply-style': {config: {tone: 'pirate'}}},
   });
 });
 
 it('confirmations.cancelled-stopped: stopping the daemon while a confirmation waits withdraws it, cancelled as stopped, lets her turn complete and exits promptly instead of waiting out its deadline', async () => {
-  const {model, daemon, wire, say} = await demoConfigHome();
+  const {model, daemon, wire, say} = await replyStyleHome();
   const events = await openEvents(daemon);
 
   model.answer(await asksForTone(wire, 'pirate'), reply('Never mind.'));

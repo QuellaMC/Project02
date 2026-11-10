@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use p02_shared::Identifier;
-use p02_wire::ConfigValueType;
+use p02_wire::{ConfigValueType, LayoutCard};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -10,12 +10,13 @@ use crate::label::RedactionLabel;
 use crate::vocabulary::ConfigScope;
 
 /// A plugin's section of the config document, `plugins.<id>`: where it may
-/// be set, and the fields it declares in the order they are shown.
+/// be set, the fields it declares, and the cards a page draws them in.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigSection {
     pub(crate) scope: ConfigScope,
     pub(crate) fields: Vec<ConfigField>,
+    pub(crate) layout: Vec<LayoutCard>,
 }
 
 /// One declared config field. The same declaration drives resolution, the
@@ -24,7 +25,11 @@ pub struct ConfigSection {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigField {
     pub(crate) name: Identifier,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
     pub(crate) description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) placeholder: Option<String>,
     pub(crate) secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) scope: Option<ConfigScope>,
@@ -34,6 +39,8 @@ pub struct ConfigField {
     pub(crate) default_value: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) allowed_values: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) choices: Option<BTreeMap<String, String>>,
     pub(crate) agent_mutable: bool,
     pub(crate) redaction_labels: Vec<RedactionLabel>,
 }
@@ -53,6 +60,14 @@ impl ConfigSection {
     pub fn field(&self, name: &str) -> Option<&ConfigField> {
         self.fields.iter().find(|field| field.name.as_str() == name)
     }
+
+    /// The cards a page draws the fields in, as declared and then one card
+    /// more, untitled, of every field no row places: each field is in one
+    /// card at least, and a section without fields has none.
+    #[must_use]
+    pub fn layout(&self) -> &[LayoutCard] {
+        &self.layout
+    }
 }
 
 impl ConfigField {
@@ -61,9 +76,21 @@ impl ConfigField {
         &self.name
     }
 
+    /// What a page calls the field.
+    #[must_use]
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    /// What an empty box shows.
+    #[must_use]
+    pub fn placeholder(&self) -> Option<&str> {
+        self.placeholder.as_deref()
     }
 
     /// Whether it holds a credential: read redacted everywhere but by its
@@ -94,6 +121,13 @@ impl ConfigField {
     #[must_use]
     pub fn allowed_values(&self) -> Option<&[String]> {
         self.allowed_values.as_deref()
+    }
+
+    /// The words for each allowed value, when the field has them: every
+    /// allowed value has its words, and nothing else does.
+    #[must_use]
+    pub fn choices(&self) -> Option<&BTreeMap<String, String>> {
+        self.choices.as_ref()
     }
 
     /// Whether the model may propose a change, which the person approves.
@@ -199,12 +233,15 @@ mod tests {
     fn field(value_type: Option<ConfigValueType>, allowed: Option<&[&str]>) -> ConfigField {
         ConfigField {
             name: Identifier::new("tone").unwrap(),
+            label: None,
             description: "Reply tone.".to_owned(),
+            placeholder: None,
             secret: false,
             scope: None,
             value_type,
             default_value: None,
             allowed_values: allowed.map(|values| values.iter().map(|&v| v.to_owned()).collect()),
+            choices: None,
             agent_mutable: false,
             redaction_labels: Vec::new(),
         }
@@ -314,6 +351,7 @@ mod tests {
         let section = ConfigSection {
             scope: ConfigScope::GlobalWithCharacterOverrides,
             fields: vec![tone, key],
+            layout: Vec::new(),
         };
         let authored = |values: Value| values.as_object().cloned().unwrap();
         let config = ResolvedConfig::resolve(

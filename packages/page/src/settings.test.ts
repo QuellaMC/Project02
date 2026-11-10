@@ -80,7 +80,7 @@ function untyped(
   return rest;
 }
 
-/** Mira's view: the host fields, and demo-config with a secret and a structure. */
+/** Mira's view: the host fields, and a plugin of the test's own with a field of every shape. */
 function view(fingerprint = 'f1'): OkView {
   return {
     status: 'ok',
@@ -99,8 +99,8 @@ function view(fingerprint = 'f1'): OkView {
     sections: [
       {
         namespace: 'plugins',
-        id: 'demo-config',
-        displayName: 'Demo Config',
+        id: 'fixture',
+        displayName: 'Fixture',
         version: '1.0.0',
         enabled: true,
         enabledSource: 'global',
@@ -123,6 +123,7 @@ function view(fingerprint = 'f1'): OkView {
             }),
           ),
         ],
+        layout: [],
         diagnostics: [],
       },
     ],
@@ -161,8 +162,8 @@ function opened(target: ConfigTarget = mira): WebState {
   );
 }
 
-const tone = sectionFieldKey('plugins', 'demo-config', 'tone');
-const secret = sectionFieldKey('plugins', 'demo-config', 'apiKey');
+const tone = sectionFieldKey('plugins', 'fixture', 'tone');
+const secret = sectionFieldKey('plugins', 'fixture', 'apiKey');
 
 describe('web settings', () => {
   it('opens on a target with the thread kept behind it, and closes back to the chat letting edits go', () => {
@@ -398,7 +399,7 @@ describe('web settings', () => {
         {
           kind: 'section_field_set',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'apiKey',
           value: '123',
         },
@@ -409,7 +410,7 @@ describe('web settings', () => {
         {
           kind: 'section_field_set',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'tone',
           value: 'warm',
         },
@@ -420,55 +421,55 @@ describe('web settings', () => {
         {
           kind: 'section_field_unset',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'tone',
         },
       ],
       [
-        sectionFieldKey('plugins', 'demo-config', 'settings'),
+        sectionFieldKey('plugins', 'fixture', 'settings'),
         '{"from": "page"}',
         {
           kind: 'section_field_set',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'settings',
           value: {from: 'page'},
         },
       ],
       [
-        sectionFieldKey('plugins', 'demo-config', 'endpoints'),
+        sectionFieldKey('plugins', 'fixture', 'endpoints'),
         'not json',
         {
           kind: 'section_field_set',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'endpoints',
           value: 'not json',
         },
       ],
       [
-        sectionKey('plugins', 'demo-config'),
+        sectionKey('plugins', 'fixture'),
         'true',
         {
           kind: 'section_enabled',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           enabled: true,
         },
       ],
       [
-        sectionKey('plugins', 'demo-config'),
+        sectionKey('plugins', 'fixture'),
         undefined,
-        {kind: 'section_enabled', namespace: 'plugins', id: 'demo-config'},
+        {kind: 'section_enabled', namespace: 'plugins', id: 'fixture'},
       ],
       ['plugins/nobody/tone', 'warm', undefined],
       [
-        sectionFieldKey('plugins', 'demo-config', 'mode'),
+        sectionFieldKey('plugins', 'fixture', 'mode'),
         'true',
         {
           kind: 'section_field_set',
           namespace: 'plugins',
-          id: 'demo-config',
+          id: 'fixture',
           field: 'mode',
           value: 'true',
         },
@@ -479,10 +480,10 @@ describe('web settings', () => {
       expect(operationFor(current, key, text), key).toEqual(operation);
     }
 
-    expect(rowAt(current, sectionKey('plugins', 'demo-config'))).toEqual({
+    expect(rowAt(current, sectionKey('plugins', 'fixture'))).toEqual({
       kind: 'section_enabled',
       namespace: 'plugins',
-      id: 'demo-config',
+      id: 'fixture',
     });
     // Two rows never share a key, whatever the names: a slash is in no id.
     expect(sectionKey('plugins', 'a.b')).not.toBe(
@@ -510,6 +511,7 @@ describe('web settings', () => {
         field('botToken', {secret: true, valueType: 'string'}),
         defaulted('mirror', true, {valueType: 'boolean'}),
       ],
+      layout: [],
       diagnostics: [],
     };
     const unknownField: RuntimeConfigDiagnostic = {
@@ -626,7 +628,7 @@ describe('web settings', () => {
     const settings = typed('settings');
 
     if (note === undefined || tone === undefined || settings === undefined) {
-      throw new Error('Expected the demo fields.');
+      throw new Error("Expected the fixture's fields.");
     }
 
     expect(readableName('userDisplayName')).toBe('User display name');
@@ -644,7 +646,7 @@ describe('web settings', () => {
     expect(
       operationFor(
         current,
-        sectionFieldKey('plugins', 'demo-config', 'note'),
+        sectionFieldKey('plugins', 'fixture', 'note'),
         valueText(note, 'true'),
       ),
     ).toMatchObject({value: 'true'});

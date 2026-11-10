@@ -5,9 +5,9 @@
 
 use std::sync::LazyLock;
 
-use p02_contracts::{ConfigField, ConfigScope, ConfigSection, Manifest, PluginKind};
+use p02_contracts::{AccessMap, ConfigField, ConfigScope, ConfigSection, Manifest};
 use p02_shared::Identifier;
-use p02_wire::{ConfigValueType, Namespace, Source};
+use p02_wire::{ConfigValueType, Namespace, PluginPage, Source};
 use serde_json::json;
 
 /// The version a document this build writes names. A document's version is
@@ -164,8 +164,10 @@ fn telegram() -> Connector {
         "fields": [
             {
                 "name": "botToken",
+                "label": "Token",
                 "description": "This character's bot, as @BotFather gave it. The character \
                     answers in Telegram as that bot.",
+                "placeholder": "Paste from @BotFather",
                 "scope": "character_only",
                 "secret": true,
                 "valueType": "string",
@@ -173,8 +175,10 @@ fn telegram() -> Connector {
             },
             {
                 "name": "managementBotToken",
+                "label": "Token",
                 "description": "Optional. A bot for the home itself: who is on, what is \
                     waiting for your approval, pairing.",
+                "placeholder": "Paste from @BotFather",
                 "scope": "global_only",
                 "secret": true,
                 "valueType": "string",
@@ -182,8 +186,10 @@ fn telegram() -> Connector {
             },
             {
                 "name": "mirror",
+                "label": "Show Other Chats",
                 "description": "Show in this chat what you and the character said on other \
                     surfaces, like the web page.",
+                "scope": "global_only",
                 "secret": false,
                 "valueType": "boolean",
                 "defaultValue": true,
@@ -191,6 +197,7 @@ fn telegram() -> Connector {
             },
             {
                 "name": "pairedUsers",
+                "label": "Paired Accounts",
                 "description": "Accounts allowed to talk to your characters, each id with a \
                     name. Pairing adds one; remove a line to unpair it.",
                 "scope": "global_only",
@@ -340,8 +347,22 @@ impl<'s> Declared<'s> {
         }
     }
 
-    pub(crate) fn is_memory_provider(self) -> bool {
-        matches!(self, Self::Plugin(manifest) if manifest.kind() == PluginKind::MemoryProvider)
+    /// How a page draws a plugin's row, when its manifest says; a
+    /// connector declares none.
+    pub(crate) fn page(self) -> Option<&'s PluginPage> {
+        match self {
+            Self::Plugin(manifest) => manifest.page(),
+            Self::Connector(_) => None,
+        }
+    }
+
+    /// What a plugin's manifest requests of the host; a connector
+    /// requests nothing.
+    pub(crate) fn access(self) -> Option<&'s AccessMap> {
+        match self {
+            Self::Plugin(manifest) => Some(manifest.requested_access()),
+            Self::Connector(_) => None,
+        }
     }
 
     /// The scope of `field`: its own, which may only narrow the section's.

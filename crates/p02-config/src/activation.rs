@@ -1,6 +1,5 @@
 //! What a character's settings make of her plugins beyond each section's
-//! own judgment: the memory provider they choose, and the plugins her
-//! package expects.
+//! own judgment: the plugins her package expects that she does not run.
 
 use std::collections::BTreeSet;
 
@@ -8,49 +7,15 @@ use p02_characters::CharacterDefinition;
 use p02_shared::Identifier;
 use p02_wire::{Code, Diagnostic, Namespace};
 
-use crate::host::DEFAULT_MEMORY_PROVIDER;
 use crate::resolve::{Section, Status};
 
-/// What `character`'s settings make of her plugins, `resolved` being her
-/// sections and `chosen` her memory provider.
-pub(crate) fn judge(
+/// The plugins `character`'s package expects that she does not run,
+/// `resolved` being her sections: a warning each, and she starts without
+/// them.
+pub(crate) fn expected(
     character: &CharacterDefinition,
-    chosen: Option<&str>,
     resolved: &[Section<'_>],
 ) -> Vec<Diagnostic> {
-    memory_provider(chosen, resolved)
-        .into_iter()
-        .chain(expected(character, resolved))
-        .collect()
-}
-
-/// The memory provider her settings choose must be a memory plugin she
-/// runs, or she has no memory to keep: an error that stops her.
-fn memory_provider(chosen: Option<&str>, resolved: &[Section<'_>]) -> Option<Diagnostic> {
-    let chosen = chosen?;
-    let runs = resolved.iter().any(|section| {
-        section.declared.is_memory_provider()
-            && section.declared.id().as_str() == chosen
-            && matches!(section.status, Status::Active(_))
-    });
-
-    (!runs).then(|| {
-        let path = DEFAULT_MEMORY_PROVIDER.path();
-
-        Diagnostic::error(
-            Code::MemoryProviderUnavailable,
-            format!(
-                "The memory provider \"{chosen}\" her settings choose is not a memory plugin she \
-                 runs. Switch it on, or choose another in {path}."
-            ),
-        )
-        .at(path)
-    })
-}
-
-/// The plugins her package expects that she does not run, a warning each:
-/// she starts without them.
-fn expected(character: &CharacterDefinition, resolved: &[Section<'_>]) -> Vec<Diagnostic> {
     let expected: BTreeSet<&Identifier> = character
         .plugins
         .required()

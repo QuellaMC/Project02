@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use p02_contracts::{Manifest, ManifestError, PluginFactory};
 use serde_json::Value;
 
-use crate::{character_memory, character_state, demo_config, management, mem0, session_history};
+use crate::{character_memory, character_state, management, mem0, reply_style, session_history};
 
 /// Each plugin by its id, with its descriptor and its factory: the host's
 /// own first, then the packages in id order. Whatever lists or runs them
@@ -29,14 +29,14 @@ const PLUGINS: [(&str, &str, PluginFactory); 6] = [
         character_state::create,
     ),
     (
-        "demo-config",
-        include_str!("demo_config/project02.plugin.json"),
-        demo_config::create,
-    ),
-    (
         "mem0",
         include_str!("mem0/project02.plugin.json"),
         mem0::create,
+    ),
+    (
+        "reply-style",
+        include_str!("reply_style/project02.plugin.json"),
+        reply_style::create,
     ),
     (
         "session-history",
@@ -116,8 +116,8 @@ mod tests {
                 ("runtime.plugin", true),
                 ("character-memory", true),
                 ("character-state", false),
-                ("demo-config", false),
                 ("mem0", false),
+                ("reply-style", false),
                 ("session-history", true),
             ]
         );

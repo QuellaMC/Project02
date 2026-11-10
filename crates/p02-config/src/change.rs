@@ -152,8 +152,8 @@ impl<'s> Edit<'s> {
         operation: &Operation,
     ) -> Result<Self, String> {
         match operation {
-            Operation::Set { path, value } => host_edit(path, Some(value)),
-            Operation::Unset { path } => host_edit(path, None),
+            Operation::Set { path, value } => host_edit(target, path, Some(value)),
+            Operation::Unset { path } => host_edit(target, path, None),
             Operation::SectionEnabled {
                 namespace,
                 id,
@@ -214,7 +214,7 @@ impl<'s> Edit<'s> {
     }
 }
 
-fn host_edit(path: &str, value: Option<&Value>) -> Result<Edit<'static>, String> {
+fn host_edit(target: &Target, path: &str, value: Option<&Value>) -> Result<Edit<'static>, String> {
     let field = path
         .strip_prefix("project02.")
         .and_then(host_field)
@@ -226,6 +226,10 @@ fn host_edit(path: &str, value: Option<&Value>) -> Result<Edit<'static>, String>
                 paths.join(", ")
             )
         })?;
+
+    if !target.authors(field.scope()) {
+        return Err(field.outside_scope(target.own_layer()));
+    }
 
     if let Some(value) = value
         && !field.accepts(value)

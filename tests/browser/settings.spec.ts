@@ -100,11 +100,11 @@ test("page.settings-setup-frame: a fresh home with no model provider chosen open
   await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
 });
 
-test("page.settings-save-and-sync: a character's plugin field, a secret and her bot token save from her screen, a secret shown only as set and never in the page; a second page follows saves through the stream; and a page that fell behind is told that someone saved first", async ({
+test("page.settings-save-and-sync: a character's plugin field and her bot token save from her screen, the token shown only as set and never in the page; a second page follows saves through the stream; and a page that fell behind is told that someone saved first", async ({
   context,
   page,
 }) => {
-  const {daemon} = await miraHome({plugins: {'demo-config': {enabled: true}}});
+  const {daemon} = await miraHome({});
 
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings for Mira'}).click();
@@ -112,7 +112,7 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
     page.getByRole('heading', {name: 'Settings · Mira'}),
   ).toBeVisible();
 
-  const tone = row(page, 'plugins/demo-config/tone');
+  const tone = row(page, 'plugins/reply-style/tone');
 
   await expect(tone).toContainText('default');
   await tone.getByRole('combobox', {name: 'Tone'}).selectOption('warm');
@@ -121,16 +121,6 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
   await expect(tone).toContainText('this character');
   await expect(tone.getByRole('combobox', {name: 'Tone'})).toHaveValue('warm');
 
-  const secret = row(page, 'plugins/demo-config/apiKey');
-
-  await expect(secret).toContainText('not set');
-  await secret.getByLabel('Api key').fill('sk-live-secret');
-  await secret.getByRole('button', {name: 'Replace'}).click();
-  await expect(secret).toContainText('set');
-  await expect(secret).not.toContainText('not set');
-  await expect(secret.getByLabel('Api key')).toHaveValue('');
-  expect(await page.content()).not.toContain('sk-live-secret');
-
   const botToken = row(page, 'connectors/telegram/botToken');
 
   await expect(botToken).toContainText('not set');
@@ -138,6 +128,7 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
   await botToken.getByRole('button', {name: 'Replace'}).click();
   await expect(botToken).not.toContainText('not set');
   await expect(botToken).toContainText('set');
+  await expect(botToken.getByLabel('Bot token')).toHaveValue('');
   expect(await page.content()).not.toContain('4242:telegram-bot-token');
 
   // A second page on the same screen follows a save made here without
@@ -146,37 +137,37 @@ test("page.settings-save-and-sync: a character's plugin field, a secret and her 
 
   await second.goto(daemon.url);
   await second.getByRole('button', {name: 'Settings for Mira'}).click();
-  await expect(row(second, 'plugins/demo-config/tone')).toContainText(
+  await expect(row(second, 'plugins/reply-style/tone')).toContainText(
     'this character',
   );
 
-  const note = row(page, 'plugins/demo-config/operatorNote');
-  const noteBox = note.getByRole('textbox', {name: 'Operator note'});
-  const secondNote = row(second, 'plugins/demo-config/operatorNote').getByRole(
+  const signoff = row(page, 'plugins/reply-style/signoff');
+  const secondSignoff = row(second, 'plugins/reply-style/signoff').getByRole(
     'textbox',
-    {name: 'Operator note'},
+    {name: 'Signoff'},
   );
 
   // A page whose read did not land is behind, and says so; its next save
   // is told that someone saved first.
   await second.route('**/api/config?*', route => route.abort(), {times: 1});
-  await noteBox.fill('kept');
-  await note.getByRole('button', {name: 'Save'}).click();
-  await expect(note.getByRole('button', {name: 'Saved'})).toBeVisible();
+  await signoff.getByRole('textbox', {name: 'Signoff'}).fill('kept');
+  await signoff.getByRole('button', {name: 'Save'}).click();
+  await expect(signoff.getByRole('button', {name: 'Saved'})).toBeVisible();
   await expect(second.locator('.notice')).toBeVisible();
 
-  const staleSignoff = row(second, 'plugins/demo-config/signoff');
+  const staleName = row(second, 'project02.userDisplayName');
+  const staleNameBox = staleName.getByRole('textbox', {
+    name: 'User display name',
+  });
 
-  await staleSignoff.getByRole('textbox', {name: 'Signoff'}).fill('bye');
-  await staleSignoff.getByRole('button', {name: 'Save'}).click();
+  await staleNameBox.fill('Sam');
+  await staleName.getByRole('button', {name: 'Save'}).click();
   await expect(second.locator('.notice')).toContainText(
     'Someone else saved first',
   );
   // The screen shows what is there now, with the person's own text still in its row.
-  await expect(secondNote).toHaveValue('kept');
-  await expect(
-    staleSignoff.getByRole('textbox', {name: 'Signoff'}),
-  ).toHaveValue('bye');
+  await expect(secondSignoff).toHaveValue('kept');
+  await expect(staleNameBox).toHaveValue('Sam');
 
   // A character clicked in the roster is a thread wanted: settings give way.
   await page.getByRole('button', {name: /^Mira\b/u}).click();
@@ -303,10 +294,10 @@ test("page.settings-field-editing: each row saves its field as its kind — text
     .getByLabel('Management bot token', {exact: true})
     .fill('123456:home-bot');
   await saved('connectors/telegram/managementBotToken', 'Replace');
-  await row(page, 'plugins/demo-config')
-    .getByRole('checkbox', {name: 'Demo Config enabled'})
+  await row(page, 'plugins/mem0')
+    .getByRole('checkbox', {name: 'Long-Term Memory enabled'})
     .check();
-  await landed('plugins/demo-config');
+  await landed('plugins/mem0');
   expect(homeConfig(home)).toMatchObject({
     project02: {contextWindowTokens: 4096},
     connectors: {
@@ -314,7 +305,7 @@ test("page.settings-field-editing: each row saves its field as its kind — text
         config: {mirror: false, managementBotToken: '123456:home-bot'},
       },
     },
-    plugins: {'demo-config': {enabled: true}},
+    plugins: {mem0: {enabled: true}},
   });
   await expect(
     row(page, 'connectors/telegram/managementBotToken'),

@@ -979,9 +979,17 @@ data: {…}</code></pre>
         A view is what a settings page renders. Its
         <code>project02</code> fields, in the order a page shows them, and each
         plugin's fields share one shape — what this scope authored, what is in
-        effect and which layer put it there; a plugin's switch says the same of
-        itself as <code>enabledSource</code>. Whatever a view offers, the scope can save:
-        every host field is authorable at the home and per character, a plugin
+        effect and which layer put it there, with the <code>label</code>,
+        <code>placeholder</code> and <code>choices</code> its declaration gives
+        it; a plugin's switch says the same of itself as
+        <code>enabledSource</code>. A section also carries its
+        <code>layout</code>, the cards to draw its fields in; a plugin's
+        carries its <code>page</code> too, how to draw its row, and the
+        <code>access</code> its manifest requests
+        (<a href="config-system.html">Config System</a>). Whatever a view
+        offers, the scope can save: a host field is authorable at the home and
+        per character unless its scope keeps it to one, as a character's own
+        <code>enabled</code> is hers alone, a plugin
         or field that belongs to a character (<code>"character_only"</code>) is
         absent from the home's view, and one that belongs to the home
         (<code>"global_only"</code>) from a character's. A connector's settings,
