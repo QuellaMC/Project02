@@ -406,7 +406,8 @@ export function TextBox({
  * check, and one pasted in goes when the person presses Return or leaves
  * the box, the tab keeping no copy. While the box of a stored key is in
  * use and empty, `remove` puts a button in the check's place that takes
- * the key away.
+ * the key away, one saved a moment ago as much as any other; a key taken
+ * away shows the passing check of a change that landed.
  */
 export function KeyBox({
   id,
@@ -459,9 +460,11 @@ export function KeyBox({
           }
         }}
       />
-      {check !== undefined ? (
-        <Check key={check} />
-      ) : !stored || text !== '' ? null : !focused ? (
+      {text !== '' ? null : !stored ? (
+        check === undefined ? null : (
+          <Check key={check} />
+        )
+      ) : !focused ? (
         <Check steady />
       ) : remove === undefined ? null : (
         <button

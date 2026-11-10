@@ -202,6 +202,12 @@ test('page.settings-saves-as-typed: a box saves on Return with a check and no Sa
     .poll(() => homeConfig(home))
     .toMatchObject({project02: {nvidiaApiKey: fresh}});
   expect(await page.content()).not.toContain(fresh);
+
+  // A key saved a moment ago can be taken away like any other.
+  await key.focus();
+  await expect(
+    page.getByRole('button', {name: 'Remove API Key'}),
+  ).toBeVisible();
 });
 
 test('page.settings-key-removed: a stored key is taken away by the button its own box shows while it is in use, and the box asks for a key again', async ({
