@@ -19,6 +19,7 @@ import {
   conflictMet,
   editLetGo,
   editToSend,
+  fieldAt,
   fieldEdited,
   home,
   operationFor,
@@ -49,6 +50,15 @@ export type SettingsVerbs = {
   readonly save: (row: Row) => Promise<void>;
   /** A switch, a choice or a select: the value goes at the click; none unsets it. */
   readonly choose: (row: Row, value: JsonValue | undefined) => Promise<void>;
+  /**
+   * A change worked out from what the row holds when its turn comes, for a
+   * value that is a list of things: two asked for together each start
+   * from what the one before left, so neither undoes the other.
+   */
+  readonly amend: (
+    row: Row,
+    next: (held: JsonValue | undefined) => JsonValue | undefined,
+  ) => Promise<void>;
   readonly setAdvanced: (on: boolean) => void;
   /** The welcome's Continue: what its step holds is saved, and the next step opens once it landed. */
   readonly welcomeNext: () => Promise<void>;
@@ -65,6 +75,7 @@ export const noSettingsVerbs: SettingsVerbs = {
   edit: () => undefined,
   save: () => Promise.resolve(),
   choose: () => Promise.resolve(),
+  amend: () => Promise.resolve(),
   setAdvanced: () => undefined,
   welcomeNext: () => Promise.resolve(),
   welcomeBack: () => undefined,
@@ -107,11 +118,51 @@ type Read = {
   readonly views: ReadonlyMap<string, ConfigView>;
 };
 
-export function createSettingsVerbs(tab: {
+/** What the settings verbs need of the tab: its client and its one value. */
+type Tab = {
   readonly client: GatewayClient;
   readonly getState: () => WebState;
   readonly apply: (reduce: (state: WebState) => WebState) => void;
-}): {
+};
+
+/** The welcome's steps: Continue saves what its step holds, as a box is saved, and the next step opens once it landed. */
+function welcomeVerbs(
+  {getState, apply}: Tab,
+  save: SettingsVerbs['save'],
+): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack' | 'finishWelcome'> {
+  return {
+    async welcomeNext() {
+      const screen = getState().settings?.screen;
+
+      if (screen?.kind !== 'welcome' || screen.step === 3) {
+        return;
+      }
+
+      const row = screen.step === 1 ? nameRow : keyRow;
+
+      await save(row);
+
+      // A step whose box the daemon refused stays, saying why at it.
+      if (getState().settings?.problems.has(rowKey(row)) === true) {
+        return;
+      }
+
+      apply(current => welcomeStepped(current, screen.step === 1 ? 2 : 3));
+    },
+    welcomeBack() {
+      const screen = getState().settings?.screen;
+
+      if (screen?.kind === 'welcome' && screen.step > 1) {
+        apply(current => welcomeStepped(current, screen.step === 3 ? 2 : 1));
+      }
+    },
+    finishWelcome() {
+      apply(current => settingsClosed(noticeSpent(current)));
+    },
+  };
+}
+
+export function createSettingsVerbs(tab: Tab): {
   readonly verbs: SettingsVerbs;
   /** Config moved, on this tab or another surface: what is open reads its views again, with what is typed kept. */
   readonly changed: () => Promise<void>;
@@ -296,7 +347,13 @@ export function createSettingsVerbs(tab: {
         apply(current => settingsOpened(noticeSpent(current), page));
       },
       closeSettings() {
-        apply(current => settingsClosed(noticeSpent(current)));
+        // The saves already asked for go first: a box left by the very
+        // click that closes the window is saved, not let go with it.
+        const close = () => {
+          apply(current => settingsClosed(noticeSpent(current)));
+        };
+
+        void queue.then(close, close);
       },
       edit(row, text) {
         apply(current => fieldEdited(current, row, text));
@@ -307,38 +364,24 @@ export function createSettingsVerbs(tab: {
 
         return queued(() => change(row, value));
       },
+      amend(row, next) {
+        return queued(async () => {
+          const settings = getState().settings;
+          const view =
+            settings === undefined ? undefined : viewOf(settings, row.target);
+          const field =
+            view === undefined ? undefined : fieldAt(view, row.place);
+
+          if (field !== undefined) {
+            await change(row, next(field.effective.value));
+          }
+        });
+      },
       setAdvanced(on) {
         remember(on);
         apply(current => advancedSet(current, on));
       },
-      async welcomeNext() {
-        const screen = getState().settings?.screen;
-
-        if (screen?.kind !== 'welcome' || screen.step === 3) {
-          return;
-        }
-
-        const row = screen.step === 1 ? nameRow : keyRow;
-
-        await save(row);
-
-        // A step whose box the daemon refused stays, saying why at it.
-        if (getState().settings?.problems.has(rowKey(row)) === true) {
-          return;
-        }
-
-        apply(current => welcomeStepped(current, screen.step === 1 ? 2 : 3));
-      },
-      welcomeBack() {
-        const screen = getState().settings?.screen;
-
-        if (screen?.kind === 'welcome' && screen.step > 1) {
-          apply(current => welcomeStepped(current, screen.step === 3 ? 2 : 1));
-        }
-      },
-      finishWelcome() {
-        apply(current => settingsClosed(noticeSpent(current)));
-      },
+      ...welcomeVerbs(tab, save),
     },
     async changed() {
       if (getState().settings !== undefined) {

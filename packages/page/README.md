@@ -52,9 +52,13 @@ takes, the sidebar's values and dots, how a character and a bot stand,
 and where each finding is said; `look.ts` holds the icons, tints and
 avatar colours. `settings-session.ts` is the verbs over the tab's client,
 one change at a time, and remembers the window's Advanced switch in the
-browser. The `settings-*.tsx` files draw the window, and `welcome.tsx`
-the first run, shown instead of the chat while the home's settings give
-a character no AI model, until the person starts chatting. The roster
+browser: a change to a list, such as an account unpaired, is worked out
+from what the list holds when its turn comes, and closing the window
+waits for the saves already asked for. A stored key is taken away by the
+button its own box shows while it is in use. The `settings-*.tsx` files
+draw the window, and `welcome.tsx` the first run, shown instead of the
+chat while the home's settings give a character no AI model, until the
+person starts chatting or sets it up later. The roster
 opens the window, a gear per character opens her page, and one who needs
 an AI model says so in plain words that lead to it. The chat and the
 window draw from one set of tokens in `styles.css`, light and dark.

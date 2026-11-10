@@ -404,7 +404,9 @@ export function TextBox({
 /**
  * A key box is always empty: a stored key shows as dots and keeps its
  * check, and one pasted in goes when the person presses Return or leaves
- * the box, the tab keeping no copy.
+ * the box, the tab keeping no copy. While the box of a stored key is in
+ * use and empty, `remove` puts a button in the check's place that takes
+ * the key away.
  */
 export function KeyBox({
   id,
@@ -412,6 +414,7 @@ export function KeyBox({
   stored,
   placeholder,
   check,
+  remove,
   onChange,
   onCommit,
 }: {
@@ -420,13 +423,25 @@ export function KeyBox({
   readonly stored: boolean;
   readonly placeholder: (focused: boolean) => string;
   readonly check?: number;
+  readonly remove?: {readonly label: string; readonly onClick: () => void};
   readonly onChange: (text: string) => void;
   readonly onCommit: () => void;
 }) {
   const [focused, setFocused] = useState(false);
 
   return (
-    <span className="box">
+    <span
+      className="box"
+      onFocus={() => {
+        setFocused(true);
+      }}
+      onBlur={event => {
+        // The box is in use while its input or its button holds the focus.
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setFocused(false);
+        }
+      }}
+    >
       <input
         id={id}
         type="password"
@@ -434,16 +449,10 @@ export function KeyBox({
         value={text}
         placeholder={placeholder(focused)}
         autoComplete="off"
-        onFocus={() => {
-          setFocused(true);
-        }}
         onChange={event => {
           onChange(event.currentTarget.value);
         }}
-        onBlur={() => {
-          setFocused(false);
-          onCommit();
-        }}
+        onBlur={onCommit}
         onKeyDown={event => {
           if (event.key === 'Enter') {
             event.currentTarget.blur();
@@ -452,9 +461,18 @@ export function KeyBox({
       />
       {check !== undefined ? (
         <Check key={check} />
-      ) : stored && !focused && text === '' ? (
+      ) : !stored || text !== '' ? null : !focused ? (
         <Check steady />
-      ) : null}
+      ) : remove === undefined ? null : (
+        <button
+          type="button"
+          className="box-remove"
+          aria-label={remove.label}
+          onClick={remove.onClick}
+        >
+          <Icon name="cross" size={11} weight={2.6} />
+        </button>
+      )}
     </span>
   );
 }

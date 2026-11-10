@@ -154,6 +154,12 @@ export function FieldRow({
             stored={field.authored.configured}
             placeholder={focused => keyPlaceholder(field, focused)}
             {...checkProp(checkAt(ctx, row))}
+            remove={{
+              label: `Remove ${label}`,
+              onClick: () => {
+                void session.choose(row, undefined);
+              },
+            }}
             onChange={text => {
               session.edit(row, text);
             }}
