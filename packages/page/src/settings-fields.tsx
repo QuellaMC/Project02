@@ -79,9 +79,10 @@ function optionsOf(field: Field): readonly Option[] {
 }
 
 /**
- * One field as a row, by its control: a box with its label, a switch, or a
- * segmented choice. `leading` goes before the label; `placeholder` says
- * what an empty box shows when the field's own hint is not the right one.
+ * One field as a row, by its control: a box with its label, a switch, a
+ * segmented choice beside its label, or a row of pills under it. `leading`
+ * goes before the label; `placeholder` says what an empty box shows when
+ * the field's own hint is not the right one.
  */
 export function FieldRow({
   ctx,
@@ -125,13 +126,30 @@ export function FieldRow({
       );
     }
     case 'segmented':
-    case 'pills':
       return (
         <Cell kind="field" problems={problems}>
           <span id={id} className="field-label field-label-short">
             {label}
           </span>
           <Segmented
+            labelledBy={id}
+            value={valueNow(settings, row, field)}
+            options={optionsOf(field)}
+            onChoose={value => {
+              void session.choose(row, value);
+            }}
+          />
+        </Cell>
+      );
+    case 'pills':
+      // Beside a label of full width a row of pills has no room, so the
+      // line wraps it under the label.
+      return (
+        <Cell kind="field" problems={problems}>
+          <span id={id} className="field-label">
+            {label}
+          </span>
+          <Pills
             labelledBy={id}
             value={valueNow(settings, row, field)}
             options={optionsOf(field)}

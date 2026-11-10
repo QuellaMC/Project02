@@ -179,6 +179,53 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
   await expect(page.locator('main > .notice')).toHaveCount(0);
 });
 
+test("page.unseen-dot: with two characters, a message one writes while the other's chat is on screen puts a dot beside her name, and opening her chat takes it away", async ({
+  page,
+}) => {
+  // Mira's heartbeat a quarter of an hour, at a minute of a tenth of a
+  // second; Nova's off, so only Mira writes first.
+  const {model, daemon} = await miraHome(
+    {
+      characters: {
+        nova: {'project02.character.json': characterJson('nova', 'Nova')},
+      },
+      'character-data': {
+        mira: {'config.json': configJson({project02: {heartbeat: '15m'}})},
+        nova: {'config.json': configJson({project02: {heartbeat: 'off'}})},
+      },
+    },
+    {PROJECT02_TEST_DURATIONS: 'minute=100'},
+  );
+  const roster = page.getByRole('complementary', {name: 'Characters'});
+  const chatWith = (name: string) =>
+    roster.getByRole('button', {name: new RegExp(`^${name}\\b`, 'u')});
+  const dotOf = (name: string) =>
+    roster
+      .getByRole('listitem')
+      .filter({hasText: name})
+      .getByRole('img', {name: 'New message'});
+  const moment = model.hold();
+
+  await page.goto(daemon.url);
+  // Opening her chat makes her thread, and her heartbeat starts.
+  await chatWith('Mira').click();
+  await expect(composerFor(page)).toBeVisible();
+  await chatWith('Nova').click();
+  await expect(page.getByRole('textbox', {name: 'Message Nova'})).toBeVisible();
+  await moment.arrived();
+  moment.release({
+    chunks: [...visibleReply('Thinking of you.'), finish('tool_calls')],
+  });
+  await expect(dotOf('Mira')).toBeVisible();
+  await expect(dotOf('Nova')).toHaveCount(0);
+
+  await chatWith('Mira').click();
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Thinking of you.',
+  ]);
+  await expect(dotOf('Mira')).toHaveCount(0);
+});
+
 test('page.reconnect-same-address: once the daemon stops the page says Connecting… and keeps the thread; once another starts on the home it is back on the same address by itself, and the next line is answered without a click', async ({
   page,
 }) => {

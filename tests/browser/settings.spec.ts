@@ -40,6 +40,13 @@ function homeConfig(home: string): unknown {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
 }
 
+/** A character's own config.json as it stands; none until something of hers is saved. */
+function characterConfig(home: string, characterId: string): unknown {
+  const path = join(home, 'character-data', characterId, 'config.json');
+
+  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+}
+
 /** The accounts paired with Telegram, as the home's config.json holds them. */
 function pairedIn(home: string): unknown {
   return (
@@ -307,6 +314,38 @@ test('page.settings-feature-switch: Reply Style switched on from her page, with 
   expect(JSON.stringify(messagesOf(model.requests.at(-1)))).toContain(
     'warm tone. End everything you say with the exact signoff \\"Yours, Mira.\\"',
   );
+});
+
+test('page.settings-heartbeat: her page has a Heartbeat group whose A Moment to Herself is 30 min on a new home; another choice saves at the click and is still chosen after a reload, and the group is hidden while she is off', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+  const group = page.getByRole('heading', {name: 'Heartbeat', exact: true});
+  const choice = (name: string) =>
+    page
+      .getByRole('radiogroup', {name: 'A Moment to Herself'})
+      .getByRole('radio', {name, exact: true});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+  await expect(group).toBeVisible();
+  await expect(choice('30 min')).toHaveAttribute('aria-checked', 'true');
+
+  await choice('2 hours').click();
+  await expect
+    .poll(() => characterConfig(home, 'mira'))
+    .toMatchObject({project02: {heartbeat: '2h'}});
+
+  await page.reload();
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+  await expect(choice('2 hours')).toHaveAttribute('aria-checked', 'true');
+  await expect(choice('30 min')).toHaveAttribute('aria-checked', 'false');
+
+  await page.getByRole('switch', {name: 'Mira is on'}).click();
+  await expect(
+    page.getByText("She won't start or reply while she's off."),
+  ).toBeVisible();
+  await expect(group).toHaveCount(0);
 });
 
 test('page.settings-memory: Kept At shows only the boxes of the place chosen; switched on for her before it is set up, her row says Set Up and she still answers; set up, it is her switch again', async ({

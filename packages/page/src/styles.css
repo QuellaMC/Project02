@@ -255,12 +255,28 @@ code {
   grid-row: 1 / 3;
 }
 
+/* Her name, and after it a dot while a reply of hers waits unseen in her chat. */
+.roster-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .roster-name {
   min-width: 0;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.roster-unseen {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .roster-open .pill {

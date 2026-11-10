@@ -217,6 +217,13 @@ export type WebState = {
    */
   readonly turns: ReadonlyMap<string, RunningTurn>;
   /**
+   * The characters with a reply this tab has not shown: one committed to
+   * a conversation that was not the thread on screen, whatever began her
+   * turn. Her name carries a dot, one however many wait, until her chat
+   * opens. The tab's own, so a reload starts without.
+   */
+  readonly unseen: ReadonlySet<string>;
+  /**
    * What the page has to say that belongs to no thread: how a turn did
    * not complete, a confirmation that expired, a verb the daemon refused.
    * A person who sees the whole roster is told about the whole roster, so
@@ -247,6 +254,7 @@ export const initialState: WebState = {
   pending: new Map(),
   composers: new Map(),
   turns: new Map(),
+  unseen: new Set(),
   notices: [],
 };
 
@@ -391,26 +399,26 @@ export function pageUnread(
 
 /**
  * The thread opens for its newest page, with what its last turn left to
- * say. Opening the thread already on screen — a person clicking the
- * character they are reading — sets it aside rather than emptying it, as
- * a reconnect does, so a page that cannot be read leaves the
+ * say, and what she wrote while it was not on screen is in front of the
+ * person now. Opening the thread already on screen — a person clicking
+ * the character they are reading — sets it aside rather than emptying
+ * it, as a reconnect does, so a page that cannot be read leaves the
  * conversation in front of them.
  */
 export function threadOpened(state: WebState, opened: Opened): WebState {
-  const {conversationId} = opened;
+  const {conversationId, characterId} = opened;
   const {thread} = state;
+  const unseen = new Set(state.unseen);
+
+  unseen.delete(characterId);
 
   return {
     ...state,
     thread:
       thread?.conversationId === conversationId
         ? setAside(thread)
-        : {
-            characterId: opened.characterId,
-            conversationId,
-            stale: [],
-            messages: [],
-          },
+        : {characterId, conversationId, stale: [], messages: []},
+    unseen,
   };
 }
 
@@ -759,20 +767,8 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       return event.decision === 'expired'
         ? pairingExpired(state, event)
         : withoutPairing(state, event.code);
-    case 'turn_progress': {
-      const {progress} = event;
-      // The daemon took the line, whichever thread it went to.
-      const taken =
-        progress.kind === 'user_message' &&
-        state.pending.has(progress.clientMessageId)
-          ? settled(state, progress.clientMessageId)
-          : state;
-      return withThread(taken, thread =>
-        thread.conversationId === event.conversationId
-          ? committed(thread, progress)
-          : thread,
-      );
-    }
+    case 'turn_progress':
+      return progressed(state, event);
     case 'turn_running':
       // The daemon's word on the turn replaces the tab's copy whole.
       return {
@@ -797,6 +793,39 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
           });
     }
   }
+}
+
+/**
+ * A step of a turn, in whichever conversation it ran: a line the daemon
+ * took settles, whichever thread it went to; a committed message joins
+ * the thread on screen; and a reply of hers committed anywhere else is
+ * one the person has not seen.
+ */
+function progressed(
+  state: WebState,
+  event: Extract<GatewayEvent, {kind: 'turn_progress'}>,
+): WebState {
+  const {progress} = event;
+  const taken =
+    progress.kind === 'user_message' &&
+    state.pending.has(progress.clientMessageId)
+      ? settled(state, progress.clientMessageId)
+      : state;
+
+  if (state.thread?.conversationId === event.conversationId) {
+    return withThread(taken, thread => committed(thread, progress));
+  }
+
+  return progress.kind === 'visible_reply'
+    ? replyUnseen(taken, event.characterId)
+    : taken;
+}
+
+/** A reply of hers landed where the person was not looking: one dot beside her name, however many land. */
+function replyUnseen(state: WebState, characterId: string): WebState {
+  return state.unseen.has(characterId)
+    ? state
+    : {...state, unseen: new Set(state.unseen).add(characterId)};
 }
 
 /** A committed message of the thread on screen joins it; the log holds the rest. */

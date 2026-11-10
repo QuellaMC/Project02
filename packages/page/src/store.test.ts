@@ -523,6 +523,49 @@ describe('web store', () => {
     );
   });
 
+  it("marks a character whose reply landed in a chat not on screen, once however many land, never for the thread on screen or the person's own line, until her chat opens", () => {
+    const nova = {
+      status: 'opened' as const,
+      conversationId: 'conv-2',
+      characterId: 'nova',
+    };
+    const reply = (messageId: string) =>
+      progress({
+        kind: 'visible_reply',
+        messageId,
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'Found your keys yet?',
+        draftId: '1.0',
+      });
+
+    expect(applyEvent(opened(), reply('m-1')).unseen.size).toBe(0);
+    // No thread is open until a person picks one of several characters.
+    expect([
+      ...applyEvent(installSnapshot(initialState, ready()), reply('m-1'))
+        .unseen,
+    ]).toEqual(['mira']);
+
+    let state = applyEvent(
+      threadOpened(opened(), nova),
+      userMessage('m-1', 'From the phone.', 'phone'),
+    );
+
+    expect(state.unseen.size).toBe(0);
+
+    state = applyEvent(state, reply('m-2'));
+
+    expect([...state.unseen]).toEqual(['mira']);
+    expect(applyEvent(state, reply('m-3'))).toBe(state);
+    expect(
+      threadOpened(state, {
+        status: 'opened',
+        conversationId,
+        characterId: 'mira',
+      }).unseen.size,
+    ).toBe(0);
+  });
+
   it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {
     let state = sent(opened(), 'hello', 'line-1');
 
