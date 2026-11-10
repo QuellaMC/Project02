@@ -1,53 +1,80 @@
 /**
- * The rules of a settings screen, as pure functions of the previous value
- * and one input, like the chat's: what the daemon's view says, what the
- * person typed, what the daemon answered a change with. The screen holds
- * no document, no defaults and no field list of its own — a field renders
- * by the shape the view gives it — and the one thing it adds is what is
- * typed and not yet saved. Nothing here touches the DOM.
+ * The rules of the settings in front of the chat, the window and the first
+ * run's welcome, as pure functions of the previous value and one input,
+ * like the chat's: the views the daemon handed out, what the person typed
+ * or clicked, what the daemon answered a change with. The page holds no
+ * document and no defaults of its own: every value it shows is a view's,
+ * and the one thing it adds is what is typed and not yet saved. Nothing
+ * here touches the DOM.
  */
 import type {
   ConfigChange,
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
-  GatewayHealth,
   JsonValue,
-  RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
-import {noticed, type SettingsPage, type WebState} from './store.ts';
+import {
+  noticed,
+  type Settings,
+  type SettingsPage,
+  type SettingsPlace,
+  type WebState,
+} from './store.ts';
 
-type OkView = Extract<ConfigView, {status: 'ok'}>;
+export type OkView = Extract<ConfigView, {status: 'ok'}>;
+export type Field = RuntimeConfigFieldInspectShape;
+export type Section = RuntimeConfigSectionInspectShape;
 
-/** One row the screen can change, found by its key. */
-export type SettingsRow =
-  | {
-      readonly kind: 'host';
-      readonly field: RuntimeConfigFieldInspectShape;
-    }
-  | {
-      readonly kind: 'section_field';
-      readonly namespace: RuntimeConfigSectionNamespace;
-      readonly id: string;
-      readonly field: RuntimeConfigFieldInspectShape;
-    }
-  | {
-      readonly kind: 'section_enabled';
-      readonly namespace: RuntimeConfigSectionNamespace;
-      readonly id: string;
-    };
+/** One value of one target: what a box, a switch or a choice changes. */
+export type Row = {
+  readonly target: ConfigTarget;
+  readonly place: SettingsPlace;
+};
+
+export const home: ConfigTarget = {scope: 'global'};
+
+export function characterTarget(characterId: string): ConfigTarget {
+  return {scope: 'character', characterId};
+}
+
+const characterPrefix = 'character:';
+
+/** A target's key among the views: `home`, or `character:<id>`. */
+export function targetKey(target: ConfigTarget): string {
+  return target.scope === 'global'
+    ? 'home'
+    : `${characterPrefix}${target.characterId}`;
+}
+
+export function targetOfKey(key: string): ConfigTarget {
+  return key.startsWith(characterPrefix)
+    ? characterTarget(key.slice(characterPrefix.length))
+    : home;
+}
 
 /**
- * Keys: `project02.<field>` for a host field — its path on the wire —
+ * A row's key: its target's, then `project02.<field>` for a host field,
  * `<namespace>/<id>` for a section's switch and `<namespace>/<id>/<field>`
- * for its field. A slash appears in no namespace, id or field name, so two
- * rows never share a key whatever their names.
+ * for a section's field. A slash is in no target, namespace, id or field
+ * name, so two rows never share a key.
  */
-export function hostFieldKey(name: string): string {
-  return `project02.${name}`;
+export function rowKey({target, place}: Row): string {
+  return `${targetKey(target)}/${placeKey(place)}`;
+}
+
+function placeKey(place: SettingsPlace): string {
+  switch (place.kind) {
+    case 'host':
+      return `project02.${place.name}`;
+    case 'switch':
+      return sectionKey(place.namespace, place.id);
+    case 'field':
+      return `${sectionKey(place.namespace, place.id)}/${place.name}`;
+  }
 }
 
 export function sectionKey(
@@ -57,37 +84,55 @@ export function sectionKey(
   return `${namespace}/${id}`;
 }
 
-export function sectionFieldKey(
-  namespace: RuntimeConfigSectionNamespace,
-  id: string,
-  name: string,
-): string {
-  return `${sectionKey(namespace, id)}/${name}`;
+/** The target's view, once it was read and could be. */
+export function viewOf(
+  settings: Settings,
+  target: ConfigTarget,
+): OkView | undefined {
+  const view = settings.views.get(targetKey(target));
+
+  return view?.status === 'ok' ? view : undefined;
 }
 
-export function sameTarget(left: ConfigTarget, right: ConfigTarget): boolean {
-  return left.scope === 'global'
-    ? right.scope === 'global'
-    : right.scope === 'character' && left.characterId === right.characterId;
+export function sectionOf(
+  view: OkView,
+  namespace: RuntimeConfigSectionNamespace,
+  id: string,
+): Section | undefined {
+  return view.sections.find(
+    section => section.namespace === namespace && section.id === id,
+  );
+}
+
+/** The field a place names in a view; none for a section's switch. */
+export function fieldAt(view: OkView, place: SettingsPlace): Field | undefined {
+  switch (place.kind) {
+    case 'host':
+      return view.project02.find(field => field.name === place.name);
+    case 'field':
+      return sectionOf(view, place.namespace, place.id)?.fields.find(
+        field => field.name === place.name,
+      );
+    case 'switch':
+      return undefined;
+  }
 }
 
 /**
- * The screen opens on a target; the thread stays in the store, hidden
- * behind it. Opening the screen already open is a refresh — the session
- * reads the view again — and takes nothing the person typed.
+ * The window opens on a page, or goes to it when it is open; the thread
+ * stays behind it. The views and what is typed stay: going from page to
+ * page loses nothing, and the session reads the views again on opening.
  */
-export function settingsOpened(
-  state: WebState,
-  target: ConfigTarget,
-  setup = false,
-): WebState {
-  return state.settings !== undefined &&
-    sameTarget(state.settings.target, target)
-    ? state
-    : {
-        ...state,
-        settings: {target, setup, edits: new Map(), problems: new Map()},
-      };
+export function settingsOpened(state: WebState, page: SettingsPage): WebState {
+  const screen = {kind: 'window', page} as const;
+
+  return {
+    ...state,
+    settings:
+      state.settings === undefined
+        ? {screen, views: new Map(), edits: new Map(), problems: new Map()}
+        : {...state.settings, screen},
+  };
 }
 
 /** Back to the chat; what was typed and not saved is let go. */
@@ -103,88 +148,154 @@ export function settingsClosed(state: WebState): WebState {
   return rest;
 }
 
-/**
- * The view replaces, and what is typed and what the daemon refused stay
- * beside it: a re-read after a save, a conflict or another surface's
- * change must not take a person's words. A view for another target is a
- * read that was let go.
- */
-export function configViewRead(
-  state: WebState,
-  target: ConfigTarget,
-  view: ConfigView,
-): WebState {
-  const {settings} = state;
-
-  return settings === undefined || !sameTarget(settings.target, target)
-    ? state
-    : {...state, settings: {...settings, view}};
+/** Whether a view says its settings give a character no AI model: the first run's whole judgement. */
+function welcomeNeeded(view: ConfigView): boolean {
+  return view.status === 'ok' && !view.model.ready;
 }
 
-export function fieldEdited(
+/**
+ * The first run's welcome opens on its first step when the home's view
+ * gives a character no AI model, over nothing the person opened.
+ */
+export function welcomeOpened(state: WebState, homeView: ConfigView): WebState {
+  return state.settings !== undefined || !welcomeNeeded(homeView)
+    ? state
+    : {
+        ...state,
+        settings: {
+          screen: {kind: 'welcome', step: 1},
+          views: new Map([[targetKey(home), homeView]]),
+          edits: new Map(),
+          problems: new Map(),
+        },
+      };
+}
+
+export function welcomeStepped(state: WebState, step: 1 | 2 | 3): WebState {
+  return state.settings?.screen.kind === 'welcome'
+    ? {...state, settings: {...state.settings, screen: {kind: 'welcome', step}}}
+    : state;
+}
+
+export function advancedSet(state: WebState, advanced: boolean): WebState {
+  return state.advanced === advanced ? state : {...state, advanced};
+}
+
+/**
+ * Every view as one read found them: they replace the views whole, and
+ * what is typed and what the daemon said of a change stay beside them, so
+ * a re-read after a save, a conflict or another surface's change takes
+ * none of a person's words.
+ */
+export function viewsRead(
   state: WebState,
-  key: string,
-  text: string,
+  views: ReadonlyMap<string, ConfigView>,
 ): WebState {
+  return withSettings(state, settings => ({...settings, views}));
+}
+
+export function fieldEdited(state: WebState, row: Row, text: string): WebState {
   return withSettings(state, settings => {
     const edits = new Map(settings.edits);
 
-    edits.set(key, text);
+    edits.set(rowKey(row), text);
 
     return {...withoutSaved(settings), edits};
   });
 }
 
+/** A box left as it was: nothing is sent, and it shows the view's value again. */
+export function editLetGo(state: WebState, row: Row): WebState {
+  return withSettings(state, settings => withoutEdit(settings, rowKey(row)));
+}
+
+/** A click's value, as its row keeps it until the view says it landed. */
+export function clickedText(value: JsonValue | undefined): string {
+  return value === undefined ? '' : valueText(value);
+}
+
 /**
- * The change is on its way from the screen that is open, under a ticket
- * of its own. A secret's text goes the moment it is sent: the daemon
- * redacts it from then on, and the tab keeps no copy either; any other
- * text is remembered as what was sent, so a newer word typed meanwhile
- * is told apart from it.
+ * What leaving a box, or pressing Return in it, sends: nothing when it
+ * holds no edit or the text it held; an unset when it was emptied, so the
+ * value inherits again; and otherwise the text as the field's value. A key
+ * box is always empty: a key typed into it is sent, and leaving it empty
+ * sends nothing.
+ */
+export function editToSend(
+  settings: Settings,
+  row: Row,
+): {readonly value?: JsonValue} | undefined {
+  const text = settings.edits.get(rowKey(row));
+  const view = viewOf(settings, row.target);
+  const field = view === undefined ? undefined : fieldAt(view, row.place);
+
+  if (text === undefined || field === undefined) {
+    return undefined;
+  }
+
+  if (field.secret) {
+    return text.trim() === '' ? undefined : {value: text.trim()};
+  }
+
+  const held = ownText(field);
+
+  if (text === held || (text.trim() === '' && held === '')) {
+    return undefined;
+  }
+
+  return text.trim() === '' ? {} : {value: valueFrom(field, text)};
+}
+
+/**
+ * The change is on its way under a ticket of its own, with what its row
+ * held in the view it was sent against. A secret's text goes the moment it
+ * is sent: the daemon never sends it back, and the tab keeps no copy.
  */
 export function changeSent(
   state: WebState,
   ticket: number,
-  key: string,
+  row: Row,
 ): WebState {
   return withSettings(state, settings => {
-    const row =
-      settings.view?.status === 'ok' ? rowAt(settings.view, key) : undefined;
+    const key = rowKey(row);
+    const view = viewOf(settings, row.target);
     const secret =
-      row !== undefined && row.kind !== 'section_enabled' && row.field.secret;
-    const edits = new Map(settings.edits);
+      view !== undefined && fieldAt(view, row.place)?.secret === true;
+    const text = settings.edits.get(key);
     const problems = new Map(settings.problems);
-    const text = edits.get(key);
-
-    if (secret) {
-      edits.delete(key);
-    }
 
     problems.delete(key);
 
     return {
-      ...withoutSaved(settings),
-      edits,
+      ...withoutSaved(secret ? withoutEdit(settings, key) : settings),
       problems,
-      saving: {ticket, key, ...(secret || text === undefined ? {} : {text})},
+      saving: {
+        ticket,
+        target: row.target,
+        place: row.place,
+        ...(secret || text === undefined ? {} : {text}),
+        base: view === undefined ? '' : rowValue(view, row.place),
+        retried: false,
+      },
     };
   });
 }
 
+/** What the row says when someone else changed it first and it shows that now. */
+export const changedElsewhere =
+  'This was changed somewhere else, so it shows what it is now.';
+
 /**
- * How the change ended, known by its ticket: a screen opened since, or a
- * later change on it, is waiting on nothing this one can answer.
- * `applied`: the text that was sent is done with, and a newer word typed
- * meanwhile stays to be saved; the view is left as it was read, its
- * fingerprint with it: the session lands the answer with a view read
- * after it, and only a read says what the daemon holds.
- * `refused` as `invalid`: the daemon's reason stays at the field, with
- * the text. `conflict`: someone else saved first; said once, and the
- * session re-reads, with the text still in the row. A character that is
- * gone closes the screen. A write the daemon could not make is said as
- * the daemon said it. A switch has no Save of its own, so a flip that
- * did not land is let go: the switch shows what the daemon has, and a
- * click sends it again.
+ * How the change ended, known by its ticket: a later change is waiting on
+ * nothing this one can answer. `applied`: the text sent is done with, a
+ * newer word typed meanwhile stays to be saved, and the check shows; the
+ * view stays as it was read, and the session lands the answer with a view
+ * read after it. A refusal, or a write the daemon could not make, is said
+ * at its row in the daemon's words with the person's text kept; a click
+ * has no text to keep, so its row shows what the daemon has. Someone else
+ * saving first is `conflictMet`'s to judge; what reaches here of it is
+ * said at the row, which shows what it holds now. A character that is
+ * gone is a notice.
  */
 export function changeEnded(
   state: WebState,
@@ -198,314 +309,192 @@ export function changeEnded(
   }
 
   const {saving, ...page} = settings;
-  const {key} = saving;
+  const key = rowKey(saving);
 
   if (outcome.status === 'applied') {
-    const edits = new Map(page.edits);
-    const problems = new Map(page.problems);
-    const newer =
-      edits.has(key) && edits.get(key) !== saving.text
-        ? edits.get(key)
-        : undefined;
-
-    edits.delete(key);
-    problems.delete(key);
-
-    if (newer !== undefined) {
-      edits.set(key, newer);
-    }
+    const typed = page.edits.get(key);
+    const newer = typed !== undefined && typed !== saving.text;
 
     return {
       ...state,
-      settings: {
-        ...page,
-        edits,
-        problems,
-        ...(newer === undefined ? {saved: key} : {}),
-      },
+      settings: newer
+        ? page
+        : {...withoutEdit(page, key), saved: {key, ticket}},
     };
   }
 
-  const kept = isSwitch(page, key) ? withoutEdit(page, key) : page;
-
-  if (outcome.status === 'refused' && outcome.reason === 'invalid') {
-    const problems = new Map(kept.problems);
-
-    problems.set(key, outcome.message);
-
-    return {...state, settings: {...kept, problems}};
-  }
-
-  const next: WebState = {...state, settings: kept};
-
   if (outcome.status === 'refused' && outcome.reason === 'unknown_character') {
-    return noticed(settingsClosed(next), outcome.message);
+    return noticed(
+      {...state, settings: withoutEdit(page, key)},
+      outcome.message,
+    );
   }
 
-  return noticed(
-    next,
-    outcome.status === 'refused'
-      ? 'Someone else saved first. This is what is there now; make your change again.'
-      : outcome.message,
-  );
+  const moved = outcome.status === 'refused' && outcome.reason === 'conflict';
+  const problems = new Map(page.problems);
+
+  problems.set(key, moved ? changedElsewhere : outcome.message);
+
+  return {
+    ...state,
+    settings: {
+      ...(moved || !typedInto(page, saving) ? withoutEdit(page, key) : page),
+      problems,
+    },
+  };
 }
 
 /**
- * One operation from the row's shape, for the daemon to judge. Text is
- * typed by the field's valueType: a number when it reads as one, a
- * boolean from the switch, JSON for an object or array when it parses,
- * and the text itself otherwise — the daemon says what is wrong with it.
- * A secret goes as typed whatever kind it declares: the daemon takes a
- * credential as text only. No text is a reset: unset, or the plugin
- * switch cleared, so the row inherits again.
+ * Someone else saved first, and a read found the target's view as it is
+ * now. The same change is to be sent once more against it only while its
+ * row holds what it held when the change was sent; otherwise, or once it
+ * was sent again already, the row shows what it holds now and says so.
+ * Never more than once: the caller lands the view, and `again` says
+ * whether to send.
  */
-export function operationFor(
-  view: ConfigView,
-  key: string,
-  text: string | undefined,
-): ConfigChange['operation'] | undefined {
-  const row = rowAt(view, key);
+export function conflictMet(
+  state: WebState,
+  ticket: number,
+  view: ConfigView | undefined,
+): {readonly state: WebState; readonly again: boolean} {
+  const saving = state.settings?.saving;
 
-  if (row === undefined) {
-    return undefined;
+  if (saving?.ticket !== ticket) {
+    return {state, again: false};
   }
 
-  switch (row.kind) {
-    case 'host':
-      return text === undefined
-        ? {kind: 'unset', path: key}
-        : {kind: 'set', path: key, value: valueOf(row.field, text)};
-    case 'section_field':
-      return text === undefined
-        ? {
-            kind: 'section_field_unset',
-            namespace: row.namespace,
-            id: row.id,
-            field: row.field.name,
-          }
-        : {
-            kind: 'section_field_set',
-            namespace: row.namespace,
-            id: row.id,
-            field: row.field.name,
-            value: valueOf(row.field, text),
-          };
-    case 'section_enabled':
+  if (
+    !saving.retried &&
+    view?.status === 'ok' &&
+    rowValue(view, saving.place) === saving.base
+  ) {
+    return {
+      state: withSettings(state, settings => ({
+        ...settings,
+        saving: {...saving, retried: true},
+      })),
+      again: true,
+    };
+  }
+
+  return {
+    state: changeEnded(state, ticket, {
+      status: 'refused',
+      reason: 'conflict',
+      message: changedElsewhere,
+    }),
+    again: false,
+  };
+}
+
+/** What a row holds in a view, comparable: its own value and the one in effect, or its switch and where that is decided. */
+function rowValue(view: OkView, place: SettingsPlace): string {
+  if (place.kind === 'switch') {
+    const section = sectionOf(view, place.namespace, place.id);
+
+    return JSON.stringify([section?.enabled, section?.enabledSource]);
+  }
+
+  const field = fieldAt(view, place);
+
+  return JSON.stringify([field?.authored, field?.effective.value]);
+}
+
+/** The one operation a change of a row to `value` is; no value unsets it, or leaves a switch to the document beneath. */
+export function operationFor(
+  place: SettingsPlace,
+  value: JsonValue | undefined,
+): ConfigChange['operation'] {
+  switch (place.kind) {
+    case 'host': {
+      const path = `project02.${place.name}`;
+
+      return value === undefined
+        ? {kind: 'unset', path}
+        : {kind: 'set', path, value};
+    }
+    case 'switch':
       return {
         kind: 'section_enabled',
-        namespace: row.namespace,
-        id: row.id,
-        ...(text === undefined ? {} : {enabled: text === 'true'}),
+        namespace: place.namespace,
+        id: place.id,
+        ...(typeof value === 'boolean' ? {enabled: value} : {}),
       };
-  }
-}
+    case 'field': {
+      const {namespace, id, name: field} = place;
 
-/** The row a key names, in the view as it stands. */
-export function rowAt(view: ConfigView, key: string): SettingsRow | undefined {
-  if (view.status !== 'ok') {
-    return undefined;
-  }
-
-  const host = view.project02.find(field => hostFieldKey(field.name) === key);
-
-  if (host !== undefined) {
-    return {kind: 'host', field: host};
-  }
-
-  for (const {namespace, id, fields} of view.sections) {
-    if (sectionKey(namespace, id) === key) {
-      return {kind: 'section_enabled', namespace, id};
-    }
-
-    const field = fields.find(
-      candidate => sectionFieldKey(namespace, id, candidate.name) === key,
-    );
-
-    if (field !== undefined) {
-      return {kind: 'section_field', namespace, id, field};
+      return value === undefined
+        ? {kind: 'section_field_unset', namespace, id, field}
+        : {kind: 'section_field_set', namespace, id, field, value};
     }
   }
+}
 
-  return undefined;
+/** A value as a box shows it: text as it is, anything else as JSON. */
+export function valueText(value: JsonValue): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** What the target's own document holds for the field, as its box shows it. */
+export function ownText(field: Field): string {
+  return field.authored.configured && field.authored.value !== undefined
+    ? valueText(field.authored.value)
+    : '';
 }
 
 /**
- * What the screen says at its top: every diagnostic no listed section's
- * block says, so one about the whole document, or about a section this
- * screen does not list, is still said.
+ * The field's value from what is typed: a number when it reads as one,
+ * and the text itself otherwise, for the daemon to judge.
  */
-export function screenDiagnostics(
-  view: OkView,
-): readonly RuntimeConfigDiagnostic[] {
-  return view.diagnostics.filter(
-    diagnostic =>
-      !view.sections.some(section => namesSection(diagnostic, section)),
-  );
+function valueFrom(field: Field, text: string): JsonValue {
+  const number = Number(text);
+
+  return field.valueType === 'number' && Number.isFinite(number)
+    ? number
+    : text;
 }
 
-/**
- * What a section's block says: every diagnostic of the view that names
- * it. The section's own list holds only what resolving its values found;
- * the view's also holds what the character's activation and the plugin
- * catalog found of it.
- */
-export function sectionDiagnostics(
-  view: OkView,
-  section: RuntimeConfigSectionInspectShape,
-): readonly RuntimeConfigDiagnostic[] {
-  return view.diagnostics.filter(diagnostic =>
-    namesSection(diagnostic, section),
-  );
+/** Whether the row is a box the person types into, whose text a refusal keeps. */
+function typedInto(settings: Settings, saving: Row): boolean {
+  const view = viewOf(settings, saving.target);
+  const field = view === undefined ? undefined : fieldAt(view, saving.place);
+
+  return field !== undefined && boxed(field);
 }
 
-function namesSection(
-  diagnostic: RuntimeConfigDiagnostic,
-  section: RuntimeConfigSectionInspectShape,
-): boolean {
+/** A field changed by typing into a box, not by a click. */
+function boxed(field: Field): boolean {
   return (
-    diagnostic.scope === 'section' &&
-    diagnostic.namespace === section.namespace &&
-    diagnostic.id === section.id
+    field.secret ||
+    (field.valueType !== 'boolean' &&
+      field.valueType !== 'object' &&
+      field.valueType !== 'array' &&
+      field.allowedValues === undefined)
   );
-}
-
-/**
- * Whether a connector's process is on the daemon's stream, as health says
- * it, and how one that is not is started, in words true at a terminal and
- * in the app alike. Nothing for a connector health does not list.
- */
-export function connectorPresenceSentence(
-  health: GatewayHealth | undefined,
-  id: string,
-): string | undefined {
-  const presence = health?.connectors.find(connector => connector.id === id);
-
-  if (presence === undefined) {
-    return undefined;
-  }
-
-  return presence.connected
-    ? 'Connector: running.'
-    : `Connector: not running. Opening the app starts it; at a terminal, run project02 ${id}.`;
-}
-
-/**
- * A fresh home has chosen no provider: the home's view holds no value for
- * `roleModelProvider`. That is the whole judgement behind the first run's
- * frame.
- */
-export function setupNeeded(view: ConfigView): boolean {
-  return (
-    view.status === 'ok' &&
-    view.project02.some(
-      field =>
-        field.name === 'roleModelProvider' &&
-        field.effective.source === 'missing',
-    )
-  );
-}
-
-/** `userDisplayName` → `User display name`: the wire carries a name and a description, not a label. */
-export function readableName(name: string): string {
-  const words = name
-    .replaceAll(/([a-z0-9])([A-Z])/gu, '$1 $2')
-    .replaceAll(/[_-]+/gu, ' ')
-    .toLowerCase();
-
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/**
- * A value as its box shows it, so that what is shown saves back as what
- * it was: a field of no declared kind reads and writes JSON, quotes and
- * all, and every declared kind shows its text.
- */
-export function valueText(
-  field: RuntimeConfigFieldInspectShape,
-  value: JsonValue | undefined,
-): string {
-  if (value === undefined) {
-    return '';
-  }
-
-  return typeof value === 'string' && !readsJson(field)
-    ? value
-    : JSON.stringify(value);
-}
-
-/** A structure, or a field of no declared kind, is typed as JSON; a choice among allowed values is never. */
-function readsJson(field: RuntimeConfigFieldInspectShape): boolean {
-  return (
-    field.allowedValues === undefined &&
-    (field.valueType === 'object' ||
-      field.valueType === 'array' ||
-      field.valueType === undefined)
-  );
-}
-
-function valueOf(
-  field: RuntimeConfigFieldInspectShape,
-  text: string,
-): JsonValue {
-  if (field.secret) {
-    return text;
-  }
-
-  if (field.valueType === 'boolean') {
-    return text === 'true';
-  }
-
-  if (field.valueType === 'number') {
-    const number = Number(text);
-
-    return text.trim().length > 0 && Number.isFinite(number) ? number : text;
-  }
-
-  // Everything else is the text as typed: the daemon judges it, and a
-  // path is sent exactly as written.
-  return readsJson(field) ? parsedOrText(text) : text;
-}
-
-function parsedOrText(text: string): JsonValue {
-  try {
-    return JSON.parse(text) as JsonValue;
-  } catch {
-    return text;
-  }
 }
 
 function withSettings(
   state: WebState,
-  update: (settings: SettingsPage) => SettingsPage,
+  update: (settings: Settings) => Settings,
 ): WebState {
   return state.settings === undefined
     ? state
     : {...state, settings: update(state.settings)};
 }
 
-/** A boolean field, or a plugin's switch: a row with no Save of its own. */
-function isSwitch(page: SettingsPage, key: string): boolean {
-  const row = page.view?.status === 'ok' ? rowAt(page.view, key) : undefined;
-
-  return (
-    row !== undefined &&
-    (row.kind === 'section_enabled' || row.field.valueType === 'boolean')
-  );
-}
-
-function withoutEdit(page: SettingsPage, key: string): SettingsPage {
-  if (!page.edits.has(key)) {
-    return page;
+function withoutEdit(settings: Settings, key: string): Settings {
+  if (!settings.edits.has(key)) {
+    return settings;
   }
 
-  const edits = new Map(page.edits);
+  const edits = new Map(settings.edits);
 
   edits.delete(key);
 
-  return {...page, edits};
+  return {...settings, edits};
 }
 
-function withoutSaved(settings: SettingsPage): SettingsPage {
+function withoutSaved(settings: Settings): Settings {
   if (settings.saved === undefined) {
     return settings;
   }

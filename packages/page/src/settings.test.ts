@@ -1,23 +1,27 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  advancedSet,
   changeEnded,
   changeSent,
-  configViewRead,
-  connectorPresenceSentence,
+  changedElsewhere,
+  characterTarget,
+  clickedText,
+  conflictMet,
+  editLetGo,
+  editToSend,
   fieldEdited,
-  hostFieldKey,
+  home,
   operationFor,
-  readableName,
-  rowAt,
-  screenDiagnostics,
-  sectionDiagnostics,
-  sectionFieldKey,
-  sectionKey,
+  rowKey,
   settingsClosed,
   settingsOpened,
-  setupNeeded,
-  valueText,
+  targetKey,
+  targetOfKey,
+  viewsRead,
+  welcomeOpened,
+  welcomeStepped,
+  type Row,
 } from './settings.ts';
 import {
   initialState,
@@ -26,21 +30,20 @@ import {
   type WebState,
 } from './store.ts';
 import type {
-  ConfigTarget,
   ConfigView,
   GatewayHealth,
   JsonValue,
-  RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
 } from '@project02/wire/contract';
 
-const home: ConfigTarget = {scope: 'global'};
-const mira: ConfigTarget = {scope: 'character', characterId: 'mira'};
+type OkView = Extract<ConfigView, {status: 'ok'}>;
 
+/** A field with nothing of its own set, its value in effect `value` when one is given. */
 function field(
   name: string,
   shape: Partial<RuntimeConfigFieldInspectShape> = {},
+  value?: JsonValue,
 ): RuntimeConfigFieldInspectShape {
   return {
     name,
@@ -50,89 +53,64 @@ function field(
     agentMutable: false,
     authored: {configured: false},
     effectiveSource: 'default',
-    effective: {name, secret: false, source: 'missing', resolved: true},
+    effective: {
+      name,
+      secret: false,
+      source: value === undefined ? 'missing' : 'default',
+      resolved: true,
+      ...(value === undefined ? {} : {value}),
+    },
     ...shape,
   };
 }
 
-/** A field nothing has set, carrying its declared default. */
-function defaulted(
+/** A field the target's own document sets to `value`. */
+function own(
   name: string,
   value: JsonValue,
   shape: Partial<RuntimeConfigFieldInspectShape> = {},
 ): RuntimeConfigFieldInspectShape {
   return field(name, {
     ...shape,
-    effective: {name, secret: false, source: 'default', resolved: true, value},
+    authored: {configured: true, value},
+    effectiveSource: 'global',
+    effective: {name, secret: false, source: 'config', resolved: true, value},
   });
 }
 
-type OkView = Extract<ConfigView, {status: 'ok'}>;
+const replyStyle: RuntimeConfigSectionInspectShape = {
+  namespace: 'plugins',
+  id: 'reply-style',
+  displayName: 'Reply Style',
+  version: '1.0.0',
+  enabled: false,
+  enabledSource: 'default',
+  activation: {enabled: false, status: 'disabled', reasons: []},
+  setup: {ready: true},
+  fields: [
+    field('tone', {allowedValues: ['neutral', 'warm']}),
+    own('signoff', 'M.'),
+  ],
+  layout: [{advanced: false, rows: [{field: 'tone'}, {field: 'signoff'}]}],
+  diagnostics: [],
+};
 
-/** A field whose manifest declares no valueType. */
-function untyped(
-  shape: RuntimeConfigFieldInspectShape,
-): RuntimeConfigFieldInspectShape {
-  const {valueType, ...rest} = shape;
-
-  void valueType;
-
-  return rest;
-}
-
-/** Mira's view: the host fields, and a plugin of the test's own with a field of every shape. */
-function view(fingerprint = 'f1'): OkView {
+function view(shape: Partial<OkView> = {}, fingerprint = 'f1'): OkView {
   return {
     status: 'ok',
     fingerprint,
     diagnostics: [],
     model: {ready: true},
     project02: [
-      defaulted('userDisplayName', 'You'),
-      field('roleModelProvider', {
-        valueType: 'enum',
-        allowedValues: ['nvidia'],
-      }),
-      field('nvidiaApiKey', {secret: true, valueType: 'string'}),
-      field('contextWindowTokens', {valueType: 'number'}),
-      defaulted('enabled', true, {valueType: 'boolean'}),
+      own('userDisplayName', 'Sam'),
+      field('nvidiaApiKey', {secret: true}),
+      field('contextWindowTokens', {valueType: 'number'}, 32768),
     ],
-    sections: [
-      {
-        namespace: 'plugins',
-        id: 'fixture',
-        displayName: 'Fixture',
-        version: '1.0.0',
-        enabled: true,
-        enabledSource: 'global',
-        activation: {enabled: true, status: 'active', reasons: []},
-        setup: {ready: true},
-        fields: [
-          field('tone', {allowedValues: ['neutral', 'warm']}),
-          untyped(field('apiKey', {secret: true})),
-          field('settings', {valueType: 'object'}),
-          field('endpoints', {valueType: 'array'}),
-          untyped(field('mode', {allowedValues: ['true', 'off']})),
-          untyped(
-            field('note', {
-              effective: {
-                name: 'note',
-                secret: false,
-                source: 'config',
-                resolved: true,
-                value: 'true',
-              },
-            }),
-          ),
-        ],
-        layout: [],
-        diagnostics: [],
-      },
-    ],
+    sections: [replyStyle],
+    ...shape,
   };
 }
 
-/** The daemon as the tab heard it: Mira ready, and no Telegram process on the stream. */
 const health: GatewayHealth = {
   protocolVersion: 9,
   homeRoot: '/home/person/.project02',
@@ -141,11 +119,30 @@ const health: GatewayHealth = {
   characters: [
     {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
   ],
-  connectors: [{id: 'telegram', connected: false, bots: []}],
+  connectors: [],
 };
 
-/** A live tab with Mira's thread open and her settings screen in front of it. */
-function opened(target: ConfigTarget = mira): WebState {
+const mira = characterTarget('mira');
+const name: Row = {
+  target: home,
+  place: {kind: 'host', name: 'userDisplayName'},
+};
+const key: Row = {target: home, place: {kind: 'host', name: 'nvidiaApiKey'}};
+const context: Row = {
+  target: home,
+  place: {kind: 'host', name: 'contextWindowTokens'},
+};
+const tone: Row = {
+  target: mira,
+  place: {kind: 'field', namespace: 'plugins', id: 'reply-style', name: 'tone'},
+};
+const replySwitch: Row = {
+  target: mira,
+  place: {kind: 'switch', namespace: 'plugins', id: 'reply-style'},
+};
+
+/** A live tab with Mira's thread open and the window in front of it, both views read. */
+function opened(views: ReadonlyMap<string, ConfigView> = both()): WebState {
   const live = installSnapshot(initialState, {
     protocolVersion: 9,
     health,
@@ -154,504 +151,298 @@ function opened(target: ConfigTarget = mira): WebState {
     turns: [],
   });
 
-  return settingsOpened(
-    threadOpened(live, {
-      status: 'opened',
-      conversationId: 'conv-1',
-      characterId: 'mira',
-    }),
-    target,
+  return viewsRead(
+    settingsOpened(
+      threadOpened(live, {
+        status: 'opened',
+        conversationId: 'conv-1',
+        characterId: 'mira',
+      }),
+      {kind: 'character', characterId: 'mira'},
+    ),
+    views,
   );
 }
 
-const tone = sectionFieldKey('plugins', 'fixture', 'tone');
-const secret = sectionFieldKey('plugins', 'fixture', 'apiKey');
+function both(home = view(), hers = view()): ReadonlyMap<string, ConfigView> {
+  return new Map([
+    ['home', home],
+    ['character:mira', hers],
+  ]);
+}
 
-describe('web settings', () => {
-  it('opens on a target with the thread kept behind it, and closes back to the chat letting edits go', () => {
-    const state = fieldEdited(opened(), tone, 'warm');
+describe('settings window', () => {
+  it('opens on a page with the thread behind it, goes from page to page keeping the views and what is typed, and closes letting them go', () => {
+    const typed = fieldEdited(opened(), name, 'Kim');
+    const moved = settingsOpened(typed, {kind: 'telegram'});
 
-    expect(state.settings).toMatchObject({target: mira, setup: false});
-    expect(state.thread?.conversationId).toBe('conv-1');
+    expect(moved.thread?.conversationId).toBe('conv-1');
+    expect(moved.settings?.screen).toEqual({
+      kind: 'window',
+      page: {kind: 'telegram'},
+    });
+    expect(moved.settings?.views).toBe(typed.settings?.views);
+    expect(moved.settings?.edits.get(rowKey(name))).toBe('Kim');
 
-    const closed = settingsClosed(state);
+    const closed = settingsClosed(moved);
 
     expect(closed.settings).toBeUndefined();
     expect(closed.thread?.conversationId).toBe('conv-1');
     expect(settingsClosed(closed)).toBe(closed);
   });
 
-  it('replaces the view and keeps what is typed and what was refused; a view for another target drops', () => {
-    let state = fieldEdited(
-      configViewRead(opened(), mira, view()),
-      tone,
-      'warm',
-    );
-
-    state = changeEnded(changeSent(state, 1, tone), 1, {
-      status: 'refused',
-      reason: 'invalid',
-      message: 'not warm enough',
+  it('opens the welcome on its first step while the home gives a character no AI model, over nothing the person opened, and steps through it', () => {
+    const fresh = view({
+      model: {ready: false, message: 'Choose an AI service.'},
     });
+    const welcomed = welcomeOpened(initialState, fresh);
 
-    const reread = configViewRead(state, mira, view('f2'));
-
-    expect(
-      reread.settings?.view?.status === 'ok' &&
-        reread.settings.view.fingerprint,
-    ).toBe('f2');
-    expect(reread.settings?.edits.get(tone)).toBe('warm');
-    expect(reread.settings?.problems.get(tone)).toBe('not warm enough');
-    expect(configViewRead(reread, home, view('f3'))).toBe(reread);
+    expect(welcomed.settings?.screen).toEqual({kind: 'welcome', step: 1});
+    expect(welcomed.settings?.views.get('home')).toBe(fresh);
+    expect(welcomeStepped(welcomed, 2).settings?.screen).toEqual({
+      kind: 'welcome',
+      step: 2,
+    });
+    expect(welcomeOpened(initialState, view())).toBe(initialState);
+    expect(welcomeOpened(opened(), fresh).settings?.screen.kind).toBe('window');
+    expect(welcomeStepped(opened(), 2)).toEqual(opened());
   });
 
-  it('marks a change on its way and drops a secret the moment it is sent', () => {
-    const state = fieldEdited(
-      fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
-      secret,
-      'sk-live',
-    );
-    const sent = changeSent(state, 1, secret);
-
-    expect(sent.settings?.saving).toEqual({ticket: 1, key: secret});
-    expect(sent.settings?.edits.has(secret)).toBe(false);
-    expect(sent.settings?.edits.get(tone)).toBe('warm');
-    expect(changeSent(state, 1, tone).settings?.saving).toEqual({
-      ticket: 1,
-      key: tone,
-      text: 'warm',
-    });
-  });
-
-  it('keeps a newer word typed while the save was on its way, and knows a change by its ticket: a screen opened since, or a later change, is not answered by it', () => {
-    const sent = changeSent(
-      fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
+  it('keeps the views in step: a read replaces them whole and keeps what is typed and what was said', () => {
+    const said = changeEnded(
+      changeSent(fieldEdited(opened(), name, ''), 1, name),
       1,
-      tone,
+      {status: 'refused', reason: 'invalid', message: 'A name is needed.'},
     );
-    const retyped = fieldEdited(sent, tone, 'neutral');
-    const landed = changeEnded(retyped, 1, {
-      status: 'applied',
-      fingerprint: 'f2',
-    });
+    const fresh = both(view({}, 'f2'));
+    const reread = viewsRead(said, fresh);
 
-    expect(landed.settings?.edits.get(tone)).toBe('neutral');
-    expect(landed.settings?.saved).toBeUndefined();
-    expect(landed.settings?.saving).toBeUndefined();
-    // The answer leaves the view as read: its fingerprint comes from the
-    // read that lands with the answer, never from the answer.
-    expect(
-      landed.settings?.view?.status === 'ok' &&
-        landed.settings.view.fingerprint,
-    ).toBe('f1');
-
-    // Left for the home and came back: a fresh screen, waiting on nothing.
-    const back = settingsOpened(settingsOpened(sent, home), mira);
-
-    expect(changeEnded(back, 1, {status: 'applied', fingerprint: 'f2'})).toBe(
-      back,
+    expect(reread.settings?.views).toBe(fresh);
+    expect(reread.settings?.edits.get(rowKey(name))).toBe('');
+    expect(reread.settings?.problems.get(rowKey(name))).toBe(
+      'A name is needed.',
     );
-
-    // A later change on the same row: the first one's end is not its end.
-    const again = changeSent(fieldEdited(back, tone, 'playful'), 2, tone);
-
-    expect(changeEnded(again, 1, {status: 'applied', fingerprint: 'f2'})).toBe(
-      again,
-    );
-    expect(
-      changeEnded(again, 2, {status: 'applied', fingerprint: 'f3'}).settings
-        ?.saved,
-    ).toBe(tone);
+    expect(viewsRead(initialState, fresh)).toBe(initialState);
   });
 
-  it('lets a flip of a switch go when it did not land, so the switch shows what the daemon has', () => {
-    const enabled = hostFieldKey('enabled');
-    const flipped = changeSent(
-      fieldEdited(configViewRead(opened(), mira, view()), enabled, 'false'),
-      1,
-      enabled,
-    );
+  it('sends a box when it changed: nothing for what it held, an unset when emptied, the value typed by the field; a key whenever one is typed', () => {
+    const sends = (row: Row, text: string) => {
+      const settings = fieldEdited(opened(), row, text).settings;
 
-    expect(flipped.settings?.edits.get(enabled)).toBe('false');
+      return settings === undefined ? 'closed' : editToSend(settings, row);
+    };
 
-    const conflicted = changeEnded(flipped, 1, {
-      status: 'refused',
-      reason: 'conflict',
-      message: 'moved',
-    });
+    expect(sends(name, 'Sam')).toBeUndefined();
+    expect(sends(name, '  ')).toEqual({});
+    expect(sends(name, 'Kim')).toEqual({value: 'Kim'});
+    expect(sends(context, '4096')).toEqual({value: 4096});
+    expect(sends(context, 'lots')).toEqual({value: 'lots'});
+    expect(sends(context, '')).toBeUndefined();
+    expect(sends(key, ' nvapi-1 ')).toEqual({value: 'nvapi-1'});
+    expect(sends(key, ' ')).toBeUndefined();
 
-    expect(conflicted.settings?.edits.has(enabled)).toBe(false);
+    const untouched = opened().settings;
 
-    const invalid = changeEnded(flipped, 1, {
-      status: 'refused',
-      reason: 'invalid',
-      message: 'no',
-    });
-
-    expect(invalid.settings?.edits.has(enabled)).toBe(false);
-    expect(invalid.settings?.problems.get(enabled)).toBe('no');
-  });
-
-  it('keeps what is typed when the screen already open is opened again', () => {
-    const typed = fieldEdited(
-      configViewRead(opened(), mira, view()),
-      tone,
-      'warm',
-    );
-
-    expect(settingsOpened(typed, mira)).toBe(typed);
-    expect(settingsOpened(typed, home).settings?.edits.size).toBe(0);
-  });
-
-  it('ends a change by its outcome: applied clears the row, invalid stays at it, conflict and failure are said, a gone character closes the screen', () => {
-    const typed = changeSent(
-      fieldEdited(configViewRead(opened(), mira, view()), tone, 'warm'),
-      1,
-      tone,
-    );
-
-    const applied = changeEnded(typed, 1, {
-      status: 'applied',
-      fingerprint: 'f2',
-    });
-
-    expect(applied.settings).toMatchObject({saved: tone});
-    expect(applied.settings?.saving).toBeUndefined();
-    expect(applied.settings?.edits.has(tone)).toBe(false);
-    // The next edit is a new change, not the saved one.
     expect(
-      fieldEdited(applied, tone, 'neutral').settings?.saved,
+      untouched === undefined ? 'closed' : editToSend(untouched, name),
     ).toBeUndefined();
+    expect(
+      editLetGo(fieldEdited(opened(), name, 'Sam'), name).settings?.edits.size,
+    ).toBe(0);
+  });
 
-    const invalid = changeEnded(typed, 1, {
+  it('lets a key go the moment it is sent, and keeps what a box sent to tell a newer word apart', () => {
+    const sent = changeSent(fieldEdited(opened(), key, 'nvapi-1'), 1, key);
+
+    expect(sent.settings?.edits.has(rowKey(key))).toBe(false);
+    expect(sent.settings?.saving).not.toHaveProperty('text');
+    expect(JSON.stringify([...(sent.settings?.edits ?? [])])).not.toContain(
+      'nvapi-1',
+    );
+
+    const typed = changeSent(fieldEdited(opened(), name, 'Kim'), 2, name);
+
+    expect(typed.settings?.saving).toMatchObject({
+      ticket: 2,
+      ...name,
+      text: 'Kim',
+      retried: false,
+    });
+  });
+
+  it('ends a change by its ticket: applied shows the check and keeps a newer word; a refusal and a failed write are said at the row, a box keeping its text and a click showing what the daemon has; a gone character is a notice', () => {
+    const sent = changeSent(fieldEdited(opened(), name, 'Kim'), 1, name);
+    const applied = changeEnded(sent, 1, {
+      status: 'applied',
+      fingerprint: 'f2',
+    });
+
+    expect(applied.settings?.saved).toEqual({key: rowKey(name), ticket: 1});
+    expect(applied.settings?.edits.has(rowKey(name))).toBe(false);
+    expect(applied.settings?.saving).toBeUndefined();
+    expect(fieldEdited(applied, name, 'Jo').settings?.saved).toBeUndefined();
+    expect(changeEnded(sent, 2, {status: 'applied', fingerprint: 'f2'})).toBe(
+      sent,
+    );
+
+    const newer = changeEnded(fieldEdited(sent, name, 'Kimi'), 1, {
+      status: 'applied',
+      fingerprint: 'f2',
+    });
+
+    expect(newer.settings?.edits.get(rowKey(name))).toBe('Kimi');
+    expect(newer.settings?.saved).toBeUndefined();
+
+    const invalid = changeEnded(sent, 1, {
       status: 'refused',
       reason: 'invalid',
-      message: 'Config field "tone" must be one of: neutral, warm.',
+      message: 'Too long.',
     });
 
-    expect(invalid.settings?.problems.get(tone)).toContain('must be one of');
-    expect(invalid.settings?.edits.get(tone)).toBe('warm');
-    expect(invalid.notices).toEqual([]);
+    expect(invalid.settings?.problems.get(rowKey(name))).toBe('Too long.');
+    expect(invalid.settings?.edits.get(rowKey(name))).toBe('Kim');
 
-    const conflict = changeEnded(typed, 1, {
-      status: 'refused',
-      reason: 'conflict',
-      message: 'Runtime config changed before the mutation could be committed.',
-    });
+    // What was said at a row goes with the next change there.
+    expect(
+      changeEnded(changeSent(invalid, 2, name), 2, {
+        status: 'applied',
+        fingerprint: 'f3',
+      }).settings?.problems.size,
+    ).toBe(0);
 
-    expect(conflict.notices).toEqual([
-      'Someone else saved first. This is what is there now; make your change again.',
-    ]);
-    expect(conflict.settings?.edits.get(tone)).toBe('warm');
+    const clicked = changeEnded(
+      changeSent(fieldEdited(opened(), tone, 'warm'), 1, tone),
+      1,
+      {status: 'failed', message: 'The disk is full.'},
+    );
 
-    const failed = changeEnded(typed, 1, {
-      status: 'failed',
-      message: 'Could not write runtime config file.',
-    });
+    expect(clicked.settings?.problems.get(rowKey(tone))).toBe(
+      'The disk is full.',
+    );
+    expect(clicked.settings?.edits.has(rowKey(tone))).toBe(false);
 
-    expect(failed.notices).toEqual(['Could not write runtime config file.']);
-
-    const gone = changeEnded(typed, 1, {
+    const gone = changeEnded(sent, 1, {
       status: 'refused',
       reason: 'unknown_character',
       message: 'Character "mira" was not found.',
     });
 
-    expect(gone.settings).toBeUndefined();
     expect(gone.notices).toEqual(['Character "mira" was not found.']);
+    expect(gone.settings?.edits.has(rowKey(name))).toBe(false);
   });
 
-  it('builds one operation from the row it names, typed by the field, and a reset from no text', () => {
-    const current = view();
-    const cases: readonly [string, string | undefined, unknown][] = [
-      [
-        hostFieldKey('userDisplayName'),
-        '  Sam ',
-        {kind: 'set', path: 'project02.userDisplayName', value: '  Sam '},
-      ],
-      [
-        hostFieldKey('userDisplayName'),
-        undefined,
-        {kind: 'unset', path: 'project02.userDisplayName'},
-      ],
-      [
-        hostFieldKey('contextWindowTokens'),
-        '4096',
-        {kind: 'set', path: 'project02.contextWindowTokens', value: 4096},
-      ],
-      [
-        hostFieldKey('contextWindowTokens'),
-        'lots',
-        {kind: 'set', path: 'project02.contextWindowTokens', value: 'lots'},
-      ],
-      [
-        hostFieldKey('enabled'),
-        'false',
-        {kind: 'set', path: 'project02.enabled', value: false},
-      ],
-      [
-        hostFieldKey('nvidiaApiKey'),
-        'nvapi-1',
-        {kind: 'set', path: 'project02.nvidiaApiKey', value: 'nvapi-1'},
-      ],
-      // A secret of no declared kind is still a credential, not a number.
-      [
-        secret,
-        '123',
-        {
-          kind: 'section_field_set',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'apiKey',
-          value: '123',
-        },
-      ],
-      [
-        tone,
-        'warm',
-        {
-          kind: 'section_field_set',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'tone',
-          value: 'warm',
-        },
-      ],
-      [
-        tone,
-        undefined,
-        {
-          kind: 'section_field_unset',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'tone',
-        },
-      ],
-      [
-        sectionFieldKey('plugins', 'fixture', 'settings'),
-        '{"from": "page"}',
-        {
-          kind: 'section_field_set',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'settings',
-          value: {from: 'page'},
-        },
-      ],
-      [
-        sectionFieldKey('plugins', 'fixture', 'endpoints'),
-        'not json',
-        {
-          kind: 'section_field_set',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'endpoints',
-          value: 'not json',
-        },
-      ],
-      [
-        sectionKey('plugins', 'fixture'),
-        'true',
-        {
-          kind: 'section_enabled',
-          namespace: 'plugins',
-          id: 'fixture',
-          enabled: true,
-        },
-      ],
-      [
-        sectionKey('plugins', 'fixture'),
-        undefined,
-        {kind: 'section_enabled', namespace: 'plugins', id: 'fixture'},
-      ],
-      ['plugins/nobody/tone', 'warm', undefined],
-      [
-        sectionFieldKey('plugins', 'fixture', 'mode'),
-        'true',
-        {
-          kind: 'section_field_set',
-          namespace: 'plugins',
-          id: 'fixture',
-          field: 'mode',
-          value: 'true',
-        },
-      ],
-    ];
+  it('sends a change again once when someone else saved first and its row holds what it held, and otherwise shows what it holds now and says so', () => {
+    const sent = changeSent(fieldEdited(opened(), tone, 'warm'), 1, tone);
+    const elsewhere = view({}, 'f2');
+    const again = conflictMet(sent, 1, elsewhere);
 
-    for (const [key, text, operation] of cases) {
-      expect(operationFor(current, key, text), key).toEqual(operation);
-    }
+    expect(again.again).toBe(true);
+    expect(again.state.settings?.saving?.retried).toBe(true);
 
-    expect(rowAt(current, sectionKey('plugins', 'fixture'))).toEqual({
-      kind: 'section_enabled',
-      namespace: 'plugins',
-      id: 'fixture',
-    });
-    // Two rows never share a key, whatever the names: a slash is in no id.
-    expect(sectionKey('plugins', 'a.b')).not.toBe(
-      sectionFieldKey('plugins', 'a', 'b'),
+    // Sent once more and met again: never a loop.
+    const twice = conflictMet(again.state, 1, elsewhere);
+
+    expect(twice.again).toBe(false);
+    expect(twice.state.settings?.saving).toBeUndefined();
+    expect(twice.state.settings?.problems.get(rowKey(tone))).toBe(
+      changedElsewhere,
     );
-    expect(
-      operationFor(
-        {status: 'refused', reason: 'config_unloadable', message: 'no'},
-        tone,
-        'warm',
-      ),
-    ).toBeUndefined();
-  });
+    expect(twice.state.settings?.edits.has(rowKey(tone))).toBe(false);
 
-  it("finds a connector's rows by their keys and builds its operations with the namespace, and says at the top only what no listed section's block says", () => {
-    const telegram: RuntimeConfigSectionInspectShape = {
-      namespace: 'connectors',
-      id: 'telegram',
-      displayName: 'Telegram',
-      version: '1.0.0',
-      enabled: true,
-      enabledSource: 'default',
-      activation: {enabled: true, status: 'active', reasons: []},
-      setup: {ready: true},
-      fields: [
-        field('botToken', {secret: true, valueType: 'string'}),
-        defaulted('mirror', true, {valueType: 'boolean'}),
-      ],
-      layout: [],
-      diagnostics: [],
-    };
-    const unknownField: RuntimeConfigDiagnostic = {
-      severity: 'warning',
-      code: 'runtime_config_ignored',
-      message: '"theme" is not a setting, so it is not used.',
-      path: 'theme',
-      scope: 'global',
-    };
-    const unknownPlugin: RuntimeConfigDiagnostic = {
-      severity: 'warning',
-      code: 'runtime_config_unknown_plugin',
-      message: 'Runtime config references unknown plugin "telegram".',
-      path: 'plugins.telegram',
-      scope: 'section',
-      namespace: 'plugins',
-      id: 'telegram',
-    };
-    const misplaced: RuntimeConfigDiagnostic = {
-      severity: 'warning',
-      code: 'runtime_config_authored_outside_scope',
-      message:
-        'Setting "managementBotToken" of "telegram" belongs to the home.',
-      path: 'connectors.telegram.config.managementBotToken',
-      scope: 'section',
-      namespace: 'connectors',
-      id: 'telegram',
-      field: 'managementBotToken',
-    };
-    const base = view();
-    const current: OkView = {
-      ...base,
-      diagnostics: [unknownField, unknownPlugin, misplaced],
-      sections: [...base.sections, telegram],
-    };
-
-    expect(
-      operationFor(current, sectionKey('connectors', 'telegram'), 'false'),
-    ).toEqual({
-      kind: 'section_enabled',
-      namespace: 'connectors',
-      id: 'telegram',
-      enabled: false,
-    });
-    expect(
-      operationFor(
-        current,
-        sectionFieldKey('connectors', 'telegram', 'mirror'),
-        'false',
-      ),
-    ).toEqual({
-      kind: 'section_field_set',
-      namespace: 'connectors',
-      id: 'telegram',
-      field: 'mirror',
-      value: false,
-    });
-    // A plugin named like a listed connector is not that connector.
-    expect(screenDiagnostics(current)).toEqual([unknownField, unknownPlugin]);
-    expect(sectionDiagnostics(current, telegram)).toEqual([misplaced]);
-  });
-
-  it("says whether a connector's process is on the stream", () => {
-    const running: GatewayHealth = {
-      ...health,
-      connectors: [{id: 'telegram', connected: true, bots: []}],
-    };
-
-    expect(connectorPresenceSentence(running, 'telegram')).toBe(
-      'Connector: running.',
-    );
-    expect(connectorPresenceSentence(health, 'telegram')).toBe(
-      'Connector: not running. Opening the app starts it; at a terminal, run project02 telegram.',
-    );
-    expect(connectorPresenceSentence(health, 'discord')).toBeUndefined();
-    expect(connectorPresenceSentence(undefined, 'telegram')).toBeUndefined();
-  });
-
-  it('judges the first run by the home provider alone: none is chosen', () => {
-    const fresh = view();
-
-    expect(setupNeeded(fresh)).toBe(true);
-
-    const chosen: OkView = {
-      ...fresh,
-      project02: fresh.project02.map(host =>
-        host.name === 'roleModelProvider'
-          ? {
-              ...host,
-              authored: {configured: true, value: 'nvidia'},
-              effectiveSource: 'global',
-              effective: {...host.effective, source: 'config', value: 'nvidia'},
-            }
-          : host,
-      ),
-    };
-
-    expect(setupNeeded(chosen)).toBe(false);
-    expect(
-      setupNeeded({
-        status: 'refused',
-        reason: 'config_unloadable',
-        message: 'no',
+    // The row itself moved: it shows what it holds now.
+    const moved = conflictMet(
+      sent,
+      1,
+      view({
+        sections: [
+          {
+            ...replyStyle,
+            fields: [
+              own('tone', 'neutral', {allowedValues: ['neutral', 'warm']}),
+            ],
+          },
+        ],
       }),
+    );
+
+    expect(moved.again).toBe(false);
+    expect(moved.state.settings?.problems.get(rowKey(tone))).toBe(
+      changedElsewhere,
+    );
+    expect(conflictMet(sent, 2, elsewhere)).toEqual({
+      state: sent,
+      again: false,
+    });
+    expect(conflictMet(sent, 1, undefined).again).toBe(false);
+
+    // A switch holds its state and where that is decided.
+    const flipped = changeSent(
+      fieldEdited(opened(), replySwitch, 'true'),
+      3,
+      replySwitch,
+    );
+
+    expect(conflictMet(flipped, 3, view({}, 'f3')).again).toBe(true);
+    expect(
+      conflictMet(
+        flipped,
+        3,
+        view({
+          sections: [{...replyStyle, enabled: true, enabledSource: 'global'}],
+        }),
+      ).again,
     ).toBe(false);
   });
 
-  it('reads a field name as words, and shows a value so that it saves back as it was', () => {
-    const current = view();
-    const typed = (name: string) =>
-      current.sections[0]?.fields.find(field => field.name === name);
-    const note = typed('note');
-    const tone = typed('tone');
-    const settings = typed('settings');
+  it('builds one operation for each kind of row: set or unset a host field or a section field, and a switch on, off or left to the document beneath', () => {
+    expect(operationFor(name.place, 'Kim')).toEqual({
+      kind: 'set',
+      path: 'project02.userDisplayName',
+      value: 'Kim',
+    });
+    expect(operationFor(name.place, undefined)).toEqual({
+      kind: 'unset',
+      path: 'project02.userDisplayName',
+    });
+    expect(operationFor(tone.place, 'warm')).toEqual({
+      kind: 'section_field_set',
+      namespace: 'plugins',
+      id: 'reply-style',
+      field: 'tone',
+      value: 'warm',
+    });
+    expect(operationFor(tone.place, undefined)).toEqual({
+      kind: 'section_field_unset',
+      namespace: 'plugins',
+      id: 'reply-style',
+      field: 'tone',
+    });
+    expect(operationFor(replySwitch.place, false)).toEqual({
+      kind: 'section_enabled',
+      namespace: 'plugins',
+      id: 'reply-style',
+      enabled: false,
+    });
+    expect(operationFor(replySwitch.place, undefined)).toEqual({
+      kind: 'section_enabled',
+      namespace: 'plugins',
+      id: 'reply-style',
+    });
+  });
 
-    if (note === undefined || tone === undefined || settings === undefined) {
-      throw new Error("Expected the fixture's fields.");
-    }
-
-    expect(readableName('userDisplayName')).toBe('User display name');
-    expect(readableName('nvidiaApiKey')).toBe('Nvidia api key');
-    expect(readableName('tone')).toBe('Tone');
-    expect(valueText(tone, undefined)).toBe('');
-    expect(valueText(tone, 'warm')).toBe('warm');
-    expect(valueText(settings, {from: 'home'})).toBe('{"from":"home"}');
-    expect(valueText(field('tokens', {valueType: 'number'}), 4096)).toBe(
-      '4096',
+  it('keys every row by its target and place, so no two rows share one', () => {
+    const keys = [name, key, tone, replySwitch, {...tone, target: home}].map(
+      rowKey,
     );
-    // A field of no declared kind shows a string with its quotes, so the
-    // text shown is the text that saves it back as a string.
-    expect(valueText(note, 'true')).toBe('"true"');
-    expect(
-      operationFor(
-        current,
-        sectionFieldKey('plugins', 'fixture', 'note'),
-        valueText(note, 'true'),
-      ),
-    ).toMatchObject({value: 'true'});
+
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(targetOfKey(targetKey(mira))).toEqual(mira);
+    expect(targetOfKey(targetKey(home))).toEqual(home);
+    expect(clickedText(true)).toBe('true');
+    expect(clickedText('warm')).toBe('warm');
+    expect(clickedText(undefined)).toBe('');
+    expect(clickedText({'7': 'Kim'})).toBe('{"7":"Kim"}');
+    expect(advancedSet(initialState, true).advanced).toBe(true);
+    expect(advancedSet(initialState, false)).toBe(initialState);
   });
 });

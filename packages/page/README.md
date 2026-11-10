@@ -37,21 +37,24 @@ A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.
 
-The settings screen is the page's one writer of config, over the daemon's
-two verbs. `settings.ts` holds its rules, pure and tested in Node: the
-screen's target and view, what is typed and not saved, one operation per
-change built from the field's shape, and how each outcome of a change
-ends — applied re-reads the view and leaves the roster to the stream, a
-refusal stays at its field, a conflict is said once with the person's
-text kept. `settings-session.ts`
-is the verbs over the tab's client, and `settings.tsx` renders one screen
-for the home and for a character, every row the field shape the view
-carries. The roster links to it: Settings for the home, a gear per
-character, and a character that is off shows so, with its switch on its
-own screen; one who needs an AI model says so in words, not as a
-failure. A connector's block says from health whether its process is
-on the daemon's stream, and how to start it when it is not. A change saved
-on any surface reaches every screen open on it: the stream's
-`health_changed` frame is a tab's cue to read its view
-again, with what is typed kept. A fresh home opens on the home's screen
-framed as setup until a provider is chosen; the person leaves it.
+The settings window is the page's one writer of config, over the
+daemon's two verbs, and every value it shows is a view's: the home's and
+each character's, read when the window opens and again on every
+`health_changed` frame, with what is typed kept. `settings.ts` holds its
+rules, pure and tested in Node: where the window is, the views, what is
+typed and not saved, what a box sends and when, one operation per change,
+and how each change ends — applied shows a check, a refusal or a write
+that failed stays at its row with the person's text, and someone saving
+first sends the same change again once while its row still holds what it
+held. `settings-model.ts` works out what each page shows: which rows a
+card draws (a value in effect is never hidden), which control a field
+takes, the sidebar's values and dots, how a character and a bot stand,
+and where each finding is said; `look.ts` holds the icons, tints and
+avatar colours. `settings-session.ts` is the verbs over the tab's client,
+one change at a time, and remembers the window's Advanced switch in the
+browser. The `settings-*.tsx` files draw the window, and `welcome.tsx`
+the first run, shown instead of the chat while the home's settings give
+a character no AI model, until the person starts chatting. The roster
+opens the window, a gear per character opens her page, and one who needs
+an AI model says so in plain words that lead to it. The chat and the
+window draw from one set of tokens in `styles.css`, light and dark.

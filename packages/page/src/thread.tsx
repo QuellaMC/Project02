@@ -1,6 +1,7 @@
 import {useEffect, useRef} from 'react';
 
 import type {CharacterSummary} from '@project02/wire/contract';
+import {avatarColor, initialOf} from './look.ts';
 import type {Session} from './session.ts';
 import {composerText, type Thread, type WebState} from './store.ts';
 
@@ -33,10 +34,21 @@ function stateWords(state: CharacterSummary['state']): string {
     : state.replace('_', ' ');
 }
 
-export function Avatar({name}: {readonly name: string}) {
+/** Her initial on her colour, as the settings window shows her. */
+export function Avatar({
+  id,
+  name,
+}: {
+  readonly id: string;
+  readonly name: string;
+}) {
   return (
-    <span className="avatar" aria-hidden="true">
-      {name.slice(0, 1).toUpperCase()}
+    <span
+      className="avatar"
+      style={{background: avatarColor(id)}}
+      aria-hidden="true"
+    >
+      {initialOf(name)}
     </span>
   );
 }
@@ -78,7 +90,7 @@ export function ThreadPane({
   return (
     <section className="thread">
       <header className="thread-header">
-        <Avatar name={name} />
+        <Avatar id={thread.characterId} name={name} />
         <h2 className="thread-name">{name}</h2>
         {character === undefined ? null : <StatePill character={character} />}
       </header>

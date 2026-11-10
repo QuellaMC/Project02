@@ -14,6 +14,7 @@ import {
 import {
   createSettingsVerbs,
   noSettingsVerbs,
+  rememberedAdvanced,
   type SettingsVerbs,
 } from './settings-session.ts';
 import {
@@ -183,8 +184,7 @@ export function createSession(address: string): Session {
         }
 
         // Config moved, here or on another surface, or a connector's
-        // process came or went: a settings screen open shows what is
-        // there now.
+        // process came or went: the settings open show what is there now.
         if (event.kind === 'health_changed') {
           void settings.changed();
         }
@@ -405,6 +405,7 @@ function createTabValue(): {
     ...initialState,
     composers: kept.composers,
     pending: kept.pending,
+    advanced: rememberedAdvanced(),
   };
   let home = kept.homeRoot;
   let refusalSaid = false;

@@ -14,7 +14,8 @@ export default defineConfig({
         'src/main.tsx',
         'src/app.tsx',
         'src/thread.tsx',
-        'src/settings.tsx',
+        'src/welcome.tsx',
+        'src/settings-*.tsx',
       ],
       reporter: ['text', 'json-summary'],
       thresholds: {

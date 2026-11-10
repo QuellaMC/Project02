@@ -260,11 +260,12 @@
       from the declared fields — the home's, or one character's — and <code>POST /api/config</code>
       writes one change through the one control transaction, bound to the fingerprint the view
       handed out; a running character runs on it at once, or, while her reply is in flight,
-      from its next request to her model (<a href="gateway-api.html">Gateway API</a>). The web page's settings screen is the
-      operator's surface over those verbs: one screen for the home and for each character,
-      every row the field shape the view carries, one field per save. A fresh home opens on
-      it, framed as setup, until a provider is chosen; until then each character needs an AI
-      model, says to choose a service, and keeps the lines sent to her until one is chosen.
+      from its next request to her model (<a href="gateway-api.html">Gateway API</a>). The web page's settings window is the
+      person's surface over those verbs: a page for what the home sets once and one for each
+      character, every row drawn from the field shape and the layout the views carry, one
+      field per change, each written only to a target whose view lists it. A fresh home opens
+      on a welcome until its settings give a character an AI model; until then each character
+      needs one, says what to choose or add, and keeps the lines sent to her until she has it.
       A plugin switched on before its setup is finished, as Long-Term Memory without its
       key, is left out of her start: she runs without it and says so, and each view's
       section says what to fill in. A hand edit made while the daemon runs
@@ -285,8 +286,8 @@
       A messaging connector's settings are a section under <code>connectors</code>, declared
       as every section is. Every connector is built in, so its declaration lives beside the
       host's fields, in <code>crates/p02-config</code>, rather than in a plugin's
-      descriptor. Its settings are shown on the same settings page as a plugin's, under
-      <em>Messaging apps</em>, and written through the same config verb, never by the model,
+      descriptor. Its settings are read from the same views as a plugin's, shown on its own page of
+      the settings window, and written through the same config verb, never by the model,
       whose tools reach plugins only. Telegram is the first: <code>botToken</code>, the bot a
       character answers as, is that character's alone; <code>managementBotToken</code>, a bot
       for the home itself, is the home's alone; the switch, on by default, is the home's for

@@ -7,43 +7,105 @@ import type {
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
+  JsonValue,
 } from '@project02/wire/contract';
 import type {GatewayClient} from '@project02/wire/client';
 import {
+  advancedSet,
   changeEnded,
   changeSent,
-  configViewRead,
+  characterTarget,
+  clickedText,
+  conflictMet,
+  editLetGo,
+  editToSend,
   fieldEdited,
+  home,
   operationFor,
-  sameTarget,
+  rowKey,
   settingsClosed,
   settingsOpened,
-  setupNeeded,
+  targetKey,
+  viewOf,
+  viewsRead,
+  welcomeOpened,
+  welcomeStepped,
+  type Row,
 } from './settings.ts';
-import {noticeSpent, noticed, type WebState} from './store.ts';
+import {
+  noticeSpent,
+  noticed,
+  type SettingsPage,
+  type WebState,
+} from './store.ts';
 
 export type SettingsVerbs = {
-  readonly openSettings: (target: ConfigTarget) => Promise<void>;
+  readonly openSettings: (page: SettingsPage) => Promise<void>;
+  /** Another page of the window that is open. */
+  readonly goTo: (page: SettingsPage) => void;
   readonly closeSettings: () => void;
-  readonly editSetting: (key: string, text: string) => void;
-  /** Sends what is typed in the row as one change. */
-  readonly saveSetting: (key: string) => Promise<void>;
-  /** Unsets the row, so it inherits again. */
-  readonly resetSetting: (key: string) => Promise<void>;
+  readonly edit: (row: Row, text: string) => void;
+  /** Sends what is typed in a box, when it changed. */
+  readonly save: (row: Row) => Promise<void>;
+  /** A switch, a choice or a select: the value goes at the click; none unsets it. */
+  readonly choose: (row: Row, value: JsonValue | undefined) => Promise<void>;
+  readonly setAdvanced: (on: boolean) => void;
+  /** The welcome's Continue: what its step holds is saved, and the next step opens once it landed. */
+  readonly welcomeNext: () => Promise<void>;
+  readonly welcomeBack: () => void;
+  /** Start Chatting: the welcome gives way to the chat. */
+  readonly finishWelcome: () => void;
 };
 
 /** An address that can never work has no settings to change. */
 export const noSettingsVerbs: SettingsVerbs = {
   openSettings: () => Promise.resolve(),
+  goTo: () => undefined,
   closeSettings: () => undefined,
-  editSetting: () => undefined,
-  saveSetting: () => Promise.resolve(),
-  resetSetting: () => Promise.resolve(),
+  edit: () => undefined,
+  save: () => Promise.resolve(),
+  choose: () => Promise.resolve(),
+  setAdvanced: () => undefined,
+  welcomeNext: () => Promise.resolve(),
+  welcomeBack: () => undefined,
+  finishWelcome: () => undefined,
 };
+
+const advancedKey = 'project02.advanced';
+
+/** The window's Advanced switch as this browser remembers it; off when it keeps nothing. */
+export function rememberedAdvanced(): boolean {
+  try {
+    return localStorage.getItem(advancedKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function remember(advanced: boolean): void {
+  try {
+    localStorage.setItem(advancedKey, String(advanced));
+  } catch {
+    // A browser that keeps nothing forgets the switch with the tab.
+  }
+}
 
 function problem(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** The name row and the key row the welcome's steps save. */
+const nameRow: Row = {
+  target: home,
+  place: {kind: 'host', name: 'userDisplayName'},
+};
+const keyRow: Row = {target: home, place: {kind: 'host', name: 'nvidiaApiKey'}};
+
+/** A read of every view, numbered as it began. */
+type Read = {
+  readonly mine: number;
+  readonly views: ReadonlyMap<string, ConfigView>;
+};
 
 export function createSettingsVerbs(tab: {
   readonly client: GatewayClient;
@@ -51,180 +113,260 @@ export function createSettingsVerbs(tab: {
   readonly apply: (reduce: (state: WebState) => WebState) => void;
 }): {
   readonly verbs: SettingsVerbs;
-  /** Config moved, on this tab or another surface: a screen open reads its view again, with what is typed kept. */
+  /** Config moved, on this tab or another surface: what is open reads its views again, with what is typed kept. */
   readonly changed: () => Promise<void>;
-  /** Every `ready`: a screen open re-reads its view; the first one judges the setup frame, once per tab. */
+  /** Every `ready`: what is open reads again; the first one judges the welcome, once per tab. */
   readonly ready: () => Promise<void>;
 } {
   const {client, getState, apply} = tab;
-  /** Reads of the screen, numbered as they begin, and the newest whose view has landed. */
+  /** Reads, numbered as they begin, and the newest whose views have landed. */
   let reads = 0;
   let landed = 0;
   /** Each change has a ticket of its own; its end is known by it. */
   let changes = 0;
-  let setupJudged = false;
-  /** Whether the settings screen open is the one on the target. */
-  const isOpen = (target: ConfigTarget): boolean => {
-    const open = getState().settings;
+  /** Changes go one at a time, each against the views the one before it left. */
+  let queue: Promise<void> = Promise.resolve();
+  let welcomeJudged = false;
 
-    return open !== undefined && sameTarget(open.target, target);
-  };
-  /**
-   * Reads the screen's view and lands it in one step with `alongside`.
-   * Views land in the order their reads began: one that settles after a
-   * later read's view has landed brings only `alongside`. Whether
-   * `alongside` landed: a read that fails brings nothing, and is said
-   * unless a later one is on its way or its screen was left.
-   */
-  const readView = async (
-    target: ConfigTarget,
-    alongside: (state: WebState) => WebState = state => state,
-  ): Promise<boolean> => {
+  const queued = (work: () => Promise<void>): Promise<void> =>
+    (queue = queue.then(work, work));
+
+  /** Every view: the home's and each character's in the roster now. */
+  const read = async (): Promise<Read | undefined> => {
     const mine = (reads += 1);
-    let view: ConfigView;
+    const targets: readonly ConfigTarget[] = [
+      home,
+      ...(getState().health?.characters ?? []).map(character =>
+        characterTarget(character.id),
+      ),
+    ];
 
     try {
-      view = await client.configView(target);
+      const views = await Promise.all(
+        targets.map(target => client.configView(target)),
+      );
+
+      return {
+        mine,
+        views: new Map(
+          targets.map((target, at) => [targetKey(target), views[at]]),
+        ) as ReadonlyMap<string, ConfigView>,
+      };
     } catch (error: unknown) {
-      if (mine === reads && isOpen(target)) {
+      if (mine === reads && getState().settings !== undefined) {
         apply(current => noticed(current, problem(error)));
       }
 
-      return false;
+      return undefined;
     }
-
-    const lands = mine > landed;
+  };
+  /**
+   * Lands a read's views in one step with `alongside`. Views land in the
+   * order their reads began: a read that settles after a later one's
+   * views landed brings only `alongside`.
+   */
+  const land = (
+    found: Read,
+    alongside: (state: WebState) => WebState = state => state,
+  ): void => {
+    const lands = found.mine > landed;
 
     if (lands) {
-      landed = mine;
+      landed = found.mine;
     }
 
     apply(current =>
-      lands
-        ? configViewRead(alongside(current), target, view)
-        : alongside(current),
+      lands ? viewsRead(alongside(current), found.views) : alongside(current),
     );
-
-    return true;
   };
-  /**
-   * One change, bound to the fingerprint the view handed out. Applied or
-   * met with a conflict, the view is read again — a write can move more
-   * than its field, and a conflict means the screen was stale — and the
-   * answer lands with that view, so a row goes from what was typed to
-   * what is saved, never back through the value from before. A read that
-   * fails is said, and the answer lands alone: the next change on the
-   * stream reads the screen again.
-   */
-  const change = async (
-    key: string,
-    text: string | undefined,
-  ): Promise<void> => {
-    const page = getState().settings;
+  /** Whether `alongside` landed: a read that fails brings nothing, and is said. */
+  const refresh = async (
+    alongside?: (state: WebState) => WebState,
+  ): Promise<boolean> => {
+    const found = await read();
 
-    if (page?.view?.status !== 'ok') {
-      return;
+    if (found !== undefined) {
+      land(found, alongside);
     }
 
-    const operation = operationFor(page.view, key, text);
+    return found !== undefined;
+  };
+  const send = async (
+    target: ConfigTarget,
+    fingerprint: string,
+    row: Row,
+    value: JsonValue | undefined,
+  ): Promise<ConfigChangeOutcome> => {
+    try {
+      return await client.applyConfigChange({
+        target,
+        expectedFingerprint: fingerprint,
+        operation: operationFor(row.place, value),
+      });
+    } catch (error: unknown) {
+      return {status: 'failed', message: problem(error)};
+    }
+  };
+  /**
+   * One change, bound to the fingerprint its view handed out. Someone
+   * else saving first reads every view again, and the change goes once
+   * more while its row holds what it held. Applied, the answer lands with
+   * views read after it, so a row goes from what was clicked or typed to
+   * what is saved, never back through the value from before.
+   */
+  const change = async (
+    row: Row,
+    value: JsonValue | undefined,
+  ): Promise<void> => {
+    const settings = getState().settings;
+    const view =
+      settings === undefined ? undefined : viewOf(settings, row.target);
 
-    if (operation === undefined) {
+    if (view === undefined) {
       return;
     }
 
     const ticket = (changes += 1);
 
-    apply(current => changeSent(noticeSpent(current), ticket, key));
+    apply(current => changeSent(noticeSpent(current), ticket, row));
 
-    let outcome: ConfigChangeOutcome;
+    let outcome = await send(row.target, view.fingerprint, row, value);
 
-    try {
-      outcome = await client.applyConfigChange({
-        target: page.target,
-        expectedFingerprint: page.view.fingerprint,
-        operation,
+    if (outcome.status === 'refused' && outcome.reason === 'conflict') {
+      const found = await read();
+      const now = found?.views.get(targetKey(row.target));
+
+      if (found === undefined) {
+        apply(current => changeEnded(current, ticket, outcome));
+
+        return;
+      }
+
+      let met: ReturnType<typeof conflictMet> = {
+        state: getState(),
+        again: false,
+      };
+
+      land(found, current => {
+        met = conflictMet(current, ticket, now);
+
+        return met.state;
       });
-    } catch (error: unknown) {
-      outcome = {status: 'failed', message: problem(error)};
+
+      if (!met.again || now?.status !== 'ok') {
+        return;
+      }
+
+      outcome = await send(row.target, now.fingerprint, row, value);
     }
 
     const ended = (current: WebState): WebState =>
       changeEnded(current, ticket, outcome);
-
-    // The screen the change came from is read again, if it is still the
-    // one open — at once, on the answer in hand, whether or not the frame
-    // that follows reaches this tab's stream. The roster needs no read:
-    // what the change did to it comes on the stream, to every tab.
     const moved =
       outcome.status === 'applied' ||
       (outcome.status === 'refused' && outcome.reason === 'conflict');
 
-    if (
-      !moved ||
-      !isOpen(page.target) ||
-      !(await readView(page.target, ended))
-    ) {
+    if (!moved || !(await refresh(ended))) {
       apply(ended);
     }
   };
+  /** A box's edit, sent when its turn comes and it still differs from what the box held. */
+  const save = (row: Row): Promise<void> =>
+    queued(async () => {
+      const settings = getState().settings;
+      const sent =
+        settings === undefined ? undefined : editToSend(settings, row);
 
-  const changed = async (): Promise<void> => {
-    const page = getState().settings;
+      if (sent === undefined) {
+        apply(current => editLetGo(current, row));
 
-    if (page !== undefined) {
-      await readView(page.target);
-    }
-  };
+        return;
+      }
+
+      await change(row, sent.value);
+    });
 
   return {
     verbs: {
-      async openSettings(target) {
-        apply(current => settingsOpened(noticeSpent(current), target));
-        await readView(target);
+      async openSettings(page) {
+        apply(current => settingsOpened(noticeSpent(current), page));
+        await refresh();
+      },
+      goTo(page) {
+        apply(current => settingsOpened(noticeSpent(current), page));
       },
       closeSettings() {
         apply(current => settingsClosed(noticeSpent(current)));
       },
-      editSetting(key, text) {
-        apply(current => fieldEdited(current, key, text));
+      edit(row, text) {
+        apply(current => fieldEdited(current, row, text));
       },
-      saveSetting(key) {
-        return change(key, getState().settings?.edits.get(key));
+      save,
+      choose(row, value) {
+        apply(current => fieldEdited(current, row, clickedText(value)));
+
+        return queued(() => change(row, value));
       },
-      resetSetting(key) {
-        return change(key, undefined);
+      setAdvanced(on) {
+        remember(on);
+        apply(current => advancedSet(current, on));
+      },
+      async welcomeNext() {
+        const screen = getState().settings?.screen;
+
+        if (screen?.kind !== 'welcome' || screen.step === 3) {
+          return;
+        }
+
+        const row = screen.step === 1 ? nameRow : keyRow;
+
+        await save(row);
+
+        // A step whose box the daemon refused stays, saying why at it.
+        if (getState().settings?.problems.has(rowKey(row)) === true) {
+          return;
+        }
+
+        apply(current => welcomeStepped(current, screen.step === 1 ? 2 : 3));
+      },
+      welcomeBack() {
+        const screen = getState().settings?.screen;
+
+        if (screen?.kind === 'welcome' && screen.step > 1) {
+          apply(current => welcomeStepped(current, screen.step === 3 ? 2 : 1));
+        }
+      },
+      finishWelcome() {
+        apply(current => settingsClosed(noticeSpent(current)));
       },
     },
-    changed,
+    async changed() {
+      if (getState().settings !== undefined) {
+        await refresh();
+      }
+    },
     async ready() {
       if (getState().settings !== undefined) {
-        await changed();
+        await refresh();
 
         return;
       }
 
-      // Judged once, on a view that was read: a reconnect must not bounce
-      // a person who left the frame, and a read that failed is no
+      // Judged once, on a view that was read: a reconnect must not bring
+      // back a welcome the person left, and a read that failed is no
       // judgement, so the next ready tries again.
-      if (setupJudged) {
+      if (welcomeJudged) {
         return;
       }
 
-      const target: ConfigTarget = {scope: 'global'};
-      const view = await client.configView(target).catch(() => undefined);
+      const view = await client.configView(home).catch(() => undefined);
 
       if (view === undefined) {
         return;
       }
 
-      setupJudged = true;
-
-      // Not over a screen the person opened while the view was on its way.
-      if (setupNeeded(view) && getState().settings === undefined) {
-        apply(current =>
-          configViewRead(settingsOpened(current, target, true), target, view),
-        );
-      }
+      welcomeJudged = true;
+      apply(current => welcomeOpened(current, view));
     },
   };
 }

@@ -21,6 +21,7 @@ import type {
   PairingSettleOutcome,
   PendingConfirmation,
   RunningTurn,
+  RuntimeConfigSectionNamespace,
   TurnStatus,
   VisibleMessageRole,
 } from '@project02/wire/contract';
@@ -72,30 +73,92 @@ export type Thread = {
   readonly unread?: string | undefined;
 };
 
-/** The settings screen's state; its rules live in settings.ts. */
-export type SettingsPage = {
+/**
+ * A page of the settings window. A sub-page names the page it opens from,
+ * which its Back button returns to and the sidebar marks.
+ */
+export type SettingsPage =
+  | {readonly kind: 'you'}
+  | {readonly kind: 'character'; readonly characterId: string}
+  | {readonly kind: 'model'}
+  | {readonly kind: 'telegram'}
+  /** A plugin's account, set up once for everyone. */
+  | {readonly kind: 'connection'; readonly pluginId: string}
+  | {readonly kind: 'advanced'}
+  /** A plugin's own page for one character, from her page. */
+  | {
+      readonly kind: 'feature';
+      readonly characterId: string;
+      readonly pluginId: string;
+    }
+  /** A character's own AI model, from her page. */
+  | {readonly kind: 'character-model'; readonly characterId: string}
+  /** A bot's page: the home's own, or a character's. */
+  | {
+      readonly kind: 'bot';
+      readonly target: ConfigTarget;
+      readonly from: 'character' | 'telegram';
+    }
+  /** What the app knows of one plugin or connector, from Advanced. */
+  | {
+      readonly kind: 'plugin';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+    };
+
+/** What stands in front of the chat: the settings window on a page, or the first run's welcome at a step. */
+export type SettingsScreen =
+  | {readonly kind: 'window'; readonly page: SettingsPage}
+  | {readonly kind: 'welcome'; readonly step: 1 | 2 | 3};
+
+/** One change on its way. */
+export type Saving = {
+  /** Its end is known by it: the end of an earlier change is not taken for this one's. */
+  readonly ticket: number;
   readonly target: ConfigTarget;
-  /** The first run's heading, shown until the person leaves the screen. */
-  readonly setup: boolean;
-  /** Absent while the first read is on its way; a refused view shows its message, never blank fields. */
-  readonly view?: ConfigView;
-  /** Field key → what is typed there and not saved; survives a re-read. */
-  readonly edits: ReadonlyMap<string, string>;
-  /** Field key → the daemon's refusal of the last change there. */
-  readonly problems: ReadonlyMap<string, string>;
+  readonly place: SettingsPlace;
+  /** The text it carried, none for a secret, which the tab keeps no copy of. */
+  readonly text?: string;
+  /** What the row held in the view the change was sent against. */
+  readonly base: string;
+  /** Whether it was sent again once already after someone else saved first. */
+  readonly retried: boolean;
+};
+
+/** Where one value lives in a view: a host field, a section's switch, or a section's field. */
+export type SettingsPlace =
+  | {readonly kind: 'host'; readonly name: string}
+  | {
+      readonly kind: 'switch';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+    }
+  | {
+      readonly kind: 'field';
+      readonly namespace: RuntimeConfigSectionNamespace;
+      readonly id: string;
+      readonly name: string;
+    };
+
+/**
+ * The settings in front of the chat, the window or the welcome, with the
+ * views they draw from and what the person has typed; its rules live in
+ * settings.ts.
+ */
+export type Settings = {
+  readonly screen: SettingsScreen;
   /**
-   * The one change on its way: its ticket, its row, and the text it
-   * carried — none for a secret, which the tab keeps no copy of. Its end
-   * is known by the ticket, so the end of a change sent from an earlier
-   * screen on the same target is not taken for this one's.
+   * Each view as last read, by its target's key: the home's and each
+   * character's. Every value the page shows is one of theirs.
    */
-  readonly saving?: {
-    readonly ticket: number;
-    readonly key: string;
-    readonly text?: string;
-  };
-  /** The field whose last change landed, until the person's next edit. */
-  readonly saved?: string;
+  readonly views: ReadonlyMap<string, ConfigView>;
+  /** Row key → what is typed or clicked there and not saved; survives a re-read. */
+  readonly edits: ReadonlyMap<string, string>;
+  /** Row key → what the daemon said of the last change there. */
+  readonly problems: ReadonlyMap<string, string>;
+  readonly saving?: Saving;
+  /** The row whose last change landed, and that change: its check shows for a moment. */
+  readonly saved?: {readonly key: string; readonly ticket: number};
 };
 
 export type WebState = {
@@ -107,8 +170,13 @@ export type WebState = {
   readonly pairings: readonly PairingRequest[];
   /** The one open DM. */
   readonly thread?: Thread;
-  /** The settings screen, when one is open in front of the thread. */
-  readonly settings?: SettingsPage;
+  /** The settings window or the welcome, when one is open in front of the chat. */
+  readonly settings?: Settings;
+  /**
+   * The window's Advanced switch: what most people never need is shown
+   * while it is on. The window remembers it, not the home.
+   */
+  readonly advanced: boolean;
   /** Client message id → a pending line; kept across a switch of threads. */
   readonly pending: ReadonlyMap<string, PendingLine>;
   /**
@@ -149,6 +217,7 @@ export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 
 export const initialState: WebState = {
   connection: {status: 'connecting'},
+  advanced: false,
   confirmations: [],
   pairings: [],
   pending: new Map(),
