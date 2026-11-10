@@ -1,6 +1,6 @@
 //! What a character's settings make of her plugins beyond each section's
-//! own judgment: the memory provider they choose, and the plugins her
-//! package expects.
+//! own judgment: the plugins her package expects that she does not run,
+//! and those she has switched on before their setup is finished.
 
 use std::collections::BTreeSet;
 
@@ -8,49 +8,16 @@ use p02_characters::CharacterDefinition;
 use p02_shared::Identifier;
 use p02_wire::{Code, Diagnostic, Namespace};
 
-use crate::host::DEFAULT_MEMORY_PROVIDER;
 use crate::resolve::{Section, Status};
 
-/// What `character`'s settings make of her plugins, `resolved` being her
-/// sections and `chosen` her memory provider.
-pub(crate) fn judge(
+/// The plugins `character`'s package expects that she does not run,
+/// `resolved` being her sections: a warning each, and she starts without
+/// them. One she has switched on before its setup is finished is
+/// [`not_set_up`]'s to say.
+pub(crate) fn expected(
     character: &CharacterDefinition,
-    chosen: Option<&str>,
     resolved: &[Section<'_>],
 ) -> Vec<Diagnostic> {
-    memory_provider(chosen, resolved)
-        .into_iter()
-        .chain(expected(character, resolved))
-        .collect()
-}
-
-/// The memory provider her settings choose must be a memory plugin she
-/// runs, or she has no memory to keep: an error that stops her.
-fn memory_provider(chosen: Option<&str>, resolved: &[Section<'_>]) -> Option<Diagnostic> {
-    let chosen = chosen?;
-    let runs = resolved.iter().any(|section| {
-        section.declared.is_memory_provider()
-            && section.declared.id().as_str() == chosen
-            && matches!(section.status, Status::Active(_))
-    });
-
-    (!runs).then(|| {
-        let path = DEFAULT_MEMORY_PROVIDER.path();
-
-        Diagnostic::error(
-            Code::MemoryProviderUnavailable,
-            format!(
-                "The memory provider \"{chosen}\" her settings choose is not a memory plugin she \
-                 runs. Switch it on, or choose another in {path}."
-            ),
-        )
-        .at(path)
-    })
-}
-
-/// The plugins her package expects that she does not run, a warning each:
-/// she starts without them.
-fn expected(character: &CharacterDefinition, resolved: &[Section<'_>]) -> Vec<Diagnostic> {
     let expected: BTreeSet<&Identifier> = character
         .plugins
         .required()
@@ -70,7 +37,7 @@ fn expected(character: &CharacterDefinition, resolved: &[Section<'_>]) -> Vec<Di
                 .map(|section| section.status);
             let why = match status {
                 None => "which this build does not have",
-                Some(Status::Active(_)) => return None,
+                Some(Status::Active(_) | Status::NotSetUp) => return None,
                 Some(Status::Blocked) => "which her settings block",
                 Some(Status::Disabled(_)) => "which her settings switch off",
             };
@@ -86,6 +53,29 @@ fn expected(character: &CharacterDefinition, resolved: &[Section<'_>]) -> Vec<Di
                 .at(format!("plugins.{plugin}"))
                 .in_section(Namespace::Plugins, plugin.as_str()),
             )
+        })
+        .collect()
+}
+
+/// The plugins she has switched on before their setup is finished,
+/// `resolved` being her sections: a warning each, in the words of the
+/// settings page, and she starts without them.
+pub(crate) fn not_set_up(resolved: &[Section<'_>]) -> Vec<Diagnostic> {
+    resolved
+        .iter()
+        .filter(|section| section.status == Status::NotSetUp)
+        .map(|section| {
+            let declared = section.declared;
+
+            Diagnostic::warning(
+                Code::PluginNotRunning,
+                format!(
+                    "{} is not set up yet, so she is running without it.",
+                    declared.display_name()
+                ),
+            )
+            .at(declared.path())
+            .in_section(declared.namespace(), declared.id().as_str())
         })
         .collect()
 }

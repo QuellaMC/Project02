@@ -1,7 +1,9 @@
 //! The settings on the wire: a settings screen's view, a connector's read,
 //! and the one change a client makes to them.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU32;
 
 use p02_shared::{Fingerprint, Identifier, vocabulary};
 use schemars::JsonSchema;
@@ -12,15 +14,17 @@ use ts_rs::TS;
 use crate::diagnostic::Diagnostic;
 
 /// What a settings screen renders: the fingerprint a change must present,
-/// the diagnostics, and the host's fields and every section the target may
-/// set, all in one field shape. A target whose settings cannot be resolved
-/// is refused with the reason, never shown as blank fields.
+/// the diagnostics, whether the target's settings give a character an AI
+/// model, and the host's fields and every section the target may set, all
+/// in one field shape. A target whose settings cannot be resolved is
+/// refused with the reason, never shown as blank fields.
 #[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfigView {
     Ok {
         fingerprint: Fingerprint,
         diagnostics: Vec<Diagnostic>,
+        model: Setup,
         project02: Vec<FieldView>,
         sections: Vec<SectionView>,
     },
@@ -46,12 +50,22 @@ pub enum ViewRefusal {
 #[schemars(rename = "RuntimeConfigFieldInspectShape")]
 pub struct FieldView {
     pub name: Identifier,
+    /// What a page calls the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub description: String,
+    /// What an empty box shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
     pub secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_type: Option<ConfigValueType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_values: Option<Vec<String>>,
+    /// The words for each allowed value, which a page lists in the order
+    /// of `allowedValues`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub choices: Option<BTreeMap<String, String>>,
     pub agent_mutable: bool,
     pub authored: Authored,
     pub effective_source: Source,
@@ -92,19 +106,128 @@ pub enum ValueSource {
 /// One section as a screen shows it.
 #[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(rename = "RuntimeConfigSectionInspectShape")]
+#[ts(rename = "RuntimeConfigSectionInspectShape", optional_fields)]
 #[schemars(rename = "RuntimeConfigSectionInspectShape")]
 pub struct SectionView {
     pub namespace: Namespace,
     pub id: Identifier,
     pub display_name: String,
     pub version: String,
+    /// How a plugin's row is drawn, when its manifest says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<PluginPage>,
+    /// What a plugin's manifest requests, each access with its level; a
+    /// connector has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access: Option<BTreeMap<AccessName, AccessLevel>>,
     pub enabled: bool,
     /// Which document decides `enabled`, or the declaration's default.
     pub enabled_source: Source,
     pub activation: SectionActivation,
+    /// Whether its settings are enough to build it, judged switched on or
+    /// off: a plugin switched on before they are does not run. A
+    /// connector's always are.
+    pub setup: Setup,
     pub fields: Vec<FieldView>,
+    /// The cards `fields` are drawn in, each field in one at least.
+    pub layout: Vec<LayoutCard>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Whether settings are enough for what they set up, a plugin or a
+/// character's AI model; while they are not, `message` says what to fill
+/// in, in the words of the settings page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct Setup {
+    pub ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// The settings' own judgement of what they set up: enough, or the
+/// sentence saying what to fill in.
+impl From<Result<(), String>> for Setup {
+    fn from(judged: Result<(), String>) -> Self {
+        match judged {
+            Ok(()) => Self {
+                ready: true,
+                message: None,
+            },
+            Err(message) => Self {
+                ready: false,
+                message: Some(message),
+            },
+        }
+    }
+}
+
+/// How a plugin's row on a settings page is drawn, as its manifest
+/// declares it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct PluginPage {
+    /// The row's one-line subtitle.
+    pub summary: String,
+    /// A name of the page's own set, as `tint` is: a page falls back for
+    /// one it does not know.
+    pub icon: String,
+    pub tint: String,
+    pub placement: Placement,
+    /// Where the row comes among its placement's: by this, then by
+    /// display name.
+    pub order: NonZeroU32,
+    /// What the plugin's entry among a page's connections is called, for
+    /// a plugin whose home settings are an account set up once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+}
+
+vocabulary! {
+    /// Where a plugin's row belongs on a settings page.
+    Placement {
+        /// Among what makes up her mind and body.
+        MindBody = "mind_body",
+        /// Among what she is permitted to do.
+        Permission = "permission",
+    }
+}
+
+/// One card of a section's layout: rows of its fields, under a title and
+/// over a footer when it has them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct LayoutCard {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub footer: Option<String>,
+    /// Whether the card holds what most people leave as it is: a page may
+    /// keep a row of it out of sight while nothing sets its field.
+    pub advanced: bool,
+    /// When the card's rows have an effect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<LayoutWhen>,
+    pub rows: Vec<LayoutRow>,
+}
+
+/// One row of a card: a field of the section.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct LayoutRow {
+    pub field: Identifier,
+    /// When the field has an effect, beyond its card's own condition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<LayoutWhen>,
+}
+
+/// A condition on a field of the same section that lists its allowed
+/// values: it holds while that field's value in effect is one of `is`.
+/// What it guards has no effect otherwise, so a page may hide it then.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+pub struct LayoutWhen {
+    pub field: Identifier,
+    pub is: Vec<String>,
 }
 
 /// Whether a section runs, as its settings decide it, and why.
@@ -183,9 +306,9 @@ pub struct CharacterConnectorEntry {
     pub entry: ConnectorEntry,
 }
 
-/// Whose settings a view reads or a change writes: the home's, or one
-/// character's.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, TS)]
+/// Whose settings a view reads or a change writes, and whose bot a
+/// connector's is: the home's, or one character's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ConfigTarget {
     Global,
@@ -356,6 +479,31 @@ pub enum Source {
     Default,
     Global,
     Character,
+}
+
+vocabulary! {
+    /// What a plugin's manifest may request: a service the host hands it,
+    /// or a declaration of what it does.
+    AccessName {
+        CharacterFileStore = "character_file_store",
+        SessionHistory = "session_history",
+        PluginDatabase = "plugin_database",
+        TurnContext = "turn_context",
+        ModelInput = "model_input",
+        TrustedContext = "trusted_context",
+        /// The plugin sends what it is given to a service outside the
+        /// app. The host hands nothing for it.
+        Network = "network",
+    }
+}
+
+vocabulary! {
+    /// How much of a service: ordered, so `Write` satisfies a need for `Read`.
+    AccessLevel {
+        None = "none",
+        Read = "read",
+        Write = "write",
+    }
 }
 
 vocabulary! {

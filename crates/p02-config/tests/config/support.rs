@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{Resolution, Sections, apply_change, config_view, connector_config_view};
-use p02_contracts::Manifest;
+use p02_contracts::{Manifest, SetupCheck};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
 use p02_wire::{ChangeOutcome, ConfigChange, ConfigTarget};
@@ -34,9 +34,10 @@ pub(crate) fn document(stanzas: Value) -> Value {
     Value::Object(document)
 }
 
-/// A plugin's manifest with the config section given.
-pub(crate) fn manifest(id: &str, kind: &str, scope: &str, on: bool, fields: &Value) -> Manifest {
-    Manifest::from_value(&json!({
+/// A plugin's manifest with the config section given, as its author
+/// writes it.
+fn described(id: &str, kind: &str, scope: &str, on: bool, fields: &Value) -> Value {
+    json!({
         "id": id,
         "displayName": id,
         "version": "1.0.0",
@@ -55,17 +56,75 @@ pub(crate) fn manifest(id: &str, kind: &str, scope: &str, on: bool, fields: &Val
         },
         "activation": {"defaultEnabled": on, "reasons": [format!("bundled_{id}")]},
         "requestedAccess": {"model_input": "write"},
-    }))
-    .unwrap()
+    })
 }
 
-/// The plugins this build compiles in, their settings as theirs are.
+/// A plugin's manifest with the config section given.
+pub(crate) fn manifest(id: &str, kind: &str, scope: &str, on: bool, fields: &Value) -> Manifest {
+    Manifest::from_value(&described(id, kind, scope, on, fields)).unwrap()
+}
+
+/// The plugins this build compiles in, their settings as theirs are: a
+/// memory whose account is the home's alone, drawn in cards, and a reply
+/// style that is each character's own.
 pub(crate) fn plugins() -> Vec<Manifest> {
+    let platform = json!({"field": "backend", "is": ["platform"]});
+    let mut mem0 = described(
+        "mem0",
+        "memory_provider",
+        "global_with_character_overrides",
+        false,
+        &json!([
+            {
+                "name": "backend", "label": "Kept At",
+                "description": "Where memories are kept.",
+                "secret": false, "scope": "global_only", "valueType": "string",
+                "allowedValues": ["platform", "server", "oss"], "defaultValue": "platform",
+                "choices": {
+                    "platform": "Mem0 Cloud", "server": "Your Server", "oss": "This Computer",
+                },
+                "redactionLabels": [],
+            },
+            {
+                "name": "baseUrl", "description": "Where memories are sent.",
+                "secret": false, "scope": "global_only", "valueType": "url",
+                "redactionLabels": [],
+            },
+            {
+                "name": "apiKey", "description": "The key.", "placeholder": "Paste key",
+                "secret": true, "scope": "global_only", "valueType": "string",
+                "redactionLabels": ["memory"],
+            },
+        ]),
+    );
+
+    mem0["page"] = json!({
+        "summary": "Remembers across all chats",
+        "icon": "archive",
+        "tint": "brown",
+        "placement": "mind_body",
+        "order": 3,
+        "connection": "Memory",
+    });
+    mem0["config"]["layout"] = json!([
+        {"rows": ["backend"]},
+        {"when": platform, "rows": ["apiKey"], "footer": "Get a key at app.mem0.ai."},
+        {"title": "Advanced", "advanced": true, "rows": [{"field": "baseUrl", "when": platform}]},
+    ]);
+
     vec![
         manifest(
-            "demo-config",
+            "character-state",
+            "first_party",
+            "character_only",
+            false,
+            &json!([]),
+        ),
+        Manifest::from_value(&mem0).unwrap(),
+        manifest(
+            "reply-style",
             "context_provider",
-            "global_with_character_overrides",
+            "character_only",
             false,
             &json!([
                 {
@@ -78,44 +137,6 @@ pub(crate) fn plugins() -> Vec<Manifest> {
                     "name": "signoff", "description": "The signoff.",
                     "secret": false, "valueType": "string", "agentMutable": true,
                     "redactionLabels": [],
-                },
-                {
-                    "name": "operatorNote", "description": "A note.",
-                    "secret": false, "valueType": "string", "redactionLabels": [],
-                },
-                {
-                    "name": "apiKey", "description": "A key.",
-                    "secret": true, "valueType": "string", "redactionLabels": [],
-                },
-            ]),
-        ),
-        manifest(
-            "character-state",
-            "first_party",
-            "character_only",
-            false,
-            &json!([]),
-        ),
-        manifest(
-            "mem0",
-            "memory_provider",
-            "global_with_character_overrides",
-            false,
-            &json!([
-                {
-                    "name": "backend", "description": "Where memories are kept.",
-                    "secret": false, "valueType": "string",
-                    "allowedValues": ["platform", "server", "oss"], "defaultValue": "platform",
-                    "redactionLabels": [],
-                },
-                {
-                    "name": "baseUrl", "description": "Where memories are sent.",
-                    "secret": false, "valueType": "url",
-                    "redactionLabels": [],
-                },
-                {
-                    "name": "apiKey", "description": "The key.",
-                    "secret": true, "valueType": "string", "redactionLabels": ["memory"],
                 },
             ]),
         ),
@@ -151,7 +172,11 @@ impl World {
         Self {
             _directory: directory,
             home,
-            sections: Sections::new(plugins),
+            sections: Sections::new(plugins.into_iter().map(|manifest| {
+                let ready: SetupCheck = |_| Ok(());
+
+                (manifest, ready)
+            })),
         }
     }
 
@@ -217,13 +242,15 @@ impl World {
         Resolution::read(&self.home, &self.sections, &self.discovery(), target).unwrap()
     }
 
-    /// The view of `target` as a page receives it.
+    /// The view of `target` as a page receives it, whatever model its
+    /// settings choose taken as one a character can use.
     pub(crate) fn view(&self, target: &ConfigTarget) -> Value {
         serde_json::to_value(config_view(
             &self.home,
             &self.sections,
             &self.discovery(),
             target,
+            |_| Ok(()),
         ))
         .unwrap()
     }

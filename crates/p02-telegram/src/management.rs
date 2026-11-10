@@ -175,6 +175,7 @@ fn words(state: RosterState) -> &'static str {
         RosterState::NotStarted => "not started",
         RosterState::Starting => "starting",
         RosterState::Ready => "ready",
+        RosterState::NeedsModel => "needs an AI model",
         RosterState::Stopping => "stopping",
         RosterState::Stopped => "stopped",
         RosterState::Failed => "failed",

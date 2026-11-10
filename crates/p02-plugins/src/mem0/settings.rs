@@ -1,6 +1,6 @@
 //! What the plugin's settings make of it: whose memories, and the backend
-//! that keeps them; or the sentence naming what to set, which never
-//! repeats a value.
+//! that keeps them; or the sentence naming what to fill in, in the words
+//! of the settings page, which never repeats a value.
 
 use p02_contracts::ResolvedConfig;
 use p02_memory::{DEFAULT_EMBEDDER_MODEL, DEFAULT_MODEL, Endpoint, OPENAI_BASE_URL, Settings};
@@ -34,10 +34,12 @@ impl Fields<'_> {
             .filter(|text| !text.is_empty())
     }
 
-    fn base_url(&self, field: &str) -> Result<Option<BaseUrl>, String> {
+    /// The address `field` holds, which the settings page calls `named`.
+    fn base_url(&self, field: &str, named: &str) -> Result<Option<BaseUrl>, String> {
         self.text(field)
             .map(|text| {
-                BaseUrl::parse(text).map_err(|_| format!("Mem0 {field} must be {BASE_URL_RULE}."))
+                BaseUrl::parse(text)
+                    .map_err(|_| format!("Long-Term Memory's {named} must be {BASE_URL_RULE}."))
             })
             .transpose()
     }
@@ -48,7 +50,7 @@ pub(super) fn configured(config: &ResolvedConfig) -> Result<Setup, String> {
     let fields = Fields(config);
     let user = fields
         .text("userId")
-        .ok_or_else(|| "Mem0 userId must not be blank.".to_owned())?
+        .ok_or_else(|| "Long-Term Memory needs a memory owner.".to_owned())?
         .to_owned();
     let backend = match fields.text("backend") {
         Some("server") => server(&fields)?,
@@ -62,25 +64,27 @@ pub(super) fn configured(config: &ResolvedConfig) -> Result<Setup, String> {
 fn platform(fields: &Fields<'_>) -> Result<Backend, String> {
     let key = fields
         .text("apiKey")
-        .ok_or("Mem0 platform backend needs the apiKey config field (MEM0_API_KEY).")?;
-    let base = match fields.base_url("baseUrl")? {
+        .ok_or("Long-Term Memory needs an API key.")?;
+    let base = match fields.base_url("baseUrl", "server address")? {
         Some(base) => base,
         None => BaseUrl::parse(PLATFORM_BASE_URL).expect("the platform's address is a base URL"),
     };
 
-    Rest::new(Dialect::Platform, base, Some(key))
-        .map(Backend::Rest)
-        .map_err(|error| error.to_string())
+    rest(Dialect::Platform, base, Some(key))
 }
 
 fn server(fields: &Fields<'_>) -> Result<Backend, String> {
     let base = fields
-        .base_url("baseUrl")?
-        .ok_or("Mem0 server backend needs the baseUrl config field.")?;
+        .base_url("baseUrl", "server address")?
+        .ok_or("Long-Term Memory needs a server address.")?;
 
-    Rest::new(Dialect::Server, base, fields.text("apiKey"))
+    rest(Dialect::Server, base, fields.text("apiKey"))
+}
+
+fn rest(dialect: Dialect, base: BaseUrl, key: Option<&str>) -> Result<Backend, String> {
+    Rest::new(dialect, base, key)
         .map(Backend::Rest)
-        .map_err(|error| error.to_string())
+        .map_err(|_| unsendable("API key"))
 }
 
 /// Both endpoints speak the OpenAI wire. Every rule runs on the effective
@@ -91,8 +95,8 @@ fn server(fields: &Fields<'_>) -> Result<Backend, String> {
 /// is the one endpoint that requires a key.
 fn embedded(fields: &Fields<'_>) -> Result<Backend, String> {
     let cloud = BaseUrl::parse(OPENAI_BASE_URL).expect("the OpenAI address is a base URL");
-    let model_base = fields.base_url("ossLlmBaseUrl")?;
-    let embedder_base = fields.base_url("ossEmbedderBaseUrl")?;
+    let model_base = fields.base_url("ossLlmBaseUrl", "server for Remembering")?;
+    let embedder_base = fields.base_url("ossEmbedderBaseUrl", "server for Searching")?;
     let model_base = model_base.unwrap_or_else(|| cloud.clone());
     let embedder_base = embedder_base.unwrap_or_else(|| model_base.clone());
     let model_key = fields.text("ossLlmApiKey");
@@ -102,29 +106,22 @@ fn embedded(fields: &Fields<'_>) -> Result<Backend, String> {
 
     if model_base == cloud && model_key.is_none() {
         return Err(
-            "Mem0 OSS extraction needs the ossLlmApiKey config field (MEM0_OSS_LLM_API_KEY), or \
-             an ossLlmBaseUrl pointing at an OpenAI-compatible server such as LM Studio or \
+            "Long-Term Memory needs an API key for Remembering, or a server for it such as \
              Ollama."
                 .to_owned(),
         );
     }
 
     if embedder_base == cloud && embedder_key.is_none() {
-        return Err(
-            "Mem0 OSS embedding at the OpenAI endpoint needs the ossEmbedderApiKey config field \
-             (MEM0_OSS_EMBEDDER_API_KEY)."
-                .to_owned(),
-        );
+        return Err("Long-Term Memory needs an API key for Searching.".to_owned());
     }
 
-    let unusable =
-        |field: &str| format!("Mem0 {field} holds characters a request header cannot carry.");
     let model = Endpoint::new(
         model_base,
         model_key,
         fields.text("ossLlmModel").unwrap_or(DEFAULT_MODEL),
     )
-    .map_err(|_| unusable("ossLlmApiKey"))?;
+    .map_err(|_| unsendable("API key for Remembering"))?;
     let embedder = Endpoint::new(
         embedder_base,
         embedder_key,
@@ -132,10 +129,16 @@ fn embedded(fields: &Fields<'_>) -> Result<Backend, String> {
             .text("ossEmbedderModel")
             .unwrap_or(DEFAULT_EMBEDDER_MODEL),
     )
-    .map_err(|_| unusable("ossEmbedderApiKey"))?;
+    .map_err(|_| unsendable("API key for Searching"))?;
 
     Ok(Backend::Embedded(Box::new(Embedded::new(Settings {
         model,
         embedder,
     }))))
+}
+
+/// The sentence for a key, which the settings page calls `named`, that no
+/// request can carry.
+fn unsendable(named: &str) -> String {
+    format!("Long-Term Memory's {named} holds characters that cannot be sent; paste it again.")
 }

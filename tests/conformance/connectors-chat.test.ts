@@ -251,7 +251,8 @@ it('connectors.telegram-private-text-only: nothing is carried from a group chat 
 
 it("connectors.telegram-turn-ended-told: the chat a line came from is told why it got no answer, in the daemon's words: its character not running, or a turn that ended without a reply", async () => {
   const model = await startModelServer();
-  // A provider chosen for Mira alone: Nova's bot runs, and she does not.
+  // Nova's own settings hold a value that stops her: her bot runs, and she
+  // does not.
   const home = createHome({
     'config.json': configJson({
       connectors: {
@@ -268,7 +269,12 @@ it("connectors.telegram-turn-ended-told: the chat a line came from is told why i
           connectors: {telegram: {config: {botToken: miraBot.token}}},
         }),
       },
-      nova: {'config.json': botSettings(novaBot)},
+      nova: {
+        'config.json': configJson({
+          project02: {contextWindowTokens: -5},
+          connectors: {telegram: {config: {botToken: novaBot.token}}},
+        }),
+      },
     },
   });
   const daemon = await startDaemon(home);
@@ -362,13 +368,17 @@ it("connectors.telegram-mirror: another surface's turn is shown in each paired c
   model.answer(reply('Hello, Alice.'));
   telegram.push(miraBot.token, messageFrom(alice, 1, 'Hello, Mira.'));
   await telegram.shows(miraBot.token, bob.id, 'Hello, Alice.');
-  await saveConfig(wire, mira, {
-    kind: 'section_field_set',
-    namespace: 'connectors',
-    id: 'telegram',
-    field: 'mirror',
-    value: false,
-  });
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {
+      kind: 'section_field_set',
+      namespace: 'connectors',
+      id: 'telegram',
+      field: 'mirror',
+      value: false,
+    },
+  );
   model.answer(reply('Quietly, web.'));
   await sayOnWeb('Quiet now.', 'web-2');
   model.answer(reply('Hello again, Alice.'));
@@ -400,9 +410,25 @@ it('connectors.telegram-mirror-before-open: a web line that opens her thread aft
   first.signal('SIGINT');
   await first.exit();
 
-  const wire = wireOf(await startDaemon(home));
+  const restarted = await startDaemon(home);
+  const wire = wireOf(restarted);
   const held = model.hold();
+  const boot = await openEvents(restarted);
 
+  // Her roster comes up behind the address, and until the boot pass
+  // reaches her she takes no line: the line goes once it has, which her
+  // state in the stream's snapshot, or its first change after, says.
+  await boot.holding('the boot pass to reach her', frames =>
+    frames.find(
+      frame =>
+        frameOf('state_changed', {characterId: 'mira'})(frame) ||
+        ['starting', 'ready'].some(state =>
+          frameOf('ready', {health: {characters: [{id: 'mira', state}]}})(
+            frame,
+          ),
+        ),
+    ),
+  );
   await expect(
     wire.turn({
       conversationId,

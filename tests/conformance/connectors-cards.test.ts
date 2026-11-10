@@ -37,7 +37,7 @@ type Asked = {
   readonly source: string;
 };
 
-/** A home where Mira's bot answers, the bundled plugin whose fields the model may ask to change is on, and these accounts are paired. */
+/** A home where Mira's bot answers, her reply style, whose fields the model may ask to change, is on, and these accounts are paired. */
 function cardsHome(
   model: {readonly settings: object},
   paired: readonly Account[],
@@ -46,7 +46,6 @@ function cardsHome(
   return createHome({
     'config.json': configJson({
       project02: model.settings,
-      plugins: {'demo-config': {enabled: true}},
       connectors: {
         telegram: {
           config: {
@@ -63,6 +62,7 @@ function cardsHome(
     'character-data': {
       mira: {
         'config.json': configJson({
+          plugins: {'reply-style': {enabled: true}},
           connectors: {telegram: {config: {botToken: miraBot.token}}},
         }),
       },
@@ -70,14 +70,14 @@ function cardsHome(
   });
 }
 
-/** The model asking to set one of the demo plugin's fields on Mira, against the fingerprint her settings hand out now. */
+/** The model asking to set one field of Mira's reply style, against the fingerprint her settings hand out now. */
 async function asksToSet(wire: Wire, fieldName: string, value: string) {
   const view = (await wire.configView(mira)) as {readonly fingerprint: string};
 
   return calling([
     'runtime_plugin_config_update',
     {
-      pluginId: 'demo-config',
+      pluginId: 'reply-style',
       fieldName,
       operation: 'set',
       value,

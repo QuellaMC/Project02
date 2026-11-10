@@ -4,12 +4,15 @@ The plugin host and the plugins compiled into the daemon. It depends on
 p02-contracts, p02-core, p02-memory and p02-shared.
 
 Each plugin keeps its descriptor, `project02.plugin.json`, beside its
-code: the manifest of its hooks, its tools, its settings and the access
-it requests. `list::plugins` holds every plugin compiled in, the host's
-own `runtime.plugin` first and the rest in id order. A character's host
-is built from the plugins her settings switch on, each by its factory
-from the values her settings give it and checked against its manifest;
-when her settings change, she gets a host built anew.
+code: the manifest of its hooks, its tools, its settings, the access it
+requests and how a settings page draws it. `list::plugins` holds every
+plugin compiled in, the host's own `runtime.plugin` first and the rest in
+id order, each with its factory and the check of whether its settings are
+enough to build it, made by the code the factory builds it with. A
+character's host is built from the plugins her settings switch on and that
+check finds set up, each by its factory from the values her settings give
+it and checked against its manifest; when her settings change, she gets a
+host built anew.
 
 The host's rules:
 
@@ -28,5 +31,6 @@ The host's rules:
 
 The plugins: `runtime.plugin`, which lists the plugins she runs, shows one
 plugin's settings and, on the person's yes, changes a field the model may
-change in her own settings; session history; mem0; character state;
-character memory; and demo-config, a tone and a signoff for her to change.
+change in her own settings; session history; mem0, whose account is the
+home's to set up; character state; character memory; and reply-style, the
+tone she writes in and a signoff, each character's own.

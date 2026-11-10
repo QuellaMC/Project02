@@ -2,15 +2,15 @@
 //! until it is stopped or Telegram refuses its token, and hands each
 //! update past the pairing gate to its rules, which follow the daemon's
 //! frames too; trouble is said once per change, naming the bot, while the
-//! bot keeps trying.
+//! bot keeps trying, and the table hears how the bot stands.
 
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use p02_core::ClientStamp;
-use p02_wire::{Event, OpenOutcome};
-use tokio::sync::{mpsc, oneshot, watch};
+use p02_wire::{BotState, BotUsername, ConnectorBot, Event, OpenOutcome};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -58,6 +58,8 @@ pub(crate) struct Start {
     pub(crate) daemon: watch::Receiver<Option<Daemon>>,
     pub(crate) held: watch::Receiver<bool>,
     pub(crate) latest: watch::Receiver<Option<Latest>>,
+    /// Rung whenever how the bot stands changed.
+    pub(crate) bell: Arc<Notify>,
     pub(crate) lines: Arc<dyn Lines>,
     pub(crate) stop: CancellationToken,
 }
@@ -69,11 +71,20 @@ fn source_of(username: &str) -> ClientStamp {
         .expect("a bot's username is letters, digits and underscores")
 }
 
+/// How a bot stands, as the daemon's health shows it: the name Telegram
+/// gave it, once it has, and its state, once the bot knows one.
+#[derive(Debug, Default)]
+struct Standing {
+    username: Option<BotUsername>,
+    state: Option<BotState>,
+}
+
 /// A running bot, as the table holds it.
 #[derive(Debug)]
 pub(crate) struct Bot {
     settings: watch::Sender<Arc<BotSettings>>,
     inbox: mpsc::UnboundedSender<Inbox>,
+    standing: watch::Receiver<Standing>,
     stop: CancellationToken,
 }
 
@@ -81,19 +92,34 @@ impl Bot {
     pub(crate) fn start(start: Start, settings: BotSettings, tracker: &TaskTracker) -> Self {
         let (settings, read) = watch::channel(Arc::new(settings));
         let (inbox, frames) = mpsc::unbounded_channel();
+        let (stands, standing) = watch::channel(Standing::default());
         let stop = start.stop.clone();
 
-        tracker.spawn(run(start, read, frames));
+        tracker.spawn(run(start, read, frames, stands));
 
         Self {
             settings,
             inbox,
+            standing,
             stop,
         }
     }
 
     pub(crate) fn same_owner(&self, owner: &Owner) -> bool {
         self.settings.borrow().owner.same(owner)
+    }
+
+    /// The bot as the daemon's health shows it; none until it knows how
+    /// it stands.
+    pub(crate) fn report(&self) -> Option<ConnectorBot> {
+        let standing = self.standing.borrow();
+        let state = standing.state?;
+
+        Some(ConnectorBot {
+            target: self.settings.borrow().owner.target(),
+            username: standing.username.clone(),
+            state,
+        })
     }
 
     /// The settings a later read gave, for the same owner.
@@ -119,6 +145,7 @@ async fn run(
     start: Start,
     settings: watch::Receiver<Arc<BotSettings>>,
     frames: mpsc::UnboundedReceiver<Inbox>,
+    standing: watch::Sender<Standing>,
 ) {
     let Start {
         telegram,
@@ -127,17 +154,25 @@ async fn run(
         daemon,
         held,
         latest,
+        bell,
         lines,
         stop,
     } = start;
     let api = BotApi::new(telegram, token);
-    let mut problems = Problems::default();
+    let mut problems = Problems {
+        said: None,
+        standing,
+        bell,
+    };
     let Some(me) = identify(&api, &settings, lines.as_ref(), &mut problems, &stop).await else {
         stop.cancelled().await;
         return;
     };
     let username = me.username.unwrap_or_else(|| me.id.to_string());
     let source = source_of(&username);
+
+    problems.identified(&username);
+
     let character = match &settings.borrow().owner {
         Owner::Management { .. } => {
             lines.say(&format!("Telegram: management bot @{username} is on."));
@@ -195,6 +230,7 @@ async fn run(
     .await;
 
     if ended == PollEnd::Refused {
+        problems.stands(BotState::Refused);
         lines.report(&refused(&settings.borrow().owner));
         quiet.cancel();
         stop.cancelled().await;
@@ -242,6 +278,7 @@ async fn identify(
         let wait = match outcome {
             Ok(me) => return Some(me),
             Err(failure) if failure.token_refused() => {
+                problems.stands(BotState::Refused);
                 lines.report(&refused(&settings.borrow().owner));
                 return None;
             }
@@ -277,21 +314,61 @@ enum Problem {
     Unreachable,
 }
 
-/// The problem said last.
-#[derive(Debug, Default)]
-struct Problems(Option<Problem>);
+impl Problem {
+    fn state(self) -> BotState {
+        match self {
+            Self::Conflict => BotState::Conflict,
+            Self::Webhook => BotState::Webhook,
+            Self::Unreachable => BotState::Unreachable,
+        }
+    }
+}
+
+/// The problem said last, and how the bot stands, which the table hears
+/// of whenever it changes and tells the daemon.
+#[derive(Debug)]
+struct Problems {
+    said: Option<Problem>,
+    standing: watch::Sender<Standing>,
+    bell: Arc<Notify>,
+}
 
 impl Problems {
+    /// The bot's state as it is now.
+    fn stands(&self, state: BotState) {
+        let changed = self
+            .standing
+            .send_if_modified(|standing| standing.state.replace(state) != Some(state));
+
+        if changed {
+            self.bell.notify_one();
+        }
+    }
+
+    /// Telegram said who the bot is, so it is on.
+    fn identified(&self, username: &str) {
+        self.standing.send_modify(|standing| {
+            standing.username = BotUsername::new(username).ok();
+            standing.state = Some(BotState::On);
+        });
+        self.bell.notify_one();
+    }
+
     /// Says the problem once it is another than the one said last; and,
-    /// once none is left, that the messages come again.
+    /// once none is left, that the messages come again. How the bot
+    /// stands follows the problem as it is now, said before or not: a
+    /// bot Telegram named after a problem stands on, and a poll that meets
+    /// that problem again says nothing new and puts it back.
     fn change(&mut self, now: Option<(Problem, &str)>, bot: &str, lines: &dyn Lines) {
         let problem = now.map(|(problem, _)| problem);
 
-        if problem == self.0 {
+        self.stands(problem.map_or(BotState::On, Problem::state));
+
+        if problem == self.said {
             return;
         }
 
-        self.0 = problem;
+        self.said = problem;
         lines.report(&match now {
             None => format!("Telegram: {bot} gets its messages again."),
             Some((Problem::Conflict, _)) => {

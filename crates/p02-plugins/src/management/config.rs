@@ -302,7 +302,7 @@ fn installed(text: &str) -> Result<Option<&'static Manifest>, PluginError> {
     Ok(crate::list::plugins()
         .map_err(|error| PluginError::new(error_chain(error)))?
         .iter()
-        .map(|(manifest, _)| manifest)
+        .map(|(manifest, ..)| manifest)
         .find(|manifest| manifest.id().as_str() == text))
 }
 

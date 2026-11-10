@@ -3,8 +3,10 @@
 //! shapes it, anything else unreadable, never an empty result; a row of
 //! it that names no memory is passed over.
 
+use std::sync::OnceLock;
+
 use p02_memory::{Message, Role, Scope};
-use p02_shared::{BaseUrl, credential_header, http_client};
+use p02_shared::{BaseUrl, InvalidCredentialError, credential_header, http_client};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderName, HeaderValue};
 use serde_json::{Value, json};
 
@@ -25,24 +27,21 @@ pub(super) struct Rest {
     dialect: Dialect,
     base: BaseUrl,
     credential: Option<(HeaderName, HeaderValue)>,
-    http: reqwest::Client,
-}
-
-/// Why a REST backend cannot be built from its settings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub(super) enum BuildRestError {
-    #[error("Mem0 apiKey holds characters a request header cannot carry.")]
-    Credential,
-    #[error("Mem0 could not set up its HTTP client.")]
-    Client,
+    /// Made at the first request, not with the backend: the settings are
+    /// checked by making a backend whenever they are read, and a client
+    /// reads the system's certificates.
+    http: OnceLock<reqwest::Client>,
 }
 
 impl Rest {
+    /// # Errors
+    ///
+    /// [`InvalidCredentialError`] when `api_key` cannot travel in a header.
     pub(super) fn new(
         dialect: Dialect,
         base: BaseUrl,
         api_key: Option<&str>,
-    ) -> Result<Self, BuildRestError> {
+    ) -> Result<Self, InvalidCredentialError> {
         let credential = api_key
             .map(|key| match dialect {
                 Dialect::Platform => (AUTHORIZATION, format!("Token {key}")),
@@ -51,19 +50,14 @@ impl Rest {
                 }
                 Dialect::Server => (AUTHORIZATION, format!("Bearer {key}")),
             })
-            .map(|(name, value)| {
-                credential_header(&value)
-                    .map(|value| (name, value))
-                    .map_err(|_| BuildRestError::Credential)
-            })
+            .map(|(name, value)| credential_header(&value).map(|value| (name, value)))
             .transpose()?;
-        let http = http_client().build().map_err(|_| BuildRestError::Client)?;
 
         Ok(Self {
             dialect,
             base,
             credential,
-            http,
+            http: OnceLock::new(),
         })
     }
 
@@ -152,7 +146,7 @@ impl Rest {
         body: &Value,
     ) -> Result<Value, BackendError> {
         let mut request = self
-            .http
+            .http(operation)?
             .post(self.base.endpoint(path))
             .header(ACCEPT, "application/json")
             .json(body);
@@ -175,6 +169,20 @@ impl Rest {
         let bytes = response.bytes().await.map_err(|_| unreadable())?;
 
         serde_json::from_slice(&bytes).map_err(|_| unreadable())
+    }
+
+    /// The client its requests go by, made at the first; one that cannot
+    /// be made reaches no backend.
+    fn http(&self, operation: Operation) -> Result<&reqwest::Client, BackendError> {
+        if let Some(http) = self.http.get() {
+            return Ok(http);
+        }
+
+        let made = http_client()
+            .build()
+            .map_err(|_| BackendError::new(operation, Failure::Unreachable))?;
+
+        Ok(self.http.get_or_init(|| made))
     }
 }
 

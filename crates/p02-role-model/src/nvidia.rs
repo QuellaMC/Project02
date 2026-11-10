@@ -7,6 +7,7 @@ mod stream;
 mod transport;
 
 use std::fmt;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -60,13 +61,16 @@ impl fmt::Debug for NvidiaSettings {
     }
 }
 
-/// Why an adapter cannot be built from its settings.
+/// Why an adapter cannot be built from its settings, in the words a
+/// person reads where the settings page asks for them.
 #[derive(Debug, thiserror::Error)]
 pub enum BuildNvidiaAdapterError {
-    #[error("the NVIDIA API key holds characters a request header cannot carry")]
+    /// NVIDIA's cloud answers nothing without a key, and no server of the
+    /// person's own is named, which may ask for none.
+    #[error("add your NVIDIA API key")]
+    MissingKey,
+    #[error("paste your NVIDIA API key again: it holds characters that cannot be sent")]
     Credential,
-    #[error("the NVIDIA provider's HTTP client could not be built")]
-    Client(#[source] reqwest::Error),
 }
 
 /// How a request proves who sends it.
@@ -75,8 +79,6 @@ pub(crate) enum Access {
     Key { header: HeaderValue, secret: String },
     /// A server of one's own, which may ask for no key.
     Open,
-    /// NVIDIA's cloud answers nothing without a key.
-    Missing,
 }
 
 impl fmt::Debug for Access {
@@ -84,7 +86,6 @@ impl fmt::Debug for Access {
         formatter.write_str(match self {
             Self::Key { .. } => "Key([redacted])",
             Self::Open => "Open",
-            Self::Missing => "Missing",
         })
     }
 }
@@ -95,7 +96,7 @@ impl Access {
     fn redact(&self, message: String) -> String {
         match self {
             Self::Key { secret, .. } => message.replace(secret.as_str(), "[redacted]"),
-            Self::Open | Self::Missing => message,
+            Self::Open => message,
         }
     }
 }
@@ -105,7 +106,6 @@ impl Access {
 pub(crate) enum FailureCode {
     HttpError,
     MalformedResponse,
-    MissingApiKey,
     ProviderError,
     RequestTimeout,
 }
@@ -115,7 +115,6 @@ impl FailureCode {
         match self {
             Self::HttpError => "http_error",
             Self::MalformedResponse => "malformed_response",
-            Self::MissingApiKey => "missing_api_key",
             Self::ProviderError => "provider_error",
             Self::RequestTimeout => "request_timeout",
         }
@@ -128,7 +127,10 @@ pub(crate) struct NvidiaAdapter {
     endpoint: Url,
     model: String,
     access: Access,
-    http: reqwest::Client,
+    /// Made at the first request, not with the adapter: a character's
+    /// settings are judged by building one whenever they are read, and a
+    /// client reads the system's certificates.
+    http: OnceLock<reqwest::Client>,
     silence: Duration,
 }
 
@@ -146,7 +148,7 @@ impl NvidiaAdapter {
                 secret: key.to_owned(),
             },
             None if settings.base_url.is_some() => Access::Open,
-            None => Access::Missing,
+            None => return Err(BuildNvidiaAdapterError::MissingKey),
         };
 
         Ok(Self {
@@ -156,9 +158,7 @@ impl NvidiaAdapter {
                 .clone()
                 .unwrap_or_else(|| DEFAULT_MODEL.to_owned()),
             access,
-            http: http_client()
-                .build()
-                .map_err(BuildNvidiaAdapterError::Client)?,
+            http: OnceLock::new(),
             silence: PROVIDER_SILENCE,
         })
     }
@@ -168,6 +168,18 @@ impl NvidiaAdapter {
     pub(crate) fn with_silence(mut self, silence: Duration) -> Self {
         self.silence = silence;
         self
+    }
+
+    /// The client its requests go by, made at the first; one that cannot
+    /// be made fails the request as a connection that breaks does.
+    fn http(&self) -> Result<&reqwest::Client, Failure> {
+        if let Some(http) = self.http.get() {
+            return Ok(http);
+        }
+
+        let made = http_client().build().map_err(Failure::Broken)?;
+
+        Ok(self.http.get_or_init(|| made))
     }
 
     fn failed(&self, fault: Fault) -> ProviderAnswer {
@@ -184,9 +196,10 @@ impl NvidiaAdapter {
         request: &TurnRequest,
         drafts: &mut ReplyDrafts<'_>,
     ) -> Result<ProviderAnswer, Fault> {
+        let http = self.http()?;
         let mut silence = Silence::start(self.silence);
         let mut response = match transport::send(
-            &self.http,
+            http,
             &self.endpoint,
             &self.access,
             &request.bytes,
@@ -226,21 +239,17 @@ impl NvidiaAdapter {
 
     /// A plain completion's text, or why there is none.
     async fn completion(&self, request: &TextCompletionRequest) -> Result<String, String> {
+        let http = self.http().map_err(Failure::message)?;
         let mut silence = Silence::start(self.silence);
         let body = completion_request(&self.model, request);
-        let response = match transport::send(
-            &self.http,
-            &self.endpoint,
-            &self.access,
-            &body,
-            &mut silence,
-        )
-        .await
-        .map_err(Failure::message)?
-        {
-            Answer::Accepted(response) => response,
-            Answer::Refused { message, .. } => return Err(message),
-        };
+        let response =
+            match transport::send(http, &self.endpoint, &self.access, &body, &mut silence)
+                .await
+                .map_err(Failure::message)?
+            {
+                Answer::Accepted(response) => response,
+                Answer::Refused { message, .. } => return Err(message),
+            };
         let body = transport::read_all(response, &mut silence)
             .await
             .map_err(Failure::message)?;
@@ -275,14 +284,6 @@ impl From<Failure> for Fault {
 #[async_trait]
 impl RoleModelAdapter for NvidiaAdapter {
     async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
-        if matches!(self.access, Access::Missing) {
-            return self.failed(Fault {
-                code: FailureCode::MissingApiKey,
-                message: "NVIDIA provider requires the nvidiaApiKey setting.".to_owned(),
-                status: None,
-            });
-        }
-
         let request = TurnRequest::new(&self.model, invocation.messages(), invocation.tools());
         let mut drafts = ReplyDrafts::new(*invocation, &request.mappings);
 
@@ -296,12 +297,6 @@ impl RoleModelAdapter for NvidiaAdapter {
     }
 
     async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {
-        if matches!(self.access, Access::Missing) {
-            return TextCompletion::Failed {
-                reason: "NVIDIA provider has no API key.".to_owned(),
-            };
-        }
-
         match self.completion(request).await {
             Ok(text) => TextCompletion::Completed {
                 text,

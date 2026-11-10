@@ -7,10 +7,10 @@ import type {
   PendingConfirmation,
 } from '@project02/wire/contract';
 import {webSource, type Session} from './session.ts';
-import {readableName} from './settings.ts';
-import {SettingsScreen} from './settings.tsx';
-import {characterName} from './store.ts';
+import {SettingsWindow} from './settings-window.tsx';
+import {characterName, type WebState} from './store.ts';
 import {Avatar, StatePill, ThreadPane} from './thread.tsx';
+import {Welcome} from './welcome.tsx';
 
 /** States a line cannot reach; the daemon holds a line through the rest. */
 const blockingStates = new Set<CharacterSummary['state']>([
@@ -21,24 +21,73 @@ const blockingStates = new Set<CharacterSummary['state']>([
 
 export function App({session}: {readonly session: Session}) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
-  const {connection, health, thread} = state;
+  const {settings} = state;
+
+  if (settings === undefined) {
+    return <Chat state={state} session={session} />;
+  }
+
+  // The window and the welcome take the whole page; the chat waits behind.
+  return (
+    <>
+      <header className="banners">
+        <ConnectionBanners state={state} />
+      </header>
+      {settings.screen.kind === 'welcome' ? (
+        <Welcome
+          state={state}
+          settings={settings}
+          step={settings.screen.step}
+          session={session}
+        />
+      ) : (
+        <SettingsWindow
+          state={state}
+          settings={settings}
+          page={settings.screen.page}
+          session={session}
+        />
+      )}
+    </>
+  );
+}
+
+function ConnectionBanners({state}: {readonly state: WebState}) {
+  const {connection} = state;
+
+  return (
+    <>
+      {connection.status === 'refused' ? (
+        <p className="banner banner-refused" role="alert">
+          {connection.message} This address does not work: open the one{' '}
+          <code>project02 serve</code> printed, or open the app again.
+        </p>
+      ) : null}
+      {connection.status === 'connecting' ? (
+        <p className="banner muted">Connecting…</p>
+      ) : null}
+    </>
+  );
+}
+
+function Chat({
+  state,
+  session,
+}: {
+  readonly state: WebState;
+  readonly session: Session;
+}) {
+  const {health, thread} = state;
   const configProblems =
     health?.config.diagnostics.filter(
       diagnostic => diagnostic.severity === 'error',
     ) ?? [];
+  const first = health?.characters[0];
 
   return (
     <div className="page">
       <header className="banners">
-        {connection.status === 'refused' ? (
-          <p className="banner banner-refused" role="alert">
-            {connection.message} This address does not work: open the one{' '}
-            <code>project02 serve</code> printed, or open the app again.
-          </p>
-        ) : null}
-        {connection.status === 'connecting' ? (
-          <p className="banner muted">Connecting…</p>
-        ) : null}
+        <ConnectionBanners state={state} />
         {configProblems.map((diagnostic, problem) => (
           // Two fields can fail the same way, so the banner names the
           // field: the message alone says what is wrong, not what to fix.
@@ -56,7 +105,11 @@ export function App({session}: {readonly session: Session}) {
             type="button"
             className="secondary roster-settings"
             onClick={() => {
-              void session.openSettings({scope: 'global'});
+              void session.openSettings(
+                first === undefined
+                  ? {kind: 'you'}
+                  : {kind: 'character', characterId: first.id},
+              );
             }}
           >
             Settings
@@ -65,19 +118,18 @@ export function App({session}: {readonly session: Session}) {
         {health === undefined ? null : (
           <Roster
             characters={health.characters}
-            openId={
-              state.settings === undefined ? thread?.characterId : undefined
-            }
+            openId={thread?.characterId}
             onOpen={characterId => {
-              // A character clicked is a thread wanted, whatever screen is up.
-              session.closeSettings();
               void session.open(characterId);
             }}
             onStart={characterId => {
               void session.start(characterId);
             }}
             onSettings={characterId => {
-              void session.openSettings({scope: 'character', characterId});
+              void session.openSettings({kind: 'character', characterId});
+            }}
+            onModel={() => {
+              void session.openSettings({kind: 'model'});
             }}
           />
         )}
@@ -120,13 +172,7 @@ export function App({session}: {readonly session: Session}) {
             ))}
           </div>
         )}
-        {state.settings !== undefined ? (
-          <SettingsScreen
-            state={state}
-            page={state.settings}
-            session={session}
-          />
-        ) : thread === undefined ? (
+        {thread === undefined ? (
           <p className="muted empty">
             {health !== undefined && health.characters.length > 1
               ? 'Pick a character.'
@@ -153,12 +199,15 @@ function Roster({
   onOpen,
   onStart,
   onSettings,
+  onModel,
 }: {
   readonly characters: readonly CharacterSummary[];
   readonly openId: string | undefined;
   readonly onOpen: (characterId: string) => void;
   readonly onStart: (characterId: string) => void;
   readonly onSettings: (characterId: string) => void;
+  /** Opens AI Model, for a character who needs one. */
+  readonly onModel: () => void;
 }) {
   if (characters.length === 0) {
     return <p className="muted">No characters are installed.</p>;
@@ -178,7 +227,7 @@ function Roster({
               onOpen(character.id);
             }}
           >
-            <Avatar name={character.displayName} />
+            <Avatar id={character.id} name={character.displayName} />
             <span className="roster-name">{character.displayName}</span>
             <StatePill character={character} />
           </button>
@@ -205,7 +254,16 @@ function Roster({
           >
             ⚙
           </button>
-          {character.diagnostic === undefined ? null : (
+          {character.state === 'needs_model' ? (
+            // What she needs is said in plain words, and leads to where it is set.
+            <button
+              type="button"
+              className="roster-note roster-link"
+              onClick={onModel}
+            >
+              {character.diagnostic ?? 'Choose an AI model.'}
+            </button>
+          ) : character.diagnostic === undefined ? null : (
             <p className="muted small roster-note">{character.diagnostic}</p>
           )}
           {character.maintenance === undefined ? null : (
@@ -260,7 +318,7 @@ function PairingCard({
 }) {
   return (
     <div className="card" role="group" aria-label="Pairing">
-      <p className="card-title">{readableName(request.connectorId)} pairing</p>
+      <p className="card-title">{connectorName(request.connectorId)} pairing</p>
       <p className="card-summary">{request.subject.label}</p>
       <CardActions
         note={`code ${request.code} · expires at ${clockTime(request.expiresAt)} · via ${request.source}`}
@@ -312,6 +370,11 @@ function CardActions({
       </button>
     </div>
   );
+}
+
+/** `telegram` → `Telegram`: a connector named as a person reads it. */
+function connectorName(id: string): string {
+  return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
 function clockTime(at: number): string {

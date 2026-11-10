@@ -2,10 +2,17 @@
   "format": "project02.plugin.v2",
   "manifest": {
     "id": "runtime.plugin",
-    "displayName": "Runtime Plugin Management",
+    "displayName": "Ask to Change Settings",
     "version": "1.0.0",
     "kind": "first_party",
     "description": "Host-owned plugin inventory, redacted config inspection, and approval-gated config updates.",
+    "page": {
+      "summary": "Lets her ask you to change one of her settings",
+      "icon": "shield",
+      "tint": "gray",
+      "placement": "permission",
+      "order": 1
+    },
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "declaredPlugins": ["tool_provider", "handle_tool_call"],
     "config": {

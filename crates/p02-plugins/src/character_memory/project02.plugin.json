@@ -2,10 +2,17 @@
   "format": "project02.plugin.v2",
   "manifest": {
     "id": "character-memory",
-    "displayName": "Character Memory",
+    "displayName": "Notebook",
     "version": "1.0.0",
     "kind": "first_party",
     "description": "First-party curated character memory: a small always-in-prompt store of durable notes and user-profile facts the character maintains through the memory.update tool.",
+    "page": {
+      "summary": "Notes she always keeps in mind",
+      "icon": "notebook",
+      "tint": "orange",
+      "placement": "mind_body",
+      "order": 1
+    },
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "declaredPlugins": [
       "tool_provider",

@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 8,
+  "protocolVersion": 9,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -325,7 +325,8 @@
               → <code>GatewayHealth</code>: protocol version, home root, config
               and package diagnostics, the roster with each character's state
               and last maintenance failure, and <code>connectors</code>: for
-              each built-in connector, whether a process of it is on the stream.
+              each built-in connector, whether a process of it is on the stream,
+              and the bots it last said it runs.
             </td>
           </tr>
           <tr>
@@ -333,7 +334,8 @@
             <td><code>POST /api/characters/:id/start</code></td>
             <td>
               → <code>StartOutcome</code>: <code>settled</code> with the
-              character's summary (its state says ready or failed), or
+              character's summary (its state says ready, failed, or
+              <code>needs_model</code>), or
               <code>refused</code> (<code>unknown_character</code>,
               <code>gateway_stopped</code>). The operator's retry; the daemon
               boots the roster itself.
@@ -457,6 +459,16 @@
             </td>
           </tr>
           <tr>
+            <td>connector bots</td>
+            <td><code>POST /api/connectors/:id/bots</code></td>
+            <td>
+              <code>{bots: [{target, username?, state}]}</code> →
+              <code>ConnectorBotsOutcome</code>: <code>kept</code>, or
+              <code>refused</code> (<code>unknown_connector</code>,
+              <code>not_connected</code>). Described below.
+            </td>
+          </tr>
+          <tr>
             <td>pending pairings</td>
             <td><code>GET /api/pairing</code></td>
             <td>
@@ -545,7 +557,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":8,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":9,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -604,7 +616,7 @@ data: {…}</code></pre>
             <td>
               The protocol version and the daemon's snapshot at that instant:
               <code>health</code> (the roster, each character's state and last
-              maintenance failure, the connectors on the stream),
+              maintenance failure, the connectors on the stream and their bots),
               <code>confirmations</code> and <code>pairings</code> still
               waiting, and <code>turns</code> — each turn in progress, named by
               its submission's <code>conversationId</code>,
@@ -709,8 +721,9 @@ data: {…}</code></pre>
             <td><code>state_changed</code></td>
             <td>
               A character's runtime state, with a message when something went
-              wrong. A character built afresh on changed config before a request
-              to her model says <code>ready</code> again.
+              wrong or when she needs a model. A character built afresh on
+              changed config says <code>ready</code> again, or
+              <code>needs_model</code> when it no longer gives her one.
             </td>
           </tr>
           <tr>
@@ -718,9 +731,10 @@ data: {…}</code></pre>
             <td>
               The daemon's whole state, read again the moment a config change
               landed and before the pass that acts on it, or the moment a
-              connector's process came onto the stream or left it: the roster as
-              config now says it, the connectors on the stream, and the config
-              and package problems as they stand, the shape
+              connector's process came onto the stream, left it, or said its
+              bots stand otherwise than the daemon held: the roster as config
+              now says it, the connectors on the stream with their bots, and the
+              config and package problems as they stand, the shape
               <code>GET /api/health</code> returns. Every surface hears it, not
               only the one that wrote, and one showing config reads its view
               again on it, so two windows on one screen stay in step; what the
@@ -783,6 +797,33 @@ data: {…}</code></pre>
         when its first stream opens and when its last one ends, and the settings
         page says on the connector's block whether it is running. The connector
         keeps its config by the rule above.
+      </p>
+
+      <p>
+        A connector tells the daemon how its bots stand:
+        <code>POST /api/connectors/:id/bots</code> with its whole table every
+        time, <code>{bots: […]}</code>, at most 256 entries. An entry is one
+        bot: its <code>target</code>, <code>{scope: "global"}</code> for the
+        home's own bot and
+        <code>{scope: "character", characterId}</code> for a character's; its
+        <code>username</code> once its service has said who it is, 1 to 32
+        ASCII letters, digits or underscores, without the <code>@</code>; and
+        its <code>state</code> — <code>on</code> (it is receiving messages),
+        <code>refused</code> (the service refused its token),
+        <code>unreachable</code> (the service cannot be reached),
+        <code>conflict</code> (another program is polling its token) or
+        <code>webhook</code> (its token is set to a webhook). A bot whose state
+        is not known yet is left out, and a token is no part of an entry. A
+        table that breaks a rule is a 400. The daemon holds the table in place
+        of the one before, shows it as the connector's <code>bots</code> in
+        health, and sends <code>health_changed</code> when it differs from the
+        one it held. It lets the table go when the connector's last stream
+        ends, and answers a table sent while no stream of the connector is
+        open <code>refused</code> (<code>not_connected</code>), so health
+        never shows the bots of a connector that is off the stream. A
+        connector therefore sends its table after the first frame of every
+        stream it opens, the daemon having counted it by then, and again
+        whenever the table changes.
       </p>
 
       <p>
@@ -979,9 +1020,23 @@ data: {…}</code></pre>
         A view is what a settings page renders. Its
         <code>project02</code> fields, in the order a page shows them, and each
         plugin's fields share one shape — what this scope authored, what is in
-        effect and which layer put it there; a plugin's switch says the same of
-        itself as <code>enabledSource</code>. Whatever a view offers, the scope can save:
-        every host field is authorable at the home and per character, a plugin
+        effect and which layer put it there, with the <code>label</code>,
+        <code>placeholder</code> and <code>choices</code> its declaration gives
+        it; a plugin's switch says the same of itself as
+        <code>enabledSource</code>. A section also carries its
+        <code>layout</code>, the cards to draw its fields in; a plugin's
+        carries its <code>page</code> too, how to draw its row, and the
+        <code>access</code> its manifest requests
+        (<a href="config-system.html">Config System</a>). Each section carries
+        its <code>setup</code>, switched on or off: <code>ready</code>, or not
+        with a <code>message</code> saying what to fill in, judged by the code
+        that builds the plugin; a connector's is always ready. The view's own
+        <code>model</code> is the same shape for whether its scope's host
+        values give a character an AI model, as her start judges it.
+        Whatever a view offers, the scope can save: a host field is
+        authorable at the home and
+        per character unless its scope keeps it to one, as a character's own
+        <code>enabled</code> is hers alone, a plugin
         or field that belongs to a character (<code>"character_only"</code>) is
         absent from the home's view, and one that belongs to the home
         (<code>"global_only"</code>) from a character's. A connector's settings,
@@ -1024,15 +1079,22 @@ data: {…}</code></pre>
         to the roster arrives as <code>health_changed</code> at once, and the
         daemon reconciles behind the answer: a character it switches on starts,
         and one it switches off stops once her reply in flight ends. Every
-        other change a running character meets at her next request to her
-        model, her reply in flight included: when what she would be built from
-        differs — her effective config, her plugin values including secrets —
-        she assembles afresh before that request, on the same conversation, and
-        publishes <code>ready</code>. A global change a character overrides
-        costs it nothing, and so does a change to a connector's section, from
-        which no character is built. Config she cannot assemble from lands her
-        in <code>failed</code> with the diagnostic, the line refused or the
-        reply in flight failed, and the next change or start retries her.
+        other change a running character meets at once, or, while her reply is
+        in flight, before its next request to her model: when what she would
+        be built from differs — her effective config, her plugin values
+        including secrets — she assembles afresh, on the same conversation,
+        and publishes <code>ready</code>. A global change a character
+        overrides costs it nothing, and so does a change to a connector's
+        section, from which no character is built. A plugin switched on before its setup is
+        finished is left out: she runs without it, her summary's diagnostic
+        says so, and the change that finishes it builds her with it. Config
+        that gives her no AI model leaves her <code>needs_model</code>, saying
+        what to choose: her thread opens, the lines sent to her wait in her
+        inbox, nothing tries her again by itself, and the change that gives
+        her one starts her on them. Other config she cannot assemble from
+        lands her in <code>failed</code> with the diagnostic, the line refused
+        or the reply in flight failed, and the next change or start retries
+        her.
       </p>
 
       <h2>Storage failures are outcomes</h2>

@@ -3,6 +3,7 @@ import {expect, it} from 'vitest';
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {configJson, createHome} from './harness/home.ts';
+import {startMem0Server} from './harness/mem0-server.ts';
 import {
   calling,
   messagesOf,
@@ -14,7 +15,6 @@ import {
 import {converse, saveConfig, wireOf, type Wire} from './harness/wire.ts';
 
 const mira = {scope: 'character', characterId: 'mira'} as const;
-const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
 function toolNames(request: ModelRequest | undefined): readonly string[] {
   return (
@@ -40,15 +40,19 @@ async function fingerprintOf(wire: Wire): Promise<string> {
     .fingerprint;
 }
 
-/** Mira on the model server, demo-config switched on beside the plugins she runs by default. */
-async function demoConfigHome() {
+/** Mira on the model server, her reply style switched on beside the plugins she runs by default. */
+async function replyStyleHome() {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({
-      'config.json': configJson({
-        project02: model.settings,
-        plugins: {'demo-config': {enabled: true}},
-      }),
+      'config.json': configJson({project02: model.settings}),
+      'character-data': {
+        mira: {
+          'config.json': configJson({
+            plugins: {'reply-style': {enabled: true}},
+          }),
+        },
+      },
     }),
   );
   const wire = wireOf(daemon);
@@ -101,8 +105,8 @@ it('plugins.tool-exposure: the model is offered the tools of each plugin she run
   }
 });
 
-it("plugins.config-tools-read: runtime_plugin_config shows the model a plugin's settings with a secret only as [redacted], so the secret never reaches the model's server", async () => {
-  const secret = 'sk-demo-secret-value';
+it("plugins.config-tools-read: runtime_plugin_config shows the model one plugin's settings as her own screen has them, what she set and what is in effect, and nothing the home alone sets: a key the home keeps for a plugin never reaches the model's server", async () => {
+  const secret = 'm0-secret-key-value';
   const model = await startModelServer();
   const say = await converse(
     wireOf(
@@ -110,12 +114,12 @@ it("plugins.config-tools-read: runtime_plugin_config shows the model a plugin's 
         createHome({
           'config.json': configJson({
             project02: model.settings,
-            plugins: {'demo-config': {enabled: true}},
+            plugins: {mem0: {config: {apiKey: secret}}},
           }),
           'character-data': {
             mira: {
               'config.json': configJson({
-                plugins: {'demo-config': {config: {apiKey: secret}}},
+                plugins: {'reply-style': {config: {signoff: 'Yours.'}}},
               }),
             },
           },
@@ -126,73 +130,76 @@ it("plugins.config-tools-read: runtime_plugin_config shows the model a plugin's 
   );
 
   model.answer(
-    calling(['runtime_plugin_config', {pluginId: 'demo-config'}]),
+    calling(
+      ['runtime_plugin_config', {pluginId: 'reply-style'}],
+      ['runtime_plugin_config', {pluginId: 'mem0'}],
+    ),
     reply('Inspected.'),
   );
-  await say('How is demo-config set?', 'inspect');
+  await say('How are you set?', 'inspect');
   expect(toolResults(model.requests.at(-1))).toMatchObject([
     {
       status: 'accepted',
       output: {
-        id: 'demo-config',
-        fields: expect.arrayContaining([
-          expect.objectContaining({
-            name: 'apiKey',
-            authored: expect.objectContaining({value: '[redacted]'}) as unknown,
-            effective: expect.objectContaining({
-              value: '[redacted]',
-            }) as unknown,
-          }),
-        ]) as unknown[],
+        id: 'reply-style',
+        fields: [
+          {name: 'tone', authored: {configured: false}},
+          {
+            name: 'signoff',
+            authored: {configured: true, value: 'Yours.'},
+            effective: {value: 'Yours.'},
+          },
+        ],
       },
     },
+    {status: 'accepted', output: {id: 'mem0', fields: []}},
   ]);
   expect(JSON.stringify(model.requests)).not.toContain(secret);
 });
 
-it('plugins.config-tools-update-refusals: an update to a secret setting, or to one only the person may change, is refused without asking the person', async () => {
-  const {model, wire, say, events} = await demoConfigHome();
+it('plugins.config-tools-update-refusals: an update to a secret setting, or to one only the person may change, is refused without asking the person, saying which it is', async () => {
+  const {model, wire, say, events} = await replyStyleHome();
   const fingerprint = await fingerprintOf(wire);
   const update = (fieldName: string, value: string) =>
     calling([
       'runtime_plugin_config_update',
       {
-        pluginId: 'demo-config',
+        pluginId: 'mem0',
         fieldName,
         operation: 'set',
         value,
         expectedFingerprint: fingerprint,
       },
     ]);
-  const refused = (fieldName: string) => ({
+  const refused = (why: string) => ({
     status: 'rejected',
     reason: 'plugin_config_update_invalid',
-    message: expect.stringContaining(`"${fieldName}"`) as string,
+    message: expect.stringContaining(why) as string,
   });
 
   model.answer(
     update('apiKey', 'sk-chosen-by-the-model'),
-    update('operatorNote', 'Mine.'),
+    update('backend', 'server'),
     reply('I may not.'),
   );
   expect(await say('Use this key.', 'key')).toMatchObject({
     status: 'completed',
   });
   expect(toolResults(model.requests.at(-1))).toMatchObject([
-    refused('apiKey'),
-    refused('operatorNote'),
+    refused('"apiKey" is secret'),
+    refused('"backend" is not one you may change'),
   ]);
   await events.next(frameOf('turn_completed', {clientMessageId: 'key'}));
   expect(events.frames.filter(frameOf('confirmation_requested'))).toEqual([]);
 });
 
 it('plugins.config-tools-live-apply: each change of hers the person approves is written at once and in effect from her very next request, a second change in the same reply as much as the first', async () => {
-  const {model, wire, say, events} = await demoConfigHome();
+  const {model, wire, say, events} = await replyStyleHome();
   const update = (fieldName: string, value: string, fingerprint: string) =>
     calling([
       'runtime_plugin_config_update',
       {
-        pluginId: 'demo-config',
+        pluginId: 'reply-style',
         fieldName,
         operation: 'set',
         value,
@@ -239,64 +246,67 @@ it('plugins.config-tools-live-apply: each change of hers the person approves is 
   );
 });
 
-it('plugins.memory-provider-selection: naming as her memory provider a plugin that is off fails her at her next line, saying so, as her settings say at that setting, and the line waits in her inbox; she stays failed until the setting is put right, which starts her again, and she answers it', async () => {
-  const daemon = await startDaemon(createHome(), {
-    ...fixedReplies,
-    PROJECT02_TEST_DURATIONS: 'heartbeat=500',
-  });
+it("plugins.setup-unfinished: Long-Term Memory switched on before its setup is finished leaves her answering without it, her summary saying so and her view's memory section saying what to fill in; finishing the setup brings it back at once, with nothing restarted by hand: her summary loses the warning, and her next line recalls through it", async () => {
+  const model = await startModelServer();
+  const mem0 = await startMem0Server();
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({
+        project02: model.settings,
+        plugins: {mem0: {enabled: true, config: {baseUrl: mem0.baseUrl}}},
+      }),
+    }),
+  );
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const events = await openEvents(daemon);
-  const statesOfMira = () =>
-    events.frames.filter(frameOf('state_changed', {characterId: 'mira'}));
+  const memoryOf = async () =>
+    (
+      (await wire.configView(mira)) as {
+        readonly sections: readonly {readonly id: string}[];
+      }
+    ).sections.find(section => section.id === 'mem0');
 
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {kind: 'set', path: 'project02.defaultMemoryProvider', value: 'mem0'},
-  );
-
-  const waiting = say('Hello?', 'hello');
-
-  await events.next(
-    frameOf('state_changed', {characterId: 'mira', state: 'failed'}),
-  );
   expect(await wire.health()).toMatchObject({
     characters: [
       {
         id: 'mira',
-        state: 'failed',
-        diagnostic: expect.stringContaining('"mem0"') as string,
+        state: 'ready',
+        diagnostic:
+          'Long-Term Memory is not set up yet, so she is running without it.',
       },
     ],
   });
-  expect(await wire.configView(mira)).toMatchObject({
-    diagnostics: expect.arrayContaining([
-      expect.objectContaining({
-        severity: 'error',
-        path: 'project02.defaultMemoryProvider',
-      }),
-    ]) as unknown[],
+  expect(await memoryOf()).toMatchObject({
+    enabled: true,
+    setup: {ready: false, message: 'Long-Term Memory needs an API key.'},
   });
-
-  // Tried again by nothing: two heartbeats on, nothing more has happened to her.
-  const failedSoFar = statesOfMira().length;
-
-  for (let beat = 0; beat < 2; beat += 1) {
-    await events.next(frame => frame.comment === 'ping');
-  }
-
-  expect(statesOfMira()).toHaveLength(failedSoFar);
+  model.answer(reply('Hello.'));
+  expect(await say('Hello?', 'without')).toMatchObject({status: 'completed'});
+  expect(mem0.requests).toEqual([]);
   await saveConfig(
     wire,
     {scope: 'global'},
-    {kind: 'unset', path: 'project02.defaultMemoryProvider'},
+    {
+      kind: 'section_field_set',
+      namespace: 'plugins',
+      id: 'mem0',
+      field: 'apiKey',
+      value: 'm0-key',
+    },
   );
   await events.next(
     frameOf('state_changed', {characterId: 'mira', state: 'ready'}),
   );
-  await expect(waiting).resolves.toMatchObject({
-    status: 'completed',
-    messages: [{text: 'Hello?'}, {}],
+  expect(
+    ((await wire.health()) as {readonly characters: readonly object[]})
+      .characters[0],
+  ).not.toHaveProperty('diagnostic');
+  expect(await memoryOf()).toMatchObject({setup: {ready: true}});
+  model.answer(reply('Hello again.'));
+  expect(await say('Hello?', 'with')).toMatchObject({status: 'completed'});
+  expect(mem0.requests[0]).toMatchObject({
+    path: '/v3/memories/search/',
+    headers: {authorization: 'Token m0-key'},
   });
 });

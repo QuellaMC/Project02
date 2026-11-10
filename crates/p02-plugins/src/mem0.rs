@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use p02_contracts::{
     BeforeRoleModelCallOutput, CommittedTurn, ContextItem, ContextItemKind, EvidenceKind,
     EvidenceNote, EvidenceStatus, FactoryInput, HookContext, HookReport, HookStatus, PluginError,
-    ProvidedTool, RedactionLabel, RuntimePlugin, SourceKind, SourceReference, ToolCall,
-    ToolCallOutcome, TurnIdentity, TurnText,
+    ProvidedTool, RedactionLabel, ResolvedConfig, RuntimePlugin, SourceKind, SourceReference,
+    ToolCall, ToolCallOutcome, TurnIdentity, TurnText,
 };
 use p02_core::VisibleMessageRole;
 use p02_memory::{Message, ObservedOn, Role, Scope, Turn};
@@ -37,26 +37,37 @@ const MEMORY_CHARS: usize = 600;
 static MEMORY_LABEL: LazyLock<RedactionLabel> =
     LazyLock::new(|| RedactionLabel::new("memory").expect("memory is a redaction label"));
 
-/// The package's factory. Settings that leave the plugin without a
-/// backend make a plugin whose every hook says what to set.
+/// The package's factory.
 ///
 /// # Errors
 ///
-/// [`PluginError`] when a tool of the package is refused, which no build
-/// of the daemon ships.
+/// [`PluginError`] for settings that leave the plugin without a backend,
+/// which [`check_setup`] says before anything is built, or when a tool of
+/// the package is refused, which no build of the daemon ships.
 pub fn create(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
     Ok(Arc::new(Mem0Plugin {
         tools: tools::provided()?,
-        setup: settings::configured(input.config()).map(Arc::new),
+        setup: Arc::new(settings::configured(input.config()).map_err(PluginError::new)?),
         captures: Captures::default(),
     }))
+}
+
+/// Whether `config` is enough to build the plugin, judged by what its
+/// factory builds it with: whose memories they are, and a backend that
+/// can reach them.
+///
+/// # Errors
+///
+/// The sentence naming what to fill in, in the words of the settings page.
+pub fn check_setup(config: &ResolvedConfig) -> Result<(), String> {
+    settings::configured(config).map(drop)
 }
 
 #[derive(Debug)]
 struct Mem0Plugin {
     tools: Vec<ProvidedTool>,
-    /// Where memories are kept, or what the settings must set first.
-    setup: Result<Arc<Setup>, String>,
+    /// Whose memories, and where they are kept.
+    setup: Arc<Setup>,
     captures: Captures,
 }
 
@@ -70,7 +81,7 @@ impl RuntimePlugin for Mem0Plugin {
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let setup = self.setup()?;
+        let setup = &self.setup;
         let found = setup
             .backend
             .search(
@@ -107,16 +118,7 @@ impl RuntimePlugin for Mem0Plugin {
                     .with_source(source),
             ],
         };
-        let setup = match &self.setup {
-            Ok(setup) => Arc::clone(setup),
-            Err(message) => {
-                return Ok(report(
-                    EvidenceStatus::Degraded,
-                    message,
-                    this_turn(identity),
-                ));
-            }
-        };
+        let setup = Arc::clone(&self.setup);
         let observed_on = ObservedOn::parse(
             committed
                 .committed_at()
@@ -168,7 +170,7 @@ impl RuntimePlugin for Mem0Plugin {
         call: &ToolCall,
         context: &HookContext,
     ) -> Result<ToolCallOutcome, PluginError> {
-        let setup = self.setup()?;
+        let setup = &self.setup;
         let turn = context.turn()?;
         let scope = setup.scope(turn);
 
@@ -229,14 +231,6 @@ impl RuntimePlugin for Mem0Plugin {
             status: HookStatus::Completed,
             evidence: vec![EvidenceNote::new(EvidenceKind::Shutdown, status, summary)],
         })
-    }
-}
-
-impl Mem0Plugin {
-    fn setup(&self) -> Result<&Setup, PluginError> {
-        self.setup
-            .as_deref()
-            .map_err(|message| PluginError::new(message.clone()))
     }
 }
 

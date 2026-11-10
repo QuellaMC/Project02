@@ -15,19 +15,22 @@ use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
     Connector, Sections, apply_change, config_view, connector_config_view, connectors,
 };
-use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
+use p02_contracts::{
+    FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
+};
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
     Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
-    ConfirmationAnswer, ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome,
-    OpenOutcome, OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome,
-    StartRefusal, SubmitOutcome, TurnRefusal,
+    ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
+    ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, OpenOutcome,
+    OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome, StartRefusal,
+    SubmitOutcome, TurnRefusal,
 };
 use tokio::sync::mpsc;
 
-use crate::character::CharacterHandle;
+use crate::character::{CharacterHandle, model};
 use crate::history::{self, HistoryPage};
 use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
@@ -36,11 +39,13 @@ use crate::reconcile::{Reconciler, Roster, settings_now};
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
 
-/// A plugin the daemon can run for a character: its manifest, and what
-/// builds an instance of it from her settings.
+/// A plugin the daemon can run for a character: its manifest, the check of
+/// whether her settings are enough to build it, and what builds an
+/// instance of it from them.
 #[derive(Clone)]
 pub struct Plugin {
     manifest: Manifest,
+    check: SetupCheck,
     factory: Arc<Factory>,
 }
 
@@ -48,6 +53,7 @@ impl Plugin {
     #[must_use]
     pub fn new(
         manifest: Manifest,
+        check: SetupCheck,
         factory: impl Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError>
         + Send
         + Sync
@@ -55,6 +61,7 @@ impl Plugin {
     ) -> Self {
         Self {
             manifest,
+            check,
             factory: Arc::new(factory),
         }
     }
@@ -228,9 +235,16 @@ struct Inner {
     /// and deliveries take it in the order they came.
     routes: tokio::sync::Mutex<HashMap<ConversationId, Identifier>>,
     reconciler: Arc<Reconciler>,
-    /// How many streams of each connector are open.
-    presence: Mutex<BTreeMap<Identifier, usize>>,
+    presence: Mutex<BTreeMap<Identifier, Connected>>,
     pairings: Pairings,
+}
+
+/// A connector on the stream: how many streams of it are open, and the
+/// bots it last said it runs, none once the last stream ended.
+#[derive(Clone, Debug, Default)]
+struct Connected {
+    streams: usize,
+    bots: Vec<ConnectorBot>,
 }
 
 /// The daemon, held by what it owns without keeping it alive: a
@@ -253,7 +267,8 @@ struct Characters {
 }
 
 /// A connector's stream counted as present while this is held: health
-/// shows the connector connected, and the stream's end lets it go.
+/// shows the connector connected, and the stream's end lets it go, the
+/// last stream's end the connector's bots with it.
 #[derive(Debug)]
 #[must_use = "a connector counts as present only while its presence is held"]
 pub struct Presence {
@@ -277,10 +292,15 @@ impl Drop for Presence {
     fn drop(&mut self) {
         let last = {
             let mut presence = self.daemon.inner.presence();
-            let count = presence.entry(self.connector.clone()).or_default();
+            let connected = presence.entry(self.connector.clone()).or_default();
 
-            *count = count.saturating_sub(1);
-            *count == 0
+            connected.streams = connected.streams.saturating_sub(1);
+
+            if connected.streams == 0 {
+                connected.bots.clear();
+            }
+
+            connected.streams == 0
         };
 
         if last {
@@ -296,7 +316,7 @@ impl Inner {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn presence(&self) -> MutexGuard<'_, BTreeMap<Identifier, usize>> {
+    fn presence(&self) -> MutexGuard<'_, BTreeMap<Identifier, Connected>> {
         self.presence.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -325,7 +345,11 @@ impl Daemon {
             inner: Arc::new(Inner {
                 world: Arc::new(World {
                     home,
-                    sections: Sections::new(plugins.iter().map(|plugin| plugin.manifest.clone())),
+                    sections: Sections::new(
+                        plugins
+                            .iter()
+                            .map(|plugin| (plugin.manifest.clone(), plugin.check)),
+                    ),
                     plugins,
                     durations,
                     test_provider,
@@ -348,7 +372,7 @@ impl Daemon {
 
     /// The daemon's whole state, read now: the roster as the disk says it
     /// is, each character's state as her actor published it, and the
-    /// connectors on the stream.
+    /// connectors on the stream, each with its bots.
     pub async fn health(&self) -> Health {
         let daemon = self.clone();
 
@@ -388,9 +412,15 @@ impl Daemon {
 
                 connectors()
                     .iter()
-                    .map(|connector| ConnectorPresence {
-                        id: connector.id().clone(),
-                        connected: presence.get(connector.id()).is_some_and(|count| *count > 0),
+                    .map(|connector| {
+                        let Connected { streams, bots } =
+                            presence.get(connector.id()).cloned().unwrap_or_default();
+
+                        ConnectorPresence {
+                            id: connector.id().clone(),
+                            connected: streams > 0,
+                            bots,
+                        }
                     })
                     .collect()
             },
@@ -443,8 +473,8 @@ impl Daemon {
     /// became, whether or not she takes lines now. Its routing and its
     /// place in her inbox are one step, which lines take in the order they
     /// came, so they reach her in that order; a new line for a character
-    /// that is starting waits for her, and one for a character who failed
-    /// or does not run is refused, saying why.
+    /// that is starting, or who waits for a model, waits for her, and one
+    /// for a character who failed or does not run is refused, saying why.
     pub async fn deliver(&self, message: Message) -> SubmitOutcome {
         let mut routes = self.inner.routes.lock().await;
         let (conversation, character) =
@@ -593,7 +623,8 @@ impl Daemon {
             .boxed()
     }
 
-    /// The settings of `target` as its settings screen shows them.
+    /// The settings of `target` as its settings screen shows them, their AI
+    /// model judged as a character's start judges hers.
     pub async fn config_view(&self, target: ConfigTarget) -> ConfigView {
         let world = Arc::clone(&self.inner.world);
 
@@ -603,6 +634,7 @@ impl Daemon {
                 &world.sections,
                 &discover(world.home.root()),
                 &target,
+                |host| model(&world, host).map(drop),
             )
         })
         .await
@@ -639,8 +671,7 @@ impl Daemon {
     /// change, under the documents' locks; once it lands, health as it now
     /// stands goes out to every surface before the answer does, and a
     /// reconcile pass acts on it behind the answer, on a task of its own,
-    /// so the characters it switches on or off start or stop. A running
-    /// character meets it at her next request. It waits on the disk.
+    /// by its rule. It waits on the disk.
     pub(crate) fn change_settings(&self, change: &ConfigChange) -> ChangeOutcome {
         let world = &self.inner.world;
         let outcome = apply_change(
@@ -670,10 +701,10 @@ impl Daemon {
         };
         let first = {
             let mut counts = self.inner.presence();
-            let count = counts.entry(connector.id().clone()).or_default();
+            let connected = counts.entry(connector.id().clone()).or_default();
 
-            *count += 1;
-            *count == 1
+            connected.streams += 1;
+            connected.streams == 1
         };
 
         if first {
@@ -681,6 +712,55 @@ impl Daemon {
         }
 
         presence
+    }
+
+    /// Keeps `bots` as the table of connector `connector`, in place of the
+    /// one it held, while a stream of it is open: health shows it from then
+    /// on, and goes out to every surface, before the answer does, when the
+    /// table changed. A connector with no stream open is refused, so health
+    /// never shows the bots of one that is off the stream.
+    pub async fn connector_bots(
+        &self,
+        connector: &str,
+        bots: Vec<ConnectorBot>,
+    ) -> ConnectorBotsOutcome {
+        let connector = match p02_config::connector(connector) {
+            Ok(connector) => connector,
+            Err(unknown) => {
+                return ConnectorBotsOutcome::Refused {
+                    reason: ConnectorBotsRefusal::UnknownConnector,
+                    message: unknown.to_string(),
+                };
+            }
+        };
+        let changed = {
+            let mut presence = self.inner.presence();
+            let Some(connected) = presence
+                .get_mut(connector.id())
+                .filter(|connected| connected.streams > 0)
+            else {
+                return ConnectorBotsOutcome::Refused {
+                    reason: ConnectorBotsRefusal::NotConnected,
+                    message: format!(
+                        "Connector \"{}\" has no event stream open, and its bots are kept only \
+                         while one is.",
+                        connector.id()
+                    ),
+                };
+            };
+            let changed = connected.bots != bots;
+
+            connected.bots = bots;
+            changed
+        };
+
+        if changed {
+            let daemon = self.clone();
+
+            blocking(move || daemon.announce_health()).await;
+        }
+
+        ConnectorBotsOutcome::Kept
     }
 
     /// Stops every character, for good: no start follows. A boot or a

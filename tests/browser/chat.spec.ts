@@ -36,17 +36,14 @@ const mira = {scope: 'character', characterId: 'mira'} as const;
 const alice = {id: '381940562', label: 'Alice (@alice)'};
 const bob = {id: '987654321', label: 'Bob (@bob)'};
 
-/** Mira on the model server, beside the bundled plugin whose tone the model may ask to change. */
+/** Mira on the model server. */
 async function miraHome(
   seed: Parameters<typeof createHome>[0] = {},
   env: Readonly<Record<string, string>> = {},
 ) {
   const model = await startModelServer();
   const home = createHome({
-    'config.json': configJson({
-      project02: model.settings,
-      plugins: {'demo-config': {enabled: true}},
-    }),
+    'config.json': configJson({project02: model.settings}),
     ...seed,
   });
   const daemon = await startDaemon(home, env);
@@ -72,7 +69,7 @@ async function asksForTone(wire: Wire, tone: string): Promise<Answer> {
   return calling([
     'runtime_plugin_config_update',
     {
-      pluginId: 'demo-config',
+      pluginId: 'reply-style',
       fieldName: 'tone',
       operation: 'set',
       value: tone,

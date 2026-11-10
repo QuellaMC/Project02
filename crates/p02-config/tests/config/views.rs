@@ -73,10 +73,74 @@ fn her_view_shows_the_homes_values_in_effect_her_own_as_authored_and_her_package
 }
 
 #[test]
+fn a_view_draws_only_what_its_target_may_set_in_the_cards_and_words_its_declaration_gives() {
+    let world = World::new();
+    let home_view = world.view(&home());
+    let mira_view = world.view(&of("mira"));
+    let memory = section(&home_view, "plugins", "mem0").unwrap();
+    let hers = section(&mira_view, "plugins", "mem0").unwrap();
+    let backend = field(memory, "backend").unwrap();
+    let platform = json!({"field": "backend", "is": ["platform"]});
+    let telegram = |view| section(view, "connectors", "telegram").unwrap();
+
+    assert_eq!(
+        memory["page"],
+        json!({
+            "summary": "Remembers across all chats",
+            "icon": "archive",
+            "tint": "brown",
+            "placement": "mind_body",
+            "order": 3,
+            "connection": "Memory",
+        })
+    );
+    assert_eq!(memory["access"], json!({"model_input": "write"}));
+    assert_eq!(
+        json!([backend["label"], backend["choices"]]),
+        json!(["Kept At", {"platform": "Mem0 Cloud", "server": "Your Server", "oss": "This Computer"}])
+    );
+    assert_eq!(field(memory, "apiKey").unwrap()["placeholder"], "Paste key");
+    assert_eq!(
+        memory["layout"],
+        json!([
+            {"advanced": false, "rows": [{"field": "backend"}]},
+            {
+                "footer": "Get a key at app.mem0.ai.",
+                "advanced": false,
+                "when": platform,
+                "rows": [{"field": "apiKey"}],
+            },
+            {
+                "title": "Advanced",
+                "advanced": true,
+                "rows": [{"field": "baseUrl", "when": platform}],
+            },
+        ])
+    );
+    // She switches her memory and sets none of it: the account is the home's.
+    assert_eq!(
+        json!([hers["page"], hers["fields"], hers["layout"]]),
+        json!([memory["page"], [], []])
+    );
+    assert_eq!(
+        telegram(&mira_view)["layout"],
+        json!([{"advanced": false, "rows": [{"field": "botToken"}]}])
+    );
+    assert_eq!(
+        json!([
+            telegram(&home_view).get("page"),
+            telegram(&home_view).get("access")
+        ]),
+        json!([null, null])
+    );
+    assert_eq!(host_field(&home_view, "userDisplayName")["label"], "Name");
+}
+
+#[test]
 fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let secrets = [
         "nvapi-home-secret",
-        "demo-key-secret",
+        "mem0-key-secret",
         "123456:management-secret",
         "111111:misplaced-secret",
         "987654:mira-secret",
@@ -90,7 +154,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     world
         .write_home(&document(json!({
             "project02": {"nvidiaApiKey": "nvapi-home-secret"},
-            "plugins": {"demo-config": {"config": {"apiKey": "demo-key-secret"}}},
+            "plugins": {"mem0": {"config": {"apiKey": "mem0-key-secret"}}},
             "connectors": {"telegram": {"config": {
                 "managementBotToken": "123456:management-secret",
                 "botToken": "111111:misplaced-secret",
@@ -120,11 +184,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
         "[redacted]"
     );
     assert_eq!(
-        field(
-            section(&home_view, "plugins", "demo-config").unwrap(),
-            "apiKey"
-        )
-        .unwrap()["authored"]["value"],
+        field(section(&home_view, "plugins", "mem0").unwrap(), "apiKey").unwrap()["authored"]["value"],
         "[redacted]"
     );
     assert_eq!(
@@ -195,7 +255,7 @@ fn a_connectors_read_hands_each_entry_its_own_values_secrets_in_the_clear() {
             "mira",
             &document(json!({"connectors": {"telegram": {
                 "enabled": true,
-                "config": {"botToken": "987654:mira", "mirror": true},
+                "config": {"botToken": "987654:mira"},
             }}})),
         )
         .write_overlay(
@@ -230,7 +290,7 @@ fn a_connectors_read_hands_each_entry_its_own_values_secrets_in_the_clear() {
             json!(["mira", "active", {
                 "botToken": "987654:mira",
                 "managementBotToken": "123456:home",
-                "mirror": true,
+                "mirror": false,
                 "pairedUsers": {},
             }]),
             json!(["nova", "active", {

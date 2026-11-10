@@ -5,10 +5,12 @@
 
 use std::sync::LazyLock;
 
-use p02_contracts::{ConfigField, ConfigScope, ConfigSection, Manifest, PluginKind};
+use p02_contracts::{
+    AccessMap, ConfigField, ConfigScope, ConfigSection, Manifest, ResolvedConfig, SetupCheck,
+};
 use p02_shared::Identifier;
-use p02_wire::{ConfigValueType, Namespace, Source};
-use serde_json::json;
+use p02_wire::{ConfigValueType, Namespace, PluginPage, Source};
+use serde_json::{Map, Value, json};
 
 /// The version a document this build writes names. A document's version is
 /// never judged when it is read.
@@ -164,8 +166,10 @@ fn telegram() -> Connector {
         "fields": [
             {
                 "name": "botToken",
+                "label": "Token",
                 "description": "This character's bot, as @BotFather gave it. The character \
                     answers in Telegram as that bot.",
+                "placeholder": "Paste from @BotFather",
                 "scope": "character_only",
                 "secret": true,
                 "valueType": "string",
@@ -173,8 +177,10 @@ fn telegram() -> Connector {
             },
             {
                 "name": "managementBotToken",
+                "label": "Token",
                 "description": "Optional. A bot for the home itself: who is on, what is \
                     waiting for your approval, pairing.",
+                "placeholder": "Paste from @BotFather",
                 "scope": "global_only",
                 "secret": true,
                 "valueType": "string",
@@ -182,8 +188,10 @@ fn telegram() -> Connector {
             },
             {
                 "name": "mirror",
+                "label": "Show Other Chats",
                 "description": "Show in this chat what you and the character said on other \
                     surfaces, like the web page.",
+                "scope": "global_only",
                 "secret": false,
                 "valueType": "boolean",
                 "defaultValue": true,
@@ -191,6 +199,7 @@ fn telegram() -> Connector {
             },
             {
                 "name": "pairedUsers",
+                "label": "Paired Accounts",
                 "description": "Accounts allowed to talk to your characters, each id with a \
                     name. Pairing adds one; remove a line to unpair it.",
                 "scope": "global_only",
@@ -251,17 +260,18 @@ pub fn connector(id: &str) -> Result<&'static Connector, UnknownConnector> {
 
 /// The sections a home's settings are judged against: the plugins this
 /// build compiles in, one per id, in the order it lists them, the order
-/// her plugins run and are reported in, and its connectors.
+/// her plugins run and are reported in, each with the check of whether its
+/// settings are enough to build it, and its connectors.
 #[derive(Debug, Default)]
 pub struct Sections {
-    plugins: Vec<Manifest>,
+    plugins: Vec<(Manifest, SetupCheck)>,
 }
 
 impl Sections {
     /// The sections of `plugins`, the build's list, and of every
     /// connector.
     #[must_use]
-    pub fn new(plugins: impl IntoIterator<Item = Manifest>) -> Self {
+    pub fn new(plugins: impl IntoIterator<Item = (Manifest, SetupCheck)>) -> Self {
         Self {
             plugins: plugins.into_iter().collect(),
         }
@@ -272,7 +282,7 @@ impl Sections {
     pub(crate) fn declared(&self) -> impl Iterator<Item = Declared<'_>> {
         self.plugins
             .iter()
-            .map(Declared::Plugin)
+            .map(|(manifest, check)| Declared::Plugin(manifest, *check))
             .chain(connectors().iter().map(Declared::Connector))
     }
 
@@ -282,45 +292,46 @@ impl Sections {
     }
 }
 
-/// A declared section, of a plugin or of a connector.
+/// A declared section, of a plugin, with the check of its setup, or of a
+/// connector.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Declared<'s> {
-    Plugin(&'s Manifest),
+    Plugin(&'s Manifest, SetupCheck),
     Connector(&'s Connector),
 }
 
 impl<'s> Declared<'s> {
     pub(crate) fn namespace(self) -> Namespace {
         match self {
-            Self::Plugin(_) => Namespace::Plugins,
+            Self::Plugin(..) => Namespace::Plugins,
             Self::Connector(_) => Namespace::Connectors,
         }
     }
 
     pub(crate) fn id(self) -> &'s Identifier {
         match self {
-            Self::Plugin(manifest) => manifest.id(),
+            Self::Plugin(manifest, _) => manifest.id(),
             Self::Connector(connector) => &connector.id,
         }
     }
 
     pub(crate) fn display_name(self) -> &'s str {
         match self {
-            Self::Plugin(manifest) => manifest.display_name(),
+            Self::Plugin(manifest, _) => manifest.display_name(),
             Self::Connector(connector) => connector.display_name,
         }
     }
 
     pub(crate) fn version(self) -> &'s str {
         match self {
-            Self::Plugin(manifest) => manifest.version(),
+            Self::Plugin(manifest, _) => manifest.version(),
             Self::Connector(connector) => connector.version,
         }
     }
 
     pub(crate) fn config(self) -> &'s ConfigSection {
         match self {
-            Self::Plugin(manifest) => manifest.config(),
+            Self::Plugin(manifest, _) => manifest.config(),
             Self::Connector(connector) => &connector.config,
         }
     }
@@ -328,20 +339,46 @@ impl<'s> Declared<'s> {
     /// Whether the section is on where no settings switch it.
     pub(crate) fn default_enabled(self) -> bool {
         match self {
-            Self::Plugin(manifest) => manifest.activation().default_enabled(),
+            Self::Plugin(manifest, _) => manifest.activation().default_enabled(),
             Self::Connector(_) => true,
         }
     }
 
     pub(crate) fn reasons(self) -> &'s [String] {
         match self {
-            Self::Plugin(manifest) => manifest.activation().reasons(),
+            Self::Plugin(manifest, _) => manifest.activation().reasons(),
             Self::Connector(connector) => &connector.reasons,
         }
     }
 
-    pub(crate) fn is_memory_provider(self) -> bool {
-        matches!(self, Self::Plugin(manifest) if manifest.kind() == PluginKind::MemoryProvider)
+    /// How a page draws a plugin's row, when its manifest says; a
+    /// connector declares none.
+    pub(crate) fn page(self) -> Option<&'s PluginPage> {
+        match self {
+            Self::Plugin(manifest, _) => manifest.page(),
+            Self::Connector(_) => None,
+        }
+    }
+
+    /// What a plugin's manifest requests of the host; a connector
+    /// requests nothing.
+    pub(crate) fn access(self) -> Option<&'s AccessMap> {
+        match self {
+            Self::Plugin(manifest, _) => Some(manifest.requested_access()),
+            Self::Connector(_) => None,
+        }
+    }
+
+    /// Whether `values`, the section's in effect, are enough to build it,
+    /// as its plugin's own check judges them: a connector needs nothing
+    /// more.
+    pub(crate) fn setup(self, values: &Map<String, Value>) -> Result<(), String> {
+        match self {
+            Self::Plugin(manifest, check) => {
+                check(&ResolvedConfig::resolve(manifest.config(), values))
+            }
+            Self::Connector(_) => Ok(()),
+        }
     }
 
     /// The scope of `field`: its own, which may only narrow the section's.

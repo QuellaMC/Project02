@@ -11,8 +11,8 @@ pub const HOST_PLUGIN: &str = "runtime.plugin";
 pub const BEFORE_ROLE_MODEL_CALL_REJECTION: &str = "plugin_before_role_model_call_rejected";
 
 vocabulary! {
-    /// What a plugin is for. Only a memory provider changes what the host
-    /// does with it: the default memory provider is chosen among them.
+    /// What a plugin is for, as a listing of the plugins says it. The host
+    /// runs every kind alike.
     PluginKind {
         FirstParty = "first_party",
         MemoryProvider = "memory_provider",
@@ -31,27 +31,6 @@ vocabulary! {
         HandleToolCall = "handle_tool_call",
         AfterTurnCommitted = "after_turn_committed",
         OnShutdown = "on_shutdown",
-    }
-}
-
-vocabulary! {
-    /// A host service a plugin may request.
-    AccessName {
-        CharacterFileStore = "character_file_store",
-        SessionHistory = "session_history",
-        PluginDatabase = "plugin_database",
-        TurnContext = "turn_context",
-        ModelInput = "model_input",
-        TrustedContext = "trusted_context",
-    }
-}
-
-vocabulary! {
-    /// How much of a service: ordered, so `Write` satisfies a need for `Read`.
-    AccessLevel {
-        None = "none",
-        Read = "read",
-        Write = "write",
     }
 }
 

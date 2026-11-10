@@ -7,12 +7,12 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
-use p02_contracts::{ConfigField, ConfigSection};
+use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
 use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl, vocabulary};
 use serde_json::{Value, json};
 
-use crate::declaration::expectation;
+use crate::declaration::{Layer, expectation, outside_scope};
 use crate::resolve::Field;
 
 vocabulary! {
@@ -43,9 +43,11 @@ const USER_DISPLAY_NAME: HostSetting<SpeakerName> = HostSetting {
     name: "userDisplayName",
     field: || {
         json!({
+            "label": "Name",
             "description": "The name you go by in conversation. A new name reaches every \
                 character from your next message; earlier messages keep the name they were \
                 written under.",
+            "placeholder": "Your name",
             "secret": false,
             "valueType": "string",
             "defaultValue": Participant::DEFAULT_LOCAL_USER_NAME,
@@ -64,6 +66,7 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
     name: "roleModelProvider",
     field: || {
         json!({
+            "label": "Service",
             "description": "Who answers as the character: nvidia is a model on NVIDIA's cloud, \
                 or on the server nvidiaBaseUrl names. No character starts until one is chosen.",
             "secret": false,
@@ -72,6 +75,7 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
                 .iter()
                 .map(|provider| provider.as_str())
                 .collect::<Vec<_>>(),
+            "choices": {"nvidia": "NVIDIA"},
             "redactionLabels": [],
         })
     },
@@ -83,8 +87,10 @@ const NVIDIA_API_KEY: HostSetting<String> = HostSetting {
     name: "nvidiaApiKey",
     field: || {
         json!({
+            "label": "API Key",
             "description": "Your NVIDIA API key. Needed when the provider is nvidia; never shown \
                 back once saved.",
+            "placeholder": "Paste key",
             "secret": true,
             "valueType": "string",
             "redactionLabels": ["secret"],
@@ -98,7 +104,9 @@ const NVIDIA_MODEL: HostSetting<String> = HostSetting {
     name: "nvidiaModel",
     field: || {
         json!({
+            "label": "Model",
             "description": "The NVIDIA model to talk to; the provider's default when left unset.",
+            "placeholder": "NVIDIA's Default",
             "secret": false,
             "valueType": "string",
             "redactionLabels": [],
@@ -112,10 +120,12 @@ const NVIDIA_BASE_URL: HostSetting<BaseUrl> = HostSetting {
     name: "nvidiaBaseUrl",
     field: || {
         json!({
+            "label": "Server Address",
             "description": "Where the model runs: the base address of an NVIDIA NIM or any \
                 OpenAI-compatible server, such as http://localhost:1234/v1. NVIDIA's cloud when \
                 left unset. Use https:// for a server on another machine: http:// sends the key \
                 and the conversation in the clear.",
+            "placeholder": "NVIDIA Cloud",
             "secret": false,
             "valueType": "url",
             "redactionLabels": [],
@@ -129,6 +139,7 @@ const CONTEXT_WINDOW_TOKENS: HostSetting<NonZeroU64> = HostSetting {
     name: "contextWindowTokens",
     field: || {
         json!({
+            "label": "Context Size",
             "description": "How much conversation the model can hold at once, in tokens; up to \
                 half of it replays past messages. Lower it if the model runs out of room.",
             "secret": false,
@@ -141,27 +152,14 @@ const CONTEXT_WINDOW_TOKENS: HostSetting<NonZeroU64> = HostSetting {
     must_be: Some("a positive whole number of tokens"),
 };
 
-pub(crate) const DEFAULT_MEMORY_PROVIDER: HostSetting<String> = HostSetting {
-    name: "defaultMemoryProvider",
-    field: || {
-        json!({
-            "description": "Which enabled memory plugin keeps what the character remembers, when \
-                more than one is enabled.",
-            "secret": false,
-            "valueType": "string",
-            "redactionLabels": [],
-        })
-    },
-    read: text,
-    must_be: Some("a non-empty string"),
-};
-
 const ENABLED: HostSetting<bool> = HostSetting {
     name: "enabled",
     field: || {
         json!({
+            "label": "On",
             "description": "Whether the character is switched on. A character that is off is \
                 not started and cannot be reached; turning it back on starts it.",
+            "scope": "character_only",
             "secret": false,
             "valueType": "boolean",
             "defaultValue": true,
@@ -180,15 +178,14 @@ fn text(value: &Value) -> Option<String> {
 }
 
 /// The host's settings in the order the settings page shows them: what a
-/// person decides first, then the knobs, then the switch.
-static SETTINGS: [&dyn Setting; 8] = [
+/// person decides first, then the knobs, then each character's own switch.
+static SETTINGS: [&dyn Setting; 7] = [
     &USER_DISPLAY_NAME,
     &ROLE_MODEL_PROVIDER,
     &NVIDIA_API_KEY,
     &NVIDIA_MODEL,
     &NVIDIA_BASE_URL,
     &CONTEXT_WINDOW_TOKENS,
-    &DEFAULT_MEMORY_PROVIDER,
     &ENABLED,
 ];
 
@@ -219,13 +216,9 @@ impl<T: fmt::Debug> Setting for HostSetting<T> {
 }
 
 impl<T> HostSetting<T> {
-    pub(crate) fn path(&self) -> String {
-        path(self.name)
-    }
-
     /// Its value in effect among the host's resolved `fields`, read, when
     /// it is one its field takes.
-    pub(crate) fn value(&self, fields: &[Field<'_>]) -> Option<T> {
+    fn value(&self, fields: &[Field<'_>]) -> Option<T> {
         self.resolved(fields).effective.value().and_then(self.read)
     }
 
@@ -274,6 +267,18 @@ impl HostField {
         path(self.name())
     }
 
+    /// Which settings may set the field: the home's with a character's on
+    /// top, unless its declaration narrows that.
+    pub(crate) fn scope(&self) -> ConfigScope {
+        self.declaration.scope().unwrap_or(SCOPE)
+    }
+
+    /// The sentence for a value of this field that `layer` holds and its
+    /// scope keeps from it, which also refuses a write of one.
+    pub(crate) fn outside_scope(&self, layer: Layer) -> String {
+        outside_scope("project02", Some(self.name()), layer)
+    }
+
     /// The one judge of a value of this field, for the loader and every
     /// writer alike.
     pub(crate) fn accepts(&self, value: &Value) -> bool {
@@ -281,11 +286,14 @@ impl HostField {
     }
 }
 
+/// Where a host field is set unless it says otherwise.
+const SCOPE: ConfigScope = ConfigScope::GlobalWithCharacterOverrides;
+
 static HOST: LazyLock<Vec<HostField>> = LazyLock::new(|| {
     // The declarations are this build's own, so a refusal is a defect a
     // test of the registry shows before any build ships it.
     let section = ConfigSection::from_value(&json!({
-        "scope": "global_with_character_overrides",
+        "scope": SCOPE,
         "fields": SETTINGS.iter().map(|setting| setting.declaration()).collect::<Vec<_>>(),
     }))
     .expect("the host's fields meet the rules of a manifest");
@@ -327,7 +335,6 @@ pub struct HostSettings {
     pub nvidia_model: Option<String>,
     pub nvidia_base_url: Option<BaseUrl>,
     pub context_window_tokens: NonZeroU64,
-    pub default_memory_provider: Option<String>,
     /// Whether the character is switched on.
     pub enabled: bool,
 }
@@ -342,7 +349,6 @@ impl HostSettings {
             nvidia_model: NVIDIA_MODEL.value(fields),
             nvidia_base_url: NVIDIA_BASE_URL.value(fields),
             context_window_tokens: CONTEXT_WINDOW_TOKENS.value_or_default(fields),
-            default_memory_provider: DEFAULT_MEMORY_PROVIDER.value(fields),
             enabled: ENABLED.value(fields) == Some(true),
         }
     }
@@ -361,7 +367,6 @@ impl fmt::Debug for HostSettings {
             .field("nvidia_model", &self.nvidia_model)
             .field("nvidia_base_url", &self.nvidia_base_url)
             .field("context_window_tokens", &self.context_window_tokens)
-            .field("default_memory_provider", &self.default_memory_provider)
             .field("enabled", &self.enabled)
             .finish()
     }

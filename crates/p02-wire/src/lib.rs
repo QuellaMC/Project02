@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod bots;
 mod config;
 mod confirmation;
 mod conversation;
@@ -12,11 +13,15 @@ mod protocol;
 mod refusal;
 mod text;
 
+pub use bots::{
+    BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
+};
 pub use config::{
-    ActivationStatus, Authored, ChangeOutcome, ChangeRefusal, CharacterConnectorEntry,
-    ConfigChange, ConfigTarget, ConfigValueType, ConfigView, ConnectorConfigView, ConnectorEntry,
-    ConnectorRefusal, EffectiveView, FieldView, Namespace, Operation, SectionActivation,
-    SectionView, Source, ValueSource, ViewRefusal,
+    AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
+    CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
+    ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
+    LayoutRow, LayoutWhen, Namespace, Operation, Placement, PluginPage, SectionActivation,
+    SectionView, Setup, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{
     Answer, AnswerBody, CancelReason, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion,
@@ -40,4 +45,4 @@ pub use pairing::{
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};
-pub use text::{ParseShortError, ParseTextError, Short, Text};
+pub use text::{BotUsername, ParseBotUsernameError, ParseShortError, ParseTextError, Short, Text};

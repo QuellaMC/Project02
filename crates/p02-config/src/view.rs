@@ -12,26 +12,30 @@ use p02_store::Home;
 use p02_wire::{
     ActivationStatus, Authored, CharacterConnectorEntry, ConfigTarget, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, Diagnostic, EffectiveView, FieldView,
-    Namespace, SectionActivation, SectionView, ValueSource, ViewRefusal,
+    LayoutCard, Namespace, SectionActivation, SectionView, ValueSource, ViewRefusal,
 };
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::conceal::conceal;
 use crate::declaration::{Declared, Sections, Target, connector};
-use crate::host::RoleModelProvider;
-use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, Status};
+use crate::host::{HostSettings, RoleModelProvider, host_fields};
+use crate::resolve::{
+    Effective, Field, ReadSettingsError, Resolution, Section, Status, values_in_effect,
+};
 
-/// The view of `target`'s settings.
+/// The view of `target`'s settings, `model` judging whether the host's
+/// values in effect give a character an AI model, as her start judges it.
 #[must_use]
 pub fn config_view(
     home: &Home,
     sections: &Sections,
     discovery: &Discovery,
     target: &ConfigTarget,
+    model: impl FnOnce(&HostSettings) -> Result<(), String>,
 ) -> ConfigView {
     match Resolution::read(home, sections, discovery, target) {
-        Ok(resolution) => resolution.view(),
+        Ok(resolution) => resolution.view(model),
         Err(error) => {
             let (reason, message) = refusal(&error);
 
@@ -66,12 +70,13 @@ impl ReadSettingsError {
 }
 
 impl Resolution<'_> {
-    /// The view of these settings: every host field, and every section,
-    /// and of each section every field, that the target may set; secrets
-    /// never. A person looks a section up by its name, so the screen lists
-    /// the plugins' by id and then the connectors'.
+    /// The view of these settings: whether their host values give a
+    /// character a model, as `model` judges them, and every host field,
+    /// and every section, and of each section every field, that the target
+    /// may set; secrets never. A person looks a section up by its name, so
+    /// the screen lists the plugins' by id and then the connectors'.
     #[must_use]
-    pub fn view(&self) -> ConfigView {
+    pub fn view(&self, model: impl FnOnce(&HostSettings) -> Result<(), String>) -> ConfigView {
         let mut sections: Vec<SectionView> = self
             .sections()
             .iter()
@@ -84,7 +89,13 @@ impl Resolution<'_> {
         ConfigView::Ok {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
-            project02: self.host().iter().map(field_view).collect(),
+            model: model(&HostSettings::of(self.host())).into(),
+            project02: host_fields()
+                .iter()
+                .zip(self.host())
+                .filter(|(declared, _)| self.target().authors(declared.scope()))
+                .map(|(_, field)| field_view(field))
+                .collect(),
             sections,
         }
     }
@@ -99,26 +110,57 @@ impl Resolution<'_> {
 
     fn section_shown(&self, section: &Section<'_>) -> Option<SectionView> {
         let target = self.target();
+        let declared = section.declared;
 
-        target
-            .authors(section.declared.config().scope())
-            .then(|| SectionView {
-                namespace: section.declared.namespace(),
-                id: section.declared.id().clone(),
-                display_name: section.declared.display_name().to_owned(),
-                version: section.declared.version().to_owned(),
+        target.authors(declared.config().scope()).then(|| {
+            let fields: Vec<FieldView> = section
+                .fields
+                .iter()
+                .filter(|field| target.authors(declared.scope_of(field.declaration)))
+                .map(field_view)
+                .collect();
+
+            SectionView {
+                namespace: declared.namespace(),
+                id: declared.id().clone(),
+                display_name: declared.display_name().to_owned(),
+                version: declared.version().to_owned(),
+                page: declared.page().cloned(),
+                access: declared.access().map(|access| access.levels().clone()),
                 enabled: section.enabled(),
                 enabled_source: section.switch.source(),
                 activation: activation(section),
-                fields: section
-                    .fields
-                    .iter()
-                    .filter(|field| target.authors(section.declared.scope_of(field.declaration)))
-                    .map(field_view)
-                    .collect(),
+                setup: section.setup.clone().into(),
+                layout: layout(declared.config().layout(), &fields),
+                fields,
                 diagnostics: section.diagnostics.clone(),
-            })
+            }
+        })
     }
+}
+
+/// The cards of a section's layout with the rows of `fields`, those a view
+/// lists; a card left without rows is not one of the view's.
+fn layout(cards: &[LayoutCard], fields: &[FieldView]) -> Vec<LayoutCard> {
+    cards
+        .iter()
+        .filter_map(|card| {
+            let rows: Vec<_> = card
+                .rows
+                .iter()
+                .filter(|row| fields.iter().any(|field| field.name == row.field))
+                .cloned()
+                .collect();
+
+            (!rows.is_empty()).then(|| LayoutCard {
+                title: card.title.clone(),
+                footer: card.footer.clone(),
+                advanced: card.advanced,
+                when: card.when.clone(),
+                rows,
+            })
+        })
+        .collect()
 }
 
 fn field_view(field: &Field<'_>) -> FieldView {
@@ -128,10 +170,13 @@ fn field_view(field: &Field<'_>) -> FieldView {
 
     FieldView {
         name: declaration.name().clone(),
+        label: declaration.label().map(str::to_owned),
         description: declaration.description().to_owned(),
+        placeholder: declaration.placeholder().map(str::to_owned),
         secret,
         value_type: declaration.value_type(),
         allowed_values: declaration.allowed_values().map(<[String]>::to_vec),
+        choices: declaration.choices().cloned(),
         agent_mutable: declaration.agent_mutable() && !secret,
         authored: Authored {
             configured: field.authored.is_some(),
@@ -186,6 +231,7 @@ fn activation(section: &Section<'_>) -> SectionActivation {
                 .collect(),
         ),
         Status::Disabled(reason) => (ActivationStatus::Disabled, vec![reason.to_owned()]),
+        Status::NotSetUp => (ActivationStatus::Disabled, vec!["not_set_up".to_owned()]),
         Status::Blocked => (
             ActivationStatus::Blocked,
             vec!["blocked_by_config_errors".to_owned()],
@@ -257,16 +303,7 @@ fn connector_entry(resolution: &Resolution<'_>, id: &str) -> ConnectorEntry {
         .expect("a resolution holds a section of each connector this build has");
     let activation = activation(section);
     let values = if activation.status == ActivationStatus::Active {
-        section
-            .fields
-            .iter()
-            .filter_map(|field| {
-                field
-                    .effective
-                    .value()
-                    .map(|value| (field.declaration.name().to_string(), value.clone()))
-            })
-            .collect()
+        values_in_effect(&section.fields)
     } else {
         Map::new()
     };
@@ -309,8 +346,6 @@ pub struct HostReport {
     character: Option<Identifier>,
     enabled: bool,
     user_display_name: SpeakerName,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    default_memory_provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     role_model_provider: Option<RoleModelProvider>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -380,7 +415,6 @@ impl Resolution<'_> {
                     },
                     enabled: host.enabled,
                     user_display_name: host.user_display_name.clone(),
-                    default_memory_provider: host.default_memory_provider.clone(),
                     role_model_provider: host.role_model_provider,
                     nvidia_api_key: host.nvidia_api_key.as_ref().map(|_| "[redacted]"),
                     nvidia_model: host.nvidia_model.clone(),
@@ -402,7 +436,7 @@ impl Resolution<'_> {
                 .sections()
                 .iter()
                 .filter_map(|section| match section.declared {
-                    Declared::Plugin(manifest) => Some(self.plugin_report(section, manifest)),
+                    Declared::Plugin(manifest, _) => Some(self.plugin_report(section, manifest)),
                     Declared::Connector(_) => None,
                 })
                 .collect(),

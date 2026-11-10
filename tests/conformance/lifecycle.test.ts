@@ -21,7 +21,7 @@ import {characterJson, configJson, createHome} from './harness/home.ts';
 import {exchange, jsonFrom} from './harness/http.ts';
 import {reply, startModelServer} from './harness/model-server.ts';
 import {within} from './harness/wait.ts';
-import {conversationOf, converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 
@@ -114,7 +114,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
   const home = createHome();
   const daemon = await startDaemon(home);
   const address = {
-    protocolVersion: 8,
+    protocolVersion: 9,
     token: daemon.token,
     port: Number(new URL(daemon.origin).port),
   };
@@ -132,7 +132,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
 it("lifecycle.port-default-and-fallback: when another program holds the home's port, serve says so before its address line, binds a free port and records it for the next run", async () => {
   const port = await occupiedPort();
   const home = createHome({
-    'daemon.json': JSON.stringify({protocolVersion: 8, token: 'kept', port}),
+    'daemon.json': JSON.stringify({protocolVersion: 9, token: 'kept', port}),
   });
   const moved = await startDaemon(home);
 
@@ -320,28 +320,68 @@ it('lifecycle.roster-boot: at boot every enabled character starts, and a disable
   });
 });
 
-it('lifecycle.no-provider-chosen: until a model provider is chosen no character starts: health shows each failed saying so, and an open is refused character_unavailable with that sentence', async () => {
-  const noProvider =
-    'No model provider is chosen. Choose one on the settings page.';
-  const wire = wireOf(
-    await startDaemon(
-      createHome({characters: {zeta: characterPackage('zeta', 'Zeta')}}),
-    ),
+it('lifecycle.no-model: with no AI service chosen she needs a model, saying what to choose as her view does, and a line sent to her waits until choosing a service starts her and she answers it; a service taken away while she runs leaves her needing one at once, and a line sent to her then waits in her inbox with nothing trying her again by itself, until a service is chosen again and she answers it', async () => {
+  const model = await startModelServer();
+  const {roleModelProvider, ...endpoint} = model.settings;
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: endpoint})}),
+    {PROJECT02_TEST_DURATIONS: 'heartbeat=500'},
   );
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const needed = 'Choose an AI service.';
+  const service = (operation: object) =>
+    saveConfig(wire, {scope: 'global'}, operation);
+  const choose = () =>
+    service({
+      kind: 'set',
+      path: 'project02.roleModelProvider',
+      value: roleModelProvider,
+    });
+  const answered = (clientMessageId: string) =>
+    events.next(
+      frameOf('turn_completed', {clientMessageId, status: 'completed'}),
+    );
+  const statesOfMira = () =>
+    events.frames.filter(frameOf('state_changed', {characterId: 'mira'}));
 
   await wire.start('mira');
-  await wire.start('zeta');
   expect(await wire.health()).toMatchObject({
-    characters: [
-      {id: 'mira', state: 'failed', diagnostic: noProvider},
-      {id: 'zeta', state: 'failed', diagnostic: noProvider},
-    ],
+    characters: [{id: 'mira', state: 'needs_model', diagnostic: needed}],
   });
-  expect(await wire.open('mira')).toMatchObject({
-    status: 'refused',
-    reason: 'character_unavailable',
-    message: expect.stringContaining(noProvider) as string,
+  expect(await wire.configView({scope: 'global'})).toMatchObject({
+    model: {ready: false, message: needed},
   });
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const line = (text: string, clientMessageId: string) =>
+    wire.turn({conversationId, text, source: 'web', clientMessageId});
+
+  expect(await line('Hello?', 'waiting')).toEqual({status: 'queued'});
+  model.answer(reply('Here now.'));
+  await choose();
+  await answered('waiting');
+  await service({kind: 'unset', path: 'project02.roleModelProvider'});
+  await events.next(
+    frameOf('state_changed', {
+      characterId: 'mira',
+      state: 'needs_model',
+      message: needed,
+    }),
+  );
+  expect(await line('Still there?', 'stranded')).toEqual({status: 'queued'});
+
+  // Tried again by nothing: two heartbeats on, nothing more has happened to her.
+  const needingSoFar = statesOfMira().length;
+
+  for (let beat = 0; beat < 2; beat += 1) {
+    await events.next(frame => frame.comment === 'ping');
+  }
+
+  expect(statesOfMira()).toHaveLength(needingSoFar);
+  model.answer(reply('Back.'));
+  await choose();
+  await answered('stranded');
 });
 
 it('lifecycle.start-retry-after-fix: a character whose config is invalid fails naming the field, and once the file is fixed a start reads it again and the character is ready', async () => {

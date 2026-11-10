@@ -44,7 +44,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 8,
+    protocolVersion: 9,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -58,7 +58,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 8,
+    protocolVersion: 9,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -147,7 +147,7 @@ function confirmation(id: string): PendingConfirmation {
     characterId: 'mira',
     id,
     request: {
-      pluginId: 'demo-config',
+      pluginId: 'runtime.plugin',
       toolName: 'runtime.plugin.config.update',
       summary: 'Set tone to warm',
       preview: {tone: 'warm'},

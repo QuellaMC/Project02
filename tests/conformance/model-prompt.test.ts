@@ -114,10 +114,12 @@ it("model.prompt-frames: the model is shown her persona's sections and the perso
 it("model.history-replay: after the daemon dies in the middle of a turn, her next turn replays that turn's line and each call that finished with its result, and drops the call that never did", async () => {
   const model = await startModelServer();
   const home = createHome({
-    'config.json': configJson({
-      project02: model.settings,
-      plugins: {'demo-config': {enabled: true}},
-    }),
+    'config.json': configJson({project02: model.settings}),
+    'character-data': {
+      mira: {
+        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+      },
+    },
   });
   const first = await startDaemon(home);
   const wire = wireOf(first);
@@ -134,7 +136,7 @@ it("model.history-replay: after the daemon dies in the middle of a turn, her nex
       [
         'runtime_plugin_config_update',
         {
-          pluginId: 'demo-config',
+          pluginId: 'reply-style',
           fieldName: 'tone',
           operation: 'set',
           value: 'pirate',

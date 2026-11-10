@@ -1,10 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::time::Duration;
 
 use p02_shared::{BoundJsonError, Credentials, Identifier, JsonLimits, bound_json};
-use p02_wire::ConfigValueType;
+use p02_wire::{ConfigValueType, LayoutCard, LayoutRow, LayoutWhen, Placement, PluginPage};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -27,6 +27,8 @@ pub struct Manifest {
     version: String,
     kind: PluginKind,
     description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page: Option<PluginPage>,
     contract_version: ContractVersion,
     declared_plugins: Vec<Declaration>,
     config: ConfigSection,
@@ -103,6 +105,11 @@ pub enum ManifestError {
     )]
     AllowedValuesMismatch(Identifier),
     #[error(
+        "plugin config field \"{0}\" choices must give words to each of its allowedValues, and \
+         to nothing else"
+    )]
+    ChoicesMismatch(Identifier),
+    #[error(
         "plugin config field \"{0}\" defaultValue must be a value of its valueType, and one of \
          its allowedValues when it has them"
     )]
@@ -156,6 +163,7 @@ impl Manifest {
                 "version",
                 "kind",
                 "description",
+                "page",
                 "contractVersion",
                 "declaredPlugins",
                 "config",
@@ -175,7 +183,7 @@ impl Manifest {
             .and_then(PluginKind::parse)
             .ok_or(ManifestError::UnsupportedKind)?;
         let declared_plugins = declarations(&root)?;
-        let config = config_section(&root.object("config", &["scope", "fields"])?)?;
+        let config = config_section(&root.object("config", SECTION_KEYS)?)?;
         let runtime_policy = runtime_policy(&root.object(
             "runtimePolicy",
             &["timeoutMs", "redactionLabels", "failureBehavior"],
@@ -195,6 +203,7 @@ impl Manifest {
             version: root.text("version")?,
             kind,
             description: root.text("description")?,
+            page: page(&root)?,
             contract_version: ContractVersion,
             declared_plugins,
             config,
@@ -228,6 +237,12 @@ impl Manifest {
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    /// How a settings page draws the plugin's row, when the manifest says.
+    #[must_use]
+    pub fn page(&self) -> Option<&PluginPage> {
+        self.page.as_ref()
     }
 
     /// The declarations, in authored order.
@@ -271,11 +286,7 @@ impl ConfigSection {
     ///
     /// [`ManifestError`] for the first rule `value` breaks.
     pub fn from_value(value: &Value) -> Result<Self, ManifestError> {
-        config_section(&Fields::of(
-            value,
-            "config".to_owned(),
-            &["scope", "fields"],
-        )?)
+        config_section(&Fields::of(value, "config".to_owned(), SECTION_KEYS)?)
     }
 }
 
@@ -373,6 +384,43 @@ fn declarations(root: &Fields<'_>) -> Result<Vec<Declaration>, ManifestError> {
         .collect()
 }
 
+/// How a settings page draws the plugin's row, if the manifest says. The
+/// icon and the tint are names of the page's own, which falls back for one
+/// it does not know, so here they are only text.
+fn page(root: &Fields<'_>) -> Result<Option<PluginPage>, ManifestError> {
+    let Some(fields) = root.optional_object(
+        "page",
+        &[
+            "summary",
+            "icon",
+            "tint",
+            "placement",
+            "order",
+            "connection",
+        ],
+    )?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(PluginPage {
+        summary: fields.text("summary")?,
+        icon: fields.text("icon")?,
+        tint: fields.text("tint")?,
+        placement: fields.vocabulary("placement", Placement::ALL)?,
+        order: fields
+            .get("order")
+            .and_then(Value::as_u64)
+            .and_then(|order| u32::try_from(order).ok())
+            .and_then(NonZeroU32::new)
+            .ok_or_else(|| fields.invalid("order", "a positive integer"))?,
+        connection: fields.optional_text("connection")?,
+    }))
+}
+
+/// The keys of a config section, a manifest's or one declared in code.
+const SECTION_KEYS: &[&str] = &["scope", "fields", "layout"];
+
 fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
     let scope = fields.vocabulary("scope", ConfigScope::ALL)?;
     let Some(Value::Array(items)) = fields.get("fields") else {
@@ -386,12 +434,15 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
             fields.path(&format!("fields[{index}]")),
             &[
                 "name",
+                "label",
                 "description",
+                "placeholder",
                 "secret",
                 "scope",
                 "valueType",
                 "defaultValue",
                 "allowedValues",
+                "choices",
                 "agentMutable",
                 "redactionLabels",
             ],
@@ -420,13 +471,162 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
 
     Ok(ConfigSection {
         scope,
+        layout: layout(fields, &declared)?,
         fields: declared,
     })
 }
 
+/// The section's cards as authored, and then one card more, untitled, of
+/// every field no row places, in the order declared: a section that lays
+/// nothing out is one card of all its fields, so no reader needs a
+/// fallback.
+fn layout(
+    section: &Fields<'_>,
+    declared: &[ConfigField],
+) -> Result<Vec<LayoutCard>, ManifestError> {
+    let mut cards: Vec<LayoutCard> = match section.get("layout") {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                card(
+                    &Fields::of(
+                        item,
+                        section.path(&format!("layout[{index}]")),
+                        &["title", "footer", "advanced", "when", "rows"],
+                    )?,
+                    declared,
+                )
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err(section.invalid("layout", "an array of cards")),
+    };
+    let unplaced: Vec<LayoutRow> = declared
+        .iter()
+        .filter(|field| {
+            !cards
+                .iter()
+                .flat_map(|card| &card.rows)
+                .any(|row| row.field == field.name)
+        })
+        .map(|field| LayoutRow {
+            field: field.name.clone(),
+            when: None,
+        })
+        .collect();
+
+    if !unplaced.is_empty() {
+        cards.push(LayoutCard {
+            title: None,
+            footer: None,
+            advanced: false,
+            when: None,
+            rows: unplaced,
+        });
+    }
+
+    Ok(cards)
+}
+
+fn card(fields: &Fields<'_>, declared: &[ConfigField]) -> Result<LayoutCard, ManifestError> {
+    let title = fields.optional_text("title")?;
+    let footer = fields.optional_text("footer")?;
+    let advanced = fields.optional_boolean("advanced")?.unwrap_or(false);
+    let when = condition(fields, declared)?;
+    let rows = match fields.get("rows") {
+        Some(Value::Array(items)) if !items.is_empty() => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| row(fields.path(&format!("rows[{index}]")), item, declared))
+            .collect::<Result<_, _>>()?,
+        _ => return Err(fields.invalid("rows", "a non-empty array of rows")),
+    };
+
+    Ok(LayoutCard {
+        title,
+        footer,
+        advanced,
+        when,
+        rows,
+    })
+}
+
+/// A row at `path`: the name of a declared field, or an object naming one
+/// and when it has an effect.
+fn row(path: String, item: &Value, declared: &[ConfigField]) -> Result<LayoutRow, ManifestError> {
+    let expected = "the name of a declared field";
+    let (field, when) = if item.is_object() {
+        let fields = Fields::of(item, path, &["field", "when"])?;
+
+        (
+            named(fields.get("field"), declared)
+                .ok_or_else(|| fields.invalid("field", expected))?,
+            condition(&fields, declared)?,
+        )
+    } else {
+        let field = named(Some(item), declared).ok_or_else(|| ManifestError::Invalid {
+            path,
+            expected: expected.to_owned(),
+        })?;
+
+        (field, None)
+    };
+
+    Ok(LayoutRow {
+        field: field.name.clone(),
+        when,
+    })
+}
+
+/// The `when` of a card or a row, if it has one: a declared field that
+/// lists its allowed values, and one or more of them.
+fn condition(
+    fields: &Fields<'_>,
+    declared: &[ConfigField],
+) -> Result<Option<LayoutWhen>, ManifestError> {
+    let Some(when) = fields.optional_object("when", &["field", "is"])? else {
+        return Ok(None);
+    };
+    let (field, allowed) = named(when.get("field"), declared)
+        .and_then(|field| Some((field, field.allowed_values.as_ref()?)))
+        .ok_or_else(|| {
+            when.invalid(
+                "field",
+                "the name of a declared field that lists allowedValues",
+            )
+        })?;
+    let is = match when.get("is") {
+        Some(Value::Array(items)) if !items.is_empty() => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .filter(|value| allowed.iter().any(|allowed| allowed == value))
+                    .map(str::to_owned)
+            })
+            .collect::<Option<Vec<String>>>(),
+        _ => None,
+    }
+    .ok_or_else(|| when.invalid("is", "an array of one or more of its field's allowedValues"))?;
+
+    Ok(Some(LayoutWhen {
+        field: field.name.clone(),
+        is,
+    }))
+}
+
+/// The declared field `value` names.
+fn named<'d>(value: Option<&Value>, declared: &'d [ConfigField]) -> Option<&'d ConfigField> {
+    let name = value?.as_str()?;
+
+    declared.iter().find(|field| field.name.as_str() == name)
+}
+
 fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
     let name = fields.identifier("name")?;
+    let label = fields.optional_text("label")?;
     let description = fields.text("description")?;
+    let placeholder = fields.optional_text("placeholder")?;
     let secret = fields.boolean("secret")?;
     let scope = fields.optional_vocabulary("scope", ConfigScope::ALL)?;
     let value_type = fields.optional_vocabulary("valueType", ConfigValueType::ALL)?;
@@ -449,6 +649,10 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         .get("allowedValues")
         .map(|_| fields.strings("allowedValues"))
         .transpose()?;
+    let choices = fields
+        .get("choices")
+        .map(|_| fields.words("choices"))
+        .transpose()?;
     let agent_mutable = fields.optional_boolean("agentMutable")?.unwrap_or(false);
     let redaction_labels = fields.labels("redactionLabels")?;
 
@@ -458,12 +662,15 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
 
     Ok(ConfigField {
         name,
+        label,
         description,
+        placeholder,
         secret,
         scope,
         value_type,
         default_value,
         allowed_values,
+        choices,
         agent_mutable,
         redaction_labels,
     })
@@ -471,7 +678,8 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
 
 /// Every value a manifest names for a field is one the field accepts: each
 /// allowed value, of which there is one at least, and the default, which is
-/// what the field takes wherever nothing sets it. A credential is never a
+/// what the field takes wherever nothing sets it. Words for the allowed
+/// values are for each of them and nothing else. A credential is never a
 /// default a manifest decides, and a secret's type is one that holds a
 /// string, since a credential is one.
 fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
@@ -486,6 +694,15 @@ fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
                 .all(|value| field.accepts(&Value::from(value.as_str()))))
     {
         return Err(ManifestError::AllowedValuesMismatch(field.name.clone()));
+    }
+
+    if let Some(choices) = &field.choices
+        && !field.allowed_values.as_ref().is_some_and(|allowed| {
+            allowed.iter().all(|value| choices.contains_key(value))
+                && choices.keys().all(|value| allowed.contains(value))
+        })
+    {
+        return Err(ManifestError::ChoicesMismatch(field.name.clone()));
     }
 
     let Some(default_value) = &field.default_value else {
@@ -583,12 +800,50 @@ impl<'a> Fields<'a> {
         Fields::of(self.get(key).unwrap_or(&Value::Null), self.path(key), keys)
     }
 
-    fn text(&self, key: &str) -> Result<String, ManifestError> {
+    fn optional_object(
+        &self,
+        key: &str,
+        keys: &[&str],
+    ) -> Result<Option<Fields<'a>>, ManifestError> {
         self.get(key)
-            .and_then(Value::as_str)
-            .filter(|text| !text.trim().is_empty())
-            .map(str::to_owned)
+            .map(|value| Fields::of(value, self.path(key), keys))
+            .transpose()
+    }
+
+    fn text(&self, key: &str) -> Result<String, ManifestError> {
+        self.optional_text(key)?
             .ok_or_else(|| self.invalid(key, "a non-empty string"))
+    }
+
+    fn optional_text(&self, key: &str) -> Result<Option<String>, ManifestError> {
+        self.get(key)
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| self.invalid(key, "a non-empty string"))
+            })
+            .transpose()
+    }
+
+    /// An object of words, each a non-empty string, by what it is for.
+    fn words(&self, key: &str) -> Result<BTreeMap<String, String>, ManifestError> {
+        let expected = "an object of non-empty strings";
+        let Some(Value::Object(entries)) = self.get(key) else {
+            return Err(self.invalid(key, expected));
+        };
+
+        entries
+            .iter()
+            .map(|(name, words)| {
+                words
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| (name.clone(), text.to_owned()))
+                    .ok_or_else(|| self.invalid(key, expected))
+            })
+            .collect()
     }
 
     fn identifier(&self, key: &str) -> Result<Identifier, ManifestError> {
@@ -673,9 +928,10 @@ impl<'a> Fields<'a> {
 mod tests {
     use serde_json::json;
 
+    use p02_wire::{AccessLevel, AccessName};
+
     use super::*;
     use crate::access::AccessMapError;
-    use crate::vocabulary::{AccessLevel, AccessName};
 
     fn fixture() -> Value {
         json!({
@@ -684,6 +940,13 @@ mod tests {
             "version": "1.0.0",
             "kind": "tool_provider",
             "description": "A test plugin.",
+            "page": {
+                "summary": "Keeps notes",
+                "icon": "notebook",
+                "tint": "orange",
+                "placement": "mind_body",
+                "order": 2,
+            },
             "contractVersion": CONTRACT_VERSION,
             "declaredPlugins": ["tool_provider", "handle_tool_call"],
             "config": {
@@ -820,6 +1083,14 @@ mod tests {
                 ManifestError::AllowedValuesMismatch(name("tone")),
             ),
             (
+                |m| m["config"]["fields"][0]["choices"] = json!({"warm": "Warm"}),
+                ManifestError::ChoicesMismatch(name("tone")),
+            ),
+            (
+                |m| m["config"]["fields"][1]["choices"] = json!({"key": "Key"}),
+                ManifestError::ChoicesMismatch(name("apiKey")),
+            ),
+            (
                 |m| m["config"]["fields"][0]["defaultValue"] = json!("sarcastic"),
                 ManifestError::DefaultMismatch(name("tone")),
             ),
@@ -832,6 +1103,42 @@ mod tests {
                     field: name("tone"),
                     field_scope: ConfigScope::CharacterOnly,
                     section_scope: ConfigScope::GlobalOnly,
+                },
+            ),
+            (
+                |m| m["config"]["layout"] = json!([{"rows": []}]),
+                invalid("config.layout[0].rows", "a non-empty array of rows"),
+            ),
+            (
+                |m| m["config"]["layout"] = json!([{"rows": ["tone", "volume"]}]),
+                invalid("config.layout[0].rows[1]", "the name of a declared field"),
+            ),
+            (
+                |m| {
+                    m["config"]["layout"] =
+                        json!([{"when": {"field": "apiKey", "is": ["set"]}, "rows": ["tone"]}]);
+                },
+                invalid(
+                    "config.layout[0].when.field",
+                    "the name of a declared field that lists allowedValues",
+                ),
+            ),
+            (
+                |m| {
+                    m["config"]["layout"] = json!([{"rows": [
+                        {"field": "apiKey", "when": {"field": "tone", "is": ["warm", "shouty"]}},
+                    ]}]);
+                },
+                invalid(
+                    "config.layout[0].rows[0].when.is",
+                    "an array of one or more of its field's allowedValues",
+                ),
+            ),
+            (
+                |m| m["config"]["layout"] = json!([{"rows": ["tone"], "collapsed": true}]),
+                ManifestError::UnknownKey {
+                    path: "config.layout[0]".to_owned(),
+                    key: "collapsed".to_owned(),
                 },
             ),
             (
@@ -868,6 +1175,14 @@ mod tests {
             (
                 |m| m["displayName"] = json!("  "),
                 invalid("displayName", "a non-empty string"),
+            ),
+            (
+                |m| m["page"]["placement"] = json!("sidebar"),
+                invalid("page.placement", r#"one of "mind_body" or "permission""#),
+            ),
+            (
+                |m| m["page"]["order"] = json!(0),
+                invalid("page.order", "a positive integer"),
             ),
             (
                 |m| m["activation"]["defaultEnabled"] = json!("yes"),
@@ -945,5 +1260,105 @@ mod tests {
             Manifest::from_value(&manifest).unwrap().requested_access(),
             &AccessMap::default()
         );
+    }
+
+    #[test]
+    fn a_manifest_says_how_a_page_draws_it_and_every_field_lands_in_a_card() {
+        let mut manifest = fixture();
+
+        manifest["page"]["connection"] = json!("Notes");
+        manifest["config"]["fields"][0]["label"] = json!("Tone");
+        manifest["config"]["fields"][0]["choices"] = json!({"warm": "Warm", "formal": "Formal"});
+        manifest["config"]["fields"][1]["placeholder"] = json!("Paste key");
+        manifest["config"]["fields"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "name": "signoff",
+                "description": "A signoff.",
+                "secret": false,
+                "redactionLabels": [],
+            }));
+        manifest["config"]["layout"] = json!([{
+            "title": "Voice",
+            "footer": "How it sounds.",
+            "advanced": true,
+            "when": {"field": "tone", "is": ["warm"]},
+            "rows": ["tone", {"field": "signoff", "when": {"field": "tone", "is": ["formal"]}}],
+        }]);
+
+        let accepted = Manifest::from_value(&manifest).unwrap();
+        let tone = accepted.config().field("tone").unwrap();
+        let when = |value: &str| LayoutWhen {
+            field: name("tone"),
+            is: vec![value.to_owned()],
+        };
+
+        assert_eq!(
+            serde_json::to_value(accepted.page()).unwrap(),
+            json!({
+                "summary": "Keeps notes",
+                "icon": "notebook",
+                "tint": "orange",
+                "placement": "mind_body",
+                "order": 2,
+                "connection": "Notes",
+            })
+        );
+        assert_eq!(tone.label(), Some("Tone"));
+        assert_eq!(
+            tone.choices().map(|choices| choices["formal"].as_str()),
+            Some("Formal")
+        );
+        assert_eq!(
+            accepted.config().field("apiKey").unwrap().placeholder(),
+            Some("Paste key")
+        );
+        assert_eq!(
+            accepted.config().layout(),
+            [
+                LayoutCard {
+                    title: Some("Voice".to_owned()),
+                    footer: Some("How it sounds.".to_owned()),
+                    advanced: true,
+                    when: Some(when("warm")),
+                    rows: vec![
+                        LayoutRow {
+                            field: name("tone"),
+                            when: None,
+                        },
+                        LayoutRow {
+                            field: name("signoff"),
+                            when: Some(when("formal")),
+                        },
+                    ],
+                },
+                LayoutCard {
+                    title: None,
+                    footer: None,
+                    advanced: false,
+                    when: None,
+                    rows: vec![LayoutRow {
+                        field: name("apiKey"),
+                        when: None,
+                    }],
+                },
+            ]
+        );
+        assert_eq!(
+            Manifest::from_value(&serde_json::to_value(&accepted).unwrap()).unwrap(),
+            accepted,
+            "a manifest reads back as it is written"
+        );
+
+        let mut plain = fixture();
+
+        plain.as_object_mut().unwrap().remove("page");
+        plain["config"]["fields"] = json!([]);
+
+        let plain = Manifest::from_value(&plain).unwrap();
+
+        assert_eq!(plain.page(), None);
+        assert_eq!(plain.config().layout(), []);
     }
 }

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use p02_contracts::{
-    CommittedTurn, ContextItemKind, EvidenceStatus, SourceKind, SourceReference, ToolCallResult,
-    TurnIdentity, TurnText,
+    CommittedTurn, ContextItemKind, EvidenceStatus, ResolvedConfig, SourceKind, SourceReference,
+    ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
@@ -734,65 +734,44 @@ async fn an_add_abandoned_at_the_deadline_warns_that_it_may_have_landed() {
     );
 }
 
-#[tokio::test]
-async fn a_call_says_what_the_settings_lack_and_never_echoes_a_malformed_address() {
-    let storage = Storage::new();
-    let turn = line("hello");
+#[test]
+fn the_check_says_what_the_settings_lack_and_never_echoes_a_malformed_address() {
+    let manifest = manifest(5_000);
     let rule = "an absolute http:// or https:// address with no embedded credentials, query, or \
                 fragment";
 
     for (settings, sentence) in [
         (
             json!({"backend": "server"}),
-            "Mem0 server backend needs the baseUrl config field.".to_owned(),
+            "Long-Term Memory needs a server address.".to_owned(),
         ),
         (
             json!({"backend": "platform"}),
-            "Mem0 platform backend needs the apiKey config field (MEM0_API_KEY).".to_owned(),
+            "Long-Term Memory needs an API key.".to_owned(),
         ),
         (
             json!({"backend": "server", "baseUrl": "https://operator:hunter2@mem0.example"}),
-            format!("Mem0 baseUrl must be {rule}."),
+            format!("Long-Term Memory's server address must be {rule}."),
         ),
         (
             json!({"backend": "oss", "ossLlmBaseUrl": "localhost:11434/v1"}),
-            format!("Mem0 ossLlmBaseUrl must be {rule}."),
+            format!("Long-Term Memory's server for Remembering must be {rule}."),
         ),
         (
             json!({"backend": "oss", "ossLlmBaseUrl": "http://localhost:11434/v1", "ossEmbedderBaseUrl": "https://api.openai.com/v1/"}),
-            "Mem0 OSS embedding at the OpenAI endpoint needs the ossEmbedderApiKey config field \
-             (MEM0_OSS_EMBEDDER_API_KEY)."
+            "Long-Term Memory needs an API key for Searching.".to_owned(),
+        ),
+        (
+            json!({"backend": "oss"}),
+            "Long-Term Memory needs an API key for Remembering, or a server for it such as \
+             Ollama."
                 .to_owned(),
         ),
     ] {
-        let report = ask(
-            &host(&storage, &settings),
-            "mem0.search",
-            json!({"query": "tea"}),
-            &turn,
-        )
-        .await;
+        let config = ResolvedConfig::resolve(manifest.config(), settings.as_object().unwrap());
 
-        assert_eq!(
-            refusal(&report),
-            ("handler_failed", sentence.as_str()),
-            "{settings}"
-        );
-        assert!(!format!("{report:?}").contains("hunter2"));
+        assert_eq!(mem0::check_setup(&config), Err(sentence), "{settings}");
     }
-
-    let report = ask(
-        &host(&storage, &json!({"backend": "oss"})),
-        "mem0.search",
-        json!({"query": "tea"}),
-        &turn,
-    )
-    .await;
-
-    assert!(
-        refusal(&report).1.contains("MEM0_OSS_LLM_API_KEY"),
-        "{report:?}"
-    );
 }
 
 #[tokio::test]

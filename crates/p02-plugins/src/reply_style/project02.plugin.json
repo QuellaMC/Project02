@@ -1,0 +1,67 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "reply-style",
+    "displayName": "Reply Style",
+    "version": "1.0.0",
+    "kind": "context_provider",
+    "description": "How she writes to you: the tone she takes, and a sign-off to end each reply with. She can ask you to change either.",
+    "page": {
+      "summary": "How she writes",
+      "icon": "bubble",
+      "tint": "mint",
+      "placement": "mind_body",
+      "order": 5
+    },
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "declaredPlugins": ["before_role_model_call"],
+    "config": {
+      "scope": "character_only",
+      "fields": [
+        {
+          "name": "tone",
+          "label": "Tone",
+          "description": "The tone she writes in. She can ask you to change it; a change you approve takes effect at once.",
+          "secret": false,
+          "valueType": "string",
+          "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
+          "choices": {
+            "neutral": "Neutral",
+            "warm": "Warm",
+            "formal": "Formal",
+            "playful": "Playful",
+            "pirate": "Pirate"
+          },
+          "agentMutable": true,
+          "redactionLabels": []
+        },
+        {
+          "name": "signoff",
+          "label": "Sign-Off",
+          "description": "The exact words she ends every reply with; none when left empty. She can ask you to change it; a change you approve takes effect at once.",
+          "placeholder": "None",
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": true,
+          "redactionLabels": []
+        }
+      ]
+    },
+    "runtimePolicy": {
+      "timeoutMs": 10000,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call"
+      }
+    },
+    "activation": {
+      "defaultEnabled": false,
+      "reasons": ["built_in_reply_style"]
+    },
+    "requestedAccess": {
+      "model_input": "write",
+      "trusted_context": "write"
+    }
+  }
+}

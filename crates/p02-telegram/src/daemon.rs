@@ -12,9 +12,10 @@ use p02_shared::{
     read_daemon_record,
 };
 use p02_wire::{
-    Answer, AnswerBody, ConfirmationAnswer, ConnectorConfigView, ErrorBody, Event, GatewayMessage,
-    Health, OpenConversationBody, OpenOutcome, PROTOCOL_VERSION, PairingAnswer, PairingOutcome,
-    PairingRequestBody, PairingSubjectBody, Ready, Short, SubmitOutcome,
+    Answer, AnswerBody, ConfirmationAnswer, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
+    ConnectorConfigView, ErrorBody, Event, GatewayMessage, Health, OpenConversationBody,
+    OpenOutcome, PROTOCOL_VERSION, PairingAnswer, PairingOutcome, PairingRequestBody,
+    PairingSubjectBody, Ready, Short, SubmitOutcome,
 };
 use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
@@ -116,6 +117,19 @@ impl Daemon {
         self.post(
             &format!("/api/connectors/{CONNECTOR}/pairing"),
             &PairingRequestBody { subject, source },
+        )
+        .await
+    }
+
+    /// Tells the daemon how the bots stand, all of them: its health shows
+    /// that while this connector's stream is open.
+    pub(crate) async fn tell_bots(
+        &self,
+        bots: Vec<ConnectorBot>,
+    ) -> Result<ConnectorBotsOutcome, Unanswered> {
+        self.post(
+            &format!("/api/connectors/{CONNECTOR}/bots"),
+            &ConnectorBotsBody { bots },
         )
         .await
     }
@@ -336,7 +350,7 @@ async fn follow(
             }
         }
 
-        table.hold();
+        table.lost();
 
         if moved(home, record) {
             return Following::Moved;

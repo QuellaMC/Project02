@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::bots::ConnectorBot;
 use crate::diagnostic::Diagnostic;
 use crate::protocol::ProtocolVersion;
 
@@ -43,11 +44,13 @@ pub struct PackageReport {
     pub path: String,
 }
 
-/// Whether a process of a built-in connector is on the event stream now.
+/// Whether a process of a built-in connector is on the event stream now,
+/// and the bots it last said it runs, none while it is not.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ConnectorPresence {
     pub id: Identifier,
     pub connected: bool,
+    pub bots: Vec<ConnectorBot>,
 }
 
 /// One installed character, as health reports her.
@@ -59,7 +62,8 @@ pub struct CharacterSummary {
     pub display_name: SpeakerName,
     pub enabled: bool,
     pub state: RosterState,
-    /// Why she failed, or what her start warned of.
+    /// Why she failed, what she needs for a model, or what her start
+    /// warned of.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<String>,
     /// The latest background failure since she started.
@@ -75,6 +79,7 @@ pub enum RosterState {
     NotStarted,
     Starting,
     Ready,
+    NeedsModel,
     Stopping,
     Stopped,
     Failed,
@@ -86,6 +91,7 @@ impl From<Option<CharacterState>> for RosterState {
             None => Self::NotStarted,
             Some(CharacterState::Starting) => Self::Starting,
             Some(CharacterState::Ready) => Self::Ready,
+            Some(CharacterState::NeedsModel) => Self::NeedsModel,
             Some(CharacterState::Stopping) => Self::Stopping,
             Some(CharacterState::Stopped) => Self::Stopped,
             Some(CharacterState::Failed) => Self::Failed,
@@ -100,6 +106,9 @@ vocabulary! {
     CharacterState {
         Starting = "starting",
         Ready = "ready",
+        /// Her settings give her no AI model she can use: she is built
+        /// without one, and the lines sent to her wait until they do.
+        NeedsModel = "needs_model",
         Stopping = "stopping",
         Stopped = "stopped",
         Failed = "failed",

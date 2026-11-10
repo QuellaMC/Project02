@@ -10,7 +10,7 @@ use async_trait::async_trait;
 
 use p02_characters::discover;
 use p02_config::{Resolution, Sections, apply_change, check_change, materialize};
-use p02_contracts::{Manifest, PluginFactory};
+use p02_contracts::{Manifest, PluginFactory, SetupCheck};
 use p02_plugins::{
     ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
     FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError, list,
@@ -43,19 +43,24 @@ pub(crate) struct MiraHome {
 
 impl MiraHome {
     pub(crate) fn new() -> Self {
-        let directory = TempDir::new().unwrap();
-        let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
-        let sections = Sections::new(
+        Self::judged_by(
             list::plugins()
                 .unwrap()
                 .iter()
-                .map(|(manifest, _)| manifest.clone()),
-        );
+                .map(|(manifest, check, _)| (manifest.clone(), *check)),
+        )
+    }
+
+    /// A home whose settings are judged against `plugins`, each a manifest
+    /// and its check, in place of the listed plugins' own.
+    pub(crate) fn judged_by(plugins: impl IntoIterator<Item = (Manifest, SetupCheck)>) -> Self {
+        let directory = TempDir::new().unwrap();
+        let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
 
         Self {
             _directory: directory,
             home,
-            sections: Arc::new(sections),
+            sections: Arc::new(Sections::new(plugins)),
         }
     }
 
@@ -104,7 +109,7 @@ impl MiraHome {
             .fold(
                 builder(Arc::new(self.data())),
                 |builder, (plugin, values)| {
-                    let (manifest, factory) = bundled(plugin);
+                    let (manifest, _, factory) = bundled(plugin);
 
                     builder.plugin(
                         manifest.clone(),
@@ -141,7 +146,7 @@ impl MiraHome {
                     }),
                 ),
                 |builder, (plugin, values)| {
-                    let (manifest, factory) = bundled(plugin.as_str());
+                    let (manifest, _, factory) = bundled(plugin.as_str());
 
                     builder.plugin(manifest.clone(), values.clone(), *factory)
                 },
@@ -265,11 +270,11 @@ pub(crate) fn delete(file: &Path) {
 }
 
 /// The plugin of the daemon's list under `id`.
-pub(crate) fn bundled(id: &str) -> &'static (Manifest, PluginFactory) {
+pub(crate) fn bundled(id: &str) -> &'static (Manifest, SetupCheck, PluginFactory) {
     list::plugins()
         .unwrap()
         .iter()
-        .find(|(manifest, _)| manifest.id().as_str() == id)
+        .find(|(manifest, ..)| manifest.id().as_str() == id)
         .unwrap()
 }
 
@@ -373,7 +378,7 @@ impl ConfigControl for MiraSettings {
             list::plugins()
                 .unwrap()
                 .iter()
-                .map(|(manifest, _)| {
+                .map(|(manifest, ..)| {
                     let view = resolution
                         .section_view(Namespace::Plugins, manifest.id().as_str())
                         .unwrap();

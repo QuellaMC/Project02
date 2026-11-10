@@ -2,13 +2,13 @@
 //! of plugins, and her settings read and changed through it.
 
 use p02_contracts::ToolCallResult;
-use p02_plugins::{PluginHost, ToolCallReport};
+use p02_plugins::{PluginHost, ToolCallReport, list};
 use p02_shared::read_file;
 use p02_store::SettingsDocument;
 use serde_json::{Value, json};
 
 use crate::home::{MiraHome, Person, rewrite};
-use crate::support::{call, run_round, turn};
+use crate::support::{bundled_manifest, call, run_round, turn};
 
 async fn ask(host: &PluginHost, tool: &str, input: Value) -> ToolCallReport {
     run_round(host, vec![call("c1", tool, input)], &turn())
@@ -48,7 +48,7 @@ fn listed(report: &ToolCallReport) -> Vec<(String, bool, String)> {
 
 fn update(fingerprint: &str, change: &Value) -> Value {
     let mut input = json!({
-        "pluginId": "demo-config",
+        "pluginId": "reply-style",
         "fieldName": "tone",
         "expectedFingerprint": fingerprint,
     });
@@ -60,16 +60,16 @@ fn update(fingerprint: &str, change: &Value) -> Value {
     input
 }
 
-/// Demo-config's settings in Mira's own settings.
-fn demo_config(home: &MiraHome) -> Value {
-    home.overlay()["plugins"]["demo-config"]["config"].clone()
+/// Her reply style in Mira's own settings.
+fn reply_style(home: &MiraHome) -> Value {
+    home.overlay()["plugins"]["reply-style"]["config"].clone()
 }
 
 #[tokio::test]
 async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_settings_decide() {
     let home = MiraHome::new();
 
-    home.settings(&json!({"plugins": {"demo-config": {"enabled": true, "config": {"tone": 42}}}}));
+    home.settings(&json!({"plugins": {"mem0": {"enabled": true, "config": {"backend": "cloud"}}}}));
 
     let host = home.mira(Person::approving());
     let running = ask(&host, "runtime.plugin.list", json!({})).await;
@@ -135,8 +135,8 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
             runs("character-memory"),
             runs("character-state"),
             runs("session-history"),
-            not("demo-config", "blocked"),
-            not("mem0", "disabled"),
+            not("mem0", "blocked"),
+            not("reply-style", "disabled"),
         ],
         "a plugin her settings block is listed blocked"
     );
@@ -160,7 +160,7 @@ async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
     let read = ask(
         &host,
         "runtime.plugin.config",
-        json!({"pluginId": "demo-config"}),
+        json!({"pluginId": "reply-style"}),
     )
     .await;
 
@@ -186,7 +186,7 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
  {
     let home = MiraHome::new();
 
-    home.settings(&json!({"plugins": {"demo-config": {"enabled": true}}}));
+    home.settings(&json!({}));
 
     let home_settings = read_file(&home.path(SettingsDocument::Home)).unwrap();
     let person = Person::approving();
@@ -199,7 +199,7 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
         person.asked()[0].preview,
         *json!({
             "kind": "runtime_plugin_config_change",
-            "targetPluginId": "demo-config",
+            "targetPluginId": "reply-style",
             "fieldName": "tone",
             "operation": "set",
             "expectedFingerprint": read,
@@ -213,13 +213,13 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
         output(&applied),
         &json!({
             "status": "applied",
-            "pluginId": "demo-config",
+            "pluginId": "reply-style",
             "fieldName": "tone",
             "operation": "set",
             "fingerprint": home.fingerprint(),
         })
     );
-    assert_eq!(demo_config(&home), json!({"tone": "formal"}));
+    assert_eq!(reply_style(&home), json!({"tone": "formal"}));
     assert_eq!(
         read_file(&home.path(SettingsDocument::Home)).unwrap(),
         home_settings,
@@ -242,14 +242,14 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
         ),
         async {
             waiting.being_asked().await;
-            home.change("demo-config", "signoff", json!("Yours."));
+            home.change("reply-style", "signoff", json!("Yours."));
             waiting.answer();
         }
     );
 
     assert_eq!(reason(&moved), Some("plugin_config_fingerprint_conflict"));
     assert_eq!(
-        demo_config(&home),
+        reply_style(&home),
         json!({"tone": "formal", "signoff": "Yours."}),
         "an update her settings moved under writes nothing"
     );
@@ -258,13 +258,10 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
 #[tokio::test]
 async fn an_unset_is_shown_as_an_unset_and_leaves_the_field_to_the_settings_beneath() {
     let home = MiraHome::new();
-
-    home.settings(&json!({"plugins": {"demo-config": {"enabled": true}}}));
-
     let person = Person::approving();
     let host = home.mira(person.clone());
 
-    home.change("demo-config", "tone", json!("formal"));
+    home.change("reply-style", "tone", json!("formal"));
 
     let unset = ask(
         &host,
@@ -281,5 +278,58 @@ async fn an_unset_is_shown_as_an_unset_and_leaves_the_field_to_the_settings_bene
     );
     assert_eq!(preview["after"], json!({"configured": false}));
     assert_eq!(output(&unset)["operation"], "unset");
-    assert_eq!(demo_config(&home), Value::Null);
+    assert_eq!(reply_style(&home), Value::Null);
+}
+
+/// No plugin of this build keeps a secret among a character's own
+/// settings, so hers are judged here by Reply Style's manifest with a key
+/// added to it.
+#[tokio::test]
+async fn a_secret_of_her_own_settings_is_shown_to_the_model_only_as_redacted() {
+    let secret = "sk-live-secret";
+    let keyed = bundled_manifest("reply-style", |manifest| {
+        manifest["config"]["fields"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "name": "apiKey",
+                "description": "A key of her own.",
+                "secret": true,
+                "valueType": "string",
+                "redactionLabels": [],
+            }));
+    });
+    let home = MiraHome::judged_by(list::plugins().unwrap().iter().map(|(manifest, check, _)| {
+        if manifest.id() == keyed.id() {
+            (keyed.clone(), *check)
+        } else {
+            (manifest.clone(), *check)
+        }
+    }));
+
+    home.change("reply-style", "apiKey", json!(secret));
+
+    let host = home.mira(Person::approving());
+    let read = ask(
+        &host,
+        "runtime.plugin.config",
+        json!({"pluginId": "reply-style"}),
+    )
+    .await;
+    let key = output(&read)["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "apiKey")
+        .unwrap();
+
+    assert_eq!(
+        json!([
+            key["sensitive"],
+            key["authored"]["value"],
+            key["effective"]["value"]
+        ]),
+        json!([true, "[redacted]", "[redacted]"])
+    );
+    assert!(!output(&read).to_string().contains(secret));
 }

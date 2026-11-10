@@ -32,8 +32,10 @@ pub use output::{
     CuratedSectionError, HookReport, HookStatus, PluginContextItem, PluginCuratedSection,
     SourceReference, SourceReferenceError, contains_forbidden_control_character, within_limits,
 };
+pub use p02_wire::{AccessLevel, AccessName};
 pub use plugin::{
     FactoryInput, Hook, PluginError, PluginFactory, Registration, RegistrationError, RuntimePlugin,
+    SetupCheck,
 };
 pub use role_model::{
     BlankContextTextError, CharacterDecision, ChatCompletionTool, ChatFunctionCall, ChatMessage,
@@ -51,7 +53,7 @@ pub use tool::{
     ToolCallOutcome, ToolDefinitionError, ToolPreparation,
 };
 pub use vocabulary::{
-    AccessLevel, AccessName, BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure,
-    CONTRACT_VERSION, ConfigScope, ContextItemKind, Declaration, EvidenceKind, EvidenceStatus,
-    HOST_PLUGIN, HandleToolCallFailure, PluginKind, PolicyOutcome, SourceKind, ToolConcurrency,
+    BEFORE_ROLE_MODEL_CALL_REJECTION, BeforeRoleModelCallFailure, CONTRACT_VERSION, ConfigScope,
+    ContextItemKind, Declaration, EvidenceKind, EvidenceStatus, HOST_PLUGIN, HandleToolCallFailure,
+    PluginKind, PolicyOutcome, SourceKind, ToolConcurrency,
 };

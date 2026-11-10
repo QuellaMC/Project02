@@ -73,7 +73,7 @@ impl Gateway {
         let plugins = list::plugins()
             .unwrap()
             .iter()
-            .map(|(manifest, factory)| Plugin::new(manifest.clone(), *factory))
+            .map(|(manifest, check, factory)| Plugin::new(manifest.clone(), *check, *factory))
             .collect();
         let daemon = Daemon::open(
             world.home.clone(),

@@ -38,7 +38,7 @@ pub(crate) async fn run(
     let plugins = match p02_plugins::list::plugins() {
         Ok(listed) => listed
             .iter()
-            .map(|(manifest, factory)| Plugin::new(manifest.clone(), *factory))
+            .map(|(manifest, check, factory)| Plugin::new(manifest.clone(), *check, *factory))
             .collect(),
         Err(error) => return failed(console, error),
     };

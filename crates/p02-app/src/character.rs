@@ -34,16 +34,16 @@ use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::reconcile::settings_now;
 
-/// The sentence a character without a model gives, which the settings
-/// page answers.
-const NO_PROVIDER: &str = "No model provider is chosen. Choose one on the settings page.";
+/// What a character whose settings choose no AI service needs, which the
+/// settings page answers.
+const NO_SERVICE: &str = "Choose an AI service.";
 
 /// What a character's actor publishes of her, read without a round trip.
 #[derive(Clone, Debug)]
 pub(crate) struct CharacterHealth {
     pub(crate) state: CharacterState,
-    /// Why she failed, while she is failed; what her start warned of, while
-    /// she is ready.
+    /// Why she failed, while she is failed; what she needs, while she needs
+    /// a model; what her start warned of, while she is ready.
     pub(crate) diagnostic: Option<String>,
     pub(crate) maintenance: Option<MaintenanceFailure>,
 }
@@ -129,12 +129,13 @@ impl CharacterHandle {
         self.commands.is_closed()
     }
 
-    /// Whether a line queued for her now is one she takes: she is starting
-    /// or ready, and no failure of hers waits for the person.
+    /// Whether a line queued for her now is one she takes: she is starting,
+    /// ready, or waits for a model, and no failure of hers waits for the
+    /// person.
     pub(crate) fn takes_lines(&self) -> bool {
         matches!(
             self.health.borrow().state,
-            CharacterState::Starting | CharacterState::Ready
+            CharacterState::Starting | CharacterState::Ready | CharacterState::NeedsModel
         )
     }
 
@@ -145,7 +146,10 @@ impl CharacterHandle {
 
     /// Answered once her start settles. A boot in flight is joined, so a
     /// failure it ends in is answered and not tried again; otherwise she is
-    /// asked, and boots again when she has failed.
+    /// asked: she boots again when she has failed, and is brought up to
+    /// date with her settings when she is built, ready or waiting for a
+    /// model, unless a turn of hers runs, which meets them before its next
+    /// request.
     pub(crate) async fn start(&self) {
         let starting = |health: &CharacterHealth| health.state == CharacterState::Starting;
         let mut health = self.health.clone();
@@ -224,16 +228,16 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 
 /// What she is built of, from her package and her settings as they were
 /// when she was built: who she is, her data, the name the person goes by,
-/// the model and the plugins she answers with, her model's window, and
-/// those settings, which her next request compares with what they say
-/// then.
+/// the model she answers with, or what she needs for one, the plugins she
+/// answers with, her model's window, and those settings, which her next
+/// request compares with what they say then.
 #[derive(Debug)]
 struct Built {
     character: Character,
     data: CharacterData,
     person: SpeakerName,
     context_window: NonZeroU64,
-    adapter: Arc<dyn RoleModelAdapter>,
+    model: Result<Arc<dyn RoleModelAdapter>, String>,
     host: PluginHost,
     settings: CharacterSettings,
 }
@@ -246,16 +250,18 @@ struct Parts {
     thread: Option<Conversation>,
 }
 
-/// A character built, and what her start warns of.
+/// A character built, and the state that leaves her in: ready, with what
+/// her start warns of, or waiting for a model.
 struct Assembled {
     built: Built,
-    warning: Option<String>,
+    state: Change,
 }
 
 /// A change of her state, with what it carries.
 enum Change {
     Starting,
     Ready { warning: Option<String> },
+    NeedsModel(String),
     Failed(String),
     Stopping,
     Stopped { failures: Option<String> },
@@ -305,8 +311,14 @@ impl Actor {
     async fn handle(&mut self, command: Command) {
         match command {
             Command::Start(reply) => {
-                if self.her.state() == CharacterState::Failed {
-                    self.boot().await;
+                match self.her.state() {
+                    CharacterState::Failed => self.boot().await,
+                    CharacterState::Ready | CharacterState::NeedsModel => {
+                        if let Ok(parts) = self.current().await {
+                            self.parts = Some(parts);
+                        }
+                    }
+                    _ => {}
                 }
 
                 let _ = reply.send(());
@@ -321,12 +333,12 @@ impl Actor {
     }
 
     /// Takes the oldest line in her inbox through her thread, while she is
-    /// ready and her settings still build her: true when she took one. The
-    /// line leaves her inbox once its turn ends, however it ended, and only
-    /// then is the end announced, so a client that hears it and sends the
-    /// line again is answered as her thread has it. A turn the runtime
-    /// fails leaves her failed, and she is built again behind it; her inbox
-    /// failing fails her.
+    /// ready and her settings still build her with a model: true when she
+    /// took one. The line leaves her inbox once its turn ends, however it
+    /// ended, and only then is the end announced, so a client that hears it
+    /// and sends the line again is answered as her thread has it. A turn
+    /// the runtime fails leaves her failed, and she is built again behind
+    /// it; her inbox failing fails her.
     async fn take_next(&mut self) -> bool {
         let Some(line) = self.oldest_queued().await else {
             return false;
@@ -334,13 +346,16 @@ impl Actor {
         let Ok(mut parts) = self.current().await else {
             return false;
         };
-
-        if self.her.stop.is_cancelled() {
-            self.parts = Some(parts);
-            return false;
-        }
-
-        let taken = self.turn(&mut parts, &line).await;
+        let adapter = match &parts.built.model {
+            Ok(adapter) if !self.her.stop.is_cancelled() => Arc::clone(adapter),
+            // Her stop came, or her settings no longer give her a model:
+            // the line waits in her inbox.
+            _ => {
+                self.parts = Some(parts);
+                return false;
+            }
+        };
+        let taken = self.turn(&mut parts, adapter, &line).await;
         let data = parts.built.data.clone();
 
         self.parts = Some(parts);
@@ -370,11 +385,13 @@ impl Actor {
     }
 
     /// Takes `line` through her thread on `parts`, opened before the turn
-    /// begins, while she still hears what she is asked: an open of her
-    /// thread is answered at once, and so is a start, since she runs.
+    /// begins, with `adapter` her model, while she still hears what she is
+    /// asked: an open of her thread is answered at once, and so is a start,
+    /// since she runs.
     async fn turn(
         &mut self,
         parts: &mut Parts,
+        adapter: Arc<dyn RoleModelAdapter>,
         line: &QueuedLine,
     ) -> Result<(Delivery, bool), Ending> {
         let Parts { built, thread } = parts;
@@ -385,7 +402,7 @@ impl Actor {
             conversation_id: thread.id().clone(),
             character_id: self.her.id.clone(),
         };
-        let mut turn = std::pin::pin!(take_line(&self.her, thread, built, line));
+        let mut turn = std::pin::pin!(take_line(&self.her, thread, built, adapter, line));
 
         loop {
             tokio::select! {
@@ -433,12 +450,20 @@ impl Actor {
         }
     }
 
-    /// Her parts to use, brought up to date with her settings first; or
-    /// the sentence she refuses with while she is not ready, or once her
-    /// settings no longer build her, which fails her.
+    /// Her parts to use, brought up to date with her settings first, which
+    /// may leave her with a model or without one; or the sentence she
+    /// refuses with while she is not built, or once her settings no longer
+    /// build her, which fails her.
     async fn current(&mut self) -> Result<Parts, String> {
         let mut parts = match self.parts.take() {
-            Some(parts) if self.her.state() == CharacterState::Ready => parts,
+            Some(parts)
+                if matches!(
+                    self.her.state(),
+                    CharacterState::Ready | CharacterState::NeedsModel
+                ) =>
+            {
+                parts
+            }
             unready => {
                 self.parts = unready;
                 return Err(self.her.not_ready());
@@ -458,12 +483,12 @@ impl Actor {
         self.her.publish(Change::Starting);
 
         match self.her.assemble().await {
-            Ok(Assembled { built, warning }) => {
+            Ok(Assembled { built, state }) => {
                 self.parts = Some(Parts {
                     built,
                     thread: None,
                 });
-                self.her.settle(Change::Ready { warning });
+                self.her.settle(state);
             }
             Err(failure) => self.her.settle(Change::Failed(failure)),
         }
@@ -674,6 +699,11 @@ impl Her {
         let (state, diagnostic, message) = match change {
             Change::Starting => (CharacterState::Starting, None, None),
             Change::Ready { warning } => (CharacterState::Ready, warning, None),
+            Change::NeedsModel(needed) => (
+                CharacterState::NeedsModel,
+                Some(needed.clone()),
+                Some(needed),
+            ),
             Change::Failed(failure) => {
                 (CharacterState::Failed, Some(failure.clone()), Some(failure))
             }
@@ -739,9 +769,9 @@ impl Her {
     /// Brings `built` up to date with her settings: she is built again, as
     /// her boot builds her, when what they say now is not what she was
     /// built from, unless they now switch her off, which her stop answers
-    /// once the turn in flight ends. True when she was built again; what
-    /// she ran on until then is let go, what failed of that noted as
-    /// maintenance.
+    /// once the turn in flight ends. True when she was built again, with a
+    /// model or waiting for one; what she ran on until then is let go, what
+    /// failed of that noted as maintenance.
     ///
     /// # Errors
     ///
@@ -761,20 +791,21 @@ impl Her {
 
         let Assembled {
             built: rebuilt,
-            warning,
+            state,
         } = self.assemble().await?;
 
         self.noted(&std::mem::replace(built, rebuilt).shut_down().await);
-        self.settle(Change::Ready { warning });
+        self.settle(state);
         Ok(true)
     }
 }
 
 /// Her parts as a turn runs on them, brought up to date with her settings
-/// before each of its requests after the first.
+/// before each of its requests after the first, and the model it runs on.
 struct Current<'a> {
     her: &'a Her,
     built: &'a mut Built,
+    adapter: Arc<dyn RoleModelAdapter>,
 }
 
 #[async_trait]
@@ -784,7 +815,7 @@ impl Mind for Current<'_> {
     }
 
     fn adapter(&self) -> &dyn RoleModelAdapter {
-        self.built.adapter.as_ref()
+        self.adapter.as_ref()
     }
 
     fn host(&self) -> &PluginHost {
@@ -795,8 +826,13 @@ impl Mind for Current<'_> {
         self.built.context_window
     }
 
+    /// Settings that no longer give her a model end the turn, as settings
+    /// that no longer build her do.
     async fn refresh(&mut self) -> Result<bool, String> {
-        self.her.refresh(self.built).await
+        let rebuilt = self.her.refresh(self.built).await?;
+
+        self.adapter = self.built.model.clone()?;
+        Ok(rebuilt)
     }
 }
 
@@ -822,14 +858,15 @@ impl Parts {
     }
 }
 
-/// Takes `line` through `thread`, as `built` answers it: what the runtime
-/// made of it, and whether the line was heard committed. The stream is told
-/// the turn as it goes: each message and tool call, and the turn as it runs
-/// whenever that changes.
+/// Takes `line` through `thread`, as `built` answers it through `adapter`:
+/// what the runtime made of it, and whether the line was heard committed.
+/// The stream is told the turn as it goes: each message and tool call, and
+/// the turn as it runs whenever that changes.
 async fn take_line(
     her: &Her,
     thread: &mut Conversation,
     built: &mut Built,
+    adapter: Arc<dyn RoleModelAdapter>,
     line: &QueuedLine,
 ) -> (Delivery, bool) {
     let committed = AtomicBool::new(false);
@@ -862,7 +899,11 @@ async fn take_line(
                 source: line.source.clone(),
                 client_message_id: line.client_message_id.clone(),
             },
-            &mut Current { her, built },
+            &mut Current {
+                her,
+                built,
+                adapter,
+            },
             &listener,
         )
         .await;
@@ -898,9 +939,9 @@ async fn hold<'t>(
 /// Assembles character `id` from what the disk holds now: her package, her
 /// settings, which must be readable, hold nothing that stops her, and
 /// switch her on before anything is written for her, her package's
-/// settings merged into her overlay, her model, and her host built with
-/// `broker` to ask the person and her settings for its own plugin to read
-/// and change, through `daemon`.
+/// settings merged into her overlay, her model, or what she needs for one,
+/// and her host built with `broker` to ask the person and her settings for
+/// its own plugin to read and change, through `daemon`.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -923,8 +964,7 @@ fn assemble(
 
     if !settings.host().enabled {
         return Err(format!(
-            "Character \"{id}\" is disabled. Set project02.enabled to true in its character \
-             config, or remove the global project02.enabled."
+            "Character \"{id}\" is switched off. Switch her on in her settings to start her."
         ));
     }
 
@@ -935,7 +975,7 @@ fn assemble(
         world.durations.settings_lock,
     )
     .map_err(|error| unmaterialized(id, error))?;
-    let adapter = model(world, settings.host())?;
+    let model = model(world, settings.host());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let host = settings
         .plugins()
@@ -954,7 +994,12 @@ fn assemble(
         .map_err(|error| error_sentence(&error))?;
 
     Ok(Assembled {
-        warning: (!cautions.is_empty()).then(|| cautions.join(" ")),
+        state: match &model {
+            Ok(_) => Change::Ready {
+                warning: (!cautions.is_empty()).then(|| cautions.join(" ")),
+            },
+            Err(needed) => Change::NeedsModel(needed.clone()),
+        },
         built: Built {
             character: Character {
                 profile: definition.profile.clone(),
@@ -963,7 +1008,7 @@ fn assemble(
             data,
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,
-            adapter,
+            model,
             host,
             settings,
         },
@@ -971,9 +1016,13 @@ fn assemble(
 }
 
 /// Her model: the one the test switch puts in every character's place,
-/// else the provider her settings choose, else none, which she cannot
-/// start without.
-fn model(world: &World, host: &HostSettings) -> Result<Arc<dyn RoleModelAdapter>, String> {
+/// else the service her settings choose, built; or the sentence saying
+/// what they need for one. Her settings' view asks this too, so the page
+/// says what she says.
+pub(crate) fn model(
+    world: &World,
+    host: &HostSettings,
+) -> Result<Arc<dyn RoleModelAdapter>, String> {
     if let Some(adapter) = &world.test_provider {
         return Ok(Arc::clone(adapter));
     }
@@ -988,7 +1037,7 @@ fn model(world: &World, host: &HostSettings) -> Result<Arc<dyn RoleModelAdapter>
 
     match select_adapter(None, nvidia.as_ref(), world.durations.model_silence) {
         Ok(Some(adapter)) => Ok(adapter),
-        Ok(None) => Err(NO_PROVIDER.to_owned()),
+        Ok(None) => Err(NO_SERVICE.to_owned()),
         Err(error) => Err(error_sentence(&error)),
     }
 }

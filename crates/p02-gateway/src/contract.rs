@@ -17,15 +17,17 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    Answer, AnswerBody, CancelReason, ChangeOutcome, ChangeRefusal, CharacterState,
-    CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer,
-    ConfirmationId, ConfirmationQuestion, ConnectorConfigView, ConnectorPresence, ConnectorRefusal,
-    ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
-    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
-    RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal, StorageFailure,
-    SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    Answer, AnswerBody, BotState, BotUsername, CancelReason, ChangeOutcome, ChangeRefusal,
+    CharacterState, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
+    ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
+    ConnectorBotsOutcome, ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence,
+    ConnectorRefusal, ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome,
+    HistoryRefusal, MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal,
+    PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal,
+    PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion,
+    Ready, Refusal, RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal,
+    StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
+    TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -55,6 +57,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<ChangeOutcome>();
     wire.written::<ConnectorConfigView>();
     wire.written::<PairingOutcome>();
+    wire.written::<ConnectorBotsOutcome>();
     wire.written::<PairingRequest>();
     wire.written::<PairingAnswer>();
     wire.written::<ErrorBody>();
@@ -67,6 +70,7 @@ fn walk(wire: &mut impl Wire) {
     wire.read::<GatewayMessage>();
     wire.read::<AnswerBody>();
     wire.read::<PairingRequestBody>();
+    wire.read::<ConnectorBotsBody>();
     wire.read::<ConfigChange>();
     wire.read::<ConfigTarget>();
 }
@@ -311,6 +315,19 @@ fn read() -> Vec<(&'static str, Value)> {
                 "source": "telegram:mira_bot",
             }),
         ),
+        reads::<ConnectorBotsBody>(
+            "ConnectorBotsBody",
+            json!({
+                "bots": [
+                    {
+                        "target": {"scope": "character", "characterId": "mira"},
+                        "username": "mira_bot",
+                        "state": "on",
+                    },
+                    {"target": {"scope": "global"}, "state": "refused"},
+                ],
+            }),
+        ),
         reads::<ConfigChange>(
             "ConfigChange",
             json!({
@@ -357,13 +374,27 @@ fn written() -> Vec<(&'static str, Value)> {
             id: id("mira"),
             display_name: mira.clone(),
             enabled: true,
-            state: RosterState::NotStarted,
-            diagnostic: Some("No model provider is chosen.".to_owned()),
+            state: RosterState::NeedsModel,
+            diagnostic: Some("Choose an AI service.".to_owned()),
             maintenance: Some(maintenance.clone()),
         }],
         connectors: vec![ConnectorPresence {
             id: id("telegram"),
-            connected: false,
+            connected: true,
+            bots: vec![
+                ConnectorBot {
+                    target: ConfigTarget::Global,
+                    username: None,
+                    state: BotState::Unreachable,
+                },
+                ConnectorBot {
+                    target: ConfigTarget::Character {
+                        character_id: "mira".to_owned(),
+                    },
+                    username: Some(BotUsername::new("mira_bot").unwrap()),
+                    state: BotState::On,
+                },
+            ],
         }],
     };
     let turn = TurnStamp {
@@ -377,8 +408,8 @@ fn written() -> Vec<(&'static str, Value)> {
         request: ConfirmationQuestion {
             plugin_id: id("runtime.plugin"),
             tool_name: id("runtime.plugin.config_update"),
-            summary: "Turn the demo plugin on.".to_owned(),
-            preview: json!({"enabled": true}).as_object().unwrap().clone(),
+            summary: "Change her tone.".to_owned(),
+            preview: json!({"fieldName": "tone"}).as_object().unwrap().clone(),
         },
         deadline_at: 1_793_000_000_000,
         turn: Some(turn.clone()),
@@ -566,6 +597,14 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "Unknown connector \"discord\". Connectors: telegram.".to_owned(),
             },
         ),
+        read_back("ConnectorBotsOutcome", &ConnectorBotsOutcome::Kept),
+        read_back(
+            "ConnectorBotsOutcome",
+            &ConnectorBotsOutcome::Refused {
+                reason: ConnectorBotsRefusal::NotConnected,
+                message: "Connector \"telegram\" has no event stream open.".to_owned(),
+            },
+        ),
         read_back(
             "PairingSettleOutcome",
             &PairingAnswer::Settled {
@@ -599,7 +638,7 @@ fn written() -> Vec<(&'static str, Value)> {
 
 /// The settings of a home whose documents each name a connector this build
 /// lacks, a warning of the home's and one of Mira's overlay: the home's view,
-/// Mira's, and Telegram's read.
+/// whose model is not set up, Mira's, and Telegram's read.
 fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let directory = tempfile::TempDir::new().unwrap();
     let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
@@ -621,12 +660,14 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
         p02_plugins::list::plugins()
             .unwrap()
             .iter()
-            .map(|(manifest, _)| manifest.clone()),
+            .map(|(manifest, check, _)| (manifest.clone(), *check)),
     );
     let discovery = discover(home.root());
 
     (
-        config_view(&home, &sections, &discovery, &ConfigTarget::Global),
+        config_view(&home, &sections, &discovery, &ConfigTarget::Global, |_| {
+            Err("Choose an AI service.".to_owned())
+        }),
         config_view(
             &home,
             &sections,
@@ -634,6 +675,7 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
             &ConfigTarget::Character {
                 character_id: mira.to_string(),
             },
+            |_| Ok(()),
         ),
         connector_config_view(&home, &sections, &discovery, "telegram"),
     )

@@ -25,6 +25,7 @@ import {
 
 type Field = {
   readonly name: string;
+  readonly label?: string;
   readonly authored: {readonly configured: boolean; readonly value?: unknown};
   readonly effectiveSource: string;
   readonly effective: {readonly source: string; readonly value?: unknown};
@@ -35,6 +36,7 @@ type Section = {
   readonly id: string;
   readonly enabled: boolean;
   readonly fields: readonly Field[];
+  readonly layout: readonly object[];
 };
 
 type View = {
@@ -65,7 +67,7 @@ function homeDocument(home: string): string {
   return readFileSync(join(home, 'config.json'), 'utf8');
 }
 
-/** The line of the model's system messages where demo-config names the tone. */
+/** The line of the model's system messages where her reply style names the tone. */
 function toneIn(request: ModelRequest | undefined): string | undefined {
   return messagesOf(request)
     .filter(message => message.role === 'system')
@@ -73,7 +75,7 @@ function toneIn(request: ModelRequest | undefined): string | undefined {
     .find(line => line.includes(' tone'));
 }
 
-it("config.view-global: the home's view lists the host fields in page order, each with what the home authored, what is in effect and where it comes from, every section the home may set, the document's diagnostics and a fingerprint", async () => {
+it("config.view-global: the home's view lists the host fields the home may set in page order, each with its label, what the home authored, what is in effect and where it comes from, every section the home may set with how a page draws it and its fields laid out in cards, the document's diagnostics and a fingerprint", async () => {
   const wire = wireOf(
     await startDaemon(
       createHome({
@@ -106,6 +108,7 @@ it("config.view-global: the home's view lists the host fields in page order, eac
     project02: [
       {
         name: 'userDisplayName',
+        label: 'Name',
         authored: {configured: true, value: 'Robin'},
         effectiveSource: 'global',
         effective: {source: 'config', value: 'Robin'},
@@ -120,39 +123,53 @@ it("config.view-global: the home's view lists the host fields in page order, eac
         effectiveSource: 'default',
         effective: {source: 'default', value: 32768},
       },
-      unset('defaultMemoryProvider'),
-      {
-        name: 'enabled',
-        authored: {configured: false},
-        effectiveSource: 'default',
-        effective: {source: 'default', value: true},
-      },
     ],
   });
   expect(
     view.sections.map(section => `${section.namespace}.${section.id}`),
   ).toEqual([
     'plugins.character-memory',
-    'plugins.demo-config',
     'plugins.mem0',
     'plugins.runtime.plugin',
     'plugins.session-history',
     'connectors.telegram',
+  ]);
+  expect(sectionOf(view, 'mem0')).toMatchObject({
+    displayName: 'Long-Term Memory',
+    page: {
+      summary: 'Remembers across all chats',
+      icon: 'archive',
+      tint: 'brown',
+      placement: 'mind_body',
+      order: 3,
+      connection: 'Memory',
+    },
+    access: {network: 'write'},
+  });
+  expect(sectionOf(view, 'mem0')?.layout.slice(0, 2)).toEqual([
+    {advanced: false, rows: [{field: 'backend'}]},
+    {
+      footer: 'Get a key at app.mem0.ai.',
+      advanced: false,
+      when: {field: 'backend', is: ['platform']},
+      rows: [{field: 'apiKey'}],
+    },
   ]);
 });
 
 it('config.change-ops: set, unset, section_enabled and a section field set and unset each answer applied with the new fingerprint, which the next view carries with the change in it', async () => {
   const wire = wireOf(await startDaemon(createHome()));
   const settingsIn = (view: View) => {
-    const section = sectionOf(view, 'demo-config');
+    const section = sectionOf(view, 'mem0');
 
     return {
       userDisplayName: hostField(view, 'userDisplayName')?.authored,
-      demoConfigEnabled: section?.enabled,
-      tone: section?.fields.find(field => field.name === 'tone')?.authored,
+      memoryEnabled: section?.enabled,
+      backend: section?.fields.find(field => field.name === 'backend')
+        ?.authored,
     };
   };
-  const demoConfig = {namespace: 'plugins', id: 'demo-config'};
+  const memory = {namespace: 'plugins', id: 'mem0'};
   const unauthored = {configured: false};
 
   for (const [operation, after] of [
@@ -160,29 +177,29 @@ it('config.change-ops: set, unset, section_enabled and a section field set and u
       {kind: 'set', path: 'project02.userDisplayName', value: 'Robin'},
       {
         userDisplayName: {configured: true, value: 'Robin'},
-        demoConfigEnabled: false,
-        tone: unauthored,
+        memoryEnabled: false,
+        backend: unauthored,
       },
     ],
     [
       {kind: 'unset', path: 'project02.userDisplayName'},
-      {userDisplayName: unauthored, demoConfigEnabled: false, tone: unauthored},
+      {userDisplayName: unauthored, memoryEnabled: false, backend: unauthored},
     ],
     [
-      {kind: 'section_enabled', ...demoConfig, enabled: true},
-      {userDisplayName: unauthored, demoConfigEnabled: true, tone: unauthored},
+      {kind: 'section_enabled', ...memory, enabled: true},
+      {userDisplayName: unauthored, memoryEnabled: true, backend: unauthored},
     ],
     [
-      {kind: 'section_field_set', ...demoConfig, field: 'tone', value: 'warm'},
+      {kind: 'section_field_set', ...memory, field: 'backend', value: 'server'},
       {
         userDisplayName: unauthored,
-        demoConfigEnabled: true,
-        tone: {configured: true, value: 'warm'},
+        memoryEnabled: true,
+        backend: {configured: true, value: 'server'},
       },
     ],
     [
-      {kind: 'section_field_unset', ...demoConfig, field: 'tone'},
-      {userDisplayName: unauthored, demoConfigEnabled: true, tone: unauthored},
+      {kind: 'section_field_unset', ...memory, field: 'backend'},
+      {userDisplayName: unauthored, memoryEnabled: true, backend: unauthored},
     ],
   ] as const) {
     const before = await viewOf(wire, {scope: 'global'});
@@ -236,13 +253,13 @@ it('config.change-refusals: a value of the wrong type or outside its allowed val
       {kind: 'set', path: 'project02.contextWindowTokens', value: 'many'},
     ],
     [
-      'tone',
+      'backend',
       {
         kind: 'section_field_set',
         namespace: 'plugins',
-        id: 'demo-config',
-        field: 'tone',
-        value: 'shouty',
+        id: 'mem0',
+        field: 'backend',
+        value: 'cloud',
       },
     ],
   ] as const) {
@@ -289,38 +306,37 @@ it('config.write-failed: a change to a home that cannot be written answers faile
 
 it("config.overlay-merge: what a character's screen saves is written into her overlay alone and overrides the home's values for her field by field, a plugin's switch and a key among them, while the home's values stand in for what she leaves unset", async () => {
   const model = await startModelServer();
+  const switchedOff = {
+    'config.json': configJson({project02: {enabled: false}}),
+  };
   const home = createHome({
     'config.json': configJson({
       project02: {
         ...model.settings,
         userDisplayName: 'Robin',
         contextWindowTokens: 8192,
-        enabled: false,
       },
-      plugins: {
-        'demo-config': {enabled: false, config: {tone: 'warm', signoff: '-R'}},
-      },
+      plugins: {'session-history': {enabled: false}},
     }),
     characters: {
       zeta: {'project02.character.json': characterJson('zeta', 'Zeta')},
     },
+    'character-data': {mira: switchedOff, zeta: switchedOff},
   });
   const wire = wireOf(await startDaemon(home));
   const zeta = {scope: 'character', characterId: 'zeta'} as const;
-  const demoConfig = {namespace: 'plugins', id: 'demo-config'};
   const homeBefore = homeDocument(home);
 
   // Switched on last, each starts once, on all she was given.
   for (const [target, operation] of [
     [mira, {kind: 'set', path: 'project02.userDisplayName', value: 'Sam'}],
-    [mira, {kind: 'section_enabled', ...demoConfig, enabled: true}],
     [
       mira,
       {
-        kind: 'section_field_set',
-        ...demoConfig,
-        field: 'tone',
-        value: 'formal',
+        kind: 'section_enabled',
+        namespace: 'plugins',
+        id: 'session-history',
+        enabled: true,
       },
     ],
     [zeta, {kind: 'set', path: 'project02.nvidiaApiKey', value: 'zeta-key'}],
@@ -333,7 +349,6 @@ it("config.overlay-merge: what a character's screen saves is written into her ov
   expect(homeDocument(home)).toBe(homeBefore);
 
   const view = await viewOf(wire, mira);
-  const demoConfigOfHers = sectionOf(view, 'demo-config');
 
   expect(hostField(view, 'userDisplayName')).toMatchObject({
     effectiveSource: 'character',
@@ -344,19 +359,16 @@ it("config.overlay-merge: what a character's screen saves is written into her ov
     effectiveSource: 'global',
     effective: {value: 8192},
   });
-  expect(demoConfigOfHers).toMatchObject({
+  expect(sectionOf(view, 'session-history')).toMatchObject({
     enabled: true,
     enabledSource: 'character',
     activation: {status: 'active'},
   });
-  expect(
-    demoConfigOfHers?.fields
-      .filter(field => ['tone', 'signoff'].includes(field.name))
-      .map(field => [field.name, field.effectiveSource, field.effective.value]),
-  ).toEqual([
-    ['tone', 'character', 'formal'],
-    ['signoff', 'global', '-R'],
-  ]);
+  expect(sectionOf(await viewOf(wire, zeta), 'session-history')).toMatchObject({
+    enabled: false,
+    enabledSource: 'global',
+    activation: {status: 'disabled'},
+  });
 
   for (const [characterId, key] of [
     ['mira', 'model-server-key'],
@@ -376,10 +388,14 @@ it("config.applied-reload: a change saved while her reply runs is in effect from
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({
-      'config.json': configJson({
-        project02: model.settings,
-        plugins: {'demo-config': {enabled: true}},
-      }),
+      'config.json': configJson({project02: model.settings}),
+      'character-data': {
+        mira: {
+          'config.json': configJson({
+            plugins: {'reply-style': {enabled: true}},
+          }),
+        },
+      },
     }),
   );
   const wire = wireOf(daemon);
@@ -392,7 +408,7 @@ it("config.applied-reload: a change saved while her reply runs is in effect from
   await saveConfig(wire, mira, {
     kind: 'section_field_set',
     namespace: 'plugins',
-    id: 'demo-config',
+    id: 'reply-style',
     field: 'tone',
     value: 'pirate',
   });
@@ -465,14 +481,14 @@ it('config.enabled-switch: switching a character off through a change says so at
 it("config.secret-redaction: no secret appears in the home's view or a character's, only [redacted]: the model's key, a plugin's and the Telegram tokens", async () => {
   const secrets = [
     'nvapi-home-secret',
-    'demo-key-secret',
+    'mem0-key-secret',
     '123456:management-secret',
     '987654:mira-secret',
   ];
   const home = createHome({
     'config.json': configJson({
       project02: {nvidiaApiKey: 'nvapi-home-secret'},
-      plugins: {'demo-config': {config: {apiKey: 'demo-key-secret'}}},
+      plugins: {mem0: {config: {apiKey: 'mem0-key-secret'}}},
       connectors: {
         telegram: {config: {managementBotToken: '123456:management-secret'}},
       },
@@ -495,7 +511,7 @@ it("config.secret-redaction: no secret appears in the home's view or a character
     authored: {value: '[redacted]'},
     effective: {value: '[redacted]'},
   });
-  expect(sectionField(homeView, 'demo-config', 'apiKey')).toMatchObject({
+  expect(sectionField(homeView, 'mem0', 'apiKey')).toMatchObject({
     authored: {value: '[redacted]'},
   });
   expect(

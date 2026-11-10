@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use p02_shared::Identifier;
+use p02_wire::{AccessLevel, AccessName};
 use serde_json::{Map, Value};
 
 use crate::capability::{DatabaseError, SessionHistoryError, StoreError};
@@ -12,7 +13,7 @@ use crate::context::HookContext;
 use crate::manifest::Manifest;
 use crate::output::{BeforeRoleModelCallOutput, CommittedTurn, HookReport};
 use crate::tool::{ProvidedTool, ToolCall, ToolCallOutcome, ToolPreparation};
-use crate::vocabulary::{AccessLevel, AccessName, Declaration};
+use crate::vocabulary::Declaration;
 
 /// A plugin compiled into the daemon. Which plugins run is decided by the
 /// settings when a character starts, so the host keeps them in one list of
@@ -292,6 +293,11 @@ impl<'a> FactoryInput<'a> {
 
 /// Builds one instance of a plugin.
 pub type PluginFactory = fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError>;
+
+/// Whether a plugin's config is enough to build it, answered by the code
+/// its factory builds it with; while it is not, the sentence says what to
+/// fill in, in the words of the settings page.
+pub type SetupCheck = fn(&ResolvedConfig) -> Result<(), String>;
 
 #[cfg(test)]
 mod tests {
