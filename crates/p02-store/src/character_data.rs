@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use p02_characters::CharacterVersion;
 use p02_core::Timestamp;
-use p02_shared::{Identifier, create_directories};
+use p02_shared::{Identifier, PathEntry, create_directories, describe_entry};
 
 use crate::error::StorageError;
 use crate::home::{Home, check_real};
@@ -77,6 +77,17 @@ impl CharacterData {
         checked_marker(home, &root)?
             .map(|marker| Self::of_marker(home, character, root, marker))
             .transpose()
+    }
+
+    /// Whether `character` has a data directory in `home`, marked or not:
+    /// she was here before, and what she left there is hers again once she
+    /// is back. Nothing is judged or written.
+    #[must_use]
+    pub fn exists(home: &Home, character: &Identifier) -> bool {
+        !matches!(
+            describe_entry(&home.data_root(character)),
+            PathEntry::Absent
+        )
     }
 
     #[must_use]

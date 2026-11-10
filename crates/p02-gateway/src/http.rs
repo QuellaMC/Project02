@@ -15,7 +15,7 @@ use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, HOST, ORIGI
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use p02_app::{Daemon, HistoryPage, Message};
 use p02_config::connector;
 use p02_core::SpeakerName;
@@ -115,6 +115,9 @@ impl App {
 pub(crate) fn router(app: App) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/character-preview", post(preview_character))
+        .route("/api/characters", post(add_character))
+        .route("/api/characters/{id}", delete(remove_character))
         .route("/api/characters/{id}/start", post(start))
         .route("/api/conversations/open", post(open))
         .route("/api/turns", post(turn))
@@ -245,6 +248,29 @@ async fn health(State(app): State<App>) -> Response {
 
 async fn start(State(app): State<App>, Path(id): Path<String>) -> Response {
     answer(&app.0.daemon.start_character(&id).await)
+}
+
+/// The body is a character file as the person's file holds it, which the
+/// descriptor's own parser judges.
+async fn preview_character(
+    State(app): State<App>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match within_cap(body) {
+        Ok(file) => answer(&app.0.daemon.preview_character(file.to_vec()).await),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn add_character(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {
+    match within_cap(body) {
+        Ok(file) => answer(&app.0.daemon.add_character(file.to_vec()).await),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn remove_character(State(app): State<App>, Path(id): Path<String>) -> Response {
+    answer(&app.0.daemon.remove_character(&id).await)
 }
 
 async fn open(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {
@@ -420,18 +446,23 @@ fn read<T: DeserializeOwned>(
     subject: &str,
     body: Result<Bytes, BytesRejection>,
 ) -> Result<T, Refused> {
-    let body = body.map_err(|rejection| match rejection {
-        BytesRejection::FailedToBufferBody(FailedToBufferBody::LengthLimitError(_)) => {
-            Refused::too_large()
-        }
-        _ => Refused::unreadable(),
-    })?;
+    let body = within_cap(body)?;
 
     // Read as JSON first, so that a refusal of its shape names no place in
     // the text, which a person reads as noise.
     serde_json::from_slice::<Value>(&body)
         .and_then(serde_json::from_value::<T>)
         .map_err(|error| Refused::invalid(format!("{subject}: {error}.")))
+}
+
+/// The body of a request, read whole within the cap.
+fn within_cap(body: Result<Bytes, BytesRejection>) -> Result<Bytes, Refused> {
+    body.map_err(|rejection| match rejection {
+        BytesRejection::FailedToBufferBody(FailedToBufferBody::LengthLimitError(_)) => {
+            Refused::too_large()
+        }
+        _ => Refused::unreadable(),
+    })
 }
 
 /// The first value of `name` in the query.

@@ -16,6 +16,7 @@ mod layout;
 mod lock;
 mod log;
 mod marker;
+mod packages;
 mod plugin_files;
 mod record;
 mod replay;
@@ -38,6 +39,7 @@ pub use layout::EntryKind;
 pub use lock::Lease;
 pub use log::{SessionLog, SessionWriter};
 pub use marker::{MarkerProblem, Scope};
+pub use packages::HeldPackage;
 pub use plugin_files::{FileKind, ValueProblem};
 pub use record::{
     AfterTurnCommitted, ContinuedFrom, EventReceived, Judgement, LogRecord, MessageCommitted,

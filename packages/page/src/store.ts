@@ -924,6 +924,7 @@ function summaryOf(
     id: character.id,
     displayName: character.displayName,
     enabled: character.enabled,
+    builtIn: character.builtIn,
     state,
     ...(diagnostic === undefined ? {} : {diagnostic}),
     ...(character.maintenance === undefined || state === 'starting'

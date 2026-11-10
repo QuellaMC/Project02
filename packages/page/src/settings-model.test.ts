@@ -261,12 +261,14 @@ const mira: CharacterSummary = {
   id: 'mira',
   displayName: 'Mira',
   enabled: true,
+  builtIn: true,
   state: 'ready',
 };
 const nova: CharacterSummary = {
   id: 'nova',
   displayName: 'Nova',
   enabled: false,
+  builtIn: false,
   state: 'not_started',
 };
 

@@ -8,6 +8,7 @@ mod conversation;
 mod diagnostic;
 mod event;
 mod health;
+mod packages;
 mod pairing;
 mod protocol;
 mod refusal;
@@ -38,6 +39,11 @@ pub use event::{
 pub use health::{
     CharacterState, CharacterSummary, ConfigHealth, ConnectorPresence, Health, MaintenanceFailure,
     PackageReport, PackagesHealth, RosterState, StartOutcome, StartRefusal,
+};
+pub use packages::{
+    AddCharacterOutcome, AddCharacterRefusal, CharacterFeature, CharacterInstalled,
+    CharacterPreviewOutcome, CharacterPreviewRefusal, RemoveCharacterOutcome,
+    RemoveCharacterRefusal,
 };
 pub use pairing::{
     PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,

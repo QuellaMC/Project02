@@ -15,6 +15,7 @@ mod feed;
 mod generated;
 mod history;
 mod layout;
+mod packages;
 mod plugin_files;
 mod records;
 mod support;

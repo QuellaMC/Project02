@@ -323,8 +323,10 @@
             <td><code>GET /api/health</code></td>
             <td>
               → <code>GatewayHealth</code>: protocol version, home root, config
-              and package diagnostics, the roster with each character's state
-              and last maintenance failure, and <code>connectors</code>: for
+              and package diagnostics, the roster with each character's state,
+              whether she comes with the app (<code>builtIn</code>: she can be
+              switched off, never removed) and her last maintenance failure,
+              and <code>connectors</code>: for
               each built-in connector, whether a process of it is on the stream,
               and the bots it last said it runs.
             </td>
@@ -339,6 +341,61 @@
               <code>refused</code> (<code>unknown_character</code>,
               <code>gateway_stopped</code>). The operator's retry; the daemon
               boots the roster itself.
+            </td>
+          </tr>
+          <tr>
+            <td>preview character</td>
+            <td><code>POST /api/character-preview</code></td>
+            <td>
+              A character file, the body being the file as the person's file
+              holds it → <code>CharacterPreviewOutcome</code>:
+              <code>ok</code> with her <code>id</code>,
+              <code>displayName</code>, <code>version</code>,
+              <code>about</code> when the file has one line about her,
+              <code>comesWith</code> — each plugin on by default or asked for
+              by her file, in the plugin list's order, as
+              <code>{kind: "plugin", id, displayName}</code> by the name a page
+              shows, then each one her file asks for that this build lacks, as
+              <code>{kind: "unknown", id}</code> —
+              <code>installed</code> (<code>none</code>, <code>same</code>,
+              <code>other_version</code>, <code>built_in</code>) and
+              <code>hasData</code>, whether a data folder of hers is in the
+              home; or <code>refused</code> (<code>invalid</code>) with the
+              rule the file breaks in plain words. A body that is no character
+              file is answered so, never <code>400</code>. Nothing is written.
+            </td>
+          </tr>
+          <tr>
+            <td>add character</td>
+            <td><code>POST /api/characters</code></td>
+            <td>
+              A character file, as a preview takes it →
+              <code>AddCharacterOutcome</code>: <code>added</code> or
+              <code>updated</code> with her <code>characterId</code>;
+              <code>refused</code> (<code>invalid</code>,
+              <code>built_in</code>), nothing written; or a storage failure,
+              her package as it was. Judged afresh as a preview judges it, so
+              a file whose id differs from a package of the home only in
+              capital letters is refused, and written as the file holds it,
+              whole, to
+              <code>&lt;home&gt;/characters/&lt;id&gt;/project02.character.json</code>
+              under the locks of her settings, never through a link. Then
+              <code>health_changed</code>, and she starts as any enabled
+              character does; one running when she is updated stops and starts
+              again from her new package.
+            </td>
+          </tr>
+          <tr>
+            <td>remove character</td>
+            <td><code>DELETE /api/characters/:id</code></td>
+            <td>
+              → <code>RemoveCharacterOutcome</code>: <code>removed</code>;
+              <code>refused</code> (<code>built_in</code>,
+              <code>unknown_character</code>); or a storage failure, her
+              package as it was. Her descriptor goes, and her folder unless it
+              holds anything of the person's; her data stays, so adding her
+              again brings back her conversation, her memories and her
+              settings. Then <code>health_changed</code>, and she stops.
             </td>
           </tr>
           <tr>
@@ -730,7 +787,8 @@ data: {…}</code></pre>
             <td><code>health_changed</code></td>
             <td>
               The daemon's whole state, read again the moment a config change
-              landed and before the pass that acts on it, or the moment a
+              or a character's package landed and before the pass that acts on
+              it, or the moment a
               connector's process came onto the stream, left it, or said its
               bots stand otherwise than the daemon held: the roster as config
               now says it, the connectors on the stream with their bots, and the

@@ -117,7 +117,13 @@ const health: GatewayHealth = {
   config: {diagnostics: []},
   packages: {diagnostics: []},
   characters: [
-    {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
+    {
+      id: 'mira',
+      displayName: 'Mira',
+      enabled: true,
+      builtIn: true,
+      state: 'ready',
+    },
   ],
   connectors: [],
 };

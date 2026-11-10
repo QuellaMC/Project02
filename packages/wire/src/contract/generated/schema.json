@@ -19,6 +19,92 @@
         "blocked"
       ]
     },
+    "AddCharacterOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "characterId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "status": {
+              "type": "string",
+              "const": "added"
+            }
+          },
+          "required": [
+            "status",
+            "characterId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "characterId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "status": {
+              "type": "string",
+              "const": "updated"
+            }
+          },
+          "required": [
+            "status",
+            "characterId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AddCharacterRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was written."
+        },
+        {
+          "$ref": "#/$defs/StorageFailure",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "description": "Her package could not be written, and is as it was."
+        }
+      ],
+      "description": "What came of adding the character a file holds. `added`: she is new\nhere; `updated`: her package replaced the one installed. Either way her\npackage is on disk, and she starts as any enabled character does."
+    },
+    "AddCharacterRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "invalid",
+          "description": "The file holds no character this home can publish."
+        },
+        {
+          "type": "string",
+          "const": "built_in",
+          "description": "She comes with the app."
+        }
+      ]
+    },
     "Answer": {
       "type": "string",
       "enum": [
@@ -169,6 +255,153 @@
       ],
       "description": "A connector's section for one target: its activation, and each field\nthat has a value it takes for that target, the home's fields reaching\nevery character's entry."
     },
+    "CharacterFeature": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "plugin"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "displayName"
+          ],
+          "description": "A plugin of this build, by the name a page shows."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "kind": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "A plugin her file asks for that this build does not have."
+        }
+      ],
+      "description": "A feature a character would start with."
+    },
+    "CharacterInstalled": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "none",
+          "description": "She is new here."
+        },
+        {
+          "type": "string",
+          "const": "same",
+          "description": "This very version of her is installed."
+        },
+        {
+          "type": "string",
+          "const": "other_version",
+          "description": "Another version of her is installed: adding her updates her."
+        },
+        {
+          "type": "string",
+          "const": "built_in",
+          "description": "She comes with the app: she cannot be added."
+        }
+      ],
+      "description": "Whether the character a file holds is in the home already."
+    },
+    "CharacterPreviewOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "displayName": {
+              "$ref": "#/$defs/SpeakerName"
+            },
+            "version": {
+              "type": "string"
+            },
+            "about": {
+              "type": "string",
+              "description": "One line about her, when her file has one."
+            },
+            "comesWith": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CharacterFeature"
+              },
+              "description": "The features she would start with: each plugin on by default or\nasked for by her file, in the plugin list's order, then each one\nher file asks for that this build does not have."
+            },
+            "installed": {
+              "$ref": "#/$defs/CharacterInstalled"
+            },
+            "hasData": {
+              "type": "boolean",
+              "description": "Whether a data folder of hers is in the home: she was here\nbefore, and her chats come back with her."
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "id",
+            "displayName",
+            "version",
+            "comesWith",
+            "installed",
+            "hasData"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/CharacterPreviewRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        }
+      ],
+      "description": "Who a character file holds and what adding her would do, judged as an\nadd judges it, or why she cannot be added from it."
+    },
+    "CharacterPreviewRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "invalid",
+          "description": "The file holds no character this home can publish."
+        }
+      ]
+    },
     "CharacterRuntimeState": {
       "oneOf": [
         {
@@ -201,6 +434,10 @@
         "enabled": {
           "type": "boolean"
         },
+        "builtIn": {
+          "type": "boolean",
+          "description": "Whether she comes with the app: she can be switched off, never\nremoved."
+        },
         "state": {
           "$ref": "#/$defs/RosterState"
         },
@@ -217,6 +454,7 @@
         "id",
         "displayName",
         "enabled",
+        "builtIn",
         "state"
       ],
       "description": "One installed character, as health reports her."
@@ -1949,6 +2187,72 @@
         "message"
       ],
       "description": "A transport refusal: the envelope's code and sentence."
+    },
+    "RemoveCharacterOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "removed"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/RemoveCharacterRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was removed."
+        },
+        {
+          "$ref": "#/$defs/StorageFailure",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "description": "Her package could not be removed, and is as it was."
+        }
+      ],
+      "description": "What came of removing a character. `removed`: her package is gone and\nshe stops; her data stays, for her to come back to."
+    },
+    "RemoveCharacterRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "built_in",
+          "description": "She comes with the app: she can be switched off, never removed."
+        },
+        {
+          "type": "string",
+          "const": "unknown_character",
+          "description": "No package of the home holds her."
+        }
+      ]
     },
     "RosterState": {
       "type": "string",

@@ -61,6 +61,9 @@ pub struct CharacterSummary {
     pub id: Identifier,
     pub display_name: SpeakerName,
     pub enabled: bool,
+    /// Whether she comes with the app: she can be switched off, never
+    /// removed.
+    pub built_in: bool,
     pub state: RosterState,
     /// Why she failed, what she needs for a model, or what her start
     /// warned of.

@@ -14,6 +14,15 @@ export type AccessName = "character_file_store" | "session_history" | "plugin_da
 export type ActivationStatus = "active" | "disabled" | "blocked";
 
 /**
+ * What came of adding the character a file holds. `added`: she is new
+ * here; `updated`: her package replaced the one installed. Either way her
+ * package is on disk, and she starts as any enabled character does.
+ */
+export type AddCharacterOutcome = { "status": "added", characterId: Identifier, } | { "status": "updated", characterId: Identifier, } | { "status": "refused", reason: AddCharacterRefusal, message: string, } | { "status": "failed" } & StorageFailure;
+
+export type AddCharacterRefusal = "invalid" | "built_in";
+
+/**
  * The person's answer to a parked confirmation or a pairing request.
  */
 export type Answer = "approved" | "denied";
@@ -54,6 +63,39 @@ export type ChangeRefusal = "conflict" | "invalid" | "unknown_character";
 export type CharacterConnectorEntry = { characterId: Identifier, activation: RuntimeConfigSectionActivationShape, values: { [key in string]: JsonValue }, };
 
 /**
+ * A feature a character would start with.
+ */
+export type CharacterFeature = { "kind": "plugin", id: Identifier, displayName: string, } | { "kind": "unknown", id: Identifier, };
+
+/**
+ * Whether the character a file holds is in the home already.
+ */
+export type CharacterInstalled = "none" | "same" | "other_version" | "built_in";
+
+/**
+ * Who a character file holds and what adding her would do, judged as an
+ * add judges it, or why she cannot be added from it.
+ */
+export type CharacterPreviewOutcome = { "status": "ok", id: Identifier, displayName: SpeakerName, version: string, 
+/**
+ * One line about her, when her file has one.
+ */
+about?: string, 
+/**
+ * The features she would start with: each plugin on by default or
+ * asked for by her file, in the plugin list's order, then each one
+ * her file asks for that this build does not have.
+ */
+comesWith: ReadonlyArray<CharacterFeature>, installed: CharacterInstalled, 
+/**
+ * Whether a data folder of hers is in the home: she was here
+ * before, and her chats come back with her.
+ */
+hasData: boolean, } | { "status": "refused", reason: CharacterPreviewRefusal, message: string, };
+
+export type CharacterPreviewRefusal = "invalid";
+
+/**
  * Where a character's runtime stands.
  */
 export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stopping" | "stopped" | "failed";
@@ -61,7 +103,12 @@ export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stop
 /**
  * One installed character, as health reports her.
  */
-export type CharacterSummary = { id: Identifier, displayName: SpeakerName, enabled: boolean, state: RosterState, 
+export type CharacterSummary = { id: Identifier, displayName: SpeakerName, enabled: boolean, 
+/**
+ * Whether she comes with the app: she can be switched off, never
+ * removed.
+ */
+builtIn: boolean, state: RosterState, 
 /**
  * Why she failed, what she needs for a model, or what her start
  * warned of.
@@ -462,6 +509,14 @@ connection?: string, };
  * A transport refusal: the envelope's code and sentence.
  */
 export type Refusal = { code: string, message: string, };
+
+/**
+ * What came of removing a character. `removed`: her package is gone and
+ * she stops; her data stays, for her to come back to.
+ */
+export type RemoveCharacterOutcome = { "status": "removed" } | { "status": "refused", reason: RemoveCharacterRefusal, message: string, } | { "status": "failed" } & StorageFailure;
+
+export type RemoveCharacterRefusal = "built_in" | "unknown_character";
 
 /**
  * Where an installed character stands as health reports her: her
