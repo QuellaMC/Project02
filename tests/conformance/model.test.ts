@@ -2,12 +2,7 @@ import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
-import {
-  configJson,
-  createHome,
-  sessionLog,
-  sessionRecords,
-} from './harness/home.ts';
+import {configJson, createHome, sessionLog} from './harness/home.ts';
 import {
   content,
   eventStream,
@@ -64,14 +59,14 @@ it('model.provider-request-body: a round asks the model for a streamed completio
   });
 });
 
-it("model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/completions, a slash at its end or not, under the key as a bearer or with no authorization when there is no key; without it they go to NVIDIA's cloud, where a round without a key fails provider_error missing_api_key", async () => {
+it('model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/completions, a slash at its end or not, under the key as a bearer or with no authorization when there is no key', async () => {
   const model = await startModelServer();
   const {nvidiaBaseUrl} = model.settings;
   const turnAt = async (project02: object) => {
     const home = createHome({'config.json': configJson({project02})});
     const say = await converse(wireOf(await startDaemon(home)), 'mira');
 
-    return {home, outcome: await say('Hello?', 'hello')};
+    return say('Hello?', 'hello');
   };
 
   model.answer(reply('Keyed.'), reply('Open.'));
@@ -86,25 +81,6 @@ it("model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/comp
     {path: '/v1/chat/completions', authorization: 'Bearer model-server-key'},
     {path: '/v1/chat/completions', authorization: undefined},
   ]);
-
-  const cloud = await turnAt({roleModelProvider: 'nvidia'});
-
-  expect(cloud.outcome).toMatchObject({
-    status: 'rejected',
-    reason: 'provider_error',
-  });
-  expect(sessionRecords(cloud.home, 'mira', 'role_model_round')).toMatchObject([
-    {
-      failure: {
-        code: 'missing_api_key',
-        message: 'NVIDIA provider requires the nvidiaApiKey setting.',
-      },
-      parsedRoleModelDecisionSnapshot: {
-        result: {status: 'rejected', rejection: {reason: 'provider_error'}},
-      },
-    },
-  ]);
-  expect(model.requests).toHaveLength(2);
 });
 
 it('model.provider-streaming: an answer cut anywhere, inside a frame or a character, reads back whole, its tool calls taken by their index, past reasoning chunks, comments and the usage chunk', async () => {

@@ -48,7 +48,8 @@ is the verbs over the tab's client, and `settings.tsx` renders one screen
 for the home and for a character, every row the field shape the view
 carries. The roster links to it: Settings for the home, a gear per
 character, and a character that is off shows so, with its switch on its
-own screen. A connector's block says from health whether its process is
+own screen; one who needs an AI model says so in words, not as a
+failure. A connector's block says from health whether its process is
 on the daemon's stream, and how to start it when it is not. A change saved
 on any surface reaches every screen open on it: the stream's
 `health_changed` frame is a tab's cue to read its view

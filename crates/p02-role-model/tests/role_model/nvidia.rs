@@ -9,6 +9,7 @@ use p02_contracts::{
     TextCompletionRequest,
 };
 use p02_role_model::{NvidiaSettings, select_adapter};
+use p02_shared::BaseUrl;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 
@@ -257,15 +258,29 @@ async fn a_plain_completion_asks_the_same_model_without_tools_or_thinking() {
             }
         );
     }
+}
 
+/// Whether settings give a character a model is answered by building it:
+/// no service chosen makes none, NVIDIA's cloud without a key is refused
+/// saying what to add, and a server of the person's own needs no key.
+#[test]
+fn a_model_is_built_from_a_chosen_service_with_a_key_or_a_server_of_ones_own() {
+    let built = |settings: Option<&NvidiaSettings>| {
+        select_adapter(None, settings, None).map(|adapter| adapter.is_some())
+    };
+    let own = NvidiaSettings {
+        base_url: Some(BaseUrl::parse("http://localhost:1234/v1").unwrap()),
+        ..NvidiaSettings::default()
+    };
+
+    assert!(matches!(built(None), Ok(false)));
     assert_eq!(
-        nvidia(&NvidiaSettings::default(), None)
-            .complete_text(&request)
-            .await,
-        TextCompletion::Failed {
-            reason: "NVIDIA provider has no API key.".to_owned()
-        }
+        built(Some(&NvidiaSettings::default()))
+            .err()
+            .map(|refused| refused.to_string()),
+        Some("add your NVIDIA API key".to_owned())
     );
+    assert!(matches!(built(Some(&own)), Ok(true)));
 }
 
 #[tokio::test(start_paused = true)]

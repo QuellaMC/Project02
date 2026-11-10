@@ -7,10 +7,12 @@ Each plugin keeps its descriptor, `project02.plugin.json`, beside its
 code: the manifest of its hooks, its tools, its settings, the access it
 requests and how a settings page draws it. `list::plugins` holds every
 plugin compiled in, the host's own `runtime.plugin` first and the rest in
-id order. A character's host is built from the plugins her settings
-switch on, each by its factory from the values her settings give it and
-checked against its manifest; when her settings change, she gets a host
-built anew.
+id order, each with its factory and the check of whether its settings are
+enough to build it, made by the code the factory builds it with. A
+character's host is built from the plugins her settings switch on and that
+check finds set up, each by its factory from the values her settings give
+it and checked against its manifest; when her settings change, she gets a
+host built anew.
 
 The host's rules:
 

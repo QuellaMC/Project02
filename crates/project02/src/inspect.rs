@@ -69,7 +69,11 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
     home.check().map_err(|error| error_sentence(&error))?;
 
     let manifests = p02_plugins::list::plugins().map_err(|error| error_sentence(error))?;
-    let sections = Sections::new(manifests.iter().map(|(manifest, _)| manifest.clone()));
+    let sections = Sections::new(
+        manifests
+            .iter()
+            .map(|(manifest, check, _)| (manifest.clone(), *check)),
+    );
 
     // Every character reads the home's document, so one that does not load
     // is said as itself, not as what it makes of each of them.

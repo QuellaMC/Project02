@@ -6,12 +6,7 @@ import {text} from 'node:stream/consumers';
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
-import {
-  configJson,
-  createHome,
-  sessionLog,
-  sessionRecords,
-} from './harness/home.ts';
+import {configJson, createHome, sessionLog} from './harness/home.ts';
 import {startMem0Server, type Mem0Server} from './harness/mem0-server.ts';
 import {
   calling,
@@ -185,19 +180,11 @@ it("memory.mem0-wire: the server backend recalls and captures under its X-API-Ke
   model.answer(reply('Hello.'));
   await sayWithCredentials('Hello?', 'credentials');
 
-  const [completed] = sessionRecords(
-    credentialed,
-    'mira',
-    'runtime_turn_completed',
+  // Judged not set up: she answers without it, and neither what she says
+  // of it nor what she records holds the credentials it carries.
+  expect(JSON.stringify(await credentialedWire.health())).not.toContain(
+    'hunter2',
   );
-  const recalled = (
-    completed?.['runtimePluginEvidence'] as
-      | readonly {readonly pluginId: string; readonly status: string}[]
-      | undefined
-  )?.find(entry => entry.pluginId === 'mem0');
-
-  // Judged unusable, and recorded so without the credentials it carries.
-  expect(recalled?.status).toBe('degraded');
   expect(
     JSON.stringify(
       sessionLog(credentialed, 'mira', `${thread.conversationId}.1`),

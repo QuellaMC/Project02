@@ -35,6 +35,7 @@ pub use output::{
 pub use p02_wire::{AccessLevel, AccessName};
 pub use plugin::{
     FactoryInput, Hook, PluginError, PluginFactory, Registration, RegistrationError, RuntimePlugin,
+    SetupCheck,
 };
 pub use role_model::{
     BlankContextTextError, CharacterDecision, ChatCompletionTool, ChatFunctionCall, ChatMessage,

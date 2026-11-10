@@ -21,7 +21,7 @@ pub use config::{
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
     LayoutRow, LayoutWhen, Namespace, Operation, Placement, PluginPage, SectionActivation,
-    SectionView, Source, ValueSource, ViewRefusal,
+    SectionView, Setup, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{
     Answer, AnswerBody, CancelReason, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion,

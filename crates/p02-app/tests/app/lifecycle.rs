@@ -109,7 +109,10 @@ async fn a_start_during_her_start_joins_it_and_answers_once_she_is_ready() {
 #[tokio::test(start_paused = true)]
 async fn a_start_whose_boot_fails_starts_her_once() {
     let world = World::new();
-    let daemon = world.daemon_answering(None).await;
+
+    world.her_settings(json!({"project02": {"contextWindowTokens": -5}}));
+
+    let daemon = world.daemon().await;
     let mut ear = Ear::on(&daemon);
     let StartOutcome::Settled { character } = daemon.start_character("mira").await else {
         panic!("her start runs");

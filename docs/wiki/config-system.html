@@ -259,12 +259,15 @@
       The daemon is the config owner. <code>GET /api/config</code> renders a scope's settings
       from the declared fields — the home's, or one character's — and <code>POST /api/config</code>
       writes one change through the one control transaction, bound to the fingerprint the view
-      handed out; a running character runs on it from her next request to her model
-      (<a href="gateway-api.html">Gateway API</a>). The web page's settings screen is the
+      handed out; a running character runs on it at once, or, while her reply is in flight,
+      from its next request to her model (<a href="gateway-api.html">Gateway API</a>). The web page's settings screen is the
       operator's surface over those verbs: one screen for the home and for each character,
       every row the field shape the view carries, one field per save. A fresh home opens on
-      it, framed as setup, until a provider is chosen; until then no character starts, and
-      each says to choose one on the settings page. A hand edit made while the daemon runs
+      it, framed as setup, until a provider is chosen; until then each character needs an AI
+      model, says to choose a service, and keeps the lines sent to her until one is chosen.
+      A plugin switched on before its setup is finished, as Long-Term Memory without its
+      key, is left out of her start: she runs without it and says so, and each view's
+      section says what to fill in. A hand edit made while the daemon runs
       is reflected on the next read and in a running character's next request; who runs is
       judged again at the next change from the page or the next start, since nothing watches
       the file.

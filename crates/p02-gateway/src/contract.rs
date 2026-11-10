@@ -374,8 +374,8 @@ fn written() -> Vec<(&'static str, Value)> {
             id: id("mira"),
             display_name: mira.clone(),
             enabled: true,
-            state: RosterState::NotStarted,
-            diagnostic: Some("No model provider is chosen.".to_owned()),
+            state: RosterState::NeedsModel,
+            diagnostic: Some("Choose an AI service.".to_owned()),
             maintenance: Some(maintenance.clone()),
         }],
         connectors: vec![ConnectorPresence {
@@ -638,7 +638,7 @@ fn written() -> Vec<(&'static str, Value)> {
 
 /// The settings of a home whose documents each name a connector this build
 /// lacks, a warning of the home's and one of Mira's overlay: the home's view,
-/// Mira's, and Telegram's read.
+/// whose model is not set up, Mira's, and Telegram's read.
 fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let directory = tempfile::TempDir::new().unwrap();
     let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
@@ -660,12 +660,14 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
         p02_plugins::list::plugins()
             .unwrap()
             .iter()
-            .map(|(manifest, _)| manifest.clone()),
+            .map(|(manifest, check, _)| (manifest.clone(), *check)),
     );
     let discovery = discover(home.root());
 
     (
-        config_view(&home, &sections, &discovery, &ConfigTarget::Global),
+        config_view(&home, &sections, &discovery, &ConfigTarget::Global, |_| {
+            Err("Choose an AI service.".to_owned())
+        }),
         config_view(
             &home,
             &sections,
@@ -673,6 +675,7 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
             &ConfigTarget::Character {
                 character_id: mira.to_string(),
             },
+            |_| Ok(()),
         ),
         connector_config_view(&home, &sections, &discovery, "telegram"),
     )

@@ -164,9 +164,12 @@ impl Reconciler {
 impl Daemon {
     /// One pass of the rule over the characters running now, against the
     /// roster as the pass reads it: an enabled character who runs nothing
-    /// starts, one who failed starts again, and a disabled one who runs
-    /// stops, as does one whose package left the roster. One started after
-    /// now, by a client, is the next pass's to judge.
+    /// starts, one who failed starts again, one who runs is brought up to
+    /// date with her settings, built again when they changed, unless a turn
+    /// of hers runs, which meets them before its next request, and a
+    /// disabled one who runs stops, as does one whose package left the
+    /// roster. One started after now, by a client, is the next pass's to
+    /// judge.
     pub(crate) fn pass(&self) -> BoxFuture<'static, ()> {
         let running: Vec<Arc<CharacterHandle>> = self
             .handles()

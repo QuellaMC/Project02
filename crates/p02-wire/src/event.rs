@@ -65,7 +65,8 @@ pub enum Event {
     StateChanged {
         character_id: Identifier,
         state: CharacterState,
-        /// Present when a failure caused the change.
+        /// Present when a failure caused the change, or when she needs a
+        /// model: what to do about it.
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },

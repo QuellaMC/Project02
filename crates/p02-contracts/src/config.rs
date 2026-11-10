@@ -191,7 +191,8 @@ impl ResolvedConfig {
     /// What `section` resolves to from `authored`, the values the settings
     /// set by field name. A name the section does not declare reaches no
     /// plugin.
-    pub(crate) fn resolve(section: &ConfigSection, authored: &Map<String, Value>) -> Self {
+    #[must_use]
+    pub fn resolve(section: &ConfigSection, authored: &Map<String, Value>) -> Self {
         Self(
             section
                 .fields()

@@ -727,10 +727,10 @@ impl Gate {
 /// The manifest the daemon's list holds for plugin `id`, edited as a test
 /// needs it.
 pub(crate) fn bundled_manifest(id: &str, edit: impl FnOnce(&mut Map<String, Value>)) -> Manifest {
-    let (manifest, _) = list::plugins()
+    let (manifest, ..) = list::plugins()
         .unwrap()
         .iter()
-        .find(|(manifest, _)| manifest.id().as_str() == id)
+        .find(|(manifest, ..)| manifest.id().as_str() == id)
         .unwrap();
     let Value::Object(mut fields) = serde_json::to_value(manifest).unwrap() else {
         panic!("a manifest is an object");

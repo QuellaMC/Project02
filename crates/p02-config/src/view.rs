@@ -19,19 +19,23 @@ use serde_json::{Map, Value};
 
 use crate::conceal::conceal;
 use crate::declaration::{Declared, Sections, Target, connector};
-use crate::host::{RoleModelProvider, host_fields};
-use crate::resolve::{Effective, Field, ReadSettingsError, Resolution, Section, Status};
+use crate::host::{HostSettings, RoleModelProvider, host_fields};
+use crate::resolve::{
+    Effective, Field, ReadSettingsError, Resolution, Section, Status, values_in_effect,
+};
 
-/// The view of `target`'s settings.
+/// The view of `target`'s settings, `model` judging whether the host's
+/// values in effect give a character an AI model, as her start judges it.
 #[must_use]
 pub fn config_view(
     home: &Home,
     sections: &Sections,
     discovery: &Discovery,
     target: &ConfigTarget,
+    model: impl FnOnce(&HostSettings) -> Result<(), String>,
 ) -> ConfigView {
     match Resolution::read(home, sections, discovery, target) {
-        Ok(resolution) => resolution.view(),
+        Ok(resolution) => resolution.view(model),
         Err(error) => {
             let (reason, message) = refusal(&error);
 
@@ -66,12 +70,13 @@ impl ReadSettingsError {
 }
 
 impl Resolution<'_> {
-    /// The view of these settings: every host field, and every section,
-    /// and of each section every field, that the target may set; secrets
-    /// never. A person looks a section up by its name, so the screen lists
-    /// the plugins' by id and then the connectors'.
+    /// The view of these settings: whether their host values give a
+    /// character a model, as `model` judges them, and every host field,
+    /// and every section, and of each section every field, that the target
+    /// may set; secrets never. A person looks a section up by its name, so
+    /// the screen lists the plugins' by id and then the connectors'.
     #[must_use]
-    pub fn view(&self) -> ConfigView {
+    pub fn view(&self, model: impl FnOnce(&HostSettings) -> Result<(), String>) -> ConfigView {
         let mut sections: Vec<SectionView> = self
             .sections()
             .iter()
@@ -84,6 +89,7 @@ impl Resolution<'_> {
         ConfigView::Ok {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
+            model: model(&HostSettings::of(self.host())).into(),
             project02: host_fields()
                 .iter()
                 .zip(self.host())
@@ -124,6 +130,7 @@ impl Resolution<'_> {
                 enabled: section.enabled(),
                 enabled_source: section.switch.source(),
                 activation: activation(section),
+                setup: section.setup.clone().into(),
                 layout: layout(declared.config().layout(), &fields),
                 fields,
                 diagnostics: section.diagnostics.clone(),
@@ -224,6 +231,7 @@ fn activation(section: &Section<'_>) -> SectionActivation {
                 .collect(),
         ),
         Status::Disabled(reason) => (ActivationStatus::Disabled, vec![reason.to_owned()]),
+        Status::NotSetUp => (ActivationStatus::Disabled, vec!["not_set_up".to_owned()]),
         Status::Blocked => (
             ActivationStatus::Blocked,
             vec!["blocked_by_config_errors".to_owned()],
@@ -295,16 +303,7 @@ fn connector_entry(resolution: &Resolution<'_>, id: &str) -> ConnectorEntry {
         .expect("a resolution holds a section of each connector this build has");
     let activation = activation(section);
     let values = if activation.status == ActivationStatus::Active {
-        section
-            .fields
-            .iter()
-            .filter_map(|field| {
-                field
-                    .effective
-                    .value()
-                    .map(|value| (field.declaration.name().to_string(), value.clone()))
-            })
-            .collect()
+        values_in_effect(&section.fields)
     } else {
         Map::new()
     };
@@ -437,7 +436,7 @@ impl Resolution<'_> {
                 .sections()
                 .iter()
                 .filter_map(|section| match section.declared {
-                    Declared::Plugin(manifest) => Some(self.plugin_report(section, manifest)),
+                    Declared::Plugin(manifest, _) => Some(self.plugin_report(section, manifest)),
                     Declared::Connector(_) => None,
                 })
                 .collect(),

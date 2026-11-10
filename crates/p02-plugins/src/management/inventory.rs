@@ -51,7 +51,7 @@ pub(super) async fn answer(
         listed.extend(
             installed
                 .iter()
-                .map(|(manifest, _)| manifest)
+                .map(|(manifest, ..)| manifest)
                 .filter(|manifest| {
                     !core
                         .slots

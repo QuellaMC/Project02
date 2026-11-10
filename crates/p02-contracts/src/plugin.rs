@@ -294,6 +294,11 @@ impl<'a> FactoryInput<'a> {
 /// Builds one instance of a plugin.
 pub type PluginFactory = fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError>;
 
+/// Whether a plugin's config is enough to build it, answered by the code
+/// its factory builds it with; while it is not, the sentence says what to
+/// fill in, in the words of the settings page.
+pub type SetupCheck = fn(&ResolvedConfig) -> Result<(), String>;
+
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;

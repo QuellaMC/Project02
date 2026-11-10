@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{Resolution, Sections, apply_change, config_view, connector_config_view};
-use p02_contracts::Manifest;
+use p02_contracts::{Manifest, SetupCheck};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
 use p02_wire::{ChangeOutcome, ConfigChange, ConfigTarget};
@@ -172,7 +172,11 @@ impl World {
         Self {
             _directory: directory,
             home,
-            sections: Sections::new(plugins),
+            sections: Sections::new(plugins.into_iter().map(|manifest| {
+                let ready: SetupCheck = |_| Ok(());
+
+                (manifest, ready)
+            })),
         }
     }
 
@@ -238,13 +242,15 @@ impl World {
         Resolution::read(&self.home, &self.sections, &self.discovery(), target).unwrap()
     }
 
-    /// The view of `target` as a page receives it.
+    /// The view of `target` as a page receives it, whatever model its
+    /// settings choose taken as one a character can use.
     pub(crate) fn view(&self, target: &ConfigTarget) -> Value {
         serde_json::to_value(config_view(
             &self.home,
             &self.sections,
             &self.discovery(),
             target,
+            |_| Ok(()),
         ))
         .unwrap()
     }

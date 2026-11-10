@@ -120,26 +120,16 @@ impl World {
     /// model, with the plugins of the daemon's list and the one built behind
     /// the assembly gate.
     pub(crate) async fn daemon(&self) -> Daemon {
-        self.daemon_answering(Some(Arc::clone(&self.model) as _))
-            .await
-    }
-
-    /// A daemon on this home whose characters answer through `model`, or
-    /// as their settings choose.
-    pub(crate) async fn daemon_answering(
-        &self,
-        model: Option<Arc<dyn RoleModelAdapter>>,
-    ) -> Daemon {
         let listed = list::plugins()
             .unwrap()
             .iter()
-            .map(|(manifest, factory)| Plugin::new(manifest.clone(), *factory));
+            .map(|(manifest, check, factory)| Plugin::new(manifest.clone(), *check, *factory));
         let gated = Toy::built_behind("assembly", &self.assembly).plugin();
 
         Daemon::open(
             self.home.clone(),
             DaemonSettings {
-                test_provider: model,
+                test_provider: Some(Arc::clone(&self.model) as Arc<dyn RoleModelAdapter>),
                 durations: Durations::default(),
                 plugins: listed.chain([gated]).collect(),
             },
@@ -369,11 +359,15 @@ impl Toy {
         .unwrap();
         let gate = self.gate;
 
-        Plugin::new(manifest, move |_| {
-            gate.pass();
+        Plugin::new(
+            manifest,
+            |_| Ok(()),
+            move |_| {
+                gate.pass();
 
-            Ok(Arc::new(Ending) as Arc<dyn RuntimePlugin>)
-        })
+                Ok(Arc::new(Ending) as Arc<dyn RuntimePlugin>)
+            },
+        )
     }
 }
 

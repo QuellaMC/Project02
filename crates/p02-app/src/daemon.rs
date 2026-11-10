@@ -15,7 +15,9 @@ use p02_characters::{CharacterDefinition, discover};
 use p02_config::{
     Connector, Sections, apply_change, config_view, connector_config_view, connectors,
 };
-use p02_contracts::{FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin};
+use p02_contracts::{
+    FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
+};
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
@@ -28,7 +30,7 @@ use p02_wire::{
 };
 use tokio::sync::mpsc;
 
-use crate::character::CharacterHandle;
+use crate::character::{CharacterHandle, model};
 use crate::history::{self, HistoryPage};
 use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
@@ -37,11 +39,13 @@ use crate::reconcile::{Reconciler, Roster, settings_now};
 type Factory =
     dyn Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> + Send + Sync;
 
-/// A plugin the daemon can run for a character: its manifest, and what
-/// builds an instance of it from her settings.
+/// A plugin the daemon can run for a character: its manifest, the check of
+/// whether her settings are enough to build it, and what builds an
+/// instance of it from them.
 #[derive(Clone)]
 pub struct Plugin {
     manifest: Manifest,
+    check: SetupCheck,
     factory: Arc<Factory>,
 }
 
@@ -49,6 +53,7 @@ impl Plugin {
     #[must_use]
     pub fn new(
         manifest: Manifest,
+        check: SetupCheck,
         factory: impl Fn(&FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError>
         + Send
         + Sync
@@ -56,6 +61,7 @@ impl Plugin {
     ) -> Self {
         Self {
             manifest,
+            check,
             factory: Arc::new(factory),
         }
     }
@@ -339,7 +345,11 @@ impl Daemon {
             inner: Arc::new(Inner {
                 world: Arc::new(World {
                     home,
-                    sections: Sections::new(plugins.iter().map(|plugin| plugin.manifest.clone())),
+                    sections: Sections::new(
+                        plugins
+                            .iter()
+                            .map(|plugin| (plugin.manifest.clone(), plugin.check)),
+                    ),
                     plugins,
                     durations,
                     test_provider,
@@ -463,8 +473,8 @@ impl Daemon {
     /// became, whether or not she takes lines now. Its routing and its
     /// place in her inbox are one step, which lines take in the order they
     /// came, so they reach her in that order; a new line for a character
-    /// that is starting waits for her, and one for a character who failed
-    /// or does not run is refused, saying why.
+    /// that is starting, or who waits for a model, waits for her, and one
+    /// for a character who failed or does not run is refused, saying why.
     pub async fn deliver(&self, message: Message) -> SubmitOutcome {
         let mut routes = self.inner.routes.lock().await;
         let (conversation, character) =
@@ -613,7 +623,8 @@ impl Daemon {
             .boxed()
     }
 
-    /// The settings of `target` as its settings screen shows them.
+    /// The settings of `target` as its settings screen shows them, their AI
+    /// model judged as a character's start judges hers.
     pub async fn config_view(&self, target: ConfigTarget) -> ConfigView {
         let world = Arc::clone(&self.inner.world);
 
@@ -623,6 +634,7 @@ impl Daemon {
                 &world.sections,
                 &discover(world.home.root()),
                 &target,
+                |host| model(&world, host).map(drop),
             )
         })
         .await
@@ -659,8 +671,7 @@ impl Daemon {
     /// change, under the documents' locks; once it lands, health as it now
     /// stands goes out to every surface before the answer does, and a
     /// reconcile pass acts on it behind the answer, on a task of its own,
-    /// so the characters it switches on or off start or stop. A running
-    /// character meets it at her next request. It waits on the disk.
+    /// by its rule. It waits on the disk.
     pub(crate) fn change_settings(&self, change: &ConfigChange) -> ChangeOutcome {
         let world = &self.inner.world;
         let outcome = apply_change(

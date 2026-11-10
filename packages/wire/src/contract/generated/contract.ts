@@ -56,14 +56,15 @@ export type CharacterConnectorEntry = { characterId: Identifier, activation: Run
 /**
  * Where a character's runtime stands.
  */
-export type CharacterRuntimeState = "starting" | "ready" | "stopping" | "stopped" | "failed";
+export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stopping" | "stopped" | "failed";
 
 /**
  * One installed character, as health reports her.
  */
 export type CharacterSummary = { id: Identifier, displayName: SpeakerName, enabled: boolean, state: RosterState, 
 /**
- * Why she failed, or what her start warned of.
+ * Why she failed, what she needs for a model, or what her start
+ * warned of.
  */
 diagnostic?: string, 
 /**
@@ -113,11 +114,12 @@ export type ConfigValueType = "string" | "number" | "boolean" | "object" | "arra
 
 /**
  * What a settings screen renders: the fingerprint a change must present,
- * the diagnostics, and the host's fields and every section the target may
- * set, all in one field shape. A target whose settings cannot be resolved
- * is refused with the reason, never shown as blank fields.
+ * the diagnostics, whether the target's settings give a character an AI
+ * model, and the host's fields and every section the target may set, all
+ * in one field shape. A target whose settings cannot be resolved is
+ * refused with the reason, never shown as blank fields.
  */
-export type ConfigView = { "status": "ok", fingerprint: Fingerprint, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, project02: ReadonlyArray<RuntimeConfigFieldInspectShape>, sections: ReadonlyArray<RuntimeConfigSectionInspectShape>, } | { "status": "refused", reason: ViewRefusal, message: string, };
+export type ConfigView = { "status": "ok", fingerprint: Fingerprint, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, model: Setup, project02: ReadonlyArray<RuntimeConfigFieldInspectShape>, sections: ReadonlyArray<RuntimeConfigSectionInspectShape>, } | { "status": "refused", reason: ViewRefusal, message: string, };
 
 export type ConfirmationCancelReason = "expired" | "stopped";
 
@@ -216,14 +218,15 @@ export type GatewayErrorBody = { error: Refusal, };
  */
 export type GatewayEvent = { "kind": "turn_progress", characterId: Identifier, conversationId: ConversationId, progress: TurnProgress, } | { "kind": "turn_running" } & RunningTurn | { "kind": "turn_completed", characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, status: TurnStatus, committed: boolean, reason?: string, message?: string, } | { "kind": "confirmation_requested" } & PendingConfirmation | { "kind": "confirmation_settled", characterId: Identifier, id: ConfirmationId, } & ({ "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, }) | { "kind": "pairing_requested" } & PairingRequest | { "kind": "pairing_settled", connectorId: Identifier, code: string, subject: PairingSubject, decision: PairingDecision, } | { "kind": "state_changed", characterId: Identifier, state: CharacterRuntimeState, 
 /**
- * Present when a failure caused the change.
+ * Present when a failure caused the change, or when she needs a
+ * model: what to do about it.
  */
 message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "kind": "maintenance_failed", characterId: Identifier, at: Timestamp, message: string, };
 
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 8, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 9, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -244,7 +247,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 8, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 9, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -464,7 +467,7 @@ export type Refusal = { code: string, message: string, };
  * Where an installed character stands as health reports her: her
  * runtime's state, or `not_started` until the daemon built it.
  */
-export type RosterState = "not_started" | "starting" | "ready" | "stopping" | "stopped" | "failed";
+export type RosterState = "not_started" | "starting" | "ready" | "needs_model" | "stopping" | "stopped" | "failed";
 
 /**
  * A reply she is still writing: its text so far, under its draft's id.
@@ -526,7 +529,13 @@ access?: { [key in AccessName]?: AccessLevel }, enabled: boolean,
 /**
  * Which document decides `enabled`, or the declaration's default.
  */
-enabledSource: Source, activation: RuntimeConfigSectionActivationShape, fields: ReadonlyArray<RuntimeConfigFieldInspectShape>, 
+enabledSource: Source, activation: RuntimeConfigSectionActivationShape, 
+/**
+ * Whether its settings are enough to build it, judged switched on or
+ * off: a plugin switched on before they are does not run. A
+ * connector's always are.
+ */
+setup: Setup, fields: ReadonlyArray<RuntimeConfigFieldInspectShape>, 
 /**
  * The cards `fields` are drawn in, each field in one at least.
  */
@@ -537,6 +546,13 @@ layout: ReadonlyArray<LayoutCard>, diagnostics: ReadonlyArray<RuntimeConfigDiagn
  * plugin and a connector may share an id: their sections never meet.
  */
 export type RuntimeConfigSectionNamespace = "plugins" | "connectors";
+
+/**
+ * Whether settings are enough for what they set up, a plugin or a
+ * character's AI model; while they are not, `message` says what to fill
+ * in, in the words of the settings page.
+ */
+export type Setup = { ready: boolean, message?: string, };
 
 /**
  * How much a finding weighs: an error stops what it concerns, a warning

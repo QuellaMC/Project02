@@ -299,11 +299,11 @@ async fn a_secret_of_her_own_settings_is_shown_to_the_model_only_as_redacted() {
                 "redactionLabels": [],
             }));
     });
-    let home = MiraHome::judged_by(list::plugins().unwrap().iter().map(|(manifest, _)| {
+    let home = MiraHome::judged_by(list::plugins().unwrap().iter().map(|(manifest, check, _)| {
         if manifest.id() == keyed.id() {
-            keyed.clone()
+            (keyed.clone(), *check)
         } else {
-            manifest.clone()
+            (manifest.clone(), *check)
         }
     }));
 

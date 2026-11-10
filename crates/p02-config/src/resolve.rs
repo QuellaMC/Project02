@@ -213,6 +213,9 @@ pub(crate) struct Section<'s> {
     /// when it is not a boolean, else the declaration's default.
     pub(crate) switch: Effective,
     pub(crate) fields: Vec<Field<'s>>,
+    /// Whether its values in effect are enough to build it, judged once,
+    /// switched on or off; or the sentence saying what to fill in.
+    pub(crate) setup: Result<(), String>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) status: Status,
 }
@@ -222,6 +225,9 @@ pub(crate) struct Section<'s> {
 pub(crate) enum Status {
     Active(&'static str),
     Disabled(&'static str),
+    /// Switched on before its settings are enough to build it: it runs
+    /// once they are.
+    NotSetUp,
     Blocked,
 }
 
@@ -327,7 +333,9 @@ impl<'s> Resolution<'s> {
             },
             skipped,
         );
-        let unmet = activation::expected(character, &resolution.resolved);
+        let unmet = activation::expected(character, &resolution.resolved)
+            .into_iter()
+            .chain(activation::not_set_up(&resolution.resolved));
 
         resolution.diagnostics.extend(unmet);
         Ok(resolution)
@@ -410,8 +418,9 @@ impl<'s> Resolution<'s> {
     /// Every finding about the target's settings: what of the documents is
     /// not used, sections named that this build lacks, host values held
     /// outside their scope or refused, what of her package's settings is
-    /// skipped, what is wrong with each section, and the plugins her
-    /// package expects that she does not run.
+    /// skipped, what is wrong with each section, the plugins her package
+    /// expects that she does not run, and those she has switched on before
+    /// their setup is finished.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
@@ -426,7 +435,8 @@ impl<'s> Resolution<'s> {
     }
 
     /// What a character's start warns of: the plugins her package expects
-    /// that she does not run, and what keeps a plugin of hers from running.
+    /// that she does not run, those she has switched on before their setup
+    /// is finished, and what keeps a plugin of hers from running.
     pub fn cautions(&self) -> impl Iterator<Item = &Diagnostic> {
         self.diagnostics.iter().filter(|diagnostic| {
             diagnostic.code() == Code::PluginNotRunning
@@ -438,7 +448,8 @@ impl<'s> Resolution<'s> {
     /// the plugins that run by them, each with its values in effect, so a
     /// field left to its default and one set to the same value run her
     /// alike. Two that are equal run the same character, so a running one
-    /// is rebuilt only when hers differ from those she was built from.
+    /// is rebuilt only when hers differ from those she was built from, a
+    /// plugin whose setup was finished or undone among them.
     #[must_use]
     pub fn settings(&self) -> CharacterSettings {
         let host = HostSettings::of(&self.host);
@@ -450,18 +461,10 @@ impl<'s> Resolution<'s> {
                     && matches!(section.status, Status::Active(_))
             })
             .map(|section| {
-                let values = section
-                    .fields
-                    .iter()
-                    .filter_map(|field| {
-                        field
-                            .effective
-                            .value()
-                            .map(|value| (field.declaration.name().to_string(), value.clone()))
-                    })
-                    .collect();
-
-                (section.declared.id().clone(), values)
+                (
+                    section.declared.id().clone(),
+                    values_in_effect(&section.fields),
+                )
             })
             .collect();
 
@@ -547,6 +550,19 @@ impl fmt::Debug for CharacterSettings {
     }
 }
 
+/// Each of `fields` that has a value its field takes in effect, by name.
+pub(crate) fn values_in_effect(fields: &[Field<'_>]) -> Map<String, Value> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            field
+                .effective
+                .value()
+                .map(|value| (field.declaration.name().to_string(), value.clone()))
+        })
+        .collect()
+}
+
 /// The value the nearest of `layers` holds, judged by `accepts`, else the
 /// default.
 fn resolve(
@@ -612,6 +628,7 @@ fn section<'s>(declared: Declared<'s>, target: &Target, layers: &Layers) -> Sect
             }
         })
         .collect();
+    let setup = declared.setup(&values_in_effect(&fields));
     let mut diagnostics = outside_scope_warnings(declared, layers);
     let switched = matches!(switch, Effective::Authored { .. });
 
@@ -629,6 +646,8 @@ fn section<'s>(declared: Declared<'s>, target: &Target, layers: &Layers) -> Sect
 
         if diagnostics.iter().any(Diagnostic::is_error) {
             Status::Blocked
+        } else if setup.is_err() {
+            Status::NotSetUp
         } else if switched {
             Status::Active("enabled_by_config")
         } else {
@@ -640,6 +659,7 @@ fn section<'s>(declared: Declared<'s>, target: &Target, layers: &Layers) -> Sect
         declared,
         switch,
         fields,
+        setup,
         diagnostics,
         status,
     }

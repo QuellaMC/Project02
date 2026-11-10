@@ -14,15 +14,17 @@ use ts_rs::TS;
 use crate::diagnostic::Diagnostic;
 
 /// What a settings screen renders: the fingerprint a change must present,
-/// the diagnostics, and the host's fields and every section the target may
-/// set, all in one field shape. A target whose settings cannot be resolved
-/// is refused with the reason, never shown as blank fields.
+/// the diagnostics, whether the target's settings give a character an AI
+/// model, and the host's fields and every section the target may set, all
+/// in one field shape. A target whose settings cannot be resolved is
+/// refused with the reason, never shown as blank fields.
 #[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfigView {
     Ok {
         fingerprint: Fingerprint,
         diagnostics: Vec<Diagnostic>,
+        model: Setup,
         project02: Vec<FieldView>,
         sections: Vec<SectionView>,
     },
@@ -122,10 +124,42 @@ pub struct SectionView {
     /// Which document decides `enabled`, or the declaration's default.
     pub enabled_source: Source,
     pub activation: SectionActivation,
+    /// Whether its settings are enough to build it, judged switched on or
+    /// off: a plugin switched on before they are does not run. A
+    /// connector's always are.
+    pub setup: Setup,
     pub fields: Vec<FieldView>,
     /// The cards `fields` are drawn in, each field in one at least.
     pub layout: Vec<LayoutCard>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Whether settings are enough for what they set up, a plugin or a
+/// character's AI model; while they are not, `message` says what to fill
+/// in, in the words of the settings page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct Setup {
+    pub ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// The settings' own judgement of what they set up: enough, or the
+/// sentence saying what to fill in.
+impl From<Result<(), String>> for Setup {
+    fn from(judged: Result<(), String>) -> Self {
+        match judged {
+            Ok(()) => Self {
+                ready: true,
+                message: None,
+            },
+            Err(message) => Self {
+                ready: false,
+                message: Some(message),
+            },
+        }
+    }
 }
 
 /// How a plugin's row on a settings page is drawn, as its manifest

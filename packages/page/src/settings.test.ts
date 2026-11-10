@@ -86,6 +86,7 @@ function view(fingerprint = 'f1'): OkView {
     status: 'ok',
     fingerprint,
     diagnostics: [],
+    model: {ready: true},
     project02: [
       defaulted('userDisplayName', 'You'),
       field('roleModelProvider', {
@@ -105,6 +106,7 @@ function view(fingerprint = 'f1'): OkView {
         enabled: true,
         enabledSource: 'global',
         activation: {enabled: true, status: 'active', reasons: []},
+        setup: {ready: true},
         fields: [
           field('tone', {allowedValues: ['neutral', 'warm']}),
           untyped(field('apiKey', {secret: true})),
@@ -132,7 +134,7 @@ function view(fingerprint = 'f1'): OkView {
 
 /** The daemon as the tab heard it: Mira ready, and no Telegram process on the stream. */
 const health: GatewayHealth = {
-  protocolVersion: 8,
+  protocolVersion: 9,
   homeRoot: '/home/person/.project02',
   config: {diagnostics: []},
   packages: {diagnostics: []},
@@ -145,7 +147,7 @@ const health: GatewayHealth = {
 /** A live tab with Mira's thread open and her settings screen in front of it. */
 function opened(target: ConfigTarget = mira): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 8,
+    protocolVersion: 9,
     health,
     confirmations: [],
     pairings: [],
@@ -507,6 +509,7 @@ describe('web settings', () => {
       enabled: true,
       enabledSource: 'default',
       activation: {enabled: true, status: 'active', reasons: []},
+      setup: {ready: true},
       fields: [
         field('botToken', {secret: true, valueType: 'string'}),
         defaulted('mirror', true, {valueType: 'boolean'}),

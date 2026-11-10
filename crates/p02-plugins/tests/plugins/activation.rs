@@ -9,7 +9,7 @@ use p02_contracts::{CommittedTurn, FactoryInput, PluginError, RedactionLabel, St
 use p02_core::Timestamp;
 use p02_plugins::{BeforeCallOutcome, list};
 use p02_shared::Identifier;
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use crate::storage::Storage;
 use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, builder, turn};
@@ -83,12 +83,17 @@ async fn a_plugins_labels_are_held_at_activation_to_what_a_record_has_room_for()
 
 #[tokio::test]
 async fn the_listed_plugins_activate_together() {
+    // A plugin is built once it is set up: Long-Term Memory with its key.
+    let set_up = Map::from_iter([("apiKey".to_owned(), Value::from("m0-key"))]);
     let host = list::plugins()
         .unwrap()
         .iter()
-        .fold(builder(Storage::new()), |builder, (manifest, factory)| {
-            builder.plugin(manifest.clone(), Map::new(), *factory)
-        })
+        .fold(
+            builder(Storage::new()),
+            |builder, (manifest, _, factory)| {
+                builder.plugin(manifest.clone(), set_up.clone(), *factory)
+            },
+        )
         .activate()
         .unwrap();
 

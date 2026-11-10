@@ -30,6 +30,12 @@ under the store's locks, and its views and changes are p02-wire's types.
   section, or for a host field the characters that read it. What a
   character runs on is one value, so she is rebuilt exactly when it
   changes.
+- **Setup.** Each plugin's section is judged once, switched on or off, by
+  the check its plugin is listed with: whether its values in effect are
+  enough to build it, or what to fill in. One switched on before they are
+  does not run, and a character's findings say she runs without it. A
+  view carries each section's judgement, and the judgement of the AI model
+  its target's host values give, which its caller makes.
 - **Changing.** A change sets or unsets one host field, switch or section
   field in the target's own document, bound to the fingerprint its author
   read. Its own rules are met first; then, holding the locks of every

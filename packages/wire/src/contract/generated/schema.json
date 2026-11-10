@@ -170,13 +170,22 @@
       "description": "A connector's section for one target: its activation, and each field\nthat has a value it takes for that target, the home's fields reaching\nevery character's entry."
     },
     "CharacterRuntimeState": {
-      "type": "string",
-      "enum": [
-        "starting",
-        "ready",
-        "stopping",
-        "stopped",
-        "failed"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "starting",
+            "ready",
+            "stopping",
+            "stopped",
+            "failed"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "needs_model",
+          "description": "Her settings give her no AI model she can use: she is built\nwithout one, and the lines sent to her wait until they do."
+        }
       ],
       "description": "Where a character's runtime stands."
     },
@@ -197,7 +206,7 @@
         },
         "diagnostic": {
           "type": "string",
-          "description": "Why she failed, or what her start warned of."
+          "description": "Why she failed, what she needs for a model, or what her start\nwarned of."
         },
         "maintenance": {
           "description": "The latest background failure since she started.",
@@ -249,7 +258,7 @@
         {
           "type": "string",
           "const": "character_plugin_not_running",
-          "description": "A plugin her package expects that she does not run."
+          "description": "A plugin she does not run that her package expects, or that she\nhas switched on before its setup is finished."
         }
       ],
       "description": "What a finding is, in the one spelling clients read."
@@ -421,6 +430,9 @@
                 "$ref": "#/$defs/RuntimeConfigDiagnostic"
               }
             },
+            "model": {
+              "$ref": "#/$defs/Setup"
+            },
             "project02": {
               "type": "array",
               "items": {
@@ -442,6 +454,7 @@
             "status",
             "fingerprint",
             "diagnostics",
+            "model",
             "project02",
             "sections"
           ]
@@ -467,7 +480,7 @@
           ]
         }
       ],
-      "description": "What a settings screen renders: the fingerprint a change must present,\nthe diagnostics, and the host's fields and every section the target may\nset, all in one field shape. A target whose settings cannot be resolved\nis refused with the reason, never shown as blank fields."
+      "description": "What a settings screen renders: the fingerprint a change must present,\nthe diagnostics, whether the target's settings give a character an AI\nmodel, and the host's fields and every section the target may set, all\nin one field shape. A target whose settings cannot be resolved is\nrefused with the reason, never shown as blank fields."
     },
     "ConfirmationCancelReason": {
       "oneOf": [
@@ -1002,7 +1015,7 @@
             },
             "message": {
               "type": "string",
-              "description": "Present when a failure caused the change."
+              "description": "Present when a failure caused the change, or when she needs a\nmodel: what to do about it."
             },
             "kind": {
               "type": "string",
@@ -1064,7 +1077,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 8
+          "const": 9
         },
         "homeRoot": {
           "type": "string"
@@ -1129,7 +1142,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 8
+          "const": 9
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -1943,6 +1956,7 @@
         "not_started",
         "starting",
         "ready",
+        "needs_model",
         "stopping",
         "stopped",
         "failed"
@@ -2178,6 +2192,10 @@
         "activation": {
           "$ref": "#/$defs/RuntimeConfigSectionActivationShape"
         },
+        "setup": {
+          "$ref": "#/$defs/Setup",
+          "description": "Whether its settings are enough to build it, judged switched on or\noff: a plugin switched on before they are does not run. A\nconnector's always are."
+        },
         "fields": {
           "type": "array",
           "items": {
@@ -2206,6 +2224,7 @@
         "enabled",
         "enabledSource",
         "activation",
+        "setup",
         "fields",
         "layout",
         "diagnostics"
@@ -2219,6 +2238,21 @@
         "connectors"
       ],
       "description": "The two stanzas of a document that hold declared sections by id. A\nplugin and a connector may share an id: their sections never meet."
+    },
+    "Setup": {
+      "type": "object",
+      "properties": {
+        "ready": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ready"
+      ],
+      "description": "Whether settings are enough for what they set up, a plugin or a\ncharacter's AI model; while they are not, `message` says what to fill\nin, in the words of the settings page."
     },
     "Severity": {
       "type": "string",
