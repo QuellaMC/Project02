@@ -11,12 +11,15 @@ const FORMAT: &str = "project02.character.v1";
 /// The most a descriptor may weigh.
 pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
-/// A character as her package defines her: who she is, the persona the
-/// model is given, the version of that content, and the plugins she
-/// expects.
+/// A character as her package defines her: who she is, one line about her
+/// when it gives one, the persona the model is given, the version of that
+/// content, and the plugins she expects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterDefinition {
     pub profile: CharacterProfile,
+    /// What a person adding her from a file reads of her before she is
+    /// added; nothing else reads it.
+    pub about: Option<String>,
     pub persona: Persona,
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
@@ -131,6 +134,11 @@ pub enum ParseDescriptorError {
          blank space at either end"
     )]
     InvalidDisplayName,
+    #[error(
+        "character package identity.about must be one line of 1 to 128 characters with no blank \
+         space at either end"
+    )]
+    InvalidAbout,
     #[error("character package persona.system must be an array of one section or more")]
     NoPersona,
     #[error("character package persona.system[{0}] must be a non-blank string")]
@@ -147,10 +155,49 @@ pub enum ParseDescriptorError {
     ConfigEntryNotAnObject(Identifier),
 }
 
+impl ParseDescriptorError {
+    /// The rule broken, in plain words, for a person who chose the file
+    /// rather than wrote it.
+    #[must_use]
+    pub fn plainly(&self) -> &'static str {
+        match self {
+            Self::TooLarge => "This file is too large to be a character file.",
+            Self::NotJson(_) | Self::NotAnObject("descriptor") | Self::UnsupportedFormat => {
+                "This file is not a character file this app can read."
+            }
+            Self::NotAnObject("identity") | Self::InvalidId => {
+                "This file does not give the character an id the app can use."
+            }
+            Self::InvalidDisplayName => "This file does not give the character a one-line name.",
+            Self::InvalidAbout => {
+                "The line about the character in this file is not one line of at most 128 \
+                 characters."
+            }
+            Self::NotAnObject("persona") | Self::NoPersona | Self::InvalidSection(_) => {
+                "This file does not say who the character is."
+            }
+            Self::NotAnObject("meta") | Self::InvalidVersion => {
+                "This file does not give its version as three numbers, such as 1.0.0."
+            }
+            Self::NotAnObject(_)
+            | Self::InvalidPluginList(_)
+            | Self::ConfigNotAnObject
+            | Self::InvalidConfigKey(_)
+            | Self::ConfigEntryNotAnObject(_) => {
+                "This file lists the character's features in a way the app cannot read."
+            }
+        }
+    }
+}
+
 impl CharacterDefinition {
     /// Reads a `project02.character.json`: UTF-8 JSON of at most 64 KiB.
     /// What it holds that a descriptor does not know is not read.
-    pub(crate) fn from_descriptor(bytes: &[u8]) -> Result<Self, ParseDescriptorError> {
+    ///
+    /// # Errors
+    ///
+    /// [`ParseDescriptorError`] naming the first rule `bytes` breaks.
+    pub fn from_descriptor(bytes: &[u8]) -> Result<Self, ParseDescriptorError> {
         if bytes.len() > MAX_DESCRIPTOR_BYTES {
             return Err(ParseDescriptorError::TooLarge);
         }
@@ -164,6 +211,7 @@ impl CharacterDefinition {
 
         Ok(Self {
             profile: profile(descriptor)?,
+            about: about(descriptor)?,
             persona: persona(descriptor)?,
             version: version(descriptor)?,
             plugins: plugins(descriptor)?,
@@ -182,6 +230,20 @@ fn profile(descriptor: &Map<String, Value>) -> Result<CharacterProfile, ParseDes
             .and_then(|name| SpeakerName::new(name).ok())
             .ok_or(ParseDescriptorError::InvalidDisplayName)?,
     })
+}
+
+/// One line about her, held to the bound of her name.
+fn about(descriptor: &Map<String, Value>) -> Result<Option<String>, ParseDescriptorError> {
+    object(descriptor.get("identity"), "identity")?
+        .get("about")
+        .map(|about| {
+            about
+                .as_str()
+                .filter(|about| SpeakerName::new(about).is_ok())
+                .map(str::to_owned)
+                .ok_or(ParseDescriptorError::InvalidAbout)
+        })
+        .transpose()
 }
 
 fn persona(descriptor: &Map<String, Value>) -> Result<Persona, ParseDescriptorError> {
@@ -342,6 +404,7 @@ mod tests {
             ("/$schema", json!(42)),
             ("/identity/pronouns", json!("she/her")),
             ("/identity/displayName", json!(emoji.repeat(128))),
+            ("/identity/about", json!("A quiet one, who notices things.")),
             ("/persona/system", json!(["First.", "Second."])),
             ("/meta/version", json!("999999999.0.01")),
             (
@@ -358,6 +421,10 @@ mod tests {
 
         assert_eq!(definition.profile.id.as_str(), "nova");
         assert_eq!(definition.profile.display_name.as_str(), emoji.repeat(128));
+        assert_eq!(
+            definition.about.as_deref(),
+            Some("A quiet one, who notices things.")
+        );
         assert_eq!(definition.persona.sections(), ["First.", "Second."]);
         assert_eq!(definition.version.as_str(), "999999999.0.01");
         assert_eq!(
@@ -386,6 +453,12 @@ mod tests {
                 .unwrap()
                 .plugins,
             PluginExpectations::default()
+        );
+        assert_eq!(
+            CharacterDefinition::from_descriptor(&with(&[]))
+                .unwrap()
+                .about,
+            None
         );
     }
 
@@ -420,6 +493,10 @@ mod tests {
             (
                 with(&[("/identity/displayName", json!("Nova\nError: failed"))]),
                 "identity.displayName",
+            ),
+            (
+                with(&[("/identity/about", json!("Quiet.\nAnd more."))]),
+                "identity.about",
             ),
             (
                 with(&[("/persona/system", json!([]))]),

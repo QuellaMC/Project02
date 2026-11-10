@@ -38,6 +38,7 @@ const mira: CharacterSummary = {
   id: 'mira',
   displayName: 'Mira',
   enabled: true,
+  builtIn: true,
   state: 'ready',
 };
 const conversationId = 'conv-1';
@@ -1129,6 +1130,7 @@ describe('web store', () => {
       id: 'nova',
       displayName: 'Nova',
       enabled: true,
+      builtIn: false,
       state: 'starting',
     };
     const changed = applyEvent(state, {

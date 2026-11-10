@@ -30,8 +30,9 @@ export type Line = {
  * always comes with a 200.
  */
 export function wireOf(daemon: Address) {
+  // A body is sent as JSON, and a file's text as the file holds it.
   const call = (
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     answer: Answer,
     body?: unknown,
@@ -45,7 +46,9 @@ export function wireOf(daemon: Address) {
             authorization: `Bearer ${daemon.token}`,
             ...(body === undefined ? {} : {'content-type': 'application/json'}),
           },
-          ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+          ...(body === undefined
+            ? {}
+            : {body: typeof body === 'string' ? body : JSON.stringify(body)}),
         });
         const text = await response.text();
 
@@ -71,6 +74,16 @@ export function wireOf(daemon: Address) {
         'POST',
         `/api/characters/${segment(characterId)}/start`,
         'StartOutcome',
+      ),
+    previewCharacter: (file: string) =>
+      call('POST', '/api/character-preview', 'CharacterPreviewOutcome', file),
+    addCharacter: (file: string) =>
+      call('POST', '/api/characters', 'AddCharacterOutcome', file),
+    removeCharacter: (characterId: string) =>
+      call(
+        'DELETE',
+        `/api/characters/${segment(characterId)}`,
+        'RemoveCharacterOutcome',
       ),
     open: async (characterId: string) =>
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {

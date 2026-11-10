@@ -17,17 +17,19 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    Answer, AnswerBody, BotState, BotUsername, CancelReason, ChangeOutcome, ChangeRefusal,
-    CharacterState, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
-    ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
-    ConnectorBotsOutcome, ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence,
-    ConnectorRefusal, ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome,
-    HistoryRefusal, MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal,
-    PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal,
-    PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion,
-    Ready, Refusal, RosterState, RunningDraft, RunningTurn, Settlement, StartOutcome, StartRefusal,
-    StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
-    TurnStatus, ViewRefusal,
+    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, BotState, BotUsername,
+    CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
+    CharacterPreviewOutcome, CharacterPreviewRefusal, CharacterState, CharacterSummary,
+    ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId,
+    ConfirmationQuestion, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
+    ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody,
+    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
+    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
+    RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn,
+    Settlement, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, ToolCallStatus,
+    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -48,6 +50,9 @@ trait Wire {
 fn walk(wire: &mut impl Wire) {
     wire.written::<Health>();
     wire.written::<StartOutcome>();
+    wire.written::<CharacterPreviewOutcome>();
+    wire.written::<AddCharacterOutcome>();
+    wire.written::<RemoveCharacterOutcome>();
     wire.written::<OpenOutcome>();
     wire.written::<SubmitOutcome>();
     wire.written::<HistoryOutcome>();
@@ -374,6 +379,7 @@ fn written() -> Vec<(&'static str, Value)> {
             id: id("mira"),
             display_name: mira.clone(),
             enabled: true,
+            built_in: true,
             state: RosterState::NeedsModel,
             diagnostic: Some("Choose an AI service.".to_owned()),
             maintenance: Some(maintenance.clone()),
@@ -502,6 +508,59 @@ fn written() -> Vec<(&'static str, Value)> {
             &StartOutcome::Refused {
                 reason: StartRefusal::GatewayStopped,
                 message: "The daemon is stopping.".to_owned(),
+            },
+        ),
+        value(
+            "CharacterPreviewOutcome",
+            &CharacterPreviewOutcome::Ok {
+                id: id("nova"),
+                display_name: SpeakerName::new("Nova").unwrap(),
+                version: "1.0.0".to_owned(),
+                about: Some("A quiet one, who notices things.".to_owned()),
+                comes_with: vec![
+                    CharacterFeature::Plugin {
+                        id: id("character-memory"),
+                        display_name: "Notebook".to_owned(),
+                    },
+                    CharacterFeature::Unknown { id: id("teleport") },
+                ],
+                installed: CharacterInstalled::OtherVersion,
+                has_data: true,
+            },
+        ),
+        value(
+            "CharacterPreviewOutcome",
+            &CharacterPreviewOutcome::Refused {
+                reason: CharacterPreviewRefusal::Invalid,
+                message: "This file is not a character file this app can read.".to_owned(),
+            },
+        ),
+        value(
+            "AddCharacterOutcome",
+            &AddCharacterOutcome::Updated {
+                character_id: id("nova"),
+            },
+        ),
+        value(
+            "AddCharacterOutcome",
+            &AddCharacterOutcome::Refused {
+                reason: AddCharacterRefusal::BuiltIn,
+                message: "This character comes with the app.".to_owned(),
+            },
+        ),
+        value(
+            "AddCharacterOutcome",
+            &AddCharacterOutcome::Failed(StorageFailure {
+                code: "write_failed".to_owned(),
+                message: "The disk is full.".to_owned(),
+            }),
+        ),
+        value("RemoveCharacterOutcome", &RemoveCharacterOutcome::Removed),
+        value(
+            "RemoveCharacterOutcome",
+            &RemoveCharacterOutcome::Refused {
+                reason: RemoveCharacterRefusal::UnknownCharacter,
+                message: "No character \"nova\" is here to remove.".to_owned(),
             },
         ),
         read_back(

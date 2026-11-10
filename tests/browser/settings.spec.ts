@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, type Locator, type Page} from '@playwright/test';
@@ -88,11 +88,33 @@ function checkOf(page: Page, box: Locator): Locator {
   return page.locator('.box', {has: box}).locator('.box-check');
 }
 
-async function say(page: Page, line: string): Promise<void> {
-  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+async function say(page: Page, line: string, to = 'Mira'): Promise<void> {
+  const composer = page.getByRole('textbox', {name: `Message ${to}`});
 
   await composer.fill(line);
   await composer.press('Enter');
+}
+
+/** The file chooser this button opens, given a file of this name and text. */
+async function chooseFile(
+  page: Page,
+  button: Locator,
+  name: string,
+  text: string,
+): Promise<void> {
+  const chooser = page.waitForEvent('filechooser');
+
+  await button.click();
+  await (
+    await chooser
+  ).setFiles({name, mimeType: 'application/json', buffer: Buffer.from(text)});
+}
+
+/** The folders of the characters added to the home. */
+function addedTo(home: string): string[] {
+  const packages = join(home, 'characters');
+
+  return existsSync(packages) ? readdirSync(packages) : [];
 }
 
 test('page.welcome-first-run: a home whose settings give her no AI model opens on the welcome; the name, the service and the key save as each is given, Start Chatting opens the chat, and she answers through the key', async ({
@@ -442,6 +464,116 @@ test('page.settings-advanced: the Advanced switch shows what most people never n
     page.getByText('Sends your chats to the service you set up for it'),
   ).toBeVisible();
   await expect(page.getByText('No character uses it right now.')).toBeVisible();
+});
+
+test('page.add-character: a character file shows who she is and what she comes with; Add brings her into the sidebar and she answers in the chat; removed, she leaves the window, and added again her chat is still hers', async ({
+  page,
+}) => {
+  const {model, home, daemon} = await miraHome({});
+  const file = characterJson('nova', 'Nova', {
+    identity: {
+      id: 'nova',
+      displayName: 'Nova',
+      about: 'A quiet one, who notices things.',
+    },
+    plugins: {recommended: ['reply-style', 'teleport']},
+  });
+  const add = entry(page, 'Add Character');
+  const roster = page.getByRole('complementary', {name: 'Characters'});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await chooseFile(page, add, 'nova.json', file);
+  await expect(page.getByRole('heading', {name: 'Nova'})).toBeVisible();
+  await expect(page.getByText('Version 1.0.0 · nova.json')).toBeVisible();
+  await expect(
+    page.getByText('A quiet one, who notices things.'),
+  ).toBeVisible();
+  await expect(page.locator('.chip')).toHaveText([
+    'Notebook',
+    'Look Back',
+    'Reply Style',
+    'Ask to Change Settings',
+  ]);
+  await expect(
+    page.getByText('This app does not have: teleport.'),
+  ).toBeVisible();
+  expect(addedTo(home)).toEqual([]);
+
+  await page.getByRole('button', {name: 'Add Nova'}).click();
+  await expect(page.getByRole('switch', {name: 'Nova is on'})).toBeVisible();
+  await expect(entry(page, 'Nova')).toBeVisible();
+
+  model.answer(reply('Hello. I noticed you.'));
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await roster.getByRole('button', {name: /^Nova/u}).click();
+  await say(page, 'Hi, Nova.', 'Nova');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello. I noticed you.',
+  ]);
+
+  await page.getByRole('button', {name: 'Settings for Nova'}).click();
+  await page.getByRole('button', {name: 'Remove Nova…'}).click();
+  await expect(page.getByRole('alertdialog')).toContainText(
+    'Her chats and memories stay on this computer',
+  );
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', {name: 'Remove', exact: true})
+    .click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(entry(page, 'Nova')).toHaveCount(0);
+  expect(addedTo(home)).toEqual([]);
+
+  await chooseFile(page, add, 'nova.json', file);
+  await expect(
+    page.getByText('Her chats and memories from before are still here.'),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Add Nova'}).click();
+  await expect(page.getByRole('switch', {name: 'Nova is on'})).toBeVisible();
+
+  // A fresh tab knows only what the daemon keeps.
+  await page.reload();
+  await roster.getByRole('button', {name: /^Nova/u}).click();
+  await expect(page.locator('.bubble-own .bubble-text')).toHaveText([
+    'Hi, Nova.',
+  ]);
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello. I noticed you.',
+  ]);
+});
+
+test('page.add-character-refused: a file too large to be a character file, and one that holds none, are each refused in plain words in place of a preview; Cancel goes back, and nothing is added', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+  await chooseFile(
+    page,
+    entry(page, 'Add Character'),
+    'big.json',
+    JSON.stringify({padding: 'x'.repeat(64 * 1024)}),
+  );
+  await expect(
+    page.getByText('This file is too large to be a character file.'),
+  ).toBeVisible();
+
+  await chooseFile(
+    page,
+    page.getByRole('button', {name: 'Choose Another File'}),
+    'notes.json',
+    '{"name": "Nova"}',
+  );
+  await expect(
+    page.getByText('This file is not a character file this app can read.'),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Cancel'}).click();
+  await expect(page.getByRole('switch', {name: 'Mira is on'})).toBeVisible();
+  expect(addedTo(home)).toEqual([]);
 });
 
 test('page.settings-two-tabs: what one tab changes shows in another without a click, and a tab that fell behind sends its own change again once over the newer settings', async ({

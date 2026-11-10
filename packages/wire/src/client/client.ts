@@ -1,9 +1,11 @@
 import {
   gatewayLoopbackHostnames,
   gatewayProtocolVersion,
+  type AddCharacterOutcome,
   type Answer,
   type AnswerBody,
   type AnswerOutcome,
+  type CharacterPreviewOutcome,
   type ClientStamp,
   type ConfigChange,
   type ConfigChangeOutcome,
@@ -23,6 +25,7 @@ import {
   type PairingSettleOutcome,
   type PairingSubject,
   type PendingConfirmation,
+  type RemoveCharacterOutcome,
   type StartOutcome,
   type SubmitOutcome,
 } from '../contract/index.ts';
@@ -93,6 +96,23 @@ export type GatewayClient = {
     characterId: string,
     options?: GatewayCallOptions,
   ): Promise<StartOutcome>;
+  /**
+   * Who a character file holds and what adding her would do; nothing is
+   * written. `file` is the file's text, sent as it is.
+   */
+  previewCharacter(
+    file: string,
+    options?: GatewayCallOptions,
+  ): Promise<CharacterPreviewOutcome>;
+  /** Adds the character a file holds, or updates her; `file` as for a preview. */
+  addCharacter(
+    file: string,
+    options?: GatewayCallOptions,
+  ): Promise<AddCharacterOutcome>;
+  removeCharacter(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<RemoveCharacterOutcome>;
   openDirectConversation(
     characterId: string,
     options?: GatewayCallOptions,
@@ -210,6 +230,19 @@ export function createGatewayClient(
       route.post<StartOutcome>(
         `/api/characters/${segment(characterId)}/start`,
         undefined,
+        callOptions,
+      ),
+    previewCharacter: (file, callOptions) =>
+      route.postFile<CharacterPreviewOutcome>(
+        '/api/character-preview',
+        file,
+        callOptions,
+      ),
+    addCharacter: (file, callOptions) =>
+      route.postFile<AddCharacterOutcome>('/api/characters', file, callOptions),
+    removeCharacter: (characterId, callOptions) =>
+      route.delete<RemoveCharacterOutcome>(
+        `/api/characters/${segment(characterId)}`,
         callOptions,
       ),
     openDirectConversation: (characterId, callOptions) =>
@@ -357,20 +390,27 @@ function createRoutes(
     body: object | undefined,
     options?: GatewayCallOptions,
   ): Promise<Outcome>;
+  /** A JSON document a file holds, sent as the file holds it. */
+  postFile<Outcome>(
+    path: string,
+    file: string,
+    options?: GatewayCallOptions,
+  ): Promise<Outcome>;
+  delete<Outcome>(path: string, options?: GatewayCallOptions): Promise<Outcome>;
 } {
   const send = async (
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
-    body: object | undefined,
+    json: string | undefined,
     options: GatewayCallOptions | undefined,
   ): Promise<unknown> => {
     const response = await transport(`${baseUrl}${path}`, {
       method,
       headers:
-        body === undefined
+        json === undefined
           ? headers
           : {...headers, 'content-type': 'application/json'},
-      ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+      ...(json === undefined ? {} : {body: json}),
       ...(options?.signal === undefined ? {} : {signal: options.signal}),
     });
 
@@ -386,7 +426,20 @@ function createRoutes(
       path: string,
       body: object | undefined,
       options?: GatewayCallOptions,
-    ) => (await send('POST', path, body, options)) as Outcome,
+    ) =>
+      (await send(
+        'POST',
+        path,
+        body === undefined ? undefined : JSON.stringify(body),
+        options,
+      )) as Outcome,
+    postFile: async <Outcome>(
+      path: string,
+      file: string,
+      options?: GatewayCallOptions,
+    ) => (await send('POST', path, file, options)) as Outcome,
+    delete: async <Outcome>(path: string, options?: GatewayCallOptions) =>
+      (await send('DELETE', path, undefined, options)) as Outcome,
   };
 }
 

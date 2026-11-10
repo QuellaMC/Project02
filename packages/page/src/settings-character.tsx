@@ -76,9 +76,12 @@ function hostRow(characterId: string, name: string): Row {
 export function CharacterPage({
   ctx,
   characterId,
+  removing,
 }: {
   readonly ctx: Ctx;
   readonly characterId: string;
+  /** Her page asking whether to remove her. */
+  readonly removing?: Extract<SettingsPage, {kind: 'remove'}>;
 }) {
   const character = characterOf(ctx, characterId);
   const target = characterTarget(characterId);
@@ -115,7 +118,92 @@ export function CharacterPage({
           She won&apos;t start or reply while she&apos;s off.
         </p>
       )}
+      {character.builtIn ? null : (
+        <RemoveCharacter
+          ctx={ctx}
+          character={character}
+          {...(removing === undefined ? {} : {removing})}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * Remove, at the bottom of the page of a character a person added. It
+ * asks first, saying that her chats and memories stay, with the focus on
+ * Cancel so a key pressed by mistake removes nothing; and says in the
+ * daemon's words why she was not removed when she was not.
+ */
+function RemoveCharacter({
+  ctx,
+  character,
+  removing,
+}: {
+  readonly ctx: Ctx;
+  readonly character: CharacterSummary;
+  readonly removing?: Extract<SettingsPage, {kind: 'remove'}>;
+}) {
+  const {session} = ctx;
+  const name = character.displayName;
+
+  if (removing === undefined) {
+    return (
+      <button
+        type="button"
+        className="button-danger"
+        onClick={() => {
+          session.goTo({kind: 'remove', characterId: character.id});
+        }}
+      >
+        Remove {name}…
+      </button>
+    );
+  }
+
+  return (
+    <div
+      role="alertdialog"
+      aria-labelledby="remove-title"
+      aria-describedby="remove-text"
+      className="confirm"
+    >
+      <div className="confirm-words">
+        <span id="remove-title" className="confirm-title">
+          Remove {name}?
+        </span>
+        <span id="remove-text" className="page-note">
+          She leaves your character list. Her chats and memories stay on this
+          computer, so adding her again brings them back.
+        </span>
+      </div>
+      <div className="confirm-buttons">
+        <button
+          type="button"
+          className="button-pill button-destructive"
+          onClick={() => {
+            void session.removeCharacter(character.id);
+          }}
+        >
+          Remove
+        </button>
+        <button
+          type="button"
+          className="button-pill"
+          autoFocus
+          onClick={() => {
+            session.goTo({kind: 'character', characterId: character.id});
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      {removing.problem === undefined ? null : (
+        <p className="page-problem" role="alert">
+          {removing.problem}
+        </p>
+      )}
+    </div>
   );
 }
 

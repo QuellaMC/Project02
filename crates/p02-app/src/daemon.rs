@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use futures_util::FutureExt;
 use futures_util::future::join_all;
-use p02_characters::{CharacterDefinition, discover};
+use p02_characters::{CharacterDefinition, discover, is_bundled};
 use p02_config::{
     Connector, Sections, apply_change, config_view, connector_config_view, connectors,
 };
@@ -857,7 +857,7 @@ impl Daemon {
 
     /// Health as it now stands, sent to every surface; it waits on the
     /// disk.
-    fn announce_health(&self) {
+    pub(crate) fn announce_health(&self) {
         let health = self.health_now();
 
         self.inner
@@ -875,6 +875,7 @@ impl Daemon {
             id: definition.profile.id.clone(),
             display_name: definition.profile.display_name.clone(),
             enabled,
+            built_in: is_bundled(&definition.profile.id),
             state: health.as_ref().map(|health| health.state).into(),
             diagnostic: health.as_ref().and_then(|health| health.diagnostic.clone()),
             maintenance: health.and_then(|health| health.maintenance),

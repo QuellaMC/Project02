@@ -16,7 +16,8 @@ const BUNDLED: [(&str, &str); 1] = [(
 /// Where a home keeps the packages its person added, a folder each.
 pub const HOME_PACKAGES: &str = "characters";
 
-const DESCRIPTOR: &str = "project02.character.json";
+/// The one file of a package.
+pub const PACKAGE_DESCRIPTOR: &str = "project02.character.json";
 
 /// What discovery found: the characters it published, in id order, and a
 /// diagnostic for each package it could not publish.
@@ -69,6 +70,34 @@ pub enum PackageProblem {
          only by case; rename or remove this package"
     )]
     DuplicateId { taken: Identifier },
+}
+
+/// Where a character offered to a home would stand once her package is
+/// written in her folder there, against the packages published now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Standing {
+    /// No package of the home is her.
+    New,
+    /// Her package is published in this very version.
+    Same,
+    /// Her package is published in another version.
+    OtherVersion,
+    /// She comes with the app, so no package of the home can be her.
+    BuiltIn,
+}
+
+/// Why a character offered to a home would not be published from her
+/// folder there: a folder of its packages is named by an id differing from
+/// hers only by case, and the two would share one data directory, and on a
+/// disk that ignores case one folder.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "another character here, \"{taken}\", differs from \"{id}\" only in capital letters, and the \
+     two cannot both be added"
+)]
+pub struct IdTaken {
+    pub id: Identifier,
+    pub taken: Identifier,
 }
 
 /// Why no published character answers to an id.
@@ -153,6 +182,66 @@ impl Discovery {
             }
         })
     }
+
+    /// Where `character` would stand once her package is written in her
+    /// folder of the home this discovery read, judged by the rule it
+    /// publishes by, the bundled packages first and no id twice even by
+    /// case: built in when she comes with the app; refused when a folder of
+    /// the home's packages, published or not, has her id in other capital
+    /// letters, since one of the two would be left unpublished; installed
+    /// when a package of her very id is published; new otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`IdTaken`] naming the folder whose id differs from hers only by
+    /// case.
+    pub fn standing(&self, character: &CharacterDefinition) -> Result<Standing, IdTaken> {
+        let id = &character.profile.id;
+
+        if is_bundled(id) {
+            return Ok(Standing::BuiltIn);
+        }
+
+        let taken = self
+            .characters
+            .iter()
+            .map(|published| published.profile.id.clone())
+            .chain(
+                self.diagnostics
+                    .iter()
+                    .filter_map(|diagnostic| Identifier::new(diagnostic.folder.as_deref()?).ok()),
+            )
+            .find(|folder| folder.collision_key() == id.collision_key() && folder != id);
+
+        if let Some(taken) = taken {
+            return Err(IdTaken {
+                id: id.clone(),
+                taken,
+            });
+        }
+
+        Ok(
+            match self
+                .characters
+                .iter()
+                .find(|published| published.profile.id == *id)
+            {
+                None => Standing::New,
+                Some(published) if published.version == character.version => Standing::Same,
+                Some(_) => Standing::OtherVersion,
+            },
+        )
+    }
+}
+
+/// Whether `id` is a character that comes with the app, or differs from
+/// one only by case: no package of a home can be her, since the bundled
+/// packages are published first.
+#[must_use]
+pub fn is_bundled(id: &Identifier) -> bool {
+    BUNDLED.iter().any(|(folder, _)| {
+        Identifier::new(folder).is_ok_and(|bundled| bundled.collision_key() == id.collision_key())
+    })
 }
 
 impl PackageDiagnostic {
@@ -261,7 +350,7 @@ fn home_packages(home: &Path) -> Vec<Result<Candidate, PackageDiagnostic>> {
 /// package folder is; one past the size limit is read only far enough to
 /// tell.
 fn read_package(directory: &Path, folder: String) -> Result<Candidate, PackageDiagnostic> {
-    let path = directory.join(DESCRIPTOR);
+    let path = directory.join(PACKAGE_DESCRIPTOR);
     let read = match describe_entry(&path) {
         PathEntry::File => read_at_most(&path, MAX_DESCRIPTOR_BYTES + 1)
             .map_err(PackageProblem::UnreadableDescriptor),
@@ -422,13 +511,13 @@ mod tests {
             });
 
             self.write(
-                &format!("characters/{folder}/{DESCRIPTOR}"),
+                &format!("characters/{folder}/{PACKAGE_DESCRIPTOR}"),
                 descriptor.to_string().as_bytes(),
             )
         }
 
         fn descriptor(&self, folder: &str) -> PackageLocation {
-            PackageLocation::Home(self.path(&format!("characters/{folder}/{DESCRIPTOR}")))
+            PackageLocation::Home(self.path(&format!("characters/{folder}/{PACKAGE_DESCRIPTOR}")))
         }
     }
 

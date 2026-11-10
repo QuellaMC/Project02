@@ -9,6 +9,7 @@ import {
   cardsShown,
   characterStatus,
   choiceWords,
+  comesWithOf,
   controlOf,
   featureControl,
   featureValue,
@@ -17,8 +18,10 @@ import {
   keyPlaceholder,
   labelOf,
   marks,
+  offerOf,
   parentOf,
   placeholderOf,
+  readinessOf,
   sectionsListed,
   setupPage,
   sidebarOf,
@@ -28,6 +31,7 @@ import {
   usedBy,
   valueNow,
   welcomeReady,
+  type CharacterPreview,
 } from './settings-model.ts';
 import {characterTarget, home, rowKey, type Row} from './settings.ts';
 import type {Settings} from './store.ts';
@@ -261,12 +265,14 @@ const mira: CharacterSummary = {
   id: 'mira',
   displayName: 'Mira',
   enabled: true,
+  builtIn: true,
   state: 'ready',
 };
 const nova: CharacterSummary = {
   id: 'nova',
   displayName: 'Nova',
   enabled: false,
+  builtIn: false,
   state: 'not_started',
 };
 
@@ -803,6 +809,10 @@ describe('settings model', () => {
     ).toEqual({
       kind: 'advanced',
     });
+    expect(parentOf({kind: 'remove', characterId: 'nova'})).toEqual({
+      kind: 'character',
+      characterId: 'nova',
+    });
     expect(parentOf({kind: 'you'})).toBeUndefined();
     expect(
       marks(
@@ -811,6 +821,94 @@ describe('settings model', () => {
       ),
     ).toBe(true);
     expect(marks({kind: 'you'}, {kind: 'advanced'})).toBe(false);
+  });
+
+  it('offers by where she stands here: Add when she is new, saying so when her chats from before are still here; Update for another version; her page when this very version is here; and nothing to add for one that comes with the app', () => {
+    const nova: CharacterPreview = {
+      status: 'ok',
+      id: 'nova',
+      displayName: 'Nova',
+      version: '1.0.0',
+      comesWith: [],
+      installed: 'none',
+      hasData: false,
+    };
+
+    expect(offerOf(nova)).toEqual({button: 'Add Nova'});
+    expect(offerOf({...nova, hasData: true})).toEqual({
+      button: 'Add Nova',
+      line: 'Her chats and memories from before are still here.',
+    });
+    expect(
+      offerOf({...nova, installed: 'other_version', hasData: true}),
+    ).toEqual({
+      button: 'Update Nova',
+      line: 'Nova is here in another version.',
+    });
+    expect(offerOf({...nova, installed: 'same', hasData: true})).toEqual({
+      line: 'Nova is already here.',
+      link: 'Open Nova',
+    });
+    expect(offerOf({...nova, installed: 'built_in', hasData: true})).toEqual({
+      line: 'Nova comes with the app.',
+    });
+  });
+
+  it('draws what she comes with in the order her page shows it, each on its tile, says once what this app does not have, and what she would find set up', () => {
+    const settings = settingsOf({
+      home: homeView(),
+      'character:mira': herView(),
+    });
+
+    expect(
+      comesWithOf(settings, [
+        {
+          kind: 'plugin',
+          id: 'runtime.plugin',
+          displayName: 'Ask to Change Settings',
+        },
+        {kind: 'unknown', id: 'astronomy'},
+        {kind: 'plugin', id: 'weather', displayName: 'Weather'},
+        {kind: 'plugin', id: 'session-history', displayName: 'Look Back'},
+        {kind: 'unknown', id: 'clock'},
+      ]),
+    ).toEqual({
+      chips: [
+        {
+          id: 'session-history',
+          name: 'Look Back',
+          icon: 'history',
+          tint: 'cyan',
+        },
+        {
+          id: 'runtime.plugin',
+          name: 'Ask to Change Settings',
+          icon: 'shield',
+          tint: 'gray',
+        },
+        {id: 'weather', name: 'Weather', icon: 'grid', tint: 'gray'},
+      ],
+      lacking: 'This app does not have: astronomy, clock.',
+    });
+    expect(comesWithOf(settings, [])).toEqual({chips: []});
+    expect(readinessOf(settings)).toEqual([
+      {label: 'AI Model', value: 'Ready'},
+      {label: 'Long-Term Memory', value: 'Ready'},
+    ]);
+    expect(
+      readinessOf(
+        settingsOf({
+          home: homeView({
+            model: {ready: false},
+            sections: [memory({setup: {ready: false}}), telegram],
+          }),
+        }),
+      ),
+    ).toEqual([
+      {label: 'AI Model', value: 'Set Up First'},
+      {label: 'Long-Term Memory', value: 'Optional'},
+    ]);
+    expect(readinessOf(settingsOf({}))).toEqual([]);
   });
 
   it('draws a plugin by the icon and tint it names, the plainest for one the page lacks, and each character on the same colour wherever she appears', () => {

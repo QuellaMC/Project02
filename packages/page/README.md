@@ -62,3 +62,13 @@ person starts chatting or sets it up later. The roster
 opens the window, a gear per character opens her page, and one who needs
 an AI model says so in plain words that lead to it. The chat and the
 window draw from one set of tokens in `styles.css`, light and dark.
+
+The window adds and removes characters over three more verbs. Add
+Character opens the system's file chooser. The file's text goes to the
+daemon's preview unless it is larger than a character file can be, and
+the window shows who she is and what adding her does, or why she cannot
+be added; it holds the text only while that page is open, and Add sends
+it again for the daemon to judge afresh. A character a person added has
+Remove at the bottom of her page, which asks first. The roster is
+health's, so a character added or removed anywhere appears or goes here,
+and a page of one who is gone is left for You.

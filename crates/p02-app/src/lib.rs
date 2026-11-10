@@ -7,6 +7,7 @@ mod confirmation;
 mod daemon;
 mod history;
 mod outcome;
+mod packages;
 mod pairing;
 mod reconcile;
 

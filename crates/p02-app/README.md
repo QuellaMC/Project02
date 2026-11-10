@@ -27,6 +27,12 @@ with an outcome of p02-wire, never an error.
   on changed. A turn in flight meets it before its next request to her
   model, where her settings are read again in any case. Whether they give
   her a model is one judgement, which her settings' view asks too.
+- **A character's package** is added from a file, updated or removed
+  while the daemon runs: judged as discovery would publish it, written or
+  removed under the locks of her settings, and then announced and
+  reconciled as a settings change is. One updated while she runs is
+  stopped, and starts again from her new package; her data outlives her
+  removal.
 - **Confirmations and pairing requests** wait for the person under a
   deadline the daemon judges, and each settles once.
 - **A connector** is on the stream while a stream of its own is open, and

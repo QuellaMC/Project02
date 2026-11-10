@@ -9,6 +9,6 @@ pub use descriptor::{
     Persona, PluginExpectations,
 };
 pub use discovery::{
-    Discovery, FindCharacterError, HOME_PACKAGES, PackageDiagnostic, PackageLocation,
-    PackageProblem, discover,
+    Discovery, FindCharacterError, HOME_PACKAGES, IdTaken, PACKAGE_DESCRIPTOR, PackageDiagnostic,
+    PackageLocation, PackageProblem, Standing, discover, is_bundled,
 };
