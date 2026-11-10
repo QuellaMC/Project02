@@ -380,8 +380,13 @@ impl Table {
 
         let changed = match &event {
             Event::HealthChanged { health } => {
+                let bots_alone = self
+                    .health
+                    .as_ref()
+                    .is_some_and(|before| bots_alone_moved(before, health));
+
                 self.health = Some(health.clone());
-                true
+                !bots_alone
             }
             _ => false,
         };
@@ -608,6 +613,26 @@ impl Table {
         self.tracker.close();
         self.tracker.wait().await;
     }
+}
+
+/// Whether `now` differs from `before` only in what the connectors' bots
+/// say. That is the daemon passing on a table a connector told it, this
+/// one's own among them: no setting moved, so nothing is read for it and
+/// no bot is held. A health that says the same as the one before is a
+/// setting that moved, which health does not show, and is read for.
+fn bots_alone_moved(before: &Health, now: &Health) -> bool {
+    let apart_from_bots = |health: &Health| {
+        let mut health = health.clone();
+
+        for connector in &mut health.connectors {
+            connector.bots.clear();
+        }
+
+        serde_json::to_value(health).ok()
+    };
+
+    serde_json::to_value(before).ok() != serde_json::to_value(now).ok()
+        && apart_from_bots(before) == apart_from_bots(now)
 }
 
 /// Tells the daemon how the bots stand each time that is set, one post at a
