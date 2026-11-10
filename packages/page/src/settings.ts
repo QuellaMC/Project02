@@ -240,26 +240,38 @@ export function characterPreviewed(
 type Unanswered = {readonly status: 'failed'; readonly message: string};
 
 /**
- * How adding her ended, heard by the preview that asked: added or
- * updated, the window opens her page and the file goes with the preview;
- * otherwise the preview stays and says why, in the daemon's words.
+ * How adding her ended, heard by the preview that asked, `asked`, while
+ * its file is still the one shown: added or updated, the window opens her
+ * page and the file goes with the preview; otherwise the preview stays
+ * and says why, in the daemon's words. A preview the person has left, for
+ * another file or another page, is not answered in its place: when she
+ * was added the roster says so, and what kept her out is a notice.
  */
 export function characterAddEnded(
   state: WebState,
+  asked: Extract<SettingsPage, {kind: 'add'}>,
   outcome: AddCharacterOutcome | Unanswered,
 ): WebState {
   const page = windowPage(state);
+  const shown =
+    page?.kind === 'add' &&
+    page.fileName === asked.fileName &&
+    page.text === asked.text
+      ? page
+      : undefined;
 
-  if (page?.kind !== 'add') {
-    return state;
+  if (outcome.status === 'added' || outcome.status === 'updated') {
+    return shown === undefined
+      ? state
+      : settingsOpened(state, {
+          kind: 'character',
+          characterId: outcome.characterId,
+        });
   }
 
-  return settingsOpened(
-    state,
-    outcome.status === 'added' || outcome.status === 'updated'
-      ? {kind: 'character', characterId: outcome.characterId}
-      : {...page, problem: outcome.message},
-  );
+  return shown === undefined
+    ? noticed(state, outcome.message)
+    : settingsOpened(state, {...shown, problem: outcome.message});
 }
 
 /**

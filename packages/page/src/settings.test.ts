@@ -519,35 +519,59 @@ describe('settings window', () => {
       'This file is too large to be a character file.',
     );
 
+    const asked = {kind: 'add', fileName: 'nova.json', text, from} as const;
     const builtIn =
       'This character comes with the app, so a file cannot add or change her.';
-    const refused = characterAddEnded(shown, {
-      status: 'refused',
-      reason: 'built_in',
-      message: builtIn,
-    });
+    const refused = characterAddEnded(
+      shown,
+      {...asked, preview: novaFile},
+      {status: 'refused', reason: 'built_in', message: builtIn},
+    );
+    const unreached = {
+      status: 'failed',
+      message: 'The app could not be reached.',
+    } as const;
 
     expect(pageOf(refused)).toEqual({...pageOf(shown), problem: builtIn});
     expect(
       pageOf(
-        characterAddEnded(shown, {
-          status: 'failed',
-          message: 'The app could not be reached.',
-        }),
+        characterAddEnded(shown, {...asked, preview: novaFile}, unreached),
       ),
     ).toMatchObject({kind: 'add', problem: 'The app could not be reached.'});
     expect(
       pageOf(
-        characterAddEnded(refused, {status: 'updated', characterId: 'nova'}),
+        characterAddEnded(
+          refused,
+          {...asked, preview: novaFile},
+          {status: 'updated', characterId: 'nova'},
+        ),
       ),
     ).toEqual({kind: 'character', characterId: 'nova'});
 
-    // An answer that finds the window elsewhere, or a file with no window open, changes nothing.
+    // An answer is its own preview's alone. One that finds another file
+    // previewed, or the window elsewhere, leaves what is shown as it is:
+    // she is in the roster when she was added, and what kept her out is a
+    // notice. A file chosen with no window open is not shown.
+    const another = characterPreviewed(
+      shown,
+      {name: 'aria.json', text: '{"format": "project02.character.v1", "n": 2}'},
+      novaFile,
+    );
     const elsewhere = opened();
 
-    expect(
-      characterAddEnded(elsewhere, {status: 'added', characterId: 'nova'}),
-    ).toBe(elsewhere);
+    for (const left of [another, elsewhere]) {
+      expect(
+        characterAddEnded(
+          left,
+          {...asked, preview: novaFile},
+          {status: 'added', characterId: 'nova'},
+        ),
+      ).toBe(left);
+      expect(
+        characterAddEnded(left, {...asked, preview: novaFile}, unreached),
+      ).toEqual({...left, notices: ['The app could not be reached.']});
+    }
+
     expect(
       characterPreviewed(initialState, {name: 'nova.json', text}, novaFile),
     ).toBe(initialState);

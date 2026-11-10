@@ -210,7 +210,7 @@ function characterVerbs({
 
       const outcome = await client.addCharacter(page.text).catch(unanswered);
 
-      apply(current => characterAddEnded(current, outcome));
+      apply(current => characterAddEnded(current, page, outcome));
     },
     async removeCharacter(characterId) {
       apply(noticeSpent);
