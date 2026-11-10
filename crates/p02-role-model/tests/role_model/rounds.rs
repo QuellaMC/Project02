@@ -14,7 +14,8 @@ use p02_contracts::{
 };
 use p02_core::{MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole};
 use p02_role_model::{
-    DraftEvent, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
+    DraftEvent, ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
+    TurnSink,
 };
 use serde_json::{Value, json};
 
@@ -173,9 +174,12 @@ async fn run(
     persona: &Persona,
     history: &[ConversationTurn],
 ) -> Result<TurnOutcome, &'static str> {
+    let event = event();
+    let now = event.created_at().in_zone(jiff::tz::TimeZone::UTC);
     let mut rounds = Rounds::new(TurnInput {
-        event: event(),
-        user_message: p02_core::UserLine::new("Hello?").unwrap().into(),
+        event,
+        opening: Opening::Line(p02_core::UserLine::new("Hello?").unwrap().into()),
+        now,
         context: context(),
         plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(
             "memory.fixture",
@@ -214,7 +218,7 @@ async fn every_round_is_recorded_before_anything_it_decided_happens() {
     let sink = Recording::default();
     let outcome = run(&model, &sink, &mira(), &history).await.unwrap();
 
-    assert!(matches!(outcome, TurnOutcome::Replied { round: at, .. } if at == round(2)));
+    assert!(matches!(outcome, TurnOutcome::Completed { round: at, .. } if at == round(2)));
     assert_eq!(
         sink.log(),
         [

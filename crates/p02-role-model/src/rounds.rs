@@ -1,13 +1,15 @@
-//! A turn's model rounds: one after another until the model replies or the
-//! rounds run out, each made with what the character runs on when it
-//! starts. Every round is judged once and handed to the turn as soon as it
-//! is judged, before anything it decided happens.
+//! A turn's model rounds: one after another until a round calls no plugin
+//! tool or the rounds run out, each made with what the character runs on
+//! when it starts. Every round is judged once, by what began the turn, and
+//! handed to the turn as soon as it is judged, before anything it decided
+//! happens.
 
 mod drafts;
 
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
+use jiff::Zoned;
 use p02_characters::Persona;
 use p02_contracts::{
     CharacterDecision, ConversationToolCall, ConversationTurn, DecisionContext, DecisionRejection,
@@ -18,7 +20,7 @@ use p02_core::{EventIdentity, VisibleMessage, VisibleText};
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
-use crate::prompt::{InputEnvelope, render, unusable_reply_note};
+use crate::prompt::{InputEnvelope, Opening, render, unusable_reply_note};
 use drafts::Drafts;
 pub use drafts::{DraftEvent, DraftId};
 
@@ -31,7 +33,9 @@ const MAX_TOOL_ROUNDS: u32 = 99;
 #[derive(Debug)]
 pub struct TurnInput<'a> {
     pub event: EventIdentity,
-    pub user_message: VisibleText,
+    pub opening: Opening,
+    /// When the event came in, where the person is.
+    pub now: Zoned,
     /// What the runtime and the plugins prepared for the model's first
     /// round.
     pub context: DecisionContext,
@@ -141,13 +145,14 @@ pub trait TurnSink: Send + Sync {
 /// How a turn's rounds ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TurnOutcome {
-    /// The model replied, and the replies were committed.
-    Replied {
+    /// A round called no plugin tool: what it said, if it said anything,
+    /// was committed.
+    Completed {
         round: NonZeroU32,
         decision: CharacterDecision,
     },
-    /// The turn ended without a reply: the provider gave nothing usable, a
-    /// last round could not be used, or the rounds ran out.
+    /// The turn ended refused: the provider gave nothing usable, a last
+    /// round could not be used, or the rounds ran out.
     Refused {
         round: NonZeroU32,
         rejection: DecisionRejection,
@@ -181,7 +186,8 @@ impl<'a> Rounds<'a> {
         Self {
             envelope: InputEnvelope::new(
                 input.event,
-                input.user_message,
+                input.opening,
+                input.now,
                 input.context,
                 input.plugin_tools,
             ),
@@ -235,7 +241,7 @@ impl<'a> Rounds<'a> {
             .with_history(self.history)
             .with_reply_listener(&listener);
         let answer = adapter.invoke(&invocation).await;
-        let result = DecisionResult::judge(&answer);
+        let result = DecisionResult::judge(&answer, self.envelope.opening.occasion());
         let recorded = ModelRound {
             round,
             answer,
@@ -274,7 +280,7 @@ impl<'a> Rounds<'a> {
 
         if calls.is_empty() {
             commit_replies(sink, drafts, &decision).await?;
-            return Ok(Some(TurnOutcome::Replied { round, decision }));
+            return Ok(Some(TurnOutcome::Completed { round, decision }));
         }
 
         if self.spent >= MAX_TOOL_ROUNDS {

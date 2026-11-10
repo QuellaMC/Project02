@@ -14,7 +14,7 @@ pub use answer::{ModelOutput, ProviderAnswer, ProviderFailure, TokenUsage, Writt
 pub use chat::{ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction};
 pub use decision::{
     BlankContextTextError, CharacterDecision, DecisionContext, DecisionRejection,
-    DecisionRejectionReason, DecisionResult, RuntimeNote,
+    DecisionRejectionReason, DecisionResult, Occasion, RuntimeNote,
 };
 pub use history::{ConversationToolCall, ConversationTurn, ToolCallResult, ToolRound};
 pub use reasoning::{ReasoningFilter, scrub_reasoning_blocks};

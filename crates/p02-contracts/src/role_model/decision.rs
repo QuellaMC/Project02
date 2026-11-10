@@ -5,9 +5,19 @@ use serde::{Deserialize, Serialize};
 use crate::output::{PluginContextItem, PluginCuratedSection};
 use crate::role_model::tools::ModelToolCall;
 
-/// What a model round decided: its calls, in order, and the note it wrote
-/// beside them, which is shown to it again and never to the person. A
-/// record of it reads back as it was written.
+/// What a turn began from: the person's line, which the character answers,
+/// or a moment of her own, which nobody began and in which nothing is owed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Occasion {
+    Line,
+    Moment,
+}
+
+/// What a model round decided: its calls, in order, and the text it wrote
+/// beside them or, in a moment of her own, alone: a note or a thought of
+/// hers, never shown to the person. A record of it reads back as it was
+/// written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterDecision {
@@ -17,8 +27,8 @@ pub struct CharacterDecision {
 }
 
 impl CharacterDecision {
-    /// A decision of calls the judge read, which are never none, and a note
-    /// it kept only when it said something.
+    /// A decision of calls the judge read, none only in a moment of her
+    /// own, and the text it kept only when it said something.
     pub(crate) fn judged(tool_calls: Vec<ModelToolCall>, text: Option<String>) -> Self {
         Self { tool_calls, text }
     }

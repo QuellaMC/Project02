@@ -63,9 +63,10 @@ impl Random {
 }
 
 /// A session of turns of every shape the runtime writes, in random order:
-/// replies, tool rounds, refused rounds, refusals, failures, and turns a
-/// crash cut short, which the next turn closes; message numbers a failed
-/// write spent are skipped.
+/// replies, tool rounds, refused rounds, refusals, failures, turns a crash
+/// cut short, which the next turn closes, and moments of hers that end in a
+/// word, in tool work or in a thought; message numbers a failed write spent
+/// are skipped.
 fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
     let mut random = Random(seed);
     let mut script = Script::new(session);
@@ -78,7 +79,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
             script.skip_message();
         }
 
-        match random.below(7) {
+        match random.below(8) {
             0 => script.refused_input(" \t\r\n\u{3000}\u{2028} "),
             1 => {
                 let mut cut_short = script.turn(&line);
@@ -136,6 +137,28 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                 .user(&client)
                 .round(Some(answer(&[], &["tired"], None)))
                 .rejected_by_its_round(),
+            6 => {
+                let said = random.sentences(2);
+                let said: Vec<&str> = if random.chance(50) {
+                    said.iter().map(String::as_str).collect()
+                } else {
+                    Vec::new()
+                };
+                let thought = random.sentence();
+                let mut moment = script.moment();
+
+                if random.chance(50) {
+                    moment
+                        .round(Some(answer(&[], &["curious"], None)))
+                        .start_calls()
+                        .finish_calls();
+                }
+
+                moment
+                    .round(Some(answer(&said, &[], Some(&thought))))
+                    .replies()
+                    .completed();
+            }
             _ => {
                 let replies = random.sentences(3);
                 let replies: Vec<&str> = replies.iter().map(String::as_str).collect();

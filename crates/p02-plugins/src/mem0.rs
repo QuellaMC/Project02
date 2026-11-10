@@ -1,9 +1,11 @@
-//! The mem0 package: long-term memory, recalled before each turn and
-//! captured after it, kept by a Mem0 platform account, a self-hosted Mem0
-//! server, or the embedded engine on this device. Memories belong to the
-//! person and the character, never to a session. A backend that fails
-//! costs the turn its memory, never the turn, and every failure is told in
-//! words that carry no credential.
+//! The mem0 package: long-term memory, recalled by the person's line before
+//! the turn it begins and captured with her reply after it, kept by a Mem0
+//! platform account, a self-hosted Mem0 server, or the embedded engine on
+//! this device. A moment of the character's own, which no line began,
+//! recalls and captures nothing by itself; her tools still search and add.
+//! Memories belong to the person and the character, never to a session. A
+//! backend that fails costs the turn its memory, never the turn, and every
+//! failure is told in words that carry no credential.
 
 mod backend;
 mod captures;
@@ -81,12 +83,15 @@ impl RuntimePlugin for Mem0Plugin {
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
+        let Some(line) = &turn_text(context)?.current_user_message else {
+            return Ok(BeforeRoleModelCallOutput::default());
+        };
         let setup = &self.setup;
         let found = setup
             .backend
             .search(
                 &setup.scope(context.turn()?),
-                turn_text(context)?.current_user_message.as_str(),
+                line.as_str(),
                 context.plugin_database(),
             )
             .await
@@ -104,12 +109,19 @@ impl RuntimePlugin for Mem0Plugin {
         })
     }
 
-    /// Queues the turn and returns: extraction happens behind the turn.
+    /// Queues the turn and returns: extraction happens behind the turn. A
+    /// turn no line began has nothing to learn from, and queues nothing.
     async fn after_turn_committed(
         &self,
         committed: &CommittedTurn,
         context: &HookContext,
     ) -> Result<HookReport, PluginError> {
+        let Some(messages) = captured(committed) else {
+            return Ok(HookReport {
+                status: HookStatus::Completed,
+                evidence: Vec::new(),
+            });
+        };
         let identity = context.turn()?;
         let report = |status, summary: &str, source| HookReport {
             status: HookStatus::Completed,
@@ -131,7 +143,7 @@ impl RuntimePlugin for Mem0Plugin {
         })?;
         let turn = Turn {
             session: identity.session_id.to_string(),
-            messages: captured(committed),
+            messages,
             sources: vec![identity.event.event_id().to_string()],
             observed_on,
         };
@@ -338,26 +350,27 @@ fn added(written: Written, turn: &TurnIdentity) -> ToolCallOutcome {
 /// The turn as the backend is to read it: the person's line and the
 /// character's last reply as the turn committed them, each under the name
 /// the session recorded for its speaker, since role labels name nobody in
-/// roleplay.
-fn captured(committed: &CommittedTurn) -> Vec<Message> {
+/// roleplay; none for a turn no line of the person's began.
+fn captured(committed: &CommittedTurn) -> Option<Vec<Message>> {
     let messages = committed.messages().unwrap_or_default();
     let line = messages
         .iter()
-        .find(|message| message.role == VisibleMessageRole::User)
-        .map(|message| (Role::User, message));
+        .find(|message| message.role == VisibleMessageRole::User)?;
     let reply = messages
         .iter()
         .rev()
         .find(|message| message.role == VisibleMessageRole::Character)
         .map(|message| (Role::Assistant, message));
 
-    line.into_iter()
-        .chain(reply)
-        .map(|(role, message)| Message {
-            role,
-            content: format!("{}: {}", message.speaker_name, message.text),
-        })
-        .collect()
+    Some(
+        std::iter::once((Role::User, line))
+            .chain(reply)
+            .map(|(role, message)| Message {
+                role,
+                content: format!("{}: {}", message.speaker_name, message.text),
+            })
+            .collect(),
+    )
 }
 
 /// A context item's id for a memory: the memory's own, in the letters an

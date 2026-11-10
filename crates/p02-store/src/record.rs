@@ -8,6 +8,7 @@ mod round;
 mod terminal;
 mod tool;
 
+use p02_contracts::Occasion;
 use p02_core::{EventIdentity, VisibleText};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -63,11 +64,13 @@ pub enum RecordKind {
     SessionContinued,
 }
 
-/// What came in for a turn.
+/// What came in for a turn: the person's text, or nothing, for a moment of
+/// the character's own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventReceived {
-    pub payload_summary: PayloadSummary,
+#[serde(try_from = "WireReceived", into = "WireReceived")]
+pub enum EventReceived {
+    Text(PayloadSummary),
+    Moment,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +81,56 @@ pub struct PayloadSummary {
     /// The line it was taken as, unless it was refused as one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normalized_current_user_message: Option<VisibleText>,
+}
+
+/// An event as recorded: the person's text says what came in, as every
+/// earlier build wrote it, and a moment says it is one.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireReceived {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    occasion: Option<Occasion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    payload_summary: Option<PayloadSummary>,
+}
+
+impl EventReceived {
+    /// What the turn began from: the person's line, whether or not it was
+    /// taken as one, or a moment of hers.
+    #[must_use]
+    pub fn occasion(&self) -> Occasion {
+        match self {
+            Self::Text(_) => Occasion::Line,
+            Self::Moment => Occasion::Moment,
+        }
+    }
+}
+
+impl TryFrom<WireReceived> for EventReceived {
+    type Error = &'static str;
+
+    fn try_from(wire: WireReceived) -> Result<Self, Self::Error> {
+        match (wire.occasion, wire.payload_summary) {
+            (Some(Occasion::Moment), _) => Ok(Self::Moment),
+            (_, Some(summary)) => Ok(Self::Text(summary)),
+            (_, None) => Err("an event the person began says what came in"),
+        }
+    }
+}
+
+impl From<EventReceived> for WireReceived {
+    fn from(received: EventReceived) -> Self {
+        match received {
+            EventReceived::Text(summary) => Self {
+                occasion: None,
+                payload_summary: Some(summary),
+            },
+            EventReceived::Moment => Self {
+                occasion: Some(Occasion::Moment),
+                payload_summary: None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

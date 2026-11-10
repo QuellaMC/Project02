@@ -74,7 +74,7 @@ pub enum RuntimeRejection {
     InputValidationRejected,
     /// A plugin refused the turn before the model was called.
     PluginBeforeRoleModelCallRejected,
-    /// The runtime failed before it had a reply.
+    /// The runtime failed before the turn could complete.
     RuntimeFailure,
 }
 

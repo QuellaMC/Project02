@@ -148,7 +148,7 @@ async fn summarize(
             budget,
             recollection,
         ),
-        input: summarizer_input(turns, earlier, window),
+        input: summarizer_input(turns, earlier, character, window),
         max_output_chars: budget,
     };
     let fallback = |reason: &str| Summary {
@@ -197,15 +197,16 @@ fn transcript_cap(window: NonZeroU64) -> usize {
 }
 
 /// What the summarizer reads: the earlier summary, when there is one, then
-/// the turns as a transcript.
+/// the turns as a transcript, her moments said to be `character`'s.
 fn summarizer_input(
     turns: &[ConversationTurn],
     earlier: Option<&str>,
+    character: &SpeakerName,
     window: NonZeroU64,
 ) -> String {
     let conversation = format!(
         "<conversation>\n{}\n</conversation>",
-        transcript(turns, transcript_cap(window))
+        transcript(turns, character, transcript_cap(window))
     );
 
     match earlier {
@@ -216,13 +217,15 @@ fn summarizer_input(
     }
 }
 
-/// `turns` as plain lines, oldest first: the day whenever it changes, each
-/// message as its speaker's name and its text on one line, each tool call
-/// and its result, a line too long shortened from its middle, and the
-/// oldest lines left out while the whole is longer than `cap` characters,
-/// a note of how many counted in, though never the newest.
-fn transcript(turns: &[ConversationTurn], cap: usize) -> String {
-    let lines = transcript_lines(turns);
+/// `turns` as plain lines, oldest first: the day whenever it changes, a
+/// moment of `character`'s own said to be one where the person's line
+/// would be, so what she says there answers nobody, each message as its
+/// speaker's name and its text on one line, each tool call and its result,
+/// a line too long shortened from its middle, and the oldest lines left out
+/// while the whole is longer than `cap` characters, a note of how many
+/// counted in, though never the newest.
+fn transcript(turns: &[ConversationTurn], character: &SpeakerName, cap: usize) -> String {
+    let lines = transcript_lines(turns, character);
     let lengths: Vec<usize> = lines.iter().map(|line| line.chars().count()).collect();
     let mut kept = lengths.iter().sum::<usize>() + lines.len().saturating_sub(1);
     let mut dropped = 0;
@@ -248,7 +251,7 @@ fn omitted(lines: usize) -> String {
     format!("[… {lines} earlier lines omitted …]")
 }
 
-fn transcript_lines(turns: &[ConversationTurn]) -> Vec<String> {
+fn transcript_lines(turns: &[ConversationTurn], character: &SpeakerName) -> Vec<String> {
     let mut lines = Vec::new();
     let mut day = None;
 
@@ -260,7 +263,10 @@ fn transcript_lines(turns: &[ConversationTurn]) -> Vec<String> {
             day = Some(today);
         }
 
-        lines.push(said(&turn.user_message));
+        lines.push(match &turn.user_message {
+            Some(line) => said(line),
+            None => format!("[a moment of {character}'s own — nobody wrote]"),
+        });
 
         for round in &turn.tool_rounds {
             lines.extend(round.interim_replies.iter().map(said));
@@ -351,9 +357,10 @@ fn capped(text: &str, budget: usize) -> Option<String> {
 }
 
 /// What the record says of `turns` when no model condenses them: how many
-/// went by and when, the last things the person said there, the tools used,
-/// within 2,000 characters or `budget`, whichever is less; the `earlier`
-/// summary is kept in front, cut to the room left, when any is.
+/// went by and when, the last things the person said there, when they said
+/// anything, the tools used, within 2,000 characters or `budget`,
+/// whichever is less; the `earlier` summary is kept in front, cut to the
+/// room left, when any is.
 fn mechanical_summary(
     turns: &[ConversationTurn],
     earlier: Option<&str>,
@@ -366,14 +373,13 @@ fn mechanical_summary(
     let last = turns
         .last()
         .map_or("?", |turn| day_of(turn.identity.created_at()));
-    let quoted = turns[turns.len().saturating_sub(QUOTED_LINES)..]
+    let lines: Vec<&VisibleMessage> = turns
         .iter()
-        .map(|turn| {
-            format!(
-                "“{}”",
-                cut(turn.user_message.text.as_str(), QUOTED_LINE_CHARS)
-            )
-        })
+        .filter_map(|turn| turn.user_message.as_ref())
+        .collect();
+    let quoted = lines[lines.len().saturating_sub(QUOTED_LINES)..]
+        .iter()
+        .map(|line| format!("“{}”", cut(line.text.as_str(), QUOTED_LINE_CHARS)))
         .collect::<Vec<_>>()
         .join(" · ");
     let mut tools: Vec<&Identifier> = Vec::new();
@@ -388,13 +394,14 @@ fn mechanical_summary(
         }
     }
 
-    let mut sentences = vec![
-        format!(
-            "Earlier conversation ({} turns, {first} to {last}) is not in context verbatim.",
-            turns.len()
-        ),
-        format!("Most recent things {person} said there: {quoted}."),
-    ];
+    let mut sentences = vec![format!(
+        "Earlier conversation ({} turns, {first} to {last}) is not in context verbatim.",
+        turns.len()
+    )];
+
+    if !quoted.is_empty() {
+        sentences.push(format!("Most recent things {person} said there: {quoted}."));
+    }
 
     if !tools.is_empty() {
         let tools: Vec<&str> = tools.iter().map(|tool| tool.as_str()).collect();
@@ -491,7 +498,7 @@ mod tests {
     }
 
     /// A history of up to a dozen turns over a few days, with tool rounds
-    /// among them.
+    /// and moments of hers among them.
     fn history(random: &mut Random) -> Vec<ConversationTurn> {
         let session = SessionId::new(ConversationId::new("conv_seed").unwrap(), NonZeroU64::MIN);
         let mut number = 0;
@@ -520,7 +527,11 @@ mod tests {
                     Timestamp::new(&format!("2026-10-{:02}T09:00:00.000Z", 10 + turn / 4)).unwrap(),
                 )
                 .unwrap();
-                let user_message = message(random, VisibleMessageRole::User);
+                let user_message = if random.below(4) == 0 {
+                    None
+                } else {
+                    Some(message(random, VisibleMessageRole::User))
+                };
                 let tool_rounds = (0..random.below(3))
                     .map(|round| ToolRound {
                         round: NonZeroU32::new(u32::try_from(round + 1).unwrap()).unwrap(),
@@ -672,8 +683,9 @@ mod tests {
             let mut random = Random(seed);
             let turns = history(&mut random);
             let cap = transcript_cap(window(&mut random));
-            let lines = transcript_lines(&turns);
-            let shown = transcript(&turns, cap);
+            let mira = SpeakerName::new("Mira").unwrap();
+            let lines = transcript_lines(&turns, &mira);
+            let shown = transcript(&turns, &mira, cap);
             let newest = lines.last().unwrap();
 
             assert!(

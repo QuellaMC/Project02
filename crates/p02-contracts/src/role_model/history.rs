@@ -7,15 +7,17 @@ use serde_json::{Map, Value};
 
 use crate::tool::ToolCallId;
 
-/// A finished turn as the model replays it: the person's message, every
-/// tool round with its results, then the character's final replies. The
-/// event that opened the turn names it.
+/// A finished turn as the model replays it: the person's message, none for
+/// a moment of the character's own, every tool round with its results,
+/// then the character's final replies. The event that opened the turn
+/// names it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationTurn {
     #[serde(flatten)]
     pub identity: EventIdentity,
-    pub user_message: VisibleMessage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_message: Option<VisibleMessage>,
     pub tool_rounds: Vec<ToolRound>,
     pub final_replies: Vec<VisibleMessage>,
 }
@@ -23,7 +25,8 @@ pub struct ConversationTurn {
 impl ConversationTurn {
     /// Every visible message of the turn, in the order it was said.
     pub fn visible_messages(&self) -> impl Iterator<Item = &VisibleMessage> {
-        std::iter::once(&self.user_message)
+        self.user_message
+            .iter()
             .chain(
                 self.tool_rounds
                     .iter()

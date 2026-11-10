@@ -12,6 +12,7 @@
 )]
 
 mod failures;
+mod moments;
 mod support;
 mod threads;
 mod turns;

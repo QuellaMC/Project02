@@ -1,6 +1,6 @@
 //! The open thread between the person and one character: its segment
-//! under its writer, the lines it takes one at a time, and the lines its
-//! closed segments took.
+//! under its writer, the turns it takes one at a time, a line of the
+//! person's or a moment of hers, and the lines its closed segments took.
 
 use std::num::{NonZeroU32, NonZeroU64};
 
@@ -19,7 +19,7 @@ use p02_store::{
     TakenLines,
 };
 
-use crate::turn::{self, CompletedTurn, Progress, RejectedTurn, RunTurnError};
+use crate::turn::{self, CompletedTurn, Occasion, Progress, RejectedTurn, RunTurnError};
 
 /// A character as a thread runs her: who she is, and the persona her model
 /// is given.
@@ -43,7 +43,7 @@ pub struct Submission<'a> {
 
 /// The open thread between the person and one character on one home: the
 /// writer of the thread and of its current segment, and the lines its
-/// closed segments took. It takes one line at a time, so `&mut self` is
+/// closed segments took. It takes one turn at a time, so `&mut self` is
 /// its queue.
 #[derive(Debug)]
 #[must_use = "a thread holds its writers until it is closed"]
@@ -56,7 +56,8 @@ pub struct Conversation {
     skipped: Option<String>,
 }
 
-/// What became of a line.
+/// What became of a line, or of a moment of hers, which is neither a
+/// duplicate nor a blank text.
 #[derive(Debug)]
 pub enum Delivery {
     /// A turn took the line already, as `message_id`: nothing ran, and
@@ -71,14 +72,14 @@ pub enum Delivery {
     /// The turn completed, and the session continued after it when it was
     /// due to.
     Completed(CompletedTurn),
-    /// The turn ended refused, the person's line kept.
+    /// The turn ended refused, what it committed kept.
     Rejected(RejectedTurn),
     /// The runtime itself failed, so the turn is fatal: its caller restarts
     /// the character.
     Failed(RunTurnError),
 }
 
-/// What a line is answered with: the name the person goes by, the
+/// What a turn is answered with: the name the person goes by, the
 /// character's model, her plugins, and the size of her model's window in
 /// tokens, as her settings say. Its keeper brings it up to date before her
 /// turn, and the turn before each request to the model after its first.
@@ -215,10 +216,29 @@ impl Conversation {
                 message_id,
             },
             Ok(None) => {
-                turn::run(&mut self.disk, submission, &self.character, mind, listener).await
+                turn::take(&mut self.disk, submission, &self.character, mind, listener).await
             }
             Err(error) => Delivery::Failed(error),
         }
+    }
+
+    /// Takes a moment of hers through the turn, as `mind` answers it: a turn
+    /// nobody began, which commits no line of the person's and may end
+    /// without a word. `listener` hears it as it hears a line's turn, and a
+    /// delivery dropped before it ends loses the thread as a line's does.
+    pub async fn moment(
+        &mut self,
+        mind: &mut dyn Mind,
+        listener: &(dyn Fn(Progress) + Send + Sync),
+    ) -> Delivery {
+        turn::run(
+            &mut self.disk,
+            Occasion::Moment,
+            &self.character,
+            mind,
+            listener,
+        )
+        .await
     }
 
     /// Ends the thread: the segment's lease is released, then the
