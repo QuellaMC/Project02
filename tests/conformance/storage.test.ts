@@ -40,18 +40,34 @@ const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 // A window this small rotates the segment after every turn.
 const rotatingEveryTurn = configJson({project02: {contextWindowTokens: 1}});
 
-/** The resources a lock directory's stamps name: each held lock's holder, and after a crash the dead holder's. */
-function stampsOf(locks: string): string[] {
-  return readdirSync(locks)
-    .filter(name => name.endsWith('.owner.json'))
-    .map(
-      name =>
-        (
-          JSON.parse(readFileSync(join(locks, name), 'utf8')) as {
-            readonly resourceKey: string;
-          }
-        ).resourceKey,
-    )
+/** The stamp files in a lock directory, one beside each lock that is held, or was when its holder died. */
+function stampFilesOf(locks: string): string[] {
+  return readdirSync(locks).filter(name => name.endsWith('.owner.json'));
+}
+
+/**
+ * The session writers a character's stamps name. Her inbox's lock and her
+ * plugins' files' are stamped beside them, taken and let go around every
+ * turn, so while her daemon runs only her writers' stamps stand still. A
+ * stamp is written as a note: one met half written, or gone since it was
+ * listed, names no holder, as a waiter reads it.
+ */
+function writersOf(locks: string): string[] {
+  return stampFilesOf(locks)
+    .flatMap(name => {
+      try {
+        return [
+          (
+            JSON.parse(readFileSync(join(locks, name), 'utf8')) as {
+              readonly resourceKey: string;
+            }
+          ).resourceKey,
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .filter(key => key.startsWith('session-writer:'))
     .sort();
 }
 
@@ -152,7 +168,7 @@ it("storage.per-character-isolation: each character's segments and their writers
     expect(readdirSync(join(data, 'sessions')), characterId).toEqual([
       `${conversationId}.1`,
     ]);
-    expect(stampsOf(join(data, '.locks')), characterId).toEqual([writer]);
+    expect(writersOf(join(data, '.locks')), characterId).toEqual([writer]);
     writers.push(lockOf(join(data, '.locks'), writer).file);
   }
 
@@ -161,7 +177,7 @@ it("storage.per-character-isolation: each character's segments and their writers
 
   for (const characterId of ['mira', 'zeta']) {
     expect(
-      stampsOf(join(home, 'character-data', characterId, '.locks')),
+      stampFilesOf(join(home, 'character-data', characterId, '.locks')),
       characterId,
     ).toEqual([]);
   }
@@ -283,7 +299,7 @@ it("storage.continuation: once its history outgrows the window the conversation 
       sessionContinuation: {continuedFrom: {sessionId: `${conversationId}.1`}},
     },
   ]);
-  expect(stampsOf(join(home, 'character-data', 'mira', '.locks'))).toEqual([
+  expect(writersOf(join(home, 'character-data', 'mira', '.locks'))).toEqual([
     `session-writer:${conversationId}.2`,
   ]);
   await say('Still there?', 'still');
@@ -696,7 +712,7 @@ it("storage.stale-lock-reclaim: a lease a killed daemon held is the next run's a
   await sayKilled('Hello.', 'hello');
   killed.signal('SIGKILL');
   await killed.exit();
-  expect(stampsOf(locks)).toEqual([writer]);
+  expect(writersOf(locks)).toEqual([writer]);
   // A stamp is written as a note, never replaced whole: a crash can cut it short.
   writeFileSync(stamp, '{"resourceKey":');
 
