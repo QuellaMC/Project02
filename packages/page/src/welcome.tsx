@@ -282,6 +282,15 @@ function ModelStep({
           void session.welcomeNext();
         }}
       />
+      <button
+        type="button"
+        className="welcome-later"
+        onClick={() => {
+          session.finishWelcome();
+        }}
+      >
+        Set Up Later
+      </button>
     </>
   );
 }

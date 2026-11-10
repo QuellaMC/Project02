@@ -1236,6 +1236,20 @@ code {
   right: 30px;
 }
 
+.box-remove {
+  position: absolute;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--chevron);
+  color: var(--field-bg);
+  display: grid;
+  place-items: center;
+}
+
 .box-check-fading {
   animation: check-fade 1.6s ease forwards;
 }
@@ -1628,6 +1642,17 @@ code {
 .welcome-button-dim {
   opacity: 0.4;
   cursor: default;
+}
+
+.welcome-later {
+  align-self: center;
+  min-height: 36px;
+  margin-top: -8px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: 15px;
 }
 
 .welcome-done {

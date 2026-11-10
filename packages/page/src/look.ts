@@ -7,6 +7,7 @@
 /** Each icon a path in a 24-unit square, drawn as a stroke. */
 const icons = {
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  cross: 'M7.5 7.5l9 9 M16.5 7.5l-9 9',
   plus: 'M12 6v12 M6 12h12',
   updown: 'M8 9l4-4 4 4 M8 15l4 4 4-4',
   sparkle:

@@ -40,6 +40,42 @@ function homeConfig(home: string): unknown {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
 }
 
+/** The accounts paired with Telegram, as the home's config.json holds them. */
+function pairedIn(home: string): unknown {
+  return (
+    homeConfig(home) as {
+      readonly connectors: {
+        readonly telegram: {readonly config: {readonly pairedUsers: unknown}};
+      };
+    }
+  ).connectors.telegram.config.pairedUsers;
+}
+
+/**
+ * Holds the page's next change at the daemon's door until the function
+ * it answers with is called: a save still on its way.
+ */
+async function holdNextChange(page: Page): Promise<() => void> {
+  const gate: {open: () => void} = {open: () => undefined};
+  const held = new Promise<void>(resolve => {
+    gate.open = resolve;
+  });
+  let waiting = true;
+
+  await page.route('**/api/config', async route => {
+    if (waiting && route.request().method() === 'POST') {
+      waiting = false;
+      await held;
+    }
+
+    await route.continue();
+  });
+
+  return () => {
+    gate.open();
+  };
+}
+
 /** An entry of the window's sidebar, by the start of its name. */
 function entry(page: Page, name: string): Locator {
   return page
@@ -131,6 +167,21 @@ test('page.welcome-first-run: a home whose settings give her no AI model opens o
   expect(await page.content()).not.toContain(nvidiaApiKey);
 });
 
+test('page.welcome-later: a person with no key at hand leaves the welcome for the chat, where she says what she needs and that leads to AI Model', async ({
+  page,
+}) => {
+  const daemon = await startDaemon(createHome());
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Continue'}).click();
+  await expect(
+    page.getByRole('heading', {name: 'Choose an AI Model'}),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Set Up Later'}).click();
+  await page.getByRole('button', {name: 'Choose an AI service.'}).click();
+  await expect(page.getByRole('heading', {name: 'AI Model'})).toBeVisible();
+});
+
 test('page.settings-saves-as-typed: a box saves on Return with a check and no Save button anywhere, emptied it inherits again, and a key box stays empty, a stored key shown as dots and a new one never shown back', async ({
   page,
 }) => {
@@ -161,7 +212,7 @@ test('page.settings-saves-as-typed: a box saves on Return with a check and no Sa
 
   await entry(page, 'AI Model').click();
 
-  const key = page.getByLabel('API Key');
+  const key = page.getByLabel('API Key', {exact: true});
 
   await expect(key).toHaveValue('');
   await expect(key).toHaveAttribute('placeholder', '••••••••••••');
@@ -173,6 +224,47 @@ test('page.settings-saves-as-typed: a box saves on Return with a check and no Sa
     .poll(() => homeConfig(home))
     .toMatchObject({project02: {nvidiaApiKey: fresh}});
   expect(await page.content()).not.toContain(fresh);
+});
+
+test('page.settings-key-removed: a stored key is taken away by the button its own box shows while it is in use, and the box asks for a key again', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+
+  const key = page.getByLabel('API Key', {exact: true});
+
+  await expect(checkOf(page, key)).toBeVisible();
+  await key.focus();
+  await page.getByRole('button', {name: 'Remove API Key'}).click();
+  await expect(key).toHaveAttribute('placeholder', 'Paste key');
+  expect(homeConfig(home)).not.toHaveProperty(['project02', 'nvidiaApiKey']);
+});
+
+test('page.settings-close-keeps-saves: a box left by the very click that closes the window is saved, even behind a save still on its way', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+
+  const release = await holdNextChange(page);
+
+  await page.getByRole('textbox', {name: 'Model'}).fill('nvidia/small');
+  await page.getByLabel('API Key', {exact: true}).fill('nvapi-second');
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  release();
+  await expect(page.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({
+      project02: {nvidiaModel: 'nvidia/small', nvidiaApiKey: 'nvapi-second'},
+    });
 });
 
 test('page.settings-feature-switch: Reply Style switched on from her page, with a tone and a sign-off, takes effect in her next reply', async ({
@@ -271,12 +363,14 @@ test('page.settings-memory: Kept At shows only the boxes of the place chosen; sw
   ).toBeChecked();
 });
 
-test('page.settings-telegram: the page says when Telegram is not running; a token pasted for her bot shows the name Telegram gave it and is never shown back, one Telegram refuses is said so, and a paired account is removed', async ({
+test('page.settings-telegram: the page says when Telegram is not running; a token pasted for her bot shows the name Telegram gave it and is never shown back, one Telegram refuses is said so, and two paired accounts removed one right after the other are both gone', async ({
   page,
 }) => {
   const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
   const {home, daemon} = await miraHome({
-    connectors: {telegram: {config: {pairedUsers: {'4242': 'Alice'}}}},
+    connectors: {
+      telegram: {config: {pairedUsers: {'4242': 'Alice', '5151': 'Bob'}}},
+    },
   });
   const notRunning = page.getByText("Telegram isn't running.", {exact: false});
   const token = page.getByLabel('Token');
@@ -312,14 +406,20 @@ test('page.settings-telegram: the page says when Telegram is not running; a toke
   await page.getByRole('main').getByRole('button', {name: 'Telegram'}).click();
   await expect(bot).toContainText('Token Refused');
 
-  const alice = page.locator('.cell').filter({hasText: 'Alice'});
+  const account = (name: string) =>
+    page.locator('.cell').filter({hasText: name});
 
-  await expect(alice).toContainText('4242');
-  await alice.getByRole('button', {name: 'Remove'}).click();
+  await expect(account('Alice')).toContainText('4242');
+
+  // The second removal is asked for while the first is still on its way,
+  // and starts from what the first left: neither brings the other back.
+  const release = await holdNextChange(page);
+
+  await account('Alice').getByRole('button', {name: 'Remove'}).click();
+  await account('Bob').getByRole('button', {name: 'Remove'}).click();
+  release();
   await expect(page.getByText('No one yet')).toBeVisible();
-  expect(homeConfig(home)).toMatchObject({
-    connectors: {telegram: {config: {pairedUsers: {}}}},
-  });
+  expect(pairedIn(home)).toEqual({});
 });
 
 test('page.settings-advanced: the Advanced switch shows what most people never need and survives a reload, a row holding a value shows without it, and the plugin list opens what the app knows of a plugin', async ({

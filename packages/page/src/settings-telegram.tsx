@@ -182,9 +182,12 @@ function Paired({ctx}: {readonly ctx: Ctx}) {
             type="button"
             className="button-small button-red"
             onClick={() => {
-              void session.choose(
-                row,
-                Object.fromEntries(paired.filter(([other]) => other !== id)),
+              void session.amend(row, held =>
+                isAccounts(held)
+                  ? Object.fromEntries(
+                      Object.entries(held).filter(([other]) => other !== id),
+                    )
+                  : held,
               );
             }}
           >
