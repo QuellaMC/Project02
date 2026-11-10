@@ -6,12 +6,20 @@
 import type {ReactNode} from 'react';
 
 import type {Session} from './session.ts';
+import {AddPage} from './settings-add.tsx';
 import {
   CharacterModelPage,
   CharacterPage,
   FeaturePage,
 } from './settings-character.tsx';
-import {BackButton, Face, PersonFace, Tile} from './settings-controls.tsx';
+import {
+  BackButton,
+  Face,
+  FileButton,
+  Icon,
+  PersonFace,
+  Tile,
+} from './settings-controls.tsx';
 import type {Ctx} from './settings-fields.tsx';
 import {findings, marks, sidebarOf} from './settings-model.ts';
 import {
@@ -46,18 +54,10 @@ export function SettingsWindow({
     session,
     findings: findings(settings, id => characterName(state, id)),
   };
-  // A character no longer installed has no page: the window shows the person's.
-  const shown: SettingsPage =
-    'characterId' in page &&
-    state.health?.characters.some(
-      character => character.id === page.characterId,
-    ) === false
-      ? {kind: 'you'}
-      : page;
 
   return (
     <div className="window">
-      <Sidebar ctx={ctx} page={shown} />
+      <Sidebar ctx={ctx} page={page} />
       <main className="window-main">
         <div className="window-column">
           {state.notices.map(notice => (
@@ -65,7 +65,7 @@ export function SettingsWindow({
               {notice}
             </p>
           ))}
-          <PageShown ctx={ctx} page={shown} />
+          <PageShown ctx={ctx} page={page} />
         </div>
       </main>
     </div>
@@ -84,6 +84,14 @@ function PageShown({
       return <YouPage ctx={ctx} />;
     case 'character':
       return <CharacterPage ctx={ctx} characterId={page.characterId} />;
+    case 'remove':
+      return (
+        <CharacterPage
+          ctx={ctx}
+          characterId={page.characterId}
+          removing={page}
+        />
+      );
     case 'model':
       return <ModelPage ctx={ctx} />;
     case 'telegram':
@@ -106,6 +114,8 @@ function PageShown({
       return <BotPage ctx={ctx} page={page} />;
     case 'plugin':
       return <PluginPage ctx={ctx} namespace={page.namespace} id={page.id} />;
+    case 'add':
+      return <AddPage ctx={ctx} page={page} />;
   }
 }
 
@@ -159,6 +169,18 @@ function Sidebar({
             <span className="side-label">{entry.label}</span>
           </SideButton>
         ))}
+        <FileButton
+          className="side-item side-add"
+          current={page.kind === 'add'}
+          onChoose={file => {
+            void session.chooseCharacterFile(file);
+          }}
+        >
+          <span className="side-add-ring" aria-hidden="true">
+            <Icon name="plus" size={13} weight={2.4} />
+          </span>
+          <span className="side-label">Add Character</span>
+        </FileButton>
       </div>
       <div className="side-group">
         <span className="side-group-title">Connections</span>

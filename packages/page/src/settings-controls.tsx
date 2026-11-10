@@ -6,7 +6,7 @@
  * from the settings model, and each reports a change through the props it
  * is given.
  */
-import {useState, type ReactNode} from 'react';
+import {useRef, useState, type ReactNode} from 'react';
 
 import {
   avatarColor,
@@ -45,7 +45,14 @@ export function Icon({
   );
 }
 
-const tileGlyphs = {side: 15, row: 17, note: 15, page: 27, welcome: 30};
+const tileGlyphs = {
+  side: 15,
+  row: 17,
+  note: 15,
+  chip: 15,
+  page: 27,
+  welcome: 30,
+};
 
 /** An icon on its tint's tile, at a row's size, the sidebar's or a page header's. */
 export function Tile({
@@ -120,6 +127,54 @@ export function Chevron() {
     >
       <path d="M1.5 1.5L6.5 7L1.5 12.5" />
     </svg>
+  );
+}
+
+/**
+ * A button that opens the system's file chooser for one JSON file, and
+ * hands over the file chosen; choosing the same file again is news again.
+ */
+export function FileButton({
+  className,
+  current = false,
+  onChoose,
+  children,
+}: {
+  readonly className: string;
+  readonly current?: boolean;
+  readonly onChoose: (file: File) => void;
+  readonly children: ReactNode;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={className}
+        aria-current={current ? 'page' : undefined}
+        onClick={() => {
+          input.current?.click();
+        }}
+      >
+        {children}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={event => {
+          const file = event.currentTarget.files?.[0];
+
+          event.currentTarget.value = '';
+
+          if (file !== undefined) {
+            onChoose(file);
+          }
+        }}
+      />
+    </>
   );
 }
 

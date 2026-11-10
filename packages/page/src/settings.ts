@@ -8,16 +8,20 @@
  * here touches the DOM.
  */
 import type {
+  AddCharacterOutcome,
+  CharacterPreviewOutcome,
   ConfigChange,
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
   JsonValue,
+  RemoveCharacterOutcome,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
 import {
+  characterLeft,
   noticed,
   type Settings,
   type SettingsPage,
@@ -179,6 +183,103 @@ export function welcomeStepped(state: WebState, step: 1 | 2 | 3): WebState {
 
 export function advancedSet(state: WebState, advanced: boolean): WebState {
   return state.advanced === advanced ? state : {...state, advanced};
+}
+
+/** The page the window is on, while it is open. */
+function windowPage(state: WebState): SettingsPage | undefined {
+  const screen = state.settings?.screen;
+
+  return screen?.kind === 'window' ? screen.page : undefined;
+}
+
+/** The largest character file: the daemon reads none larger. */
+const characterFileBytes = 64 * 1024;
+
+/**
+ * Why the page does not send a chosen file, by its size: none larger than
+ * a character file can be is ever sent.
+ */
+export function characterFileRefusal(size: number): string | undefined {
+  return size > characterFileBytes
+    ? 'This file is too large to be a character file.'
+    : undefined;
+}
+
+/** Said of a chosen file that cannot be read as text. */
+export const unreadableFile = "This file can't be read.";
+
+/**
+ * A file the person chose, and what was said of it: the window shows its
+ * preview, keeping the file's text to send again only when it holds a
+ * character. A file chosen from a preview goes back where the first was
+ * chosen from.
+ */
+export function characterPreviewed(
+  state: WebState,
+  file: {readonly name: string; readonly text?: string},
+  preview: CharacterPreviewOutcome,
+): WebState {
+  const page = windowPage(state);
+
+  if (page === undefined) {
+    return state;
+  }
+
+  return settingsOpened(state, {
+    kind: 'add',
+    fileName: file.name,
+    ...(preview.status === 'ok' && file.text !== undefined
+      ? {text: file.text}
+      : {}),
+    preview,
+    from: page.kind === 'add' ? page.from : page,
+  });
+}
+
+/** A call nothing answered, said as a write that failed is. */
+type Unanswered = {readonly status: 'failed'; readonly message: string};
+
+/**
+ * How adding her ended, heard by the preview that asked: added or
+ * updated, the window opens her page and the file goes with the preview;
+ * otherwise the preview stays and says why, in the daemon's words.
+ */
+export function characterAddEnded(
+  state: WebState,
+  outcome: AddCharacterOutcome | Unanswered,
+): WebState {
+  const page = windowPage(state);
+
+  if (page?.kind !== 'add') {
+    return state;
+  }
+
+  return settingsOpened(
+    state,
+    outcome.status === 'added' || outcome.status === 'updated'
+      ? {kind: 'character', characterId: outcome.characterId}
+      : {...page, problem: outcome.message},
+  );
+}
+
+/**
+ * How removing her ended: removed, the window leaves every page of hers;
+ * otherwise her confirmation stays and says why, in the daemon's words.
+ */
+export function characterRemoveEnded(
+  state: WebState,
+  characterId: string,
+  outcome: RemoveCharacterOutcome | Unanswered,
+): WebState {
+  if (outcome.status === 'removed') {
+    return characterLeft(state, characterId);
+  }
+
+  const page = windowPage(state);
+
+  return page?.kind === 'remove' && page.characterId === characterId
+    ? settingsOpened(state, {...page, problem: outcome.message})
+    : state;
 }
 
 /**

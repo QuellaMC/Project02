@@ -14,6 +14,10 @@ import {
   advancedSet,
   changeEnded,
   changeSent,
+  characterAddEnded,
+  characterFileRefusal,
+  characterPreviewed,
+  characterRemoveEnded,
   characterTarget,
   clickedText,
   conflictMet,
@@ -26,6 +30,7 @@ import {
   settingsClosed,
   settingsOpened,
   targetKey,
+  unreadableFile,
   viewOf,
   viewsRead,
   welcomeOpened,
@@ -55,6 +60,15 @@ export type SettingsVerbs = {
   readonly welcomeBack: () => void;
   /** Start Chatting: the welcome gives way to the chat. */
   readonly finishWelcome: () => void;
+  /**
+   * A character file the person chose: read as it is, unless it is too
+   * large to be one, and shown as the daemon previews it.
+   */
+  readonly chooseCharacterFile: (file: File) => Promise<void>;
+  /** Adds the character the preview shows, sending her file again for the daemon to judge afresh. */
+  readonly addCharacter: () => Promise<void>;
+  /** Removes a character a person added; her chats and memories stay. */
+  readonly removeCharacter: (characterId: string) => Promise<void>;
 };
 
 /** An address that can never work has no settings to change. */
@@ -69,6 +83,9 @@ export const noSettingsVerbs: SettingsVerbs = {
   welcomeNext: () => Promise.resolve(),
   welcomeBack: () => undefined,
   finishWelcome: () => undefined,
+  chooseCharacterFile: () => Promise.resolve(),
+  addCharacter: () => Promise.resolve(),
+  removeCharacter: () => Promise.resolve(),
 };
 
 const advancedKey = 'project02.advanced';
@@ -94,6 +111,11 @@ function problem(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A call nothing answered, said as a write that failed is. */
+function unanswered(error: unknown) {
+  return {status: 'failed', message: problem(error)} as const;
+}
+
 /** The name row and the key row the welcome's steps save. */
 const nameRow: Row = {
   target: home,
@@ -107,11 +129,102 @@ type Read = {
   readonly views: ReadonlyMap<string, ConfigView>;
 };
 
-export function createSettingsVerbs(tab: {
+/** What the settings verbs need of the tab: its client and its one value. */
+type Tab = {
   readonly client: GatewayClient;
   readonly getState: () => WebState;
   readonly apply: (reduce: (state: WebState) => WebState) => void;
-}): {
+};
+
+/** A character file's text as it is, or why the page does not send it. */
+async function textOf(
+  file: File,
+): Promise<{readonly text: string} | {readonly refused: string}> {
+  const tooLarge = characterFileRefusal(file.size);
+
+  if (tooLarge !== undefined) {
+    return {refused: tooLarge};
+  }
+
+  try {
+    return {
+      text: new TextDecoder('utf-8', {fatal: true}).decode(
+        await file.arrayBuffer(),
+      ),
+    };
+  } catch {
+    return {refused: unreadableFile};
+  }
+}
+
+/** Adding a character from a file, and removing one. */
+function characterVerbs({
+  client,
+  getState,
+  apply,
+}: Tab): Pick<
+  SettingsVerbs,
+  'chooseCharacterFile' | 'addCharacter' | 'removeCharacter'
+> {
+  return {
+    async chooseCharacterFile(file) {
+      apply(noticeSpent);
+
+      const read = await textOf(file);
+
+      if ('refused' in read) {
+        apply(current =>
+          characterPreviewed(
+            current,
+            {name: file.name},
+            {status: 'refused', reason: 'invalid', message: read.refused},
+          ),
+        );
+
+        return;
+      }
+
+      try {
+        const preview = await client.previewCharacter(read.text);
+
+        apply(current =>
+          characterPreviewed(
+            current,
+            {name: file.name, text: read.text},
+            preview,
+          ),
+        );
+      } catch (error: unknown) {
+        apply(current => noticed(current, problem(error)));
+      }
+    },
+    async addCharacter() {
+      const screen = getState().settings?.screen;
+      const page = screen?.kind === 'window' ? screen.page : undefined;
+
+      if (page?.kind !== 'add' || page.text === undefined) {
+        return;
+      }
+
+      apply(noticeSpent);
+
+      const outcome = await client.addCharacter(page.text).catch(unanswered);
+
+      apply(current => characterAddEnded(current, outcome));
+    },
+    async removeCharacter(characterId) {
+      apply(noticeSpent);
+
+      const outcome = await client
+        .removeCharacter(characterId)
+        .catch(unanswered);
+
+      apply(current => characterRemoveEnded(current, characterId, outcome));
+    },
+  };
+}
+
+export function createSettingsVerbs(tab: Tab): {
   readonly verbs: SettingsVerbs;
   /** Config moved, on this tab or another surface: what is open reads its views again, with what is typed kept. */
   readonly changed: () => Promise<void>;
@@ -204,7 +317,7 @@ export function createSettingsVerbs(tab: {
         operation: operationFor(row.place, value),
       });
     } catch (error: unknown) {
-      return {status: 'failed', message: problem(error)};
+      return unanswered(error);
     }
   };
   /**
@@ -339,6 +452,7 @@ export function createSettingsVerbs(tab: {
       finishWelcome() {
         apply(current => settingsClosed(noticeSpent(current)));
       },
+      ...characterVerbs(tab),
     },
     async changed() {
       if (getState().settings !== undefined) {

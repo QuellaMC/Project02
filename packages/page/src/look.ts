@@ -7,6 +7,7 @@
 /** Each icon a path in a 24-unit square, drawn as a stroke. */
 const icons = {
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  plus: 'M12 6v12 M6 12h12',
   updown: 'M8 9l4-4 4 4 M8 15l4 4 4-4',
   sparkle:
     'M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1-5.1-1.9 5.1-1.9z M18.5 15.5l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z',
@@ -26,6 +27,7 @@ const icons = {
   person:
     'M15.5 9a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0z M5.5 19.5a6.5 6.5 0 0 1 13 0',
   grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
+  doc: 'M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 6 20V4a.5.5 0 0 1 .5-.5z M14 3.5V8h4',
 } as const;
 
 export type IconName = keyof typeof icons;

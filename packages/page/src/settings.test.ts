@@ -5,6 +5,10 @@ import {
   changeEnded,
   changeSent,
   changedElsewhere,
+  characterAddEnded,
+  characterFileRefusal,
+  characterPreviewed,
+  characterRemoveEnded,
   characterTarget,
   clickedText,
   conflictMet,
@@ -24,12 +28,16 @@ import {
   type Row,
 } from './settings.ts';
 import {
+  applyEvent,
   initialState,
   installSnapshot,
   threadOpened,
+  type SettingsPage,
   type WebState,
 } from './store.ts';
 import type {
+  CharacterPreviewOutcome,
+  CharacterSummary,
   ConfigView,
   GatewayHealth,
   JsonValue,
@@ -175,6 +183,49 @@ function both(home = view(), hers = view()): ReadonlyMap<string, ConfigView> {
     ['home', home],
     ['character:mira', hers],
   ]);
+}
+
+/** The page the window is on, while it is open. */
+function pageOf(state: WebState): SettingsPage | undefined {
+  return state.settings?.screen.kind === 'window'
+    ? state.settings.screen.page
+    : undefined;
+}
+
+const nova: CharacterSummary = {
+  id: 'nova',
+  displayName: 'Nova',
+  enabled: true,
+  builtIn: false,
+  state: 'ready',
+};
+
+/** Nova as a file holds her, new here. */
+const novaFile: CharacterPreviewOutcome = {
+  status: 'ok',
+  id: 'nova',
+  displayName: 'Nova',
+  version: '1.0.0',
+  comesWith: [],
+  installed: 'none',
+  hasData: false,
+};
+
+/** A live tab whose roster is these characters, the window open on this page. */
+function windowOn(
+  page: SettingsPage,
+  characters: readonly CharacterSummary[],
+): WebState {
+  return settingsOpened(
+    installSnapshot(initialState, {
+      protocolVersion: 9,
+      health: {...health, characters},
+      confirmations: [],
+      pairings: [],
+      turns: [],
+    }),
+    page,
+  );
 }
 
 describe('settings window', () => {
@@ -434,6 +485,157 @@ describe('settings window', () => {
       namespace: 'plugins',
       id: 'reply-style',
     });
+  });
+
+  it("previews a chosen file over the page it was chosen from, keeping its text only while she can be added from it; adding her opens her page and lets the file go, and a refusal or a write that failed stays on the preview in the daemon's words", () => {
+    const text = '{"format": "project02.character.v1"}';
+    const from: SettingsPage = {kind: 'character', characterId: 'mira'};
+    const shown = characterPreviewed(
+      opened(),
+      {name: 'nova.json', text},
+      novaFile,
+    );
+
+    expect(pageOf(shown)).toEqual({
+      kind: 'add',
+      fileName: 'nova.json',
+      text,
+      preview: novaFile,
+      from,
+    });
+
+    const notOne = {
+      status: 'refused',
+      reason: 'invalid',
+      message: 'This file is not a character file this app can read.',
+    } as const;
+
+    // Another file chosen from the preview goes back where the first came from.
+    expect(
+      pageOf(characterPreviewed(shown, {name: 'notes.json', text}, notOne)),
+    ).toEqual({kind: 'add', fileName: 'notes.json', preview: notOne, from});
+    expect(characterFileRefusal(64 * 1024)).toBeUndefined();
+    expect(characterFileRefusal(64 * 1024 + 1)).toBe(
+      'This file is too large to be a character file.',
+    );
+
+    const builtIn =
+      'This character comes with the app, so a file cannot add or change her.';
+    const refused = characterAddEnded(shown, {
+      status: 'refused',
+      reason: 'built_in',
+      message: builtIn,
+    });
+
+    expect(pageOf(refused)).toEqual({...pageOf(shown), problem: builtIn});
+    expect(
+      pageOf(
+        characterAddEnded(shown, {
+          status: 'failed',
+          message: 'The app could not be reached.',
+        }),
+      ),
+    ).toMatchObject({kind: 'add', problem: 'The app could not be reached.'});
+    expect(
+      pageOf(
+        characterAddEnded(refused, {status: 'updated', characterId: 'nova'}),
+      ),
+    ).toEqual({kind: 'character', characterId: 'nova'});
+
+    // An answer that finds the window elsewhere, or a file with no window open, changes nothing.
+    const elsewhere = opened();
+
+    expect(
+      characterAddEnded(elsewhere, {status: 'added', characterId: 'nova'}),
+    ).toBe(elsewhere);
+    expect(
+      characterPreviewed(initialState, {name: 'nova.json', text}, novaFile),
+    ).toBe(initialState);
+  });
+
+  it('leaves every page of a character who is gone, removed here or missing from the roster the daemon says, and the page a preview goes back to; keeps the page of one on her way; and says in her confirmation why a removal did not land', () => {
+    const asking = windowOn({kind: 'remove', characterId: 'nova'}, [
+      ...health.characters,
+      nova,
+    ]);
+    const builtIn =
+      'This character comes with the app, so she cannot be removed.';
+
+    expect(
+      pageOf(
+        characterRemoveEnded(asking, 'nova', {
+          status: 'refused',
+          reason: 'built_in',
+          message: builtIn,
+        }),
+      ),
+    ).toEqual({kind: 'remove', characterId: 'nova', problem: builtIn});
+    expect(
+      characterRemoveEnded(asking, 'mira', {status: 'failed', message: 'No.'}),
+    ).toBe(asking);
+    expect(
+      pageOf(characterRemoveEnded(asking, 'nova', {status: 'removed'})),
+    ).toEqual({kind: 'you'});
+
+    const without = (page: SettingsPage) =>
+      pageOf(
+        applyEvent(windowOn(page, [...health.characters, nova]), {
+          kind: 'health_changed',
+          health,
+        }),
+      );
+    const preview: SettingsPage = {
+      kind: 'add',
+      fileName: 'lyra.json',
+      preview: {...novaFile, id: 'lyra', displayName: 'Lyra'},
+      from: {kind: 'feature', characterId: 'nova', pluginId: 'reply-style'},
+    };
+
+    expect(without({kind: 'character', characterId: 'nova'})).toEqual({
+      kind: 'you',
+    });
+    expect(
+      without({kind: 'bot', target: characterTarget('nova'), from: 'telegram'}),
+    ).toEqual({kind: 'you'});
+    expect(without(preview)).toEqual({...preview, from: {kind: 'you'}});
+    expect(without({kind: 'bot', target: home, from: 'telegram'})).toEqual({
+      kind: 'bot',
+      target: home,
+      from: 'telegram',
+    });
+    expect(without({...preview, from: {kind: 'telegram'}})).toEqual({
+      ...preview,
+      from: {kind: 'telegram'},
+    });
+
+    // A reconnect that finds her gone leaves her page the same way.
+    expect(
+      pageOf(
+        installSnapshot(asking, {
+          protocolVersion: 9,
+          health,
+          confirmations: [],
+          pairings: [],
+          turns: [],
+        }),
+      ),
+    ).toEqual({kind: 'you'});
+
+    // With the window closed, the roster is all that changes.
+    expect(
+      applyEvent(settingsClosed(asking), {kind: 'health_changed', health})
+        .settings,
+    ).toBeUndefined();
+
+    // Added here before the roster lists her, she is on her way: her page stays.
+    const coming = windowOn(
+      {kind: 'character', characterId: 'nova'},
+      health.characters,
+    );
+
+    expect(
+      pageOf(applyEvent(coming, {kind: 'health_changed', health})),
+    ).toEqual({kind: 'character', characterId: 'nova'});
   });
 
   it('keys every row by its target and place, so no two rows share one', () => {

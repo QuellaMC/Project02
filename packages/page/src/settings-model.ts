@@ -7,6 +7,8 @@
  */
 import type {
   AccessName,
+  CharacterFeature,
+  CharacterPreviewOutcome,
   CharacterSummary,
   ConfigTarget,
   GatewayHealth,
@@ -248,13 +250,17 @@ export function featuresPlaced(
     );
 }
 
-/** A plugin whose home settings are an account set up once has an entry among the connections: one whose section in the home's view has fields. */
-function hasConnection(settings: Settings, pluginId: string): boolean {
-  const view = viewOf(settings, home);
-  const section =
-    view === undefined ? undefined : sectionOf(view, 'plugins', pluginId);
+/** The plugins whose home settings are an account set up once, each an entry among the connections: those whose section in the home's view has fields. */
+function connections(view: OkView | undefined): readonly Section[] {
+  return (view?.sections ?? []).filter(
+    section => section.namespace === 'plugins' && section.fields.length > 0,
+  );
+}
 
-  return section !== undefined && section.fields.length > 0;
+function hasConnection(settings: Settings, pluginId: string): boolean {
+  return connections(viewOf(settings, home)).some(
+    section => section.id === pluginId,
+  );
 }
 
 /** Where a plugin's setup is finished: its connection, else its own page. */
@@ -690,9 +696,7 @@ export function sidebarOf(
         ? said.startsWith(`${targetKey(target)}/`)
         : said === `${targetKey(target)}/${key}`,
     );
-  const connected = (view?.sections ?? []).filter(
-    section => section.namespace === 'plugins' && section.fields.length > 0,
-  );
+  const connected = connections(view);
 
   return {
     you: nameInEffect(settings),
@@ -834,6 +838,7 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
   switch (page.kind) {
     case 'feature':
     case 'character-model':
+    case 'remove':
       return {kind: 'character', characterId: page.characterId};
     case 'bot':
       return page.from === 'telegram' || page.target.scope === 'global'
@@ -850,5 +855,120 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
 export function marks(page: SettingsPage, entry: SettingsPage): boolean {
   const top = parentOf(page) ?? page;
 
-  return JSON.stringify(top) === JSON.stringify(entry);
+  return (
+    top.kind === entry.kind && JSON.stringify(top) === JSON.stringify(entry)
+  );
+}
+
+/** Who a character file holds and what adding her would do. */
+export type CharacterPreview = Extract<CharacterPreviewOutcome, {status: 'ok'}>;
+
+/** What a preview offers: its button, a line about her stay here, and the way to her page. */
+export type Offer = {
+  /** Adds her, or updates her; none when the file cannot. */
+  readonly button?: string;
+  readonly line?: string;
+  /** Opens her page, when this very version of her is here. */
+  readonly link?: string;
+};
+
+/**
+ * What adding the character a file holds would do, by where she stands
+ * here: add her when she is new, saying so when her chats from an earlier
+ * stay are still here; update her when another version of her is here;
+ * and nothing when this very version is, which leads to her page, or when
+ * she comes with the app.
+ */
+export function offerOf(preview: CharacterPreview): Offer {
+  const name = preview.displayName;
+
+  switch (preview.installed) {
+    case 'none':
+      return {
+        button: `Add ${name}`,
+        ...(preview.hasData
+          ? {line: 'Her chats and memories from before are still here.'}
+          : {}),
+      };
+    case 'other_version':
+      return {
+        button: `Update ${name}`,
+        line: `${name} is here in another version.`,
+      };
+    case 'same':
+      return {line: `${name} is already here.`, link: `Open ${name}`};
+    case 'built_in':
+      return {line: `${name} comes with the app.`};
+  }
+}
+
+/** A feature a character comes with, drawn as a chip: its name on its plugin's tile. */
+export type Chip = {
+  readonly id: string;
+  readonly name: string;
+  readonly icon: IconName;
+  readonly tint: Tint;
+};
+
+/**
+ * What she comes with: a chip for each feature this app has, by its name
+ * on its plugin's tile, in the order her page shows them; and one plain
+ * line for those she asks for that this app does not have, which no chip
+ * stands for.
+ */
+export function comesWithOf(
+  settings: Settings,
+  features: readonly CharacterFeature[],
+): {readonly chips: readonly Chip[]; readonly lacking?: string} {
+  const listed = sectionsListed(settings).filter(
+    section => section.namespace === 'plugins',
+  );
+  const placeOf = (id: string): number => {
+    const at = listed.findIndex(section => section.id === id);
+
+    return at === -1 ? listed.length : at;
+  };
+  const chips = features
+    .flatMap(feature => (feature.kind === 'plugin' ? [feature] : []))
+    .toSorted((left, right) => placeOf(left.id) - placeOf(right.id))
+    .map(feature => {
+      const section = listed[placeOf(feature.id)];
+      const art: {readonly icon: IconName; readonly tint: Tint} =
+        section === undefined ? {icon: 'grid', tint: 'gray'} : artOf(section);
+
+      return {id: feature.id, name: feature.displayName, ...art};
+    });
+  const unknown = features.flatMap(feature =>
+    feature.kind === 'unknown' ? [feature.id] : [],
+  );
+
+  return {
+    chips,
+    ...(unknown.length === 0
+      ? {}
+      : {lacking: `This app does not have: ${unknown.join(', ')}.`}),
+  };
+}
+
+/**
+ * What a character added now would find set up: the AI model she thinks
+ * with, ready or to be set up first, and each account set up once for
+ * everyone, ready or optional.
+ */
+export function readinessOf(
+  settings: Settings,
+): readonly {readonly label: string; readonly value: string}[] {
+  const view = viewOf(settings, home);
+
+  if (view === undefined) {
+    return [];
+  }
+
+  return [
+    {label: 'AI Model', value: view.model.ready ? 'Ready' : 'Set Up First'},
+    ...connections(view).map(section => ({
+      label: section.displayName,
+      value: section.setup.ready ? 'Ready' : 'Optional',
+    })),
+  ];
 }

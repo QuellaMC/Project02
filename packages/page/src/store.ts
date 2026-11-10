@@ -8,6 +8,7 @@
  */
 import type {
   AnswerOutcome,
+  CharacterPreviewOutcome,
   CharacterSummary,
   ConfigTarget,
   ConfigView,
@@ -104,6 +105,29 @@ export type SettingsPage =
       readonly kind: 'plugin';
       readonly namespace: RuntimeConfigSectionNamespace;
       readonly id: string;
+    }
+  /**
+   * A character file the person chose, and what the daemon said of it:
+   * who she is and what adding her would do, or why she cannot be added
+   * from it. Nothing of the file outlives the page.
+   */
+  | {
+      readonly kind: 'add';
+      /** The file's name on the person's computer. */
+      readonly fileName: string;
+      /** The file's text as it was read, sent again to add her; none when it holds no character. */
+      readonly text?: string;
+      readonly preview: CharacterPreviewOutcome;
+      /** What the daemon said when adding her did not land. */
+      readonly problem?: string;
+      /** The page the file was chosen from, which Cancel goes back to. */
+      readonly from: SettingsPage;
+    }
+  /** Her page, asking whether to remove her, with what the daemon said when removing her did not land. */
+  | {
+      readonly kind: 'remove';
+      readonly characterId: string;
+      readonly problem?: string;
     };
 
 /** What stands in front of the chat: the settings window on a page, or the first run's welcome at a step. */
@@ -254,9 +278,8 @@ export function installSnapshot(
 ): WebState {
   const waiting = new Set(snapshot.confirmations.map(pending => pending.id));
   let next: WebState = {
-    ...state,
+    ...rosterSaid(state, snapshot.health),
     connection: {status: 'live'},
-    health: snapshot.health,
     confirmations: snapshot.confirmations,
     pairings: snapshot.pairings,
     turns: new Map(snapshot.turns.map(turn => [turn.conversationId, turn])),
@@ -717,7 +740,7 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       }));
     case 'health_changed':
       // The daemon's word on the roster, in order with every state frame.
-      return {...state, health: event.health};
+      return rosterSaid(state, event.health);
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state
@@ -888,6 +911,69 @@ function composing(
   }
 
   return {...state, composers};
+}
+
+/**
+ * The roster as the daemon says it now. The settings window leaves the
+ * page of a character it no longer lists; one it has not listed yet is on
+ * her way, and her page stays.
+ */
+function rosterSaid(state: WebState, health: GatewayHealth): WebState {
+  const listed = new Set(health.characters.map(character => character.id));
+  let next: WebState = {...state, health};
+
+  for (const character of state.health?.characters ?? []) {
+    if (!listed.has(character.id)) {
+      next = characterLeft(next, character.id);
+    }
+  }
+
+  return next;
+}
+
+/**
+ * A character is gone: the settings window leaves a page of hers for
+ * You, and so does the page a preview goes back to.
+ */
+export function characterLeft(state: WebState, characterId: string): WebState {
+  const {settings} = state;
+
+  if (settings?.screen.kind !== 'window') {
+    return state;
+  }
+
+  const page = pageWithout(settings.screen.page, characterId);
+
+  return page === settings.screen.page
+    ? state
+    : {...state, settings: {...settings, screen: {kind: 'window', page}}};
+}
+
+function pageWithout(page: SettingsPage, characterId: string): SettingsPage {
+  if (page.kind === 'add') {
+    const from = pageWithout(page.from, characterId);
+
+    return from === page.from ? page : {...page, from};
+  }
+
+  return characterOfPage(page) === characterId ? {kind: 'you'} : page;
+}
+
+/** The character a page of the window is about, when it is about one. */
+function characterOfPage(page: SettingsPage): string | undefined {
+  switch (page.kind) {
+    case 'character':
+    case 'remove':
+    case 'feature':
+    case 'character-model':
+      return page.characterId;
+    case 'bot':
+      return page.target.scope === 'character'
+        ? page.target.characterId
+        : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function withCharacter(
