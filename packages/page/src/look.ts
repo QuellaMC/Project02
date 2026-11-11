@@ -1,7 +1,8 @@
 /**
  * The page's own look as data: its icons, the tints an icon's tile takes,
- * and the colour of each character's avatar. A plugin names an icon and a
- * tint of these; one the page does not know falls back to its plainest.
+ * and the colour of each character's avatar. A plugin, and an app on her
+ * phone, names an icon and a tint of these; one the page does not know
+ * falls back to its plainest.
  */
 
 /** Each icon a path in a 24-unit square, drawn as a stroke. */
@@ -29,6 +30,15 @@ const icons = {
     'M15.5 9a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0z M5.5 19.5a6.5 6.5 0 0 1 13 0',
   grid: 'M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z',
   doc: 'M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 6 20V4a.5.5 0 0 1 .5-.5z M14 3.5V8h4',
+  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 7v5l3 2',
+  globe:
+    'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M3 12h18 M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z',
+  alarm:
+    'M12 6.5a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M12 10v3.5l2.2 1.5 M5 4.5L2.8 6.6 M19 4.5l2.2 2.1',
+  stopwatch:
+    'M12 7a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M12 11v3 M10 3.5h4 M12 3.5V7',
+  timer: 'M12 5a8 8 0 1 0 8 8 M12 13V5 M12 13l5-5',
+  eye: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z M12 9.3a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4z',
 } as const;
 
 export type IconName = keyof typeof icons;
@@ -53,6 +63,7 @@ const tints = [
   'cyan',
   'pink',
   'mint',
+  'graphite',
 ] as const;
 
 export type Tint = (typeof tints)[number];

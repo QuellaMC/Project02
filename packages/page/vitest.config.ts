@@ -5,12 +5,15 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
-      // The page's session and its components run only in a browser; the
+      // The page's sessions and its components run only in a browser; the
       // browser suite is their cover. Everything else the page owns —
-      // its store, every rule a tab follows — is covered here.
+      // its stores, every rule a surface follows — is covered here.
       exclude: [
+        'src/surface.ts',
         'src/session.ts',
         'src/settings-session.ts',
+        'src/phone-session.ts',
+        'src/phone-*.tsx',
         'src/main.tsx',
         'src/app.tsx',
         'src/thread.tsx',

@@ -34,6 +34,9 @@ export type Connection =
   /** The address will never work: a dead token, a wrong protocol, no token. */
   | {readonly status: 'refused'; readonly message: string};
 
+/** A surface's value, the chat's or her phone's window's: how its connection stands moves the same way for each. */
+type Connected = {readonly connection: Connection};
+
 /** A committed message as the page shows it; a person's own is told by its role. */
 export type Message = {
   readonly messageId: string;
@@ -328,7 +331,7 @@ function setAside(thread: Thread): Thread {
  * connecting again: what it shows is from before, and a line sent now
  * waits for that `ready` to go.
  */
-export function streamLost(state: WebState): WebState {
+export function streamLost<State extends Connected>(state: State): State {
   return state.connection.status === 'live'
     ? {...state, connection: {status: 'connecting'}}
     : state;
@@ -339,7 +342,7 @@ export function streamLost(state: WebState): WebState {
  * frame this tab applied, so what follows is what it missed, and nothing
  * on screen moves. A refused address stays refused.
  */
-export function streamResumed(state: WebState): WebState {
+export function streamResumed<State extends Connected>(state: State): State {
   return state.connection.status === 'connecting'
     ? {...state, connection: {status: 'live'}}
     : state;

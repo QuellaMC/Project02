@@ -44,6 +44,7 @@ import {
   type SettingsPage,
   type WebState,
 } from './store.ts';
+import {problem} from './surface.ts';
 
 export type SettingsVerbs = {
   readonly openSettings: (page: SettingsPage) => Promise<void>;
@@ -116,10 +117,6 @@ function remember(advanced: boolean): void {
   } catch {
     // A browser that keeps nothing forgets the switch with the tab.
   }
-}
-
-function problem(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** A call nothing answered, said as a write that failed is. */

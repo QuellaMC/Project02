@@ -80,3 +80,23 @@ it again for the daemon to judge afresh. A character a person added has
 Remove at the bottom of her page, which asks first. The roster is
 health's, so a character added or removed anywhere appears or goes here,
 and a page of one who is gone is left for You.
+
+At `/?phone=<character id>`, the token in the fragment as ever, the same
+bundle draws one character's phone and nothing else: her phone's window, a
+second surface beside the chat's, with its own value and rules in
+`phone.ts`, pure and tested in Node, and its own session in
+`phone-session.ts`; what every surface is made of — its one value, the
+client for the page's address, the stream it follows — is `surface.ts`.
+The window reads her phone when it opens, on every `phone_changed` naming
+her and when the stream comes back, and follows her: it shows what she has
+in front, her home screen when nothing is. The person can open an app,
+switch its views and go home, each view read on its own and nothing of hers
+changed, until a read in which what she did, what she has in front or what
+rings is new takes the window back to her. What rings is drawn over
+everything, the soonest of several; a row that a read right after something
+she did holds for the first time is marked New until the next read; the
+view on screen is read again at each minute's turn, and a reading that
+moves is counted on the page from the moments it carries. A character the
+daemon does not know, or whose settings give her no phone, is said in the
+daemon's sentence where her phone would be. `phone-window.tsx` and
+`phone-device.tsx` draw it as the design draws an iPhone.

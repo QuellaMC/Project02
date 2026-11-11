@@ -6,7 +6,6 @@
  */
 import type {Answer} from '@project02/wire/contract';
 import {
-  createGatewayClient,
   GatewayClientError,
   type GatewayClient,
   type HistoryPage,
@@ -39,6 +38,7 @@ import {
   type PendingLine,
   type WebState,
 } from './store.ts';
+import {clientFor, createValue, follow, problem} from './surface.ts';
 
 export type Session = SettingsVerbs & {
   readonly getState: () => WebState;
@@ -56,17 +56,11 @@ export type Session = SettingsVerbs & {
 /** The stamp every tab puts on its lines; a tab tells its own apart by id, not by it. */
 export const webSource = 'web';
 
-function problem(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function createSession(address: string): Session {
-  let client: GatewayClient;
+  const client = clientFor(address);
 
-  try {
-    client = createGatewayClient({url: address});
-  } catch (error: unknown) {
-    return refusedSession(problem(error));
+  if (typeof client === 'string') {
+    return refusedSession(client);
   }
 
   const {getState, subscribe, apply, writtenFor} = createTabValue();
@@ -169,70 +163,64 @@ export function createSession(address: string): Session {
     }
   };
 
-  // The stream lives as long as the page: a tab that goes away takes its
-  // socket with it, and the daemon notices.
-  void client
-    .events(
-      event => {
-        apply(current => applyEvent(current, event));
-        openTheOnlyCharacter();
+  follow(client, {
+    event: event => {
+      apply(current => applyEvent(current, event));
+      openTheOnlyCharacter();
 
-        // A character that was away when its lines were last accounted
-        // for is a fresh chance at them, and the only one that comes.
-        if (event.kind === 'state_changed' && event.state === 'ready') {
-          void accountForPending(accounting());
-        }
+      // A character that was away when its lines were last accounted
+      // for is a fresh chance at them, and the only one that comes.
+      if (event.kind === 'state_changed' && event.state === 'ready') {
+        void accountForPending(accounting());
+      }
 
-        // Config moved, here or on another surface, or a connector's
-        // process came or went: the settings open show what is there now.
-        if (event.kind === 'health_changed') {
-          void settings.changed();
-        }
-      },
-      {
-        signal: new AbortController().signal,
-        onReady: async ({snapshot}) => {
-          // The thread is set aside for the page read next, so no read
-          // already in flight for it says what it shows any more.
-          reads.clear();
-          apply(current => installSnapshot(current, snapshot));
+      // Config moved, here or on another surface, or a connector's
+      // process came or went: the settings open show what is there now.
+      if (event.kind === 'health_changed') {
+        void settings.changed();
+      }
+    },
+    ready: async snapshot => {
+      // The thread is set aside for the page read next, so no read
+      // already in flight for it says what it shows any more.
+      reads.clear();
+      apply(current => installSnapshot(current, snapshot));
 
-          const {thread} = getState();
+      const {thread} = getState();
 
-          if (thread !== undefined) {
-            await readPage(thread.conversationId, {});
-          }
+      if (thread !== undefined) {
+        await readPage(thread.conversationId, {});
+      }
 
-          const wroteFor = writtenFor();
+      const wroteFor = writtenFor();
 
-          // Only what a previous tab kept can belong to another home; a
-          // tab that has written nothing yet has nothing to let go of,
-          // including what is being typed while this frame arrives.
-          if (wroteFor !== undefined && wroteFor !== snapshot.health.homeRoot) {
-            apply(forgetWritten);
-          }
+      // Only what a previous tab kept can belong to another home; a
+      // tab that has written nothing yet has nothing to let go of,
+      // including what is being typed while this frame arrives.
+      if (wroteFor !== undefined && wroteFor !== snapshot.health.homeRoot) {
+        apply(forgetWritten);
+      }
 
-          writtenFor(snapshot.health.homeRoot);
-          // Not awaited: a line's open can wait on her start, and the
-          // stream goes on meanwhile.
-          void accountForPending(accounting());
-          openTheOnlyCharacter();
-          await settings.ready();
-        },
-        onLost: () => {
-          apply(streamLost);
-        },
-        onResumed: () => {
-          // Nothing was missed, so nothing is installed; a connection is
-          // still the moment to account for the lines this tab holds.
-          apply(streamResumed);
-          void accountForPending(accounting());
-        },
-      },
-    )
-    .catch((error: unknown) => {
-      apply(current => connectionRefused(current, problem(error)));
-    });
+      writtenFor(snapshot.health.homeRoot);
+      // Not awaited: a line's open can wait on her start, and the
+      // stream goes on meanwhile.
+      void accountForPending(accounting());
+      openTheOnlyCharacter();
+      await settings.ready();
+    },
+    lost: () => {
+      apply(streamLost);
+    },
+    resumed: () => {
+      // Nothing was missed, so nothing is installed; a connection is
+      // still the moment to account for the lines this tab holds.
+      apply(streamResumed);
+      void accountForPending(accounting());
+    },
+    refused: message => {
+      apply(current => connectionRefused(current, message));
+    },
+  });
 
   const sending = (): Sending => ({client, apply});
   const accounting = (): Accounting => ({
@@ -400,48 +388,35 @@ function createTabValue(): {
   readonly writtenFor: (homeRoot?: string) => string | undefined;
 } {
   const kept = writtenAndUnsent();
-  const listeners = new Set<() => void>();
-  let state: WebState = {
+  const value = createValue<WebState>({
     ...initialState,
     composers: kept.composers,
     pending: kept.pending,
     advanced: rememberedAdvanced(),
-  };
+  });
   let home = kept.homeRoot;
   let refusalSaid = false;
 
   return {
-    getState: () => state,
-    subscribe: listener => {
-      listeners.add(listener);
-
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    getState: value.getState,
+    subscribe: value.subscribe,
     apply: reduce => {
-      const next = reduce(state);
+      value.apply(state => {
+        const next = reduce(state);
+        const written =
+          next.composers !== state.composers || next.pending !== state.pending;
 
-      if (next === state) {
-        return;
-      }
+        if (!written || keepWrittenAndUnsent(next, home) || refusalSaid) {
+          return next;
+        }
 
-      const written =
-        next.composers !== state.composers || next.pending !== state.pending;
-
-      state = next;
-
-      if (written && !keepWrittenAndUnsent(state, home) && !refusalSaid) {
         refusalSaid = true;
-        state = noticed(
-          state,
+
+        return noticed(
+          next,
           'This browser is not keeping what you write, so a reload will lose it.',
         );
-      }
-
-      for (const listener of listeners) {
-        listener();
-      }
+      });
     },
     writtenFor: homeRoot => {
       if (homeRoot !== undefined) {
