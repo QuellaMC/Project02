@@ -59,6 +59,15 @@ function twoHome(model: ModelServer): string {
   });
 }
 
+/** Mira's phone switched off or on in her settings, as her settings page switches a plugin. */
+async function switchPhone(daemon: Daemon, enabled: boolean): Promise<void> {
+  await saveConfig(
+    wireOf(daemon),
+    {scope: 'character', characterId: 'mira'},
+    {kind: 'section_enabled', namespace: 'plugins', id: 'phone', enabled},
+  );
+}
+
 /** Her home screen's Clock, which a tab named World Clock is not. */
 function clockIcon(page: Page) {
   return page.getByRole('button', {name: 'Clock', exact: true});
@@ -80,7 +89,7 @@ async function chatWith(page: Page, name: string): Promise<void> {
   ).toBeVisible();
 }
 
-test("page.phone-follows-her: her phone's address shows her home screen with the Clock; she sets an alarm and the window goes to the Alarms view with the alarm on it and says what she did; the person opens another view and her home screen, and what she has in front is untouched; an address naming nobody says so where her phone would be", async ({
+test("page.phone-follows-her: her phone's address shows her home screen with the Clock; she sets an alarm and the window goes to the Alarms view with the alarm on it and says what she did; the person opens another view and her home screen, and what she has in front is untouched; her settings switching her phone off is said where her phone was, and on again brings it back; an address naming nobody says so where her phone would be", async ({
   page,
 }) => {
   const model = await startModelServer();
@@ -124,6 +133,13 @@ test("page.phone-follows-her: her phone's address shows her home screen with the
     front: {appId: 'clock', viewId: 'alarms'},
     did: {words: 'Set an alarm'},
   });
+
+  await switchPhone(daemon, false);
+  await expect(page.locator('.phone-said')).toHaveText(
+    'Mira has no phone: her settings switch it off.',
+  );
+  await switchPhone(daemon, true);
+  await expect(clockIcon(page)).toBeVisible();
 
   await page.goto(phoneOf(daemon, 'nova'));
   await expect(page.locator('.phone-said')).toHaveText(
@@ -232,16 +248,7 @@ test("page.phone-button: her chat's Her Phone button opens her phone's address i
     "This browser blocked her phone's window. Allow pop-ups for this page, then click Her Phone again.",
   ]);
 
-  await saveConfig(
-    wireOf(daemon),
-    {scope: 'character', characterId: 'mira'},
-    {
-      kind: 'section_enabled',
-      namespace: 'plugins',
-      id: 'phone',
-      enabled: false,
-    },
-  );
+  await switchPhone(daemon, false);
   await expect(button).toHaveCount(0);
 });
 

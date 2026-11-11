@@ -123,8 +123,11 @@ export function createPhoneSession(
 
   follow(client, {
     event: event => {
+      // Her settings say whether she has a phone, and health moves with
+      // them: her phone is read again.
       if (event.kind === 'health_changed') {
         apply(current => healthSaid(current, event.health));
+        void read();
       }
 
       if (event.kind === 'phone_changed' && event.characterId === characterId) {
