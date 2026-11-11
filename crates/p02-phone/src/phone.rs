@@ -19,12 +19,21 @@ pub struct Phone {
     apps: Vec<App>,
 }
 
-/// What an action did: its answer, and the screen of the action's view
-/// after it, or why that screen could not be shown. The action stands,
+/// An app opened: the app, the view it shows, and that view's screen.
+#[derive(Debug)]
+pub struct Opened<'a> {
+    pub app: &'a App,
+    pub view: Identifier,
+    pub screen: Screen,
+}
+
+/// What an action did: its answer, the view the phone shows after it, and
+/// that view's screen, or why it could not be shown. The action stands,
 /// saved, either way.
 #[derive(Debug)]
 pub struct Acted {
     pub answer: Value,
+    pub view: Identifier,
     pub screen: Result<Screen, PhoneError>,
 }
 
@@ -47,8 +56,20 @@ impl Phone {
         &self.apps
     }
 
-    /// The screen of `app`'s `view`, or of the view it opens on when none
-    /// is named.
+    /// The app of `id` on the phone.
+    ///
+    /// # Errors
+    ///
+    /// [`PhoneError::NoApp`] when the phone has none.
+    pub fn app(&self, id: &str) -> Result<&App, PhoneError> {
+        self.apps
+            .iter()
+            .find(|app| app.id().as_str() == id)
+            .ok_or_else(|| PhoneError::NoApp(id.to_owned()))
+    }
+
+    /// `app` opened on `view`, or on the view it opens on when none is
+    /// named, with that view's screen.
     ///
     /// # Errors
     ///
@@ -60,7 +81,7 @@ impl Phone {
         app: &str,
         view: Option<&str>,
         now: &Now,
-    ) -> Result<Screen, PhoneError> {
+    ) -> Result<Opened<'_>, PhoneError> {
         let app = self.app(app)?;
         let view = match view {
             None => app.opens_on(),
@@ -75,7 +96,11 @@ impl Phone {
                 })?,
         };
 
-        screen(files, app, view, now)
+        Ok(Opened {
+            app,
+            view: view.clone(),
+            screen: screen(files, app, view, now)?,
+        })
     }
 
     /// Takes `app`'s `action` on `input`, once its contract admits it, and
@@ -143,6 +168,7 @@ impl Phone {
 
         Ok(Acted {
             answer,
+            view: action.view().clone(),
             screen: screen(files, app, action.view(), now),
         })
     }
@@ -210,13 +236,6 @@ impl Phone {
         }
 
         Ok(failures)
-    }
-
-    fn app(&self, id: &str) -> Result<&App, PhoneError> {
-        self.apps
-            .iter()
-            .find(|app| app.id().as_str() == id)
-            .ok_or_else(|| PhoneError::NoApp(id.to_owned()))
     }
 }
 

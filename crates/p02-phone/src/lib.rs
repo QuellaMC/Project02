@@ -17,6 +17,6 @@ pub use bundled::BundledAppError;
 pub use data::Ring;
 pub use error::{PackageError, PhoneError};
 pub use manifest::{Action, View};
-pub use phone::{Acted, Phone, SetRing};
+pub use phone::{Acted, Opened, Phone, SetRing};
 pub use screen::{Item, Live, Row, Screen};
 pub use time::Now;

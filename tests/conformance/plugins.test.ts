@@ -78,6 +78,8 @@ it('plugins.tool-exposure: the model is offered the tools of each plugin she run
     'visible_reply',
     'memory_update',
     'character_state_patch',
+    'phone_open',
+    'phone_use',
     'sessions_search',
     'sessions_read',
   ];

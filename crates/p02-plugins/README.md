@@ -1,7 +1,7 @@
 # p02-plugins
 
 The plugin host and the plugins compiled into the daemon. It depends on
-p02-contracts, p02-core, p02-memory and p02-shared.
+p02-contracts, p02-core, p02-memory, p02-phone and p02-shared.
 
 Each plugin keeps its descriptor, `project02.plugin.json`, beside its
 code: the manifest of its hooks, its tools, its settings, the access it
@@ -32,5 +32,7 @@ The host's rules:
 The plugins: `runtime.plugin`, which lists the plugins she runs, shows one
 plugin's settings and, on the person's yes, changes a field the model may
 change in her own settings; session history; mem0, whose account is the
-home's to set up; character state; character memory; and reply-style, the
-tone she writes in and a signoff, each character's own.
+home's to set up; character state; character memory; her phone, whose
+apps she is told of before each call and opens and acts in through two
+tools; and reply-style, the tone she writes in and a signoff, each
+character's own.

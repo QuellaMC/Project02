@@ -183,6 +183,7 @@ it('characters.add-from-file: a file previews as who she is and what she comes w
         displayName: 'Ask to Change Settings',
       },
       {kind: 'plugin', id: 'character-memory', displayName: 'Notebook'},
+      {kind: 'plugin', id: 'phone', displayName: 'Phone'},
       {kind: 'plugin', id: 'reply-style', displayName: 'Reply Style'},
       {kind: 'plugin', id: 'session-history', displayName: 'Look Back'},
       {kind: 'unknown', id: 'teleport'},

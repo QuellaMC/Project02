@@ -39,7 +39,8 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
     let phone = showing(&json!({"everything": everything}));
     let screen = phone
         .open(&Files::default(), "notes", None, &now())
-        .unwrap();
+        .unwrap()
+        .screen;
 
     assert_eq!(serde_json::to_value(&screen).unwrap(), everything);
     assert_eq!(
@@ -119,7 +120,8 @@ fn a_screen_only_reads() {
     )]);
     let screen = phone
         .open(&Files::default(), "notes", None, &now())
-        .unwrap();
+        .unwrap()
+        .screen;
     let refused = |function: &str| {
         json!({
             "kind": "text",

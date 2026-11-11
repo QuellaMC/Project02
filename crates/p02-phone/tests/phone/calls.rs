@@ -67,7 +67,7 @@ fn an_action_runs_on_its_input_and_what_it_saved_is_there_at_the_next_call_and_i
     };
 
     assert_eq!(
-        serde_json::to_value(phone.open(&files, "notes", None, &now()).unwrap()).unwrap(),
+        serde_json::to_value(phone.open(&files, "notes", None, &now()).unwrap().screen).unwrap(),
         json!({"items": [{"kind": "text", "text": "No notes"}]})
     );
 

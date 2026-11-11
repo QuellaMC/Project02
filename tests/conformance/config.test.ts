@@ -130,6 +130,7 @@ it("config.view-global: the home's view lists the host fields the home may set i
   ).toEqual([
     'plugins.character-memory',
     'plugins.mem0',
+    'plugins.phone',
     'plugins.runtime.plugin',
     'plugins.session-history',
     'connectors.telegram',

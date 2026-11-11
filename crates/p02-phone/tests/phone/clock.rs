@@ -33,7 +33,8 @@ fn open(files: &Files, view: &str, moment: &str) -> Value {
     serde_json::to_value(
         phone()
             .open(files, "clock", Some(view), &at(moment))
-            .unwrap(),
+            .unwrap()
+            .screen,
     )
     .unwrap()
 }
@@ -115,13 +116,14 @@ fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
             ("remove_city", "world"),
         ]
     );
+
+    let opened = phone()
+        .open(&Files::default(), "clock", None, &at(MORNING))
+        .unwrap();
+
+    assert_eq!(opened.view.as_str(), "alarms");
     assert_eq!(
-        serde_json::to_value(
-            phone()
-                .open(&Files::default(), "clock", None, &at(MORNING))
-                .unwrap()
-        )
-        .unwrap(),
+        serde_json::to_value(opened.screen).unwrap(),
         nothing("No Alarms")
     );
 }

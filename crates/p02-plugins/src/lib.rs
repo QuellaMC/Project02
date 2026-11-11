@@ -14,6 +14,7 @@ pub mod list;
 mod management;
 pub mod mem0;
 mod package;
+mod phone;
 mod policy;
 mod reply_style;
 pub mod session_history;
