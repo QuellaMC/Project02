@@ -28,6 +28,7 @@ p02-contracts = { path = "crates/p02-contracts" }
 p02-core = { path = "crates/p02-core" }
 p02-gateway = { path = "crates/p02-gateway" }
 p02-memory = { path = "crates/p02-memory" }
+p02-phone = { path = "crates/p02-phone" }
 p02-plugins = { path = "crates/p02-plugins" }
 p02-role-model = { path = "crates/p02-role-model" }
 p02-runtime = { path = "crates/p02-runtime" }
@@ -38,6 +39,7 @@ p02-wire = { path = "crates/p02-wire" }
 project02 = { path = "crates/project02" }
 rand = "0.10.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rquickjs = "0.14.0"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rust-embed = { version = "8.12.0", features = ["debug-embed", "mime-guess"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }

@@ -98,8 +98,7 @@ pub struct Timestamp(String);
 pub struct ParseTimestampError;
 
 impl Timestamp {
-    /// The moment it is now, to the millisecond: the one way a moment is
-    /// minted.
+    /// The moment it is now, to the millisecond.
     ///
     /// # Panics
     ///
@@ -107,9 +106,14 @@ impl Timestamp {
     /// moment of a conversation is.
     #[must_use]
     pub fn now() -> Self {
+        Self::minted(jiff::Timestamp::now()).expect("the system clock reads a year from 0 to 9999")
+    }
+
+    /// `moment` to the millisecond, in the one spelling every moment has;
+    /// `None` before the year 0, which it cannot spell.
+    fn minted(moment: jiff::Timestamp) -> Option<Self> {
         // A precision of 3 truncates to the millisecond.
-        Self::new(&format!("{:.3}", jiff::Timestamp::now()))
-            .expect("the system clock reads a year from 0 to 9999")
+        Self::new(&format!("{moment:.3}")).ok()
     }
 
     /// # Errors
@@ -164,6 +168,14 @@ impl Timestamp {
         let seconds = ((days * 24 + number(11, 13)) * 60 + number(14, 16)) * 60 + number(17, 19);
 
         seconds * 1000 + number(20, 23)
+    }
+
+    /// The moment `millis` milliseconds after the Unix epoch, as
+    /// [`Timestamp::unix_millis`] reads it; `None` before the year 0, or
+    /// past the end of jiff's range late in the year 9999.
+    #[must_use]
+    pub fn from_unix_millis(millis: i64) -> Option<Self> {
+        Self::minted(jiff::Timestamp::from_millisecond(millis).ok()?)
     }
 }
 
@@ -328,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_timestamp_reads_as_the_milliseconds_since_the_epoch() {
+    fn a_timestamp_reads_as_the_milliseconds_since_the_epoch_and_back() {
         for text in [
             "1970-01-01T00:00:00.000Z",
             "1969-12-31T23:59:59.999Z",
@@ -336,6 +348,7 @@ mod tests {
             "2026-06-15T00:00:00.000Z",
             "2100-03-01T00:00:00.001Z",
             "0001-01-01T00:00:00.000Z",
+            "0000-01-01T00:00:00.000Z",
         ] {
             let expected = text.parse::<jiff::Timestamp>().unwrap().as_millisecond();
 
@@ -344,7 +357,17 @@ mod tests {
                 expected,
                 "{text}"
             );
+            assert_eq!(
+                Timestamp::from_unix_millis(expected),
+                Some(Timestamp::new(text).unwrap()),
+                "{text}"
+            );
         }
+
+        let first = Timestamp::new("0000-01-01T00:00:00.000Z").unwrap();
+
+        assert_eq!(Timestamp::from_unix_millis(first.unix_millis() - 1), None);
+        assert_eq!(Timestamp::from_unix_millis(i64::MAX), None);
     }
 
     #[test]
