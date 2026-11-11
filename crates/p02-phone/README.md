@@ -38,3 +38,7 @@ callers run it on the blocking pool.
   told to her and still set for its time, the app's `rang` runs as a call of
   its own, and the ring leaves unless `rang` set it for another time; a
   `rang` that fails lets it go too.
+- **What a phone comes with**: the apps in `apps/`, compiled in, today the
+  Clock: alarms, timers, a stopwatch and a world clock. A bundled app that
+  is refused fails the bundled phone at its first use, as a build that must
+  not ship.

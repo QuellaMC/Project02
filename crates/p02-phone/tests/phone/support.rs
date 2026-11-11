@@ -55,9 +55,14 @@ pub(crate) fn now() -> Now {
 
 /// `moment` in New York.
 pub(crate) fn at(moment: &str) -> Now {
+    in_zone(moment, "America/New_York")
+}
+
+/// `moment` where the person is in `zone`.
+pub(crate) fn in_zone(moment: &str, zone: &str) -> Now {
     Now::new(
         Timestamp::new(moment).unwrap(),
-        TimeZone::get("America/New_York").unwrap(),
+        TimeZone::get(zone).unwrap(),
     )
 }
 

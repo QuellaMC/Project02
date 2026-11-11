@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod bundled;
 mod data;
 mod engine;
 mod error;
@@ -12,6 +13,7 @@ mod screen;
 mod time;
 
 pub use app::App;
+pub use bundled::BundledAppError;
 pub use data::Ring;
 pub use error::{PackageError, PhoneError};
 pub use manifest::{Action, View};
