@@ -44,7 +44,8 @@ lease. It is synchronous, and its callers run it on the blocking pool.
 - **What she has in front.** `phone.json`, beside the apps' files, holds the
   app and the view she has in front, none her home screen, and what she
   last did: the app, its words and the moment. Her `open` of an app, and
-  her action, write it with the call; a person's `look` at a view only
+  her action, write it once the call stood, and a call whose writing of it
+  failed still stands and says why; a person's `look` at a view only
   reads, and puts nothing in front. It is read forgivingly: no file, or a
   part that names an app or a view no longer on the phone, is her home
   screen with nothing done.

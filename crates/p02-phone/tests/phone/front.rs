@@ -1,6 +1,7 @@
 //! What she has in front on her phone and what she last did on it: put
 //! there by her open and her action, left as it was by a look and by a
-//! call that fails, and read forgivingly.
+//! call that fails, read forgivingly, and never what fails a call that
+//! stood.
 
 use p02_core::Timestamp;
 use p02_phone::{Did, Front, Phone, PhoneState};
@@ -36,7 +37,7 @@ fn notes() -> Phone {
             ],
         }),
         "export function screen() { return { items: [] }; }
-        export function star() {}
+        export function star() { phone.storage.set('starred', true); }
         export function tear() { throw new Error('The page will not come out.'); }",
     )])
 }
@@ -109,6 +110,38 @@ fn her_open_and_her_action_say_what_she_has_in_front_and_did_and_nothing_else_do
             "did": {"app": "notes", "words": "Starred a note", "at": STARRED},
         })
     );
+}
+
+/// What she has in front is kept after the call stood: an open and an
+/// action whose keeping fails still stand, the action's own changes saved,
+/// and each says why it could not be kept.
+#[test]
+fn a_call_stands_when_what_she_has_in_front_cannot_be_kept() {
+    let phone = notes();
+    let mut files = Files {
+        unwritable: Some("phone.json"),
+        ..Files::default()
+    };
+    let opened = phone.open(&mut files, "notes", None, &at(OPENED)).unwrap();
+
+    assert!(opened.unkept.is_some());
+
+    let starred = phone
+        .act(
+            &mut files,
+            "notes",
+            "star",
+            &input(&json!({})),
+            &at(STARRED),
+        )
+        .unwrap();
+
+    assert!(starred.unkept.is_some());
+    assert_eq!(
+        files.documents["apps/notes.json"],
+        json!({"storage": {"starred": true}, "rings": []})
+    );
+    assert_eq!(state(&phone, &files), PhoneState::default());
 }
 
 #[test]

@@ -21,22 +21,27 @@ pub struct Phone {
     apps: Vec<App>,
 }
 
-/// An app opened: the app, the view it shows, and that view's screen.
+/// An app opened: the app, the view it shows, and that view's screen. The
+/// open stands whether or not her phone could keep what she now has in
+/// front: when it could not, `unkept` says why.
 #[derive(Debug)]
 pub struct Opened<'a> {
     pub app: &'a App,
     pub view: Identifier,
     pub screen: Screen,
+    pub unkept: Option<StoreError>,
 }
 
 /// What an action did: its answer, the view the phone shows after it, and
 /// that view's screen, or why it could not be shown. The action stands,
-/// saved, either way.
+/// saved, either way, and whether or not her phone could keep what she now
+/// has in front: when it could not, `unkept` says why.
 #[derive(Debug)]
 pub struct Acted {
     pub answer: Value,
     pub view: Identifier,
     pub screen: Result<Screen, PhoneError>,
+    pub unkept: Option<StoreError>,
 }
 
 /// A ring set on the phone, with its app's id and name.
@@ -72,13 +77,16 @@ impl Phone {
 
     /// She opens `app` on `view`, or on the view it opens on when none is
     /// named: it is in front of her, with that view's screen, and opening
-    /// it is what she last did, at `now`.
+    /// it is what she last did, at `now`. What she has in front is kept
+    /// once the screen came back, and an open whose keeping failed still
+    /// stands.
     ///
     /// # Errors
     ///
     /// [`PhoneError`] when there is no such app or view, when the screen
-    /// fails or is not one the phone takes, or when the store fails. An
-    /// open the phone refuses or the app fails puts nothing in front.
+    /// fails or is not one the phone takes, or when the store fails to be
+    /// read. An open the phone refuses or the app fails puts nothing in
+    /// front.
     pub fn open(
         &self,
         files: &mut dyn LeasedFiles,
@@ -93,11 +101,14 @@ impl Phone {
         };
         let screen = screen(files, app, view, now)?;
 
-        PhoneState::put(files, app, view, &format!("Opened {}", app.name()), now)?;
+        let unkept =
+            PhoneState::put(files, app, view, &format!("Opened {}", app.name()), now).err();
+
         Ok(Opened {
             app,
             view: view.clone(),
             screen,
+            unkept,
         })
     }
 
@@ -132,7 +143,9 @@ impl Phone {
     /// Takes `app`'s `action` on `input`, once its contract admits it, and
     /// saves what the action changed when it answered what the phone takes:
     /// the action's view is then in front of her, and the action is what
-    /// she last did, at `now`.
+    /// she last did, at `now`. What she has in front is kept after what the
+    /// action changed, and an action whose keeping failed still stands:
+    /// failing it would have her take it twice.
     ///
     /// # Errors
     ///
@@ -194,11 +207,13 @@ impl Phone {
             after.write(files, app.id())?;
         }
 
-        PhoneState::put(files, app, action.view(), action.did(), now)?;
+        let unkept = PhoneState::put(files, app, action.view(), action.did(), now).err();
+
         Ok(Acted {
             answer,
             view: action.view().clone(),
             screen: screen(files, app, action.view(), now),
+            unkept,
         })
     }
 

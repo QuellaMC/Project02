@@ -15,12 +15,14 @@ use serde_json::{Map, Value, json};
 /// Far past every limit a call runs under.
 const WAIT: Duration = Duration::from_secs(60);
 
-/// The files of a plugin store, in memory: each document a value, and how
-/// many times one was written.
+/// The files of a plugin store, in memory: each document a value, how many
+/// times one was written, and the one path whose writes fail, when a test
+/// names one.
 #[derive(Debug, Default)]
 pub(crate) struct Files {
     pub(crate) documents: BTreeMap<String, Value>,
     pub(crate) writes: usize,
+    pub(crate) unwritable: Option<&'static str>,
 }
 
 impl LeasedFiles for Files {
@@ -37,6 +39,10 @@ impl LeasedFiles for Files {
     }
 
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
+        if self.unwritable == Some(path) {
+            return Err(StoreError::Store("the disk is full".into()));
+        }
+
         self.documents.insert(path.to_owned(), value.clone());
         self.writes += 1;
         Ok(())
