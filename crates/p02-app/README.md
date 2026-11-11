@@ -27,7 +27,8 @@ with an outcome of p02-wire, never an error.
   comes due by the wall clock, which she reads again at least every half
   minute, begins a moment of her own that tells every ring due by then:
   after a waiting line, and before her heartbeat's moment. Her rings are
-  read when she is built and after each turn of hers. Once that moment
+  read whenever she is built, at her start and when a settings change
+  builds her anew, and after each turn of hers. Once that moment
   completes, what rang goes to its apps; when it does not, its rings wait
   for her next turn that completes, or her next start, so a ring is never
   lost and a model out of reach is not asked again and again.

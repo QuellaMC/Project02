@@ -1,8 +1,8 @@
 //! Her phone's rings as her actor keeps them: the rings set on her phone,
-//! read when she is built and again after every turn of hers, since a turn
-//! is the only thing that sets or clears one, and the rings a moment told
-//! that did not leave her phone, which wait for a turn of hers that
-//! completes.
+//! read whenever she is built, since her settings say whether she runs a
+//! phone, and again after every turn of hers, since a turn is the only
+//! thing that sets or clears one; and the rings a moment told that did not
+//! leave her phone, which wait for a turn of hers that completes.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

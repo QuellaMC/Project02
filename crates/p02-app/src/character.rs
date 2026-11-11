@@ -629,9 +629,10 @@ impl Actor {
     }
 
     /// Her parts to use, brought up to date with her settings first, which
-    /// may leave her with a model or without one; or the sentence she
-    /// refuses with while she is not built, or once her settings no longer
-    /// build her, which fails her.
+    /// may leave her with a model or without one, her phone's rings read
+    /// again when she was built anew; or the sentence she refuses with
+    /// while she is not built, or once her settings no longer build her,
+    /// which fails her.
     async fn current(&mut self) -> Result<Parts, String> {
         let mut parts = match self.parts.take() {
             Some(parts)
@@ -648,10 +649,19 @@ impl Actor {
             }
         };
 
-        if let Err(failure) = self.her.refresh(&mut parts.built).await {
-            self.parts = Some(parts);
-            self.fail(failure).await;
-            return Err(self.her.not_ready());
+        match self.her.refresh(&mut parts.built).await {
+            // Built again, she may run her phone no longer, or only now.
+            Ok(true) => {
+                let phoned = self.rings.read(parts.built.phone()).await;
+
+                self.her.noted(&phoned);
+            }
+            Ok(false) => {}
+            Err(failure) => {
+                self.parts = Some(parts);
+                self.fail(failure).await;
+                return Err(self.her.not_ready());
+            }
         }
 
         Ok(parts)

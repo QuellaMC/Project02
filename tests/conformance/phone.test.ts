@@ -23,7 +23,7 @@ import {
   type ModelRequest,
   type ModelServer,
 } from './harness/model-server.ts';
-import {converse, wireOf} from './harness/wire.ts';
+import {converse, saveConfig, wireOf} from './harness/wire.ts';
 
 /** The person is where the clocks read UTC, so an alarm's ring lands at a moment the test can name. */
 const utc = {TZ: 'UTC'};
@@ -441,4 +441,41 @@ it("phone.ring-kept: a ring whose turn the model fails stays set and begins no o
     storage: {alarms: [{id: 'a1', on: false}]},
     rings: [],
   });
+});
+
+it('phone.switched-on: while her settings switch her phone off, a ring that came due on it begins no turn; once they switch it on, the ring rings at once, in a turn of her own', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({
+      project02: {...model.settings, userDisplayName: 'Sam'},
+    }),
+    'character-data': {
+      mira: {
+        'config.json': configJson({
+          project02: {heartbeat: 'off'},
+          plugins: {phone: {enabled: false}},
+        }),
+        'plugin-data': {
+          phone: {apps: {'clock.json': JSON.stringify(wakeSam([]))}},
+        },
+      },
+    },
+  });
+  const daemon = await startDaemon(home, pinging);
+  const events = await openEvents(daemon);
+
+  await silent(events, 2);
+  expect(events.frames.filter(own('turn_running'))).toEqual([]);
+  expect(model.requests).toEqual([]);
+
+  model.answer(reply('Up you get, Sam.'));
+  await saveConfig(
+    wireOf(daemon),
+    {scope: 'character', characterId: 'mira'},
+    {kind: 'section_enabled', namespace: 'plugins', id: 'phone', enabled: true},
+  );
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
 });
