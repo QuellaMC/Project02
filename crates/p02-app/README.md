@@ -33,13 +33,13 @@ with an outcome of p02-wire, never an error.
   for her next turn that completes, or her next start, so a ring is never
   lost and a model out of reach is not asked again and again.
 - **Her phone** is read from her data whether she runs or not, under a
-  lease of its store: her apps, what she has in front with its screen and
-  what she last did, with what rings, which her actor publishes while a
-  ring's moment runs. A view of an app is read on request too, and changes
-  nothing of hers. One whose settings switch her phone off has none to
-  read. The stream says her phone changed after a call of her phone's
-  tools came back accepted, and as a ring's moment begins and once its
-  rings went to their apps.
+  lease of its store: her apps, those it comes with and those installed on
+  it, what she has in front with its screen and what she last did, with
+  what rings, which her actor publishes while a ring's moment runs. A view
+  of an app is read on request too, and changes nothing of hers. One whose
+  settings switch her phone off has none to read. The stream says her
+  phone changed after a call of her phone's tools came back accepted, and
+  as a ring's moment begins and once its rings went to their apps.
 - **The stream** hears each turn as it goes: its messages once they are
   on disk, the turn as it runs now, her drafts whole, whenever that
   changes, and then its completion, which says whether its line is in the

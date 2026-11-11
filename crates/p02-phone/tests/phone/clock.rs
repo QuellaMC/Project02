@@ -69,13 +69,29 @@ fn nothing(text: &str) -> Value {
 
 #[test]
 fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
-    let [clock] = phone().apps() else {
+    let on_phone = phone().apps(&Files::default()).unwrap();
+    let [listed] = on_phone.apps.as_slice() else {
         panic!("the bundled phone holds the Clock alone");
     };
+    let clock = phone().app(&Files::default(), "clock").unwrap();
 
     assert_eq!(
-        (clock.id().as_str(), clock.name(), clock.summary()),
-        ("clock", "Clock", "Alarms, timers, and the time anywhere")
+        (
+            listed.id.as_str(),
+            listed.name.as_str(),
+            listed.summary.as_str(),
+            listed.version.as_str(),
+            listed.wakes,
+            listed.source,
+        ),
+        (
+            "clock",
+            "Clock",
+            "Alarms, timers, and the time anywhere",
+            "1.0.0",
+            true,
+            None
+        )
     );
     assert_eq!(
         clock

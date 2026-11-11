@@ -10,6 +10,7 @@ mod apps;
 mod calls;
 mod clock;
 mod front;
+mod installed;
 mod rings;
 mod screens;
 mod support;

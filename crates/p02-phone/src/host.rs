@@ -27,6 +27,8 @@ const SET_RING: &str = "phone.rings.set takes {id, at, title, body}: an id that 
 const TITLE_LIMIT: usize = 40;
 /// What a ring's body holds: a line or two of a notification.
 const BODY_LIMIT: usize = 120;
+const UNWAKING: &str = "phone.rings.set sets no ring here: an app must say it wakes her, with \
+                        wakes: true in its manifest, to set a ring";
 const CANCEL_RING: &str = "phone.rings.cancel takes the id of a ring, which is text";
 const LOCAL: &str = "phone.time.local takes a time in whole milliseconds since the epoch and \
                      the IANA name of a time zone, both optional";
@@ -34,11 +36,14 @@ const NEXT: &str = "phone.time.next takes {hour, minute, weekdays}: an hour from
                     minute from 0 to 59 and, if it has them, weekdays, a list of days from 1 \
                     (Monday) to 7 (Sunday)";
 
-/// Whether a call may change what its app keeps.
+/// What a call may change of what its app keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Access {
+    /// Nothing: a screen, or the app's first run when it is made.
     ReadOnly,
-    ReadWrite,
+    /// Its storage, its rings cancelled, and its rings set when it says it
+    /// wakes her.
+    ReadWrite { wakes: bool },
 }
 
 /// What one call's `phone` works on: a copy of what its app keeps, which
@@ -183,6 +188,10 @@ impl Host {
     ) -> rquickjs::Result<Value<'js>> {
         self.writes(ctx, "phone.rings.set")?;
 
+        if self.access == (Access::ReadWrite { wakes: false }) {
+            return Err(Exception::throw_type(ctx, UNWAKING));
+        }
+
         let RingArgument {
             id,
             at,
@@ -276,7 +285,7 @@ impl Host {
     /// Refuses `function` when the call only reads.
     fn writes(&self, ctx: &Ctx<'_>, function: &str) -> rquickjs::Result<()> {
         match self.access {
-            Access::ReadWrite => Ok(()),
+            Access::ReadWrite { .. } => Ok(()),
             Access::ReadOnly => Err(Exception::throw_type(
                 ctx,
                 &format!("{function} changes nothing here: a screen only reads"),

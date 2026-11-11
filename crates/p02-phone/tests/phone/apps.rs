@@ -1,10 +1,10 @@
-//! Apps as their two files make them: refused for the first rule they
+//! Apps as their one file makes them: refused for the first rule they
 //! break, and run reaching nothing but the language and `phone`.
 
 use p02_phone::{App, Phone};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, input, manifest, now, view};
+use crate::support::{Files, actions, app, input, manifest, now, text, view};
 
 const SCREEN: &str = "export function screen() { return { items: [] }; }";
 
@@ -21,7 +21,12 @@ const LANGUAGE: &str = "
 ";
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a row for each rule a manifest keeps"
+)]
 fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
+    let notes = |fields: Value| text(&manifest(&fields), SCREEN);
     let add = actions(&["add"]);
     let action = |fields: Value| {
         let mut action = add[0].clone();
@@ -30,128 +35,155 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
             action[field] = value.clone();
         }
 
-        manifest(&json!({"actions": [action, actions(&["erase"])[0]]}))
+        notes(json!({"actions": [action, actions(&["erase"])[0]]}))
     };
     let named = "is refused: an action is named in lowercase letters, digits and _, beginning \
-                 with a letter, and never screen or rang";
+                 with a letter, and never manifest, screen or rang";
 
-    for (manifest, refusal) in [
+    for (file, refusal) in [
         (
-            "{".to_owned(),
-            "app.json is not an app manifest: EOF while parsing an object at line 1 column 1"
+            notes(json!({"colour": "red"})),
+            "manifest is not an app manifest: unknown field `colour`".to_owned(),
+        ),
+        (
+            notes(json!({"summary": null})),
+            "manifest is not an app manifest: missing field `summary`".to_owned(),
+        ),
+        (
+            notes(json!({"id": "2b"})),
+            "manifest is not an app manifest: not an identifier".to_owned(),
+        ),
+        (
+            notes(json!({"version": null})),
+            "manifest is not an app manifest: missing field `version`".to_owned(),
+        ),
+        (
+            notes(json!({"wakes": null})),
+            "manifest is not an app manifest: missing field `wakes`".to_owned(),
+        ),
+        (
+            notes(json!({"wakes": "yes"})),
+            "manifest is not an app manifest: invalid type: string \"yes\", expected a boolean"
                 .to_owned(),
         ),
         (
-            manifest(&json!({"colour": "red"})),
-            "app.json is not an app manifest: unknown field `colour`".to_owned(),
+            notes(json!({"format": "project02.app.v2"})),
+            "manifest format must be \"project02.app.v1\"".to_owned(),
         ),
         (
-            manifest(&json!({"summary": null})),
-            "app.json is not an app manifest: missing field `summary`".to_owned(),
+            notes(json!({"id": "Notes"})),
+            "manifest id must be in lowercase".to_owned(),
         ),
         (
-            manifest(&json!({"id": "2b"})),
-            "app.json is not an app manifest: not an identifier".to_owned(),
+            notes(json!({"name": " "})),
+            "manifest name must not be blank".to_owned(),
         ),
         (
-            manifest(&json!({"format": "project02.app.v2"})),
-            "app.json format must be \"project02.app.v1\"".to_owned(),
+            notes(json!({"summary": "Two\nlines"})),
+            "manifest summary must be one line that is not blank".to_owned(),
         ),
         (
-            manifest(&json!({"name": " "})),
-            "app.json name must not be blank".to_owned(),
+            notes(json!({"version": "1.0"})),
+            "manifest version must be three numbers with dots, such as 1.0.0".to_owned(),
         ),
         (
-            manifest(&json!({"summary": "Two\nlines"})),
-            "app.json summary must be one line that is not blank".to_owned(),
+            notes(json!({"icon": " "})),
+            "manifest icon must not be blank".to_owned(),
         ),
         (
-            manifest(&json!({"icon": " "})),
-            "app.json icon must not be blank".to_owned(),
+            notes(json!({"tint": ""})),
+            "manifest tint must not be blank".to_owned(),
         ),
         (
-            manifest(&json!({"tint": ""})),
-            "app.json tint must not be blank".to_owned(),
+            notes(json!({"views": []})),
+            "manifest views must hold one view at least".to_owned(),
         ),
         (
-            manifest(&json!({"views": []})),
-            "app.json views must hold one view at least".to_owned(),
+            notes(json!({"views": [view("all", "All"), view("all", "Again")]})),
+            "manifest names the view \"all\" more than once".to_owned(),
         ),
         (
-            manifest(&json!({"views": [view("all", "All"), view("all", "Again")]})),
-            "app.json names the view \"all\" more than once".to_owned(),
+            notes(json!({"views": [{"id": "all", "title": "All", "icon": " "}]})),
+            "manifest view \"all\" icon must not be blank".to_owned(),
         ),
         (
-            manifest(&json!({"views": [{"id": "all", "title": "All", "icon": " "}]})),
-            "app.json view \"all\" icon must not be blank".to_owned(),
-        ),
-        (
-            manifest(&json!({"opensOn": "alarms"})),
-            "app.json opensOn \"alarms\" is none of its views".to_owned(),
+            notes(json!({"opensOn": "alarms"})),
+            "manifest opensOn \"alarms\" is none of its views".to_owned(),
         ),
         (
             action(json!({"name": "Add"})),
-            format!("app.json action name \"Add\" {named}"),
+            format!("manifest action name \"Add\" {named}"),
         ),
         (
-            action(json!({"name": "rang"})),
-            format!("app.json action name \"rang\" {named}"),
+            action(json!({"name": "manifest"})),
+            format!("manifest action name \"manifest\" {named}"),
         ),
         (
             action(json!({"name": "erase"})),
-            "app.json names the action \"erase\" more than once".to_owned(),
+            "manifest names the action \"erase\" more than once".to_owned(),
         ),
         (
             action(json!({"did": "Wrote it\ndown"})),
-            "app.json action \"add\" did must be one line that is not blank".to_owned(),
+            "manifest action \"add\" did must be one line that is not blank".to_owned(),
         ),
         (
             action(json!({"view": "alarms"})),
-            "app.json action \"add\" view \"alarms\" is none of its views".to_owned(),
+            "manifest action \"add\" view \"alarms\" is none of its views".to_owned(),
         ),
         (
             action(json!({"input": {"type": "array"}})),
-            "app.json action \"add\" input is refused: a tool inputContract must declare root \
+            "manifest action \"add\" input is refused: a tool inputContract must declare root \
              type \"object\""
                 .to_owned(),
         ),
     ] {
-        let refused = App::new(&manifest, SCREEN).unwrap_err().to_string();
+        let refused = App::new(&file).unwrap_err().to_string();
 
         assert!(refused.starts_with(&refusal), "{refused}");
     }
 }
 
 #[test]
-fn a_script_that_does_not_run_or_export_its_functions_is_refused_saying_why() {
+fn a_script_that_does_not_run_or_export_what_an_app_does_is_refused_saying_why() {
     let manifest = manifest(&json!({"actions": actions(&["add"])}));
+    let notes = |script: &str| text(&manifest, script);
+    // Notes's manifest, its one view with no icon to draw.
+    let unplain = format!(
+        "export const manifest = {{...{manifest}, views: [{{id: 'all', title: 'All', icon: \
+         undefined}}]}};
+        {SCREEN}"
+    );
 
-    for (script, refusal) in [
+    for (file, refusal) in [
         (
-            "export function screen( {",
-            "Notes's app.js does not run: it threw SyntaxError: ",
+            notes("export function screen( {"),
+            "the app does not run: it threw SyntaxError: ",
         ),
         (
-            "throw new Error('not today');",
-            "Notes's app.js does not run: it threw Error: not today",
+            notes("throw new Error('not today');"),
+            "the app does not run: it threw Error: not today",
         ),
         (
-            "import { tea } from 'kitchen'; export function screen() {}",
-            "Notes's app.js does not run: it threw ReferenceError: could not load module \
-             'kitchen'",
+            notes("import { tea } from 'kitchen'; export function screen() {}"),
+            "the app does not run: it threw ReferenceError: could not load module 'kitchen'",
         ),
         (
-            "phone.storage.set('opened', true);",
-            "Notes's app.js does not run: it threw TypeError: phone.storage.set changes \
-             nothing here: a screen only reads",
+            notes("phone.storage.set('opened', true);"),
+            "the app does not run: it threw TypeError: phone.storage.set changes nothing here: \
+             a screen only reads",
+        ),
+        (SCREEN.to_owned(), "the app exports no manifest"),
+        (
+            unplain,
+            "manifest.views[0].icon is not plain data: it does not survive as JSON",
         ),
         (
-            "export const screen = 'All';",
-            "Notes's app.js exports no function screen",
+            notes("export const screen = 'All';"),
+            "Notes exports no function screen",
         ),
-        (SCREEN, "Notes's app.js exports no function add"),
+        (notes(SCREEN), "Notes exports no function add"),
     ] {
-        let refused = App::new(&manifest, script).unwrap_err().to_string();
+        let refused = App::new(&file).unwrap_err().to_string();
 
         assert!(refused.starts_with(refusal), "{refused}");
     }

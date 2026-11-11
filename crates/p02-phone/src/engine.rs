@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use rquickjs::context::intrinsic::{
     Date, Eval, Json, MapSet, Promise, Proxy, RegExp, TypedArrays, WeakRef,
 };
-use rquickjs::{Coerced, Context, Ctx, FromJs, Function, Module, Object, Runtime, Value};
+use rquickjs::{
+    Array, Coerced, Context, Ctx, FromJs, Function, Module, Object, Runtime, Type, Value,
+};
 
 use crate::host::Host;
 
@@ -20,6 +22,8 @@ const TIME_LIMIT: Duration = Duration::from_secs(1);
 const MEMORY_LIMIT: usize = 16 * 1024 * 1024;
 /// How deep a call may reach into its thread's stack.
 const STACK_LIMIT: usize = 256 * 1024;
+/// How deep a manifest may nest: as deep as JSON text is read.
+const MANIFEST_DEPTH: usize = 128;
 
 /// The language: QuickJS's base objects and ECMAScript's intrinsics, and
 /// none of what it offers beside them (`atob`, `btoa`, `performance` and
@@ -51,6 +55,15 @@ pub(crate) enum Failure {
     OutOfMemory,
 }
 
+/// What a script exports, once it ran.
+pub(crate) struct Exports {
+    /// Its manifest as JSON: none when it exports none, and where the
+    /// manifest stops being plain data when it is not.
+    pub(crate) manifest: Option<Result<serde_json::Value, String>>,
+    /// The names of the functions it exports.
+    pub(crate) functions: Vec<String>,
+}
+
 /// Why a call stopped short, before it is said as a [`Failure`].
 enum Stop {
     /// The engine's error; a value thrown waits in the context.
@@ -76,9 +89,10 @@ impl fmt::Display for Failure {
     }
 }
 
-/// The names of the functions `script` exports, once it ran.
-pub(crate) fn exported_functions(script: &str, host: &Rc<Host>) -> Result<Vec<String>, Failure> {
-    run(script, host, |_, exports, _| {
+/// What `script` exports, once it ran.
+pub(crate) fn exports(script: &str, host: &Rc<Host>) -> Result<Exports, Failure> {
+    run(script, host, |ctx, exports, _| {
+        let manifest: Value<'_> = exports.get("manifest")?;
         let mut functions = Vec::new();
 
         for name in exports.keys::<String>() {
@@ -89,7 +103,82 @@ pub(crate) fn exported_functions(script: &str, host: &Rc<Host>) -> Result<Vec<St
             }
         }
 
-        Ok(functions)
+        Ok(Exports {
+            manifest: if manifest.is_undefined() {
+                None
+            } else {
+                Some(
+                    plain(ctx, &manifest, MANIFEST_DEPTH)?
+                        .map_err(|place| format!("manifest{place}")),
+                )
+            },
+            functions,
+        })
+    })
+}
+
+/// `value` as JSON when it is plain data, which JSON keeps whole: null, a
+/// boolean, a finite number, text, or an array or a plain object of plain
+/// data, nested no deeper than `depth`. Otherwise where in it plain data
+/// stops, as a path from it: `.views[0].icon`.
+fn plain<'js>(
+    ctx: &Ctx<'js>,
+    value: &Value<'js>,
+    depth: usize,
+) -> rquickjs::Result<Result<serde_json::Value, String>> {
+    let plain = match value.type_of() {
+        Type::Null => serde_json::Value::Null,
+        Type::Bool => serde_json::Value::Bool(value.get()?),
+        Type::Int => serde_json::Value::from(value.get::<i32>()?),
+        Type::Float => match serde_json::Number::from_f64(value.get()?) {
+            Some(number) => serde_json::Value::Number(number),
+            None => return Ok(Err(String::new())),
+        },
+        Type::String => serde_json::Value::String(value.get()?),
+        Type::Array if depth > 0 => {
+            let mut items = Vec::new();
+
+            for (index, item) in value.get::<Array<'js>>()?.iter().enumerate() {
+                match plain(ctx, &item?, depth - 1)? {
+                    Ok(item) => items.push(item),
+                    Err(place) => return Ok(Err(format!("[{index}]{place}"))),
+                }
+            }
+
+            serde_json::Value::Array(items)
+        }
+        Type::Object if depth > 0 => {
+            let object: Object<'js> = value.get()?;
+
+            if !is_plain(ctx, &object)? {
+                return Ok(Err(String::new()));
+            }
+
+            let mut members = serde_json::Map::new();
+
+            for member in object.props::<String, Value<'js>>() {
+                let (key, member) = member?;
+
+                match plain(ctx, &member, depth - 1)? {
+                    Ok(member) => members.insert(key, member),
+                    Err(place) => return Ok(Err(format!(".{key}{place}"))),
+                };
+            }
+
+            serde_json::Value::Object(members)
+        }
+        _ => return Ok(Err(String::new())),
+    };
+
+    Ok(Ok(plain))
+}
+
+/// Whether `object` is a plain one, as an object literal makes: its
+/// prototype is the language's own `Object.prototype`, or it has none.
+fn is_plain<'js>(ctx: &Ctx<'js>, object: &Object<'js>) -> rquickjs::Result<bool> {
+    Ok(match object.get_prototype() {
+        None => true,
+        Some(prototype) => Some(prototype) == Object::new(ctx.clone())?.get_prototype(),
     })
 }
 

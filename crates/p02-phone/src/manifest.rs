@@ -1,20 +1,21 @@
-//! `app.json`: what an app is called and how its icon is drawn, the views
-//! it shows and the actions she can take in it.
+//! An app's manifest, which its script exports as `manifest`: what the app
+//! is called, its version, how its icon is drawn and whether it wakes her,
+//! the views it shows and the actions she can take in it.
 
 use std::collections::BTreeSet;
 
 use p02_contracts::ToolInputContract;
 use p02_shared::Identifier;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::PackageError;
 
-/// The format of `app.json` the phone reads.
+/// The format of a manifest the phone reads.
 const FORMAT: &str = "project02.app.v1";
 
-/// What the script's own functions are named, which no action is.
-const RESERVED: [&str; 2] = ["screen", "rang"];
+/// What the script's own exports are named, which no action is.
+const RESERVED: [&str; 3] = ["manifest", "screen", "rang"];
 
 /// An app's manifest, every rule of it checked.
 #[derive(Clone, Debug)]
@@ -22,15 +23,17 @@ pub(crate) struct Manifest {
     pub(crate) id: Identifier,
     pub(crate) name: String,
     pub(crate) summary: String,
+    pub(crate) version: String,
     pub(crate) icon: String,
     pub(crate) tint: String,
+    pub(crate) wakes: bool,
     pub(crate) views: Vec<View>,
     pub(crate) opens_on: Identifier,
     pub(crate) actions: Vec<Action>,
 }
 
 /// A screen of an app she can open: a tab, in the Clock.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct View {
     id: Identifier,
     title: String,
@@ -56,8 +59,10 @@ struct Authored {
     id: Identifier,
     name: String,
     summary: String,
+    version: String,
     icon: String,
     tint: String,
+    wakes: bool,
     views: Vec<AuthoredView>,
     opens_on: String,
     actions: Vec<AuthoredAction>,
@@ -131,16 +136,28 @@ impl Action {
 }
 
 impl Manifest {
-    /// The manifest `text` holds.
-    pub(crate) fn read(text: &str) -> Result<Self, PackageError> {
-        let authored: Authored = serde_json::from_str(text).map_err(PackageError::NotAManifest)?;
+    /// The manifest `manifest`, the plain data a script exported, holds.
+    pub(crate) fn read(manifest: Value) -> Result<Self, PackageError> {
+        let authored: Authored =
+            serde_json::from_value(manifest).map_err(PackageError::NotAManifest)?;
 
         if authored.format != FORMAT {
             return Err(PackageError::Format);
         }
 
+        // An id names the app's files, and a volume that folds case, the
+        // default on macOS and Windows, would give two ids one file.
+        if authored.id.as_str() != authored.id.collision_key() {
+            return Err(PackageError::IdCase);
+        }
+
         not_blank("name", &authored.name)?;
         one_line("summary", &authored.summary)?;
+
+        if !is_version(&authored.version) {
+            return Err(PackageError::Version);
+        }
+
         not_blank("icon", &authored.icon)?;
         not_blank("tint", &authored.tint)?;
 
@@ -153,13 +170,28 @@ impl Manifest {
             id: authored.id,
             name: authored.name,
             summary: authored.summary,
+            version: authored.version,
             icon: authored.icon,
             tint: authored.tint,
+            wakes: authored.wakes,
             views,
             opens_on,
             actions,
         })
     }
+}
+
+/// Whether `version` is three numbers with dots, `1.0.0`, each written as
+/// the number it is.
+fn is_version(version: &str) -> bool {
+    let numbers: Vec<&str> = version.split('.').collect();
+
+    numbers.len() == 3
+        && numbers.iter().all(|number| {
+            number
+                .parse::<u32>()
+                .is_ok_and(|read| read.to_string() == *number)
+        })
 }
 
 fn views(authored: Vec<AuthoredView>) -> Result<Vec<View>, PackageError> {
@@ -243,7 +275,7 @@ fn one_line(field: &str, text: &str) -> Result<(), PackageError> {
 }
 
 /// `name` as an action is named: lowercase letters, digits and `_`,
-/// beginning with a letter, and none of the script's own functions.
+/// beginning with a letter, and none of the script's own exports.
 fn action_name(name: &str) -> Option<Identifier> {
     let mut bytes = name.bytes();
     let spelled = bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())

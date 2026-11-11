@@ -1,5 +1,6 @@
-//! An app: its manifest and its script, made once from the two texts and
-//! checked whole, so a broken one is refused when it is added.
+//! An app: its one file, a script that exports its manifest beside its
+//! functions, made once and checked whole, so a broken one is refused when
+//! it is added.
 
 use std::iter;
 
@@ -22,23 +23,26 @@ pub struct App {
 }
 
 impl App {
-    /// The app that `manifest`, its `app.json`, and `script`, its `app.js`,
-    /// make. The script runs once, on an empty phone that only reads.
+    /// The app that `text`, its one file, makes. The script runs once, on
+    /// an empty phone that only reads, and its manifest is what it exports
+    /// as `manifest`.
     ///
     /// # Errors
     ///
-    /// [`PackageError`] for the first rule they break: the manifest's, or
-    /// a script that does not run or exports no function for `screen` or
-    /// for an action.
-    pub fn new(manifest: &str, script: &str) -> Result<Self, PackageError> {
-        let manifest = Manifest::read(manifest)?;
+    /// [`PackageError`] for the first rule it breaks: a script that does
+    /// not run, exports no manifest of plain data or no function for
+    /// `screen` or for an action, or a manifest that breaks a rule of its
+    /// own.
+    pub fn new(text: &str) -> Result<Self, PackageError> {
         let host = Host::new(Kept::default(), Now::epoch(), Access::ReadOnly);
-        let functions =
-            engine::exported_functions(script, &host).map_err(|failure| PackageError::Script {
-                app: manifest.name.clone(),
-                failure: failure.to_string(),
-            })?;
-        let exported = |name: &str| functions.iter().any(|function| function == name);
+        let exports = engine::exports(text, &host)
+            .map_err(|failure| PackageError::Script(failure.to_string()))?;
+        let manifest = match exports.manifest {
+            None => return Err(PackageError::NoManifest),
+            Some(Err(place)) => return Err(PackageError::NotPlainData(place)),
+            Some(Ok(manifest)) => Manifest::read(manifest)?,
+        };
+        let exported = |name: &str| exports.functions.iter().any(|function| function == name);
         let unexported = iter::once("screen")
             .chain(manifest.actions.iter().map(|action| action.name().as_str()))
             .find(|name| !exported(name))
@@ -54,7 +58,7 @@ impl App {
         Ok(Self {
             hears_rings: exported("rang"),
             manifest,
-            script: script.to_owned(),
+            script: text.to_owned(),
         })
     }
 
@@ -74,6 +78,12 @@ impl App {
         &self.manifest.summary
     }
 
+    /// The app's own version: three numbers with dots, `1.0.0`.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.manifest.version
+    }
+
     /// A name of the page's own icons, which falls back for one it does not
     /// know.
     #[must_use]
@@ -85,6 +95,12 @@ impl App {
     #[must_use]
     pub fn tint(&self) -> &str {
         &self.manifest.tint
+    }
+
+    /// Whether the app says it wakes her: only then can it set a ring.
+    #[must_use]
+    pub fn wakes(&self) -> bool {
+        self.manifest.wakes
     }
 
     #[must_use]

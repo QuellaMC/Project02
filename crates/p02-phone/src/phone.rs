@@ -1,5 +1,9 @@
-//! Her phone: its apps opened and used by her and looked at by the person,
-//! what she has in front and last did, and the rings its apps set.
+//! Her phone: the apps it comes with and those installed on it, opened and
+//! used by her and looked at by the person, what she has in front and last
+//! did, and the rings its apps set.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use p02_contracts::{LeasedFiles, StoreError};
 use p02_shared::{Credentials, Identifier, JsonLimits, bound_json};
@@ -15,18 +19,22 @@ use crate::host::{Access, Host};
 use crate::manifest::View;
 use crate::time::Now;
 
-/// Her phone, made from its apps.
-#[derive(Clone, Debug)]
+/// A phone: the apps it comes with, and, for every character, the apps
+/// installed on hers, which each call finds in the files it is given.
+#[derive(Debug)]
 pub struct Phone {
-    apps: Vec<App>,
+    pub(crate) comes_with: Vec<Arc<App>>,
+    /// Each installed app made from its text, or why the text makes none,
+    /// by that text: made once, and kept while the text is unchanged.
+    made: Mutex<HashMap<String, Result<Arc<App>, String>>>,
 }
 
 /// An app opened: the app, the view it shows, and that view's screen. The
 /// open stands whether or not her phone could keep what she now has in
 /// front: when it could not, `unkept` says why.
 #[derive(Debug)]
-pub struct Opened<'a> {
-    pub app: &'a App,
+pub struct Opened {
+    pub app: Arc<App>,
     pub view: Identifier,
     pub screen: Screen,
     pub unkept: Option<StoreError>,
@@ -53,26 +61,28 @@ pub struct SetRing {
 }
 
 impl Phone {
+    /// A phone that comes with `apps`.
     #[must_use]
     pub fn new(apps: Vec<App>) -> Self {
-        Self { apps }
+        Self {
+            comes_with: apps.into_iter().map(Arc::new).collect(),
+            made: Mutex::default(),
+        }
     }
 
-    #[must_use]
-    pub fn apps(&self) -> &[App] {
-        &self.apps
-    }
-
-    /// The app of `id` on the phone.
+    /// The app of `id` on her phone, as `files` keep it: one it comes with,
+    /// or one installed on it, made from its file.
     ///
     /// # Errors
     ///
-    /// [`PhoneError::NoApp`] when the phone has none.
-    pub fn app(&self, id: &str) -> Result<&App, PhoneError> {
-        self.apps
-            .iter()
-            .find(|app| app.id().as_str() == id)
-            .ok_or_else(|| PhoneError::NoApp(id.to_owned()))
+    /// [`PhoneError::NoApp`] when her phone has none,
+    /// [`PhoneError::CannotRun`] for an app installed whose file is gone or
+    /// no longer makes it, or the store's.
+    pub fn app(&self, files: &dyn LeasedFiles, id: &str) -> Result<Arc<App>, PhoneError> {
+        match self.comes_with.iter().find(|app| app.id().as_str() == id) {
+            Some(app) => Ok(Arc::clone(app)),
+            None => self.installed(files, id),
+        }
     }
 
     /// She opens `app` on `view`, or on the view it opens on when none is
@@ -83,30 +93,30 @@ impl Phone {
     ///
     /// # Errors
     ///
-    /// [`PhoneError`] when there is no such app or view, when the screen
-    /// fails or is not one the phone takes, or when the store fails to be
-    /// read. An open the phone refuses or the app fails puts nothing in
-    /// front.
+    /// [`PhoneError`] when there is no such app or view, when the app
+    /// cannot run, when the screen fails or is not one the phone takes, or
+    /// when the store fails to be read. An open the phone refuses or the
+    /// app fails puts nothing in front.
     pub fn open(
         &self,
         files: &mut dyn LeasedFiles,
         app: &str,
         view: Option<&str>,
         now: &Now,
-    ) -> Result<Opened<'_>, PhoneError> {
-        let app = self.app(app)?;
+    ) -> Result<Opened, PhoneError> {
+        let app = self.app(files, app)?;
         let view = match view {
-            None => app.opens_on(),
-            Some(view) => view_of(app, view)?,
+            None => app.opens_on().clone(),
+            Some(view) => view_of(&app, view)?.clone(),
         };
-        let screen = screen(files, app, view, now)?;
+        let screen = screen(files, &app, &view, now)?;
 
         let unkept =
-            PhoneState::put(files, app, view, &format!("Opened {}", app.name()), now).err();
+            PhoneState::put(files, &app, &view, &format!("Opened {}", app.name()), now).err();
 
         Ok(Opened {
             app,
-            view: view.clone(),
+            view,
             screen,
             unkept,
         })
@@ -117,8 +127,9 @@ impl Phone {
     ///
     /// # Errors
     ///
-    /// [`PhoneError`] when there is no such app or view, when the screen
-    /// fails or is not one the phone takes, or when the store fails.
+    /// [`PhoneError`] when there is no such app or view, when the app
+    /// cannot run, when the screen fails or is not one the phone takes, or
+    /// when the store fails.
     pub fn look(
         &self,
         files: &dyn LeasedFiles,
@@ -126,9 +137,9 @@ impl Phone {
         view: &str,
         now: &Now,
     ) -> Result<Screen, PhoneError> {
-        let app = self.app(app)?;
+        let app = self.app(files, app)?;
 
-        screen(files, app, view_of(app, view)?, now)
+        screen(files, &app, view_of(&app, view)?, now)
     }
 
     /// What she has in front on her phone and what she last did on it.
@@ -137,7 +148,7 @@ impl Phone {
     ///
     /// The store's, when it fails.
     pub fn state(&self, files: &dyn LeasedFiles) -> Result<PhoneState, StoreError> {
-        PhoneState::read(files, self)
+        PhoneState::read(files, &self.apps(files)?.apps)
     }
 
     /// Takes `app`'s `action` on `input`, once its contract admits it, and
@@ -149,10 +160,11 @@ impl Phone {
     ///
     /// # Errors
     ///
-    /// [`PhoneError`] when there is no such app or action, its contract
-    /// refuses `input`, the action fails, answers what the phone does not
-    /// take or would keep more than it holds, or when the store fails. A
-    /// call the phone refuses or the app fails saves nothing.
+    /// [`PhoneError`] when there is no such app or action, the app cannot
+    /// run, its contract refuses `input`, the action fails, answers what
+    /// the phone does not take or would keep more than it holds, or when
+    /// the store fails. A call the phone refuses or the app fails saves
+    /// nothing.
     pub fn act(
         &self,
         files: &mut dyn LeasedFiles,
@@ -161,7 +173,7 @@ impl Phone {
         input: &Map<String, Value>,
         now: &Now,
     ) -> Result<Acted, PhoneError> {
-        let app = self.app(app)?;
+        let app = self.app(files, app)?;
         let action = app
             .actions()
             .iter()
@@ -180,14 +192,18 @@ impl Phone {
             })?;
 
         let kept = Kept::read(files, app.id())?;
-        let host = Host::new(kept.clone(), now.clone(), Access::ReadWrite);
+        let host = Host::new(
+            kept.clone(),
+            now.clone(),
+            Access::ReadWrite { wakes: app.wakes() },
+        );
         let answered = engine::call(
             app.script(),
             &host,
             action.name().as_str(),
             &Value::Object(input.clone()),
         )
-        .map_err(|failure| failed(app, failure))?;
+        .map_err(|failure| failed(&app, failure))?;
         let answer = answered
             .and_then(|answer| {
                 bound_json(answer, "answer", JsonLimits::default(), Credentials::Keep)
@@ -207,17 +223,18 @@ impl Phone {
             after.write(files, app.id())?;
         }
 
-        let unkept = PhoneState::put(files, app, action.view(), action.did(), now).err();
+        let unkept = PhoneState::put(files, &app, action.view(), action.did(), now).err();
 
         Ok(Acted {
             answer,
             view: action.view().clone(),
-            screen: screen(files, app, action.view(), now),
+            screen: screen(files, &app, action.view(), now),
             unkept,
         })
     }
 
-    /// Every ring set on the phone, of all its apps, soonest first.
+    /// Every ring set on her phone, of all its apps, soonest first, read
+    /// without running any.
     ///
     /// # Errors
     ///
@@ -225,14 +242,14 @@ impl Phone {
     pub fn rings(&self, files: &dyn LeasedFiles) -> Result<Vec<SetRing>, StoreError> {
         let mut set = Vec::new();
 
-        for app in &self.apps {
+        for app in self.apps(files)?.apps {
             set.extend(
-                Kept::read(files, app.id())?
+                Kept::read(files, &app.id)?
                     .rings()
                     .iter()
                     .map(|ring| SetRing {
-                        app: app.id().clone(),
-                        app_name: app.name().to_owned(),
+                        app: app.id.clone(),
+                        app_name: app.name.clone(),
                         ring: ring.clone(),
                     }),
             );
@@ -246,8 +263,9 @@ impl Phone {
     /// for its time is heard by its app's `rang`, if it has one, as a call
     /// of its own that saves all or nothing, and then leaves the app's file
     /// unless `rang` set it anew for another time. A ring cancelled or
-    /// moved meanwhile is left alone. A `rang` that fails still lets its
-    /// ring go, and comes back as the failure.
+    /// moved meanwhile, or of an app no longer on her phone, is left alone.
+    /// A `rang` that fails, or an app that cannot run, still lets its ring
+    /// go, and comes back as the failure.
     ///
     /// # Errors
     ///
@@ -261,25 +279,46 @@ impl Phone {
         let mut failures = Vec::new();
 
         for told in rings {
-            let Some(app) = self.apps.iter().find(|app| *app.id() == told.app) else {
-                continue;
+            let app = match self.app(files, told.app.as_str()) {
+                Err(PhoneError::NoApp(_)) => continue,
+                Err(PhoneError::Store(error)) => return Err(error),
+                app => app,
             };
-            let kept = Kept::read(files, app.id())?;
+            let kept = Kept::read(files, &told.app)?;
 
             if !kept.holds(&told.ring) {
                 continue;
             }
 
-            let mut after = rang(app, &kept, &told.ring, now).unwrap_or_else(|failure| {
-                failures.push(failure);
-                kept
-            });
+            let mut after = app
+                .and_then(|app| rang(&app, &kept, &told.ring, now))
+                .unwrap_or_else(|failure| {
+                    failures.push(failure);
+                    kept
+                });
 
             after.let_go(&told.ring);
-            after.write(files, app.id())?;
+            after.write(files, &told.app)?;
         }
 
         Ok(failures)
+    }
+
+    /// The app `text` makes, or why it makes none, in the words of the first
+    /// rule it breaks: made at the first call that needs it, and kept.
+    pub(crate) fn made(&self, text: &str) -> Result<Arc<App>, String> {
+        let mut made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
+
+        if let Some(app) = made.get(text) {
+            return app.clone();
+        }
+
+        let app = App::new(text)
+            .map(Arc::new)
+            .map_err(|refusal| refusal.to_string());
+
+        made.insert(text.to_owned(), app.clone());
+        app
     }
 }
 
@@ -320,7 +359,11 @@ fn rang(app: &App, kept: &Kept, ring: &Ring, now: &Now) -> Result<Kept, PhoneErr
         return Ok(kept.clone());
     }
 
-    let host = Host::new(kept.clone(), now.clone(), Access::ReadWrite);
+    let host = Host::new(
+        kept.clone(),
+        now.clone(),
+        Access::ReadWrite { wakes: app.wakes() },
+    );
     let _ = engine::call(app.script(), &host, "rang", &ring.shown())
         .map_err(|failure| failed(app, failure))?;
     let after = host.kept();

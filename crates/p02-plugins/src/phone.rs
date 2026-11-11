@@ -1,18 +1,19 @@
 //! The phone package: her phone in her hands. Before each model call she
 //! is told the apps on it, and two tools let her open an app, to see its
-//! screen and what she can do in it, and act in one. Her phone is the one
-//! every character has, and keeps each app's one file in this plugin's
-//! store, under the lease of the hook that calls it.
+//! screen and what she can do in it, and act in one. Her phone is the apps
+//! it comes with and those installed on it, which this plugin's store
+//! keeps with what each app keeps, read and written under the lease of the
+//! hook that calls it.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use p02_contracts::{
     BeforeRoleModelCallOutput, ContextItem, ContextItemKind, EvidenceKind, EvidenceNote,
-    EvidenceStatus, FactoryInput, FileStore, HookContext, LeasedStore, PluginError, ProvidedTool,
-    RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
+    EvidenceStatus, FactoryInput, FileStore, HookContext, LeasedFiles, LeasedStore, PluginError,
+    ProvidedTool, RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
 };
-use p02_phone::{Acted, Action, App, Now, Opened, Phone, PhoneError, View};
+use p02_phone::{Acted, Action, Listed, Now, Opened, Phone, PhoneError, View};
 use p02_shared::{Identifier, error_chain, sentence};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -32,14 +33,9 @@ const USE_DESCRIPTION: &str = "Take one of an app's actions on your phone, with 
 const APP: &str = "The app's id, in quotes beside its name among your apps.";
 
 /// The package's factory: it reads no config, and hands her the phone
-/// every character has.
+/// every character has, with the apps installed on hers.
 pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
     let phone = Phone::bundled().map_err(|error| PluginError::new(error_chain(error)))?;
-    let apps: Vec<String> = phone
-        .apps()
-        .iter()
-        .map(|app| format!("{} — {}", named(app), app.summary()))
-        .collect();
 
     Ok(Arc::new(PhonePlugin {
         phone,
@@ -83,11 +79,6 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
                 }),
             )?,
         ],
-        note: format!(
-            "On your phone: {}. Open an app with {OPEN} to see its screen and what you can do \
-             in it, then act in it with {USE}.",
-            apps.join("; ")
-        ),
     }))
 }
 
@@ -95,8 +86,6 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
 struct PhonePlugin {
     phone: &'static Phone,
     tools: Vec<ProvidedTool>,
-    /// What she is told of her apps before every model call.
-    note: String,
 }
 
 /// What her phone answered a call: what she reads, and why what she has in
@@ -132,25 +121,51 @@ impl RuntimePlugin for PhonePlugin {
         &self.tools
     }
 
+    /// Names her apps, as her phone lists them without running any; what
+    /// of the list of her installed apps does not read is passed over and
+    /// said in the note's record.
     async fn before_role_model_call(
         &self,
-        _context: &HookContext,
+        context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let apps = Identifier::new("apps")
+        let phone = self.phone;
+        let on_phone = leased(store(context)?, move |files| Ok(phone.apps(files)?)).await?;
+        let note = Identifier::new("apps")
             .map_err(|error| PluginError::with_source("the note of her apps needs an id", error))?;
-
-        Ok(BeforeRoleModelCallOutput {
-            context_items: vec![ContextItem::new(
-                apps,
-                ContextItemKind::RuntimeNote,
-                self.note.clone(),
-            )],
-            curated_sections: Vec::new(),
-            evidence: vec![EvidenceNote::new(
+        let apps: Vec<String> = on_phone
+            .apps
+            .iter()
+            .map(|app| format!("{} — {}", named(app), app.summary))
+            .collect();
+        let evidence = match on_phone.passed_over.as_slice() {
+            [] => EvidenceNote::new(
                 EvidenceKind::BeforeRoleModelCall,
                 EvidenceStatus::Accepted,
                 "Named the apps on her phone.",
+            ),
+            passed_over => EvidenceNote::new(
+                EvidenceKind::BeforeRoleModelCall,
+                EvidenceStatus::Degraded,
+                passed_over
+                    .iter()
+                    .fold("Named the apps on her phone.".to_owned(), |said, why| {
+                        format!("{said} {}", sentence(why))
+                    }),
+            ),
+        };
+
+        Ok(BeforeRoleModelCallOutput {
+            context_items: vec![ContextItem::new(
+                note,
+                ContextItemKind::RuntimeNote,
+                format!(
+                    "On your phone: {}. Open an app with {OPEN} to see its screen and what you \
+                     can do in it, then act in it with {USE}.",
+                    apps.join("; ")
+                ),
             )],
+            curated_sections: Vec::new(),
+            evidence: vec![evidence],
         })
     }
 
@@ -160,11 +175,12 @@ impl RuntimePlugin for PhonePlugin {
         context: &HookContext,
     ) -> Result<ToolCallOutcome, PluginError> {
         let request = Request::of(call)?;
-        let (phone, app, summary) = (self.phone, request.app().to_owned(), request.summary());
+        let (phone, summary) = (self.phone, request.summary());
         let answered = leased(store(context)?, move |files| {
             match request.answer(phone, files) {
+                Ok(answered) => Ok(Ok(answered)),
                 Err(PhoneError::Store(error)) => Err(FilesError::Store(error)),
-                answered => Ok(answered),
+                Err(refusal) => Ok(Err(refused(phone, files, request.app(), &refusal))),
             }
         })
         .await?;
@@ -188,7 +204,7 @@ impl RuntimePlugin for PhonePlugin {
                     ),
                 }],
             },
-            Err(refusal) => refused(phone, &app, &refusal),
+            Err(refused) => refused,
         })
     }
 }
@@ -267,14 +283,14 @@ fn store(context: &HookContext) -> Result<FileStore, PluginError> {
 }
 
 /// An app as she is told of it: by its name, and the id she opens it by.
-fn named(app: &App) -> String {
-    format!("{} (\"{}\")", app.name(), app.id())
+fn named(app: &Listed) -> String {
+    format!("{} (\"{}\")", app.name, app.id)
 }
 
 /// What she reads of an app she opened: which it is, the view it shows,
 /// every view it has, every action with what it takes, and the screen.
-fn shown(opened: &Opened<'_>) -> Value {
-    let app = opened.app;
+fn shown(opened: &Opened) -> Value {
+    let app = &opened.app;
 
     json!({
         "app": app.id(),
@@ -314,23 +330,31 @@ fn used(acted: Acted) -> Value {
     json!({"answer": acted.answer, "view": acted.view, "screen": screen})
 }
 
-/// A call her phone refused, said in its own sentence and then, where it
-/// helps her next step, what there is instead: her apps, or the app's
-/// views or actions.
-fn refused(phone: &Phone, app: &str, refusal: &PhoneError) -> ToolCallOutcome {
-    let found = phone.app(app).ok();
+/// A call her phone, as `files` keep it, refused, said in its own sentence
+/// and then, where it helps her next step, what there is instead: her
+/// apps, or the app's views or actions.
+fn refused(
+    phone: &Phone,
+    files: &dyn LeasedFiles,
+    app: &str,
+    refusal: &PhoneError,
+) -> ToolCallOutcome {
+    let found = || phone.app(files, app).ok();
     let (reason, instead) = match refusal {
         PhoneError::NoApp(_) => (
             "app_not_found",
-            Some(listed("Your apps", phone.apps().iter().map(named))),
+            phone
+                .apps(files)
+                .ok()
+                .map(|on_phone| listed("Your apps", on_phone.apps.iter().map(named))),
         ),
         PhoneError::NoView { .. } => (
             "view_not_found",
-            found.map(|app| listed("Its views", app.views().iter().map(View::id))),
+            found().map(|app| listed("Its views", app.views().iter().map(View::id))),
         ),
         PhoneError::NoAction { .. } => (
             "action_not_found",
-            found.map(|app| listed("Its actions", app.actions().iter().map(Action::name))),
+            found().map(|app| listed("Its actions", app.actions().iter().map(Action::name))),
         ),
         PhoneError::Input { .. } => ("invalid_input", None),
         PhoneError::Refused { .. } => ("app_refused", None),

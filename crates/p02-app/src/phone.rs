@@ -1,14 +1,15 @@
 //! Her phone as a client reads it, from her data whether she runs or not:
-//! her apps, what she has in front with its screen, what she last did on
-//! it and what rings; and one view's screen, which a person looking around
-//! her phone reads, and which changes nothing of hers.
+//! her apps, those it comes with and those installed on it, what she has
+//! in front with its screen, what she last did on it and what rings; and
+//! one view's screen, which a person looking around her phone reads, and
+//! which changes nothing of hers.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use p02_characters::discover;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
-use p02_phone::{App, Now, Phone, PhoneError};
+use p02_phone::{Listed, Now, Phone, PhoneError};
 use p02_plugins::PHONE_PLUGIN;
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
 use p02_store::CharacterData;
@@ -148,6 +149,9 @@ fn shown(
     now: &Now,
     ringing: Vec<PhoneRing>,
 ) -> Result<PhoneOutcome, Unread> {
+    let on_phone = phone
+        .apps(files)
+        .map_err(|error| Unread::Failed(unread(&error)))?;
     let state = phone
         .state(files)
         .map_err(|error| Unread::Failed(unread(&error)))?;
@@ -171,7 +175,7 @@ fn shown(
     };
 
     Ok(PhoneOutcome::Ok {
-        apps: phone.apps().iter().map(drawn).collect(),
+        apps: on_phone.apps.iter().map(drawn).collect(),
         front,
         did: state.did.map(|did| PhoneDid {
             app_id: did.app,
@@ -203,14 +207,14 @@ fn looked(looked: Result<Screen, PhoneError>) -> Result<ScreenOutcome, Unread> {
 }
 
 /// `app` as her window draws it.
-fn drawn(app: &App) -> PhoneApp {
+fn drawn(app: &Listed) -> PhoneApp {
     PhoneApp {
-        id: app.id().clone(),
-        name: app.name().to_owned(),
-        icon: app.icon().to_owned(),
-        tint: app.tint().to_owned(),
+        id: app.id.clone(),
+        name: app.name.clone(),
+        icon: app.icon.clone(),
+        tint: app.tint.clone(),
         views: app
-            .views()
+            .views
             .iter()
             .map(|view| AppView {
                 id: view.id().clone(),
@@ -218,7 +222,7 @@ fn drawn(app: &App) -> PhoneApp {
                 icon: view.icon().to_owned(),
             })
             .collect(),
-        opens_on: app.opens_on().clone(),
+        opens_on: app.opens_on.clone(),
     }
 }
 

@@ -242,7 +242,7 @@ fn a_store_that_fails_is_the_stores_failure() {
         }
 
         fn read_text(&self, _: &str) -> Result<Option<String>, StoreError> {
-            unreachable!("the phone keeps no text")
+            Err(StoreError::Store("the disk is gone".into()))
         }
 
         fn write_json(&mut self, _: &str, _: &Value) -> Result<(), StoreError> {
@@ -254,11 +254,11 @@ fn a_store_that_fails_is_the_stores_failure() {
         }
 
         fn write_text(&mut self, _: &str, _: &str) -> Result<(), StoreError> {
-            unreachable!("the phone keeps no text")
+            unreachable!("nothing is written to a store that cannot be read")
         }
 
         fn remove(&mut self, _: &str) -> Result<(), StoreError> {
-            unreachable!("the phone removes nothing")
+            unreachable!("nothing is removed from a store that cannot be read")
         }
     }
 
