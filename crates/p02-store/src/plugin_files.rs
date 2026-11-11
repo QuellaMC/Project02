@@ -1,7 +1,8 @@
 //! A plugin's own files in a character's data, `plugin-data/<plugin>/`:
-//! documents (`.json`) replaced whole and logs (`.jsonl`) appended to, every
-//! value held to the JSON limits, one lessee at a time. A file's name says
-//! its kind, so no file is ever both.
+//! documents (`.json`) and text files (`.txt`) replaced whole or removed,
+//! and logs (`.jsonl`) only appended to, every value held to the JSON
+//! limits and every text to its bound, one lessee at a time. A file's name
+//! says its kind, so no file is of two kinds.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use std::time::Instant;
 use p02_contracts::{FileStoreBackend, LeasedFiles, StoreError};
 use p02_shared::{
     BoundJsonError, Credentials, Identifier, JsonLimits, PathEntry, append_line, bound_json,
-    create_directories, describe_entry, read_file, write_file_atomically,
+    create_directories, describe_entry, read_file, remove_file, write_file_atomically,
 };
 use serde_json::Value;
 
@@ -21,6 +22,9 @@ use crate::jsonl::committed_lines;
 use crate::layout::EntryKind;
 use crate::lock::{Lease, Resource, acquire_before};
 
+/// How much a text file of a plugin's store holds, in KiB of UTF-8.
+pub(crate) const TEXT_KIB: usize = 256;
+
 /// What a file of a plugin's store holds, as its name says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
@@ -28,6 +32,19 @@ pub enum FileKind {
     Document,
     /// One JSON value a line, in a `.jsonl` file appended to.
     Log,
+    /// UTF-8 text within its bound, in a `.txt` file replaced whole.
+    Text,
+}
+
+impl FileKind {
+    /// How the name of every file of this kind ends.
+    fn suffix(self) -> &'static str {
+        match self {
+            Self::Document => ".json",
+            Self::Log => ".jsonl",
+            Self::Text => ".txt",
+        }
+    }
 }
 
 impl fmt::Display for FileKind {
@@ -35,6 +52,7 @@ impl fmt::Display for FileKind {
         formatter.write_str(match self {
             Self::Document => "document",
             Self::Log => "log",
+            Self::Text => "text file",
         })
     }
 }
@@ -94,7 +112,7 @@ impl FileStoreBackend for PluginFiles {
 
 impl LeasedPluginFiles {
     fn read_document(&self, path: &str) -> Result<Option<Value>, StorageError> {
-        let target = self.located(store_path(path, FileKind::Document)?)?;
+        let target = self.located(store_path(path, &[FileKind::Document])?)?;
 
         read_entry(&target)?
             .map(|bytes| {
@@ -121,8 +139,21 @@ impl LeasedPluginFiles {
         Ok(committed_lines(&self.log_bytes(path)?).count() as u64)
     }
 
+    /// The text file's text, once it is UTF-8 within the bound.
+    fn read_text_file(&self, path: &str) -> Result<Option<String>, StorageError> {
+        let target = self.located(store_path(path, &[FileKind::Text])?)?;
+        let Some(bytes) = read_entry(&target)? else {
+            return Ok(None);
+        };
+
+        match String::from_utf8(bytes) {
+            Ok(text) if fits(&text) => Ok(Some(text)),
+            _ => Err(StorageError::MalformedText { path: target }),
+        }
+    }
+
     fn replace(&self, path: &str, value: &Value) -> Result<(), StorageError> {
-        let mut content = bounded_text(value, store_path(path, FileKind::Document)?)?;
+        let mut content = bounded_text(value, store_path(path, &[FileKind::Document])?)?;
 
         content.push('\n');
 
@@ -134,14 +165,36 @@ impl LeasedPluginFiles {
     /// Appends the line after the log's last whole line, what a crash left
     /// after it cut first.
     fn append(&self, path: &str, value: &Value) -> Result<(), StorageError> {
-        let line = bounded_text(value, store_path(path, FileKind::Log)?)?;
+        let line = bounded_text(value, store_path(path, &[FileKind::Log])?)?;
         let target = self.made_way_to(path)?;
 
         append_line(&target, line.as_bytes()).map_err(StorageError::write(&target))
     }
 
+    fn replace_text(&self, path: &str, text: &str) -> Result<(), StorageError> {
+        let path = store_path(path, &[FileKind::Text])?;
+
+        if !fits(text) {
+            return Err(StorageError::StoreTextTooLong {
+                path: path.to_owned(),
+            });
+        }
+
+        let target = self.made_way_to(path)?;
+
+        write_file_atomically(&target, text.as_bytes()).map_err(StorageError::write(&target))
+    }
+
+    /// Removes the document or text file at `path` and nothing else, not
+    /// the directories on the way to it. A log is only appended to.
+    fn delete(&self, path: &str) -> Result<(), StorageError> {
+        let target = self.located(store_path(path, &[FileKind::Document, FileKind::Text])?)?;
+
+        remove_file(&target).map_err(StorageError::write(&target))
+    }
+
     fn log_bytes(&self, path: &str) -> Result<Vec<u8>, StorageError> {
-        let target = self.located(store_path(path, FileKind::Log)?)?;
+        let target = self.located(store_path(path, &[FileKind::Log])?)?;
 
         Ok(read_entry(&target)?.unwrap_or_default())
     }
@@ -193,12 +246,24 @@ impl LeasedFiles for LeasedPluginFiles {
         self.count_log(path).map_err(store_error)
     }
 
+    fn read_text(&self, path: &str) -> Result<Option<String>, StoreError> {
+        self.read_text_file(path).map_err(store_error)
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.replace(path, value).map_err(store_error)
     }
 
     fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.append(path, value).map_err(store_error)
+    }
+
+    fn write_text(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.replace_text(path, text).map_err(store_error)
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        self.delete(path).map_err(store_error)
     }
 }
 
@@ -210,12 +275,12 @@ impl Drop for LeasedPluginFiles {
     }
 }
 
-/// `text`, when it names a file of `kind` in a plugin's store:
+/// `text`, when it names a file of one of `kinds` in a plugin's store:
 /// `/`-separated segments of ASCII letters, digits, `.`, `_` and `-`, each
-/// beginning with a letter or a digit, a document's last ending in `.json`
-/// and a log's in `.jsonl`. So no path leaves the store or names a write's
-/// temporary or a database beside it.
-fn store_path(text: &str, kind: FileKind) -> Result<&str, StorageError> {
+/// beginning with a letter or a digit, the last ending in the suffix of its
+/// kind. So no path leaves the store or names a write's temporary or a
+/// database beside it.
+fn store_path<'a>(text: &'a str, kinds: &'static [FileKind]) -> Result<&'a str, StorageError> {
     let named = text.split('/').all(|segment| {
         segment
             .as_bytes()
@@ -225,19 +290,20 @@ fn store_path(text: &str, kind: FileKind) -> Result<&str, StorageError> {
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     });
-    let suffix = match kind {
-        FileKind::Document => ".json",
-        FileKind::Log => ".jsonl",
-    };
 
-    if named && text.ends_with(suffix) {
+    if named && kinds.iter().any(|kind| text.ends_with(kind.suffix())) {
         Ok(text)
     } else {
         Err(StorageError::InvalidStorePath {
             path: text.to_owned(),
-            expected: kind,
+            expected: kinds,
         })
     }
+}
+
+/// Whether `text` is within what a text file holds.
+fn fits(text: &str) -> bool {
+    text.len() <= TEXT_KIB * 1_024
 }
 
 /// The bytes of the file at `target`, none when nothing is there; anything

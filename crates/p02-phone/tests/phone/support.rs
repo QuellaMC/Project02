@@ -38,6 +38,10 @@ impl LeasedFiles for Files {
         unreachable!("the phone keeps no log")
     }
 
+    fn read_text(&self, _: &str) -> Result<Option<String>, StoreError> {
+        unreachable!("the phone keeps no text")
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         if self.unwritable == Some(path) {
             return Err(StoreError::Store("the disk is full".into()));
@@ -50,6 +54,14 @@ impl LeasedFiles for Files {
 
     fn append_jsonl(&mut self, _: &str, _: &Value) -> Result<(), StoreError> {
         unreachable!("the phone keeps no log")
+    }
+
+    fn write_text(&mut self, _: &str, _: &str) -> Result<(), StoreError> {
+        unreachable!("the phone keeps no text")
+    }
+
+    fn remove(&mut self, _: &str) -> Result<(), StoreError> {
+        unreachable!("the phone removes nothing")
     }
 }
 

@@ -198,15 +198,7 @@ fn remove_database(path: &Path) -> Result<(), StorageError> {
     });
 
     for file in companions.chain([path.to_path_buf()]) {
-        match remove_file(&file) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                return Err(StorageError::Write {
-                    path: file,
-                    source: error,
-                });
-            }
-            _ => {}
-        }
+        remove_file(&file).map_err(StorageError::write(&file))?;
     }
 
     Ok(())

@@ -7,7 +7,7 @@ use p02_shared::{BoundJsonError, Identifier};
 use crate::database::OpenDatabaseError;
 use crate::layout::EntryKind;
 use crate::marker::{MarkerProblem, SCHEMA_VERSION, Scope};
-use crate::plugin_files::{FileKind, ValueProblem};
+use crate::plugin_files::{FileKind, TEXT_KIB, ValueProblem};
 use crate::replay::ReplayError;
 
 /// Why the store refused or could not do what it was asked. Each is
@@ -82,23 +82,31 @@ pub enum StorageError {
     #[error("a conversation cannot be made between these participants")]
     InvalidParticipants(#[source] ParseConversationError),
     #[error(
-        "\"{path}\" is no {expected} of a plugin's store: segments of letters, digits, '.', '_' \
-         and '-', each beginning with a letter or a digit, a document's last ending in .json and \
-         a log's in .jsonl"
+        "\"{path}\" is no {} of a plugin's store: segments of letters, digits, '.', '_' and '-', \
+         each beginning with a letter or a digit, a document's last ending in .json, a log's in \
+         .jsonl and a text file's in .txt",
+        either(.expected)
     )]
-    InvalidStorePath { path: String, expected: FileKind },
+    InvalidStorePath {
+        path: String,
+        expected: &'static [FileKind],
+    },
     #[error("the value for \"{path}\" is not within the JSON limits")]
     StoreValueLimits {
         path: String,
         #[source]
         source: BoundJsonError,
     },
+    #[error("the text for \"{path}\" is longer than the {TEXT_KIB} KiB a text file holds")]
+    StoreTextTooLong { path: String },
     #[error("{} is no JSON document within the JSON limits", .path.display())]
     MalformedDocument {
         path: PathBuf,
         #[source]
         source: ValueProblem,
     },
+    #[error("{} is no UTF-8 text of at most {TEXT_KIB} KiB", .path.display())]
+    MalformedText { path: PathBuf },
     #[error("could not open database {}", .path.display())]
     Database {
         path: PathBuf,
@@ -145,9 +153,10 @@ impl StorageError {
             Self::MalformedConversation { .. }
             | Self::Refused(_)
             | Self::InvalidParticipants(_)
-            | Self::MalformedDocument { .. } => "malformed_record",
+            | Self::MalformedDocument { .. }
+            | Self::MalformedText { .. } => "malformed_record",
             Self::InvalidStorePath { .. } => "invalid_store_path",
-            Self::StoreValueLimits { .. } => "invalid_store_value",
+            Self::StoreValueLimits { .. } | Self::StoreTextTooLong { .. } => "invalid_store_value",
             Self::ConcurrentWrite { .. } => "concurrent_write",
             Self::Busy {
                 code: BusyCode::Session,
@@ -177,4 +186,13 @@ impl StorageError {
 
         move |source| Self::Write { path, source }
     }
+}
+
+/// `kinds` in words, as "document or text file".
+fn either(kinds: &[FileKind]) -> String {
+    kinds
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" or ")
 }

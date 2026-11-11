@@ -241,12 +241,24 @@ fn a_store_that_fails_is_the_stores_failure() {
             unreachable!("the phone keeps no log")
         }
 
+        fn read_text(&self, _: &str) -> Result<Option<String>, StoreError> {
+            unreachable!("the phone keeps no text")
+        }
+
         fn write_json(&mut self, _: &str, _: &Value) -> Result<(), StoreError> {
             unreachable!("nothing is written to a store that cannot be read")
         }
 
         fn append_jsonl(&mut self, _: &str, _: &Value) -> Result<(), StoreError> {
             unreachable!("the phone keeps no log")
+        }
+
+        fn write_text(&mut self, _: &str, _: &str) -> Result<(), StoreError> {
+            unreachable!("the phone keeps no text")
+        }
+
+        fn remove(&mut self, _: &str) -> Result<(), StoreError> {
+            unreachable!("the phone removes nothing")
         }
     }
 

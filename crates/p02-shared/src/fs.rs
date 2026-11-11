@@ -246,13 +246,17 @@ pub fn empty_file(path: &Path) -> io::Result<()> {
 }
 
 /// Removes the file at `path`; a link there is removed, not followed.
+/// Nothing there is no failure, so a removal a crash cut short can be done
+/// again.
 ///
 /// # Errors
 ///
-/// The `io::Error` the removal failed with, `NotFound` when nothing is
-/// there.
+/// The `io::Error` the removal failed with.
 pub fn remove_file(path: &Path) -> io::Result<()> {
-    fs::remove_file(path)
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        removed => removed,
+    }
 }
 
 /// Removes the directory at `path`, which must be empty.
@@ -492,10 +496,7 @@ fn remove_abandoned_temporaries(path: &Path, name: &OsStr) -> io::Result<()> {
             && temporary_target(&entry.file_name()).is_some_and(|target| *name == *target);
 
         if abandoned {
-            match fs::remove_file(entry.path()) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-                _ => {}
-            }
+            remove_file(&entry.path())?;
         }
     }
 
