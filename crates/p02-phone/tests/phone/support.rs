@@ -79,7 +79,9 @@ pub(crate) fn manifest(fields: &Value) -> String {
         "id": "notes",
         "name": "Notes",
         "summary": "What she writes down",
-        "views": [{"id": "all", "title": "All"}],
+        "icon": "notebook",
+        "tint": "orange",
+        "views": [{"id": "all", "title": "All", "icon": "doc"}],
         "opensOn": "all",
         "actions": [],
     });
@@ -95,6 +97,11 @@ pub(crate) fn manifest(fields: &Value) -> String {
     manifest.to_string()
 }
 
+/// A view of this `id` and `title`.
+pub(crate) fn view(id: &str, title: &str) -> Value {
+    json!({"id": id, "title": title, "icon": "doc"})
+}
+
 /// Actions of these `names`, each shown on the view `all` and taking any
 /// object.
 pub(crate) fn actions(names: &[&str]) -> Value {
@@ -104,6 +111,7 @@ pub(crate) fn actions(names: &[&str]) -> Value {
             json!({
                 "name": name,
                 "description": "Something to do.",
+                "did": format!("Did {name}"),
                 "view": "all",
                 "input": {"type": "object"},
             })

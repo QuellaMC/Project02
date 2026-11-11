@@ -74,6 +74,19 @@ impl App {
         &self.manifest.summary
     }
 
+    /// A name of the page's own icons, which falls back for one it does not
+    /// know.
+    #[must_use]
+    pub fn icon(&self) -> &str {
+        &self.manifest.icon
+    }
+
+    /// The tint of the icon's tile, a name of the page's own as the icon is.
+    #[must_use]
+    pub fn tint(&self) -> &str {
+        &self.manifest.tint
+    }
+
     #[must_use]
     pub fn views(&self) -> &[View] {
         &self.manifest.views
@@ -85,7 +98,8 @@ impl App {
     }
 
     /// The view the app opens on when none is named.
-    pub(crate) fn opens_on(&self) -> &Identifier {
+    #[must_use]
+    pub fn opens_on(&self) -> &Identifier {
         &self.manifest.opens_on
     }
 

@@ -3,17 +3,20 @@
   "id": "clock",
   "name": "Clock",
   "summary": "Alarms, timers, and the time anywhere",
+  "icon": "clock",
+  "tint": "graphite",
   "views": [
-    {"id": "world", "title": "World Clock"},
-    {"id": "alarms", "title": "Alarms"},
-    {"id": "stopwatch", "title": "Stopwatch"},
-    {"id": "timers", "title": "Timers"}
+    {"id": "world", "title": "World Clock", "icon": "globe"},
+    {"id": "alarms", "title": "Alarms", "icon": "alarm"},
+    {"id": "stopwatch", "title": "Stopwatch", "icon": "stopwatch"},
+    {"id": "timers", "title": "Timers", "icon": "timer"}
   ],
   "opensOn": "alarms",
   "actions": [
     {
       "name": "set_alarm",
       "description": "Set an alarm for a time of day, ringing once or on the days you give.",
+      "did": "Set an alarm",
       "view": "alarms",
       "input": {
         "type": "object",
@@ -44,6 +47,7 @@
     {
       "name": "change_alarm",
       "description": "Change an alarm's time, label or days, or switch it on or off.",
+      "did": "Changed an alarm",
       "view": "alarms",
       "input": {
         "type": "object",
@@ -79,6 +83,7 @@
     {
       "name": "delete_alarm",
       "description": "Delete an alarm.",
+      "did": "Deleted an alarm",
       "view": "alarms",
       "input": {
         "type": "object",
@@ -95,6 +100,7 @@
     {
       "name": "start_timer",
       "description": "Start a timer counting down from the hours, minutes and seconds you give.",
+      "did": "Started a timer",
       "view": "timers",
       "input": {
         "type": "object",
@@ -114,6 +120,7 @@
     {
       "name": "cancel_timer",
       "description": "Cancel a running timer.",
+      "did": "Cancelled a timer",
       "view": "timers",
       "input": {
         "type": "object",
@@ -130,6 +137,7 @@
     {
       "name": "start_stopwatch",
       "description": "Start the stopwatch, going on from the time it shows.",
+      "did": "Started the stopwatch",
       "view": "stopwatch",
       "input": {
         "type": "object",
@@ -140,6 +148,7 @@
     {
       "name": "stop_stopwatch",
       "description": "Stop the stopwatch, keeping its time.",
+      "did": "Stopped the stopwatch",
       "view": "stopwatch",
       "input": {
         "type": "object",
@@ -150,6 +159,7 @@
     {
       "name": "lap_stopwatch",
       "description": "Mark a lap on the running stopwatch.",
+      "did": "Marked a lap",
       "view": "stopwatch",
       "input": {
         "type": "object",
@@ -160,6 +170,7 @@
     {
       "name": "reset_stopwatch",
       "description": "Stop the stopwatch and set it back to zero, clearing its laps.",
+      "did": "Reset the stopwatch",
       "view": "stopwatch",
       "input": {
         "type": "object",
@@ -170,6 +181,7 @@
     {
       "name": "add_city",
       "description": "Add a city to your world clock, under the name you give it.",
+      "did": "Added a city",
       "view": "world",
       "input": {
         "type": "object",
@@ -187,6 +199,7 @@
     {
       "name": "remove_city",
       "description": "Remove a city from your world clock.",
+      "did": "Removed a city",
       "view": "world",
       "input": {
         "type": "object",

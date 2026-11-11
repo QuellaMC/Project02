@@ -5,6 +5,7 @@
 
 use p02_characters::{PackageDiagnostic, PackageLocation};
 use p02_core::{ClientStamp, ConversationId, MessageId};
+use p02_plugins::PHONE_PLUGIN;
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{QueuedLine, StorageError};
@@ -61,9 +62,16 @@ pub(crate) fn running_turn(
 
 /// What the stream is told of `progress` on `turn`, in order: the message
 /// or the tool calls it says, then the turn as it now runs when that
-/// changed. A commit comes before the turn without its draft, so a surface
-/// that shows the draft ends it as the message rather than taking it back.
+/// changed, or that her phone is to be read again when a call of hers to
+/// it came back accepted. A commit comes before the turn without its
+/// draft, so a surface that shows the draft ends it as the message rather
+/// than taking it back.
 pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
+    let phoned = matches!(
+        &progress,
+        Progress::ToolCallCompleted { plugin_id, accepted: true, .. }
+            if plugin_id.as_str() == PHONE_PLUGIN
+    );
     let (said, changed) = match progress {
         Progress::UserMessage {
             message,
@@ -123,6 +131,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             round,
             tool_name,
             accepted,
+            ..
         } => (
             Some(TurnProgress::ToolCallCompleted {
                 round,
@@ -144,5 +153,8 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
     })
     .into_iter()
     .chain(changed.then(|| Event::TurnRunning(turn.clone())))
+    .chain(phoned.then(|| Event::PhoneChanged {
+        character_id: turn.character_id.clone(),
+    }))
     .collect()
 }

@@ -88,6 +88,11 @@ pub enum Event {
         #[serde(flatten)]
         failure: MaintenanceFailure,
     },
+    /// Her phone is to be read again: a call of hers to it came back
+    /// accepted, or a ring's moment of hers began or ended.
+    PhoneChanged {
+        character_id: Identifier,
+    },
 }
 
 /// How a turn ended, as the frame announcing it says.

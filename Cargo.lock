@@ -2967,6 +2967,7 @@ dependencies = [
  "p02-contracts",
  "p02-core",
  "p02-shared",
+ "p02-wire",
  "rquickjs",
  "serde",
  "serde_json",

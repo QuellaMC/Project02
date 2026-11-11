@@ -25,7 +25,9 @@ import {
   type PairingSettleOutcome,
   type PairingSubject,
   type PendingConfirmation,
+  type PhoneOutcome,
   type RemoveCharacterOutcome,
+  type ScreenOutcome,
   type StartOutcome,
   type SubmitOutcome,
 } from '../contract/index.ts';
@@ -113,6 +115,18 @@ export type GatewayClient = {
     characterId: string,
     options?: GatewayCallOptions,
   ): Promise<RemoveCharacterOutcome>;
+  /** Her phone as it stands, whether she runs or not; `phone_changed` says when to read it again. */
+  phone(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<PhoneOutcome>;
+  /** One view of an app on her phone, as someone looking around it sees it; nothing of hers changes. */
+  phoneScreen(
+    characterId: string,
+    appId: string,
+    viewId: string,
+    options?: GatewayCallOptions,
+  ): Promise<ScreenOutcome>;
   openDirectConversation(
     characterId: string,
     options?: GatewayCallOptions,
@@ -204,6 +218,7 @@ const eventKinds: Readonly<Record<GatewayEvent['kind'], true>> = {
   state_changed: true,
   health_changed: true,
   maintenance_failed: true,
+  phone_changed: true,
 };
 
 export function createGatewayClient(
@@ -214,8 +229,8 @@ export function createGatewayClient(
   const headers = {authorization: `Bearer ${token}`};
   const route = createRoutes(baseUrl, headers, guardedFetch);
 
-  // The routes of protocol 7, one per verb: each its method and path, the
-  // body the daemon reads and the outcome it answers under 200.
+  // The routes, one per verb: each its method and path, the body the
+  // daemon reads and the outcome it answers under 200.
   const client: GatewayClient = {
     baseUrl,
     async health(callOptions) {
@@ -243,6 +258,16 @@ export function createGatewayClient(
     removeCharacter: (characterId, callOptions) =>
       route.delete<RemoveCharacterOutcome>(
         `/api/characters/${segment(characterId)}`,
+        callOptions,
+      ),
+    phone: (characterId, callOptions) =>
+      route.get<PhoneOutcome>(
+        `/api/characters/${segment(characterId)}/phone`,
+        callOptions,
+      ),
+    phoneScreen: (characterId, appId, viewId, callOptions) =>
+      route.get<ScreenOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/views/${segment(viewId)}`,
         callOptions,
       ),
     openDirectConversation: (characterId, callOptions) =>

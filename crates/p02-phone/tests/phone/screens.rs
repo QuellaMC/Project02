@@ -1,9 +1,10 @@
 //! What a view shows: read into the pieces the phone knows, and read only.
 
-use p02_phone::{Phone, Screen};
+use p02_phone::Phone;
+use p02_wire::Screen;
 use serde_json::{Value, json};
 
-use crate::support::{Files, app, now};
+use crate::support::{Files, app, now, view};
 
 /// An app whose view `name` shows what `screens` holds under that name.
 fn showing(screens: &Value) -> Phone {
@@ -11,7 +12,7 @@ fn showing(screens: &Value) -> Phone {
         .as_object()
         .unwrap()
         .keys()
-        .map(|name| json!({"id": name, "title": name}))
+        .map(|name| view(name, name))
         .collect();
 
     Phone::new(vec![app(
@@ -38,9 +39,8 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
     ]});
     let phone = showing(&json!({"everything": everything}));
     let screen = phone
-        .open(&Files::default(), "notes", None, &now())
-        .unwrap()
-        .screen;
+        .look(&Files::default(), "notes", "everything", &now())
+        .unwrap();
 
     assert_eq!(serde_json::to_value(&screen).unwrap(), everything);
     assert_eq!(
@@ -88,7 +88,7 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
     ] {
         assert_eq!(
             phone
-                .open(&Files::default(), "notes", Some(view), &now())
+                .look(&Files::default(), "notes", view, &now())
                 .unwrap_err()
                 .to_string(),
             refusal
@@ -99,7 +99,7 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
 #[test]
 fn a_screen_only_reads() {
     let phone = Phone::new(vec![app(
-        &json!({"views": [{"id": "all", "title": "All"}]}),
+        &json!({}),
         "export function screen() {
             const tried = [
                 () => phone.storage.set('seen', true),
@@ -119,9 +119,8 @@ fn a_screen_only_reads() {
         }",
     )]);
     let screen = phone
-        .open(&Files::default(), "notes", None, &now())
-        .unwrap()
-        .screen;
+        .look(&Files::default(), "notes", "all", &now())
+        .unwrap();
     let refused = |function: &str| {
         json!({
             "kind": "text",

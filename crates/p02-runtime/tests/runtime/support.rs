@@ -417,6 +417,7 @@ pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
                 round,
                 tool_name,
                 accepted,
+                ..
             } => format!(
                 "tool_call_completed {round} {tool_name} {}",
                 if *accepted { "accepted" } else { "rejected" }

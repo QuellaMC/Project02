@@ -9,6 +9,7 @@ mod history;
 mod outcome;
 mod packages;
 mod pairing;
+mod phone;
 mod reconcile;
 mod rings;
 

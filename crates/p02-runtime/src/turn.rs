@@ -68,6 +68,7 @@ pub enum Progress {
     /// refusal of it.
     ToolCallCompleted {
         round: NonZeroU32,
+        plugin_id: Identifier,
         tool_name: Identifier,
         accepted: bool,
     },
@@ -847,6 +848,7 @@ impl TurnSink for Round<'_, '_> {
             .await?;
             (turn.listener)(Progress::ToolCallCompleted {
                 round,
+                plugin_id: call.plugin_id().clone(),
                 tool_name: call.tool_name().clone(),
                 accepted: matches!(report.result, ToolCallResult::Accepted { .. }),
             });

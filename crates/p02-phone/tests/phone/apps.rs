@@ -4,7 +4,7 @@
 use p02_phone::{App, Phone};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, input, manifest, now};
+use crate::support::{Files, actions, app, input, manifest, now, view};
 
 const SCREEN: &str = "export function screen() { return { items: [] }; }";
 
@@ -66,14 +66,24 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
             "app.json summary must be one line that is not blank".to_owned(),
         ),
         (
+            manifest(&json!({"icon": " "})),
+            "app.json icon must not be blank".to_owned(),
+        ),
+        (
+            manifest(&json!({"tint": ""})),
+            "app.json tint must not be blank".to_owned(),
+        ),
+        (
             manifest(&json!({"views": []})),
             "app.json views must hold one view at least".to_owned(),
         ),
         (
-            manifest(
-                &json!({"views": [{"id": "all", "title": "All"}, {"id": "all", "title": "Again"}]}),
-            ),
+            manifest(&json!({"views": [view("all", "All"), view("all", "Again")]})),
             "app.json names the view \"all\" more than once".to_owned(),
+        ),
+        (
+            manifest(&json!({"views": [{"id": "all", "title": "All", "icon": " "}]})),
+            "app.json view \"all\" icon must not be blank".to_owned(),
         ),
         (
             manifest(&json!({"opensOn": "alarms"})),
@@ -90,6 +100,10 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
         (
             action(json!({"name": "erase"})),
             "app.json names the action \"erase\" more than once".to_owned(),
+        ),
+        (
+            action(json!({"did": "Wrote it\ndown"})),
+            "app.json action \"add\" did must be one line that is not blank".to_owned(),
         ),
         (
             action(json!({"view": "alarms"})),

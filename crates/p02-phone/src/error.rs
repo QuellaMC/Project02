@@ -8,10 +8,13 @@ pub enum PackageError {
     NotAManifest(serde_json::Error),
     #[error("app.json format must be \"project02.app.v1\"")]
     Format,
-    #[error("app.json name must not be blank")]
-    Name,
-    #[error("app.json summary must be one line that is not blank")]
-    Summary,
+    /// A field that must hold words, by its place in the manifest.
+    #[error("app.json {0} must not be blank")]
+    Blank(String),
+    /// A field that must hold one line of words, by its place in the
+    /// manifest.
+    #[error("app.json {0} must be one line that is not blank")]
+    NotOneLine(String),
     #[error("app.json views must hold one view at least")]
     NoViews,
     #[error("app.json names the view \"{0}\" more than once")]

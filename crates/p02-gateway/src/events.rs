@@ -68,7 +68,7 @@ struct Hub {
     turns: BTreeMap<ConversationId, RunningTurn>,
     /// The number of the newest frame that changed what `ready` reads of
     /// the daemon: every event but a turn's, whose turns the hub keeps
-    /// itself.
+    /// itself, and her phone's, which `ready` does not carry.
     changed: u64,
     open: Vec<mpsc::UnboundedSender<Bytes>>,
     closed: bool,
@@ -308,7 +308,7 @@ impl Hub {
                     .insert(turn.conversation_id.clone(), turn.clone());
             }
             Event::TurnCompleted { .. } => self.turns.retain(|_, turn| !event.ends(turn)),
-            Event::TurnProgress { .. } => {}
+            Event::TurnProgress { .. } | Event::PhoneChanged { .. } => {}
             _ => self.changed = self.tail.latest,
         }
 

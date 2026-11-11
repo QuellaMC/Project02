@@ -25,8 +25,8 @@ use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progre
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
 use p02_wire::{
-    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, RunningTurn,
-    TurnRefusal, TurnStamp, TurnStatus,
+    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
+    RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -37,7 +37,7 @@ use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::reconcile::settings_now;
-use crate::rings::{Rings, rang};
+use crate::rings::{Rings, rang, ringing};
 
 /// What a character whose settings choose no AI service needs, which the
 /// settings page answers.
@@ -51,6 +51,9 @@ pub(crate) struct CharacterHealth {
     /// a model; what her start warned of, while she is ready.
     pub(crate) diagnostic: Option<String>,
     pub(crate) maintenance: Option<MaintenanceFailure>,
+    /// What rings on her phone: the rings the moment of hers that runs now
+    /// tells, none while no ring's moment runs.
+    pub(crate) ringing: Vec<PhoneRing>,
 }
 
 #[derive(Debug)]
@@ -83,6 +86,7 @@ impl CharacterHandle {
             state: CharacterState::Starting,
             diagnostic: None,
             maintenance: None,
+            ringing: Vec::new(),
         });
         let stop = CancellationToken::new();
         let broker = Arc::new(Broker::new(
@@ -312,6 +316,15 @@ impl Cause {
             Self::Line(_) | Self::Heartbeat => Vec::new(),
         }
     }
+
+    /// What rings on her phone while the turn it begins runs: none but for
+    /// her phone's rings.
+    fn ringing(&self) -> Vec<PhoneRing> {
+        match self {
+            Self::Rang(rings) => ringing(rings),
+            Self::Line(_) | Self::Heartbeat => Vec::new(),
+        }
+    }
 }
 
 /// What every step of hers reaches: who she is, the world she is built
@@ -509,14 +522,15 @@ impl Actor {
     }
 
     /// Takes `turn` through her thread on `parts` with `adapter` her model,
-    /// as `cause` began it. Once it ended, however it ended, she has been
-    /// quiet since; the line that began it leaves her inbox, her phone is
-    /// looked at again, what rang handed to its apps once the moment it
-    /// began completed, and only then is the end announced, so a client
-    /// that hears it and sends the line again is answered as her thread has
-    /// it, and finds her phone as the turn left it. A turn the runtime
-    /// fails leaves her failed, and she is built again behind it; her inbox
-    /// failing fails her.
+    /// as `cause` began it; when what rang on her phone began it, that
+    /// rings there while it runs. Once it ended, however it ended, she has
+    /// been quiet since; the line that began it leaves her inbox, her phone
+    /// is looked at again, what rang handed to its apps once the moment it
+    /// began completed and its ringing over, and only then is the end
+    /// announced, so a client that hears it and sends the line again is
+    /// answered as her thread has it, and finds her phone as the turn left
+    /// it. A turn the runtime fails leaves her failed, and she is built
+    /// again behind it; her inbox failing fails her.
     async fn take(
         &mut self,
         mut parts: Parts,
@@ -524,6 +538,13 @@ impl Actor {
         turn: RunningTurn,
         cause: Cause,
     ) {
+        let ringing = cause.ringing();
+        let ringing_moment = !ringing.is_empty();
+
+        if ringing_moment {
+            self.her.ring(ringing);
+        }
+
         let taken = self.turn(&mut parts, adapter, &turn, &cause).await;
         let data = parts.built.data.clone();
         let phone = parts.built.phone();
@@ -539,6 +560,10 @@ impl Actor {
         };
         let completed = ending.status == TurnStatus::Completed;
         let phoned = self.rings.after_turn(phone, told, completed).await;
+
+        if ringing_moment {
+            self.her.ring(Vec::new());
+        }
 
         self.her.noted(&phoned);
         self.her.world.events.emit(ending.announced(turn));
@@ -956,6 +981,18 @@ impl Her {
         if !self.stop.is_cancelled() {
             self.publish(change);
         }
+    }
+
+    /// Publishes `ringing` as what rings on her phone, and announces that
+    /// her phone is to be read again, in one step, as a change of her state
+    /// is announced.
+    fn ring(&self, ringing: Vec<PhoneRing>) {
+        self.health.send_modify(|health| {
+            health.ringing = ringing;
+            self.world.events.emit(Event::PhoneChanged {
+                character_id: self.id.clone(),
+            });
+        });
     }
 
     /// A background failure of hers, which the turn's outcome never says.

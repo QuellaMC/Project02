@@ -1,16 +1,18 @@
-//! Her phone: its apps opened and used, and the rings they set.
+//! Her phone: its apps opened and used by her and looked at by the person,
+//! what she has in front and last did, and the rings its apps set.
 
 use p02_contracts::{LeasedFiles, StoreError};
 use p02_shared::{Credentials, Identifier, JsonLimits, bound_json};
+use p02_wire::Screen;
 use serde_json::{Map, Value};
 
 use crate::app::App;
 use crate::data::{Kept, Ring};
 use crate::engine::{self, Failure};
 use crate::error::PhoneError;
+use crate::front::PhoneState;
 use crate::host::{Access, Host};
 use crate::manifest::View;
-use crate::screen::Screen;
 use crate::time::Now;
 
 /// Her phone, made from its apps.
@@ -68,16 +70,18 @@ impl Phone {
             .ok_or_else(|| PhoneError::NoApp(id.to_owned()))
     }
 
-    /// `app` opened on `view`, or on the view it opens on when none is
-    /// named, with that view's screen.
+    /// She opens `app` on `view`, or on the view it opens on when none is
+    /// named: it is in front of her, with that view's screen, and opening
+    /// it is what she last did, at `now`.
     ///
     /// # Errors
     ///
     /// [`PhoneError`] when there is no such app or view, when the screen
-    /// fails or is not one the phone takes, or when the store fails.
+    /// fails or is not one the phone takes, or when the store fails. An
+    /// open the phone refuses or the app fails puts nothing in front.
     pub fn open(
         &self,
-        files: &dyn LeasedFiles,
+        files: &mut dyn LeasedFiles,
         app: &str,
         view: Option<&str>,
         now: &Now,
@@ -85,33 +89,57 @@ impl Phone {
         let app = self.app(app)?;
         let view = match view {
             None => app.opens_on(),
-            Some(view) => app
-                .views()
-                .iter()
-                .map(View::id)
-                .find(|kept| kept.as_str() == view)
-                .ok_or_else(|| PhoneError::NoView {
-                    app: app.name().to_owned(),
-                    view: view.to_owned(),
-                })?,
+            Some(view) => view_of(app, view)?,
         };
+        let screen = screen(files, app, view, now)?;
 
+        PhoneState::put(files, app, view, &format!("Opened {}", app.name()), now)?;
         Ok(Opened {
             app,
             view: view.clone(),
-            screen: screen(files, app, view, now)?,
+            screen,
         })
     }
 
+    /// `app`'s `view` as someone looking at her phone sees it, by a call
+    /// that only reads: nothing is put in front of her.
+    ///
+    /// # Errors
+    ///
+    /// [`PhoneError`] when there is no such app or view, when the screen
+    /// fails or is not one the phone takes, or when the store fails.
+    pub fn look(
+        &self,
+        files: &dyn LeasedFiles,
+        app: &str,
+        view: &str,
+        now: &Now,
+    ) -> Result<Screen, PhoneError> {
+        let app = self.app(app)?;
+
+        screen(files, app, view_of(app, view)?, now)
+    }
+
+    /// What she has in front on her phone and what she last did on it.
+    ///
+    /// # Errors
+    ///
+    /// The store's, when it fails.
+    pub fn state(&self, files: &dyn LeasedFiles) -> Result<PhoneState, StoreError> {
+        PhoneState::read(files, self)
+    }
+
     /// Takes `app`'s `action` on `input`, once its contract admits it, and
-    /// saves what the action changed when it answered what the phone takes.
+    /// saves what the action changed when it answered what the phone takes:
+    /// the action's view is then in front of her, and the action is what
+    /// she last did, at `now`.
     ///
     /// # Errors
     ///
     /// [`PhoneError`] when there is no such app or action, its contract
     /// refuses `input`, the action fails, answers what the phone does not
     /// take or would keep more than it holds, or when the store fails. A
-    /// call that fails saves nothing.
+    /// call the phone refuses or the app fails saves nothing.
     pub fn act(
         &self,
         files: &mut dyn LeasedFiles,
@@ -166,6 +194,7 @@ impl Phone {
             after.write(files, app.id())?;
         }
 
+        PhoneState::put(files, app, action.view(), action.did(), now)?;
         Ok(Acted {
             answer,
             view: action.view().clone(),
@@ -239,6 +268,18 @@ impl Phone {
     }
 }
 
+/// The view of `app` named `view`.
+fn view_of<'a>(app: &'a App, view: &str) -> Result<&'a Identifier, PhoneError> {
+    app.views()
+        .iter()
+        .map(View::id)
+        .find(|kept| kept.as_str() == view)
+        .ok_or_else(|| PhoneError::NoView {
+            app: app.name().to_owned(),
+            view: view.to_owned(),
+        })
+}
+
 /// What `app`'s `view` shows, by a call that only reads.
 fn screen(
     files: &dyn LeasedFiles,
@@ -250,7 +291,7 @@ fn screen(
 
     engine::call(app.script(), &host, "screen", &Value::from(view.as_str()))
         .map_err(|failure| failed(app, failure))?
-        .and_then(Screen::read)
+        .and_then(crate::screen::read)
         .map_err(|problem| PhoneError::Screen {
             app: app.name().to_owned(),
             problem,

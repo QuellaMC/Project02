@@ -5,18 +5,16 @@
 //! leave her phone, which wait for a turn of hers that completes.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use p02_contracts::{FileStoreBackend, Rang};
 use p02_core::Timestamp;
 use p02_phone::{Now, Phone, SetRing};
 use p02_shared::{error_chain, sentence};
+use p02_wire::PhoneRing;
 
 use crate::daemon::blocking;
-
-/// How long her actor waits for her phone's store, which a call of her
-/// phone's tools holds a moment at most.
-const LEASE: Duration = Duration::from_secs(10);
+use crate::phone::lease;
 
 /// A ring is due by the wall clock, and a sleep counts the machine's own
 /// clock, which stands still while the machine sleeps and goes on when the
@@ -140,6 +138,20 @@ pub(crate) fn rang(rings: &[SetRing]) -> Vec<Rang> {
         .collect()
 }
 
+/// What rings on her phone while the moment that tells `rings` runs, as a
+/// client reads it.
+pub(crate) fn ringing(rings: &[SetRing]) -> Vec<PhoneRing> {
+    rings
+        .iter()
+        .map(|set| PhoneRing {
+            app_name: set.app_name.clone(),
+            title: set.ring.title().to_owned(),
+            body: set.ring.body().map(str::to_owned),
+            at: set.ring.at().clone(),
+        })
+        .collect()
+}
+
 /// Her phone under one lease of `store`: `told` handed to their apps, when
 /// there are any, then the rings set on it.
 fn look(store: &dyn FileStoreBackend, told: &[SetRing]) -> Looked {
@@ -154,7 +166,7 @@ fn look(store: &dyn FileStoreBackend, told: &[SetRing]) -> Looked {
         Ok(phone) => phone,
         Err(error) => return unread(error_chain(error)),
     };
-    let mut files = match store.lease(Instant::now() + LEASE) {
+    let mut files = match lease(store) {
         Ok(files) => files,
         Err(error) => return unread(error_chain(&error)),
     };

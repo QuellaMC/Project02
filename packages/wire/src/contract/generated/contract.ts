@@ -40,6 +40,11 @@ export type AnswerBody = { decision: Answer, };
 export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } | { "status": "unknown" };
 
 /**
+ * A view of an app, which she opens it on: a tab, in the Clock.
+ */
+export type AppView = { id: Identifier, title: string, icon: string, };
+
+/**
  * What the target's own document holds for a field.
  */
 export type Authored = { configured: boolean, value?: JsonValue, };
@@ -277,12 +282,12 @@ committed: boolean, reason?: string, message?: string, } | { "kind": "confirmati
  * Present when a failure caused the change, or when she needs a
  * model: what to do about it.
  */
-message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "kind": "maintenance_failed", characterId: Identifier, at: Timestamp, message: string, };
+message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "kind": "maintenance_failed", characterId: Identifier, at: Timestamp, message: string, } | { "kind": "phone_changed", characterId: Identifier, };
 
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 10, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 11, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -303,7 +308,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 10, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 11, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -363,6 +368,11 @@ when?: LayoutWhen, };
  * What it guards has no effect otherwise, so a page may hide it then.
  */
 export type LayoutWhen = { field: Identifier, is: ReadonlyArray<string>, };
+
+/**
+ * How a readout's reading moves, in milliseconds since the epoch.
+ */
+export type LiveReading = { "counts": "up", from: number, } | { "counts": "down", to: number, of: number, };
 
 /**
  * A background failure the conversation never sees: the plugins' work
@@ -483,6 +493,41 @@ deadlineAt: number,
  * The turn that raised it; none for a call raised outside any turn.
  */
 turn?: TurnIdentity, };
+
+/**
+ * An app on her phone as her window draws it: its icon and the tint of
+ * its tile, names of the page's own set, which falls back for one it does
+ * not know; its views, in its order; and the view it opens on.
+ */
+export type PhoneApp = { id: Identifier, name: string, icon: string, tint: string, views: ReadonlyArray<AppView>, opensOn: Identifier, };
+
+/**
+ * What she last did on her phone: the app, a few words in the past tense,
+ * and when.
+ */
+export type PhoneDid = { appId: Identifier, words: string, at: Timestamp, };
+
+/**
+ * The app and the view she has in front, and that view's screen, or,
+ * when it cannot be shown, the sentence saying why in its place.
+ */
+export type PhoneFront = { appId: Identifier, viewId: Identifier, screen?: Screen, message?: string, };
+
+/**
+ * Her phone as it stands, read from her data whether she runs or not:
+ * her apps, in her phone's order; what she has in front, none her home
+ * screen; what she last did on it; and what rings, which nothing does but
+ * while a ring's moment of hers runs.
+ */
+export type PhoneOutcome = { "status": "ok", apps: ReadonlyArray<PhoneApp>, front?: PhoneFront, did?: PhoneDid, ringing: ReadonlyArray<PhoneRing>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type PhoneRefusal = "unknown_character" | "no_phone";
+
+/**
+ * A ring the moment of hers that runs now tells her: its app's name, its
+ * title, its body when it has one, and the time it was set for.
+ */
+export type PhoneRing = { appName: string, title: string, body?: string, at: Timestamp, };
 
 /**
  * Where a plugin's row belongs on a settings page.
@@ -615,6 +660,65 @@ layout: ReadonlyArray<LayoutCard>, diagnostics: ReadonlyArray<RuntimeConfigDiagn
  * plugin and a connector may share an id: their sections never meet.
  */
 export type RuntimeConfigSectionNamespace = "plugins" | "connectors";
+
+/**
+ * What a view of an app shows: its pieces, top to bottom.
+ */
+export type Screen = { items: ReadonlyArray<ScreenItem>, };
+
+/**
+ * A piece of a screen.
+ */
+export type ScreenItem = { "kind": "list", header?: string, rows: ReadonlyArray<ScreenRow>, } | { "kind": "readout", 
+/**
+ * The thing's own id, which she passes to an action to change it.
+ */
+id?: string, label?: string, 
+/**
+ * The reading as of the call.
+ */
+text: string, caption?: string, 
+/**
+ * How the reading moves, when it does.
+ */
+live?: LiveReading, } | { "kind": "text", text: string, };
+
+/**
+ * One view of an app on her phone, as a person looking around it sees it:
+ * its screen, or why there is none. Looking changes nothing of hers.
+ */
+export type ScreenOutcome = { "status": "ok", screen: Screen, } | { "status": "refused", reason: ScreenRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type ScreenRefusal = "unknown_character" | "no_phone" | "unknown_app" | "unknown_view" | "app_failed";
+
+/**
+ * A row of a list: a title, a time or both.
+ */
+export type ScreenRow = { 
+/**
+ * The thing's own id, which she passes to an action to change it.
+ */
+id?: string, 
+/**
+ * A small line above.
+ */
+caption?: string, title?: string, 
+/**
+ * A small line below.
+ */
+subtitle?: string, 
+/**
+ * A clock reading, shown large.
+ */
+time?: string, 
+/**
+ * Plain text at the row's end.
+ */
+value?: string, 
+/**
+ * A switch, shown on or off.
+ */
+switch?: boolean, };
 
 /**
  * Whether settings are enough for what they set up, a plugin or a

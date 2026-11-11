@@ -10,6 +10,7 @@ mod event;
 mod health;
 mod packages;
 mod pairing;
+mod phone;
 mod protocol;
 mod refusal;
 mod text;
@@ -48,6 +49,10 @@ pub use packages::{
 pub use pairing::{
     PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
     PairingRequestBody, PairingSubject, PairingSubjectBody,
+};
+pub use phone::{
+    AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
+    Screen, ScreenItem, ScreenOutcome, ScreenRefusal, ScreenRow,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

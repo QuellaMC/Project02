@@ -749,6 +749,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'health_changed':
       // The daemon's word on the roster, in order with every state frame.
       return rosterSaid(state, event.health);
+    case 'phone_changed':
+      // The chat draws nothing of her phone.
+      return state;
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state
