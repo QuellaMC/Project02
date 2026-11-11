@@ -1,9 +1,10 @@
 # project02-shell
 
 The app a person installs: the daemon and the Telegram connector in its own
-process, a window on the daemon's page, and a tray that keeps them running
-while the window is closed. It depends on p02-shared, p02-telegram and
-project02, and on Tauri 2 for the window and the tray.
+process, a window on the daemon's page and one for her phone, and a tray
+that keeps them running while the main window is closed. It depends on
+p02-shared, p02-telegram and project02, and on Tauri 2 for the windows and
+the tray.
 
 It builds only where a webview's development files are: on Linux, the
 packages the gate's Linux job installs (`pkg-config`,
@@ -20,14 +21,36 @@ Xcode's command line tools.
   nothing else is accepted there.
 - **The start** makes the store there as `serve --init` does, the person
   having consented by installing, and starts the connector beside the
-  daemon. The window opens on the address the daemon says; a daemon that
-  ends before it says one, or a window that cannot open, is a dialog with
-  the last lines of the daemon's log, then the app quits. When another
+  daemon. The main window opens on the address the daemon says; a daemon
+  that ends before it says one, or a window that cannot open, is a dialog
+  with the last lines of the daemon's log, then the app quits. When another
   daemon already holds the home, its address is the one the window opens
   on.
-- **The window**, when closed, hides: the characters keep answering in
-  Telegram. The tray's Open, the Dock, and a second launch bring it back; a
-  second launch starts nothing.
+- **The main window**, when closed, hides: the characters keep answering
+  in Telegram. The tray's Open, the Dock, and a second launch bring it
+  back; a second launch starts nothing.
+- **Her phone's window** is the app's own. Her Phone in the chat calls
+  `window.open` on her phone's address; the main window answers that with
+  no window, as it answers every request, and the app opens her phone's
+  window itself at that address: 372 by 792, not resizable, without a
+  frame and transparent around the phone. There is one: another
+  character's phone takes it to her address. The capability `phone-window`
+  in `tauri.conf.json` gives that window, labelled `phone`, four of
+  Tauri's window calls, on 127.0.0.1, where the daemon serves, and nowhere
+  else: whether it stays on top, keeping it on top, starting a drag and
+  closing it, with which its page moves it by its bar, pins it and closes
+  it. The main window's page reaches nothing of Tauri. However it is
+  closed, it closes and does not hide; Quit hides it with the main window
+  before the stop order.
+- **What the app remembers** of her phone's window is in
+  `phone-window.json`, in the app's config folder
+  (`io.github.quellamc.project02` under the system's), written whole when
+  the window closes and when the app ends: where it was left, whether it
+  was pinned, and whose phone it showed when the app ended with it open.
+  At the next start, once the main window is on the daemon's address, that
+  phone opens again, pinned as it was and where it was, unless no screen
+  holds that place any more: then beside the main window, as the first
+  time. A file that cannot be read is no memory.
 - **The logs** are `daemon.log` and `telegram.log` in the app's log folder,
   `~/Library/Logs/io.github.quellamc.project02` on macOS and
   `io.github.quellamc.project02/logs` under the local data folder

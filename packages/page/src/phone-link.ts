@@ -8,6 +8,7 @@
  * much as the one that opened it. Browser-only: the browser suite is its
  * cover.
  */
+import {inTheApp} from './window-calls.ts';
 
 /** The one window her phone opens in. */
 const windowName = 'project02.phone';
@@ -29,14 +30,19 @@ type PhoneWindowNews = {
 
 /**
  * Her phone at `address`, the chat's own, in its one window at the
- * design's size: false when the browser would not open it.
+ * design's size: false when the browser would not open it. The desktop
+ * app opens that window itself and gives the page none: there nothing is
+ * refused, and should it fail, the button stays as it was.
  */
 export function openHerPhone(address: string, characterId: string): boolean {
   const phone = new URL(address);
 
   phone.searchParams.set('phone', characterId);
 
-  return window.open(phone.href, windowName, windowFeatures) !== null;
+  return (
+    window.open(phone.href, windowName, windowFeatures) !== null ||
+    inTheApp(window)
+  );
 }
 
 /**
@@ -71,9 +77,9 @@ export function followHerPhone(news: PhoneWindowNews): {
 /**
  * Her phone's window tells the chat of itself: whose phone it shows, now
  * and whenever it is asked, and that it went once the page goes, however
- * it goes; and it closes when the chat asks it to.
+ * it goes; and it closes, with `close`, when the chat asks it to.
  */
-export function tellTheChat(characterId: string): void {
+export function tellTheChat(characterId: string, close: () => void): void {
   const channel = new BroadcastChannel(channelName);
 
   channel.onmessage = ({data}: MessageEvent<unknown>) => {
@@ -82,7 +88,7 @@ export function tellTheChat(characterId: string): void {
     if (said?.kind === 'ask') {
       say(channel, {kind: 'shows', characterId});
     } else if (said?.kind === 'close' && said.characterId === characterId) {
-      window.close();
+      close();
     }
   };
   addEventListener('pagehide', () => {

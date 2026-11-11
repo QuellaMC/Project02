@@ -3409,6 +3409,8 @@ dependencies = [
  "p02-shared",
  "p02-telegram",
  "project02",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

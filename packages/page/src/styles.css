@@ -1754,7 +1754,15 @@ code {
   color: #ffffff;
 }
 
-/* Her phone's window: a bar, her phone and a line under it, at the design's size. */
+/*
+ * Her phone's window: a bar, her phone and a line under it, at the design's
+ * size, with nothing around them; a window that can show what is behind it
+ * does, and a browser's popup shows its own background.
+ */
+body:has(> #root > .phone-window) {
+  background: transparent;
+}
+
 .phone-window {
   width: 372px;
   height: 792px;
@@ -1781,6 +1789,11 @@ code {
   box-shadow: var(--float-shadow);
 }
 
+/* In a window without a frame of its own, the bar moves the window. */
+.phone-bar-moves {
+  cursor: grab;
+}
+
 .phone-bar-title {
   min-width: 0;
   margin: 0;
@@ -1805,6 +1818,7 @@ code {
   color: var(--secondary);
 }
 
+.phone-pin,
 .phone-close {
   flex: none;
   display: inline-grid;
@@ -1817,6 +1831,16 @@ code {
   border-radius: 16px;
   background: transparent;
   color: var(--secondary);
+}
+
+.phone-pin + .phone-close {
+  margin-left: 0;
+}
+
+/* Pressed while the window stays on top of other windows. */
+.phone-pin[aria-pressed='true'] {
+  background: var(--fill);
+  color: var(--link);
 }
 
 /* Said where her phone would be, when it cannot be shown. */

@@ -173,7 +173,7 @@ test("page.phone-rings: while a moment of hers that a ring began runs, her phone
   await expect(clockIcon(page)).toBeVisible();
 });
 
-test("page.phone-button: her chat's Her Phone button opens her phone's address in a window and is pressed while that window shows her phone; closing the window, or clicking the button again, leaves it plain; with her phone open, another character's takes the same window; a browser that blocks the window is told what to allow; once her settings switch her phone off, her chat has no button", async ({
+test("page.phone-button: her chat's Her Phone button opens her phone's address in a window and is pressed while that window shows her phone, a browser's popup with no pin; closing the window, or clicking the button again, leaves it plain; with her phone open, another character's takes the same window; a browser that blocks the window is told what to allow; once her settings switch her phone off, her chat has no button", async ({
   context,
   page,
 }) => {
@@ -192,6 +192,9 @@ test("page.phone-button: her chat's Her Phone button opens her phone's address i
 
   await expect(phone).toHaveURL(phoneOf(daemon, 'mira'));
   await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    phone.getByRole('button', {name: 'Keep on top of other windows'}),
+  ).toHaveCount(0);
   await Promise.all([
     phone.waitForEvent('close'),
     phone.getByRole('button', {name: 'Close her phone'}).click(),

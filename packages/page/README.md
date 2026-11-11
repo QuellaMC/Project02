@@ -42,7 +42,9 @@ Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the
 window says whose phone it shows when it opens, when a chat asks and when
-it goes, over a channel of the page's origin (`phone-link.ts`). From a
+it goes, over a channel of the page's origin (`phone-link.ts`). A browser
+that blocks that window is told so in a notice; in the desktop app, which
+opens the window itself and gives the page none, nothing is said. From a
 call of one of her phone's tools in a turn of hers, known by the plugin
 the stream names, until her next reply begins or the turn ends, she is
 using her phone: the button carries a dot, and her thread says so where
@@ -108,4 +110,13 @@ view on screen is read again at each minute's turn, and a reading that
 moves is counted on the page from the moments it carries. A character the
 daemon does not know, or whose settings give her no phone, is said in the
 daemon's sentence where her phone would be. `phone-window.tsx` and
-`phone-device.tsx` draw it as the design draws an iPhone.
+`phone-device.tsx` draw it as the design draws an iPhone, with nothing
+painted around it, so a window that can show what is behind it does.
+`window-calls.ts` tells, from the page's `window` and importing nothing of
+the app, whether a page is in the desktop app and what its window
+answers. The app's window for her phone has no frame of its own and
+answers four window calls: there the bar moves the window, a pin keeps it
+on top of other windows as the window says it does, and closing it, from
+the bar or when the chat asks, is the app's. A browser's popup, which has
+a title bar of its own, answers none: it gets no pin and no moving bar,
+and closes as a window a script opened.

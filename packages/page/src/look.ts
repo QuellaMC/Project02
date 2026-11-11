@@ -41,6 +41,7 @@ const icons = {
   eye: 'M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z M12 9.3a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4z',
   phone:
     'M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M10.5 18h3',
+  pin: 'M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z M12 15v5',
 } as const;
 
 export type IconName = keyof typeof icons;

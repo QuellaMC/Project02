@@ -2,10 +2,11 @@
  * Everything her phone's window shows, as one value, and every change to
  * it as a pure function of the previous value and one input: the daemon's
  * health, a read of her phone, a read of a view the person opened, the
- * person looking around, the stream's coming and going. Her phone's
- * session applies them and React reads the value; a reducer that changes
- * nothing returns the value it was given. Nothing here touches the DOM or
- * reads a clock, so the window's rules are tested in Node.
+ * person looking around, the stream's coming and going, what the window it
+ * is drawn in says of itself. Her phone's session applies them and React
+ * reads the value; a reducer that changes nothing returns the value it was
+ * given. Nothing here touches the DOM or reads a clock, so the window's
+ * rules are tested in Node.
  */
 import type {
   GatewayHealth,
@@ -74,6 +75,12 @@ export type PhoneState = {
   readonly fresh: ReadonlySet<string>;
   /** Why her phone could not be read, in a sentence; gone once it is. */
   readonly unread?: string | undefined;
+  /**
+   * The window her phone is drawn in, when it has no frame of its own and
+   * the page draws one: whether it stays on top of other windows. None in
+   * a window with a frame of its own, as a browser's popup.
+   */
+  readonly frame?: {readonly pinned: boolean};
 };
 
 /** What her phone's screen draws now. */
@@ -133,6 +140,11 @@ export function healthSaid(
 /** The address will never work again: the window says why, in place of her phone. */
 export function phoneRefused(state: PhoneState, message: string): PhoneState {
   return {...state, connection: {status: 'refused', message}};
+}
+
+/** The window her phone is drawn in has no frame of its own and stays on top of others, or not: the page draws its frame. */
+export function framed(state: PhoneState, pinned: boolean): PhoneState {
+  return state.frame?.pinned === pinned ? state : {...state, frame: {pinned}};
 }
 
 /**

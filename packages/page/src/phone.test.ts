@@ -14,6 +14,7 @@ import type {
 import {
   ago,
   clockParts,
+  framed,
   healthSaid,
   initialPhoneState,
   lineOf,
@@ -397,5 +398,15 @@ describe("her phone's window", () => {
     });
     expect(clockParts('19:00')).toEqual({digits: '19:00'});
     expect(clockParts('00:12.34')).toEqual({digits: '00:12.34'});
+  });
+
+  it('draws the frame of a window that has none of its own, its pin pressed while the window stays on top, and none for a window with a frame of its own', () => {
+    const popup = initialPhoneState('mira');
+    const pinned = framed(popup, true);
+
+    expect(popup.frame).toBeUndefined();
+    expect(pinned.frame).toEqual({pinned: true});
+    expect(framed(pinned, true)).toBe(pinned);
+    expect(framed(pinned, false).frame).toEqual({pinned: false});
   });
 });
