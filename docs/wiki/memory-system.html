@@ -201,7 +201,10 @@
         <code>sessions.search</code> and <code>sessions.read</code>. Turns
         condensed at a continuation stay searchable in the session that holds
         them, while carried turns are excluded from search results because the
-        model already sees them. Each tool bounds what it returns, so a long
+        model already sees them; a search counts the messages in the model's
+        view that hold the query, so an answer of no session says whether the
+        text is in front of it or nowhere at all. Each tool bounds what it
+        returns, so a long
         message comes back shortened rather than whole. Curated memory holds
         what must always be known; session search recovers what was merely said.
         A fact worth keeping gets promoted by the model from a transcript into

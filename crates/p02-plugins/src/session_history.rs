@@ -17,7 +17,7 @@ use p02_contracts::{
     PluginDatabase, PluginError, ProvidedTool, RuntimePlugin, SessionHistory, ToolCall,
     ToolCallOutcome,
 };
-use p02_core::SessionId;
+use p02_core::{MessageId, SessionId};
 use p02_shared::Identifier;
 use serde_json::Value;
 
@@ -113,17 +113,12 @@ impl RuntimePlugin for SessionHistoryPlugin {
     ) -> Result<ToolCallOutcome, PluginError> {
         let reach = Reach::of(context)?;
         let request = Request::of(call)?;
-        let unseen: Vec<String> = context
+        let in_view = context
             .turn_text()
-            .map(|text| {
-                text.recent_visible_message_ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect()
-            })
+            .map(|text| text.recent_visible_message_ids.clone())
             .unwrap_or_default();
         let index = Arc::clone(&self.index);
-        let answered = blocking(move || reach.answer(&index, request, &unseen)).await?;
+        let answered = blocking(move || reach.answer(&index, request, &in_view)).await?;
 
         Ok(match answered {
             Ok(answer) => ToolCallOutcome::Accepted {
@@ -221,7 +216,7 @@ impl Reach {
         &self,
         index: &Mutex<Option<SessionIndex>>,
         request: Request,
-        unseen: &[String],
+        in_view: &[MessageId],
     ) -> Result<Answer, IndexError> {
         match request {
             Request::Search {
@@ -247,7 +242,7 @@ impl Reach {
                         &query,
                         &Scope {
                             session: session.as_ref(),
-                            unseen,
+                            in_view,
                             limit,
                         },
                     )?;
@@ -256,7 +251,7 @@ impl Reach {
                         summary: format!(
                             "Returned {} of {} matching session(s).",
                             hits.views.len(),
-                            hits.sessions_with_hits
+                            hits.matching_sessions
                         ),
                         output: output::search(&hits, &query),
                     })

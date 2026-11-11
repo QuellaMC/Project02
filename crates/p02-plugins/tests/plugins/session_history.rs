@@ -89,7 +89,7 @@ fn committed() -> CommittedTurn {
 }
 
 #[tokio::test]
-async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
+async fn a_search_finds_what_the_model_cannot_see_and_counts_what_it_can() {
     let storage = Storage::new();
     let history = &storage.history;
     let long = format!("{} anchovy pizza {}", "a".repeat(300), "b".repeat(300));
@@ -160,6 +160,14 @@ async fn a_search_finds_what_the_model_cannot_see_by_routed_literal_queries() {
         cases.map(|(_, sessions)| sessions.to_vec())
     );
     assert_eq!(results[0]["totalSessionsWithHits"], json!(2));
+    // What the model already sees is never a hit, and is counted: nothing
+    // of the kraken, its own line beside the hit on the locker code, and
+    // the phrase only its interim reply holds, so that answer of no session
+    // says the phrase is in front of it.
+    assert_eq!(
+        [0, 5, 6].map(|case| &results[case]["matchesInView"]),
+        [&json!(0), &json!(1), &json!(1)]
+    );
 
     let echoed = results[0]["sessions"]
         .as_array()
