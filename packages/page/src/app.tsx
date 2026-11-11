@@ -119,6 +119,7 @@ function Chat({
           <Roster
             characters={health.characters}
             openId={thread?.characterId}
+            unseen={state.unseen}
             onOpen={characterId => {
               void session.open(characterId);
             }}
@@ -196,6 +197,7 @@ function Chat({
 function Roster({
   characters,
   openId,
+  unseen,
   onOpen,
   onStart,
   onSettings,
@@ -203,6 +205,8 @@ function Roster({
 }: {
   readonly characters: readonly CharacterSummary[];
   readonly openId: string | undefined;
+  /** The characters with a reply the person has not seen, each marked by a dot after her name. */
+  readonly unseen: ReadonlySet<string>;
   readonly onOpen: (characterId: string) => void;
   readonly onStart: (characterId: string) => void;
   readonly onSettings: (characterId: string) => void;
@@ -228,7 +232,16 @@ function Roster({
             }}
           >
             <Avatar id={character.id} name={character.displayName} />
-            <span className="roster-name">{character.displayName}</span>
+            <span className="roster-line">
+              <span className="roster-name">{character.displayName}</span>
+              {unseen.has(character.id) ? (
+                <span
+                  className="roster-unseen"
+                  role="img"
+                  aria-label="New message"
+                />
+              ) : null}
+            </span>
             <StatePill character={character} />
           </button>
           {/* Start is the retry for a character that is on; one that is off is turned on in its settings. */}

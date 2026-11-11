@@ -54,11 +54,7 @@ impl Home {
         self.check()?;
 
         with_lock(&self.locks_root(), &Resource::ConversationsCatalog, || {
-            if let Some(existing) = self
-                .conversations()?
-                .into_iter()
-                .find(|conversation| conversation.is_between(&participants))
-            {
+            if let Some(existing) = self.find_conversation(&participants)? {
                 return Ok(existing);
             }
 
@@ -70,6 +66,23 @@ impl Home {
             self.write_conversation(&conversation, &write_file_atomically)?;
             Ok(conversation)
         })
+    }
+
+    /// The one conversation between exactly `participants`, when the home
+    /// holds it: found, never made.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError`] when the home is refused, or a thread there cannot
+    /// be read or is malformed.
+    pub fn find_conversation(
+        &self,
+        participants: &[Participant],
+    ) -> Result<Option<Conversation>, StorageError> {
+        Ok(self
+            .conversations()?
+            .into_iter()
+            .find(|conversation| conversation.is_between(participants)))
     }
 
     /// Writes the record of `conversation`, new, in a directory made for it,

@@ -72,7 +72,8 @@
 {
   "version": "project02.config.v2",
   "project02": {
-    "enabled": true
+    "enabled": true,
+    "heartbeat": "30m"
   },
   "plugins": {
     "reply-style": {
@@ -94,7 +95,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the role-model provider with the NVIDIA key, model, and server it needs (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the role-model provider with the NVIDIA key, model, and server it needs (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
         <tr><td><code>connectors.&lt;id&gt;</code></td><td>The named connector's built-in declaration</td><td>Explicit enablement and the declared fields a messaging connector runs on.</td></tr>
       </tbody>
@@ -102,10 +103,10 @@
 
     <p>
       The host fields are declared once, in the field registry, in the order the settings
-      page renders them: what a person decides first, then the knobs, then each character's
-      own switch. Each field carries its description, value type, allowed values, default
-      value, and whether it is
-      a secret. Every other setting belongs to a declared section, kept under a namespace of
+      page renders them: what a person decides first, then the knobs, then what is each
+      character's own, her switch and her heartbeat. Each field carries its description,
+      value type, allowed values, default value, and whether it is a secret. Every other
+      setting belongs to a declared section, kept under a namespace of
       the document — <code>plugins</code> or <code>connectors</code> — at
       <code>&lt;namespace&gt;.&lt;id&gt;</code>, its fields at
       <code>&lt;namespace&gt;.&lt;id&gt;.config.&lt;field&gt;</code>. Every
@@ -232,7 +233,8 @@
       warning <code>runtime_config_authored_outside_scope</code> at its path, and blocks
       nothing. Secret fields follow their scope like any other setting.
       <code>character-state</code> and <code>reply-style</code> are character-only: each
-      belongs wholly to the character that runs it, as the host's <code>enabled</code> does.
+      belongs wholly to the character that runs it, as the host's <code>enabled</code> and
+      <code>heartbeat</code> do.
       <code>mem0</code>'s switch is layered while every field of it is global-only: the memory
       account is set up once, in the home, and each character switches her memory on or off.
     </p>

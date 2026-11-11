@@ -3,22 +3,24 @@ use serde_json::{Map, Value};
 
 use crate::role_model::answer::{ModelOutput, ProviderAnswer, WrittenCall};
 use crate::role_model::decision::{
-    CharacterDecision, DecisionRejection, DecisionRejectionReason, DecisionResult,
+    CharacterDecision, DecisionRejection, DecisionRejectionReason, DecisionResult, Occasion,
 };
 use crate::role_model::tools::{ModelToolCall, VISIBLE_REPLY};
 
 impl DecisionResult {
-    /// The one verdict on a model round. A provider that failed is
-    /// `provider_error`. In a person's turn the model replies or calls a
-    /// tool: its text alone is its reply, and text beside its calls is its
-    /// note; anything else, from no answer at all to a call the runtime
-    /// cannot make, is `malformed_output`, and the details say what to
-    /// fix, since the model is told them in its next round. A call's input
-    /// keeps its credential-named values, to run the call.
+    /// The one verdict on a model round of a turn begun from `occasion`. A
+    /// provider that failed is `provider_error`. Text beside the model's
+    /// calls is its note. With no call, its text alone is its reply in a
+    /// turn the person began, and a thought the character keeps in a moment
+    /// of her own, where an answer of nothing at all stands too. Anything
+    /// else, from no answer in a person's turn to a call the runtime cannot
+    /// make, is `malformed_output`, and the details say what to fix, since
+    /// the model is told them in its next round. A call's input keeps its
+    /// credential-named values, to run the call.
     #[must_use]
-    pub fn judge(answer: &ProviderAnswer) -> Self {
+    pub fn judge(answer: &ProviderAnswer, occasion: Occasion) -> Self {
         let (reason, details) = match answer {
-            ProviderAnswer::Answered { output, .. } => match decide(output) {
+            ProviderAnswer::Answered { output, .. } => match decide(output, occasion) {
                 Ok(decision) => return Self::Accepted { decision },
                 Err(details) => (DecisionRejectionReason::MalformedOutput, details),
             },
@@ -37,7 +39,7 @@ impl DecisionResult {
     }
 }
 
-fn decide(output: &ModelOutput) -> Result<CharacterDecision, String> {
+fn decide(output: &ModelOutput, occasion: Occasion) -> Result<CharacterDecision, String> {
     // A thinking model leaves a newline where its reasoning was: blank text
     // is nothing the model said.
     let text = output
@@ -46,10 +48,18 @@ fn decide(output: &ModelOutput) -> Result<CharacterDecision, String> {
         .filter(|text| !text.trim().is_empty());
 
     if output.tool_calls.is_empty() {
-        let text = text.ok_or("Reply with visible_reply or call a tool.")?;
-        let reply = ModelToolCall::reply(text).map_err(|error| format!("{error}."))?;
+        return match occasion {
+            Occasion::Line => {
+                let text = text.ok_or("Reply with visible_reply or call a tool.")?;
+                let reply = ModelToolCall::reply(text).map_err(|error| format!("{error}."))?;
 
-        return Ok(CharacterDecision::judged(vec![reply], None));
+                Ok(CharacterDecision::judged(vec![reply], None))
+            }
+            Occasion::Moment => Ok(CharacterDecision::judged(
+                Vec::new(),
+                text.map(str::to_owned),
+            )),
+        };
     }
 
     let calls = output
@@ -121,8 +131,8 @@ mod tests {
         }
     }
 
-    fn accepted(answer: &ProviderAnswer) -> Value {
-        match DecisionResult::judge(answer) {
+    fn accepted(answer: &ProviderAnswer, occasion: Occasion) -> Value {
+        match DecisionResult::judge(answer, occasion) {
             DecisionResult::Accepted { decision } => serde_json::to_value(decision).unwrap(),
             DecisionResult::Rejected { rejection } => panic!("{answer:?}: {rejection:?}"),
         }
@@ -141,7 +151,10 @@ mod tests {
         ];
 
         assert_eq!(
-            accepted(&answered(&calls, Some("Let me check what I remember."))),
+            accepted(
+                &answered(&calls, Some("Let me check what I remember.")),
+                Occasion::Line
+            ),
             json!({
                 "toolCalls": [
                     reply("first"),
@@ -152,16 +165,44 @@ mod tests {
             })
         );
         assert_eq!(
-            accepted(&answered(&[reply("hi")], Some(" \n\t "))),
+            accepted(&answered(&[reply("hi")], Some(" \n\t ")), Occasion::Line),
             json!({"toolCalls": [reply("hi")]})
         );
         assert_eq!(
-            accepted(&answered(
-                &[],
-                Some("<reasoning>hm</reasoning>Plain hello.")
-            )),
+            accepted(
+                &answered(&[], Some("<reasoning>hm</reasoning>Plain hello.")),
+                Occasion::Line
+            ),
             json!({"toolCalls": [reply("Plain hello.")]})
         );
+    }
+
+    /// In a moment of her own, her calls are judged as in any turn, and a
+    /// round with none is hers to end: its text a thought kept as written,
+    /// or nothing at all.
+    #[test]
+    fn in_a_moment_text_alone_is_a_thought_and_nothing_at_all_ends_it() {
+        assert_eq!(
+            accepted(
+                &answered(&[reply("Thinking of you.")], Some("I miss them.")),
+                Occasion::Moment
+            ),
+            json!({"toolCalls": [reply("Thinking of you.")], "text": "I miss them."})
+        );
+        assert_eq!(
+            accepted(
+                &answered(&[], Some("<think>hm</think>I miss them.")),
+                Occasion::Moment
+            ),
+            json!({"toolCalls": [], "text": "<think>hm</think>I miss them."})
+        );
+
+        for nothing in [answered(&[], None), answered(&[], Some(" \n"))] {
+            assert_eq!(
+                accepted(&nothing, Occasion::Moment),
+                json!({"toolCalls": []})
+            );
+        }
     }
 
     #[test]
@@ -169,18 +210,23 @@ mod tests {
         let many_fields: Map<String, Value> = (0..257)
             .map(|index| (format!("field{index}"), json!(index)))
             .collect();
+        let line = [Occasion::Line].as_slice();
+        let any = [Occasion::Line, Occasion::Moment].as_slice();
         let cases = [
             (
                 answered(&[], None),
                 "Reply with visible_reply or call a tool.",
+                line,
             ),
             (
                 answered(&[], Some(" \n")),
                 "Reply with visible_reply or call a tool.",
+                line,
             ),
             (
                 answered(&[json!({"name": "memory search", "input": {}})], None),
                 "\"memory search\" is not the name of a tool.",
+                any,
             ),
             (
                 answered(
@@ -191,6 +237,7 @@ mod tests {
                     None,
                 ),
                 "The arguments of memory.search must be a JSON object.",
+                any,
             ),
             (
                 answered(
@@ -198,6 +245,7 @@ mod tests {
                     None,
                 ),
                 "visible_reply needs its text as a string.",
+                any,
             ),
             (
                 answered(
@@ -205,10 +253,12 @@ mod tests {
                     None,
                 ),
                 "visible_reply takes only text, not mood.",
+                any,
             ),
             (
                 answered(&[reply("<think>still thinking")], None),
                 "visible_reply text must not be empty.",
+                any,
             ),
             (
                 answered(
@@ -216,20 +266,23 @@ mod tests {
                     None,
                 ),
                 "Model tool \"memory.capture\" input exceeds the JSON container entry limit.",
+                any,
             ),
         ];
 
-        for (answer, details) in cases {
-            assert_eq!(
-                DecisionResult::judge(&answer),
-                DecisionResult::Rejected {
-                    rejection: DecisionRejection {
-                        reason: DecisionRejectionReason::MalformedOutput,
-                        details: Some(details.to_owned()),
-                    }
-                },
-                "{answer:?}"
-            );
+        for (answer, details, occasions) in cases {
+            for &occasion in occasions {
+                assert_eq!(
+                    DecisionResult::judge(&answer, occasion),
+                    DecisionResult::Rejected {
+                        rejection: DecisionRejection {
+                            reason: DecisionRejectionReason::MalformedOutput,
+                            details: Some(details.to_owned()),
+                        }
+                    },
+                    "{answer:?} in a turn begun from {occasion:?}"
+                );
+            }
         }
     }
 }

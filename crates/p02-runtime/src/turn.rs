@@ -1,27 +1,29 @@
-//! One line through the turn: its records in the order they happen, the
-//! plugins' hooks around the model's rounds, what the turn announces as it
-//! goes, and the session's continuation after it.
+//! A turn through to its end, begun by the person's line or by a moment of
+//! the character's own: its records in the order they happen, the plugins'
+//! hooks around the model's rounds, what the turn announces as it goes,
+//! and the session's continuation after it.
 
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt as _;
-use jiff::civil::Date;
+use jiff::Zoned;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     CharacterDecision, CommittedTurn, ConversationToolCall, ConversationTurn, DecisionContext,
     Evidence, ModelToolCall, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
-    BlankTextError, ClientStamp, EventIdentity, MessageId, SpeakerName, Timestamp, UserLine,
-    VisibleMessage, VisibleText,
+    BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
+    UserLine, VisibleMessage,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    DraftEvent, DraftId, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
-    TurnSink, select_history_window, today_note,
+    DraftEvent, DraftId, ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput,
+    TurnOutcome, TurnSink, select_history_window, today_note,
 };
 use p02_shared::{Identifier, error_chain};
 use p02_store::{
@@ -74,7 +76,8 @@ pub enum Progress {
 /// A turn that completed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedTurn {
-    /// What it committed, the person's line first, in the order said.
+    /// What it committed, in the order said: the person's line first, when
+    /// a line began it.
     pub messages: Vec<VisibleMessage>,
     /// What failed once the turn was durable, which could change nothing
     /// about it: the plugins' work after the commit or its record, or the
@@ -82,7 +85,7 @@ pub struct CompletedTurn {
     pub post_commit_failures: Vec<String>,
 }
 
-/// A turn that ended refused, the person's line kept.
+/// A turn that ended refused, what it committed kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RejectedTurn {
     /// The reason its record names.
@@ -112,42 +115,101 @@ const BLANK_REFUSAL: &str = "Provide a non-empty message.";
 
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
-/// Takes `submission` through the turn on the thread's `disk`, `character`
-/// answering, and after a completed turn continues the session in a new
-/// segment when the model's window would no longer hold its history whole.
-pub(crate) async fn run(
+/// What a turn begins from: the person's line, as it came and as it was
+/// taken, with the stamps its client put on it; or a moment of her own,
+/// which nobody began.
+#[derive(Debug)]
+pub(crate) enum Occasion {
+    Line {
+        raw: String,
+        line: UserLine,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
+    },
+    Moment,
+}
+
+impl Occasion {
+    /// What its event records came in.
+    fn received(&self) -> EventReceived {
+        match self {
+            Self::Line { raw, line, .. } => EventReceived::Text(PayloadSummary {
+                raw_input: raw.clone(),
+                normalized_current_user_message: Some(line.clone().into()),
+            }),
+            Self::Moment => EventReceived::Moment,
+        }
+    }
+}
+
+/// Takes `submission` through the turn its line begins, or refuses a
+/// blank text as no line.
+pub(crate) async fn take(
     disk: &mut Option<Disk>,
     submission: Submission<'_>,
     character: &Character,
     mind: &mut dyn Mind,
     listener: &Listener<'_>,
 ) -> Delivery {
-    let identity = EventIdentity::mint();
     let line = match UserLine::new(submission.line) {
         Ok(line) => line,
-        Err(BlankTextError) => return refuse(disk, &identity, submission.line).await,
+        Err(BlankTextError) => return refuse(disk, submission.line).await,
     };
+    let occasion = Occasion::Line {
+        raw: submission.line.to_owned(),
+        line,
+        source: submission.source,
+        client_message_id: submission.client_message_id,
+    };
+
+    run(disk, occasion, character, mind, listener).await
+}
+
+/// Takes a turn begun from `occasion` to its end on the thread's `disk`,
+/// `character` answering, and after a completed turn continues the session
+/// in a new segment when the model's window would no longer hold its
+/// history whole.
+pub(crate) async fn run(
+    disk: &mut Option<Disk>,
+    occasion: Occasion,
+    character: &Character,
+    mind: &mut dyn Mind,
+    listener: &Listener<'_>,
+) -> Delivery {
+    let identity = EventIdentity::mint();
     let person = mind.person().clone();
-    let begun = match begin(disk, &identity, &submission, line, person).await {
+    let begun = match begin(disk, &identity, occasion, person).await {
         Ok(begun) => begun,
         Err(error) => return failed(disk, &identity, Vec::new(), Vec::new(), error).await,
     };
+    let (opening, committed) = match begun.opened {
+        Opened::Line {
+            message,
+            source,
+            client_message_id,
+        } => {
+            listener(Progress::UserMessage {
+                message: message.clone(),
+                source,
+                client_message_id,
+            });
+            (Opening::Line(message.text.clone()), vec![message])
+        }
+        Opened::Moment => {
+            let since_last_line = since_last_line(&begun.history.turns, identity.created_at());
 
-    listener(Progress::UserMessage {
-        message: begun.message.clone(),
-        source: submission.source,
-        client_message_id: submission.client_message_id,
-    });
-
+            (Opening::Moment { since_last_line }, Vec::new())
+        }
+    };
     let window = select_history_window(&begun.history.turns, mind.context_window());
     let mut turn = OpenTurn {
         identity: identity.clone(),
-        line: begun.message.text.clone(),
-        day: begun.day,
+        opening,
+        now: begun.now,
         character,
         listener,
         hooks: p02_plugins::Turn::new(TurnIdentity {
-            session_id: begun.message.id.session_id().clone(),
+            session_id: begun.session,
             event: identity.clone(),
             character: character.profile.clone(),
         }),
@@ -159,7 +221,7 @@ pub(crate) async fn run(
         summary: begun.history.summary.as_deref(),
         ledger: Mutex::new(Ledger {
             disk: disk.take(),
-            committed: vec![begun.message],
+            committed,
             finished: Vec::new(),
             prepared: Vec::new(),
             calls: Vec::new(),
@@ -181,7 +243,8 @@ pub(crate) async fn run(
 
 /// Records a blank text as its event, taken as no line, and the runtime's
 /// refusal of it.
-async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) -> Delivery {
+async fn refuse(disk: &mut Option<Disk>, raw: &str) -> Delivery {
+    let identity = EventIdentity::mint();
     let message = BLANK_REFUSAL.to_owned();
     let refused = {
         let (identity, raw, message) = (identity.clone(), raw.to_owned(), message.clone());
@@ -189,12 +252,10 @@ async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) ->
         on_disk(disk, move |disk| {
             disk.append(
                 &identity,
-                RecordBody::EventReceived(EventReceived {
-                    payload_summary: PayloadSummary {
-                        raw_input: raw,
-                        normalized_current_user_message: None,
-                    },
-                }),
+                RecordBody::EventReceived(EventReceived::Text(PayloadSummary {
+                    raw_input: raw,
+                    normalized_current_user_message: None,
+                })),
             )?;
             disk.append(
                 &identity,
@@ -209,64 +270,97 @@ async fn refuse(disk: &mut Option<Disk>, identity: &EventIdentity, raw: &str) ->
 
     match refused {
         Ok(()) => Delivery::InputRejected { message },
-        Err(error) => failed(disk, identity, Vec::new(), Vec::new(), error).await,
+        Err(error) => failed(disk, &identity, Vec::new(), Vec::new(), error).await,
     }
 }
 
-/// The turn as far as its line: the session's history, read before the
-/// line is committed, the line as committed, and the day it is where the
-/// person is.
+/// The turn as far as what began it: the session's history, read before
+/// anything of the turn is committed, the session it runs in, how it
+/// opened, and when it began, where the person is.
 struct Begun {
     history: ConversationHistory,
-    message: VisibleMessage,
-    day: Date,
+    session: SessionId,
+    opened: Opened,
+    now: Zoned,
 }
 
-/// Records the event, reads the history, then commits the person's line,
-/// said under `person`, and reads the machine's time zone, all on the
-/// disk's side.
+/// How a turn opened: with the person's line, committed under the stamps
+/// its client put on it, or with a moment of hers, which commits nothing.
+enum Opened {
+    Line {
+        message: VisibleMessage,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
+    },
+    Moment,
+}
+
+/// Records the event of `occasion`, reads the history, then commits the
+/// person's line, said under `person`, when a line began the turn, and
+/// reads the machine's time zone, all on the disk's side.
 async fn begin(
     disk: &mut Option<Disk>,
     identity: &EventIdentity,
-    submission: &Submission<'_>,
-    line: UserLine,
+    occasion: Occasion,
     person: SpeakerName,
 ) -> Result<Begun, RunTurnError> {
     let identity = identity.clone();
-    let raw = submission.line.to_owned();
-    let source = submission.source.clone();
-    let client_message_id = submission.client_message_id.clone();
 
     on_disk(disk, move |disk| {
-        disk.append(
-            &identity,
-            RecordBody::EventReceived(EventReceived {
-                payload_summary: PayloadSummary {
-                    raw_input: raw,
-                    normalized_current_user_message: Some(line.clone().into()),
-                },
-            }),
-        )?;
+        disk.append(&identity, RecordBody::EventReceived(occasion.received()))?;
 
         let replay = disk.writer.replay()?;
         let history = replay.history();
-        let message = replay.session().user_message(line, person);
-
-        disk.append(
-            &identity,
-            RecordBody::MessageCommitted(MessageCommitted::user(
-                message.clone(),
+        let session = replay.session().id().clone();
+        let opened = match occasion {
+            Occasion::Line {
+                line,
                 source,
                 client_message_id,
-            )),
-        )?;
+                ..
+            } => {
+                let message = replay.session().user_message(line, person);
+
+                disk.append(
+                    &identity,
+                    RecordBody::MessageCommitted(MessageCommitted::user(
+                        message.clone(),
+                        source.clone(),
+                        client_message_id.clone(),
+                    )),
+                )?;
+                Opened::Line {
+                    message,
+                    source,
+                    client_message_id,
+                }
+            }
+            Occasion::Moment => Opened::Moment,
+        };
+
         Ok(Begun {
             history,
-            message,
-            day: calendar_day(identity.created_at()),
+            session,
+            opened,
+            now: where_they_are(identity.created_at()),
         })
     })
     .await
+}
+
+/// How long before `now` the person last wrote: the newest turn of
+/// `history` a line began, by its event's time; none when no line is in
+/// it.
+fn since_last_line(history: &[ConversationTurn], now: &Timestamp) -> Option<Duration> {
+    history
+        .iter()
+        .rev()
+        .find(|turn| turn.user_message.is_some())
+        .map(|turn| {
+            let elapsed = now.unix_millis() - turn.identity.created_at().unix_millis();
+
+            Duration::from_millis(u64::try_from(elapsed).unwrap_or(0))
+        })
 }
 
 /// The turn failed: its rejection is recorded if it still can be, naming
@@ -295,26 +389,21 @@ async fn failed(
     Delivery::Failed(error)
 }
 
-/// The day it is where the person is at the turn's `moment`, by the
-/// machine's time zone, which no setting could know better and which is
-/// read from the machine's files; a zone that cannot be read is taken as
-/// UTC.
-fn calendar_day(moment: &Timestamp) -> Date {
-    moment
-        .as_str()
-        .parse::<jiff::Timestamp>()
-        .expect("a moment minted from the clock reads back")
-        .to_zoned(TimeZone::system())
-        .date()
+/// The turn's `moment` where the person is, by the machine's time zone,
+/// which no setting could know better and which is read from the machine's
+/// files; a zone that cannot be read is taken as UTC.
+fn where_they_are(moment: &Timestamp) -> Zoned {
+    moment.in_zone(TimeZone::system())
 }
 
-/// A turn from its committed line to its end: the hooks' view of it, and
-/// what it has committed so far.
+/// A turn from what began it to its end: the hooks' view of it, and what
+/// it has committed so far.
 struct OpenTurn<'a> {
     identity: EventIdentity,
-    line: VisibleText,
-    /// The day the model is told it is, first of its notes.
-    day: Date,
+    opening: Opening,
+    /// When it began, where the person is: the day the model is told it
+    /// is, first of its notes, and the time a moment's note tells.
+    now: Zoned,
     character: &'a Character,
     listener: &'a Listener<'a>,
     /// The turn as its hooks are shown it, without its text: each phase is
@@ -388,7 +477,8 @@ impl OpenTurn<'_> {
         };
         let mut rounds = Rounds::new(TurnInput {
             event: self.identity.clone(),
-            user_message: self.line.clone(),
+            opening: self.opening.clone(),
+            now: self.now.clone(),
             context,
             plugin_tools: mind.host().tool_definitions().clone(),
             history: window,
@@ -436,7 +526,7 @@ impl OpenTurn<'_> {
                     message,
                 }))
             }
-            TurnOutcome::Replied { round, decision } => {
+            TurnOutcome::Completed { round, decision } => {
                 self.complete(round, &decision, mind.host()).await
             }
         }
@@ -461,7 +551,7 @@ impl OpenTurn<'_> {
             BeforeCallOutcome::Prepared(prepared) => prepared,
             BeforeCallOutcome::Rejected(rejection) => return Preparation::Refused(rejection),
         };
-        let notes = std::iter::once(today_note(self.day))
+        let notes = std::iter::once(today_note(self.now.date()))
             .chain(runtime_notes)
             .collect();
         let mut context =
@@ -477,9 +567,9 @@ impl OpenTurn<'_> {
         Preparation::Prepared(context)
     }
 
-    /// The turn as a phase of hooks is shown it now: the person's line, and
-    /// the visible messages in the model's sight, the window's and every one
-    /// committed so far.
+    /// The turn as a phase of hooks is shown it now: the person's line, when
+    /// one began it, and the visible messages in the model's sight, the
+    /// window's and every one committed so far.
     async fn shown(&self) -> p02_plugins::Turn {
         let ledger = self.ledger.lock().await;
         let recent = self
@@ -490,7 +580,7 @@ impl OpenTurn<'_> {
             .collect();
 
         self.hooks.clone().with_text(TurnText {
-            current_user_message: self.line.clone(),
+            current_user_message: self.opening.line().cloned(),
             recent_visible_message_ids: recent,
         })
     }
@@ -537,7 +627,8 @@ impl OpenTurn<'_> {
     }
 
     /// Ends the turn completed on round `round`, anchoring the last reply it
-    /// said, then runs the work of `host`'s plugins after the commit.
+    /// said, if it said one, then runs the work of `host`'s plugins after
+    /// the commit.
     async fn complete(
         &self,
         round: NonZeroU32,

@@ -129,6 +129,18 @@ impl Timestamp {
         &self.0
     }
 
+    /// The moment as a clock in `zone` reads it.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "a moment of the years 0 to 9999 is one jiff keeps"
+    )]
+    pub fn in_zone(&self, zone: jiff::tz::TimeZone) -> jiff::Zoned {
+        jiff::Timestamp::from_millisecond(self.unix_millis())
+            .expect("a moment of the years 0 to 9999 is one jiff keeps")
+            .to_zoned(zone)
+    }
+
     /// The moment in milliseconds since the Unix epoch, as a client's clock
     /// reads a deadline.
     #[must_use]

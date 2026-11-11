@@ -70,13 +70,16 @@ fn embedded(stub: &Stub, embedder: &str) -> Value {
 /// Sam's line and Mira's reply in `session`, as event `event`: the turn,
 /// and the turn once committed.
 fn exchange(session: &str, event: &str, line: &str, reply: &str) -> (Turn, CommittedTurn) {
-    spoken(session, event, ("Sam", line), ("Mira", reply))
+    spoken(session, event, Some(("Sam", line)), ("Mira", reply))
 }
 
+/// A turn in `session`, as event `event`, that a speaker's `line` began, or
+/// a moment of hers when none did, and the character's `reply` in it: the
+/// turn, and the turn once committed.
 fn spoken(
     session: &str,
     event: &str,
-    (speaker, line): (&str, &str),
+    line: Option<(&str, &str)>,
     (character, reply): (&str, &str),
 ) -> (Turn, CommittedTurn) {
     let session_id = SessionId::parse(session).unwrap();
@@ -101,14 +104,24 @@ fn spoken(
         },
     })
     .with_text(TurnText {
-        current_user_message: VisibleText::normalize(line).unwrap(),
+        current_user_message: line.map(|(_, text)| VisibleText::normalize(text).unwrap()),
         recent_visible_message_ids: Vec::new(),
     });
     let committed = CommittedTurn::new(Timestamp::new("2026-10-18T01:00:01.000Z").unwrap())
-        .with_messages(vec![
-            message(1, VisibleMessageRole::User, "local-user", speaker, line),
-            message(2, VisibleMessageRole::Character, "mira", character, reply),
-        ]);
+        .with_messages(
+            line.map(|(speaker, text)| {
+                message(1, VisibleMessageRole::User, "local-user", speaker, text)
+            })
+            .into_iter()
+            .chain([message(
+                2,
+                VisibleMessageRole::Character,
+                "mira",
+                character,
+                reply,
+            )])
+            .collect(),
+        );
 
     (turn, committed)
 }
@@ -461,6 +474,23 @@ async fn a_redirect_an_unreadable_answer_or_another_backends_answer_fails_the_ca
     assert!(!format!("{reports:?}").contains(SERVER_KEY));
     assert!(!format!("{reports:?}").contains(PLATFORM_KEY));
     assert!(to_server_stub.requests_to("/elsewhere").is_empty());
+}
+
+/// A moment of Mira's own, which no line began, has nothing to recall by
+/// and nothing to learn from: the backend is never asked, and her end waits
+/// on no capture.
+#[tokio::test]
+async fn a_moment_recalls_nothing_by_itself_and_queues_no_capture() {
+    let mem0 = Stub::mem0().await;
+    let host = host(&Storage::new(), &server(&mem0));
+    let (turn, committed) = spoken("chat.1", "evt_1", None, ("Mira", "Thinking of you."));
+    let recalled = recall(&host, &turn).await;
+    let captured = host.after_turn_committed(&turn, &committed).await;
+
+    assert_eq!(recalled, PreparedContext::default());
+    assert!(captured.evidence.is_empty(), "{captured:?}");
+    assert_eq!(drained(host).await, "Closed memory provider.");
+    assert!(mem0.requests().is_empty());
 }
 
 #[tokio::test]

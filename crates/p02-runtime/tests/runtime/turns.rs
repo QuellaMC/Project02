@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use p02_contracts::{ChatMessage, ModelOutput, ToolCallOutcome};
 use p02_runtime::{CompletedTurn, Delivery, Progress, Submission};
-use p02_store::{RecordBody, RecordKind};
+use p02_store::{EventReceived, RecordBody, RecordKind};
 use serde_json::{Value, json};
 
 use crate::support::{Chat, Fixed, Round, Toy, reply, stamp, told, written};
@@ -129,9 +129,8 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
     );
     assert!(matches!(
         chat.records(1)[0].body(),
-        RecordBody::EventReceived(received)
-            if received.payload_summary.raw_input == " \t "
-                && received.payload_summary.normalized_current_user_message.is_none()
+        RecordBody::EventReceived(EventReceived::Text(summary))
+            if summary.raw_input == " \t " && summary.normalized_current_user_message.is_none()
     ));
     assert_eq!(chat.model.asked.lock().unwrap().len(), 1);
 }

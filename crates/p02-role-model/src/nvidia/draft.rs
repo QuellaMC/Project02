@@ -1,10 +1,11 @@
 //! What the adapter speaks while the model writes: each native
 //! `visible_reply` call's text, decoded from its arguments as they stream,
 //! behind the reasoning filter the judge will scrub the whole with.
-//! Content is never spoken: alone it is the reply and arrives whole at the
-//! commit, and beside a tool call it is the model's note to itself, which
-//! the prompt promises the person never hears; which of the two it is
-//! cannot be known while it arrives.
+//! Content is never spoken: alone it is the reply, which arrives whole at
+//! the commit, or in a moment of the character's own a thought she keeps,
+//! and beside a tool call it is the model's note to itself; the prompt
+//! promises the person never hears either, and which it is cannot be known
+//! while it arrives.
 
 use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, VISIBLE_REPLY};
 

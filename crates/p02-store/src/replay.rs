@@ -67,7 +67,8 @@ impl SessionReplay {
     }
 
     /// The turn of event `event` as the model replays it, projected from
-    /// its records alone; none before the person's line is committed.
+    /// its records alone; none until it is a turn of the history, as
+    /// [`SessionReplay::history`] has it.
     #[must_use]
     pub fn turn(&self, event: &EventIdentity) -> Option<ConversationTurn> {
         project(

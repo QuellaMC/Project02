@@ -4,6 +4,7 @@
 
 use std::num::NonZeroU64;
 
+use jiff::tz::TimeZone;
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, ConversationToolCall, ConversationTurn,
     ToolCallResult, ToolRound,
@@ -11,24 +12,30 @@ use p02_contracts::{
 use serde::Serialize;
 use serde_json::json;
 
-/// An earlier turn as the model replays it: the person's line, each tool
-/// round as the assistant's calls and their results, then the character's
-/// replies as plain assistant text. `visible_reply` itself is never
-/// replayed.
-pub(crate) fn turn_messages(turn: &ConversationTurn) -> Vec<ChatMessage> {
-    std::iter::once(ChatMessage::User {
-        content: turn.user_message.text.to_string(),
-    })
-    .chain(turn.tool_rounds.iter().flat_map(round_messages))
-    .chain(
-        turn.final_replies
-            .iter()
-            .map(|reply| ChatMessage::Assistant {
-                content: Some(reply.text.to_string()),
-                tool_calls: Vec::new(),
-            }),
-    )
-    .collect()
+use crate::prompt::past_moment;
+
+/// An earlier turn as the model replays it: the person's line, or the note
+/// of a moment of the character's own, telling when it was in `zone`; each
+/// tool round as the assistant's calls and their results; then the
+/// character's replies as plain assistant text. `visible_reply` itself is
+/// never replayed.
+pub(crate) fn turn_messages(turn: &ConversationTurn, zone: &TimeZone) -> Vec<ChatMessage> {
+    let opening = match &turn.user_message {
+        Some(line) => line.text.to_string(),
+        None => past_moment(&turn.identity.created_at().in_zone(zone.clone())),
+    };
+
+    std::iter::once(ChatMessage::User { content: opening })
+        .chain(turn.tool_rounds.iter().flat_map(round_messages))
+        .chain(
+            turn.final_replies
+                .iter()
+                .map(|reply| ChatMessage::Assistant {
+                    content: Some(reply.text.to_string()),
+                    tool_calls: Vec::new(),
+                }),
+        )
+        .collect()
 }
 
 /// A tool round on the wire: the model's note and what it said aloud as the
@@ -109,8 +116,10 @@ fn estimated_tokens(chars: u64) -> u64 {
     chars.div_ceil(4)
 }
 
+/// What `turn` costs replayed, a moment's note counted in UTC, which its
+/// length hardly feels.
 fn turn_tokens(turn: &ConversationTurn) -> u64 {
-    turn_messages(turn)
+    turn_messages(turn, &TimeZone::UTC)
         .iter()
         .map(|message| estimated_tokens(wire_chars(message)))
         .sum()
@@ -221,6 +230,43 @@ mod tests {
         assert_eq!(turn_tokens(&emoji), turn_tokens(&letters));
     }
 
+    /// A moment of hers replays its note where a line would be, telling
+    /// when it was where the person is, and nothing of what the moment was
+    /// hers for or how long since the person wrote, which no record keeps;
+    /// then what she said in it.
+    #[test]
+    fn a_moment_replays_its_note_telling_when_it_was_then_what_she_said() {
+        let moment: ConversationTurn = serde_json::from_value(json!({
+            "eventId": "evt_2",
+            "traceId": "trace_2",
+            "createdAt": "2026-11-07T04:40:00.000Z",
+            "toolRounds": [],
+            "finalReplies": [{
+                "id": "chat.1:message-3",
+                "role": "character",
+                "speakerId": "mira",
+                "speakerName": "Mira",
+                "text": "Found your keys yet?",
+            }],
+        }))
+        .unwrap();
+        let zone = TimeZone::fixed(jiff::tz::offset(-5));
+
+        assert_eq!(
+            serde_json::to_value(turn_messages(&moment, &zone)).unwrap(),
+            json!([
+                {
+                    "role": "user",
+                    "content": "<moment_of_your_own>\n\
+                                A moment of your own, on Friday, November 6, 2026, at 23:40 — \
+                                nobody had written to you.\n\
+                                </moment_of_your_own>",
+                },
+                {"role": "assistant", "content": "Found your keys yet?"},
+            ])
+        );
+    }
+
     #[test]
     fn a_tool_round_replays_as_its_note_and_replies_its_calls_and_their_results() {
         let mut replayed = turn(1, "done");
@@ -248,7 +294,7 @@ mod tests {
         ];
 
         assert_eq!(
-            serde_json::to_value(turn_messages(&replayed)).unwrap(),
+            serde_json::to_value(turn_messages(&replayed, &TimeZone::UTC)).unwrap(),
             json!([
                 {"role": "user", "content": "question 1"},
                 {
@@ -269,7 +315,7 @@ mod tests {
             ])
         );
         assert!(
-            !serde_json::to_string(&turn_messages(&replayed))
+            !serde_json::to_string(&turn_messages(&replayed, &TimeZone::UTC))
                 .unwrap()
                 .contains("visible_reply")
         );

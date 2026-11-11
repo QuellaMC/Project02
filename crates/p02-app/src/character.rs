@@ -1,8 +1,9 @@
 //! One actor per character: a task owning everything of hers, her state,
 //! the parts she is assembled from, her thread with the person and her
 //! confirmations, which answers what it is asked in the order it was asked,
-//! takes the lines in her inbox one at a time while she is ready, and
-//! between two steps reads whether she is to stop.
+//! takes the lines in her inbox one at a time while she is ready, gives her
+//! a moment of her own whenever she has been quiet for as long as her
+//! heartbeat says, and between two steps reads whether she is to stop.
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,10 +23,11 @@ use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progre
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
 use p02_wire::{
-    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, TurnRefusal,
-    TurnStamp, TurnStatus,
+    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, RunningTurn,
+    TurnRefusal, TurnStamp, TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
 use crate::config_control::CharacterConfig;
@@ -99,6 +101,7 @@ impl CharacterHandle {
                 },
                 commands: receiver,
                 parts: None,
+                quiet: None,
             }
             .run(),
         );
@@ -271,6 +274,10 @@ struct Actor {
     her: Her,
     commands: mpsc::UnboundedReceiver<Command>,
     parts: Option<Parts>,
+    /// Since when she has been quiet in this run: since her thread with the
+    /// person opened, her last turn ended, or her boot found her thread
+    /// made before; none while her thread has never been made.
+    quiet: Option<Instant>,
 }
 
 /// What every step of hers reaches: who she is, the world she is built
@@ -294,6 +301,8 @@ impl Actor {
                 continue;
             }
 
+            let due = self.due();
+
             tokio::select! {
                 biased;
                 () = self.her.stop.cancelled() => break,
@@ -302,10 +311,36 @@ impl Actor {
                     // The daemon let go of her without a stop.
                     None => break,
                 },
+                () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
+                    self.moment().await;
+                }
             }
         }
 
         self.stop_now().await;
+    }
+
+    /// When her next moment of her own is due: one period of her heartbeat
+    /// after she has been quiet since, while she is ready and her heartbeat
+    /// is not off. A moment missed is never made up: she has been quiet
+    /// since an instant of this run.
+    fn due(&self) -> Option<Instant> {
+        let minutes = self
+            .parts
+            .as_ref()
+            .filter(|_| self.her.state() == CharacterState::Ready)?
+            .built
+            .settings
+            .host()
+            .heartbeat?;
+
+        self.quiet?.checked_add(
+            self.her
+                .world
+                .durations
+                .minute
+                .saturating_mul(minutes.get()),
+        )
     }
 
     async fn handle(&mut self, command: Command) {
@@ -334,43 +369,105 @@ impl Actor {
 
     /// Takes the oldest line in her inbox through her thread, while she is
     /// ready and her settings still build her with a model: true when she
-    /// took one. The line leaves her inbox once its turn ends, however it
-    /// ended, and only then is the end announced, so a client that hears it
-    /// and sends the line again is answered as her thread has it. A turn
-    /// the runtime fails leaves her failed, and she is built again behind
-    /// it; her inbox failing fails her.
+    /// took one.
     async fn take_next(&mut self) -> bool {
         let Some(line) = self.oldest_queued().await else {
             return false;
         };
-        let Ok(mut parts) = self.current().await else {
+        // Her stop came, or her settings no longer give her a model: the
+        // line waits in her inbox.
+        let Some((parts, adapter)) = self.runnable().await else {
             return false;
         };
-        let adapter = match &parts.built.model {
-            Ok(adapter) if !self.her.stop.is_cancelled() => Arc::clone(adapter),
-            // Her stop came, or her settings no longer give her a model:
-            // the line waits in her inbox.
+        let turn = running_turn(
+            self.her.id.clone(),
+            line.conversation_id.clone(),
+            Some(&line),
+        );
+
+        self.take(parts, adapter, turn, Some(line)).await;
+        true
+    }
+
+    /// A moment of her own, now that one is due: she is brought up to date
+    /// with her settings first, and it runs through her thread while they
+    /// still give her a model and a heartbeat. A moment whose thread cannot
+    /// be opened never begins, and is noted as maintenance.
+    async fn moment(&mut self) {
+        let Some((mut parts, adapter)) = self.runnable().await else {
+            return;
+        };
+
+        if parts.built.settings.host().heartbeat.is_none() {
+            self.parts = Some(parts);
+            return;
+        }
+
+        let held = self
+            .hold(&mut parts.thread, &parts.built.character)
+            .await
+            .map(|thread| thread.id().clone());
+
+        match held {
+            Ok(conversation) => {
+                let turn = running_turn(self.her.id.clone(), conversation, None);
+
+                self.take(parts, adapter, turn, None).await;
+            }
+            Err(error) => {
+                self.parts = Some(parts);
+                self.quiet = Some(Instant::now());
+                self.her.note_maintenance(error_sentence(&error));
+            }
+        }
+    }
+
+    /// Her parts brought up to date with her settings, and the model they
+    /// give her; none, her parts kept, once her stop came or while they
+    /// give her no model.
+    async fn runnable(&mut self) -> Option<(Parts, Arc<dyn RoleModelAdapter>)> {
+        let parts = self.current().await.ok()?;
+
+        match &parts.built.model {
+            Ok(adapter) if !self.her.stop.is_cancelled() => {
+                let adapter = Arc::clone(adapter);
+
+                Some((parts, adapter))
+            }
             _ => {
                 self.parts = Some(parts);
-                return false;
+                None
             }
-        };
-        let taken = self.turn(&mut parts, adapter, &line).await;
+        }
+    }
+
+    /// Takes `turn` through her thread on `parts` with `adapter` her model:
+    /// the turn of `line`, or a moment of her own when there is none. Once
+    /// it ended, however it ended, she has been quiet since; `line` leaves
+    /// her inbox, and only then is the end announced, so a client that
+    /// hears it and sends the line again is answered as her thread has it.
+    /// A turn the runtime fails leaves her failed, and she is built again
+    /// behind it; her inbox failing fails her.
+    async fn take(
+        &mut self,
+        mut parts: Parts,
+        adapter: Arc<dyn RoleModelAdapter>,
+        turn: RunningTurn,
+        line: Option<QueuedLine>,
+    ) {
+        let taken = self.turn(&mut parts, adapter, &turn, line.as_ref()).await;
         let data = parts.built.data.clone();
 
         self.parts = Some(parts);
+        self.quiet = Some(Instant::now());
 
         let (ending, failure) = self.ended(taken);
-        let removed = {
-            let line = line.clone();
-
-            blocking(move || data.unqueue(&line)).await
+        let removed = match line {
+            Some(line) => blocking(move || data.unqueue(&line)).await,
+            None => Ok(()),
         };
 
-        self.her
-            .world
-            .events
-            .emit(ending.announced(self.her.id.clone(), line));
+        self.her.world.events.emit(ending.announced(turn));
 
         match (removed, failure) {
             (Err(error), _) => self.fail(error_sentence(&error)).await,
@@ -380,34 +477,42 @@ impl Actor {
             }
             (Ok(()), None) => {}
         }
-
-        true
     }
 
-    /// Takes `line` through her thread on `parts`, opened before the turn
-    /// begins, with `adapter` her model, while she still hears what she is
-    /// asked: an open of her thread is answered at once, and so is a start,
-    /// since she runs.
+    /// Takes `turn` through her thread on `parts`, opened before it begins,
+    /// with `adapter` her model: the turn of `line`, or a moment of her own
+    /// when there is none. While it runs she still hears what she is asked:
+    /// an open of her thread is answered at once, and so is a start, since
+    /// she runs.
     async fn turn(
         &mut self,
         parts: &mut Parts,
         adapter: Arc<dyn RoleModelAdapter>,
-        line: &QueuedLine,
+        turn: &RunningTurn,
+        line: Option<&QueuedLine>,
     ) -> Result<(Delivery, bool), Ending> {
         let Parts { built, thread } = parts;
-        let thread = hold(&self.her, thread, &built.character)
+        let thread = self
+            .hold(thread, &built.character)
             .await
             .map_err(|error| Ending::failed(error_sentence(&error), false))?;
         let opened = OpenOutcome::Opened {
             conversation_id: thread.id().clone(),
             character_id: self.her.id.clone(),
         };
-        let mut turn = std::pin::pin!(take_line(&self.her, thread, built, adapter, line));
+        let mut taking = std::pin::pin!(take_turn(
+            &self.her,
+            thread,
+            built,
+            adapter,
+            turn.clone(),
+            line
+        ));
 
         loop {
             tokio::select! {
                 biased;
-                taken = &mut turn => break Ok(taken),
+                taken = &mut taking => break Ok(taken),
                 Some(command) = self.commands.recv() => match command {
                     Command::Open(answer) => {
                         let _ = answer.send(opened.clone());
@@ -479,11 +584,38 @@ impl Actor {
         Ok(parts)
     }
 
+    /// Her thread with the person, opened on the blocking pool the first
+    /// time it is asked for, when she has been quiet since; what the open
+    /// read past is noted as maintenance.
+    async fn hold<'t>(
+        &mut self,
+        thread: &'t mut Option<Conversation>,
+        character: &Character,
+    ) -> Result<&'t mut Conversation, StorageError> {
+        let held = if let Some(held) = thread.take() {
+            held
+        } else {
+            let home = self.her.world.home.clone();
+            let character = character.clone();
+            let opened = blocking(move || Conversation::open(&home, character)).await?;
+
+            if let Some(skipped) = opened.skipped() {
+                self.her.note_maintenance(skipped.to_owned());
+            }
+
+            self.quiet = Some(Instant::now());
+            opened
+        };
+
+        Ok(thread.insert(held))
+    }
+
     async fn boot(&mut self) {
         self.her.publish(Change::Starting);
 
         match self.her.assemble().await {
             Ok(Assembled { built, state }) => {
+                self.quiet = self.her.met(&built.character).await.then(Instant::now);
                 self.parts = Some(Parts {
                     built,
                     thread: None,
@@ -504,7 +636,8 @@ impl Actor {
                 };
             }
         };
-        let held = hold(&self.her, &mut parts.thread, &parts.built.character)
+        let held = self
+            .hold(&mut parts.thread, &parts.built.character)
             .await
             .map(|thread| thread.id().clone());
 
@@ -625,7 +758,8 @@ impl Actor {
 }
 
 /// How a turn ended, as its completion announces it: its status, whether
-/// its line is in the log, and why when it did not complete.
+/// the line that began it is in the log, as a turn of her own, which has
+/// none, always says, and why when it did not complete.
 struct Ending {
     status: TurnStatus,
     committed: bool,
@@ -670,13 +804,13 @@ impl Ending {
         }
     }
 
-    /// The completion of `line`'s turn on `character`.
-    fn announced(self, character: Identifier, line: QueuedLine) -> Event {
+    /// The completion of `turn`, which ends it.
+    fn announced(self, turn: RunningTurn) -> Event {
         Event::TurnCompleted {
-            character_id: character,
-            conversation_id: line.conversation_id,
-            source: line.source,
-            client_message_id: line.client_message_id,
+            character_id: turn.character_id,
+            conversation_id: turn.conversation_id,
+            source: turn.source,
+            client_message_id: turn.client_message_id,
             status: self.status,
             committed: self.committed,
             reason: self.reason,
@@ -754,6 +888,19 @@ impl Her {
         if !failures.is_empty() {
             self.note_maintenance(failures.join("; "));
         }
+    }
+
+    /// Whether her thread with the person was ever made: found, never
+    /// made. A home whose threads cannot be read says no, and the open that
+    /// a line or a client asks for says why.
+    async fn met(&self, character: &Character) -> bool {
+        let home = self.world.home.clone();
+        let id = character.profile.id.clone();
+
+        matches!(
+            blocking(move || Conversation::exists(&home, &id)).await,
+            Ok(true)
+        )
     }
 
     /// Builds her afresh from what the disk holds now, on the blocking pool.
@@ -858,19 +1005,22 @@ impl Parts {
     }
 }
 
-/// Takes `line` through `thread`, as `built` answers it through `adapter`:
-/// what the runtime made of it, and whether the line was heard committed.
-/// The stream is told the turn as it goes: each message and tool call, and
-/// the turn as it runs whenever that changes.
-async fn take_line(
+/// Takes `turn` through `thread`, as `built` answers it through `adapter`:
+/// the turn of `line`, or a moment of her own when there is none. What the
+/// runtime made of it, and whether its line was heard committed, as a
+/// moment, with none to commit, always is. The stream is told the turn as
+/// it goes: a moment as it begins, then each message and tool call, and the
+/// turn as it runs whenever that changes.
+async fn take_turn(
     her: &Her,
     thread: &mut Conversation,
     built: &mut Built,
     adapter: Arc<dyn RoleModelAdapter>,
-    line: &QueuedLine,
+    turn: RunningTurn,
+    line: Option<&QueuedLine>,
 ) -> (Delivery, bool) {
-    let committed = AtomicBool::new(false);
-    let running = Mutex::new(running_turn(her.id.clone(), line));
+    let committed = AtomicBool::new(line.is_none());
+    let running = Mutex::new(turn);
     let listener = |progress: Progress| {
         if matches!(progress, Progress::UserMessage { .. }) {
             committed.store(true, Ordering::Relaxed);
@@ -885,55 +1035,44 @@ async fn take_line(
             her.world.events.emit(event);
         }
     };
+    let mut mind = Current {
+        her,
+        built,
+        adapter,
+    };
 
-    her.broker.running(Some(TurnStamp {
+    her.broker.running(line.map(|line| TurnStamp {
         conversation_id: line.conversation_id.clone(),
         source: line.source.clone(),
         client_message_id: line.client_message_id.clone(),
     }));
 
-    let delivery = thread
-        .deliver(
-            Submission {
-                line: &line.text,
-                source: line.source.clone(),
-                client_message_id: line.client_message_id.clone(),
-            },
-            &mut Current {
-                her,
-                built,
-                adapter,
-            },
-            &listener,
-        )
-        .await;
+    let delivery = if let Some(line) = line {
+        thread
+            .deliver(
+                Submission {
+                    line: &line.text,
+                    source: line.source.clone(),
+                    client_message_id: line.client_message_id.clone(),
+                },
+                &mut mind,
+                &listener,
+            )
+            .await
+    } else {
+        // No line's commit says it runs, so it is said as it begins: every
+        // surface knows whose turn what follows belongs to.
+        her.world.events.emit(Event::TurnRunning(
+            running
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        ));
+        thread.moment(&mut mind, &listener).await
+    };
 
     her.broker.running(None);
     (delivery, committed.into_inner())
-}
-
-/// Her thread with the person, opened on the blocking pool the first time
-/// it is asked for; what the open read past is noted as maintenance.
-async fn hold<'t>(
-    her: &Her,
-    thread: &'t mut Option<Conversation>,
-    character: &Character,
-) -> Result<&'t mut Conversation, StorageError> {
-    let held = if let Some(held) = thread.take() {
-        held
-    } else {
-        let home = her.world.home.clone();
-        let character = character.clone();
-        let opened = blocking(move || Conversation::open(&home, character)).await?;
-
-        if let Some(skipped) = opened.skipped() {
-            her.note_maintenance(skipped.to_owned());
-        }
-
-        opened
-    };
-
-    Ok(thread.insert(held))
 }
 
 /// Assembles character `id` from what the disk holds now: her package, her

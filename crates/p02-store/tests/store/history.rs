@@ -1,5 +1,5 @@
 //! What a session's log is replayed into: the session its visible messages
-//! make.
+//! make, and the turns its model replays.
 
 use std::num::NonZeroU64;
 
@@ -79,6 +79,85 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
             .collect::<Vec<_>>(),
         ["one", "three"]
     );
+}
+
+/// The model replays a turn the person's line began once the line is
+/// committed, and a moment of hers once she said something or a call of
+/// hers came back. A quiet moment, and a line whose commit never landed,
+/// stay in the log alone, and a turn read on its own follows the same rule.
+#[test]
+fn a_moment_is_replayed_once_she_said_or_did_something_and_a_line_once_it_landed() {
+    let world = World::new();
+    let mut script = Script::new(world.segment(1));
+    let writer = world.first_segment(&world.conversation).unwrap();
+
+    script
+        .turn("Tea?")
+        .user("tea")
+        .round(Some(answer(&["Tea, always."], &[], None)))
+        .replies()
+        .completed();
+    script
+        .moment()
+        .round(Some(answer(
+            &[],
+            &[],
+            Some("I wonder if Sam found the keys."),
+        )))
+        .completed();
+    script
+        .moment()
+        .round(Some(answer(&["Found your keys yet?"], &[], None)))
+        .replies()
+        .completed();
+    script
+        .moment()
+        .round(Some(answer(&[], &["wistful"], None)))
+        .start_calls()
+        .finish_calls()
+        .round(Some(answer(&[], &[], None)))
+        .completed();
+    script.turn("Still there?");
+    written(writer, &script.records);
+
+    let replay = world.log(1).read().unwrap();
+    let history = replay.history();
+    let replayed: Vec<(&str, Option<&str>, Vec<&str>, usize)> = history
+        .turns
+        .iter()
+        .map(|turn| {
+            (
+                turn.identity.event_id().as_str(),
+                turn.user_message
+                    .as_ref()
+                    .map(|message| message.text.as_str()),
+                turn.final_replies
+                    .iter()
+                    .map(|reply| reply.text.as_str())
+                    .collect(),
+                turn.tool_rounds.len(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        replayed,
+        [
+            ("evt_1", Some("Tea?"), vec!["Tea, always."], 0),
+            ("evt_3", None, vec!["Found your keys yet?"], 0),
+            ("evt_4", None, Vec::new(), 1),
+        ]
+    );
+
+    for record in replay.records() {
+        let identity = record.identity();
+
+        assert_eq!(
+            replay.turn(identity).is_some(),
+            history.turns.iter().any(|turn| &turn.identity == identity),
+            "{identity:?}"
+        );
+    }
 }
 
 /// A session's user is the person, whoever else its conversation is

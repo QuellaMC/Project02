@@ -71,6 +71,8 @@ export function ThreadPane({
   );
   const turn = state.turns.get(thread.conversationId);
   const drafts = turn?.drafts ?? [];
+  // A turn of her own, which no line began, shows nothing until she drafts.
+  const writing = turn?.clientMessageId !== undefined && drafts.length === 0;
   const typed = composerText(state);
   // Nothing can be sent into an address that will never work again; the
   // banner says where to go, and what was typed stays here.
@@ -130,7 +132,7 @@ export function ThreadPane({
         {drafts.map(draft => (
           <Bubble key={draft.draftId} name={name} text={draft.text} draft />
         ))}
-        {turn !== undefined && drafts.length === 0 ? (
+        {writing ? (
           <p className="typing muted small">{name} is writing…</p>
         ) : null}
         {pending.map(([clientMessageId, line]) => (

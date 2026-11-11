@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use p02_contracts::{
     DecisionRejectionReason, DecisionResult, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
-    ModelOutput, ProviderAnswer, ProviderFailure, ToolCallId, ToolCallResult, WrittenCall,
+    ModelOutput, Occasion, ProviderAnswer, ProviderFailure, ToolCallId, ToolCallResult,
+    WrittenCall,
 };
 use p02_core::{
     CharacterProfile, ClientStamp, Conversation, ConversationId, EventId, EventIdentity, MessageId,
@@ -168,7 +169,8 @@ pub(crate) struct Script {
 pub(crate) struct TurnScript<'a> {
     script: &'a mut Script,
     identity: EventIdentity,
-    line: VisibleText,
+    /// The person's line, none in a moment of hers.
+    line: Option<VisibleText>,
     rounds: Vec<DecisionResult>,
     messages: Vec<MessageId>,
     started: Vec<ToolCallStarted>,
@@ -240,14 +242,23 @@ impl Script {
 
         self.push(
             &identity,
-            RecordBody::EventReceived(EventReceived {
-                payload_summary: PayloadSummary {
-                    raw_input: raw.to_owned(),
-                    normalized_current_user_message: Some(line.clone()),
-                },
-            }),
+            RecordBody::EventReceived(EventReceived::Text(PayloadSummary {
+                raw_input: raw.to_owned(),
+                normalized_current_user_message: Some(line.clone()),
+            })),
         );
+        self.opened(identity, Some(line))
+    }
 
+    /// A moment of Mira's own, which nobody began.
+    pub(crate) fn moment(&mut self) -> TurnScript<'_> {
+        let identity = self.identity();
+
+        self.push(&identity, RecordBody::EventReceived(EventReceived::Moment));
+        self.opened(identity, None)
+    }
+
+    fn opened(&mut self, identity: EventIdentity, line: Option<VisibleText>) -> TurnScript<'_> {
         TurnScript {
             script: self,
             identity,
@@ -265,12 +276,10 @@ impl Script {
 
         self.push(
             &identity,
-            RecordBody::EventReceived(EventReceived {
-                payload_summary: PayloadSummary {
-                    raw_input: raw.to_owned(),
-                    normalized_current_user_message: None,
-                },
-            }),
+            RecordBody::EventReceived(EventReceived::Text(PayloadSummary {
+                raw_input: raw.to_owned(),
+                normalized_current_user_message: None,
+            })),
         );
         self.push(
             &identity,
@@ -326,7 +335,7 @@ pub(crate) fn evidence(identity: &EventIdentity, plugin: &str, kind: EvidenceKin
 impl TurnScript<'_> {
     /// The person's line, stamped by the web page.
     pub(crate) fn user(&mut self, client_message_id: &str) -> &mut Self {
-        let line = self.line.clone();
+        let line = self.line.clone().expect("only a line's turn commits one");
         let message = self.script.message(VisibleMessageRole::User, &line);
         let commit = MessageCommitted::user(
             message.clone(),
@@ -355,7 +364,11 @@ impl TurnScript<'_> {
                 status: Some(503),
             }),
         };
-        let result = DecisionResult::judge(&answer);
+        let occasion = match self.line {
+            Some(_) => Occasion::Line,
+            None => Occasion::Moment,
+        };
+        let result = DecisionResult::judge(&answer, occasion);
 
         self.rounds.push(result.clone());
         self.push(RecordBody::ModelRound(RoundRecord::new(

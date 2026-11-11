@@ -263,7 +263,16 @@ export type GatewayErrorBody = { error: Refusal, };
 /**
  * What every surface hears.
  */
-export type GatewayEvent = { "kind": "turn_progress", characterId: Identifier, conversationId: ConversationId, progress: TurnProgress, } | { "kind": "turn_running" } & RunningTurn | { "kind": "turn_completed", characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, status: TurnStatus, committed: boolean, reason?: string, message?: string, } | { "kind": "confirmation_requested" } & PendingConfirmation | { "kind": "confirmation_settled", characterId: Identifier, id: ConfirmationId, } & ({ "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, }) | { "kind": "pairing_requested" } & PairingRequest | { "kind": "pairing_settled", connectorId: Identifier, code: string, subject: PairingSubject, decision: PairingDecision, } | { "kind": "state_changed", characterId: Identifier, state: CharacterRuntimeState, 
+export type GatewayEvent = { "kind": "turn_progress", characterId: Identifier, conversationId: ConversationId, progress: TurnProgress, } | { "kind": "turn_running" } & RunningTurn | { "kind": "turn_completed", characterId: Identifier, conversationId: ConversationId, 
+/**
+ * Absent for a turn of her own, which no line began.
+ */
+source?: ClientStamp, clientMessageId?: ClientStamp, status: TurnStatus, 
+/**
+ * Whether the line that began it is in the log; true for a turn of
+ * her own, which has none: nothing of the person's waits on it.
+ */
+committed: boolean, reason?: string, message?: string, } | { "kind": "confirmation_requested" } & PendingConfirmation | { "kind": "confirmation_settled", characterId: Identifier, id: ConfirmationId, } & ({ "decision": "approved" } | { "decision": "denied" } | { "decision": "cancelled", reason: ConfirmationCancelReason, }) | { "kind": "pairing_requested" } & PairingRequest | { "kind": "pairing_settled", connectorId: Identifier, code: string, subject: PairingSubject, decision: PairingDecision, } | { "kind": "state_changed", characterId: Identifier, state: CharacterRuntimeState, 
 /**
  * Present when a failure caused the change, or when she needs a
  * model: what to do about it.
@@ -273,7 +282,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 9, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 10, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -294,7 +303,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 9, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 10, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -530,10 +539,15 @@ export type RosterState = "not_started" | "starting" | "ready" | "needs_model" |
 export type RunningDraft = { draftId: string, text: string, };
 
 /**
- * A turn as it runs: the line that started it, her character, and her
- * drafts so far, each its whole text, in the order they opened.
+ * A turn as it runs: her character, her thread, the stamps of the line
+ * that began it, both or neither, and her drafts so far, each its whole
+ * text, in the order they opened.
  */
-export type RunningTurn = { characterId: Identifier, conversationId: ConversationId, source: ClientStamp, clientMessageId: ClientStamp, drafts: ReadonlyArray<RunningDraft>, };
+export type RunningTurn = { characterId: Identifier, conversationId: ConversationId, 
+/**
+ * Absent for a turn of her own, which no line began.
+ */
+source?: ClientStamp, clientMessageId?: ClientStamp, drafts: ReadonlyArray<RunningDraft>, };
 
 /**
  * A finding about the settings: its weight, its code, a sentence for a

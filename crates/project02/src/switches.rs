@@ -15,15 +15,22 @@ use p02_shared::{BASE_URL_RULE, BaseUrl};
 /// choose.
 pub(crate) const TEST_PROVIDER: &str = "PROJECT02_TEST_PROVIDER";
 
-/// Shortens the waits, so expiry and pings run in seconds:
-/// `key=milliseconds` pairs separated by commas.
+/// Shortens the waits, so expiry, pings and her moments of her own run in
+/// seconds: `key=milliseconds` pairs separated by commas.
 pub(crate) const TEST_DURATIONS: &str = "PROJECT02_TEST_DURATIONS";
 
 /// Names the Bot API the connector reaches in Telegram's place.
 pub(crate) const TEST_TELEGRAM_API: &str = "PROJECT02_TEST_TELEGRAM_API";
 
 /// The waits serve reads, in the order a refusal lists them.
-const SERVE_KEYS: [&str; 5] = ["confirmation", "pairing", "silence", "heartbeat", "grace"];
+const SERVE_KEYS: [&str; 6] = [
+    "confirmation",
+    "pairing",
+    "silence",
+    "ping",
+    "grace",
+    "minute",
+];
 
 /// The one wait the connector reads: between two edits of a draft.
 const TELEGRAM_KEYS: [&str; 1] = ["edit"];
@@ -65,8 +72,9 @@ pub(crate) fn read(
             "confirmation" => switches.durations.confirmation = wait,
             "pairing" => switches.durations.pairing = wait,
             "silence" => switches.durations.model_silence = Some(wait),
-            "heartbeat" => switches.durations.heartbeat = wait,
-            _ => switches.durations.grace = wait,
+            "ping" => switches.durations.ping = wait,
+            "grace" => switches.durations.grace = wait,
+            _ => switches.durations.minute = wait,
         }
     }
 
@@ -166,7 +174,7 @@ mod tests {
 
         let set = switched(
             Some("deterministic"),
-            Some("confirmation=1,pairing=2,silence=3,heartbeat=4,grace=5"),
+            Some("confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6"),
         )
         .unwrap();
 
@@ -178,8 +186,9 @@ mod tests {
                 pairing: ms(2),
                 model_silence: Some(ms(3)),
                 settings_lock: Durations::default().settings_lock,
-                heartbeat: ms(4),
+                ping: ms(4),
                 grace: ms(5),
+                minute: ms(6),
             }
         );
         assert_eq!(
@@ -193,7 +202,7 @@ mod tests {
 
     #[test]
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
-        let keys = "the keys here are confirmation, pairing, silence, heartbeat, grace.";
+        let keys = "the keys here are confirmation, pairing, silence, ping, grace, minute.";
 
         for (provider, durations, said) in [
             (

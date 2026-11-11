@@ -1,8 +1,8 @@
 /**
  * A character's pages: hers, with her switch, what makes up her mind and
- * body, her bot, what she may do and what is hers alone; a plugin's own
- * page for her; and her own AI model. Each draws her view, and writes only
- * what her view lists.
+ * body, her heartbeat, her bot, what she may do and what is hers alone; a
+ * plugin's own page for her; and her own AI model. Each draws her view,
+ * and writes only what her view lists.
  */
 import type {CharacterSummary} from '@project02/wire/contract';
 import {
@@ -320,6 +320,7 @@ function CharacterCards({
           />
         ))}
       </Group>
+      <HerHeartbeat ctx={ctx} characterId={character.id} view={view} />
       <Group title="Telegram">
         <HerBot ctx={ctx} characterId={character.id} />
       </Group>
@@ -445,6 +446,29 @@ function SectionSwitch({
         }}
       />
     </Cell>
+  );
+}
+
+/** How often she gets a moment of her own while the person is quiet: her row of choices. */
+function HerHeartbeat({
+  ctx,
+  characterId,
+  view,
+}: {
+  readonly ctx: Ctx;
+  readonly characterId: string;
+  readonly view: OkView;
+}) {
+  const row = hostRow(characterId, 'heartbeat');
+  const field = fieldAt(view, row.place);
+
+  return field === undefined ? null : (
+    <Group
+      title="Heartbeat"
+      footer="While you're quiet, she gets a moment this often to think, use what she has, or write to you. Each one uses your AI model."
+    >
+      <FieldRow ctx={ctx} row={row} field={field} />
+    </Group>
   );
 }
 

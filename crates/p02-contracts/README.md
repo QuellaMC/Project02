@@ -16,5 +16,7 @@ nothing until they say yes, and one rule decides whether a value fits a
 settings field.
 
 A provider is a `RoleModelAdapter`, answering with what the model wrote or
-how it failed. `DecisionResult::judge` is the one verdict on a round, and
-what a record keeps of a round holds no credential-named value.
+how it failed. `DecisionResult::judge` is the one verdict on a round,
+given what began its turn: the person's line, which the character
+answers, or a moment of her own, in which she owes nothing. What a record
+keeps of a round holds no credential-named value.

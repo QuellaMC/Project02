@@ -420,7 +420,10 @@ impl Ear {
     /// completion back.
     pub(crate) async fn ended(&mut self, id: &str) -> Event {
         self.until(|event| {
-            matches!(event, Event::TurnCompleted { client_message_id, .. } if client_message_id.as_str() == id)
+            matches!(
+                event,
+                Event::TurnCompleted { client_message_id: Some(ended), .. } if ended.as_str() == id
+            )
         })
         .await
     }

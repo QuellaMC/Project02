@@ -53,7 +53,7 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
         },
     })
     .with_text(TurnText {
-        current_user_message: VisibleText::normalize("hello").unwrap(),
+        current_user_message: Some(VisibleText::normalize("hello").unwrap()),
         recent_visible_message_ids: visible
             .iter()
             .map(|id| MessageId::parse(id).unwrap())
@@ -587,7 +587,8 @@ impl Seen {
         Self {
             message: context
                 .turn_text()
-                .map(|text| text.current_user_message.to_string()),
+                .and_then(|text| text.current_user_message.as_ref())
+                .map(ToString::to_string),
             store,
             history: context.session_history().is_some(),
             databases: context.plugin_database().is_some(),

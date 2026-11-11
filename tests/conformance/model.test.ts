@@ -251,7 +251,7 @@ it('model.provider-timeout: a provider that never answers fails the round provid
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
-    {PROJECT02_TEST_DURATIONS: 'silence=2000,heartbeat=200'},
+    {PROJECT02_TEST_DURATIONS: 'silence=2000,ping=200'},
   );
   const say = await converse(wireOf(daemon), 'mira');
 
@@ -262,10 +262,10 @@ it('model.provider-timeout: a provider that never answers fails the round provid
     message: expect.stringContaining('timed out after 2000ms') as string,
   });
 
-  // Opened now, so every heartbeat it carries is one that comes from here on.
+  // Opened now, so every ping it carries is one that comes from here on.
   const events = await openEvents(daemon);
-  const beats = async (count: number): Promise<void> => {
-    for (let beat = 0; beat < count; beat += 1) {
+  const pings = async (count: number): Promise<void> => {
+    for (let ping = 0; ping < count; ping += 1) {
       await events.next(frame => frame.comment === 'ping');
     }
   };
@@ -277,15 +277,15 @@ it('model.provider-timeout: a provider that never answers fails the round provid
   const turn = say('Take your time.', 'slow');
 
   await driven.arrived();
-  // Six heartbeats before the headers and six more before the first chunk:
+  // Six pings before the headers and six more before the first chunk:
   // each wait well within the bound, the two together past it.
-  await beats(6);
+  await pings(6);
   driven.write([]);
-  await beats(6);
+  await pings(6);
   driven.write([head]);
 
   for (const chunk of rest) {
-    await beats(3);
+    await pings(3);
     driven.write([chunk]);
   }
 

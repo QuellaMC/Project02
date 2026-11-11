@@ -33,6 +33,11 @@ no longer waiting — and an approval that could not be written keeps the
 card and says why. Each turn in progress is the daemon's own word on it,
 replaced whole by each `turn_running` frame and installed from every
 `ready`; a stream the daemon resumed is live again with nothing installed.
+A turn of her own, which no line began, shows nothing until she drafts,
+and its end raises no notice. A reply of hers committed to a chat that
+is not on screen, whatever began her turn, puts a dot after her name in
+the roster until her chat opens: one dot however many wait, the tab's
+own, so a reload starts without.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.
@@ -60,8 +65,11 @@ draw the window, and `welcome.tsx` the first run, shown instead of the
 chat while the home's settings give a character no AI model, until the
 person starts chatting or sets it up later. The roster
 opens the window, a gear per character opens her page, and one who needs
-an AI model says so in plain words that lead to it. The chat and the
-window draw from one set of tokens in `styles.css`, light and dark.
+an AI model says so in plain words that lead to it. Her page gives her
+heartbeat, how often she gets a moment of her own, a group of its own
+between Mind & Body and Telegram: one row of choices, saved at the
+click. The chat and the window draw from one set of tokens in
+`styles.css`, light and dark.
 
 The window adds and removes characters over three more verbs. Add
 Character opens the system's file chooser. The file's text goes to the

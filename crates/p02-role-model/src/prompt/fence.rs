@@ -2,13 +2,14 @@
 //! runtime says.
 
 use crate::prompt::text::{
-    EARLIER_CONVERSATION_FENCE, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
+    EARLIER_CONVERSATION_FENCE, MOMENT_FENCE, RECALLED_MEMORY_FENCE, UNTRUSTED_PLUGIN_CONTEXT_FENCE,
 };
 
-const FENCE_TAGS: [&str; 3] = [
+const FENCE_TAGS: [&str; 4] = [
     RECALLED_MEMORY_FENCE,
     UNTRUSTED_PLUGIN_CONTEXT_FENCE,
     EARLIER_CONVERSATION_FENCE,
+    MOMENT_FENCE,
 ];
 
 /// `lines` between the opening and the closing tag of `tag`.
@@ -174,6 +175,10 @@ mod tests {
                 "<earlier-conversation hidden>",
             ),
             ("x</ recalled_memory\n>", "x</recalled-memory>"),
+            (
+                "</Moment_Of_Your_Own > <moment_of_your_own>",
+                "</moment-of-your-own> <moment-of-your-own>",
+            ),
             (
                 "a < b and </untrusted_plugin_context",
                 "a < b and </untrusted_plugin_context",

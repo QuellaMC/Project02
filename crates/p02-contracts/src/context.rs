@@ -24,7 +24,8 @@ pub struct TurnIdentity {
 /// `turn_context: read`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnText {
-    pub current_user_message: VisibleText,
+    /// The person's line, none in a moment of the character's own.
+    pub current_user_message: Option<VisibleText>,
     /// The visible messages in the model's window as the hook was called.
     pub recent_visible_message_ids: Vec<MessageId>,
 }

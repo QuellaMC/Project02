@@ -2,7 +2,7 @@
 //! a connector's read, and the report of `inspect`. Only a connector's
 //! read carries a secret, since a token is what a connector exists to use.
 
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use p02_characters::Discovery;
 use p02_contracts::{AccessMap, Manifest, PluginKind};
@@ -355,6 +355,9 @@ pub struct HostReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_base_url: Option<String>,
     context_window_tokens: NonZeroU64,
+    /// Absent while her heartbeat is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    heartbeat_minutes: Option<NonZeroU32>,
 }
 
 /// A plugin as `inspect` reports it: its kind, whether her settings run it
@@ -423,6 +426,7 @@ impl Resolution<'_> {
                         .as_ref()
                         .map(|base| base.as_str().to_owned()),
                     context_window_tokens: host.context_window_tokens,
+                    heartbeat_minutes: host.heartbeat,
                 },
                 fingerprint: self.fingerprint().clone(),
             },

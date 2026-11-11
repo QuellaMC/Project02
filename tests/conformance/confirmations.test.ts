@@ -155,7 +155,7 @@ it('confirmations.expire: a confirmation nobody answers by its deadline settles 
 
 it("confirmations.approval-window: an approval that comes after the tool's five-second execution timeout, inside the approval window, still applies", async () => {
   const {model, home, daemon, wire, say} = await replyStyleHome({
-    PROJECT02_TEST_DURATIONS: 'heartbeat=6000',
+    PROJECT02_TEST_DURATIONS: 'ping=6000',
   });
   const events = await openEvents(daemon);
 

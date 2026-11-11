@@ -4,7 +4,7 @@
 //! stream is told it.
 
 use p02_characters::{PackageDiagnostic, PackageLocation};
-use p02_core::{ClientStamp, MessageId};
+use p02_core::{ClientStamp, ConversationId, MessageId};
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{QueuedLine, StorageError};
@@ -42,13 +42,19 @@ pub fn package_report(diagnostic: &PackageDiagnostic) -> PackageReport {
     }
 }
 
-/// The turn of `line` on `character`, before anything of it is told.
-pub(crate) fn running_turn(character: Identifier, line: &QueuedLine) -> RunningTurn {
+/// A turn of `character`'s on `conversation`, before anything of it is
+/// told: the turn of `line`, under its stamps, or one of her own when there
+/// is none.
+pub(crate) fn running_turn(
+    character: Identifier,
+    conversation: ConversationId,
+    line: Option<&QueuedLine>,
+) -> RunningTurn {
     RunningTurn {
         character_id: character,
-        conversation_id: line.conversation_id.clone(),
-        source: line.source.clone(),
-        client_message_id: line.client_message_id.clone(),
+        conversation_id: conversation,
+        source: line.map(|line| line.source.clone()),
+        client_message_id: line.map(|line| line.client_message_id.clone()),
         drafts: Vec::new(),
     }
 }
