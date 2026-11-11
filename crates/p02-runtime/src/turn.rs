@@ -12,7 +12,7 @@ use jiff::Zoned;
 use jiff::tz::TimeZone;
 use p02_contracts::{
     CharacterDecision, CommittedTurn, ConversationToolCall, ConversationTurn, DecisionContext,
-    Evidence, ModelToolCall, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
+    Evidence, ModelToolCall, Rang, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
@@ -117,7 +117,8 @@ type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
 /// What a turn begins from: the person's line, as it came and as it was
 /// taken, with the stamps its client put on it; or a moment of her own,
-/// which nobody began.
+/// which nobody began, with what rang on her phone when its ringing began
+/// it.
 #[derive(Debug)]
 pub(crate) enum Occasion {
     Line {
@@ -126,7 +127,7 @@ pub(crate) enum Occasion {
         source: ClientStamp,
         client_message_id: ClientStamp,
     },
-    Moment,
+    Moment(Vec<Rang>),
 }
 
 impl Occasion {
@@ -137,7 +138,7 @@ impl Occasion {
                 raw_input: raw.clone(),
                 normalized_current_user_message: Some(line.clone().into()),
             }),
-            Self::Moment => EventReceived::Moment,
+            Self::Moment(rang) => EventReceived::Moment(rang.clone()),
         }
     }
 }
@@ -195,10 +196,16 @@ pub(crate) async fn run(
             });
             (Opening::Line(message.text.clone()), vec![message])
         }
-        Opened::Moment => {
+        Opened::Moment(rang) => {
             let since_last_line = since_last_line(&begun.history.turns, identity.created_at());
 
-            (Opening::Moment { since_last_line }, Vec::new())
+            (
+                Opening::Moment {
+                    since_last_line,
+                    rang,
+                },
+                Vec::new(),
+            )
         }
     };
     let window = select_history_window(&begun.history.turns, mind.context_window());
@@ -285,14 +292,15 @@ struct Begun {
 }
 
 /// How a turn opened: with the person's line, committed under the stamps
-/// its client put on it, or with a moment of hers, which commits nothing.
+/// its client put on it, or with a moment of hers, which commits nothing,
+/// and what rang when her phone's ringing began it.
 enum Opened {
     Line {
         message: VisibleMessage,
         source: ClientStamp,
         client_message_id: ClientStamp,
     },
-    Moment,
+    Moment(Vec<Rang>),
 }
 
 /// Records the event of `occasion`, reads the history, then commits the
@@ -335,7 +343,7 @@ async fn begin(
                     client_message_id,
                 }
             }
-            Occasion::Moment => Opened::Moment,
+            Occasion::Moment(rang) => Opened::Moment(rang),
         };
 
         Ok(Begun {

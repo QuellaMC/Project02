@@ -19,9 +19,14 @@ use crate::time::{self, Now};
 const GET: &str = "phone.storage.get takes a key, which is text";
 const SET: &str = "phone.storage.set takes a key, which is text, and a value JSON can hold";
 const REMOVE: &str = "phone.storage.remove takes a key, which is text";
-const SET_RING: &str = "phone.rings.set takes {id, at, title, body}: an id and a title that \
-                        are not blank, at in whole milliseconds since the epoch, and a body of \
-                        text if it has one";
+const SET_RING: &str = "phone.rings.set takes {id, at, title, body}: an id that is not blank, \
+                        at in whole milliseconds since the epoch, a title of one line that is \
+                        not blank, of 40 characters at most, and, if it has one, a body of one \
+                        line of 120 characters at most";
+/// What a ring's title holds: what a notification's title shows.
+const TITLE_LIMIT: usize = 40;
+/// What a ring's body holds: a line or two of a notification.
+const BODY_LIMIT: usize = 120;
 const CANCEL_RING: &str = "phone.rings.cancel takes the id of a ring, which is text";
 const LOCAL: &str = "phone.time.local takes a time in whole milliseconds since the epoch and \
                      the IANA name of a time zone, both optional";
@@ -185,7 +190,14 @@ impl Host {
             body,
         } = argument(ctx, arguments.first(), SET_RING)?;
         let at = Timestamp::from_unix_millis(at)
-            .filter(|_| !id.trim().is_empty() && !title.trim().is_empty())
+            .filter(|_| {
+                !id.trim().is_empty()
+                    && !title.trim().is_empty()
+                    && one_line(&title, TITLE_LIMIT)
+                    && body
+                        .as_deref()
+                        .is_none_or(|body| one_line(body, BODY_LIMIT))
+            })
             .ok_or_else(|| Exception::throw_type(ctx, SET_RING))?;
 
         self.kept
@@ -271,6 +283,11 @@ impl Host {
             )),
         }
     }
+}
+
+/// Whether `text` is one line of `limit` characters at most.
+fn one_line(text: &str, limit: usize) -> bool {
+    !text.contains(['\n', '\r']) && text.chars().count() <= limit
 }
 
 /// The argument as `T` reads it from JSON, an absent or undefined one as

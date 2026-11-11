@@ -8,7 +8,7 @@ mod round;
 mod terminal;
 mod tool;
 
-use p02_contracts::Occasion;
+use p02_contracts::{Occasion, Rang};
 use p02_core::{EventIdentity, VisibleText};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -64,13 +64,14 @@ pub enum RecordKind {
     SessionContinued,
 }
 
-/// What came in for a turn: the person's text, or nothing, for a moment of
-/// the character's own.
+/// What came in for a turn: the person's text, or, for a moment of the
+/// character's own, what rang on her phone, none when her heartbeat began
+/// it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "WireReceived", into = "WireReceived")]
 pub enum EventReceived {
     Text(PayloadSummary),
-    Moment,
+    Moment(Vec<Rang>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,7 +85,8 @@ pub struct PayloadSummary {
 }
 
 /// An event as recorded: the person's text says what came in, as every
-/// earlier build wrote it, and a moment says it is one.
+/// earlier build wrote it, and a moment says it is one, and what rang when
+/// anything did.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WireReceived {
@@ -92,6 +94,8 @@ struct WireReceived {
     occasion: Option<Occasion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     payload_summary: Option<PayloadSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rang: Vec<Rang>,
 }
 
 impl EventReceived {
@@ -101,7 +105,16 @@ impl EventReceived {
     pub fn occasion(&self) -> Occasion {
         match self {
             Self::Text(_) => Occasion::Line,
-            Self::Moment => Occasion::Moment,
+            Self::Moment(_) => Occasion::Moment,
+        }
+    }
+
+    /// What rang on her phone: none but in a moment its ringing began.
+    #[must_use]
+    pub fn rang(&self) -> &[Rang] {
+        match self {
+            Self::Text(_) => &[],
+            Self::Moment(rang) => rang,
         }
     }
 }
@@ -111,7 +124,7 @@ impl TryFrom<WireReceived> for EventReceived {
 
     fn try_from(wire: WireReceived) -> Result<Self, Self::Error> {
         match (wire.occasion, wire.payload_summary) {
-            (Some(Occasion::Moment), _) => Ok(Self::Moment),
+            (Some(Occasion::Moment), _) => Ok(Self::Moment(wire.rang)),
             (_, Some(summary)) => Ok(Self::Text(summary)),
             (_, None) => Err("an event the person began says what came in"),
         }
@@ -124,10 +137,12 @@ impl From<EventReceived> for WireReceived {
             EventReceived::Text(summary) => Self {
                 occasion: None,
                 payload_summary: Some(summary),
+                rang: Vec::new(),
             },
-            EventReceived::Moment => Self {
+            EventReceived::Moment(rang) => Self {
                 occasion: Some(Occasion::Moment),
                 payload_summary: None,
+                rang,
             },
         }
     }

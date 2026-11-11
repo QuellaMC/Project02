@@ -19,6 +19,9 @@ use serde_json::{Map, Value, json};
 
 use crate::package::{FilesError, leased, rejected, tool};
 
+/// The phone's plugin id, which names its store in her data.
+pub const PHONE_PLUGIN: &str = "phone";
+
 const OPEN: &str = "phone.open";
 const USE: &str = "phone.use";
 

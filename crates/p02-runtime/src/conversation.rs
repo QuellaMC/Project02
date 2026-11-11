@@ -6,7 +6,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 
 use async_trait::async_trait;
 use p02_characters::Persona;
-use p02_contracts::{ConversationTurn, RoleModelAdapter};
+use p02_contracts::{ConversationTurn, Rang, RoleModelAdapter};
 use p02_core::{
     CharacterProfile, ClientStamp, ConversationId, EventId, EventIdentity, MessageId, Participant,
     SessionId, SpeakerName,
@@ -232,16 +232,19 @@ impl Conversation {
 
     /// Takes a moment of hers through the turn, as `mind` answers it: a turn
     /// nobody began, which commits no line of the person's and may end
-    /// without a word. `listener` hears it as it hears a line's turn, and a
-    /// delivery dropped before it ends loses the thread as a line's does.
+    /// without a word, and tells her `rang`, what rang on her phone, when
+    /// its ringing began it. `listener` hears it as it hears a line's turn,
+    /// and a delivery dropped before it ends loses the thread as a line's
+    /// does.
     pub async fn moment(
         &mut self,
+        rang: Vec<Rang>,
         mind: &mut dyn Mind,
         listener: &(dyn Fn(Progress) + Send + Sync),
     ) -> Delivery {
         turn::run(
             &mut self.disk,
-            Occasion::Moment,
+            Occasion::Moment(rang),
             &self.character,
             mind,
             listener,

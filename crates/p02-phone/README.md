@@ -19,9 +19,11 @@ callers run it on the blocking pool.
 - **A script reaches** the language and `phone`, nothing else:
   `storage.get`, `set` and `remove`, a JSON value under each key;
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
-  its own rings, `at` in milliseconds since the epoch; and `time.now()`,
-  `time.local(at, zone)` and `time.next({hour, minute, weekdays})`, read from
-  the moment and the zone each call is given. A clock time the clocks skip
+  its own rings, `at` in milliseconds since the epoch, the title one line of
+  40 characters at most, as a notification's, and the body one line of 120;
+  and `time.now()`, `time.local(at, zone)` and
+  `time.next({hour, minute, weekdays})`, read from the moment and the zone
+  each call is given. A clock time the clocks skip
   comes as much later as they jumped, and one they pass twice comes the
   first time. A screen only reads.
 - **Each call runs fresh**: its own QuickJS runtime and context, dropped when

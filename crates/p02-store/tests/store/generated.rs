@@ -4,8 +4,8 @@
 
 use std::path::PathBuf;
 
-use p02_contracts::ModelOutput;
-use p02_core::SessionId;
+use p02_contracts::{ModelOutput, Rang};
+use p02_core::{SessionId, Timestamp};
 use p02_store::{LogRecord, SessionLog};
 
 use crate::support::{Script, World, answer, conversation_named, lines_of};
@@ -60,13 +60,26 @@ impl Random {
     fn sentences(&mut self, most: usize) -> Vec<String> {
         (0..=self.below(most)).map(|_| self.sentence()).collect()
     }
+
+    /// What rang on her phone: none, as for her heartbeat, or a ring or
+    /// two, an hour apart, written in hard text.
+    fn rang(&mut self) -> Vec<Rang> {
+        (0..self.below(3))
+            .map(|hour| Rang {
+                app: self.sentence(),
+                title: self.sentence(),
+                body: self.chance(50).then(|| self.sentence()),
+                at: Timestamp::new(&format!("2026-10-21T0{hour}:00:00.000Z")).unwrap(),
+            })
+            .collect()
+    }
 }
 
 /// A session of turns of every shape the runtime writes, in random order:
 /// replies, tool rounds, refused rounds, refusals, failures, turns a crash
-/// cut short, which the next turn closes, and moments of hers that end in a
-/// word, in tool work or in a thought; message numbers a failed write spent
-/// are skipped.
+/// cut short, which the next turn closes, and moments of hers, some her
+/// phone's ringing began, that end in a word, in tool work or in a thought;
+/// message numbers a failed write spent are skipped.
 fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
     let mut random = Random(seed);
     let mut script = Script::new(session);
@@ -145,7 +158,7 @@ fn generated_log(seed: u64, session: SessionId) -> Vec<LogRecord> {
                     Vec::new()
                 };
                 let thought = random.sentence();
-                let mut moment = script.moment();
+                let mut moment = script.moment(random.rang());
 
                 if random.chance(50) {
                     moment

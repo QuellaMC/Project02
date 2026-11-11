@@ -2827,6 +2827,7 @@ dependencies = [
  "p02-config",
  "p02-contracts",
  "p02-core",
+ "p02-phone",
  "p02-plugins",
  "p02-role-model",
  "p02-runtime",

@@ -40,7 +40,7 @@ const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 7] = [
         mem0::create,
     ),
     (
-        "phone",
+        phone::PHONE_PLUGIN,
         include_str!("phone/project02.plugin.json"),
         needs_nothing,
         phone::create,
@@ -148,6 +148,10 @@ mod tests {
                 ("reply-style", false),
                 ("session-history", true),
             ]
+        );
+        assert_eq!(
+            listed.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            PLUGINS.map(|(id, ..)| id)
         );
     }
 }

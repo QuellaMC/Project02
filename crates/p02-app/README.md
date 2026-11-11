@@ -23,6 +23,14 @@ with an outcome of p02-wire, never an error.
   has none, and a moment missed is never made up. A waiting line always
   goes first, and one that comes during a moment waits for its end. The
   moment runs as a line's turn does, and nothing leaves her inbox.
+- **Her rings.** While she is ready and runs her phone, a ring on it that
+  comes due by the wall clock, which she reads again at least every half
+  minute, begins a moment of her own that tells every ring due by then:
+  after a waiting line, and before her heartbeat's moment. Her rings are
+  read when she is built and after each turn of hers. Once that moment
+  completes, what rang goes to its apps; when it does not, its rings wait
+  for her next turn that completes, or her next start, so a ring is never
+  lost and a model out of reach is not asked again and again.
 - **The stream** hears each turn as it goes: its messages once they are
   on disk, the turn as it runs now, her drafts whole, whenever that
   changes, and then its completion, which says whether its line is in the

@@ -3,9 +3,9 @@
 //! record is taken as it was written, and one that fits no turn is skipped
 //! and named.
 
-use p02_contracts::DecisionResult;
-use p02_core::ClientStamp;
-use p02_store::{LogRecord, RecordBody};
+use p02_contracts::{DecisionResult, Rang};
+use p02_core::{ClientStamp, Timestamp};
+use p02_store::{EventReceived, LogRecord, RecordBody};
 
 use crate::support::{World, conversation_named, lines_of, session};
 
@@ -30,6 +30,8 @@ const FAILED_REJECTED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","created
 const MOMENT_RECEIVED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"runtime_event_received","occasion":"moment"}"#;
 const MOMENT_THOUGHT: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"role_model_round","round":1,"output":{"toolCalls":[],"text":"I wonder if Sam found the keys."},"finishReason":"stop","parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"toolCalls":[],"text":"I wonder if Sam found the keys."}}}}"#;
 const MOMENT_COMPLETED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"runtime_turn_completed","status":"completed","round":1,"commitValidation":{"result":{"status":"accepted"}}}"#;
+/// A moment of Mira's own that her phone's ringing began.
+const RINGING_RECEIVED: &str = r#"{"eventId":"evt_6","traceId":"trace_6","createdAt":"2026-10-22T07:00:01.000Z","kind":"runtime_event_received","occasion":"moment","rang":[{"app":"Clock","title":"Alarm","body":"Wake Sam","at":"2026-10-22T07:00:00.000Z"},{"app":"Clock","title":"Timer","at":"2026-10-22T07:00:00.500Z"}]}"#;
 /// The continuation of the first segment, carrying its first turn as the
 /// model replays it, in the shape every earlier build wrote.
 const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","userMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?"},"toolRounds":[{"round":1,"text":"Checking.","interimReplies":[],"toolCalls":[{"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","pluginId":"character-state","toolName":"character_state.patch","input":{"mood":"warm"},"result":{"status":"accepted","output":{"mood":"warm"}}}]}],"finalReplies":[{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always."}]}],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
@@ -81,6 +83,38 @@ fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
 
         assert_eq!(encoded, lines_of(&path));
         assert!(replay.skipped_lines().is_empty());
+    }
+}
+
+/// A moment's event keeps what rang on her phone, and one that says nothing
+/// of it, as every moment was recorded before her phone could ring, is a
+/// moment in which nothing rang; each writes back to its own bytes.
+#[test]
+fn a_moment_s_event_keeps_what_rang_and_an_earlier_one_rang_nothing() {
+    let rang = |title: &str, body: Option<&str>, at: &str| Rang {
+        app: "Clock".to_owned(),
+        title: title.to_owned(),
+        body: body.map(str::to_owned),
+        at: Timestamp::new(at).unwrap(),
+    };
+
+    for (line, rang) in [
+        (MOMENT_RECEIVED, Vec::new()),
+        (
+            RINGING_RECEIVED,
+            vec![
+                rang("Alarm", Some("Wake Sam"), "2026-10-22T07:00:00.000Z"),
+                rang("Timer", None, "2026-10-22T07:00:00.500Z"),
+            ],
+        ),
+    ] {
+        let record = LogRecord::from_line(line.as_bytes()).unwrap();
+
+        assert_eq!(
+            record.body(),
+            &RecordBody::EventReceived(EventReceived::Moment(rang))
+        );
+        assert_eq!(record.to_line(), line);
     }
 }
 

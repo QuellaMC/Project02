@@ -109,23 +109,43 @@ fn an_app_sets_replaces_cancels_and_lists_its_rings() {
         );
     }
 
+    let six = millis("2026-03-07T18:00:00.000Z");
+
     for refused in [
-        json!({"id": "tea", "at": millis("2026-03-07T18:00:00.000Z"), "title": " "}),
+        json!({"id": "tea", "at": six, "title": " "}),
         json!({"id": "tea", "at": 1.5, "title": "Tea"}),
-        json!({"at": millis("2026-03-07T18:00:00.000Z"), "title": "Tea"}),
-        json!({"id": "tea", "at": millis("2026-03-07T18:00:00.000Z"), "title": "Tea", "colour": "red"}),
+        json!({"at": six, "title": "Tea"}),
+        json!({"id": "tea", "at": six, "title": "Tea", "colour": "red"}),
+        json!({"id": "tea", "at": six, "title": "T".repeat(41)}),
+        json!({"id": "tea", "at": six, "title": "Tea\nfor two"}),
+        json!({"id": "tea", "at": six, "title": "Tea", "body": "b".repeat(121)}),
+        json!({"id": "tea", "at": six, "title": "Tea", "body": "Milk\rfirst"}),
     ] {
         assert_eq!(
             ring(&phone, &mut files, "alarms", &refused),
             Err(
                 "Alarms failed: TypeError: phone.rings.set takes {id, at, title, body}: an id \
-                 and a title that are not blank, at in whole milliseconds since the epoch, and \
-                 a body of text if it has one"
+                 that is not blank, at in whole milliseconds since the epoch, a title of one \
+                 line that is not blank, of 40 characters at most, and, if it has one, a body \
+                 of one line of 120 characters at most"
                     .to_owned()
             ),
             "{refused}"
         );
     }
+
+    let full = json!({"id": "full", "at": six, "title": "T".repeat(40), "body": "b".repeat(120)});
+
+    assert!(ring(&phone, &mut files, "alarms", &full).is_ok());
+    phone
+        .act(
+            &mut files,
+            "alarms",
+            "cancel",
+            &input(&json!({"id": "full"})),
+            &now(),
+        )
+        .unwrap();
 
     assert_eq!(
         files.documents["apps/alarms.json"],
