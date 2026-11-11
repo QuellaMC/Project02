@@ -13,6 +13,7 @@ export default defineConfig({
         'src/session.ts',
         'src/settings-session.ts',
         'src/phone-session.ts',
+        'src/phone-link.ts',
         'src/phone-*.tsx',
         'src/main.tsx',
         'src/app.tsx',

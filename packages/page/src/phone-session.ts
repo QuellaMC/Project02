@@ -2,9 +2,11 @@
  * Her phone's window: its one client and one stream, and what the person
  * does in it, which is look around her phone and change nothing of hers.
  * Every read passes through the window's reducers in phone.ts, and the
- * window reads the value, never the client. Browser-only like the chat's
- * session: the browser suite is its cover.
+ * window reads the value, never the client. From its start it tells the
+ * chat whose phone it shows. Browser-only like the chat's session: the
+ * browser suite is its cover.
  */
+import {tellTheChat} from './phone-link.ts';
 import {
   healthSaid,
   initialPhoneState,
@@ -39,6 +41,8 @@ export function createPhoneSession(
     initialPhoneState(characterId),
   );
   const client = clientFor(address);
+
+  tellTheChat(characterId);
 
   // An address that can never work: the window says so and does nothing else.
   if (typeof client === 'string') {

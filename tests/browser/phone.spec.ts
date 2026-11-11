@@ -1,14 +1,18 @@
 import {expect, type Page} from '@playwright/test';
 
 import {startDaemon, type Daemon} from '../conformance/harness/daemon.ts';
-import {configJson, createHome} from '../conformance/harness/home.ts';
+import {
+  characterJson,
+  configJson,
+  createHome,
+} from '../conformance/harness/home.ts';
 import {
   calling,
   reply,
   startModelServer,
   type ModelServer,
 } from '../conformance/harness/model-server.ts';
-import {converse, wireOf} from '../conformance/harness/wire.ts';
+import {converse, saveConfig, wireOf} from '../conformance/harness/wire.ts';
 import {test} from './fixture.ts';
 
 // A ring's time is drawn on the person's clock, in their language and zone:
@@ -42,9 +46,38 @@ function quietHome(model: ModelServer, clock?: object): string {
   });
 }
 
+/** A home of Mira's and Nova's, both answering through `model`, their heartbeats off. */
+function twoHome(model: ModelServer): string {
+  const quiet = {'config.json': configJson({project02: {heartbeat: 'off'}})};
+
+  return createHome({
+    'config.json': configJson({project02: model.settings}),
+    characters: {
+      nova: {'project02.character.json': characterJson('nova', 'Nova')},
+    },
+    'character-data': {mira: quiet, nova: quiet},
+  });
+}
+
 /** Her home screen's Clock, which a tab named World Clock is not. */
 function clockIcon(page: Page) {
   return page.getByRole('button', {name: 'Clock', exact: true});
+}
+
+/** The chat's Her Phone button, for the character whose chat is on screen. */
+function herPhoneButton(page: Page) {
+  return page.getByRole('button', {name: /^Her Phone/u});
+}
+
+/** Her chat, opened from the roster. */
+async function chatWith(page: Page, name: string): Promise<void> {
+  await page
+    .getByRole('complementary', {name: 'Characters'})
+    .getByRole('button', {name: new RegExp(`^${name}\\b`, 'u')})
+    .click();
+  await expect(
+    page.getByRole('textbox', {name: `Message ${name}`}),
+  ).toBeVisible();
 }
 
 test("page.phone-follows-her: her phone's address shows her home screen with the Clock; she sets an alarm and the window goes to the Alarms view with the alarm on it and says what she did; the person opens another view and her home screen, and what she has in front is untouched; an address naming nobody says so where her phone would be", async ({
@@ -138,4 +171,102 @@ test("page.phone-rings: while a moment of hers that a ring began runs, her phone
   asked.release(reply('Up you get, Sam.'));
   await expect(ringing).toHaveCount(0);
   await expect(clockIcon(page)).toBeVisible();
+});
+
+test("page.phone-button: her chat's Her Phone button opens her phone's address in a window and is pressed while that window shows her phone; closing the window, or clicking the button again, leaves it plain; with her phone open, another character's takes the same window; a browser that blocks the window is told what to allow; once her settings switch her phone off, her chat has no button", async ({
+  context,
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(twoHome(model));
+  const button = herPhoneButton(page);
+
+  await page.goto(daemon.url);
+  await chatWith(page, 'Mira');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+
+  const [phone] = await Promise.all([
+    page.waitForEvent('popup'),
+    button.click(),
+  ]);
+
+  await expect(phone).toHaveURL(phoneOf(daemon, 'mira'));
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await Promise.all([
+    phone.waitForEvent('close'),
+    phone.getByRole('button', {name: 'Close her phone'}).click(),
+  ]);
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+
+  const [again] = await Promise.all([
+    page.waitForEvent('popup'),
+    button.click(),
+  ]);
+
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await Promise.all([again.waitForEvent('close'), button.click()]);
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+
+  const [shared] = await Promise.all([
+    page.waitForEvent('popup'),
+    button.click(),
+  ]);
+
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await chatWith(page, 'Nova');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await button.click();
+  await expect(shared).toHaveURL(phoneOf(daemon, 'nova'));
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  expect(context.pages()).toEqual([page, shared]);
+  await chatWith(page, 'Mira');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+
+  // A browser that blocks the window answers its opening with nothing.
+  await page.evaluate('void (window.open = () => null)');
+  await button.click();
+  await expect(page.locator('main > .notice')).toHaveText([
+    "This browser blocked her phone's window. Allow pop-ups for this page, then click Her Phone again.",
+  ]);
+
+  await saveConfig(
+    wireOf(daemon),
+    {scope: 'character', characterId: 'mira'},
+    {
+      kind: 'section_enabled',
+      namespace: 'plugins',
+      id: 'phone',
+      enabled: false,
+    },
+  );
+  await expect(button).toHaveCount(0);
+});
+
+test("page.phone-in-use: while a turn of hers that called a tool of her phone waits for her reply, her chat's Her Phone button carries a dot and the thread says she is using her phone, her phone's window closed; once the turn ends, both are gone", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(quietHome(model));
+  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+  const using = page.getByText('Mira is using her phone…');
+  const dot = herPhoneButton(page).getByRole('img', {name: 'In use'});
+
+  await page.goto(daemon.url);
+  await expect(herPhoneButton(page)).toBeVisible();
+  model.answer(calling(['phone_open', {app: 'clock'}]));
+
+  const asked = model.hold();
+
+  await composer.fill('Is my alarm on?');
+  await composer.press('Enter');
+  await asked.arrived();
+  await expect(using).toBeVisible();
+  await expect(dot).toBeVisible();
+
+  asked.release(reply('No alarm yet.'));
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'No alarm yet.',
+  ]);
+  await expect(using).toHaveCount(0);
+  await expect(dot).toHaveCount(0);
 });

@@ -484,6 +484,39 @@ code {
   font-weight: 600;
 }
 
+/* Her Phone, at the head's end: filled while her phone's window shows her phone, a dot while she is using it. */
+.thread-phone {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: none;
+  border-radius: 16px;
+  background: var(--fill);
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.thread-phone[aria-pressed='true'] {
+  background: var(--link);
+  color: #ffffff;
+}
+
+.thread-phone-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.thread-phone[aria-pressed='true'] .thread-phone-dot {
+  background: #ffffff;
+}
+
 .messages {
   flex: 1;
   min-height: 0;
@@ -546,8 +579,12 @@ code {
   margin-bottom: 2px;
 }
 
+/* What she is doing before her reply begins: writing it, or using her phone. */
 .typing {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .composer {

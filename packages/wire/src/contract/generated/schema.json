@@ -3339,6 +3339,10 @@
             "status": {
               "$ref": "#/$defs/ToolCallStatus"
             },
+            "pluginId": {
+              "$ref": "#/$defs/Identifier",
+              "description": "The plugin that provides the tool, or `undeclared.<tool>` for a\ntool the turn did not offer."
+            },
             "toolName": {
               "$ref": "#/$defs/Identifier"
             },
@@ -3351,6 +3355,7 @@
             "kind",
             "round",
             "status",
+            "pluginId",
             "toolName"
           ]
         }

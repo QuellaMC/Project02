@@ -129,9 +129,9 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
         ),
         Progress::ToolCallCompleted {
             round,
+            plugin_id,
             tool_name,
             accepted,
-            ..
         } => (
             Some(TurnProgress::ToolCallCompleted {
                 round,
@@ -140,6 +140,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                 } else {
                     ToolCallStatus::Rejected
                 },
+                plugin_id,
                 tool_name,
             }),
             false,

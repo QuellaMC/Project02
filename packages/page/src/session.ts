@@ -10,6 +10,7 @@ import {
   type GatewayClient,
   type HistoryPage,
 } from '@project02/wire/client';
+import {followHerPhone, openHerPhone} from './phone-link.ts';
 import {
   createSettingsVerbs,
   noSettingsVerbs,
@@ -32,6 +33,9 @@ import {
   noticed,
   pageUnread,
   pairingGone,
+  phoneAnswered,
+  phoneWindowGone,
+  phoneWindowShows,
   streamLost,
   streamResumed,
   threadOpened,
@@ -51,6 +55,8 @@ export type Session = SettingsVerbs & {
   readonly answer: (id: string, decision: Answer) => Promise<void>;
   readonly settlePairing: (code: string, decision: Answer) => Promise<void>;
   readonly start: (characterId: string) => Promise<void>;
+  /** Opens her phone in its window, or closes that window while it shows her phone. */
+  readonly togglePhone: (characterId: string) => void;
 };
 
 /** The stamp every tab puts on its lines; a tab tells its own apart by id, not by it. */
@@ -65,6 +71,7 @@ export function createSession(address: string): Session {
 
   const {getState, subscribe, apply, writtenFor} = createTabValue();
   const settings = createSettingsVerbs({client, getState, apply});
+  const phone = linkHerPhone(address, {client, apply}, getState);
   /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
   /**
@@ -139,6 +146,7 @@ export function createSession(address: string): Session {
 
       reads.clear();
       apply(state => threadOpened(state, outcome));
+      void phone.read();
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
       if (mine === opens) {
@@ -175,9 +183,11 @@ export function createSession(address: string): Session {
       }
 
       // Config moved, here or on another surface, or a connector's
-      // process came or went: the settings open show what is there now.
+      // process came or went: the settings open show what is there now,
+      // and whether she has a phone is asked again.
       if (event.kind === 'health_changed') {
         void settings.changed();
+        void phone.read();
       }
     },
     ready: async snapshot => {
@@ -189,6 +199,7 @@ export function createSession(address: string): Session {
       const {thread} = getState();
 
       if (thread !== undefined) {
+        void phone.read();
         await readPage(thread.conversationId, {});
       }
 
@@ -331,6 +342,66 @@ export function createSession(address: string): Session {
         }
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
+      }
+    },
+    togglePhone: phone.toggle,
+  };
+}
+
+/**
+ * The chat's side of her phone's window: whose phone the window shows, as
+ * it says of itself; whether the character whose chat is on screen has a
+ * phone, as the daemon says; and the Her Phone button, which opens her
+ * phone, or asks the window showing it to close. A click on it is the
+ * person's act, and spends what the page had to say.
+ */
+function linkHerPhone(
+  address: string,
+  {client, apply}: Sending,
+  getState: () => WebState,
+): {
+  readonly read: () => Promise<void>;
+  readonly toggle: (characterId: string) => void;
+} {
+  const phoneWindow = followHerPhone({
+    shows: characterId => {
+      apply(current => phoneWindowShows(current, characterId));
+    },
+    gone: characterId => {
+      apply(current => phoneWindowGone(current, characterId));
+    },
+  });
+  /** Only the latest read applies; an earlier one that settles later is let go. */
+  let reads = 0;
+
+  return {
+    async read() {
+      const characterId = getState().thread?.characterId;
+
+      if (characterId === undefined) {
+        return;
+      }
+
+      const mine = (reads += 1);
+      // A read that did not reach the daemon says nothing of her phone.
+      const outcome = await client.phone(characterId).catch(() => undefined);
+
+      if (outcome !== undefined && mine === reads) {
+        apply(current => phoneAnswered(current, characterId, outcome));
+      }
+    },
+    toggle(characterId) {
+      apply(noticeSpent);
+
+      if (getState().phoneWindow === characterId) {
+        phoneWindow.close(characterId);
+      } else if (!openHerPhone(address, characterId)) {
+        apply(current =>
+          noticed(
+            current,
+            "This browser blocked her phone's window. Allow pop-ups for this page, then click Her Phone again.",
+          ),
+        );
       }
     },
   };
@@ -592,5 +663,6 @@ function refusedSession(message: string): Session {
     answer: nothing,
     settlePairing: nothing,
     start: nothing,
+    togglePhone: () => undefined,
   };
 }

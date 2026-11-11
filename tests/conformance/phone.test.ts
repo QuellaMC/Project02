@@ -489,7 +489,7 @@ it('phone.switched-on: while her settings switch her phone off, a ring that came
   expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
 });
 
-it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint and views, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has said her phone changed after each call, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
+it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint and views, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -534,12 +534,18 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
   const ended = await events.next(
     frameOf('turn_completed', {clientMessageId: 'wake'}),
   );
+  const said = events.frames.slice(0, events.frames.indexOf(ended));
   const phone = await wire.phone('mira');
 
   expect(
-    events.frames
-      .slice(0, events.frames.indexOf(ended))
-      .filter(frameOf('phone_changed', {characterId: 'mira'})),
+    said.filter(
+      frameOf('turn_progress', {
+        progress: {kind: 'tool_call_completed', pluginId: 'phone'},
+      }),
+    ),
+  ).toHaveLength(2);
+  expect(
+    said.filter(frameOf('phone_changed', {characterId: 'mira'})),
   ).toHaveLength(2);
   expect(phone).toEqual({
     status: 'ok',

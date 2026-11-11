@@ -38,6 +38,15 @@ and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in
 the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
+Her chat's head has a Her Phone button unless the daemon says she has no
+phone. It opens her phone in the one window every character's phone
+shares, and closes it, and is pressed while that window shows hers: the
+window says whose phone it shows when it opens, when a chat asks and when
+it goes, over a channel of the page's origin (`phone-link.ts`). From a
+call of one of her phone's tools in a turn of hers, known by the plugin
+the stream names, until her next reply begins or the turn ends, she is
+using her phone: the button carries a dot, and her thread says so where
+it would say she is writing.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.

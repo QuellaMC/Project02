@@ -16,6 +16,9 @@ import {
   noticeSpent,
   pageUnread,
   pairingGone,
+  phoneAnswered,
+  phoneWindowGone,
+  phoneWindowShows,
   streamLost,
   streamResumed,
   threadOpened,
@@ -160,6 +163,27 @@ function ownCompleted(
     status,
     committed: true,
     ...(message === undefined ? {} : {message}),
+  };
+}
+
+/** A call of a tool `pluginId` provides, come back in `characterId`'s turn on `conversation`. */
+function called(
+  pluginId: string,
+  toolName: string,
+  characterId = 'mira',
+  conversation = conversationId,
+): GatewayEvent {
+  return {
+    kind: 'turn_progress',
+    characterId,
+    conversationId: conversation,
+    progress: {
+      kind: 'tool_call_completed',
+      round: 1,
+      status: 'accepted',
+      pluginId,
+      toolName,
+    },
   };
 }
 
@@ -563,6 +587,92 @@ describe('web store', () => {
         conversationId,
         characterId: 'mira',
       }).unseen.size,
+    ).toBe(0);
+  });
+
+  it("says she is using her phone from a call of one of its tools until her next reply begins or her turn ends, in a line's turn as in one of her own, and never for another character's turn", () => {
+    const phoned = called('phone', 'phone.open');
+    let state = applyEvent(
+      applyEvent(opened(), userMessage('m-1', 'Wake me at seven.', 'line-1')),
+      running('line-1'),
+    );
+
+    expect(applyEvent(state, called('notes', 'notes.add')).phoning.size).toBe(
+      0,
+    );
+
+    state = applyEvent(state, phoned);
+
+    expect([...state.phoning]).toEqual([conversationId]);
+    // Her next reply begins with its draft, or comes whole; another line's
+    // end leaves her turn, and her phone in it, as they were.
+    expect(
+      applyEvent(state, running('line-1', [{draftId: '2.0', text: 'Set'}]))
+        .phoning.size,
+    ).toBe(0);
+    expect(
+      applyEvent(
+        state,
+        progress({
+          kind: 'visible_reply',
+          messageId: 'm-2',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'Set for seven.',
+          draftId: '2.0',
+        }),
+      ).phoning.size,
+    ).toBe(0);
+    expect(applyEvent(state, completed('line-1')).phoning.size).toBe(0);
+    expect(
+      applyEvent(state, completed('line-2', 'refused', 'wrong sender', false))
+        .phoning,
+    ).toBe(state.phoning);
+    // What the stream said before a snapshot is not said again by it.
+    expect(installSnapshot(state, ready()).phoning.size).toBe(0);
+
+    const own = applyEvent(applyEvent(opened(), ownRunning()), phoned);
+
+    expect([...own.phoning]).toEqual([conversationId]);
+    expect(applyEvent(own, ownCompleted('completed')).phoning.size).toBe(0);
+
+    const novas = applyEvent(
+      applyEvent(opened(), {
+        kind: 'turn_running',
+        characterId: 'nova',
+        conversationId: 'conv-2',
+        drafts: [],
+      }),
+      called('phone', 'phone.open', 'nova', 'conv-2'),
+    );
+
+    expect(novas.phoning.has(conversationId)).toBe(false);
+  });
+
+  it("presses her Her Phone button while her phone's window says it shows her phone, whichever page of a window taken over speaks last, and draws none for a character the daemon says has no phone", () => {
+    let state = phoneWindowShows(opened(), 'mira');
+
+    expect(state.phoneWindow).toBe('mira');
+
+    state = phoneWindowShows(state, 'nova');
+
+    expect(phoneWindowGone(state, 'mira')).toBe(state);
+    expect(phoneWindowGone(state, 'nova').phoneWindow).toBeUndefined();
+
+    const noPhone = {
+      status: 'refused',
+      reason: 'no_phone',
+      message: 'Mira has no phone: her settings switch it off.',
+    } as const;
+    const none = phoneAnswered(opened(), 'mira', noPhone);
+
+    expect([...none.phoneless]).toEqual(['mira']);
+    expect(phoneAnswered(none, 'mira', noPhone)).toBe(none);
+    expect(
+      phoneAnswered(none, 'mira', {
+        status: 'failed',
+        message: 'Her phone could not be read.',
+      }).phoneless.size,
     ).toBe(0);
   });
 

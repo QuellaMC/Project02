@@ -490,6 +490,7 @@ fn written() -> Vec<(&'static str, Value)> {
             progress: TurnProgress::ToolCallCompleted {
                 round: NonZeroU32::MIN,
                 status: ToolCallStatus::Rejected,
+                plugin_id: id("notes"),
                 tool_name: id("notes.add"),
             },
         },

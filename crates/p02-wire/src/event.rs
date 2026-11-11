@@ -155,6 +155,9 @@ pub enum TurnProgress {
     ToolCallCompleted {
         round: NonZeroU32,
         status: ToolCallStatus,
+        /// The plugin that provides the tool, or `undeclared.<tool>` for a
+        /// tool the turn did not offer.
+        plugin_id: Identifier,
         tool_name: Identifier,
     },
 }

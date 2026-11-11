@@ -739,7 +739,13 @@ data: {…}</code></pre>
               <code>user_message</code> (with <code>source</code> and
               <code>clientMessageId</code>) and <code>visible_reply</code>,
               which names the <code>draftId</code> it replaces — and its rounds'
-              tool calls.
+              tool calls: <code>tool_calls_requested</code> with the
+              <code>toolNames</code> a round called, then a
+              <code>tool_call_completed</code> for each call as it came back,
+              <code>accepted</code> or <code>rejected</code>, with its
+              <code>toolName</code> and the <code>pluginId</code> of the plugin
+              that provides the tool (<code>undeclared.&lt;tool&gt;</code> for
+              one the turn did not offer).
             </td>
           </tr>
           <tr>
@@ -1062,7 +1068,11 @@ data: {…}</code></pre>
         call of her phone's tools came back accepted, as a moment that a ring
         began begins, and once that moment's rings went to their apps, before
         its <code>turn_completed</code>. A surface showing her phone reads it
-        again then, and on every <code>ready</code>.
+        again then, and on every <code>ready</code>. A call of one of her
+        phone's tools comes back as a <code>tool_call_completed</code> whose
+        <code>pluginId</code> is <code>phone</code>, accepted or not: the page
+        says she is using her phone from it until her next reply begins or
+        the turn ends.
       </p>
 
       <h2>The sync rule</h2>

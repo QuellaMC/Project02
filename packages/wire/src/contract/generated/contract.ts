@@ -801,7 +801,12 @@ export type TurnProgress = { "kind": "user_message", messageId: MessageId, speak
 /**
  * The draft this message replaces.
  */
-draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, toolName: Identifier, };
+draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, 
+/**
+ * The plugin that provides the tool, or `undeclared.<tool>` for a
+ * tool the turn did not offer.
+ */
+pluginId: Identifier, toolName: Identifier, };
 
 /**
  * How a turn ended, as the frame announcing it says.
