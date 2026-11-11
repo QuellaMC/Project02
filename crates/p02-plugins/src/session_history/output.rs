@@ -19,7 +19,11 @@ pub(super) fn search(hits: &Hits, query: &str) -> Value {
         ("sessions".to_owned(), Value::Array(sessions)),
         (
             "totalSessionsWithHits".to_owned(),
-            Value::from(hits.sessions_with_hits),
+            Value::from(hits.matching_sessions),
+        ),
+        (
+            "matchesInView".to_owned(),
+            Value::from(hits.matches_in_view),
         ),
     ]))
 }

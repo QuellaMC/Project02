@@ -4,6 +4,7 @@
 //! where the stored cursor left off, so two ingesters never take a message
 //! twice and a stopped catch-up continues where it stopped.
 
+use std::collections::BTreeSet;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::LazyLock;
 
@@ -11,7 +12,7 @@ use p02_contracts::{
     DatabaseError, HistoryCursor, HistoryMessage, PluginDatabase, ReadMessages, SessionHistory,
     SessionHistoryError, SessionListing,
 };
-use p02_core::{SessionId, VisibleMessageRole};
+use p02_core::{MessageId, SessionId, VisibleMessageRole};
 use p02_shared::Identifier;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde_json::Value;
@@ -112,12 +113,15 @@ pub(super) struct SessionView {
     pub(super) hit: String,
 }
 
-/// The sessions with hits, best first, at most as many as asked for, and
-/// how many sessions have one.
+/// The sessions with hits, best first, at most as many as asked for, how
+/// many sessions have one, and how many messages the model already sees
+/// hold the query too: those are never hits, so an answer of no session
+/// says whether the text is in front of the model or nowhere at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hits {
     pub(super) views: Vec<SessionView>,
-    pub(super) sessions_with_hits: u64,
+    pub(super) matching_sessions: u64,
+    pub(super) matches_in_view: u64,
 }
 
 /// Messages of one session, oldest first, and whether it has more on
@@ -133,7 +137,8 @@ pub(super) struct Window {
 /// model already sees, and how many sessions to return.
 pub(super) struct Scope<'a> {
     pub(super) session: Option<&'a SessionId>,
-    pub(super) unseen: &'a [String],
+    /// The messages the model already sees.
+    pub(super) in_view: &'a [MessageId],
     pub(super) limit: u32,
 }
 
@@ -293,7 +298,7 @@ impl SessionIndex {
         } else {
             self.ranked_hits(&folded, scope)?
         };
-        let sessions_with_hits = hits.first().map_or(0, |hit| {
+        let matching_sessions = hits.first().map_or(0, |hit| {
             hit.sessions_with_hits.try_into().unwrap_or_default()
         });
         let mut views = Vec::with_capacity(hits.len());
@@ -304,8 +309,42 @@ impl SessionIndex {
 
         Ok(Hits {
             views,
-            sessions_with_hits,
+            matching_sessions,
+            matches_in_view: self.matches_in_view(&folded, scope)?,
         })
+    }
+
+    /// How many of the messages the model already sees hold the folded
+    /// query, within the scope's session when it names one. A phrase on the
+    /// trigram index is the query as a substring of the folded text, so one
+    /// reading serves a query of any length, and only the sessions those
+    /// messages are in are read.
+    fn matches_in_view(&self, folded: &str, scope: &Scope<'_>) -> Result<u64, IndexError> {
+        let sessions: BTreeSet<String> = scope
+            .in_view
+            .iter()
+            .map(|message| message.session_id().to_string())
+            .collect();
+        let count: i64 = self
+            .connection
+            .prepare_cached(
+                "SELECT COUNT(*) FROM messages
+                 WHERE session_id IN (SELECT value FROM json_each(?1))
+                   AND message_id IN (SELECT value FROM json_each(?2))
+                   AND (?3 IS NULL OR session_id = ?3)
+                   AND instr(folded, ?4) > 0",
+            )?
+            .query_row(
+                params![
+                    Value::from_iter(sessions).to_string(),
+                    in_view(scope),
+                    scope.session.map(SessionId::to_string),
+                    folded
+                ],
+                |row| row.get(0),
+            )?;
+
+        Ok(count.try_into().unwrap_or_default())
     }
 
     /// Up to `window` messages on each side of `anchor`, or the last
@@ -404,15 +443,13 @@ impl SessionIndex {
     }
 
     fn hits(&self, sql: &str, matching: &str, scope: &Scope<'_>) -> Result<Vec<Hit>, IndexError> {
-        let unseen = Value::from(scope.unseen.to_vec()).to_string();
-
         self.connection
             .prepare_cached(sql)?
             .query_map(
                 params![
                     matching,
                     scope.session.map(SessionId::to_string),
-                    unseen,
+                    in_view(scope),
                     scope.limit
                 ],
                 |row| {
@@ -499,6 +536,12 @@ impl SessionIndex {
             .collect::<Result<_, _>>()
             .map_err(IndexError::from)
     }
+}
+
+/// The ids of the messages the model already sees, as the JSON array a
+/// statement reads them from.
+fn in_view(scope: &Scope<'_>) -> String {
+    Value::from_iter(scope.in_view.iter().map(ToString::to_string)).to_string()
 }
 
 fn positioned_message(row: &Row<'_>) -> rusqlite::Result<(i64, IndexedMessage)> {
