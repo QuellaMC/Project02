@@ -36,6 +36,7 @@ import {
   featureControl,
   featureValue,
   featuresPlaced,
+  ownModelExtras,
   ownModelRows,
   serviceChoice,
   setupPage,
@@ -528,9 +529,10 @@ function HerBot({
 }
 
 /**
- * What is hers alone, under Advanced: her own AI model, by its service or
- * the same as everyone's, and what she calls the person. Shown while the
- * Advanced switch is on, and a row she holds a value for shows without it.
+ * What is hers alone, under Advanced: her own AI model, by its service,
+ * Custom while she holds only other parts of one, or the same as
+ * everyone's, and what she calls the person. Shown while the Advanced
+ * switch is on, and a row she holds a value for shows without it.
  */
 function HerOwn({
   ctx,
@@ -544,9 +546,10 @@ function HerOwn({
   const {advanced} = ctx.state;
   const target = characterTarget(character.id);
   const service = serviceChoice(ctx.settings, target).chosen;
+  const custom = ownModelExtras(ctx.settings, character.id).length > 0;
   const callsYouRow = hostRow(target, 'userDisplayName');
   const callsYou = fieldAt(view, callsYouRow.place);
-  const showModel = advanced || service !== undefined;
+  const showModel = advanced || service !== undefined || custom;
   const showName =
     callsYou !== undefined && (advanced || callsYou.authored.configured);
 
@@ -561,7 +564,7 @@ function HerOwn({
     >
       {showModel ? (
         <LinkCell
-          value={service?.name ?? 'Same as Everyone'}
+          value={service?.name ?? (custom ? 'Custom' : 'Same as Everyone')}
           onClick={() => {
             ctx.session.goTo({
               kind: 'character-model',
@@ -642,8 +645,10 @@ export function FeaturePage({
 /**
  * Her own AI model: the service, Same as Everyone naming the one every
  * character thinks with, or one of the services connected; and with a
- * service of her own, its model. Same as Everyone takes away every part
- * of her own, so none of it stands in for what everyone uses.
+ * service of her own, its model. Same as Everyone takes away her service
+ * and every model of her own, so none stands in for what everyone uses.
+ * Under them, whatever else of it she holds a value of her own for, each
+ * to be seen and taken away.
  */
 export function CharacterModelPage({
   ctx,
@@ -716,6 +721,22 @@ export function CharacterModelPage({
           <FieldRow ctx={ctx} row={hostRow(target, model.name)} field={model} />
         )}
       </Group>
+      {ownModelExtras(settings, characterId).map(held => (
+        <Group
+          key={held.title}
+          title={held.title}
+          footer={`Only for ${name}. Empty uses everyone's.`}
+        >
+          {held.rows.map(own => (
+            <FieldRow
+              key={own.field.name}
+              ctx={ctx}
+              row={own.row}
+              field={own.field}
+            />
+          ))}
+        </Group>
+      ))}
     </>
   );
 }

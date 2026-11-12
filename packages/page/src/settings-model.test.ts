@@ -19,6 +19,7 @@ import {
   labelOf,
   marks,
   offerOf,
+  ownModelExtras,
   ownModelRows,
   parentOf,
   placeholderOf,
@@ -800,6 +801,45 @@ describe('settings model', () => {
     expect(
       ownModelRows(settingsOf({'character:mira': hers({})}), 'mira'),
     ).toEqual([]);
+  });
+
+  it("shows what else of her AI model she holds of her own, a service's other fields under its name and the context size under Advanced, and never the model her page already offers", () => {
+    const hers = (project02: readonly Field[]) =>
+      herView({
+        services: services(true, true),
+        project02: [own('enabled', true, {valueType: 'boolean'}), ...project02],
+      });
+    const extras = (view: OkView) =>
+      ownModelExtras(
+        settingsOf({home: homeView(), 'character:mira': view}),
+        'mira',
+      ).map(held => [held.title, held.rows.map(({row}) => rowKey(row))]);
+
+    expect(
+      extras(
+        hers([
+          ...serviceFields({
+            roleModelProvider: 'nvidia',
+            nvidiaModel: 'meta/llama',
+            nvidiaApiKey: '[redacted]',
+            nvidiaBaseUrl: 'http://localhost:1234/v1',
+            openaiModel: 'gpt-6.1-terra',
+          }),
+          own('contextWindowTokens', 4096, {valueType: 'number'}),
+        ]),
+      ),
+    ).toEqual([
+      ['OpenAI API', ['character:mira/project02.openaiModel']],
+      [
+        'NVIDIA',
+        [
+          'character:mira/project02.nvidiaApiKey',
+          'character:mira/project02.nvidiaBaseUrl',
+        ],
+      ],
+      ['Advanced', ['character:mira/project02.contextWindowTokens']],
+    ]);
+    expect(extras(hers(serviceFields({})))).toEqual([]);
   });
 
   it('says how a character stands: off, needing an AI model with what to do, ready with any warning, or her state with why she failed', () => {

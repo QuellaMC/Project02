@@ -131,8 +131,9 @@ shown back, where a key comes from, Remove Key once one is saved, and the
 service's other fields but its model under Advanced, as NVIDIA's server
 address. A character's own AI model, from her page, is Same as Everyone or
 a service connected with its model; Same as Everyone takes away her
-service and every model of hers. The welcome asks for the key of the
-service chosen.
+service and every model of hers. Whatever else of it she holds of her
+own, a key, a server or a context size, shows under them, each to be seen
+and taken away. The welcome asks for the key of the service chosen.
 
 While her settings give her a phone, her page has her apps, over the
 daemon's verbs for them: an icon for each app on her phone but the App

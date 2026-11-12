@@ -788,6 +788,50 @@ export function ownModelRows(
     });
 }
 
+/** Rows a character's AI Model page shows under one title. */
+export type HeldRows = {
+  readonly title: string;
+  readonly rows: readonly {readonly row: Row; readonly field: Field}[];
+};
+
+/**
+ * What a character holds of her own for her AI model beside what her page
+ * chooses, the service and its model: each service's other fields she
+ * holds, under the service's name, and the context size, under Advanced.
+ * A value in effect is never hidden, so a key or a server of her own,
+ * which an earlier page could set, is seen here and can be taken away.
+ */
+export function ownModelExtras(
+  settings: Settings,
+  characterId: string,
+): readonly HeldRows[] {
+  const target = characterTarget(characterId);
+  const view = viewOf(settings, target);
+
+  if (view === undefined) {
+    return [];
+  }
+
+  const chosen = serviceChoice(settings, target).model?.name;
+  const held = (names: readonly string[]) =>
+    names.flatMap(name => {
+      const row = hostRow(target, name);
+      const field = fieldAt(view, row.place);
+
+      return name !== chosen && field?.authored.configured === true
+        ? [{row, field}]
+        : [];
+    });
+
+  return [
+    ...view.services.map(service => ({
+      title: service.name,
+      rows: held(service.fields),
+    })),
+    {title: 'Advanced', rows: held(['contextWindowTokens'])},
+  ].filter(group => group.rows.length > 0);
+}
+
 /** A service as a row of the AI Model page: its tile, the line under its name, and whether every character thinks with it. */
 export type ListedService = {
   readonly service: ModelService;
