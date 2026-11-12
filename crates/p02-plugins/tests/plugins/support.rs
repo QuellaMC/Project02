@@ -10,20 +10,22 @@ use futures_util::StreamExt as _;
 use p02_contracts::{
     BeforeRoleModelCallOutput, CharacterStorage, CommittedTurn, ContextItem, ContextItemKind,
     EvidenceKind, EvidenceNote, EvidenceStatus, FactoryInput, HookContext, HookReport, HookStatus,
-    Manifest, PluginError, ProvidedTool, RuntimePlugin, StoreAccess, StoreError, ToolCall,
-    ToolCallId, ToolCallOutcome, ToolConcurrency, ToolInputContract, TurnIdentity, TurnText,
+    Manifest, PluginError, ProvidedTool, RuntimePlugin, StoreAccess, StoreError,
+    TextCompletionRequest, ToolCall, ToolCallId, ToolCallOutcome, ToolConcurrency,
+    ToolInputContract, TurnIdentity, TurnText,
 };
 use p02_core::{
     CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
     TraceId, VisibleText,
 };
+use p02_phone::Account;
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
-    ProposedToolCall, ReadConfigError, ToolCallReport, Turn, list,
+    Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
+    ProposedToolCall, ReadConfigError, ToolCallReport, Turn, Unanswered, list,
 };
 use p02_shared::{BaseUrl, Identifier};
-use p02_wire::ActivationStatus;
+use p02_wire::{ActivationStatus, AppConnection};
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
 
@@ -214,8 +216,9 @@ impl ConfigControl for NoSettings {
     }
 }
 
-/// A host's builder over `storage`, with nobody to ask, no settings, and an
-/// App Store and an internet nothing serves.
+/// A host's builder over `storage`, with nobody to ask, no settings, an
+/// App Store and an internet nothing serves, and no connection of the
+/// person's.
 pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
     PluginHost::builder(
         storage,
@@ -223,7 +226,30 @@ pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
         Arc::new(NoSettings),
         nowhere(),
         offline(),
+        Arc::new(Unconnected),
     )
+}
+
+/// The person's connections, none connected: no app of these tests asks a
+/// model.
+#[derive(Debug)]
+pub(crate) struct Unconnected;
+
+#[async_trait]
+impl Connections for Unconnected {
+    async fn connected(&self, _account: &'static Account) -> Vec<AppConnection> {
+        Vec::new()
+    }
+
+    async fn ask(
+        &self,
+        _account: &'static Account,
+        _connection: &str,
+        _model: Option<&str>,
+        _request: &TextCompletionRequest,
+    ) -> Result<String, Unanswered> {
+        unreachable!("no app of these tests asks a model")
+    }
 }
 
 /// An App Store nothing serves: no test of these reads it.

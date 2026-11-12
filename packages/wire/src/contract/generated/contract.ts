@@ -40,10 +40,18 @@ export type AnswerBody = { decision: Answer, };
 export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } | { "status": "unknown" };
 
 /**
- * An account of the person's that an app uses: the id her phone knows it
- * by, its name, and whether the person gave her phone its key.
+ * An account of the person's that an app uses by a key: the id her phone
+ * knows it by, its name, and whether the person gave her phone its key.
  */
 export type AppAccount = { id: Identifier, name: string, hasKey: boolean, };
+
+/**
+ * A connection of the person's an app can sign in with: their service, by
+ * the id the AI Model page knows it by, what that page calls it, the
+ * models it offers, best first, and the one it asks until another is
+ * chosen.
+ */
+export type AppConnection = { id: RoleModelProvider, name: string, models: ReadonlyArray<AppModel>, defaultModel: string, };
 
 /**
  * What came of giving her an app, from the App Store or from a file: the
@@ -57,6 +65,11 @@ export type AppInstallOutcome = { "status": "ok", app: PhoneApp, replaced?: stri
  * file, which a preview of it says too.
  */
 export type AppInstallRefusal = "unknown_character" | "no_phone" | "not_in_store" | "comes_with_phone" | "already_installed" | "not_as_listed" | "not_an_app";
+
+/**
+ * A model a connection offers: its id, and the name a person reads.
+ */
+export type AppModel = { id: string, name: string, };
 
 /**
  * What an app's file would put on her phone, judged as adding it judges
@@ -73,6 +86,35 @@ export type AppPreviewOutcome = { "status": "ok", id: Identifier, name: string, 
 export type AppRemoveOutcome = { "status": "ok" } | { "status": "refused", reason: AppRemoveRefusal, message: string, } | { "status": "failed", message: string, };
 
 export type AppRemoveRefusal = "unknown_character" | "no_phone" | "unknown_app" | "comes_with_phone";
+
+/**
+ * How an app that asks a model signs in on her phone: the connections of
+ * the person's it can sign in with now, in the AI Model page's order, and
+ * the one it is signed in with, while it is.
+ */
+export type AppSignIn = { connections: ReadonlyArray<AppConnection>, signedIn?: AppSignedIn, };
+
+/**
+ * The person's say on how an app that asks a model is signed in on her
+ * phone: with `connection`, one of theirs connected now, asking `model`,
+ * one it offers, or the one it starts with when none is named; with no
+ * connection, it is signed out.
+ */
+export type AppSignInBody = { connection?: RoleModelProvider, model?: string, };
+
+/**
+ * What came of the person's say on how an app is signed in: it is kept;
+ * or why it is not.
+ */
+export type AppSignInOutcome = { "status": "ok" } | { "status": "refused", reason: AppSignInRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type AppSignInRefusal = "unknown_character" | "no_phone" | "unknown_app" | "signs_in_to_nothing" | "not_connected" | "unknown_model";
+
+/**
+ * The connection an app is signed in with, and the model it asks: the
+ * one the person chose, else the one its connection starts with.
+ */
+export type AppSignedIn = { connection: RoleModelProvider, model: string, };
 
 /**
  * Where an app on her phone came from: it comes with her phone, it is the
@@ -113,6 +155,11 @@ export type BotState = "on" | "refused" | "unreachable" | "conflict" | "webhook"
  * to 32 ASCII letters, digits or underscores, as Telegram spells one.
  */
 export type BotUsername = string;
+
+/**
+ * Whom a bubble's words are from: her, or the one she talks with there.
+ */
+export type BubbleFrom = "her" | "them";
 
 /**
  * Why a change was refused.
@@ -370,7 +417,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 15, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 16, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -400,7 +447,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 15, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 16, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -636,8 +683,8 @@ export type PersonAccount = { id: Identifier, name: string, hasKey: boolean, key
  * the line she knows it by, its version and where it came from; its icon
  * and the tint of its tile, names of the page's own set, which falls back
  * for one it does not know; whether it says it wakes her, and whether the
- * person lets it; what it may do, and the person's account it uses; its
- * views, in its order; and the view it opens on.
+ * person lets it; what it may do, and the person's account it uses, or
+ * how it signs in; its views, in its order; and the view it opens on.
  */
 export type PhoneApp = { id: Identifier, name: string, summary: string, version: string, source: AppSource, icon: string, tint: string, 
 /**
@@ -654,9 +701,14 @@ mayWake: boolean,
  */
 itMay: ReadonlyArray<string>, 
 /**
- * The account of the person's it uses, when it uses one.
+ * The account of the person's it uses, when it uses one by a key.
  */
-account?: AppAccount, views: ReadonlyArray<AppView>, opensOn: Identifier, };
+account?: AppAccount, 
+/**
+ * How it signs in, when it asks a model through a connection of the
+ * person's.
+ */
+signIn?: AppSignIn, views: ReadonlyArray<AppView>, opensOn: Identifier, };
 
 /**
  * What she last did on her phone: the app, a few words in the past tense,
@@ -886,7 +938,7 @@ caption?: string,
 /**
  * A quieter line under the caption.
  */
-detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, };
+detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, } | { "kind": "bubble", from: BubbleFrom, text: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:

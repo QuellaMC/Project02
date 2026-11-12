@@ -234,9 +234,15 @@ fn what_an_app_may_do_is_said_from_what_it_asks_for_by_its_listing_and_its_file_
             SCREEN,
             &json!({"id": "news", "reaches": ["a.example", "b.example", "c.example"]}),
         ),
+        entry(
+            "1.0.0",
+            SCREEN,
+            &json!({"id": "advice", "account": "chatgpt"}),
+        ),
     ]))
     .unwrap();
     let said = |id: &str| it_may(read.app(id).unwrap().asks());
+    let asks_chatgpt = "Ask ChatGPT with a connection of yours, once you allow it";
 
     assert_eq!(said("quiet"), ["Keep its own data"]);
     assert_eq!(
@@ -262,6 +268,8 @@ fn what_an_app_may_do_is_said_from_what_it_asks_for_by_its_listing_and_its_file_
             "Reach the internet at a.example, b.example and c.example",
         ]
     );
+    // A connection of the person's needs no host the app reaches.
+    assert_eq!(said("advice"), ["Keep its own data", asks_chatgpt]);
     assert_eq!(
         it_may(
             App::new(&reaching(&["api.tavily.com"], Some("tavily")))
@@ -273,5 +281,13 @@ fn what_an_app_may_do_is_said_from_what_it_asks_for_by_its_listing_and_its_file_
             "Reach the internet at api.tavily.com",
             "Use your Tavily account",
         ]
+    );
+    assert_eq!(
+        it_may(
+            App::new(&text(&manifest(&json!({"account": "chatgpt"})), SCREEN))
+                .unwrap()
+                .asks()
+        ),
+        ["Keep its own data", asks_chatgpt]
     );
 }

@@ -1,14 +1,15 @@
 //! Her apps in the person's hands: the App Store's catalog as they browse
 //! it for her, what an app's file would put on her phone, and what came of
-//! giving her an app, removing one, and saying whether one may wake her.
-//! Each is the person's own act, which asks nobody, and none needs her to
-//! be running.
+//! giving her an app, removing one, saying whether one may wake her, and
+//! signing one in. Each is the person's own act, which asks nobody, and
+//! none needs her to be running.
 
 use p02_shared::Identifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::config::RoleModelProvider;
 use crate::phone::{PhoneApp, PhoneRefusal};
 
 /// The App Store's catalog as the person browses it for her, read anew:
@@ -211,4 +212,55 @@ pub enum AppWakeRefusal {
     UnknownApp,
     /// The app does not say it wakes her: it sets no ring.
     CannotWake,
+}
+
+/// The person's say on how an app that asks a model is signed in on her
+/// phone: with `connection`, one of theirs connected now, asking `model`,
+/// one it offers, or the one it starts with when none is named; with no
+/// connection, it is signed out.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(optional_fields)]
+pub struct AppSignInBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<RoleModelProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// What came of the person's say on how an app is signed in: it is kept;
+/// or why it is not.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum AppSignInOutcome {
+    Ok,
+    Refused {
+        reason: AppSignInRefusal,
+        message: String,
+    },
+    /// Her phone could not be read or written.
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AppSignInRefusal {
+    UnknownCharacter,
+    /// Her settings give her no phone.
+    NoPhone,
+    UnknownApp,
+    /// The app asks no model through a connection: it has nothing to sign
+    /// in to.
+    SignsInToNothing,
+    /// The connection is not one of the person's the app signs in with
+    /// that is connected now.
+    NotConnected,
+    /// The connection offers no such model.
+    UnknownModel,
 }

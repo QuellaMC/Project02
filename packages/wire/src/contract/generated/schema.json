@@ -185,7 +185,34 @@
         "name",
         "hasKey"
       ],
-      "description": "An account of the person's that an app uses: the id her phone knows it\nby, its name, and whether the person gave her phone its key."
+      "description": "An account of the person's that an app uses by a key: the id her phone\nknows it by, its name, and whether the person gave her phone its key."
+    },
+    "AppConnection": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RoleModelProvider"
+        },
+        "name": {
+          "type": "string"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AppModel"
+          }
+        },
+        "defaultModel": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "models",
+        "defaultModel"
+      ],
+      "description": "A connection of the person's an app can sign in with: their service, by\nthe id the AI Model page knows it by, what that page calls it, the\nmodels it offers, best first, and the one it asks until another is\nchosen."
     },
     "AppInstallOutcome": {
       "oneOf": [
@@ -289,6 +316,22 @@
         }
       ],
       "description": "Why an app is not given to her: an app of the App Store, or one from a\nfile, which a preview of it says too."
+    },
+    "AppModel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "description": "A model a connection offers: its id, and the name a person reads."
     },
     "AppPreviewOutcome": {
       "oneOf": [
@@ -458,6 +501,148 @@
         }
       ]
     },
+    "AppSignIn": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AppConnection"
+          }
+        },
+        "signedIn": {
+          "$ref": "#/$defs/AppSignedIn"
+        }
+      },
+      "required": [
+        "connections"
+      ],
+      "description": "How an app that asks a model signs in on her phone: the connections of\nthe person's it can sign in with now, in the AI Model page's order, and\nthe one it is signed in with, while it is."
+    },
+    "AppSignInBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleModelProvider"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "description": "The person's say on how an app that asks a model is signed in on her\nphone: with `connection`, one of theirs connected now, asking `model`,\none it offers, or the one it starts with when none is named; with no\nconnection, it is signed out."
+    },
+    "AppSignInOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AppSignInRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read or written."
+        }
+      ],
+      "description": "What came of the person's say on how an app is signed in: it is kept;\nor why it is not."
+    },
+    "AppSignInRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character",
+            "unknown_app"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        },
+        {
+          "type": "string",
+          "const": "signs_in_to_nothing",
+          "description": "The app asks no model through a connection: it has nothing to sign\nin to."
+        },
+        {
+          "type": "string",
+          "const": "not_connected",
+          "description": "The connection is not one of the person's the app signs in with\nthat is connected now."
+        },
+        {
+          "type": "string",
+          "const": "unknown_model",
+          "description": "The connection offers no such model."
+        }
+      ]
+    },
+    "AppSignedIn": {
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/RoleModelProvider"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection",
+        "model"
+      ],
+      "description": "The connection an app is signed in with, and the model it asks: the\none the person chose, else the one its connection starts with."
+    },
     "AppSource": {
       "type": "string",
       "enum": [
@@ -621,6 +806,14 @@
     "BotUsername": {
       "type": "string",
       "description": "The name a bot goes by on its connector's service, without the `@`: 1\nto 32 ASCII letters, digits or underscores, as Telegram spells one."
+    },
+    "BubbleFrom": {
+      "type": "string",
+      "enum": [
+        "her",
+        "them"
+      ],
+      "description": "Whom a bubble's words are from: her, or the one she talks with there."
     },
     "ChangeRefusal": {
       "oneOf": [
@@ -1854,7 +2047,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 15
+          "const": 16
         },
         "homeRoot": {
           "type": "string"
@@ -1932,7 +2125,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 15
+          "const": 16
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2832,8 +3025,12 @@
           "description": "What it may do, a line each, as the App Store says it."
         },
         "account": {
-          "description": "The account of the person's it uses, when it uses one.",
+          "description": "The account of the person's it uses, when it uses one by a key.",
           "$ref": "#/$defs/AppAccount"
+        },
+        "signIn": {
+          "description": "How it signs in, when it asks a model through a connection of the\nperson's.",
+          "$ref": "#/$defs/AppSignIn"
         },
         "views": {
           "type": "array",
@@ -2859,7 +3056,7 @@
         "views",
         "opensOn"
       ],
-      "description": "An app on her phone as her window draws it and her settings show it:\nthe line she knows it by, its version and where it came from; its icon\nand the tint of its tile, names of the page's own set, which falls back\nfor one it does not know; whether it says it wakes her, and whether the\nperson lets it; what it may do, and the person's account it uses; its\nviews, in its order; and the view it opens on."
+      "description": "An app on her phone as her window draws it and her settings show it:\nthe line she knows it by, its version and where it came from; its icon\nand the tint of its tile, names of the page's own set, which falls back\nfor one it does not know; whether it says it wakes her, and whether the\nperson lets it; what it may do, and the person's account it uses, or\nhow it signs in; its views, in its order; and the view it opens on."
     },
     "PhoneDid": {
       "type": "object",
@@ -3736,6 +3933,28 @@
             "text"
           ],
           "description": "A small quiet line under what it follows: a credit, or what\nsomething costs."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/BubbleFrom"
+            },
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "bubble"
+            }
+          },
+          "required": [
+            "kind",
+            "from",
+            "text"
+          ],
+          "description": "One turn of a conversation, as a chat draws it: words that are not\nblank, and whom they are from."
         }
       ],
       "description": "A piece of a screen."

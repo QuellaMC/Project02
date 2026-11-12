@@ -6,6 +6,7 @@ mod character;
 mod chatgpt;
 mod config_control;
 mod confirmation;
+mod connections;
 mod daemon;
 mod history;
 mod outcome;

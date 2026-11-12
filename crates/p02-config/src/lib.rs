@@ -14,7 +14,7 @@ mod view;
 
 pub use change::{apply_change, check_change, create_home_document};
 pub use declaration::{Connector, Sections, UnknownConnector, connector, connectors};
-pub use host::HostSettings;
+pub use host::{HostSettings, connection};
 pub use materialize::{MaterializeError, materialize};
 pub use resolve::{CharacterSettings, ReadSettingsError, Resolution};
 pub use view::{

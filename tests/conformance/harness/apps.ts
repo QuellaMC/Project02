@@ -3,10 +3,13 @@
  * server: an app's one file, its entry in the catalog with that file's
  * SHA-256, and a catalog of apps published where its rule puts each file;
  * with the apps the tests publish, Reminders and quiet ones, Lookup, which
- * reaches the internet, and Sampler, which shows the pieces Weather and
- * Web Search are drawn with.
+ * reaches the internet, Asker, which asks a model through a connection of
+ * the person's and shows what it asked as a conversation, and Sampler,
+ * which shows the pieces Weather and Web Search are drawn with; and
+ * ChatGPT, as this repository keeps it to publish.
  */
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 
 import type {CatalogServer} from './catalog-server.ts';
 
@@ -27,6 +30,27 @@ export type App = {
     readonly actions: readonly object[];
   };
   readonly script: string;
+};
+
+/**
+ * An app this repository keeps to publish, in `crates/p02-phone/catalog/`:
+ * what its manifest says that the catalog lists, and its one file as kept
+ * there.
+ */
+export type Kept = {
+  readonly manifest: Pick<
+    App['manifest'],
+    | 'id'
+    | 'name'
+    | 'summary'
+    | 'version'
+    | 'icon'
+    | 'tint'
+    | 'wakes'
+    | 'reaches'
+    | 'account'
+  >;
+  readonly file: string;
 };
 
 /** Reminders, which keeps what she adds and says it wakes her. */
@@ -141,6 +165,73 @@ export function fetch_all({requests}) {
 };
 
 /**
+ * Asker, which asks a model through the person's ChatGPT, a connection of
+ * theirs, and reaches no host. `ask` asks its question, with instructions
+ * of its own, and answers what came of it, the answer or the sentence of
+ * its failure, which it keeps with the question, its last ten; its screen
+ * shows them as a conversation, each question hers and what came of it
+ * the other's.
+ */
+export const asker: App = {
+  manifest: {
+    id: 'asker',
+    name: 'Asker',
+    summary: 'Asks a stronger model',
+    version: '1.0.0',
+    icon: 'bulb',
+    tint: 'indigo',
+    wakes: false,
+    account: 'chatgpt',
+    views: [{id: 'asked', title: 'Asked', icon: 'bulb'}],
+    opensOn: 'asked',
+    actions: [
+      {
+        name: 'ask',
+        description: 'Ask a question.',
+        did: 'Asked a question',
+        view: 'asked',
+        input: {
+          type: 'object',
+          properties: {question: {type: 'string'}},
+          required: ['question'],
+          additionalProperties: false,
+        },
+      },
+    ],
+  },
+  script: `export function screen() {
+  const asked = phone.storage.get('asked') ?? [];
+
+  return {items: asked.length === 0
+    ? [{kind: 'text', text: 'Nothing yet'}]
+    : asked.flatMap(({question, answer}) => [
+      {kind: 'bubble', from: 'her', text: question},
+      {kind: 'bubble', from: 'them', text: answer},
+    ])};
+}
+
+export function ask({question}) {
+  let came;
+
+  try {
+    came = phone.ai.ask({instructions: 'Answer in one sentence.', input: question});
+  } catch (error) {
+    if (error.name !== 'Error') {
+      throw error;
+    }
+
+    came = {error: error.message};
+  }
+
+  const asked = phone.storage.get('asked') ?? [];
+
+  phone.storage.set('asked', [...asked, {question, answer: came.text ?? came.error}].slice(-10));
+
+  return came;
+}`,
+};
+
+/**
  * Sampler, whose one view shows, in the design's own words, a glance, a
  * strip, ranges with a note under them, a field, and a list whose rows
  * name the pages they are about.
@@ -188,6 +279,24 @@ export const sampler: App = {
 }`,
 };
 
+/** ChatGPT, which asks a stronger model her questions through a connection of the person's. */
+export const chatgpt: Kept = {
+  manifest: {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    summary: 'Ask a stronger model for help',
+    version: '1.0.0',
+    icon: 'bulb',
+    tint: 'indigo',
+    wakes: false,
+    account: 'chatgpt',
+  },
+  file: readFileSync(
+    new URL('../../../crates/p02-phone/catalog/chatgpt.js', import.meta.url),
+    'utf8',
+  ),
+};
+
 /** An app of `name` that shows a line and does nothing, at `version`. */
 export function quiet(id: string, name: string, version: string): App {
   return {
@@ -207,13 +316,15 @@ export function quiet(id: string, name: string, version: string): App {
   };
 }
 
-/** The app's one file: its manifest, exported, then its functions. */
-export function fileOf(app: App): string {
-  return `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...app.manifest})};\n\n${app.script}\n`;
+/** The app's one file: as kept to publish, or else its manifest, exported, then its functions. */
+export function fileOf(app: App | Kept): string {
+  return 'file' in app
+    ? app.file
+    : `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...app.manifest})};\n\n${app.script}\n`;
 }
 
 /** The catalog's entry of `app`, listing the file whose text is `listed`, its own unless the test says otherwise. */
-export function entryOf(app: App, listed = fileOf(app)): object {
+export function entryOf(app: App | Kept, listed = fileOf(app)): object {
   const {id, name, summary, icon, tint, version, wakes, reaches, account} =
     app.manifest;
 
@@ -235,7 +346,7 @@ export function entryOf(app: App, listed = fileOf(app)): object {
 /** The catalog of `apps`, in their order, each beside its file where the catalog's rule puts it; an entry given with an app lists in its place. */
 export function publish(
   catalog: CatalogServer,
-  ...apps: readonly (readonly [App, object?])[]
+  ...apps: readonly (readonly [App | Kept, object?])[]
 ): void {
   catalog.publish(
     'catalog.json',

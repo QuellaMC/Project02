@@ -32,16 +32,20 @@ the blocking pool.
   the hosts it `reaches`, 4 at most, each once, each a DNS name in
   lowercase of two labels at least and not an address in numbers, with no
   scheme, port or path, reaches the internet, at those hosts alone. Its
-  `account` is one the phone knows, at one of those hosts. `it_may` says
-  what an app may do, a line each, from what it asks for, for the App
-  Store and for the person: "Keep its own data", "Wake her when something
-  is due", "Reach the internet at api.tavily.com" (two hosts joined by
-  "and", more by commas and "and") and "Use your Tavily account".
-- **The accounts** are the phone's own short list, each at one host, so a
-  key the person gives for one only ever goes there, and each with one
-  sentence on where the person gets a key; an app names the one it uses
-  and never says where its key goes. Today: Tavily (`tavily`, at
-  `api.tavily.com`, "Get a free key at tavily.com.").
+  `account` is one the phone knows: a key's, at one of those hosts, or a
+  connection's, which needs none. `it_may` says what an app may do, a line
+  each, from what it asks for, for the App Store and for the person: "Keep
+  its own data", "Wake her when something is due", "Reach the internet at
+  api.tavily.com" (two hosts joined by "and", more by commas and "and"),
+  and "Use your Tavily account" or "Ask ChatGPT with a connection of yours,
+  once you allow it".
+- **The accounts** are the phone's own short list, each of one of two
+  kinds; an app names the one it uses. A key's is at one host, so a key the
+  person gives for it only ever goes there, with one sentence on where the
+  person gets one: Tavily (`tavily`, at `api.tavily.com`, "Get a free key
+  at tavily.com."). A connection's is one of the person's AI services,
+  through which an app asks a model and which it never holds: ChatGPT
+  (`chatgpt`).
 - **A script reaches** the language and `phone`, nothing else:
   `storage.get`, `set` and `remove`, a JSON value under each key;
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
@@ -58,7 +62,8 @@ the blocking pool.
   list's row has a title or a time, and its `url` is an `https://` or
   `http://` address of 2,048 characters at most; a strip has 2 to 8 cells;
   ranges have 1 to 10 rows, each a bar `from` no greater than its `to`, and
-  neither past 100. A screen that breaks one is refused, saying which.
+  neither past 100; a bubble's text is not blank. A screen that breaks one
+  is refused, saying which.
 - **`net.fetch({url, method, headers, body})`**, in an action alone: in a
   screen, in `rang` and as the app is made it throws a `TypeError`, so
   looking at her phone never reaches the internet. The `url` is an
@@ -73,16 +78,28 @@ the blocking pool.
   through as its refusal. A request at its account's host is for that
   account, and its caller sends the key with it; the script never holds a
   key.
-- **An action that fetches** has its requests made by its caller, since
-  the phone makes none: `Phone::act` is handed the exchanges of the
-  action's runs so far, each a request and what came of it, and runs it
-  from what the app keeps, its n-th fetch answered by the n-th exchange. A fetch none
-  answers yet ends the run there, which no script catches and which keeps
-  nothing, and the call asks for that request; its caller makes it, with
-  no lease held, and takes the action again at the same moment. A fifth
-  request, or one other than asked at that place before, fails the call,
-  caught or not: an action asks for the same requests on every run. Each
-  run has the limits of a call.
+- **`ai.ask({instructions, input})`**, in an action alone too, and only in
+  an app whose `account` is a connection: elsewhere it throws a
+  `TypeError`, as a fetch does, and in any other app one saying what its
+  manifest must name. The `input` is the question, text that is not
+  blank, and the `instructions`, optional, say how to answer, each of
+  64 KiB at most, as a request's body; a question that breaks a rule
+  throws a `TypeError`. It answers `{text}`, the model's words; a question
+  with no answer throws a plain `Error` with its caller's sentence, as a
+  request does. The question names the connection it is asked through;
+  the script holds nothing of it.
+- **An action that asks its host**, a request or a question, has it done
+  by its caller, since the phone does neither: `Phone::act` is handed the
+  exchanges of the action's runs so far, each what it asked and what came
+  of it, and runs it from what the app keeps, its n-th ask answered by the
+  n-th exchange. An ask none answers yet ends the run there, which no
+  script catches and which keeps nothing, and the call asks for it; its
+  caller makes the request or asks the question, with no lease held, and
+  takes the action again at the same moment. A fifth ask, requests and
+  questions together, a third question, or one other than asked at that
+  place before, fails the call, caught or not: an action asks for the same
+  things in the same order on every run. Each run has the limits of a
+  call.
 - **Each call runs fresh**: its own QuickJS runtime and context, dropped when
   it returns, under limits of 1 second for the whole call, 16 MiB of memory
   and 256 KiB of stack. The time limit holds after an `await` too, and a
@@ -112,6 +129,17 @@ the blocking pool.
   only of an app that says it wakes her, an update keeps it, and it goes
   when the app is removed. A list that does not read is passed over and
   said, and every app may wake her.
+- **How an app that asks a model is signed in** is the person's say too,
+  by their own hand or by allowing her ask, kept with her phone in
+  `signed-in.json`: for each app signed in, the connection of theirs it
+  asks through, by the id its caller knows it by, and the model they
+  chose for it, none while it asks the one its connection starts with.
+  Every other app is signed out. Only an app whose account is a
+  connection signs in, the list is written whole, an update keeps what it
+  says of an app, and it goes when the app is removed. A list that does
+  not read is passed over and said, and every app is signed out. The
+  phone knows no service: what a connection is, and whether it is
+  connected, is its caller's.
 - **Her apps** are the apps her phone comes with, then those installed on
   it by name, then the App Store, each character her own. An installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
@@ -127,9 +155,10 @@ the blocking pool.
   installing says the version it replaced. A preview judges a file as
   installing it does, and neither writes it nor keeps the app it makes.
   Removing an app takes what it keeps, with its rings, what the person said
-  of it, its file and its place on the list, and closes it when it is in
-  front; an app the phone comes with cannot be removed. A list, or an entry
-  of it, that does not read is passed over and said. An app is made from
+  of it, whether it may wake her and how it is signed in, its file and its
+  place on the list, and closes it when it is in front; an app the phone
+  comes with cannot be removed. A list, or an entry of it, that does not
+  read is passed over and said. An app is made from
   its file at the first call that runs it and kept while the file is
   unchanged; one whose file is gone or no longer makes it cannot run, which
   each call that runs it says, while the rest of her phone works.
@@ -143,10 +172,14 @@ the blocking pool.
   a day and time, once or repeating; Weather, `catalog/weather.js`, a
   place's weather now and over the hours and days ahead, read from
   Open-Meteo, which needs no key, and kept, so its screen shows the last
-  reading and when it was read; and Web Search, `catalog/search.js`, the
+  reading and when it was read; Web Search, `catalog/search.js`, the
   web searched through Tavily on the person's account, whose key its
   requests carry and it never holds, and what came up kept, so its screen
-  shows the last search. Publishing version `V` of one copies
+  shows the last search; and ChatGPT, `catalog/chatgpt.js`, a stronger
+  model she asks for help through a connection of the person's, which it
+  never holds, each question asked after the conversation before it, whose
+  newest exchanges it keeps, twenty at most and 32 KiB of text, so its
+  screen shows them as bubbles. Publishing version `V` of one copies
   its file to `apps/<id>/V.js` in the catalog's repository and adds its
   entry there with the file's SHA-256. A published version's file never
   changes: a change is a new version.

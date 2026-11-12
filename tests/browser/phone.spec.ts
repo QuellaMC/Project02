@@ -1,6 +1,8 @@
 import {expect, type Locator, type Page} from '@playwright/test';
 
 import {
+  asker,
+  fileOf,
   publish,
   quiet,
   reminders,
@@ -19,6 +21,7 @@ import {
   startModelServer,
   type ModelServer,
 } from '../conformance/harness/model-server.ts';
+import {respondedWhole, saying} from '../conformance/harness/responses.ts';
 import {converse, saveConfig, wireOf} from '../conformance/harness/wire.ts';
 import {test} from './fixture.ts';
 
@@ -294,7 +297,16 @@ test("page.phone-button: her chat's Her Phone button opens her phone's address i
   ).toHaveCount(0);
   await Promise.all([
     phone.waitForEvent('close'),
-    phone.getByRole('button', {name: 'Close her phone'}).click(),
+    // The click closes the very window it is made in, which may be gone
+    // before the click is said to have landed: only then is that no failure.
+    phone
+      .getByRole('button', {name: 'Close her phone'})
+      .click()
+      .catch((error: unknown) => {
+        if (!phone.isClosed()) {
+          throw error;
+        }
+      }),
   ]);
   await expect(button).toHaveAttribute('aria-pressed', 'false');
 
@@ -567,4 +579,74 @@ test("page.phone-pieces: an app's view draws each piece where the design puts it
 
   await expect(title).toHaveCSS('color', await colourOf(page, '--link'));
   await expect(page.getByRole('link')).toHaveCount(0);
+});
+
+test("page.phone-bubbles: her phone's window draws a conversation as bubbles, hers at the line's end in the accent colour and the other's at its start on a card, and shows its end as a chat does: once she asks her app, signed in with Sam's OpenAI API, a question whose answer runs past the screen, the window is on its view with the answer's end in sight", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({
+        project02: {
+          ...model.settings,
+          userDisplayName: 'Sam',
+          openaiApiKey: model.openai.settings.openaiApiKey,
+        },
+      }),
+      'character-data': {
+        mira: {'config.json': configJson({project02: {heartbeat: 'off'}})},
+      },
+    }),
+    model.openai.env,
+  );
+  const wire = wireOf(daemon);
+  const question = 'How do I wake someone who hates mornings?';
+  const answer = Array.from(
+    {length: 30},
+    (_, at) => `Step ${String(at + 1)}: open the curtains a little more.`,
+  ).join(' ');
+  const hers = page.locator('.phone-bubble-her');
+  const theirs = page.locator('.phone-bubble-them');
+
+  await wire.addApp('mira', fileOf(asker));
+  await wire.signInApp('mira', 'asker', {connection: 'openai'});
+  await page.goto(phoneOf(daemon, 'mira'));
+  await expect(page.getByRole('button', {name: 'Asker'})).toBeVisible();
+
+  const say = await converse(wire, 'mira');
+
+  model.answer(
+    calling(['phone_use', {app: 'asker', action: 'ask', input: {question}}]),
+    respondedWhole(saying(answer)),
+    reply('Gently, it says.'),
+  );
+  await say('Ask Asker.', 'ask');
+  await expect(page.locator('.phone-bubble')).toHaveText([question, answer]);
+
+  const [her, them] = await Promise.all([boxOf(hers), boxOf(theirs)]);
+
+  expect({
+    herAtTheEnd: them.x + them.width + near < her.x + her.width,
+    theirsAtTheStart: them.x + near < her.x,
+  }).toEqual({herAtTheEnd: true, theirsAtTheStart: true});
+  await expect(hers).toHaveCSS(
+    'background-color',
+    await colourOf(page, '--link'),
+  );
+  await expect(theirs).toHaveCSS(
+    'background-color',
+    await colourOf(page, '--card'),
+  );
+  expect(
+    await page.evaluate<{readonly runsPast: boolean; readonly atEnd: boolean}>(
+      `(() => {
+        const view = document.querySelector('.phone-pieces');
+        return {
+          runsPast: view.scrollHeight > view.clientHeight,
+          atEnd: view.scrollHeight - view.clientHeight - view.scrollTop <= 1,
+        };
+      })()`,
+    ),
+  ).toEqual({runsPast: true, atEnd: true});
 });

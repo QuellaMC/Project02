@@ -2,7 +2,7 @@
 //! her phone as the store installs it, used through the phone's own calls,
 //! each search she makes answered as Tavily's pages show its answers.
 
-use p02_phone::{Account, Acting, Exchange, Fetch, Fetched, Method, Phone, Source};
+use p02_phone::{Account, Acting, Ask, Exchange, Fetch, Fetched, Method, Phone, Source};
 use serde_json::{Value, json};
 
 use crate::support::{Files, at, input, millis};
@@ -51,18 +51,19 @@ fn search(
             &exchanges,
             &at(moment),
         ) {
-            Ok(Acting::Asks(fetch)) => {
+            Ok(Acting::Asks(Ask::Fetch(fetch))) => {
                 asked.push(fetch.clone());
 
                 let Some(fetched) = answers.get(exchanges.len()) else {
                     break None;
                 };
 
-                exchanges.push(Exchange {
+                exchanges.push(Exchange::Fetch {
                     fetch,
                     fetched: fetched.clone(),
                 });
             }
+            Ok(Acting::Asks(ask)) => panic!("it asks for {ask:?}"),
             Ok(Acting::Acted(acted)) => break Some(Ok(acted.answer)),
             Err(refused) => break Some(Err(refused.to_string())),
         }

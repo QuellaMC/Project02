@@ -9,6 +9,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::config::RoleModelProvider;
+
 /// Her phone as it stands, read from her data whether she runs or not:
 /// her apps, in her phone's order; what she has in front, none her home
 /// screen; what she last did on it; and what rings, which nothing does but
@@ -50,8 +52,8 @@ pub enum PhoneRefusal {
 /// the line she knows it by, its version and where it came from; its icon
 /// and the tint of its tile, names of the page's own set, which falls back
 /// for one it does not know; whether it says it wakes her, and whether the
-/// person lets it; what it may do, and the person's account it uses; its
-/// views, in its order; and the view it opens on.
+/// person lets it; what it may do, and the person's account it uses, or
+/// how it signs in; its views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -70,21 +72,65 @@ pub struct PhoneApp {
     pub may_wake: bool,
     /// What it may do, a line each, as the App Store says it.
     pub it_may: Vec<String>,
-    /// The account of the person's it uses, when it uses one.
+    /// The account of the person's it uses, when it uses one by a key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<AppAccount>,
+    /// How it signs in, when it asks a model through a connection of the
+    /// person's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<AppSignIn>,
     pub views: Vec<AppView>,
     pub opens_on: Identifier,
 }
 
-/// An account of the person's that an app uses: the id her phone knows it
-/// by, its name, and whether the person gave her phone its key.
+/// An account of the person's that an app uses by a key: the id her phone
+/// knows it by, its name, and whether the person gave her phone its key.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppAccount {
     pub id: Identifier,
     pub name: String,
     pub has_key: bool,
+}
+
+/// How an app that asks a model signs in on her phone: the connections of
+/// the person's it can sign in with now, in the AI Model page's order, and
+/// the one it is signed in with, while it is.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct AppSignIn {
+    pub connections: Vec<AppConnection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_in: Option<AppSignedIn>,
+}
+
+/// A connection of the person's an app can sign in with: their service, by
+/// the id the AI Model page knows it by, what that page calls it, the
+/// models it offers, best first, and the one it asks until another is
+/// chosen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AppConnection {
+    pub id: RoleModelProvider,
+    pub name: String,
+    pub models: Vec<AppModel>,
+    pub default_model: String,
+}
+
+/// A model a connection offers: its id, and the name a person reads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+pub struct AppModel {
+    pub id: String,
+    pub name: String,
+}
+
+/// The connection an app is signed in with, and the model it asks: the
+/// one the person chose, else the one its connection starts with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+pub struct AppSignedIn {
+    pub connection: RoleModelProvider,
+    pub model: String,
 }
 
 /// Where an app on her phone came from: it comes with her phone, it is the
@@ -261,6 +307,17 @@ pub enum ScreenItem {
     /// A small quiet line under what it follows: a credit, or what
     /// something costs.
     Note { text: String },
+    /// One turn of a conversation, as a chat draws it: words that are not
+    /// blank, and whom they are from.
+    Bubble { from: BubbleFrom, text: String },
+}
+
+/// Whom a bubble's words are from: her, or the one she talks with there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum BubbleFrom {
+    Her,
+    Them,
 }
 
 /// A row of a list: a title, a time or both.

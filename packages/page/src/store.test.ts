@@ -48,7 +48,7 @@ const conversationId = 'conv-1';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 15,
+    protocolVersion: 16,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -64,7 +64,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 15,
+    protocolVersion: 16,
     health: health(mira),
     confirmations,
     pairings: [],

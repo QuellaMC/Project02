@@ -3,7 +3,7 @@
 //! in Los Angeles on a Wednesday morning, each place she looks up answered
 //! as Open-Meteo's pages show its answers.
 
-use p02_phone::{Acting, Exchange, Fetch, Fetched, Method, Now, Phone, Source};
+use p02_phone::{Acting, Ask, Exchange, Fetch, Fetched, Method, Now, Phone, Source};
 use serde_json::{Value, json};
 
 use crate::support::{Files, in_zone, input, millis};
@@ -52,18 +52,19 @@ fn look_up(
             &exchanges,
             &at(MORNING),
         ) {
-            Ok(Acting::Asks(fetch)) => {
+            Ok(Acting::Asks(Ask::Fetch(fetch))) => {
                 asked.push(fetch.clone());
 
                 let Some(fetched) = answers.get(exchanges.len()) else {
                     break None;
                 };
 
-                exchanges.push(Exchange {
+                exchanges.push(Exchange::Fetch {
                     fetch,
                     fetched: fetched.clone(),
                 });
             }
+            Ok(Acting::Asks(ask)) => panic!("it asks for {ask:?}"),
             Ok(Acting::Acted(acted)) => break Some(Ok(acted.answer)),
             Err(refused) => break Some(Err(refused.to_string())),
         }

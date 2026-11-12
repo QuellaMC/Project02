@@ -10,7 +10,9 @@ use std::sync::LazyLock;
 use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
 use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl};
-use p02_wire::{FieldView, ModelService, PlanAccount, RoleModelProvider, ValueSource};
+use p02_wire::{
+    AppConnection, AppModel, FieldView, ModelService, PlanAccount, RoleModelProvider, ValueSource,
+};
 use serde_json::{Map, Value, json};
 
 use crate::declaration::{Layer, expectation, outside_scope};
@@ -431,6 +433,35 @@ fn plan_default(plan: Option<&str>) -> &'static str {
         .next()
         .map(|(id, _)| id)
         .expect("every plan offers models")
+}
+
+/// `provider`'s service as a connection an app on her phone signs in with:
+/// what a page calls it, the models it offers in their words, as a
+/// character's settings offer them, and the one it asks until another is
+/// chosen, as a character's own thinking starts with: of a ChatGPT plan of
+/// `plan`, those its plan offers and the best of them; of the OpenAI API,
+/// its models and the least costly. NVIDIA, whose models no list holds, is
+/// none.
+#[must_use]
+pub fn connection(provider: RoleModelProvider, plan: Option<&str>) -> Option<AppConnection> {
+    let (models, default_model): (Vec<(&str, &str)>, &str) = match provider {
+        RoleModelProvider::Chatgpt => (plan_models(plan).collect(), plan_default(plan)),
+        RoleModelProvider::Openai => (OPENAI_MODELS.to_vec(), OPENAI_DEFAULT_MODEL),
+        RoleModelProvider::Nvidia => return None,
+    };
+
+    Some(AppConnection {
+        id: provider,
+        name: service(provider).name.to_owned(),
+        models: models
+            .into_iter()
+            .map(|(id, name)| AppModel {
+                id: id.to_owned(),
+                name: name.to_owned(),
+            })
+            .collect(),
+        default_model: default_model.to_owned(),
+    })
 }
 
 /// A host field's view as the home's sign-in, as `account`, shapes it: the

@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {expect, type Locator, type Page} from '@playwright/test';
 
 import {
+  asker,
   fileOf,
   lookup,
   publish,
@@ -15,12 +16,13 @@ import {startCatalogServer} from '../conformance/harness/catalog-server.ts';
 import {startDaemon} from '../conformance/harness/daemon.ts';
 import {configJson, createHome} from '../conformance/harness/home.ts';
 import {
+  calling,
   reply,
   startModelServer,
   type ModelRequest,
   type ModelServer,
 } from '../conformance/harness/model-server.ts';
-import {wireOf} from '../conformance/harness/wire.ts';
+import {saveConfig, wireOf} from '../conformance/harness/wire.ts';
 import {test} from './fixture.ts';
 
 /**
@@ -95,6 +97,18 @@ function appsOf(phone: unknown): readonly string[] {
       readonly apps: readonly {readonly id: string; readonly source: string}[];
     }
   ).apps.map(app => `${app.id} ${app.source}`);
+}
+
+/** How her app `appId` is signed in, as a client reads her phone; none while it is not. */
+function signedInOf(phone: unknown, appId: string): unknown {
+  return (
+    phone as {
+      readonly apps: readonly {
+        readonly id: string;
+        readonly signIn?: {readonly signedIn?: unknown};
+      }[];
+    }
+  ).apps.find(app => app.id === appId)?.signIn?.signedIn;
 }
 
 /** The names of the tools a request to her model offered. */
@@ -294,6 +308,72 @@ test("page.apps-account: an app's page lists what it may do and, for one that us
     'config',
     'tavilyApiKey',
   ]);
+});
+
+test("page.apps-sign-in: her ask to sign in to an app that asks a model shows a card saying the connection of the person's it would sign in with and what each question costs, and Allow signs it in; the app's page then offers Not Signed In and each connection connected, says which it is signed in with, the model it asks, which the person can choose, and what each question uses; Not Signed In signs it out, and the page says she asks first", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const catalog = await startCatalogServer();
+  const daemon = await startDaemon(appsHome(model, asker), catalog.env);
+  const wire = wireOf(daemon);
+  const main = page.getByRole('main');
+  const card = page.getByRole('group', {
+    name: 'Mira wants to sign in to Asker',
+  });
+  const signedInWith = main.getByLabel('Signed In With');
+  const asks = main.getByLabel('Model', {exact: true});
+  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {
+      kind: 'set',
+      path: 'project02.openaiApiKey',
+      value: model.openai.settings.openaiApiKey,
+    },
+  );
+  model.answer(
+    calling(['phone_sign_in', {app: 'asker'}]),
+    reply('I can ask it now.'),
+  );
+  await page.goto(daemon.url);
+  await composer.fill('Sign in to Asker.');
+  await composer.press('Enter');
+  await expect(card).toHaveAccessibleDescription(
+    'With your OpenAI API key. Each question she asks there is billed to your OpenAI account.',
+  );
+  await card.getByRole('button', {name: 'Allow', exact: true}).click();
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'I can ask it now.',
+  ]);
+
+  await herPage(page);
+  await strip(page).filter({hasText: 'Asker'}).click();
+  await expect(signedInWith.locator('option')).toHaveText([
+    'Not Signed In',
+    'Your OpenAI API',
+  ]);
+  await expect(signedInWith).toHaveValue('openai');
+  await expect(asks).toHaveValue('gpt-6-luna');
+  await expect(
+    main.getByText('Each question she asks uses your OpenAI API account.'),
+  ).toBeVisible();
+
+  await asks.selectOption({label: 'GPT-6.1 Terra'});
+  await expect
+    .poll(async () => signedInOf(await wire.phone('mira'), 'asker'))
+    .toEqual({connection: 'openai', model: 'gpt-6.1-terra'});
+
+  await signedInWith.selectOption({label: 'Not Signed In'});
+  await expect(asks).toHaveCount(0);
+  await expect(
+    main.getByText(
+      'Mira asks you the first time she wants to sign in. You can also choose here.',
+    ),
+  ).toBeVisible();
+  expect(signedInOf(await wire.phone('mira'), 'asker')).toBeUndefined();
 });
 
 test("page.apps-from-file: an app from a file shows what it is and may do and that nobody read it, and adds nothing until Add, which puts it on her phone from a file and opens its page; a file that holds no app is said in the daemon's words", async ({

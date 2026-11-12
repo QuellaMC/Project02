@@ -22,8 +22,8 @@ use p02_contracts::TEXT_FILE_KIB;
 use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
 use p02_wire::{
-    AnswerBody, AppWakeBody, ConfigChange, ConfigTarget, ConnectorBotsBody, ErrorBody,
-    GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
+    AnswerBody, AppSignInBody, AppWakeBody, ConfigChange, ConfigTarget, ConnectorBotsBody,
+    ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -141,6 +141,10 @@ pub(crate) fn router(app: App) -> Router {
         .route(
             "/api/characters/{id}/phone/apps/{app}/wake",
             post(let_app_wake),
+        )
+        .route(
+            "/api/characters/{id}/phone/apps/{app}/sign-in",
+            post(sign_in_app),
         )
         .route(
             "/api/characters/{id}/phone/apps/{app}/views/{view}",
@@ -365,6 +369,22 @@ async fn let_app_wake(
         Ok(AppWakeBody { allowed }) => {
             answer(&app.0.daemon.let_app_wake(&id, &phone_app, allowed).await)
         }
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn sign_in_app(
+    State(app): State<App>,
+    Path((id, phone_app)): Path<(String, String)>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match read::<AppSignInBody>("The sign-in", body) {
+        Ok(AppSignInBody { connection, model }) => answer(
+            &app.0
+                .daemon
+                .sign_in_app(&id, &phone_app, connection, model)
+                .await,
+        ),
         Err(refusal) => refusal.into_response(),
     }
 }

@@ -161,7 +161,7 @@ pub(crate) fn input(value: &Value) -> Map<String, Value> {
 }
 
 /// What `phone`'s `app` did of `action` on `given` at `now`, an action
-/// that reaches nothing: [`Phone::act`] on no exchanges.
+/// that asks its host nothing: [`Phone::act`] on no exchanges.
 pub(crate) fn took(
     phone: &Phone,
     files: &mut dyn LeasedFiles,
@@ -174,7 +174,7 @@ pub(crate) fn took(
         .act(files, app, action, &input(given), &[], now)
         .map(|acting| match acting {
             Acting::Acted(acted) => acted,
-            Acting::Asks(fetch) => panic!("{app} asks for {}", fetch.url()),
+            Acting::Asks(ask) => panic!("{app} asks for {ask:?}"),
         })
 }
 

@@ -413,9 +413,9 @@ impl Daemon {
 
     /// The daemon's whole state, read now: the roster as the disk says it
     /// is, each character's state as her actor published it, the
-    /// connectors on the stream, each with its bots, the accounts her phone
-    /// knows, each with whether the home's settings hold its key, and the
-    /// home's sign-in to a ChatGPT plan.
+    /// connectors on the stream, each with its bots, the accounts of a key
+    /// her phone knows, each with whether the home's settings hold it, and
+    /// the home's sign-in to a ChatGPT plan.
     pub async fn health(&self) -> Health {
         let daemon = self.clone();
 

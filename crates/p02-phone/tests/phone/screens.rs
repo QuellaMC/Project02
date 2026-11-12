@@ -54,6 +54,8 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
         {"kind": "field", "text": "how long to steep green tea", "icon": "magnifier"},
         {"kind": "field", "text": "green tea"},
         {"kind": "note", "text": "Weather data by Open-Meteo.com"},
+        {"kind": "bubble", "from": "her", "text": "How long do I steep green tea?"},
+        {"kind": "bubble", "from": "them", "text": "Two to three minutes."},
     ]});
     let phone = showing(&json!({"everything": everything}));
     let screen = phone
@@ -73,6 +75,7 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
         "chart": {"items": [{"kind": "chart"}]},
         "colour": {"items": [{"kind": "list", "rows": [{"title": "London", "colour": "red"}]}]},
         "size": {"items": [{"kind": "text", "text": "No alarms", "size": "large"}]},
+        "mine": {"items": [{"kind": "bubble", "from": "me", "text": "Hello"}]},
         "nothing": null,
     }));
 
@@ -81,7 +84,7 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
             "chart",
             "Notes showed a screen the phone does not take: unknown variant `chart`, expected \
              one of `list`, `readout`, `text`, `app`, `glance`, `strip`, `ranges`, `field`, \
-             `note`",
+             `note`, `bubble`",
         ),
         (
             "colour",
@@ -93,6 +96,11 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
             "size",
             "Notes showed a screen the phone does not take: unknown field `size`, expected \
              `text`",
+        ),
+        (
+            "mine",
+            "Notes showed a screen the phone does not take: unknown variant `me`, expected \
+             `her` or `them`",
         ),
         (
             "nothing",
@@ -134,6 +142,7 @@ fn a_screen_whose_piece_breaks_its_rule_is_refused_by_the_rule() {
 
         format!("{start}{}", "a".repeat(chars - start.len()))
     };
+    let said = |text: &str| json!({"items": [{"kind": "bubble", "from": "them", "text": text}]});
     let phone = showing(&json!({
         "untitled": {"items": [{"kind": "list", "rows": [{"subtitle": "Weekdays"}]}]},
         "one": strip(1),
@@ -147,6 +156,8 @@ fn a_screen_whose_piece_breaks_its_rule_is_refused_by_the_rule() {
         "unaddressed": linked("example.com/tea"),
         "longest": linked(&address(2_048)),
         "longer": linked(&address(2_049)),
+        "blank": said(" \n "),
+        "said": said("Steep it for two minutes."),
     }));
     let strips = "a strip has fewer than 2 cells or more than 8";
     let counted = "ranges have no row or more than 10";
@@ -169,6 +180,8 @@ fn a_screen_whose_piece_breaks_its_rule_is_refused_by_the_rule() {
         ("unaddressed", Some(addressed)),
         ("longest", None),
         ("longer", Some(addressed)),
+        ("blank", Some("a bubble's `text` is blank")),
+        ("said", None),
     ] {
         assert_eq!(
             phone

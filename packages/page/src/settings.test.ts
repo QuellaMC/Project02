@@ -121,7 +121,7 @@ function view(shape: Partial<OkView> = {}, fingerprint = 'f1'): OkView {
 }
 
 const health: GatewayHealth = {
-  protocolVersion: 15,
+  protocolVersion: 16,
   homeRoot: '/home/person/.project02',
   config: {diagnostics: []},
   packages: {diagnostics: []},
@@ -161,7 +161,7 @@ const replySwitch: Row = {
 /** A live tab with Mira's thread open and the window in front of it, both views read. */
 function opened(views: ReadonlyMap<string, ConfigView> = both()): WebState {
   const live = installSnapshot(initialState, {
-    protocolVersion: 15,
+    protocolVersion: 16,
     health,
     confirmations: [],
     pairings: [],
@@ -221,7 +221,7 @@ function windowOn(
 ): WebState {
   return settingsOpened(
     installSnapshot(initialState, {
-      protocolVersion: 15,
+      protocolVersion: 16,
       health: {...health, characters},
       confirmations: [],
       pairings: [],
@@ -639,7 +639,7 @@ describe('settings window', () => {
     expect(
       pageOf(
         installSnapshot(asking, {
-          protocolVersion: 15,
+          protocolVersion: 16,
           health,
           confirmations: [],
           pairings: [],

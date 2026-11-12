@@ -8,6 +8,7 @@ use p02_shared::{Credentials, JsonLimits, bound_json};
 use p02_wire::{Screen, ScreenItem, ScreenRange, ScreenRow};
 use serde_json::Value;
 
+use crate::manifest::is_blank;
 use crate::net::URL_CHARS;
 
 /// How many cells a strip holds.
@@ -41,6 +42,7 @@ fn broken(item: &ScreenItem) -> Option<&'static str> {
             Some("ranges have no row or more than 10")
         }
         ScreenItem::Ranges { rows } => rows.iter().find_map(broken_range),
+        ScreenItem::Bubble { text, .. } => is_blank(text).then_some("a bubble's `text` is blank"),
         ScreenItem::Readout { .. }
         | ScreenItem::Text { .. }
         | ScreenItem::App { .. }

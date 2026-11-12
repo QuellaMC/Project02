@@ -136,6 +136,17 @@ export function wireOf(daemon: Address) {
         'AppWakeOutcome',
         {allowed},
       ),
+    signInApp: (
+      characterId: string,
+      appId: string,
+      signIn: {readonly connection?: string; readonly model?: string},
+    ) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/sign-in`,
+        'AppSignInOutcome',
+        signIn,
+      ),
     open: async (characterId: string) =>
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,

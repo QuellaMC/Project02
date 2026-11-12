@@ -1,23 +1,26 @@
 /**
  * Her apps in the settings window: what her page's Apps group, an app's
- * page with the person's account it uses, Get More Apps and an app's file
- * show, from what the daemon last said of her phone and of the App Store's
- * apps for her, and how each read and each answer to the person's act
- * lands in the window. How an app of the App Store stands on her phone is
- * the daemon's word: the page compares no versions. Nothing here touches
- * the DOM.
+ * page with the person's account it uses or how it signs in, Get More
+ * Apps and an app's file show, from what the daemon last said of her
+ * phone and of the App Store's apps for her, and how each read and each
+ * answer to the person's act lands in the window. How an app of the App
+ * Store stands on her phone is the daemon's word: the page compares no
+ * versions. Nothing here touches the DOM.
  */
 import type {
   AppInstallOutcome,
   AppPreviewOutcome,
   AppRemoveOutcome,
+  AppSignIn,
   AppSource,
   PhoneApp,
   PhoneOutcome,
+  RoleModelProvider,
   StoreApp,
   StoreAppStatus,
   StoreOutcome,
 } from '@project02/wire/contract';
+import type {Option} from './settings-model.ts';
 import {
   characterTarget,
   home,
@@ -159,8 +162,32 @@ export type AppShown = {
   readonly update?: string;
   /** Whether Remove App is offered: not for an app her phone comes with. */
   readonly removable: boolean;
-  /** The row of the person's account it uses, for an app that uses one. */
+  /** The row of the person's account it uses, for an app that uses one by a key. */
   readonly account?: AccountRow;
+  /** How it is signed in, for an app that asks a model through a connection of the person's. */
+  readonly signIn?: SignInShown;
+};
+
+/**
+ * How an app that asks a model is signed in, as its page draws it: each
+ * connection of the person's it can sign in with now, as Signed In With
+ * offers it; while it is signed in with one of them, that one, with the
+ * models it offers in their words and the one it asks; and the line under
+ * them. Signed in with a connection no longer connected, it is drawn not
+ * signed in, as the design draws it.
+ */
+export type SignInShown = {
+  readonly connections: readonly {
+    readonly value: RoleModelProvider;
+    /** "Your ChatGPT Plan". */
+    readonly label: string;
+  }[];
+  readonly signedIn?: {
+    readonly connection: RoleModelProvider;
+    readonly model: string;
+    readonly models: readonly Option[];
+  };
+  readonly line: string;
 };
 
 /**
@@ -215,7 +242,7 @@ export function appShownOf(
     store?.status === 'ok'
       ? store.apps.find(entry => entry.id === appId)
       : undefined;
-  const {account} = app;
+  const {account, signIn} = app;
 
   return {
     app,
@@ -237,6 +264,59 @@ export function appShownOf(
             line: `What she does in it uses your ${account.name} account.`,
           },
         }),
+    ...(signIn === undefined ? {} : {signIn: signInShown(signIn, her.name)}),
+  };
+}
+
+/**
+ * How an app that asks a model is signed in on the phone of her, `name`,
+ * as its page draws it, from what her phone says of it: its connections
+ * and how it is signed in.
+ */
+function signInShown(
+  {connections, signedIn}: AppSignIn,
+  name: string,
+): SignInShown {
+  const offered = connections.map(connection => ({
+    value: connection.id,
+    label: `Your ${connection.name}`,
+  }));
+  const connection =
+    signedIn === undefined
+      ? undefined
+      : connections.find(connected => connected.id === signedIn.connection);
+
+  if (signedIn === undefined || connection === undefined) {
+    return {
+      connections: offered,
+      line:
+        connections.length === 0
+          ? `It needs a ChatGPT plan or an OpenAI API key, connected under AI Model. Then ${name} asks you before she signs in with it.`
+          : `${name} asks you the first time she wants to sign in. You can also choose here.`,
+    };
+  }
+
+  const {model} = signedIn;
+  // The model it asks is never hidden, though its connection no longer offers it.
+  const unlisted = connection.models.every(offers => offers.id !== model);
+
+  return {
+    connections: offered,
+    signedIn: {
+      connection: connection.id,
+      model,
+      models: [
+        ...connection.models.map(offers => ({
+          value: offers.id,
+          label: offers.name,
+        })),
+        ...(unlisted ? [{value: model, label: model}] : []),
+      ],
+    },
+    line:
+      connection.id === 'chatgpt'
+        ? `Each question she asks uses your ${connection.name}'s limits.`
+        : `Each question she asks uses your ${connection.name} account.`,
   };
 }
 

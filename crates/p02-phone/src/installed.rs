@@ -18,6 +18,7 @@ use crate::error::PhoneError;
 use crate::front::PhoneState;
 use crate::manifest::View;
 use crate::phone::Phone;
+use crate::sign_in::SignIns;
 use crate::wake::Muted;
 
 const LIST: &str = "installed.json";
@@ -57,12 +58,13 @@ pub struct Listed {
 
 /// What is on her phone: the apps it comes with, then those installed on
 /// it by name, then the App Store; which of them the person said may not
-/// wake her; and what of the lists her phone keeps was passed over, a
-/// sentence each.
+/// wake her, and how each that asks a model is signed in; and what of the
+/// lists her phone keeps was passed over, a sentence each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnPhone {
     pub apps: Vec<Listed>,
     pub(crate) muted: Muted,
+    pub(crate) sign_ins: SignIns,
     pub passed_over: Vec<String>,
 }
 
@@ -152,8 +154,8 @@ impl List {
 impl Phone {
     /// What is on her phone, as `files` keep it, without running anything:
     /// the apps compiled into the daemon, then those installed on it by
-    /// name, then the App Store, and which of them the person said may not
-    /// wake her.
+    /// name, then the App Store, which of them the person said may not
+    /// wake her, and how each that asks a model is signed in.
     ///
     /// # Errors
     ///
@@ -163,10 +165,12 @@ impl Phone {
             apps: mut installed,
             mut passed_over,
         } = List::read(files)?;
-        let (muted, unread) = Muted::read(files)?;
+        let (muted, unread_muted) = Muted::read(files)?;
+        let (sign_ins, unread_sign_ins) = SignIns::read(files)?;
 
         installed.sort_by_cached_key(|app| app.name.to_lowercase());
-        passed_over.extend(unread);
+        passed_over.extend(unread_muted);
+        passed_over.extend(unread_sign_ins);
 
         Ok(OnPhone {
             apps: self
@@ -177,6 +181,7 @@ impl Phone {
                 .chain(iter::once(Listed::of(&self.store, None)))
                 .collect(),
             muted,
+            sign_ins,
             passed_over,
         })
     }
@@ -258,10 +263,11 @@ impl Phone {
     }
 
     /// Removes the app of `id` installed on her phone, in `files`: what it
-    /// keeps, with its rings, what the person said of it, its file, and its
-    /// place on the list. When she had it in front, her home screen is. Each
-    /// step can be taken again, so a removal a crash cut short is finished
-    /// by removing it again.
+    /// keeps, with its rings, what the person said of it, whether it may
+    /// wake her and how it is signed in, its file, and its place on the
+    /// list. When she had it in front, her home screen is. Each step can be
+    /// taken again, so a removal a crash cut short is finished by removing
+    /// it again.
     ///
     /// # Errors
     ///
@@ -282,6 +288,7 @@ impl Phone {
 
         Kept::remove(files, &removed.id)?;
         Muted::forget(files, &removed.id)?;
+        SignIns::forget(files, &removed.id)?;
         files.remove(&script(&removed.id))?;
         PhoneState::close(files, &removed.id)?;
         list.write(files)?;

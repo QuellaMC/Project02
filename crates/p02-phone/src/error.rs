@@ -137,6 +137,10 @@ pub enum PhoneError {
     /// so there is nothing to let it do.
     #[error("{0} cannot wake her, so there is nothing to change")]
     CannotWake(String),
+    /// An app whose account is no connection of the person's, by its name:
+    /// it asks no model, so there is nothing to sign it in to.
+    #[error("{0} signs in to nothing")]
+    SignsInToNothing(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
