@@ -57,7 +57,8 @@ pub use pairing::{
 };
 pub use phone::{
     AppSource, AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal,
-    PhoneRing, Screen, ScreenItem, ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile,
+    PhoneRing, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal,
+    ScreenRow, ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

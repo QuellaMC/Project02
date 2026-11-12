@@ -53,7 +53,11 @@ the blocking pool.
   each call is given. A clock time the clocks skip comes as much later as
   they jumped, and one they pass twice comes the first time, as jiff, the
   phone's time library, answers them. A screen only reads, and is held to
-  the pieces and fields the wire's screen knows.
+  the pieces and fields the wire's screen knows and to their rules: a
+  list's row has a title or a time, and its `url` is an `https://` or
+  `http://` address of 2,048 characters at most; a strip has 2 to 8 cells;
+  ranges have 1 to 10 rows, each a bar `from` no greater than its `to`, and
+  neither past 100. A screen that breaks one is refused, saying which.
 - **`net.fetch({url, method, headers, body})`**, in an action alone: in a
   screen, in `rang` and as the app is made it throws a `TypeError`, so
   looking at her phone never reaches the internet. The `url` is an

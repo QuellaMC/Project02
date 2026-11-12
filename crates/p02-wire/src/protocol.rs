@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 /// The protocol a client reads, which health carries so that an old client
 /// meets a clear message rather than a mystery.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// [`PROTOCOL_VERSION`] as health and a stream's first frame carry it: the
 /// one value either can say, which the contract declares as that number,

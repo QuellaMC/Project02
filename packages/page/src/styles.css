@@ -2377,6 +2377,11 @@ body:has(> #root > .phone-window) {
   scrollbar-width: none;
 }
 
+/* A piece keeps its height, a card that clips its rows too: the view scrolls. */
+.phone-pieces > * {
+  flex: none;
+}
+
 /* A reading or a line alone on its view stands in the middle of it. */
 .phone-pieces > .phone-readout:only-child,
 .phone-pieces > .phone-quiet:only-child {
@@ -2528,6 +2533,25 @@ body:has(> #root > .phone-window) {
   font-weight: 600;
 }
 
+/* A row about a page on the web, as a search lists one: where it is, its title as a link, and what it says. */
+.phone-row-linked {
+  padding: 11px 14px;
+}
+
+.phone-row-linked .phone-row-words {
+  gap: 2px;
+}
+
+.phone-row-linked .phone-row-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--link);
+}
+
+.phone-row-linked .phone-row-subtitle {
+  line-height: 1.35;
+}
+
 /* An app's header, at the head of its page in the App Store. */
 .phone-app-header {
   display: flex;
@@ -2638,6 +2662,152 @@ body:has(> #root > .phone-window) {
 
 .phone-ring-left {
   stroke: var(--orange-glyph);
+}
+
+/* A thing at a glance, in the middle: its title, its reading very large, how it is, and a quieter line under that. */
+.phone-glance {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* At the head of its screen it stands where the view's title would. */
+.phone-pieces > .phone-glance:first-child {
+  margin-top: 6px;
+}
+
+.phone-glance-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.phone-glance-text {
+  font-size: 84px;
+  font-weight: 200;
+  line-height: 1.05;
+  letter-spacing: -2px;
+}
+
+.phone-glance-caption {
+  font-size: 17px;
+}
+
+.phone-glance-detail {
+  font-size: 15px;
+  color: var(--secondary);
+}
+
+/* Small readings side by side on one card, in equal columns, each a small label over its value. */
+.phone-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  padding: 12px 6px;
+}
+
+.phone-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.phone-cell-label {
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.phone-cell-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/*
+ * Ranges: rows on one card, each its label, its low, a bar and its high.
+ * The rows share the card's columns, each as wide as its widest words, so
+ * every bar is drawn on the same track and the rows' scale reads across.
+ */
+.phone-ranges {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  column-gap: 10px;
+}
+
+.phone-range {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: 10px 14px;
+  overflow-wrap: anywhere;
+}
+
+.phone-range + .phone-range {
+  border-top: 1px solid var(--divider);
+}
+
+.phone-range-label {
+  min-width: 40px;
+  font-weight: 500;
+}
+
+.phone-range-low,
+.phone-range-high {
+  min-width: 28px;
+}
+
+.phone-range-low {
+  text-align: right;
+  color: var(--secondary);
+}
+
+.phone-range-track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill);
+}
+
+.phone-range-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: var(--link);
+}
+
+/* What was typed into a box, such as a search's words, with an icon at its start. */
+.phone-field {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--fill);
+}
+
+.phone-field-icon {
+  flex: none;
+  color: var(--secondary);
+}
+
+.phone-field-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A small quiet line under what it follows: a credit, or what something costs. */
+.phone-note {
+  margin: 0 4px;
+  font-size: 12px;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
 }
 
 .phone-tabs {

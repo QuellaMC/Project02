@@ -1720,7 +1720,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 12
+          "const": 13
         },
         "homeRoot": {
           "type": "string"
@@ -1785,7 +1785,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 12
+          "const": 13
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -3226,6 +3226,23 @@
       ],
       "description": "What a view of an app shows: its pieces, top to bottom, and which page\nof the view it is, when the view shows more than one."
     },
+    "ScreenCell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "description": "A cell of a strip: a small label over its value."
+    },
     "ScreenItem": {
       "oneOf": [
         {
@@ -3337,6 +3354,118 @@
             "status"
           ],
           "description": "An app's header: its tile, its name, a small line under it and its\nstatus, as a store's page of the app shows them."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string",
+              "description": "The reading, very large."
+            },
+            "caption": {
+              "type": "string",
+              "description": "A line saying how it is."
+            },
+            "detail": {
+              "type": "string",
+              "description": "A quieter line under the caption."
+            },
+            "kind": {
+              "type": "string",
+              "const": "glance"
+            }
+          },
+          "required": [
+            "kind",
+            "title",
+            "text"
+          ],
+          "description": "A thing at a glance: its title, one very large reading, a line\nsaying how it is and a quieter line under that, as a place's weather\nheads its screen."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cells": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ScreenCell"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "strip"
+            }
+          },
+          "required": [
+            "kind",
+            "cells"
+          ],
+          "description": "2 to 8 small readings side by side on one card, in equal columns, as\nthe hours ahead."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ScreenRange"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "ranges"
+            }
+          },
+          "required": [
+            "kind",
+            "rows"
+          ],
+          "description": "1 to 10 rows on one card, each a bar between its low and its high on\na scale the rows share, as the days ahead."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "field"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "description": "What was typed into a box, such as a search's words, with an icon at\nits start when it names one: a name of the page's own set, which\nfalls back for one it does not know."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "note"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "description": "A small quiet line under what it follows: a credit, or what\nsomething costs."
         }
       ],
       "description": "A piece of a screen."
@@ -3399,6 +3528,39 @@
       ],
       "description": "One view of an app on her phone, as a person looking around it sees it:\nits screen, or why there is none. Looking changes nothing of hers."
     },
+    "ScreenRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "low": {
+          "type": "string"
+        },
+        "high": {
+          "type": "string"
+        },
+        "from": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "to": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "label",
+        "low",
+        "high",
+        "from",
+        "to"
+      ],
+      "description": "A row of ranges: its label, the words of its low and of its high, and\nbetween them a bar from `from` to `to`, whole numbers from 0 to 100 on\nthe scale its rows share, `from` no greater than `to`."
+    },
     "ScreenRefusal": {
       "oneOf": [
         {
@@ -3455,6 +3617,10 @@
         "switch": {
           "type": "boolean",
           "description": "A switch, shown on or off."
+        },
+        "url": {
+          "type": "string",
+          "description": "The address of the page the row is about, `https://` or `http://`\nand 2,048 characters at most: its title is drawn as a link."
         }
       },
       "description": "A row of a list: a title, a time or both."

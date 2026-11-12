@@ -30,10 +30,10 @@ use p02_wire::{
     PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingRequestBody,
     PairingSubject, PendingConfirmation, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome,
     PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
-    RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenItem,
-    ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal,
-    StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus,
-    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenCell, ScreenItem,
+    ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome,
+    StartRefusal, StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome,
+    ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -882,6 +882,7 @@ fn written() -> Vec<(&'static str, Value)> {
 
 /// Her phone's Clock as her window draws it, and a screen holding every
 /// piece and field a screen has.
+#[expect(clippy::too_many_lines, reason = "one of every piece and field")]
 fn phone() -> (PhoneApp, Screen) {
     let id = |text: &str| Identifier::new(text).unwrap();
     let words = |text: &str| Some(text.to_owned());
@@ -931,6 +932,7 @@ fn phone() -> (PhoneApp, Screen) {
                         time: words("5:41 PM"),
                         value: words("00:12.34"),
                         switch: Some(true),
+                        url: words("https://example.com/london"),
                     }],
                 },
                 ScreenItem::Readout {
@@ -952,6 +954,40 @@ fn phone() -> (PhoneApp, Screen) {
                 },
                 ScreenItem::Text {
                     text: "No World Clocks".to_owned(),
+                },
+                ScreenItem::Glance {
+                    title: "Seattle".to_owned(),
+                    text: "12°".to_owned(),
+                    caption: words("Light Rain"),
+                    detail: words("H: 14°  L: 8°"),
+                },
+                ScreenItem::Strip {
+                    cells: vec![
+                        ScreenCell {
+                            label: "Now".to_owned(),
+                            value: "12°".to_owned(),
+                        },
+                        ScreenCell {
+                            label: "10AM".to_owned(),
+                            value: "12°".to_owned(),
+                        },
+                    ],
+                },
+                ScreenItem::Ranges {
+                    rows: vec![ScreenRange {
+                        label: "Wed".to_owned(),
+                        low: "8°".to_owned(),
+                        high: "14°".to_owned(),
+                        from: 33,
+                        to: 100,
+                    }],
+                },
+                ScreenItem::Field {
+                    text: "how long to steep green tea".to_owned(),
+                    icon: words("magnifier"),
+                },
+                ScreenItem::Note {
+                    text: "Weather data by Open-Meteo.com".to_owned(),
                 },
             ],
             page: words("reminders"),

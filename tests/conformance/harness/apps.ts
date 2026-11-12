@@ -2,8 +2,9 @@
  * Apps as the App Store serves them, for a test to publish on the catalog
  * server: an app's one file, its entry in the catalog with that file's
  * SHA-256, and a catalog of apps published where its rule puts each file;
- * with the apps the tests publish, Reminders and quiet ones, and Lookup,
- * which reaches the internet.
+ * with the apps the tests publish, Reminders and quiet ones, Lookup, which
+ * reaches the internet, and Sampler, which shows the pieces Weather and
+ * Web Search are drawn with.
  */
 import {createHash} from 'node:crypto';
 
@@ -136,6 +137,54 @@ export function fetch_all({requests}) {
   phone.storage.set('found', JSON.stringify(came));
 
   return came;
+}`,
+};
+
+/**
+ * Sampler, whose one view shows, in the design's own words, a glance, a
+ * strip, ranges with a note under them, a field, and a list whose rows
+ * name the pages they are about.
+ */
+export const sampler: App = {
+  manifest: {
+    id: 'sampler',
+    name: 'Sampler',
+    summary: 'One of every piece',
+    version: '1.0.0',
+    icon: 'grid',
+    tint: 'blue',
+    wakes: false,
+    views: [{id: 'all', title: 'All', icon: 'grid'}],
+    opensOn: 'all',
+    actions: [],
+  },
+  script: `export function screen() {
+  return {items: [
+    {kind: 'glance', title: 'Seattle', text: '12°', caption: 'Light Rain', detail: 'H: 14° L: 8°'},
+    {kind: 'strip', cells: [
+      {label: 'Now', value: '12°'},
+      {label: '10AM', value: '12°'},
+      {label: '11AM', value: '13°'},
+      {label: '12PM', value: '14°'},
+      {label: '1PM', value: '14°'},
+      {label: '2PM', value: '13°'},
+    ]},
+    {kind: 'ranges', rows: [
+      {label: 'Wed', low: '8°', high: '14°', from: 33, to: 100},
+      {label: 'Thu', low: '7°', high: '12°', from: 22, to: 78},
+      {label: 'Sat', low: '5°', high: '10°', from: 0, to: 56},
+    ]},
+    {kind: 'note', text: 'Weather data by Open-Meteo.com'},
+    {kind: 'field', text: 'how long to steep green tea', icon: 'magnifier'},
+    {kind: 'list', rows: [
+      {caption: 'teaguide.example', title: 'Green tea brewing guide',
+       subtitle: 'Steep green tea for two to three minutes in water at about 80°C.',
+       url: 'https://teaguide.example/green-tea'},
+      {caption: 'kitchennotes.example', title: 'Why green tea turns bitter',
+       subtitle: 'Water that is too hot and a long steep draw out tannins.',
+       url: 'http://kitchennotes.example/bitter'},
+    ]},
+  ]};
 }`,
 };
 

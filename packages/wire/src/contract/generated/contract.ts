@@ -335,7 +335,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 12, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 13, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -356,7 +356,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 12, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 13, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -733,6 +733,11 @@ export type Screen = { items: ReadonlyArray<ScreenItem>,
 page?: string, };
 
 /**
+ * A cell of a strip: a small label over its value.
+ */
+export type ScreenCell = { label: string, value: string, };
+
+/**
  * A piece of a screen.
  */
 export type ScreenItem = { "kind": "list", header?: string, rows: ReadonlyArray<ScreenRow>, } | { "kind": "readout", 
@@ -751,13 +756,32 @@ live?: LiveReading, } | { "kind": "text", text: string, } | { "kind": "app",
 /**
  * The app's own id, which she passes to an action.
  */
-id: string, tile: ScreenTile, name: string, subtitle: string, status: string, };
+id: string, tile: ScreenTile, name: string, subtitle: string, status: string, } | { "kind": "glance", title: string, 
+/**
+ * The reading, very large.
+ */
+text: string, 
+/**
+ * A line saying how it is.
+ */
+caption?: string, 
+/**
+ * A quieter line under the caption.
+ */
+detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:
  * its screen, or why there is none. Looking changes nothing of hers.
  */
 export type ScreenOutcome = { "status": "ok", screen: Screen, } | { "status": "refused", reason: ScreenRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * A row of ranges: its label, the words of its low and of its high, and
+ * between them a bar from `from` to `to`, whole numbers from 0 to 100 on
+ * the scale its rows share, `from` no greater than `to`.
+ */
+export type ScreenRange = { label: string, low: string, high: string, from: number, to: number, };
 
 export type ScreenRefusal = "unknown_character" | "no_phone" | "unknown_app" | "unknown_view" | "app_failed";
 
@@ -792,7 +816,12 @@ value?: string,
 /**
  * A switch, shown on or off.
  */
-switch?: boolean, };
+switch?: boolean, 
+/**
+ * The address of the page the row is about, `https://` or `http://`
+ * and 2,048 characters at most: its title is drawn as a link.
+ */
+url?: string, };
 
 /**
  * An app's tile as a screen draws it: its icon and its tint, names of the

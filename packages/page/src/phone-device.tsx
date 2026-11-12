@@ -13,7 +13,9 @@ import type {
   LiveReading,
   PhoneApp,
   PhoneRing,
+  ScreenCell,
   ScreenItem,
+  ScreenRange,
   ScreenRow,
   ScreenTile,
 } from '@project02/wire/contract';
@@ -32,6 +34,8 @@ import {Icon} from './settings-controls.tsx';
 type View = Extract<OnScreen, {kind: 'view'}>;
 type ReadoutItem = Extract<ScreenItem, {kind: 'readout'}>;
 type AppItem = Extract<ScreenItem, {kind: 'app'}>;
+type GlanceItem = Extract<ScreenItem, {kind: 'glance'}>;
+type FieldItem = Extract<ScreenItem, {kind: 'field'}>;
 
 /** An app's tile at each size her phone draws one: its icon's size and its stroke there. */
 const tileGlyphs = {
@@ -147,16 +151,23 @@ function AppView({
   const title =
     app.views.find(candidate => candidate.id === viewId)?.title ?? app.name;
 
+  // A glance at the head of a screen names what the view shows, as the
+  // design heads a place's weather: the view's own title over it would
+  // say it twice.
+  const headed =
+    view.message === undefined && view.screen?.items[0]?.kind === 'glance';
+
   return (
     <>
       <div className="phone-view">
-        <h2 className="phone-view-title">{title}</h2>
+        {headed ? null : <h2 className="phone-view-title">{title}</h2>}
         <div className="phone-pieces">
           {view.message === undefined ? (
             view.screen?.items.map((item, at, items) => (
               <Piece
                 key={at}
                 item={item}
+                heads={at === 0}
                 alone={items.length === 1}
                 fresh={view.fresh}
                 waiting={view.waiting}
@@ -197,11 +208,14 @@ function AppView({
  */
 function Piece({
   item,
+  heads,
   alone,
   fresh,
   waiting,
 }: {
   readonly item: ScreenItem;
+  /** Whether it is the first piece of its screen. */
+  readonly heads: boolean;
   /** Whether it is the only piece of its screen. */
   readonly alone: boolean;
   readonly fresh: ReadonlySet<string>;
@@ -238,6 +252,16 @@ function Piece({
       );
     case 'app':
       return <AppHeader app={item} waiting={waiting.has(item.id)} />;
+    case 'glance':
+      return <Glance glance={item} heads={heads} />;
+    case 'strip':
+      return <Strip cells={item.cells} />;
+    case 'ranges':
+      return <Ranges rows={item.rows} />;
+    case 'field':
+      return <Field field={item} />;
+    case 'note':
+      return <p className="phone-note">{item.text}</p>;
   }
 }
 
@@ -247,7 +271,9 @@ function Piece({
  * title, a value and a switch. A row whose switch is off is dimmed, one
  * that is new since she did something is tinted and says so, and an app's
  * row, which the App Store lists, says at its end how the app stands on
- * her phone, or that she waits on the person to install it.
+ * her phone, or that she waits on the person to install it. A row about a
+ * page on the web draws its title as a link, which opens nothing: the
+ * person watches her phone, and does not use it.
  */
 function Row({
   row,
@@ -264,6 +290,7 @@ function Row({
   const looks = [
     end === undefined ? '' : ' phone-row-timed',
     row.tile === undefined ? '' : ' phone-row-tiled',
+    row.url === undefined ? '' : ' phone-row-linked',
     row.switch === false ? ' phone-row-off' : '',
     fresh ? ' phone-row-fresh' : '',
   ].join('');
@@ -329,6 +356,93 @@ function AppHeader({
           {waiting ? 'Waiting for you' : app.status}
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A thing at a glance, as the design heads a place's weather: its title,
+ * its reading very large, how it is, and a quieter line under that. At the
+ * head of its screen its title is the view's heading.
+ */
+function Glance({
+  glance,
+  heads,
+}: {
+  readonly glance: GlanceItem;
+  readonly heads: boolean;
+}) {
+  const Title = heads ? 'h2' : 'h3';
+
+  return (
+    <div className="phone-glance">
+      <Title className="phone-glance-title">{glance.title}</Title>
+      <span className="phone-glance-text">{glance.text}</span>
+      {glance.caption === undefined ? null : (
+        <span className="phone-glance-caption">{glance.caption}</span>
+      )}
+      {glance.detail === undefined ? null : (
+        <span className="phone-glance-detail">{glance.detail}</span>
+      )}
+    </div>
+  );
+}
+
+/** Small readings side by side on one card, in equal columns: each a small label over its value. */
+function Strip({cells}: {readonly cells: readonly ScreenCell[]}) {
+  return (
+    <div className="phone-card phone-strip">
+      {cells.map((cell, at) => (
+        <span key={at} className="phone-cell">
+          <span className="phone-cell-label">{cell.label}</span>
+          <span className="phone-cell-value">{cell.value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Rows on one card, each its label, the words of its low, a bar from
+ * `from` to `to` on the scale the rows share, and the words of its high.
+ * The rows share their columns too, so every bar is drawn on one track.
+ */
+function Ranges({rows}: {readonly rows: readonly ScreenRange[]}) {
+  return (
+    <div className="phone-card phone-ranges">
+      {rows.map((range, at) => (
+        <div key={at} className="phone-range">
+          <span className="phone-range-label">{range.label}</span>
+          <span className="phone-range-low">{range.low}</span>
+          <span className="phone-range-track" aria-hidden="true">
+            <span
+              className="phone-range-bar"
+              style={{
+                left: `${String(range.from)}%`,
+                width: `${String(range.to - range.from)}%`,
+              }}
+            />
+          </span>
+          <span className="phone-range-high">{range.high}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** What was typed into a box, such as a search's words, with the icon it names at its start. */
+function Field({field}: {readonly field: FieldItem}) {
+  return (
+    <div className="phone-field">
+      {field.icon === undefined ? null : (
+        <Icon
+          name={iconOf(field.icon)}
+          size={16}
+          weight={2}
+          className="phone-field-icon"
+        />
+      )}
+      <span className="phone-field-text">{field.text}</span>
     </div>
   );
 }

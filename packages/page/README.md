@@ -154,7 +154,12 @@ she did holds for the first time on the same page of the same view is
 marked New until the next read, and another page of a view, as the App
 Store's page of an app is to its list, marks none; the
 view on screen is read again at each minute's turn, and a reading that
-moves is counted on the page from the moments it carries. The App Store's
+moves is counted on the page from the moments it carries. A glance, a
+strip, ranges whose bars share one track, a field and a note are drawn as
+the design draws them, each piece keeping its height while the view
+scrolls; a glance at the head of a screen stands where the view's title
+would; and a row that names the page it is about draws its title as a
+link that opens nothing: the person watches her phone. The App Store's
 rows carry an app's tile and its page an app's header, and while her ask
 to install an app waits for the person, the row and the header with that
 app's id say so in place of their status: "Waiting", and "Waiting for

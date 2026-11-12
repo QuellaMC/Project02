@@ -18,8 +18,9 @@ use crate::asks::Asks;
 
 /// The most requests one call of an action makes.
 const MOST_FETCHES: usize = 4;
-/// The longest address a request is made at, in characters.
-const URL_CHARS: usize = 2_048;
+/// The longest address the phone takes, in characters: a request's, or the
+/// one a screen's row names.
+pub(crate) const URL_CHARS: usize = 2_048;
 /// The largest body a request sends, in bytes.
 const BODY_BYTES: usize = 64 * 1_024;
 /// The headers a script may give a request, by their names in lowercase.

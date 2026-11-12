@@ -1,4 +1,5 @@
-//! What a view shows: read into the pieces the phone knows, and read only.
+//! What a view shows: read into the pieces the phone knows, held to their
+//! rules, and read only.
 
 use p02_phone::Phone;
 use p02_wire::Screen;
@@ -29,8 +30,9 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
         {"kind": "list", "header": "Recents", "rows": [
             {"id": "a1", "tile": {"icon": "globe", "tint": "blue"}, "caption": "Today, +8HRS",
              "title": "London", "subtitle": "Wake Sam, weekdays", "time": "7:00 AM",
-             "value": "00:12.34", "switch": true},
+             "value": "00:12.34", "switch": true, "url": "https://example.com/london"},
             {"time": "6:30 AM", "switch": false},
+            {"title": "Tea", "url": "http://example.com/tea"},
         ]},
         {"kind": "readout", "id": "t1", "label": "Tea", "text": "12:34",
          "caption": "Ends 9:54 AM",
@@ -38,6 +40,20 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
         {"kind": "readout", "text": "00:00.00",
          "live": {"counts": "up", "from": 1_794_571_440_000_i64}},
         {"kind": "text", "text": "No alarms"},
+        {"kind": "glance", "title": "Seattle", "text": "12°", "caption": "Light Rain",
+         "detail": "H: 14°  L: 8°"},
+        {"kind": "glance", "title": "Seattle", "text": "12°"},
+        {"kind": "strip", "cells": [
+            {"label": "Now", "value": "12°"},
+            {"label": "10AM", "value": "13°"},
+        ]},
+        {"kind": "ranges", "rows": [
+            {"label": "Wed", "low": "5°", "high": "14°", "from": 0, "to": 100},
+            {"label": "Thu", "low": "9°", "high": "9°", "from": 44, "to": 44},
+        ]},
+        {"kind": "field", "text": "how long to steep green tea", "icon": "magnifier"},
+        {"kind": "field", "text": "green tea"},
+        {"kind": "note", "text": "Weather data by Open-Meteo.com"},
     ]});
     let phone = showing(&json!({"everything": everything}));
     let screen = phone
@@ -57,7 +73,6 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
         "chart": {"items": [{"kind": "chart"}]},
         "colour": {"items": [{"kind": "list", "rows": [{"title": "London", "colour": "red"}]}]},
         "size": {"items": [{"kind": "text", "text": "No alarms", "size": "large"}]},
-        "untitled": {"items": [{"kind": "list", "rows": [{"subtitle": "Weekdays"}]}]},
         "nothing": null,
     }));
 
@@ -65,22 +80,19 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
         (
             "chart",
             "Notes showed a screen the phone does not take: unknown variant `chart`, expected \
-             one of `list`, `readout`, `text`, `app`",
+             one of `list`, `readout`, `text`, `app`, `glance`, `strip`, `ranges`, `field`, \
+             `note`",
         ),
         (
             "colour",
             "Notes showed a screen the phone does not take: unknown field `colour`, expected \
-             one of `id`, `tile`, `caption`, `title`, `subtitle`, `time`, `value`, `switch`",
+             one of `id`, `tile`, `caption`, `title`, `subtitle`, `time`, `value`, `switch`, \
+             `url`",
         ),
         (
             "size",
             "Notes showed a screen the phone does not take: unknown field `size`, expected \
              `text`",
-        ),
-        (
-            "untitled",
-            "Notes showed a screen the phone does not take: a row of a list has neither a \
-             title nor a time",
         ),
         (
             "nothing",
@@ -94,6 +106,77 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
                 .unwrap_err()
                 .to_string(),
             refusal
+        );
+    }
+}
+
+#[test]
+fn a_screen_whose_piece_breaks_its_rule_is_refused_by_the_rule() {
+    let strip = |cells: usize| {
+        json!({"items": [
+            {"kind": "strip", "cells": vec![json!({"label": "Now", "value": "12°"}); cells]},
+        ]})
+    };
+    let ranges = |bars: &[(u32, u32)]| {
+        let rows: Vec<Value> = bars
+            .iter()
+            .map(|(from, to)| {
+                json!({"label": "Wed", "low": "8°", "high": "14°", "from": from, "to": to})
+            })
+            .collect();
+
+        json!({"items": [{"kind": "ranges", "rows": rows}]})
+    };
+    let linked =
+        |url: &str| json!({"items": [{"kind": "list", "rows": [{"title": "Tea", "url": url}]}]});
+    let address = |chars: usize| {
+        let start = "https://example.com/";
+
+        format!("{start}{}", "a".repeat(chars - start.len()))
+    };
+    let phone = showing(&json!({
+        "untitled": {"items": [{"kind": "list", "rows": [{"subtitle": "Weekdays"}]}]},
+        "one": strip(1),
+        "eight": strip(8),
+        "nine": strip(9),
+        "bare": ranges(&[]),
+        "ten": ranges(&[(0, 100); 10]),
+        "eleven": ranges(&[(0, 100); 11]),
+        "past": ranges(&[(20, 101)]),
+        "backwards": ranges(&[(60, 40)]),
+        "unaddressed": linked("example.com/tea"),
+        "longest": linked(&address(2_048)),
+        "longer": linked(&address(2_049)),
+    }));
+    let strips = "a strip has fewer than 2 cells or more than 8";
+    let counted = "ranges have no row or more than 10";
+    let addressed =
+        "a row's `url` is not an https:// or http:// address of 2,048 characters at most";
+
+    for (view, rule) in [
+        (
+            "untitled",
+            Some("a row of a list has neither a title nor a time"),
+        ),
+        ("one", Some(strips)),
+        ("eight", None),
+        ("nine", Some(strips)),
+        ("bare", Some(counted)),
+        ("ten", None),
+        ("eleven", Some(counted)),
+        ("past", Some("a range's `from` or `to` is past 100")),
+        ("backwards", Some("a range's `from` is past its `to`")),
+        ("unaddressed", Some(addressed)),
+        ("longest", None),
+        ("longer", Some(addressed)),
+    ] {
+        assert_eq!(
+            phone
+                .look(&Files::default(), "notes", view, &now())
+                .err()
+                .map(|refusal| refusal.to_string()),
+            rule.map(|rule| format!("Notes showed a screen the phone does not take: {rule}")),
+            "{view}"
         );
     }
 }

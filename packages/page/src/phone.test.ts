@@ -69,7 +69,7 @@ const now = Date.parse('2026-11-11T09:00:00.000Z');
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 12,
+    protocolVersion: 13,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -84,7 +84,7 @@ function ready(
   ...confirmations: readonly PendingConfirmation[]
 ): GatewayReady {
   return {
-    protocolVersion: 12,
+    protocolVersion: 13,
     health: said,
     confirmations,
     pairings: [],
