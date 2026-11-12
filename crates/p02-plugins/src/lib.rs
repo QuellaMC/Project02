@@ -30,6 +30,6 @@ pub use config_control::{
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder};
 pub use lifecycle::{HookPhaseReport, PhaseStatus};
-pub use phone::{AppCatalog, Installable, NotInstallable, PHONE_PLUGIN, installable};
+pub use phone::{AppCatalog, AppInternet, Installable, NotInstallable, PHONE_PLUGIN, installable};
 pub use tool_call::{ProposedToolCall, ToolCallReport};
 pub use turn::Turn;

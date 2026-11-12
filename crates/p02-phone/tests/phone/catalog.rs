@@ -1,9 +1,10 @@
-//! The App Store's catalog: read from its document, and an app's text
-//! taken only when it is the file the catalog lists.
+//! The App Store's catalog: read from its document, an app's text taken
+//! only when it is the file the catalog lists, and what an app may do said
+//! from what it asks for.
 
 use std::fmt::Write as _;
 
-use p02_phone::{Catalog, CatalogError, Phone};
+use p02_phone::{App, Catalog, CatalogError, Phone, it_may};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -14,6 +15,14 @@ const SCREEN: &str = "export function screen() { return { items: [] }; }";
 /// Notes at `version`, as its one file.
 fn notes(version: &str) -> String {
     text(&manifest(&json!({"version": version})), SCREEN)
+}
+
+/// Notes reaching `hosts`, on `account` when it names one, as its one file.
+fn reaching(hosts: &[&str], account: Option<&str>) -> String {
+    text(
+        &manifest(&json!({"reaches": hosts, "account": account})),
+        SCREEN,
+    )
 }
 
 /// The catalog's entry of Notes at `version`, listing the file `file`, with
@@ -67,11 +76,26 @@ fn a_catalog_keeps_the_entries_that_read_and_is_refused_when_it_is_none_the_phon
         entry("1.0", &file, &json!({"id": "maps"})),
         entry("1.0.0", &file, &json!({"id": "chess", "sha256": "abc"})),
         entry("1.0.0", &file, &json!({"id": "music", "wakes": null})),
+        entry(
+            "1.0.0",
+            &file,
+            &json!({"id": "web", "reaches": ["api.tavily.com"], "account": "tavily"}),
+        ),
+        entry(
+            "1.0.0",
+            &file,
+            &json!({"id": "local", "reaches": ["localhost"]}),
+        ),
+        entry(
+            "1.0.0",
+            &file,
+            &json!({"id": "chat", "reaches": ["api.openai.com"], "account": "openai"}),
+        ),
         named("reminders"),
     ]))
     .unwrap();
 
-    assert_eq!(ids(&read), ["notes", "reminders"]);
+    assert_eq!(ids(&read), ["notes", "web", "reminders"]);
     assert_eq!(
         read.app("reminders").unwrap().changes(),
         "The first version."
@@ -114,11 +138,32 @@ fn a_catalog_keeps_the_entries_that_read_and_is_refused_when_it_is_none_the_phon
 fn an_apps_text_is_taken_only_when_it_is_the_file_the_catalog_lists_of_it() {
     let phone = Phone::new(Vec::new());
     let file = notes("1.0.0");
+    let searching = reaching(&["api.tavily.com"], Some("tavily"));
     let not_an_app = SCREEN;
-    let read = Catalog::read(&catalog(&[entry("1.0.0", &file, &json!({}))])).unwrap();
-    let listed = read.app("notes").unwrap();
+    let asks_otherwise = "its file asks of her phone other than the catalog lists".to_owned();
 
-    assert_eq!(phone.judge(listed, &file).unwrap().id().as_str(), "notes");
+    for (entry, file) in [
+        (entry("1.0.0", &file, &json!({})), &file),
+        (
+            entry(
+                "1.0.0",
+                &searching,
+                &json!({"reaches": ["api.tavily.com"], "account": "tavily"}),
+            ),
+            &searching,
+        ),
+    ] {
+        let read = Catalog::read(&catalog(&[entry])).unwrap();
+
+        assert_eq!(
+            phone
+                .judge(read.app("notes").unwrap(), file)
+                .unwrap()
+                .id()
+                .as_str(),
+            "notes"
+        );
+    }
 
     for (entry, file, why) in [
         (
@@ -136,6 +181,21 @@ fn an_apps_text_is_taken_only_when_it_is_the_file_the_catalog_lists_of_it() {
             file.clone(),
             "its file is notes 1.0.0, not the notes 1.1.0 the catalog lists".to_owned(),
         ),
+        (
+            entry("1.0.0", &file, &json!({"reaches": ["api.tavily.com"]})),
+            file.clone(),
+            asks_otherwise.clone(),
+        ),
+        (
+            entry("1.0.0", &searching, &json!({"reaches": ["api.tavily.com"]})),
+            searching.clone(),
+            asks_otherwise.clone(),
+        ),
+        (
+            entry("1.0.0", &file, &json!({"wakes": true})),
+            file.clone(),
+            asks_otherwise,
+        ),
     ] {
         let read = Catalog::read(&catalog(&[entry])).unwrap();
         let refused = phone.judge(read.app("notes").unwrap(), &file).unwrap_err();
@@ -149,4 +209,69 @@ fn an_apps_text_is_taken_only_when_it_is_the_file_the_catalog_lists_of_it() {
             "{refused:?}"
         );
     }
+}
+
+#[test]
+fn what_an_app_may_do_is_said_from_what_it_asks_for_by_its_listing_and_its_file_alike() {
+    let read = Catalog::read(&catalog(&[
+        entry("1.0.0", SCREEN, &json!({"id": "quiet"})),
+        entry(
+            "1.0.0",
+            SCREEN,
+            &json!({
+                "id": "search", "wakes": true, "reaches": ["api.tavily.com"], "account": "tavily",
+            }),
+        ),
+        entry(
+            "1.0.0",
+            SCREEN,
+            &json!({
+                "id": "weather", "reaches": ["api.open-meteo.com", "geocoding-api.open-meteo.com"],
+            }),
+        ),
+        entry(
+            "1.0.0",
+            SCREEN,
+            &json!({"id": "news", "reaches": ["a.example", "b.example", "c.example"]}),
+        ),
+    ]))
+    .unwrap();
+    let said = |id: &str| it_may(read.app(id).unwrap().asks());
+
+    assert_eq!(said("quiet"), ["Keep its own data"]);
+    assert_eq!(
+        said("search"),
+        [
+            "Keep its own data",
+            "Wake her when something is due",
+            "Reach the internet at api.tavily.com",
+            "Use your Tavily account",
+        ]
+    );
+    assert_eq!(
+        said("weather"),
+        [
+            "Keep its own data",
+            "Reach the internet at api.open-meteo.com and geocoding-api.open-meteo.com",
+        ]
+    );
+    assert_eq!(
+        said("news"),
+        [
+            "Keep its own data",
+            "Reach the internet at a.example, b.example and c.example",
+        ]
+    );
+    assert_eq!(
+        it_may(
+            App::new(&reaching(&["api.tavily.com"], Some("tavily")))
+                .unwrap()
+                .asks()
+        ),
+        [
+            "Keep its own data",
+            "Reach the internet at api.tavily.com",
+            "Use your Tavily account",
+        ]
+    );
 }

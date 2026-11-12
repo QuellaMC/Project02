@@ -18,6 +18,7 @@ use crate::error::PhoneError;
 use crate::front::PhoneState;
 use crate::host::{Access, Host};
 use crate::manifest::View;
+use crate::net::{End, Exchange, Fetch, Net};
 use crate::store;
 use crate::time::Now;
 
@@ -55,6 +56,15 @@ pub struct Acted {
     pub view: Identifier,
     pub screen: Result<Screen, PhoneError>,
     pub unkept: Option<StoreError>,
+}
+
+/// What an action came to on the exchanges it was given: it acted, or it
+/// asks for one more request, which its caller makes, with no lease held,
+/// before it takes the action again with what came of it.
+#[derive(Debug)]
+pub enum Acting {
+    Acted(Acted),
+    Asks(Fetch),
 }
 
 /// A ring set on the phone, with its app's id and name.
@@ -174,21 +184,29 @@ impl Phone {
     /// action changed, and an action whose keeping failed still stands:
     /// failing it would have her take it twice.
     ///
+    /// The action runs from what the app keeps, its n-th `phone.net.fetch`
+    /// answered by the n-th of `exchanges`, those of its runs before. A run
+    /// that asks for a request none answers yet ends there, keeping
+    /// nothing, and the call asks for it: its caller makes it and takes the
+    /// action again, at the same `now`, with what came of it.
+    ///
     /// # Errors
     ///
     /// [`PhoneError`] when there is no such app or action, the app cannot
-    /// run, its contract refuses `input`, the action fails, answers what
-    /// the phone does not take or would keep more than it holds, or when
-    /// the store fails. A call the phone refuses or the app fails saves
-    /// nothing.
+    /// run, its contract refuses `input`, the action fails, as it does by a
+    /// fifth request or one other than it asked at that place before,
+    /// answers what the phone does not take or would keep more than it
+    /// holds, or when the store fails. A call the phone refuses or the app
+    /// fails saves nothing.
     pub fn act(
         &self,
         files: &mut dyn LeasedFiles,
         app: &str,
         action: &str,
         input: &Map<String, Value>,
+        exchanges: &[Exchange],
         now: &Now,
-    ) -> Result<Acted, PhoneError> {
+    ) -> Result<Acting, PhoneError> {
         let app = self.app(files, app)?;
         let action = app
             .actions()
@@ -214,15 +232,28 @@ impl Phone {
                     kept.clone(),
                     now.clone(),
                     Access::ReadWrite { wakes: app.wakes() },
+                    Some(Net::new(app.asks(), exchanges)),
                 );
-                let answered = engine::call(
+                let ran = engine::call(
                     text,
                     &host,
                     action.name().as_str(),
                     &Value::Object(input.clone()),
-                )
-                .map_err(|failure| failed(&app, failure))?;
-                let answer = answered
+                );
+
+                match host.end() {
+                    Some(End::Asks(fetch)) => return Ok(Acting::Asks(fetch)),
+                    Some(End::Fails(words)) => {
+                        return Err(PhoneError::Threw {
+                            app: app.name().to_owned(),
+                            thrown: words.to_owned(),
+                        });
+                    }
+                    None => {}
+                }
+
+                let answer = ran
+                    .map_err(|failure| failed(&app, failure))?
                     .and_then(|answer| {
                         bound_json(answer, "answer", JsonLimits::default(), Credentials::Keep)
                             .map_err(|problem| problem.to_string())
@@ -252,12 +283,12 @@ impl Phone {
 
         let unkept = PhoneState::put(files, &app, action.view(), action.did(), now).err();
 
-        Ok(Acted {
+        Ok(Acting::Acted(Acted {
             answer,
             view: action.view().clone(),
             screen: self.screen(files, &app, action.view(), now),
             unkept,
-        })
+        }))
     }
 
     /// Every ring that may wake her, of all her phone's apps, soonest first,
@@ -368,7 +399,7 @@ impl Phone {
 
         match app.runs() {
             Runs::Script { text, .. } => {
-                let host = Host::new(kept, now.clone(), Access::ReadOnly);
+                let host = Host::new(kept, now.clone(), Access::ReadOnly, None);
 
                 engine::call(text, &host, "screen", &Value::from(view.as_str()))
                     .map_err(|failure| failed(app, failure))?
@@ -409,6 +440,7 @@ fn rang(app: &App, kept: &Kept, ring: &Ring, now: &Now) -> Result<Kept, PhoneErr
         kept.clone(),
         now.clone(),
         Access::ReadWrite { wakes: app.wakes() },
+        None,
     );
     let _ =
         engine::call(text, &host, "rang", &ring.shown()).map_err(|failure| failed(app, failure))?;

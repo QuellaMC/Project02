@@ -6,6 +6,7 @@ use std::iter;
 
 use p02_shared::Identifier;
 
+use crate::asks::Asks;
 use crate::data::Kept;
 use crate::engine;
 use crate::error::PackageError;
@@ -43,7 +44,7 @@ impl App {
     /// `screen` or for an action, or a manifest that breaks a rule of its
     /// own.
     pub fn new(text: &str) -> Result<Self, PackageError> {
-        let host = Host::new(Kept::default(), Now::epoch(), Access::ReadOnly);
+        let host = Host::new(Kept::default(), Now::epoch(), Access::ReadOnly, None);
         let exports = engine::exports(text, &host)
             .map_err(|failure| PackageError::Script(failure.to_string()))?;
         let manifest = match exports.manifest {
@@ -116,10 +117,17 @@ impl App {
         &self.manifest.tint
     }
 
+    /// What the app asks of her phone: to wake her, the hosts it reaches
+    /// and the person's account it uses there.
+    #[must_use]
+    pub fn asks(&self) -> &Asks {
+        &self.manifest.asks
+    }
+
     /// Whether the app says it wakes her: only then can it set a ring.
     #[must_use]
     pub fn wakes(&self) -> bool {
-        self.manifest.wakes
+        self.manifest.asks.wakes
     }
 
     #[must_use]

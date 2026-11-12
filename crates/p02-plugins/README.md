@@ -12,8 +12,9 @@ enough to build it, made by the code the factory builds it with. A
 character's host is built from the plugins her settings switch on and that
 check finds set up, each by its factory from the values her settings give
 it and checked against its manifest, but for two the host builds itself:
-its own, linked to it, and her phone, handed the App Store's catalog. When
-her settings change, she gets a host built anew.
+its own, linked to it, and her phone, handed the App Store's catalog and
+the internet her apps reach. When her settings change, she gets a host
+built anew.
 
 The host's rules:
 
@@ -56,3 +57,19 @@ stands on her phone, so it never puts an older version over hers. Nothing
 is fetched under a lease: her opening the App Store reads its catalog
 before her phone's store is leased, and `installable` reads her phone
 between its requests.
+
+`AppInternet` is the one seam that makes her apps' requests, built as the
+catalog's reader is: through the same client, made at its first request,
+which follows no redirect; any status is an answer, its body read as text
+up to 256 KiB, and the requests of one call share 20 seconds. What is no
+answer is said to the app in a plain sentence naming no address. Under the
+test switch every request goes below the stand-in's base by its host.
+`phone.use` runs the action under her phone's lease, and while the action
+asks for a request, makes it with no lease held and runs the action again
+at the same moment with what came of it. A request for an account of the
+person's carries `Authorization: Bearer` and the key the home's settings
+hold for it, `tavilyApiKey`, a secret of the home's alone that she cannot
+change; with none set the request is not made, and the app is told so in
+a sentence naming the person. The key reaches no log, record or app, and
+an answer that echoes it has it redacted. The phone's budget, 100
+seconds, is the room a call that fetches has.

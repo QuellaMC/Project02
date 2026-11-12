@@ -5,7 +5,7 @@
 use p02_phone::{Now, Phone, SetRing};
 use serde_json::{Value, json};
 
-use crate::support::{Files, in_zone, input, millis};
+use crate::support::{Files, in_zone, millis, took};
 
 /// Wednesday 11 November 2026, 9:41 AM in Los Angeles.
 const MORNING: &str = "2026-11-11T17:41:00.000Z";
@@ -22,8 +22,7 @@ fn at(moment: &str) -> Now {
 /// What the Clock answers `action` on `given` at `moment`, or the sentence
 /// it is refused in.
 fn act(files: &mut Files, action: &str, given: &Value, moment: &str) -> Result<Value, String> {
-    phone()
-        .act(files, "clock", action, &input(given), &at(moment))
+    took(phone(), files, "clock", action, given, &at(moment))
         .map(|acted| acted.answer)
         .map_err(|refused| refused.to_string())
 }

@@ -1,6 +1,8 @@
 use p02_contracts::{InputContractError, StoreError, ToolInputRejection};
 use p02_shared::{BoundJsonError, Identifier};
 
+use crate::account::Account;
+
 /// Why an app's one file is not an app: the first rule it breaks.
 #[derive(Debug, thiserror::Error)]
 pub enum PackageError {
@@ -49,6 +51,22 @@ pub enum PackageError {
     },
     #[error("{app} exports no function {function}")]
     Export { app: String, function: String },
+    #[error(
+        "manifest reaches \"{0}\" is refused: a host is a DNS name in lowercase, of two labels \
+         at least and not an address in numbers, with no scheme, port or path"
+    )]
+    Host(String),
+    #[error("manifest reaches names more than 4 hosts")]
+    TooManyHosts,
+    #[error("manifest reaches names \"{0}\" more than once")]
+    DuplicateHost(String),
+    #[error(
+        "manifest account \"{0}\" is none of the accounts the phone knows: {known}",
+        known = known_accounts()
+    )]
+    Account(String),
+    #[error("manifest account \"{account}\" is at {host}, which its reaches does not name")]
+    AccountUnreached { account: String, host: &'static str },
 }
 
 /// Why the App Store's catalog, or an app of it, is not what the phone
@@ -121,4 +139,13 @@ pub enum PhoneError {
     CannotWake(String),
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// The ids of the accounts the phone knows, as a refusal lists them.
+fn known_accounts() -> String {
+    Account::all()
+        .iter()
+        .map(Account::id)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

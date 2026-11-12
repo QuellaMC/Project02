@@ -1,6 +1,7 @@
 //! An app's script in QuickJS: a runtime and a context of its own for each
 //! call, the language and `phone` all it reaches, and the limits it runs
-//! under.
+//! under. A call whose `phone` ended its run stops as one out of time does,
+//! with what no script catches.
 
 use std::cell::Cell;
 use std::fmt;
@@ -193,7 +194,7 @@ pub(crate) fn call(
     run(script, host, |ctx, exports, deadline| {
         let function: Function<'_> = exports.get(function)?;
         let argument = ctx.json_parse(argument.to_string())?;
-        let answer = settled(ctx, function.call((argument,))?, deadline)?;
+        let answer = settled(ctx, function.call((argument,))?, deadline, host)?;
 
         if answer.is_undefined() {
             return Ok(Ok(serde_json::Value::Null));
@@ -209,7 +210,9 @@ pub(crate) fn call(
 
 /// Makes the runtime and the context of one call, puts `phone` in it,
 /// runs `script` and hands `work` its exports, under the limits. A call
-/// the time limit stopped anywhere fails, whatever it went on to do.
+/// the time limit stopped anywhere fails, whatever it went on to do, and
+/// one whose host ended its run stops at the next check; its caller asks
+/// the host how it ended.
 fn run<T, F>(script: &str, host: &Rc<Host>, work: F) -> Result<T, Failure>
 where
     F: for<'js> FnOnce(&Ctx<'js>, &Object<'js>, Instant) -> Result<T, Stop>,
@@ -218,6 +221,7 @@ where
     let runtime = Runtime::new().map_err(|_| Failure::OutOfMemory)?;
     let stopped = Rc::new(Cell::new(false));
     let watching = Rc::clone(&stopped);
+    let ending = Rc::clone(host);
 
     runtime.set_memory_limit(MEMORY_LIMIT);
     runtime.set_max_stack_size(STACK_LIMIT);
@@ -228,7 +232,7 @@ where
             watching.set(true);
         }
 
-        past
+        past || ending.ended()
     })));
 
     let context = Context::custom::<Language>(&runtime).map_err(|_| Failure::OutOfMemory)?;
@@ -239,7 +243,7 @@ where
 
             let (module, evaluated) = Module::declare(ctx.clone(), "app.js", script)?.eval()?;
 
-            settled(&ctx, evaluated.into_value(), deadline)?;
+            settled(&ctx, evaluated.into_value(), deadline, host)?;
             work(&ctx, &module.namespace()?, deadline)
         })();
 
@@ -252,9 +256,14 @@ where
 }
 
 /// `value`, or what it settles to when it is a promise: the jobs it waits
-/// on run until it does. One that is not settled by `deadline`, or that
-/// nothing is left to settle, stops the call.
-fn settled<'js>(ctx: &Ctx<'js>, value: Value<'js>, deadline: Instant) -> Result<Value<'js>, Stop> {
+/// on run until it does. One that is not settled by `deadline` or before
+/// `host` ended the run, or that nothing is left to settle, stops the call.
+fn settled<'js>(
+    ctx: &Ctx<'js>,
+    value: Value<'js>,
+    deadline: Instant,
+    host: &Host,
+) -> Result<Value<'js>, Stop> {
     let Some(promise) = value.as_promise() else {
         return Ok(value);
     };
@@ -263,7 +272,7 @@ fn settled<'js>(ctx: &Ctx<'js>, value: Value<'js>, deadline: Instant) -> Result<
         if let Some(result) = promise.result::<Value<'js>>() {
             return Ok(result?);
         }
-        if Instant::now() >= deadline || !ctx.execute_pending_job() {
+        if Instant::now() >= deadline || host.ended() || !ctx.execute_pending_job() {
             return Err(Stop::Unsettled);
         }
     }

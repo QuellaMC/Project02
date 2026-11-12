@@ -133,6 +133,7 @@ impl World {
                 durations: Durations::default(),
                 plugins: listed.chain([gated]).collect(),
                 app_catalog: nowhere(),
+                app_internet: Some(nowhere()),
             },
         )
         .await
@@ -140,7 +141,8 @@ impl World {
     }
 }
 
-/// An App Store nothing serves: no test of these reads it.
+/// Where nothing serves: no test of these reads the App Store or reaches
+/// the internet.
 fn nowhere() -> BaseUrl {
     BaseUrl::parse("http://127.0.0.1:9").unwrap()
 }

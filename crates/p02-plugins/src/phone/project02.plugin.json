@@ -24,11 +24,22 @@
           "defaultValue": true,
           "agentMutable": false,
           "redactionLabels": []
+        },
+        {
+          "name": "tavilyApiKey",
+          "label": "API Key",
+          "description": "The key of your Tavily account, which her apps that use it send to Tavily and nowhere else.",
+          "placeholder": "Paste key",
+          "secret": true,
+          "scope": "global_only",
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": []
         }
       ]
     },
     "runtimePolicy": {
-      "timeoutMs": 20000,
+      "timeoutMs": 30000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",

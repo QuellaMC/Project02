@@ -5,7 +5,7 @@
 use p02_phone::{Now, Phone};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, at, input, millis, now};
+use crate::support::{Files, actions, app, at, millis, now, took};
 
 /// Clock, which answers what `phone.time` does.
 fn clock() -> Phone {
@@ -25,10 +25,16 @@ fn clock() -> Phone {
 
 /// What Clock's `function` answers `asked` at `now`.
 fn asked(function: &str, asked: &Value, now: &Now) -> Result<Value, String> {
-    clock()
-        .act(&mut Files::default(), "clock", function, &input(asked), now)
-        .map(|acted| acted.answer)
-        .map_err(|refused| refused.to_string())
+    took(
+        &clock(),
+        &mut Files::default(),
+        "clock",
+        function,
+        asked,
+        now,
+    )
+    .map(|acted| acted.answer)
+    .map_err(|refused| refused.to_string())
 }
 
 /// A day and a time of it, as `phone.time.at` takes them.

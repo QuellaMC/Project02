@@ -1,6 +1,6 @@
 //! An app's manifest, which its script exports as `manifest`: what the app
-//! is called, its version, how its icon is drawn and whether it wakes her,
-//! the views it shows and the actions she can take in it.
+//! is called, its version, how its icon is drawn, what it asks of her
+//! phone, the views it shows and the actions she can take in it.
 
 use std::collections::BTreeSet;
 
@@ -9,6 +9,7 @@ use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::asks::Asks;
 use crate::error::PackageError;
 
 /// The format of a manifest the phone reads.
@@ -26,7 +27,7 @@ pub(crate) struct Manifest {
     pub(crate) version: String,
     pub(crate) icon: String,
     pub(crate) tint: String,
-    pub(crate) wakes: bool,
+    pub(crate) asks: Asks,
     pub(crate) views: Vec<View>,
     pub(crate) opens_on: Identifier,
     pub(crate) actions: Vec<Action>,
@@ -63,6 +64,10 @@ struct Authored {
     icon: String,
     tint: String,
     wakes: bool,
+    #[serde(default)]
+    reaches: Vec<String>,
+    #[serde(default)]
+    account: Option<String>,
     views: Vec<AuthoredView>,
     opens_on: String,
     actions: Vec<AuthoredAction>,
@@ -159,6 +164,14 @@ impl Manifest {
         not_blank("icon", &authored.icon)?;
         not_blank("tint", &authored.tint)?;
 
+        let asks = Asks {
+            wakes: authored.wakes,
+            reaches: authored.reaches,
+            account: authored.account,
+        };
+
+        asks.check()?;
+
         let views = views(authored.views)?;
         let opens_on = view_named(&views, &authored.opens_on)
             .ok_or(PackageError::OpensOn(authored.opens_on))?;
@@ -171,7 +184,7 @@ impl Manifest {
             version: authored.version,
             icon: authored.icon,
             tint: authored.tint,
-            wakes: authored.wakes,
+            asks,
             views,
             opens_on,
             actions,

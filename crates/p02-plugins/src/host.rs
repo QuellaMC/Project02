@@ -15,7 +15,7 @@ use crate::config_control::ConfigControl;
 use crate::confirmation::Confirmer;
 use crate::lifecycle::{HookPhaseReport, Lifecycle};
 use crate::management;
-use crate::phone::{self, AppCatalog, PHONE_PLUGIN};
+use crate::phone::{self, AppCatalog, AppInternet, PHONE_PLUGIN};
 use crate::policy;
 use crate::turn::Turn;
 
@@ -40,6 +40,7 @@ pub struct PluginHostBuilder {
     confirmer: Arc<dyn Confirmer>,
     config_control: Arc<dyn ConfigControl>,
     catalog: Arc<AppCatalog>,
+    internet: Arc<AppInternet>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -119,13 +120,14 @@ impl PluginHost {
     /// through `confirmer` before an approval-gated call takes effect,
     /// whose settings `config_control` reads and changes for the host's own
     /// plugin, and whose phone reads the App Store's catalog through
-    /// `catalog`.
+    /// `catalog` and has her apps' requests made through `internet`.
     #[must_use]
     pub fn builder(
         storage: Arc<dyn CharacterStorage>,
         confirmer: Arc<dyn Confirmer>,
         config_control: Arc<dyn ConfigControl>,
         catalog: Arc<AppCatalog>,
+        internet: Arc<AppInternet>,
     ) -> PluginHostBuilder {
         PluginHostBuilder {
             storage,
@@ -133,6 +135,7 @@ impl PluginHost {
             confirmer,
             config_control,
             catalog,
+            internet,
         }
     }
 
@@ -167,8 +170,8 @@ impl PluginHostBuilder {
     /// values its character's settings give it by field name. Its hooks run
     /// after those of every plugin added before it. The host's own plugin,
     /// `runtime.plugin`, the host builds itself, linked to it, and her
-    /// phone with the App Store's catalog, whatever factory comes with
-    /// them.
+    /// phone with the App Store's catalog and the internet her apps reach,
+    /// whatever factory comes with them.
     #[must_use]
     pub fn plugin(
         mut self,
@@ -223,7 +226,9 @@ impl PluginHostBuilder {
 
             let factory = match plugin_id.as_str() {
                 HOST_PLUGIN => management::factory(&host, Arc::clone(&self.config_control)),
-                PHONE_PLUGIN => phone::factory(Arc::clone(&self.catalog)),
+                PHONE_PLUGIN => {
+                    phone::factory(Arc::clone(&self.catalog), Arc::clone(&self.internet))
+                }
                 _ => factory,
             };
             let registration =
@@ -377,6 +382,7 @@ impl fmt::Debug for PluginHostBuilder {
             .field("confirmer", &self.confirmer)
             .field("config_control", &self.config_control)
             .field("catalog", &self.catalog)
+            .field("internet", &self.internet)
             .finish()
     }
 }

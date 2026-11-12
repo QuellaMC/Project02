@@ -19,7 +19,7 @@ use p02_contracts::{
     FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
 };
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
-use p02_plugins::AppCatalog;
+use p02_plugins::{AppCatalog, AppInternet};
 use p02_shared::{BaseUrl, Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
@@ -147,6 +147,9 @@ pub struct DaemonSettings {
     /// Where the App Store's catalog is: the build's own, unless the test
     /// switch names another.
     pub app_catalog: BaseUrl,
+    /// The stand-in that takes every request of her apps, under the test
+    /// switch; none, and each goes where it says.
+    pub app_internet: Option<BaseUrl>,
 }
 
 /// A line a client delivers into a conversation.
@@ -170,8 +173,8 @@ pub struct OpenDaemonError {
 
 /// What every actor of the daemon reads and nothing changes: the home, the
 /// settings' sections, the plugins, the waits, the model that stands in
-/// for every character's, the App Store's catalog her phone reads, and the
-/// events.
+/// for every character's, the App Store's catalog her phone reads, the
+/// internet her apps reach, and the events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -180,6 +183,7 @@ pub(crate) struct World {
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) catalog: Arc<AppCatalog>,
+    pub(crate) internet: Arc<AppInternet>,
     pub(crate) events: Arc<Events>,
 }
 
@@ -350,6 +354,7 @@ impl Daemon {
             durations,
             plugins,
             app_catalog,
+            app_internet,
         } = settings;
 
         Ok(Self {
@@ -365,6 +370,7 @@ impl Daemon {
                     durations,
                     test_provider,
                     catalog: Arc::new(AppCatalog::new(app_catalog)),
+                    internet: Arc::new(AppInternet::new(app_internet)),
                     events: Arc::default(),
                 }),
                 characters: Mutex::default(),

@@ -42,8 +42,9 @@ with an outcome of p02-wire, never an error.
   read. The stream says her phone changed after a call of her phone's
   tools came back accepted, and as a ring's moment begins and once its
   rings went to their apps. The daemon makes the one reader of the App
-  Store's catalog, from the base the binary gives it, and hands it to
-  every host it builds her.
+  Store's catalog, from the base the binary gives it, and the one seam
+  that makes her apps' requests, at a stand-in the binary names under its
+  test switch, and hands both to every host it builds her.
 - **Her apps in the person's hands**, each the person's own act, which
   asks nobody, made on her data whether she runs or not, as her phone is
   read: the App Store's catalog read anew for them to browse, with how

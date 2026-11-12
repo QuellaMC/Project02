@@ -13,6 +13,7 @@ mod catalog;
 mod clock;
 mod front;
 mod installed;
+mod net;
 mod reminders;
 mod rings;
 mod screens;

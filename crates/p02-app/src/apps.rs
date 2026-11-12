@@ -114,7 +114,7 @@ impl Daemon {
                 tint: app.tint().to_owned(),
                 version: app.version().to_owned(),
                 wakes: app.wakes(),
-                it_may: said(app.wakes()),
+                it_may: it_may(app.asks()),
                 replaces: on_phone
                     .app(app.id().as_str())
                     .map(|on_phone| on_phone.version.clone()),
@@ -300,15 +300,9 @@ fn store_app(app: &CatalogApp, on_phone: &OnPhone) -> StoreApp {
         version: app.version().to_owned(),
         changes: app.changes().to_owned(),
         wakes: app.wakes(),
-        it_may: said(app.wakes()),
+        it_may: it_may(app.asks()),
         status: app.status(&on_phone.apps),
     }
-}
-
-/// What an app that does or does not wake her may do, a line each, as the
-/// App Store says it.
-fn said(wakes: bool) -> Vec<String> {
-    it_may(wakes).into_iter().map(str::to_owned).collect()
 }
 
 /// Why her phone refused an app given to her.

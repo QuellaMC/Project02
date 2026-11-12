@@ -4,7 +4,7 @@
 use p02_phone::{App, Phone};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, input, manifest, now, text, view};
+use crate::support::{Files, actions, app, manifest, now, text, took, view};
 
 const SCREEN: &str = "export function screen() { return { items: [] }; }";
 
@@ -39,6 +39,13 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
     };
     let named = "is refused: an action is named in lowercase letters, digits and _, beginning \
                  with a letter, and never manifest, screen or rang";
+    let host = |host: &str| {
+        format!(
+            "manifest reaches \"{host}\" is refused: a host is a DNS name in lowercase, of two \
+             labels at least and not an address in numbers, with no scheme, port or path"
+        )
+    };
+    let reaching = |hosts: &[&str]| notes(json!({"reaches": hosts}));
 
     for (file, refusal) in [
         (
@@ -105,6 +112,47 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
         (
             notes(json!({"views": [{"id": "all", "title": "All", "icon": " "}]})),
             "manifest view \"all\" icon must not be blank".to_owned(),
+        ),
+        (
+            notes(json!({"reaches": "api.tavily.com"})),
+            "manifest is not an app manifest: invalid type: string \"api.tavily.com\", expected \
+             a sequence"
+                .to_owned(),
+        ),
+        (reaching(&["localhost"]), host("localhost")),
+        (reaching(&["127.0.0.1"]), host("127.0.0.1")),
+        (
+            reaching(&["https://api.tavily.com/search"]),
+            host("https://api.tavily.com/search"),
+        ),
+        (
+            reaching(&["api.tavily.com:443"]),
+            host("api.tavily.com:443"),
+        ),
+        (reaching(&["API.tavily.com"]), host("API.tavily.com")),
+        (
+            reaching(&[
+                "a.example",
+                "b.example",
+                "c.example",
+                "d.example",
+                "e.example",
+            ]),
+            "manifest reaches names more than 4 hosts".to_owned(),
+        ),
+        (
+            reaching(&["api.tavily.com", "api.tavily.com"]),
+            "manifest reaches names \"api.tavily.com\" more than once".to_owned(),
+        ),
+        (
+            notes(json!({"reaches": ["api.openai.com"], "account": "openai"})),
+            "manifest account \"openai\" is none of the accounts the phone knows: tavily"
+                .to_owned(),
+        ),
+        (
+            notes(json!({"reaches": ["api.open-meteo.com"], "account": "tavily"})),
+            "manifest account \"tavily\" is at api.tavily.com, which its reaches does not name"
+                .to_owned(),
         ),
         (
             notes(json!({"opensOn": "alarms"})),
@@ -209,22 +257,23 @@ fn a_script_reaches_the_language_and_phone_and_nothing_else() {
     globals.sort_unstable();
 
     assert_eq!(
-        phone
-            .act(
-                &mut Files::default(),
-                "notes",
-                "look",
-                &input(&json!({})),
-                &now()
-            )
-            .unwrap()
-            .answer,
+        took(
+            &phone,
+            &mut Files::default(),
+            "notes",
+            "look",
+            &json!({}),
+            &now()
+        )
+        .unwrap()
+        .answer,
         json!({
             "globals": globals,
             "phone": [
                 ["storage", ["get", "set", "remove"]],
                 ["rings", ["set", "cancel", "list"]],
                 ["time", ["now", "local", "at", "next"]],
+                ["net", ["fetch"]],
             ],
             "imported": "ReferenceError: could not load module 'notes.js'",
         })

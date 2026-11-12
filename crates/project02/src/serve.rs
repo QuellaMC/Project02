@@ -80,6 +80,7 @@ pub(crate) async fn run(
         durations: switches.durations,
         plugins,
         app_catalog: switches.app_catalog,
+        app_internet: switches.app_internet,
     };
 
     serve(home, claim, settings, &stop, console).await

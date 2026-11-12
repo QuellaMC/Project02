@@ -7,7 +7,7 @@ use p02_phone::{Phone, PhoneError};
 use p02_wire::Screen;
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, bounded, input, now};
+use crate::support::{Files, actions, app, bounded, now, took};
 
 /// Notes, which keeps a list of what she writes down.
 fn notes() -> Phone {
@@ -57,15 +57,15 @@ fn an_action_runs_on_its_input_and_what_it_saved_is_there_at_the_next_call_and_i
     let phone = notes();
     let mut files = Files::default();
     let add = |files: &mut Files, text: &str| {
-        phone
-            .act(
-                files,
-                "notes",
-                "add",
-                &input(&json!({"text": text})),
-                &now(),
-            )
-            .unwrap()
+        took(
+            &phone,
+            files,
+            "notes",
+            "add",
+            &json!({"text": text}),
+            &now(),
+        )
+        .unwrap()
     };
 
     assert_eq!(
@@ -99,15 +99,11 @@ fn input_is_judged_before_the_script_sees_it_and_what_is_not_there_is_refused() 
 
     for (refused, sentence) in [
         (
-            phone
-                .act(&mut files, "notes", "add", &input(&json!({})), &now())
-                .unwrap_err(),
+            took(&phone, &mut files, "notes", "add", &json!({}), &now()).unwrap_err(),
             "Notes cannot take that: add input missing required field \"text\"",
         ),
         (
-            phone
-                .act(&mut files, "notes", "erase", &input(&json!({})), &now())
-                .unwrap_err(),
+            took(&phone, &mut files, "notes", "erase", &json!({}), &now()).unwrap_err(),
             "Notes has no action \"erase\"",
         ),
         (
@@ -204,12 +200,10 @@ fn a_call_that_fails_saves_nothing_and_the_next_call_works() {
         let phone = Arc::clone(&phone);
         let (refused, written, files) = bounded(move || {
             let mut files = Files::default();
-            let refused = phone.act(&mut files, "notes", action, &input(&json!({})), &now());
+            let refused = took(&phone, &mut files, "notes", action, &json!({}), &now());
             let written = files.writes;
 
-            phone
-                .act(&mut files, "notes", "write", &input(&json!({})), &now())
-                .unwrap();
+            took(&phone, &mut files, "notes", "write", &json!({}), &now()).unwrap();
             (refused.unwrap_err().to_string(), written, files)
         });
 
@@ -269,11 +263,12 @@ fn a_store_that_fails_is_the_stores_failure() {
         Err(PhoneError::Store(StoreError::Store(_)))
     ));
     assert!(matches!(
-        phone.act(
+        took(
+            &phone,
             &mut Unreadable,
             "notes",
             "add",
-            &input(&json!({"text": "milk"})),
+            &json!({"text": "milk"}),
             &now()
         ),
         Err(PhoneError::Store(StoreError::Store(_)))
