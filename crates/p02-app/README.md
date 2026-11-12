@@ -24,22 +24,35 @@ with an outcome of p02-wire, never an error.
   goes first, and one that comes during a moment waits for its end. The
   moment runs as a line's turn does, and nothing leaves her inbox.
 - **Her rings.** While she is ready and runs her phone, a ring on it that
-  comes due by the wall clock, which she reads again at least every half
-  minute, begins a moment of her own that tells every ring due by then:
-  after a waiting line, and before her heartbeat's moment. Her rings are
-  read whenever she is built, at her start and when a settings change
-  builds her anew, and after each turn of hers. Once that moment
-  completes, what rang goes to its apps; when it does not, its rings wait
-  for her next turn that completes, or her next start, so a ring is never
-  lost and a model out of reach is not asked again and again.
+  may wake her and comes due by the wall clock, which she reads again at
+  least every half minute, begins a moment of her own that tells every ring
+  due by then: after a waiting line, and before her heartbeat's moment. Her
+  rings are read whenever she is built, at her start and when a settings
+  change builds her anew, after each turn of hers, and whenever the person
+  changes her phone. Once that moment completes, what rang goes to its
+  apps; when it does not, its rings wait for her next turn that completes,
+  or her next start, so a ring is never lost and a model out of reach is
+  not asked again and again.
 - **Her phone** is read from her data whether she runs or not, under a
-  lease of its store: her apps, what she has in front with its screen and
+  lease of its store: her apps, those it comes with and those installed
+  on it, the App Store last, what she has in front with its screen and
   what she last did, with what rings, which her actor publishes while a
   ring's moment runs. A view of an app is read on request too, and changes
   nothing of hers. One whose settings switch her phone off has none to
   read. The stream says her phone changed after a call of her phone's
   tools came back accepted, and as a ring's moment begins and once its
-  rings went to their apps.
+  rings went to their apps. The daemon makes the one reader of the App
+  Store's catalog, from the base the binary gives it, and hands it to
+  every host it builds her.
+- **Her apps in the person's hands**, each the person's own act, which
+  asks nobody, made on her data whether she runs or not, as her phone is
+  read: the App Store's catalog read anew for them to browse, with how
+  each app stands on her phone; an app of it given to her by the one path
+  her own ask takes, an older version replaced keeping what it keeps;
+  an app from a file, previewed with nothing written, then given; an app
+  removed; and whether an app may wake her. Each that changed her phone
+  says so on the stream, and her actor, while she runs, reads its rings
+  again.
 - **The stream** hears each turn as it goes: its messages once they are
   on disk, the turn as it runs now, her drafts whole, whenever that
   changes, and then its completion, which says whether its line is in the

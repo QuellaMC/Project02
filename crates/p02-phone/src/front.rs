@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::app::App;
-use crate::phone::Phone;
+use crate::installed::Listed;
 use crate::time::Now;
 
 const PATH: &str = "phone.json";
@@ -38,25 +38,26 @@ pub struct Did {
 }
 
 impl PhoneState {
-    /// What `phone` keeps of her in `files`, read forgivingly: no file is
-    /// her home screen with nothing done, and so is each part that does not
-    /// read or names an app or a view no longer on the phone.
-    pub(crate) fn read(files: &dyn LeasedFiles, phone: &Phone) -> Result<Self, StoreError> {
+    /// What her phone, whose apps are `apps`, keeps of her in `files`, read
+    /// forgivingly: no file is her home screen with nothing done, and so is
+    /// each part that does not read or names an app or a view no longer on
+    /// the phone.
+    pub(crate) fn read(files: &dyn LeasedFiles, apps: &[Listed]) -> Result<Self, StoreError> {
         let Some(document) = files.read_json(PATH)? else {
             return Ok(Self::default());
         };
+        let on_phone = |id: &Identifier| apps.iter().find(|app| app.id == *id);
         let front = document
             .get("front")
             .and_then(|front| Front::deserialize(front).ok())
             .filter(|front| {
-                phone
-                    .app(front.app.as_str())
-                    .is_ok_and(|app| app.views().iter().any(|view| *view.id() == front.view))
+                on_phone(&front.app)
+                    .is_some_and(|app| app.views.iter().any(|view| *view.id() == front.view))
             });
         let did = document
             .get("did")
             .and_then(|did| Did::deserialize(did).ok())
-            .filter(|did| phone.app(did.app.as_str()).is_ok());
+            .filter(|did| on_phone(&did.app).is_some());
 
         Ok(Self { front, did })
     }
@@ -81,5 +82,25 @@ impl PhoneState {
         };
 
         files.write_json(PATH, &json!({"front": front, "did": did}))
+    }
+
+    /// Closes `app` when she has it in front, so her home screen is, and
+    /// leaves the rest of the file as it was.
+    pub(crate) fn close(files: &mut dyn LeasedFiles, app: &Identifier) -> Result<(), StoreError> {
+        let Some(mut document) = files.read_json(PATH)? else {
+            return Ok(());
+        };
+        let in_front = document
+            .get("front")
+            .and_then(|front| Front::deserialize(front).ok())
+            .is_some_and(|front| front.app == *app);
+
+        match document.as_object_mut() {
+            Some(parts) if in_front => {
+                parts.remove("front");
+                files.write_json(PATH, &document)
+            }
+            _ => Ok(()),
+        }
     }
 }

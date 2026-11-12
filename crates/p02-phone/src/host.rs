@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use jiff::civil::Time;
+use jiff::civil::{DateTime, Time};
 use jiff::tz::TimeZone;
 use p02_core::Timestamp;
 use rquickjs::function::Rest;
@@ -27,18 +27,25 @@ const SET_RING: &str = "phone.rings.set takes {id, at, title, body}: an id that 
 const TITLE_LIMIT: usize = 40;
 /// What a ring's body holds: a line or two of a notification.
 const BODY_LIMIT: usize = 120;
+const UNWAKING: &str = "phone.rings.set sets no ring here: an app must say it wakes her, with \
+                        wakes: true in its manifest, to set a ring";
 const CANCEL_RING: &str = "phone.rings.cancel takes the id of a ring, which is text";
 const LOCAL: &str = "phone.time.local takes a time in whole milliseconds since the epoch and \
                      the IANA name of a time zone, both optional";
+const AT: &str = "phone.time.at takes {year, month, day, hour, minute}: a day on the calendar, \
+                  an hour from 0 to 23 and a minute from 0 to 59";
 const NEXT: &str = "phone.time.next takes {hour, minute, weekdays}: an hour from 0 to 23, a \
                     minute from 0 to 59 and, if it has them, weekdays, a list of days from 1 \
                     (Monday) to 7 (Sunday)";
 
-/// Whether a call may change what its app keeps.
+/// What a call may change of what its app keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Access {
+    /// Nothing: a screen, or the app's first run when it is made.
     ReadOnly,
-    ReadWrite,
+    /// Its storage, its rings cancelled, and its rings set when it says it
+    /// wakes her.
+    ReadWrite { wakes: bool },
 }
 
 /// What one call's `phone` works on: a copy of what its app keeps, which
@@ -61,6 +68,16 @@ struct RingArgument {
     at: i64,
     title: String,
     body: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AtArgument {
+    year: i16,
+    month: i8,
+    day: i8,
+    hour: i8,
+    minute: i8,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +135,7 @@ impl Host {
                 &[
                     ("now", Self::now),
                     ("local", Self::local),
+                    ("at", Self::at),
                     ("next", Self::next),
                 ],
             )?,
@@ -182,6 +200,10 @@ impl Host {
         arguments: &[Value<'js>],
     ) -> rquickjs::Result<Value<'js>> {
         self.writes(ctx, "phone.rings.set")?;
+
+        if self.access == (Access::ReadWrite { wakes: false }) {
+            return Err(Exception::throw_type(ctx, UNWAKING));
+        }
 
         let RingArgument {
             id,
@@ -254,6 +276,22 @@ impl Host {
         to_script(ctx, &time::reading(at, zone))
     }
 
+    fn at<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let AtArgument {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+        } = argument(ctx, arguments.first(), AT)?;
+        let at = DateTime::new(year, month, day, hour, minute, 0, 0)
+            .ok()
+            .and_then(|wanted| time::moment(wanted, self.now.zone()))
+            .ok_or_else(|| Exception::throw_type(ctx, AT))?;
+
+        to_script(ctx, &at.as_millisecond())
+    }
+
     fn next<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
         let NextArgument {
             hour,
@@ -276,7 +314,7 @@ impl Host {
     /// Refuses `function` when the call only reads.
     fn writes(&self, ctx: &Ctx<'_>, function: &str) -> rquickjs::Result<()> {
         match self.access {
-            Access::ReadWrite => Ok(()),
+            Access::ReadWrite { .. } => Ok(()),
             Access::ReadOnly => Err(Exception::throw_type(
                 ctx,
                 &format!("{function} changes nothing here: a screen only reads"),

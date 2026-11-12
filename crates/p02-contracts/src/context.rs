@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use p02_core::{CharacterProfile, EventIdentity, MessageId, SessionId, VisibleText};
+use p02_core::{CharacterProfile, EventIdentity, MessageId, SessionId, SpeakerName, VisibleText};
 use p02_shared::Identifier;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -18,6 +18,9 @@ pub struct TurnIdentity {
     pub session_id: SessionId,
     pub event: EventIdentity,
     pub character: CharacterProfile,
+    /// The name the person she talks with chose, as her notes name them:
+    /// none while they chose none.
+    pub person: Option<SpeakerName>,
 }
 
 /// What was said this turn, shown only to a plugin granted
@@ -209,12 +212,25 @@ mod tests {
             Ok(0)
         }
 
+        fn read_text(&self, _path: &str) -> Result<Option<String>, StoreError> {
+            Ok(None)
+        }
+
         fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
             self.0.insert(path.to_owned(), value.clone());
             Ok(())
         }
 
         fn append_jsonl(&mut self, _path: &str, _value: &Value) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn write_text(&mut self, _path: &str, _text: &str) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+            self.0.remove(path);
             Ok(())
         }
     }
@@ -277,6 +293,7 @@ mod tests {
                     id: mira,
                     display_name: SpeakerName::new("Mira").unwrap(),
                 },
+                person: None,
             })),
             Instant::now() + Duration::from_secs(10),
             cancellation,
@@ -298,13 +315,25 @@ mod tests {
             .with_plugin_database(Arc::clone(&opener) as _);
         let store = granted.character_file_store().unwrap();
 
-        let leased = store.with_lease(|leased| {
-            leased.write_json("notes.json", &json!(["kept"]))?;
-            cancellation.cancel();
-            leased.read_json("notes.json")
-        });
+        let refused = store
+            .with_lease(|leased| {
+                leased.write_json("notes.json", &json!(["kept"]))?;
+                cancellation.cancel();
+                Ok([
+                    leased.read_json("notes.json").err(),
+                    leased.read_text("notes.txt").err(),
+                    leased.write_text("notes.txt", "late").err(),
+                    leased.remove("notes.json").err(),
+                ])
+            })
+            .unwrap();
 
-        assert!(matches!(leased, Err(StoreError::Cancelled)), "{leased:?}");
+        for refused in refused {
+            assert!(
+                matches!(refused, Some(StoreError::Cancelled)),
+                "{refused:?}"
+            );
+        }
         assert!(matches!(
             store.with_lease(|leased| leased.count_jsonl("log.jsonl")),
             Err(StoreError::Cancelled)
@@ -338,10 +367,16 @@ mod tests {
             .unwrap();
         drop(hold);
 
-        assert!(matches!(
+        for refused in [
             retained.with_lease(|leased| leased.write_json("notes.json", &json!("late"))),
-            Err(StoreError::WritesRevoked)
-        ));
+            retained.with_lease(|leased| leased.write_text("notes.txt", "late")),
+            retained.with_lease(|leased| leased.remove("notes.json")),
+        ] {
+            assert!(
+                matches!(refused, Err(StoreError::WritesRevoked)),
+                "{refused:?}"
+            );
+        }
         assert_eq!(
             retained
                 .with_lease(|leased| leased.read_json("notes.json"))
@@ -351,13 +386,14 @@ mod tests {
 
         let (reader, _hold) = context(CancellationToken::new())
             .with_character_file_store(memory, StoreAccess::ReadOnly);
+        let read_only = reader.character_file_store().unwrap();
 
-        assert!(matches!(
-            reader
-                .character_file_store()
-                .unwrap()
-                .with_lease(|leased| leased.append_jsonl("log.jsonl", &json!(1))),
-            Err(StoreError::ReadOnly)
-        ));
+        for refused in [
+            read_only.with_lease(|leased| leased.append_jsonl("log.jsonl", &json!(1))),
+            read_only.with_lease(|leased| leased.write_text("notes.txt", "mine")),
+            read_only.with_lease(|leased| leased.remove("notes.json")),
+        ] {
+            assert!(matches!(refused, Err(StoreError::ReadOnly)), "{refused:?}");
+        }
     }
 }

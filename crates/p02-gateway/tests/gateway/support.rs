@@ -14,7 +14,7 @@ use p02_contracts::{Invocation, ModelOutput, ProviderAnswer, RoleModelAdapter};
 use p02_gateway::Server;
 use p02_plugins::list;
 use p02_role_model::{TestProvider, select_adapter};
-use p02_shared::{DaemonToken, DanglingLinks, SseFrame, SseFrameSplitter, canonical_path};
+use p02_shared::{BaseUrl, DaemonToken, DanglingLinks, SseFrame, SseFrameSplitter, canonical_path};
 use p02_store::Home;
 use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
@@ -81,6 +81,8 @@ impl Gateway {
                 test_provider: Some(Arc::clone(&model) as Arc<dyn RoleModelAdapter>),
                 durations,
                 plugins,
+                // An App Store nothing serves: no test of these reads it.
+                app_catalog: BaseUrl::parse("http://127.0.0.1:9").unwrap(),
             },
         )
         .await

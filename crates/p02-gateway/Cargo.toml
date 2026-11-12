@@ -11,6 +11,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 p02-app.workspace = true
 p02-config.workspace = true
+p02-contracts.workspace = true
 p02-core.workspace = true
 p02-shared.workspace = true
 p02-store.workspace = true
@@ -31,7 +32,6 @@ tower-service.workspace = true
 async-trait.workspace = true
 jsonschema.workspace = true
 p02-characters.workspace = true
-p02-contracts.workspace = true
 p02-plugins.workspace = true
 p02-role-model.workspace = true
 p02-shared = { workspace = true, features = ["http"] }

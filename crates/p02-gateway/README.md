@@ -9,7 +9,9 @@ Nothing here prints, reads the environment or parses a flag.
   record keeps the home's token and port, owner-only.
 - **The socket** answers on `127.0.0.1` alone. Every `/api` request passes
   the stop, the host and origin checks and the bearer token, and its body
-  the 64 KiB cap; a body is read as its route's shape, which judges itself.
+  the 64 KiB cap, but for an app's file, which the person adds to her
+  phone and which is held to what a text file of her phone's store holds;
+  a body is read as its route's shape, which judges itself.
   A route answers its verb's outcome under 200, and every refusal of the
   transport is one envelope, `{"error":{"code","message"}}`.
 - **The stream** numbers each event once under the run's id and keeps the

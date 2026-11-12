@@ -22,7 +22,7 @@ use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    DraftEvent, DraftId, ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput,
+    DraftEvent, DraftId, ModelRound, Opening, Person, Reply, Rounds, RoutedToolCall, TurnInput,
     TurnOutcome, TurnSink, select_history_window, today_note,
 };
 use p02_shared::{Identifier, error_chain};
@@ -180,6 +180,10 @@ pub(crate) async fn run(
 ) -> Delivery {
     let identity = EventIdentity::mint();
     let person = mind.person().clone();
+    let named = match Person::of(&person) {
+        Person::Named(name) => Some(name.clone()),
+        Person::Unnamed => None,
+    };
     let begun = match begin(disk, &identity, occasion, person).await {
         Ok(begun) => begun,
         Err(error) => return failed(disk, &identity, Vec::new(), Vec::new(), error).await,
@@ -220,6 +224,7 @@ pub(crate) async fn run(
             session_id: begun.session,
             event: identity.clone(),
             character: character.profile.clone(),
+            person: named,
         }),
         window: window
             .iter()

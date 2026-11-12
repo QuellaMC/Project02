@@ -197,15 +197,7 @@ impl CharacterData {
             for leftover in [RAW_EVENTS_FILE, FINDER_METADATA] {
                 let path = directory.join(leftover);
 
-                match remove_file(&path) {
-                    Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                        return Err(StorageError::Write {
-                            path,
-                            source: error,
-                        });
-                    }
-                    _ => {}
-                }
+                remove_file(&path).map_err(StorageError::write(&path))?;
             }
 
             remove_directory(&directory).map_err(StorageError::write(&directory))

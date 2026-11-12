@@ -1,10 +1,12 @@
 /**
  * A character's pages: hers, with her switch, what makes up her mind and
- * body, her heartbeat, her bot, what she may do and what is hers alone; a
- * plugin's own page for her; and her own AI model. Each draws her view,
- * and writes only what her view lists.
+ * body, her heartbeat, her apps, her bot, what she may do and what is hers
+ * alone; a plugin's own page for her; and her own AI model. Each draws her
+ * view, and writes only what her view lists.
  */
 import type {CharacterSummary} from '@project02/wire/contract';
+import {askToInstallRow, hasPhone} from './her-apps.ts';
+import {HerApps} from './settings-apps.tsx';
 import {
   Cell,
   Chevron,
@@ -305,9 +307,6 @@ function CharacterCards({
   readonly character: CharacterSummary;
   readonly view: OkView;
 }) {
-  const target = characterTarget(character.id);
-  const permissions = featuresPlaced(view, 'permission');
-
   return (
     <>
       <Group title="Mind & Body">
@@ -321,29 +320,66 @@ function CharacterCards({
         ))}
       </Group>
       <HerHeartbeat ctx={ctx} characterId={character.id} view={view} />
+      <HerApps ctx={ctx} characterId={character.id} view={view} />
       <Group title="Telegram">
         <HerBot ctx={ctx} characterId={character.id} />
       </Group>
-      {permissions.length === 0 ? null : (
-        <Group
-          title="Permissions"
-          footer="You approve each change she asks for."
-        >
-          {permissions.map(section => (
-            <SectionSwitch
-              key={section.id}
-              ctx={ctx}
-              row={{
-                target,
-                place: {kind: 'switch', namespace: 'plugins', id: section.id},
-              }}
-              section={section}
-            />
-          ))}
-        </Group>
-      )}
+      <HerPermissions ctx={ctx} characterId={character.id} view={view} />
       <HerOwn ctx={ctx} character={character} view={view} />
     </>
+  );
+}
+
+/**
+ * What she may ask the person for: each plugin placed among her
+ * permissions, a switch of hers, and while her settings give her a phone,
+ * Ask to Install Apps, her phone's own field.
+ */
+function HerPermissions({
+  ctx,
+  characterId,
+  view,
+}: {
+  readonly ctx: Ctx;
+  readonly characterId: string;
+  readonly view: OkView;
+}) {
+  const target = characterTarget(characterId);
+  const permissions = featuresPlaced(view, 'permission');
+  const install = askToInstallRow(characterId);
+  const installField = hasPhone(view)
+    ? fieldAt(view, install.place)
+    : undefined;
+
+  return permissions.length === 0 && installField === undefined ? null : (
+    <Group
+      title="Permissions"
+      footer={
+        installField === undefined
+          ? 'You approve each change she asks for.'
+          : 'You approve each change or app she asks for.'
+      }
+    >
+      {permissions.map(section => (
+        <SectionSwitch
+          key={section.id}
+          ctx={ctx}
+          row={{
+            target,
+            place: {kind: 'switch', namespace: 'plugins', id: section.id},
+          }}
+          section={section}
+        />
+      ))}
+      {installField === undefined ? null : (
+        <FieldRow
+          ctx={ctx}
+          row={install}
+          field={installField}
+          leading={<Tile icon="download" tint="gray" />}
+        />
+      )}
+    </Group>
   );
 }
 

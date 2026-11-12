@@ -1,20 +1,21 @@
 //! Her phone as a client reads it, from her data whether she runs or not:
-//! her apps, what she has in front with its screen, what she last did on
-//! it and what rings; and one view's screen, which a person looking around
-//! her phone reads, and which changes nothing of hers.
+//! her apps, those it comes with and those installed on it, what she has
+//! in front with its screen, what she last did on it and what rings; and
+//! one view's screen, which a person looking around her phone reads, and
+//! which changes nothing of hers.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use p02_characters::discover;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
-use p02_phone::{App, Now, Phone, PhoneError};
+use p02_phone::{Listed, Now, OnPhone, Phone, PhoneError, Source};
 use p02_plugins::PHONE_PLUGIN;
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
 use p02_store::CharacterData;
 use p02_wire::{
-    AppView, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen,
-    ScreenOutcome, ScreenRefusal,
+    AppSource, AppView, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
+    Screen, ScreenOutcome, ScreenRefusal,
 };
 
 use crate::daemon::{Daemon, World, blocking};
@@ -24,12 +25,22 @@ use crate::reconcile::settings_now;
 /// tools holds a moment at most.
 const LEASE: Duration = Duration::from_secs(10);
 
-/// Why her phone was not read, in a sentence: the daemon knows no such
+/// Why her phone was not reached, in a sentence: the daemon knows no such
 /// character, her settings give her none, or it could not be read.
-enum Unread {
+pub(crate) enum Unread {
     UnknownCharacter(String),
     NoPhone(String),
     Failed(String),
+}
+
+/// Her phone as the daemon reaches it, whether she runs or not: whose it
+/// is, the phone every character has, and its store in her data.
+#[derive(Clone, Debug)]
+pub(crate) struct HerPhone {
+    /// Her id, as the daemon knows her.
+    pub(crate) id: Identifier,
+    pub(crate) phone: &'static Phone,
+    store: Arc<dyn FileStoreBackend>,
 }
 
 impl Daemon {
@@ -43,22 +54,12 @@ impl Daemon {
         let character = character.to_owned();
 
         blocking(move || {
-            match with_phone(&world, &character, |phone, files| {
-                shown(phone, files, &Now::system(), ringing)
-            }) {
-                Ok(shown) => shown,
-                Err(Unread::UnknownCharacter(message)) => PhoneOutcome::Refused {
-                    reason: PhoneRefusal::UnknownCharacter,
-                    message,
-                },
-                Err(Unread::NoPhone(message)) => PhoneOutcome::Refused {
-                    reason: PhoneRefusal::NoPhone,
-                    message,
-                },
-                Err(Unread::Failed(message)) => PhoneOutcome::Failed { message },
-            }
+            HerPhone::of(&world, &character).and_then(|her| {
+                her.with(|phone, files| shown(phone, files, &Now::system(), ringing))
+            })
         })
         .await
+        .unwrap_or_else(PhoneOutcome::from)
     }
 
     /// The screen of `app`'s `view` on her phone, as someone looking around
@@ -68,22 +69,21 @@ impl Daemon {
         let (character, app, view) = (character.to_owned(), app.to_owned(), view.to_owned());
 
         blocking(move || {
-            match with_phone(&world, &character, |phone, files| {
-                looked(phone.look(files, &app, &view, &Now::system()))
-            }) {
-                Ok(looked) => looked,
-                Err(Unread::UnknownCharacter(message)) => ScreenOutcome::Refused {
-                    reason: ScreenRefusal::UnknownCharacter,
-                    message,
-                },
-                Err(Unread::NoPhone(message)) => ScreenOutcome::Refused {
-                    reason: ScreenRefusal::NoPhone,
-                    message,
-                },
-                Err(Unread::Failed(message)) => ScreenOutcome::Failed { message },
-            }
+            HerPhone::of(&world, &character).and_then(|her| {
+                her.with(|phone, files| looked(phone.look(files, &app, &view, &Now::system())))
+            })
         })
         .await
+        .unwrap_or_else(ScreenOutcome::from)
+    }
+
+    /// The phone of `character`, read on the blocking pool as
+    /// [`HerPhone::of`] reads it.
+    pub(crate) async fn her_phone(&self, character: &str) -> Result<HerPhone, Unread> {
+        let world = Arc::clone(self.world());
+        let character = character.to_owned();
+
+        blocking(move || HerPhone::of(&world, &character)).await
     }
 
     /// What rings on the phone of `character` as her actor last published
@@ -97,48 +97,65 @@ impl Daemon {
     }
 }
 
+impl HerPhone {
+    /// The phone of `character` in `world`, her data made if she has none
+    /// yet. The daemon must know her, and her settings switch her phone on;
+    /// settings that cannot be read do not take it from her, since her start
+    /// says what is wrong with them.
+    pub(crate) fn of(world: &World, character: &str) -> Result<Self, Unread> {
+        let discovery = discover(world.home.root());
+        let definition = discovery
+            .find(character)
+            .map_err(|error| Unread::UnknownCharacter(error_sentence(&error)))?;
+        let settings = settings_now(world, definition);
+        let plugin = world
+            .plugins
+            .iter()
+            .map(|plugin| plugin.manifest().id())
+            .find(|id| id.as_str() == PHONE_PLUGIN)
+            .filter(|phone| {
+                settings.is_none_or(|settings| settings.plugins().any(|(id, _)| id == *phone))
+            })
+            .ok_or_else(|| {
+                Unread::NoPhone(format!(
+                    "{} has no phone: her settings switch it off.",
+                    definition.profile.display_name
+                ))
+            })?;
+        let phone = Phone::bundled().map_err(|error| Unread::Failed(unread(error)))?;
+        let data = CharacterData::ensure(&world.home, &definition.profile.id)
+            .map_err(|error| Unread::Failed(unread(&error)))?;
+
+        Ok(Self {
+            id: definition.profile.id.clone(),
+            phone,
+            store: data.file_store(plugin),
+        })
+    }
+
+    /// What `work` makes of her phone under a lease of its store, on the
+    /// calling thread, which waits on the disk.
+    pub(crate) fn with<T>(
+        &self,
+        work: impl FnOnce(&Phone, &mut dyn LeasedFiles) -> Result<T, Unread>,
+    ) -> Result<T, Unread> {
+        let mut files =
+            lease(self.store.as_ref()).map_err(|error| Unread::Failed(unread(&error)))?;
+
+        work(self.phone, files.as_mut())
+    }
+
+    /// What is on her phone, read under a lease of its store, on the
+    /// calling thread.
+    pub(crate) fn apps(&self) -> Result<OnPhone, StoreError> {
+        self.phone.apps(lease(self.store.as_ref())?.as_ref())
+    }
+}
+
 /// Her phone's store under its lease, waited for as long as a call of her
 /// phone's tools holds it at most.
 pub(crate) fn lease(store: &dyn FileStoreBackend) -> Result<Box<dyn LeasedFiles + '_>, StoreError> {
     store.lease(Instant::now() + LEASE)
-}
-
-/// What `read` makes of the phone of `character` under a lease of its
-/// store in her data, which is made if she has none yet. The daemon must
-/// know her, and her settings switch her phone on; settings that cannot be
-/// read do not take it from her, since her start says what is wrong with
-/// them.
-fn with_phone<T>(
-    world: &World,
-    character: &str,
-    read: impl FnOnce(&Phone, &dyn LeasedFiles) -> Result<T, Unread>,
-) -> Result<T, Unread> {
-    let discovery = discover(world.home.root());
-    let definition = discovery
-        .find(character)
-        .map_err(|error| Unread::UnknownCharacter(error_sentence(&error)))?;
-    let settings = settings_now(world, definition);
-    let plugin = world
-        .plugins
-        .iter()
-        .map(|plugin| plugin.manifest().id())
-        .find(|id| id.as_str() == PHONE_PLUGIN)
-        .filter(|phone| {
-            settings.is_none_or(|settings| settings.plugins().any(|(id, _)| id == *phone))
-        })
-        .ok_or_else(|| {
-            Unread::NoPhone(format!(
-                "{} has no phone: her settings switch it off.",
-                definition.profile.display_name
-            ))
-        })?;
-    let phone = Phone::bundled().map_err(|error| Unread::Failed(unread(error)))?;
-    let data = CharacterData::ensure(&world.home, &definition.profile.id)
-        .map_err(|error| Unread::Failed(unread(&error)))?;
-    let store = data.file_store(plugin);
-    let files = lease(store.as_ref()).map_err(|error| Unread::Failed(unread(&error)))?;
-
-    read(phone, files.as_ref())
 }
 
 /// Her phone as `files` keep it at `now`, with `ringing` what rings on it.
@@ -148,6 +165,9 @@ fn shown(
     now: &Now,
     ringing: Vec<PhoneRing>,
 ) -> Result<PhoneOutcome, Unread> {
+    let on_phone = phone
+        .apps(files)
+        .map_err(|error| Unread::Failed(unread(&error)))?;
     let state = phone
         .state(files)
         .map_err(|error| Unread::Failed(unread(&error)))?;
@@ -161,17 +181,21 @@ fn shown(
                     Err(failure) => (None, Some(sentence(&failure.to_string()))),
                 };
 
-            Some(PhoneFront {
+            Some(Box::new(PhoneFront {
                 app_id: front.app,
                 view_id: front.view,
                 screen,
                 message,
-            })
+            }))
         }
     };
 
     Ok(PhoneOutcome::Ok {
-        apps: phone.apps().iter().map(drawn).collect(),
+        apps: on_phone
+            .apps
+            .iter()
+            .map(|app| drawn(app, &on_phone))
+            .collect(),
         front,
         did: state.did.map(|did| PhoneDid {
             app_id: did.app,
@@ -202,15 +226,25 @@ fn looked(looked: Result<Screen, PhoneError>) -> Result<ScreenOutcome, Unread> {
     })
 }
 
-/// `app` as her window draws it.
-fn drawn(app: &App) -> PhoneApp {
+/// `app`, on her phone as `on_phone` has it, as her window draws it and
+/// her settings show it.
+pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone) -> PhoneApp {
     PhoneApp {
-        id: app.id().clone(),
-        name: app.name().to_owned(),
-        icon: app.icon().to_owned(),
-        tint: app.tint().to_owned(),
+        id: app.id.clone(),
+        name: app.name.clone(),
+        summary: app.summary.clone(),
+        version: app.version.clone(),
+        source: match app.source {
+            None => AppSource::BuiltIn,
+            Some(Source::Catalog) => AppSource::Catalog,
+            Some(Source::File) => AppSource::File,
+        },
+        icon: app.icon.clone(),
+        tint: app.tint.clone(),
+        wakes: app.wakes,
+        may_wake: on_phone.may_wake(app),
         views: app
-            .views()
+            .views
             .iter()
             .map(|view| AppView {
                 id: view.id().clone(),
@@ -218,14 +252,46 @@ fn drawn(app: &App) -> PhoneApp {
                 icon: view.icon().to_owned(),
             })
             .collect(),
-        opens_on: app.opens_on().clone(),
+        opens_on: app.opens_on.clone(),
     }
 }
 
 /// Why her phone could not be read, in a sentence: `error` and its causes.
-fn unread(error: &dyn std::error::Error) -> String {
+pub(crate) fn unread(error: &dyn std::error::Error) -> String {
     sentence(&format!(
         "her phone could not be read: {}",
         error_chain(error)
     ))
+}
+
+impl From<Unread> for PhoneOutcome {
+    fn from(unread: Unread) -> Self {
+        match unread {
+            Unread::UnknownCharacter(message) => Self::Refused {
+                reason: PhoneRefusal::UnknownCharacter,
+                message,
+            },
+            Unread::NoPhone(message) => Self::Refused {
+                reason: PhoneRefusal::NoPhone,
+                message,
+            },
+            Unread::Failed(message) => Self::Failed { message },
+        }
+    }
+}
+
+impl From<Unread> for ScreenOutcome {
+    fn from(unread: Unread) -> Self {
+        match unread {
+            Unread::UnknownCharacter(message) => Self::Refused {
+                reason: ScreenRefusal::UnknownCharacter,
+                message,
+            },
+            Unread::NoPhone(message) => Self::Refused {
+                reason: ScreenRefusal::NoPhone,
+                message,
+            },
+            Unread::Failed(message) => Self::Failed { message },
+        }
+    }
 }

@@ -40,9 +40,57 @@ export type AnswerBody = { decision: Answer, };
 export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } | { "status": "unknown" };
 
 /**
+ * What came of giving her an app, from the App Store or from a file: the
+ * app as her phone now lists it, and the version of it that it replaced,
+ * when it replaced one; or why it was not given.
+ */
+export type AppInstallOutcome = { "status": "ok", app: PhoneApp, replaced?: string, } | { "status": "refused", reason: AppInstallRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * Why an app is not given to her: an app of the App Store, or one from a
+ * file, which a preview of it says too.
+ */
+export type AppInstallRefusal = "unknown_character" | "no_phone" | "not_in_store" | "comes_with_phone" | "already_installed" | "not_as_listed" | "not_an_app";
+
+/**
+ * What an app's file would put on her phone, judged as adding it judges
+ * it, with nothing written: what the app is, what it may do, a line each,
+ * and the version of it on her phone that adding it replaces; or why the
+ * file adds none.
+ */
+export type AppPreviewOutcome = { "status": "ok", id: Identifier, name: string, summary: string, icon: string, tint: string, version: string, wakes: boolean, itMay: ReadonlyArray<string>, replaces?: string, } | { "status": "refused", reason: AppInstallRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * What came of removing an app from her phone: it is gone, with what it
+ * kept and its rings; or why it was not removed.
+ */
+export type AppRemoveOutcome = { "status": "ok" } | { "status": "refused", reason: AppRemoveRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type AppRemoveRefusal = "unknown_character" | "no_phone" | "unknown_app" | "comes_with_phone";
+
+/**
+ * Where an app on her phone came from: it comes with her phone, it is the
+ * App Store's, or the person added it from a file nobody read.
+ */
+export type AppSource = "built_in" | "catalog" | "file";
+
+/**
  * A view of an app, which she opens it on: a tab, in the Clock.
  */
 export type AppView = { id: Identifier, title: string, icon: string, };
+
+/**
+ * The person's say on whether an app may wake her.
+ */
+export type AppWakeBody = { allowed: boolean, };
+
+/**
+ * What came of the person's say on whether an app may wake her: it is
+ * kept; or why it is not.
+ */
+export type AppWakeOutcome = { "status": "ok" } | { "status": "refused", reason: AppWakeRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type AppWakeRefusal = "unknown_character" | "no_phone" | "unknown_app" | "cannot_wake";
 
 /**
  * What the target's own document holds for a field.
@@ -287,7 +335,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 11, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 12, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -308,7 +356,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 11, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 12, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -495,11 +543,22 @@ deadlineAt: number,
 turn?: TurnIdentity, };
 
 /**
- * An app on her phone as her window draws it: its icon and the tint of
- * its tile, names of the page's own set, which falls back for one it does
- * not know; its views, in its order; and the view it opens on.
+ * An app on her phone as her window draws it and her settings show it:
+ * the line she knows it by, its version and where it came from; its icon
+ * and the tint of its tile, names of the page's own set, which falls back
+ * for one it does not know; whether it says it wakes her, and whether the
+ * person lets it; its views, in its order; and the view it opens on.
  */
-export type PhoneApp = { id: Identifier, name: string, icon: string, tint: string, views: ReadonlyArray<AppView>, opensOn: Identifier, };
+export type PhoneApp = { id: Identifier, name: string, summary: string, version: string, source: AppSource, icon: string, tint: string, 
+/**
+ * Whether it says it wakes her: only such an app sets a ring.
+ */
+wakes: boolean, 
+/**
+ * Whether the person lets it wake her: yes unless they said it may
+ * not.
+ */
+mayWake: boolean, views: ReadonlyArray<AppView>, opensOn: Identifier, };
 
 /**
  * What she last did on her phone: the app, a few words in the past tense,
@@ -662,9 +721,16 @@ layout: ReadonlyArray<LayoutCard>, diagnostics: ReadonlyArray<RuntimeConfigDiagn
 export type RuntimeConfigSectionNamespace = "plugins" | "connectors";
 
 /**
- * What a view of an app shows: its pieces, top to bottom.
+ * What a view of an app shows: its pieces, top to bottom, and which page
+ * of the view it is, when the view shows more than one.
  */
-export type Screen = { items: ReadonlyArray<ScreenItem>, };
+export type Screen = { items: ReadonlyArray<ScreenItem>, 
+/**
+ * Which page of its view this is, as the App Store's page of an app
+ * says that app's id; none for a view of one page. One page's rows
+ * are not another's.
+ */
+page?: string, };
 
 /**
  * A piece of a screen.
@@ -681,7 +747,11 @@ text: string, caption?: string,
 /**
  * How the reading moves, when it does.
  */
-live?: LiveReading, } | { "kind": "text", text: string, };
+live?: LiveReading, } | { "kind": "text", text: string, } | { "kind": "app", 
+/**
+ * The app's own id, which she passes to an action.
+ */
+id: string, tile: ScreenTile, name: string, subtitle: string, status: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:
@@ -699,6 +769,10 @@ export type ScreenRow = {
  * The thing's own id, which she passes to an action to change it.
  */
 id?: string, 
+/**
+ * An app's tile at the row's start.
+ */
+tile?: ScreenTile, 
 /**
  * A small line above.
  */
@@ -719,6 +793,12 @@ value?: string,
  * A switch, shown on or off.
  */
 switch?: boolean, };
+
+/**
+ * An app's tile as a screen draws it: its icon and its tint, names of the
+ * page's own set, as an app's on her home screen are.
+ */
+export type ScreenTile = { icon: string, tint: string, };
 
 /**
  * Whether settings are enough for what they set up, a plugin or a
@@ -765,6 +845,28 @@ export type StartRefusal = "unknown_character" | "gateway_stopped";
  * a damaged record, which the person is told and which is no bug.
  */
 export type StorageFailure = { code: string, message: string, };
+
+/**
+ * An app of the App Store as its page there says it: its tile, its
+ * version and what changed in it, whether it says it wakes her, what it
+ * may do, a line each, and how it stands on her phone.
+ */
+export type StoreApp = { id: Identifier, name: string, summary: string, icon: string, tint: string, version: string, changes: string, wakes: boolean, itMay: ReadonlyArray<string>, status: StoreAppStatus, };
+
+/**
+ * How an app of the App Store stands on her phone, versions ordered as
+ * their three numbers: not on it; on it in an older version than the
+ * store's, which the store's updates; or on it in the store's version or
+ * a newer one.
+ */
+export type StoreAppStatus = "not_on_phone" | "update" | "installed";
+
+/**
+ * The App Store's catalog as the person browses it for her, read anew:
+ * each app as its page in the store says it, with the version of it on
+ * her phone; or why it could not be read.
+ */
+export type StoreOutcome = { "status": "ok", apps: ReadonlyArray<StoreApp>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
 
 /**
  * What became of a line sent to a character: queued in her inbox, where

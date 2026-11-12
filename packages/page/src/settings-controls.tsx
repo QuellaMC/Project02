@@ -45,16 +45,18 @@ export function Icon({
   );
 }
 
+/** A tile's icon at each size a tile is drawn: its size, and its stroke, finer on a large tile. */
 const tileGlyphs = {
-  side: 15,
-  row: 17,
-  note: 15,
-  chip: 15,
-  page: 27,
-  welcome: 30,
-};
+  side: {size: 15, weight: 1.9},
+  row: {size: 17, weight: 1.9},
+  note: {size: 15, weight: 1.9},
+  chip: {size: 15, weight: 1.9},
+  app: {size: 24, weight: 1.7},
+  page: {size: 27, weight: 1.7},
+  welcome: {size: 30, weight: 1.7},
+} as const;
 
-/** An icon on its tint's tile, at a row's size, the sidebar's or a page header's. */
+/** An icon on its tint's tile, at a row's size, the sidebar's, an app's on her page or a page header's. */
 export function Tile({
   icon,
   tint,
@@ -64,13 +66,11 @@ export function Tile({
   readonly tint: Tint;
   readonly size?: keyof typeof tileGlyphs;
 }) {
+  const glyph = tileGlyphs[size];
+
   return (
     <span className={`tile tile-${size} tint-${tint}`} aria-hidden="true">
-      <Icon
-        name={icon}
-        size={tileGlyphs[size]}
-        weight={size === 'page' || size === 'welcome' ? 1.7 : 1.9}
-      />
+      <Icon name={icon} size={glyph.size} weight={glyph.weight} />
     </span>
   );
 }
@@ -131,16 +131,20 @@ export function Chevron() {
 }
 
 /**
- * A button that opens the system's file chooser for one JSON file, and
- * hands over the file chosen; choosing the same file again is news again.
+ * A button that opens the system's file chooser for one file of the types
+ * it accepts, and hands over the file chosen; choosing the same file again
+ * is news again.
  */
 export function FileButton({
   className,
+  accept,
   current = false,
   onChoose,
   children,
 }: {
   readonly className: string;
+  /** The file chooser's own list of types, as an input's `accept` says it. */
+  readonly accept: string;
   readonly current?: boolean;
   readonly onChoose: (file: File) => void;
   readonly children: ReactNode;
@@ -162,7 +166,7 @@ export function FileButton({
       <input
         ref={input}
         type="file"
-        accept=".json,application/json"
+        accept={accept}
         hidden
         onChange={event => {
           const file = event.currentTarget.files?.[0];
@@ -392,19 +396,21 @@ export function LinkCell({
   );
 }
 
-/** A row's name, with a second line under it when it has one. */
+/** A row's name, with a second line under it when it has one; `strong`, the name of a row that offers to do something. */
 export function Label({
   name,
   detail,
+  strong = false,
 }: {
   readonly name: string;
   readonly detail?: string;
+  readonly strong?: boolean;
 }) {
   return detail === undefined ? (
-    <span className="label">{name}</span>
+    <span className={strong ? 'label label-strong' : 'label'}>{name}</span>
   ) : (
     <span className="label label-two">
-      <span>{name}</span>
+      <span className={strong ? 'label-strong' : undefined}>{name}</span>
       <span className="detail">{detail}</span>
     </span>
   );

@@ -5,7 +5,8 @@ mod storage;
 
 pub use database::{DatabaseError, DatabaseOpener, PluginDatabase};
 pub use file_store::{
-    FileStore, FileStoreBackend, LeasedFiles, LeasedStore, StoreAccess, StoreError, WriteHold,
+    FileStore, FileStoreBackend, LeasedFiles, LeasedStore, StoreAccess, StoreError, TEXT_FILE_KIB,
+    WriteHold,
 };
 pub use session_history::{
     HistoryCursor, HistoryMessage, MessageBatch, ReadMessages, SessionHistory, SessionHistoryError,

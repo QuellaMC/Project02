@@ -4,7 +4,6 @@
 //! link.
 
 use std::ffi::OsStr;
-use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -108,15 +107,7 @@ impl HeldPackage {
     pub fn remove(&self) -> Result<(), StorageError> {
         self.check_real()?;
 
-        match remove_file(&self.descriptor) {
-            Err(source) if source.kind() != io::ErrorKind::NotFound => {
-                return Err(StorageError::Write {
-                    path: self.descriptor.clone(),
-                    source,
-                });
-            }
-            _ => {}
-        }
+        remove_file(&self.descriptor).map_err(StorageError::write(&self.descriptor))?;
 
         // She is gone with her descriptor. A folder that cannot be taken is
         // left, and discovery reports it as a package without one, so the

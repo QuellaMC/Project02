@@ -18,11 +18,11 @@ use p02_core::{
     TraceId, VisibleText,
 };
 use p02_plugins::{
-    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    AppCatalog, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
     FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings, ProposedToolCall,
     ReadConfigError, ToolCallReport, Turn, list,
 };
-use p02_shared::Identifier;
+use p02_shared::{BaseUrl, Identifier};
 use p02_wire::ActivationStatus;
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
@@ -51,6 +51,7 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
             id: id("mira"),
             display_name: SpeakerName::new("Mira").unwrap(),
         },
+        person: None,
     })
     .with_text(TurnText {
         current_user_message: Some(VisibleText::normalize("hello").unwrap()),
@@ -213,9 +214,17 @@ impl ConfigControl for NoSettings {
     }
 }
 
-/// A host's builder over `storage`, with nobody to ask and no settings.
+/// A host's builder over `storage`, with nobody to ask, no settings and an
+/// App Store nothing serves.
 pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
-    PluginHost::builder(storage, Arc::new(Nobody), Arc::new(NoSettings))
+    PluginHost::builder(storage, Arc::new(Nobody), Arc::new(NoSettings), nowhere())
+}
+
+/// An App Store nothing serves: no test of these reads it.
+pub(crate) fn nowhere() -> Arc<AppCatalog> {
+    Arc::new(AppCatalog::new(
+        BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+    ))
 }
 
 /// A host of the given plugins over a fresh storage.

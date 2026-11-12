@@ -9,7 +9,9 @@ other crate opens a database.
   a file, `characters/<id>/project02.character.json`, and per character
   `character-data/<id>/`: her marker, overlay and `.locks`, `inbox.jsonl`,
   `sessions.jsonl`, `sessions/<conversation>.<n>/raw-events.jsonl`,
-  `taken-lines/` and `plugin-data/<plugin>/`.
+  `taken-lines/` and `plugin-data/<plugin>/`: a plugin's databases, and
+  its documents, logs and text files, each named for its kind, a text file
+  holding 256 KiB at most and any but a log removable.
 - **Safety.** Logs are only appended to, and the next append cuts a line a
   crash tore; other files are replaced whole, owner-only, under their
   lock. Her inbox, the lines no turn of hers took yet, is appended to and
@@ -25,4 +27,4 @@ other crate opens a database.
   and said, and a plugin database damaged or of another version is
   rebuilt. What reading past would lose is refused: a catalog its
   directories contradict, a continued segment's missing log, a plugin's
-  damaged document.
+  damaged document or text file.

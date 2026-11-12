@@ -250,10 +250,14 @@ export function featuresPlaced(
     );
 }
 
-/** The plugins whose home settings are an account set up once, each an entry among the connections: those whose section in the home's view has fields. */
+/** The plugins whose home settings are an account set up once, each an entry among the connections: those that say they are one. */
 function connections(view: OkView | undefined): readonly Section[] {
-  return (view?.sections ?? []).filter(
-    section => section.namespace === 'plugins' && section.fields.length > 0,
+  return (view?.sections ?? []).filter(isConnection);
+}
+
+function isConnection(section: Section): boolean {
+  return (
+    section.namespace === 'plugins' && section.page?.connection !== undefined
   );
 }
 
@@ -718,8 +722,7 @@ export function sidebarOf(
       {
         page: {kind: 'telegram'},
         label: 'Telegram',
-        icon: 'plane',
-        tint: 'blue',
+        ...connectorArt('telegram'),
         value: view === undefined ? '' : telegramOn(settings) ? 'On' : 'Off',
         dot: wrong(home, sectionKey('connectors', 'telegram')),
       },
@@ -743,7 +746,7 @@ export function sidebarOf(
       dot: (view?.sections ?? []).some(
         section =>
           section.namespace === 'plugins' &&
-          section.fields.length === 0 &&
+          !isConnection(section) &&
           wrong(home, sectionKey('plugins', section.id)),
       ),
     },
@@ -819,16 +822,23 @@ function connectionEntry(
   return wanted ? {value: 'Set Up', dot: true} : {value: 'Off', dot: false};
 }
 
-/** A section's tile: its own, Telegram's, or the plainest. */
-export function artOf(section: Section): {
-  readonly icon: IconName;
-  readonly tint: Tint;
-} {
+/** An icon on its tint: what a tile draws. */
+export type Art = {readonly icon: IconName; readonly tint: Tint};
+
+/** A section's tile: its own, a connector's, or the plainest. */
+export function artOf(section: Section): Art {
   if (section.page !== undefined) {
     return {icon: iconOf(section.page.icon), tint: tintOf(section.page.tint)};
   }
 
-  return section.namespace === 'connectors' && section.id === 'telegram'
+  return section.namespace === 'connectors'
+    ? connectorArt(section.id)
+    : {icon: 'grid', tint: 'gray'};
+}
+
+/** A connector's tile, wherever the page names one: Telegram's, or the plainest. */
+export function connectorArt(connectorId: string): Art {
+  return connectorId === 'telegram'
     ? {icon: 'plane', tint: 'blue'}
     : {icon: 'grid', tint: 'gray'};
 }
@@ -839,7 +849,11 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
     case 'feature':
     case 'character-model':
     case 'remove':
+    case 'app':
+    case 'get-apps':
       return {kind: 'character', characterId: page.characterId};
+    case 'app-file':
+      return {kind: 'get-apps', characterId: page.characterId};
     case 'bot':
       return page.from === 'telegram' || page.target.scope === 'global'
         ? {kind: 'telegram'}
@@ -851,9 +865,13 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
   }
 }
 
-/** Whether the sidebar's entry for `entry` is the one the page is on or opens from. */
+/** Whether the sidebar's entry for `entry` is the one the page is on or opens from, however deep under it. */
 export function marks(page: SettingsPage, entry: SettingsPage): boolean {
-  const top = parentOf(page) ?? page;
+  let top = page;
+
+  for (let up = parentOf(top); up !== undefined; up = parentOf(top)) {
+    top = up;
+  }
 
   return (
     top.kind === entry.kind && JSON.stringify(top) === JSON.stringify(entry)

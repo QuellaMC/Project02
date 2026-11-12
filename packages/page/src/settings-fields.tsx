@@ -114,6 +114,7 @@ export function FieldRow({
           kind={detail === undefined ? 'switch' : 'tall'}
           problems={problems}
         >
+          {leading}
           <Label name={label} {...(detail === undefined ? {} : {detail})} />
           <Switch
             on={on}

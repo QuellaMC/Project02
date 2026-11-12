@@ -167,6 +167,286 @@
       ],
       "description": "What an answer to a parked confirmation came to. `expired`: the deadline\nhad passed, so the confirmation was settled cancelled instead; the\nclient is never the judge of the deadline."
     },
+    "AppInstallOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "app": {
+              "$ref": "#/$defs/PhoneApp"
+            },
+            "replaced": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "app"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AppInstallRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was written."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "The App Store, or her phone, could not be read or written: her\nphone is as it was."
+        }
+      ],
+      "description": "What came of giving her an app, from the App Store or from a file: the\napp as her phone now lists it, and the version of it that it replaced,\nwhen it replaced one; or why it was not given."
+    },
+    "AppInstallRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        },
+        {
+          "type": "string",
+          "const": "not_in_store",
+          "description": "The App Store lists no such app."
+        },
+        {
+          "type": "string",
+          "const": "comes_with_phone",
+          "description": "The phone comes with an app of that id."
+        },
+        {
+          "type": "string",
+          "const": "already_installed",
+          "description": "Her phone holds the app in the version the App Store lists."
+        },
+        {
+          "type": "string",
+          "const": "not_as_listed",
+          "description": "The app's file is not what the App Store lists."
+        },
+        {
+          "type": "string",
+          "const": "not_an_app",
+          "description": "The file makes no app."
+        }
+      ],
+      "description": "Why an app is not given to her: an app of the App Store, or one from a\nfile, which a preview of it says too."
+    },
+    "AppPreviewOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "name": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "tint": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "wakes": {
+              "type": "boolean"
+            },
+            "itMay": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "replaces": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "id",
+            "name",
+            "summary",
+            "icon",
+            "tint",
+            "version",
+            "wakes",
+            "itMay"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AppInstallRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read."
+        }
+      ],
+      "description": "What an app's file would put on her phone, judged as adding it judges\nit, with nothing written: what the app is, what it may do, a line each,\nand the version of it on her phone that adding it replaces; or why the\nfile adds none."
+    },
+    "AppRemoveOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AppRemoveRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was removed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read or written."
+        }
+      ],
+      "description": "What came of removing an app from her phone: it is gone, with what it\nkept and its rings; or why it was not removed."
+    },
+    "AppRemoveRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character",
+            "unknown_app"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        },
+        {
+          "type": "string",
+          "const": "comes_with_phone",
+          "description": "The app comes with her phone: it cannot be removed."
+        }
+      ]
+    },
+    "AppSource": {
+      "type": "string",
+      "enum": [
+        "built_in",
+        "catalog",
+        "file"
+      ],
+      "description": "Where an app on her phone came from: it comes with her phone, it is the\nApp Store's, or the person added it from a file nobody read."
+    },
     "AppView": {
       "type": "object",
       "properties": {
@@ -186,6 +466,94 @@
         "icon"
       ],
       "description": "A view of an app, which she opens it on: a tab, in the Clock."
+    },
+    "AppWakeBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "description": "The person's say on whether an app may wake her."
+    },
+    "AppWakeOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AppWakeRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read or written."
+        }
+      ],
+      "description": "What came of the person's say on whether an app may wake her: it is\nkept; or why it is not."
+    },
+    "AppWakeRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character",
+            "unknown_app"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        },
+        {
+          "type": "string",
+          "const": "cannot_wake",
+          "description": "The app does not say it wakes her: it sets no ring."
+        }
+      ]
     },
     "Authored": {
       "type": "object",
@@ -1343,7 +1711,7 @@
             "kind",
             "characterId"
           ],
-          "description": "Her phone is to be read again: a call of hers to it came back\naccepted, or a ring's moment of hers began or ended."
+          "description": "Her phone is to be read again: a call of hers to it came back\naccepted, a ring's moment of hers began or ended, or the person gave\nher an app, removed one, or said whether one may wake her."
         }
       ],
       "description": "What every surface hears."
@@ -1352,7 +1720,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 11
+          "const": 12
         },
         "homeRoot": {
           "type": "string"
@@ -1417,7 +1785,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 11
+          "const": 12
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2214,11 +2582,28 @@
         "name": {
           "type": "string"
         },
+        "summary": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/AppSource"
+        },
         "icon": {
           "type": "string"
         },
         "tint": {
           "type": "string"
+        },
+        "wakes": {
+          "type": "boolean",
+          "description": "Whether it says it wakes her: only such an app sets a ring."
+        },
+        "mayWake": {
+          "type": "boolean",
+          "description": "Whether the person lets it wake her: yes unless they said it may\nnot."
         },
         "views": {
           "type": "array",
@@ -2233,12 +2618,17 @@
       "required": [
         "id",
         "name",
+        "summary",
+        "version",
+        "source",
         "icon",
         "tint",
+        "wakes",
+        "mayWake",
         "views",
         "opensOn"
       ],
-      "description": "An app on her phone as her window draws it: its icon and the tint of\nits tile, names of the page's own set, which falls back for one it does\nnot know; its views, in its order; and the view it opens on."
+      "description": "An app on her phone as her window draws it and her settings show it:\nthe line she knows it by, its version and where it came from; its icon\nand the tint of its tile, names of the page's own set, which falls back\nfor one it does not know; whether it says it wakes her, and whether the\nperson lets it; its views, in its order; and the view it opens on."
     },
     "PhoneDid": {
       "type": "object",
@@ -2825,12 +3215,16 @@
           "items": {
             "$ref": "#/$defs/ScreenItem"
           }
+        },
+        "page": {
+          "type": "string",
+          "description": "Which page of its view this is, as the App Store's page of an app\nsays that app's id; none for a view of one page. One page's rows\nare not another's."
         }
       },
       "required": [
         "items"
       ],
-      "description": "What a view of an app shows: its pieces, top to bottom."
+      "description": "What a view of an app shows: its pieces, top to bottom, and which page\nof the view it is, when the view shows more than one."
     },
     "ScreenItem": {
       "oneOf": [
@@ -2907,7 +3301,42 @@
             "kind",
             "text"
           ],
-          "description": "A line of plain words, as for a view with nothing in it yet."
+          "description": "Plain words: a line alone on a view with nothing in it yet, or a\nparagraph among other pieces."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The app's own id, which she passes to an action."
+            },
+            "tile": {
+              "$ref": "#/$defs/ScreenTile"
+            },
+            "name": {
+              "type": "string"
+            },
+            "subtitle": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "app"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "tile",
+            "name",
+            "subtitle",
+            "status"
+          ],
+          "description": "An app's header: its tile, its name, a small line under it and its\nstatus, as a store's page of the app shows them."
         }
       ],
       "description": "A piece of a screen."
@@ -3000,6 +3429,10 @@
           "type": "string",
           "description": "The thing's own id, which she passes to an action to change it."
         },
+        "tile": {
+          "description": "An app's tile at the row's start.",
+          "$ref": "#/$defs/ScreenTile"
+        },
         "caption": {
           "type": "string",
           "description": "A small line above."
@@ -3025,6 +3458,23 @@
         }
       },
       "description": "A row of a list: a title, a time or both."
+    },
+    "ScreenTile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "icon",
+        "tint"
+      ],
+      "description": "An app's tile as a screen draws it: its icon and its tint, names of the\npage's own set, as an app's on her home screen are."
     },
     "Setup": {
       "type": "object",
@@ -3129,6 +3579,127 @@
         "message"
       ],
       "description": "An ordinary failure of the home's storage, a full disk, a permission or\na damaged record, which the person is told and which is no bug."
+    },
+    "StoreApp": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "string"
+        },
+        "wakes": {
+          "type": "boolean"
+        },
+        "itMay": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/StoreAppStatus"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "summary",
+        "icon",
+        "tint",
+        "version",
+        "changes",
+        "wakes",
+        "itMay",
+        "status"
+      ],
+      "description": "An app of the App Store as its page there says it: its tile, its\nversion and what changed in it, whether it says it wakes her, what it\nmay do, a line each, and how it stands on her phone."
+    },
+    "StoreAppStatus": {
+      "type": "string",
+      "enum": [
+        "not_on_phone",
+        "update",
+        "installed"
+      ],
+      "description": "How an app of the App Store stands on her phone, versions ordered as\ntheir three numbers: not on it; on it in an older version than the\nstore's, which the store's updates; or on it in the store's version or\na newer one."
+    },
+    "StoreOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "apps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/StoreApp"
+              }
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "apps"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/PhoneRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "The catalog, or her phone, could not be read."
+        }
+      ],
+      "description": "The App Store's catalog as the person browses it for her, read anew:\neach app as its page in the store says it, with the version of it on\nher phone; or why it could not be read."
     },
     "SubmitOutcome": {
       "oneOf": [

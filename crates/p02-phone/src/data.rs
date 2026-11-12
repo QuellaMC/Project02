@@ -1,5 +1,6 @@
-//! What an app keeps, in its one file: `apps/<app-id>.json` among the files
-//! its caller hands in, holding `{"storage": {...}, "rings": [...]}`.
+//! What an app keeps, in one file of its data: `apps/<app-id>.json` among
+//! the files its caller hands in, holding `{"storage": {...}, "rings":
+//! [...]}`.
 
 use p02_contracts::{LeasedFiles, StoreError};
 use p02_core::Timestamp;
@@ -115,6 +116,11 @@ impl Kept {
         app: &Identifier,
     ) -> Result<(), StoreError> {
         files.write_json(&path(app), &self.document())
+    }
+
+    /// Removes `app`'s file, and with it all it keeps and its rings.
+    pub(crate) fn remove(files: &mut dyn LeasedFiles, app: &Identifier) -> Result<(), StoreError> {
+        files.remove(&path(app))
     }
 
     /// Whether this keeps within the JSON limits the store holds a file

@@ -134,8 +134,23 @@ export function settingsOpened(state: WebState, page: SettingsPage): WebState {
     ...state,
     settings:
       state.settings === undefined
-        ? {screen, views: new Map(), edits: new Map(), problems: new Map()}
+        ? settingsOn(screen, new Map())
         : {...state.settings, screen},
+  };
+}
+
+/** The settings on a screen, with these views read and nothing else yet. */
+function settingsOn(
+  screen: Settings['screen'],
+  views: Settings['views'],
+): Settings {
+  return {
+    screen,
+    views,
+    edits: new Map(),
+    problems: new Map(),
+    phones: new Map(),
+    catalogs: new Map(),
   };
 }
 
@@ -166,12 +181,10 @@ export function welcomeOpened(state: WebState, homeView: ConfigView): WebState {
     ? state
     : {
         ...state,
-        settings: {
-          screen: {kind: 'welcome', step: 1},
-          views: new Map([[targetKey(home), homeView]]),
-          edits: new Map(),
-          problems: new Map(),
-        },
+        settings: settingsOn(
+          {kind: 'welcome', step: 1},
+          new Map([[targetKey(home), homeView]]),
+        ),
       };
 }
 
@@ -186,11 +199,14 @@ export function advancedSet(state: WebState, advanced: boolean): WebState {
 }
 
 /** The page the window is on, while it is open. */
-function windowPage(state: WebState): SettingsPage | undefined {
+export function windowPage(state: WebState): SettingsPage | undefined {
   const screen = state.settings?.screen;
 
   return screen?.kind === 'window' ? screen.page : undefined;
 }
+
+/** What the file chooser offers for a character: her one file, a JSON document. */
+export const characterFileTypes = '.json,application/json';
 
 /** The largest character file: the daemon reads none larger. */
 const characterFileBytes = 64 * 1024;

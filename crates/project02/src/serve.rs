@@ -79,6 +79,7 @@ pub(crate) async fn run(
         test_provider,
         durations: switches.durations,
         plugins,
+        app_catalog: switches.app_catalog,
     };
 
     serve(home, claim, settings, &stop, console).await

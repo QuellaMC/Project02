@@ -6,13 +6,15 @@ use serde_json::{Value, json};
 
 use crate::support::{Files, actions, app, at, input, millis, now};
 
-/// An app named `name` that sets and cancels rings on request, and hears
-/// them with `rang` when it is given one.
-fn ringing(name: &str, rang: &str) -> App {
+/// An app named `name`, which says it wakes her when it `wakes`, that sets
+/// and cancels rings on request, and hears them with `rang` when it is
+/// given one.
+fn ringing(name: &str, wakes: bool, rang: &str) -> App {
     app(
         &json!({
             "id": name.to_lowercase(),
             "name": name,
+            "wakes": wakes,
             "actions": actions(&["ring", "cancel"]),
         }),
         &format!(
@@ -38,6 +40,7 @@ fn ringing(name: &str, rang: &str) -> App {
 fn alarms() -> App {
     ringing(
         "Alarms",
+        true,
         "export function rang(ring) {
             phone.storage.set('heard', [...(phone.storage.get('heard') ?? []), ring]);
 
@@ -53,7 +56,7 @@ fn alarms() -> App {
 
 /// Timers, which does not hear its rings.
 fn timers() -> App {
-    ringing("Timers", "")
+    ringing("Timers", true, "")
 }
 
 /// What `phone`'s `app` answers when asked to set `ring`.
@@ -154,6 +157,40 @@ fn an_app_sets_replaces_cancels_and_lists_its_rings() {
             "rings": [{"id": "tea", "at": "2026-03-07T17:30:00.000Z", "title": "Tea"}],
         })
     );
+}
+
+#[test]
+fn an_app_that_does_not_say_it_wakes_her_sets_no_ring_and_cancels_and_lists_as_any_does() {
+    let phone = Phone::new(vec![ringing("Notes", false, "")]);
+    let mut files = Files::default();
+
+    assert_eq!(
+        ring(
+            &phone,
+            &mut files,
+            "notes",
+            &shown("tea", "2026-03-07T19:00:00.000Z", "Tea")
+        ),
+        Err(
+            "Notes failed: TypeError: phone.rings.set sets no ring here: an app must say it \
+             wakes her, with wakes: true in its manifest, to set a ring"
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        phone
+            .act(
+                &mut files,
+                "notes",
+                "cancel",
+                &input(&json!({"id": "tea"})),
+                &now()
+            )
+            .unwrap()
+            .answer,
+        json!([])
+    );
+    assert_eq!(phone.rings(&files).unwrap(), []);
 }
 
 #[test]

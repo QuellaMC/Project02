@@ -2,15 +2,18 @@
  * Everything her phone's window shows, as one value, and every change to
  * it as a pure function of the previous value and one input: the daemon's
  * health, a read of her phone, a read of a view the person opened, the
- * person looking around, the stream's coming and going, what the window it
- * is drawn in says of itself. Her phone's session applies them and React
- * reads the value; a reducer that changes nothing returns the value it was
- * given. Nothing here touches the DOM or reads a clock, so the window's
- * rules are tested in Node.
+ * person looking around, the stream's coming and going and what it says of
+ * confirmations, what the window it is drawn in says of itself. Her
+ * phone's session applies them and React reads the value; a reducer that
+ * changes nothing returns the value it was given. Nothing here touches the
+ * DOM or reads a clock, so the window's rules are tested in Node.
  */
 import type {
+  GatewayEvent,
   GatewayHealth,
+  GatewayReady,
   LiveReading,
+  PendingConfirmation,
   PhoneApp,
   PhoneDid,
   PhoneFront,
@@ -20,6 +23,7 @@ import type {
   ScreenOutcome,
   ScreenRow,
 } from '@project02/wire/contract';
+import {installAskOf} from './ask-words.ts';
 import type {Connection} from './store.ts';
 
 /** Her phone as a read gave it. */
@@ -76,6 +80,12 @@ export type PhoneState = {
   /** Why her phone could not be read, in a sentence; gone once it is. */
   readonly unread?: string | undefined;
   /**
+   * Her asks to install an app that wait for the person, by the id of the
+   * confirmation that asks: the app's id in the App Store. The stream says
+   * them, and the daemon keeps none.
+   */
+  readonly asks: ReadonlyMap<string, string>;
+  /**
    * The window her phone is drawn in, when it has no frame of its own and
    * the page draws one: whether it stays on top of other windows. None in
    * a window with a frame of its own, as a browser's popup.
@@ -96,6 +106,8 @@ export type OnScreen =
       readonly screen?: Screen | undefined;
       readonly message?: string | undefined;
       readonly fresh: ReadonlySet<string>;
+      /** The apps she waits on the person to install, by their ids, which a row or a header of that id says. */
+      readonly waiting: ReadonlySet<string>;
     };
 
 /** The line under her phone, lit while what it says is under a minute old. */
@@ -107,6 +119,7 @@ export type Line = {
 
 const hers: Shows = {kind: 'hers'};
 const noRows: ReadonlySet<string> = new Set();
+const noAsks: ReadonlyMap<string, string> = new Map();
 
 export function initialPhoneState(characterId: string): PhoneState {
   return {
@@ -114,15 +127,61 @@ export function initialPhoneState(characterId: string): PhoneState {
     connection: {status: 'connecting'},
     shows: hers,
     fresh: noRows,
+    asks: noAsks,
   };
 }
 
-/** Every `ready`: the stream is live, and health says who she is. */
+/**
+ * Every `ready`: the stream is live, health says who she is, and what she
+ * asked to install and waits on the person for is what the confirmations
+ * waiting now say.
+ */
 export function phoneReady(
   state: PhoneState,
-  health: GatewayHealth,
+  snapshot: GatewayReady,
 ): PhoneState {
-  return healthSaid({...state, connection: {status: 'live'}}, health);
+  return snapshot.confirmations.reduce(
+    askRaised,
+    healthSaid(
+      {...state, connection: {status: 'live'}, asks: noAsks},
+      snapshot.health,
+    ),
+  );
+}
+
+/**
+ * A confirmation raised: when it is her ask to install an app, that app's
+ * row and page in the store say she waits on the person until it is
+ * settled. Another character asks for her own phone, not this one.
+ */
+export function askRaised(
+  state: PhoneState,
+  pending: PendingConfirmation,
+): PhoneState {
+  const app =
+    pending.characterId === state.characterId
+      ? installAskOf(pending.request.preview)?.app.id
+      : undefined;
+
+  return app === undefined || state.asks.get(pending.id) === app
+    ? state
+    : {...state, asks: new Map(state.asks).set(pending.id, app)};
+}
+
+/** A confirmation settled, approved, denied or cancelled: an ask of hers it was waits no more. */
+export function askSettled(
+  state: PhoneState,
+  settled: Extract<GatewayEvent, {kind: 'confirmation_settled'}>,
+): PhoneState {
+  if (!state.asks.has(settled.id)) {
+    return state;
+  }
+
+  const asks = new Map(state.asks);
+
+  asks.delete(settled.id);
+
+  return {...state, asks};
 }
 
 /** Who she is as the daemon's health says it now: her name, while it lists her. */
@@ -234,7 +293,8 @@ export function screenRead(
 /**
  * What her phone's screen draws now: over everything, the soonest of what
  * rings; else what the window shows, her home screen when that is an app
- * no longer on her phone.
+ * no longer on her phone, and on a view, the apps she waits on the person
+ * to install.
  */
 export function screenOf(state: PhoneState): OnScreen {
   const {phone, shows} = state;
@@ -249,15 +309,17 @@ export function screenOf(state: PhoneState): OnScreen {
     return {kind: 'ringing', ring};
   }
 
+  const waiting = new Set(state.asks.values());
+
   if (shows.kind === 'hers') {
     return phone.front === undefined
       ? {kind: 'home', apps: phone.apps}
-      : viewOn(phone, phone.front, state.fresh);
+      : viewOn(phone, phone.front, state.fresh, waiting);
   }
 
   return shows.kind === 'home'
     ? {kind: 'home', apps: phone.apps}
-    : viewOn(phone, shows, noRows);
+    : viewOn(phone, shows, noRows, waiting);
 }
 
 /**
@@ -377,6 +439,7 @@ function viewOn(
   phone: HerPhone,
   view: ShownView,
   fresh: ReadonlySet<string>,
+  waiting: ReadonlySet<string>,
 ): OnScreen {
   const app = phone.apps.find(candidate => candidate.id === view.appId);
 
@@ -389,10 +452,15 @@ function viewOn(
         screen: view.screen,
         message: view.message,
         fresh,
+        waiting,
       };
 }
 
-/** The rows of `after`, the same view as `before`, that `before` did not hold. */
+/**
+ * The rows of `after` that `before` did not hold, when both are the same
+ * page of the same view: another page, as the App Store's page of an app
+ * is to its list, holds rows of its own, none of them new.
+ */
 function freshRows(
   before: PhoneFront | undefined,
   after: PhoneFront | undefined,
@@ -400,7 +468,8 @@ function freshRows(
   if (
     before?.screen === undefined ||
     after?.screen === undefined ||
-    !sameFront(before, after)
+    !sameFront(before, after) ||
+    before.screen.page !== after.screen.page
   ) {
     return noRows;
   }

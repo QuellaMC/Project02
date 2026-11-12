@@ -1,14 +1,11 @@
-import {useState, useSyncExternalStore} from 'react';
+import {useSyncExternalStore} from 'react';
 
-import type {
-  Answer,
-  CharacterSummary,
-  PairingRequest,
-  PendingConfirmation,
-} from '@project02/wire/contract';
-import {webSource, type Session} from './session.ts';
+import type {CharacterSummary} from '@project02/wire/contract';
+import {askersOf} from './dock.ts';
+import {Bottom} from './dock-view.tsx';
+import type {Session} from './session.ts';
 import {SettingsWindow} from './settings-window.tsx';
-import {characterName, type WebState} from './store.ts';
+import type {WebState} from './store.ts';
 import {Avatar, StatePill, ThreadPane} from './thread.tsx';
 import {Welcome} from './welcome.tsx';
 
@@ -129,6 +126,7 @@ function Chat({
             characters={health.characters}
             openId={thread?.characterId}
             unseen={state.unseen}
+            askers={askersOf(state)}
             onOpen={characterId => {
               void session.open(characterId);
             }}
@@ -155,33 +153,6 @@ function Chat({
             {notice}
           </p>
         ))}
-        {state.confirmations.length === 0 &&
-        state.pairings.length === 0 ? null : (
-          // Every confirmation waiting is on the page, whichever character
-          // it belongs to and whichever surface raised it: a person who
-          // sees the whole roster answers for the whole roster, and one
-          // raised for a character nobody is reading must not expire
-          // unseen. A pairing request is the home's, and waits beside them.
-          <div className="cards">
-            {state.confirmations.map(card => (
-              <ConfirmationCard
-                key={card.id}
-                pending={card}
-                characterName={characterName(state, card.characterId)}
-                onAnswer={decision => session.answer(card.id, decision)}
-              />
-            ))}
-            {state.pairings.map(request => (
-              <PairingCard
-                key={request.code}
-                request={request}
-                onSettle={decision =>
-                  session.settlePairing(request.code, decision)
-                }
-              />
-            ))}
-          </div>
-        )}
         {thread === undefined ? (
           <p className="muted empty">
             {health !== undefined && health.characters.length > 1
@@ -198,6 +169,12 @@ function Chat({
             session={session}
           />
         )}
+        {/* Everything waiting is answered here, whichever character it
+            belongs to and whichever surface raised it: a person who sees
+            the whole roster answers for the whole roster, and one raised
+            for a character nobody is reading must not expire unseen. A
+            pairing request is the home's, and waits among them. */}
+        <Bottom state={state} session={session} />
       </main>
     </div>
   );
@@ -207,6 +184,7 @@ function Roster({
   characters,
   openId,
   unseen,
+  askers,
   onOpen,
   onStart,
   onSettings,
@@ -216,6 +194,8 @@ function Roster({
   readonly openId: string | undefined;
   /** The characters with a reply the person has not seen, each marked by a dot after her name. */
   readonly unseen: ReadonlySet<string>;
+  /** The characters with an ask waiting for the person: each says so where she says how she stands. */
+  readonly askers: ReadonlySet<string>;
   readonly onOpen: (characterId: string) => void;
   readonly onStart: (characterId: string) => void;
   readonly onSettings: (characterId: string) => void;
@@ -251,7 +231,10 @@ function Roster({
                 />
               ) : null}
             </span>
-            <StatePill character={character} />
+            <StatePill
+              character={character}
+              asking={askers.has(character.id)}
+            />
           </button>
           {/* Start is the retry for a character that is on; one that is off is turned on in its settings. */}
           {character.enabled && blockingStates.has(character.state) ? (
@@ -297,111 +280,4 @@ function Roster({
       ))}
     </ul>
   );
-}
-
-function ConfirmationCard({
-  pending,
-  characterName,
-  onAnswer,
-}: {
-  readonly pending: PendingConfirmation;
-  readonly characterName: string;
-  readonly onAnswer: (decision: Answer) => Promise<void>;
-}) {
-  const raisedOn =
-    pending.turn === undefined || pending.turn.source === webSource
-      ? ''
-      : ` · raised on ${pending.turn.source}`;
-
-  return (
-    <div className="card" role="group" aria-label="Confirmation">
-      <p className="card-title">
-        Confirm {pending.request.toolName}{' '}
-        <span className="muted">· {pending.request.pluginId}</span>
-      </p>
-      <p className="card-summary">{pending.request.summary}</p>
-      <pre className="card-preview">
-        {JSON.stringify(pending.request.preview, null, 2)}
-      </pre>
-      <CardActions
-        note={`${characterName} · expires at ${clockTime(pending.deadlineAt)}${raisedOn}`}
-        onAnswer={onAnswer}
-      />
-    </div>
-  );
-}
-
-function PairingCard({
-  request,
-  onSettle,
-}: {
-  readonly request: PairingRequest;
-  readonly onSettle: (decision: Answer) => Promise<void>;
-}) {
-  return (
-    <div className="card" role="group" aria-label="Pairing">
-      <p className="card-title">{connectorName(request.connectorId)} pairing</p>
-      <p className="card-summary">{request.subject.label}</p>
-      <CardActions
-        note={`code ${request.code} · expires at ${clockTime(request.expiresAt)} · via ${request.source}`}
-        onAnswer={onSettle}
-      />
-    </div>
-  );
-}
-
-/**
- * The buttons rest while an answer is on its way; one that did not settle
- * the card gives them back, since the card is still there.
- */
-function CardActions({
-  note,
-  onAnswer,
-}: {
-  readonly note: string;
-  readonly onAnswer: (decision: 'approved' | 'denied') => Promise<void>;
-}) {
-  const [answering, setAnswering] = useState(false);
-  const answer = async (decision: 'approved' | 'denied') => {
-    setAnswering(true);
-    await onAnswer(decision);
-    setAnswering(false);
-  };
-
-  return (
-    <div className="card-actions">
-      <span className="muted small">{note}</span>
-      <button
-        type="button"
-        disabled={answering}
-        onClick={() => {
-          void answer('approved');
-        }}
-      >
-        Approve
-      </button>
-      <button
-        type="button"
-        className="secondary"
-        disabled={answering}
-        onClick={() => {
-          void answer('denied');
-        }}
-      >
-        Deny
-      </button>
-    </div>
-  );
-}
-
-/** `telegram` → `Telegram`: a connector named as a person reads it. */
-function connectorName(id: string): string {
-  return id.charAt(0).toUpperCase() + id.slice(1);
-}
-
-function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }

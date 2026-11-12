@@ -7,6 +7,9 @@ use serde_json::Value;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+/// How much a text file of a plugin's store holds, in KiB of UTF-8.
+pub const TEXT_FILE_KIB: usize = 256;
+
 /// One plugin's durable files, under a lease that shuts out every other
 /// holder, in this process or another. The store crate implements it.
 pub trait FileStoreBackend: Send + Sync + fmt::Debug {
@@ -42,6 +45,14 @@ pub trait LeasedFiles: fmt::Debug {
     /// [`StoreError::Store`] for an unsafe path or a log that cannot be read.
     fn count_jsonl(&self, path: &str) -> Result<u64, StoreError>;
 
+    /// A text file whole, or `None` when there is none at `path`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Store`] for an unsafe path or a file that is no text
+    /// the store keeps.
+    fn read_text(&self, path: &str) -> Result<Option<String>, StoreError>;
+
     /// Replaces a document whole, so a crash leaves the old one or the new.
     ///
     /// # Errors
@@ -53,6 +64,24 @@ pub trait LeasedFiles: fmt::Debug {
     ///
     /// [`StoreError::Store`] for an unsafe path or a failed write.
     fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError>;
+
+    /// Replaces a text file whole, so a crash leaves the old text or the
+    /// new.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Store`] for an unsafe path, text longer than the store
+    /// keeps, or a failed write.
+    fn write_text(&mut self, path: &str, text: &str) -> Result<(), StoreError>;
+
+    /// Removes a document or a text file; a log is only appended to. Nothing
+    /// at `path` is no failure, so a removal a crash cut short can be done
+    /// again.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Store`] for an unsafe path or a failed removal.
+    fn remove(&mut self, path: &str) -> Result<(), StoreError>;
 }
 
 /// Whether a hook may change the store it reads.
@@ -63,8 +92,8 @@ pub enum StoreAccess {
 }
 
 /// A plugin's store as one hook holds it. Every call is checked before it
-/// acts: none once the hook is cancelled, and no write once the hook has
-/// settled or when it may only read.
+/// acts: none once the hook is cancelled, and no write or removal once the
+/// hook has settled or when it may only read.
 #[derive(Clone, Debug)]
 pub struct FileStore {
     backend: Arc<dyn FileStoreBackend>,
@@ -201,6 +230,16 @@ impl LeasedStore<'_> {
         self.files.count_jsonl(path)
     }
 
+    /// A text file, or `None` when there is none at `path`.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::Cancelled`], or the store's own error.
+    pub fn read_text(&self, path: &str) -> Result<Option<String>, StoreError> {
+        self.store.check_open()?;
+        self.files.read_text(path)
+    }
+
     /// # Errors
     ///
     /// [`StoreError::Cancelled`], [`StoreError::ReadOnly`],
@@ -217,6 +256,24 @@ impl LeasedStore<'_> {
     pub fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.store.check_writable()?;
         self.files.append_jsonl(path, value)
+    }
+
+    /// # Errors
+    ///
+    /// [`StoreError::Cancelled`], [`StoreError::ReadOnly`],
+    /// [`StoreError::WritesRevoked`], or the store's own error.
+    pub fn write_text(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.store.check_writable()?;
+        self.files.write_text(path, text)
+    }
+
+    /// # Errors
+    ///
+    /// [`StoreError::Cancelled`], [`StoreError::ReadOnly`],
+    /// [`StoreError::WritesRevoked`], or the store's own error.
+    pub fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        self.store.check_writable()?;
+        self.files.remove(path)
     }
 }
 
@@ -235,11 +292,23 @@ impl LeasedFiles for LeasedStore<'_> {
         LeasedStore::count_jsonl(self, path)
     }
 
+    fn read_text(&self, path: &str) -> Result<Option<String>, StoreError> {
+        LeasedStore::read_text(self, path)
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         LeasedStore::write_json(self, path, value)
     }
 
     fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         LeasedStore::append_jsonl(self, path, value)
+    }
+
+    fn write_text(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
+        LeasedStore::write_text(self, path, text)
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        LeasedStore::remove(self, path)
     }
 }

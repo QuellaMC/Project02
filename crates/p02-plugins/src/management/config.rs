@@ -13,11 +13,10 @@ use p02_contracts::{
 };
 use p02_shared::{Identifier, error_chain};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use crate::config_control::{ConfigControl, FieldChange, FieldChangeOutcome, PluginSettings};
-use crate::package::{blocking, rejected};
+use crate::package::{admitted, blocking, rejected, unasked};
 
 const UNKNOWN_PLUGIN: &str = "plugin_config_unknown_plugin";
 const UPDATE_INVALID: &str = "plugin_config_update_invalid";
@@ -57,21 +56,23 @@ pub(super) async fn prepare(
 ) -> Result<ToolPreparation, PluginError> {
     let request = match Request::of(call)? {
         Ok(request) => request,
-        Err(refusal) => return Ok(unasked(refusal)),
+        Err(refusal) => return Ok(refusal.unasked()),
     };
     let settings = settings(Arc::clone(&control), request.plugin.clone()).await?;
 
     if let Some(error) = first_error(&settings.section) {
-        return Ok(unasked(Refusal::invalid(format!(
+        return Ok(Refusal::invalid(format!(
             "Plugin config cannot be updated while its current settings are invalid: {error}"
-        ))));
+        ))
+        .unasked());
     }
 
     if settings.fingerprint.as_str() != request.expected_fingerprint {
-        return Ok(unasked(Refusal {
+        return Ok(Refusal {
             reason: CONFLICT,
             message: CONFLICT_SENTENCE.to_owned(),
-        }));
+        }
+        .unasked());
     }
 
     let change = request.change();
@@ -84,7 +85,7 @@ pub(super) async fn prepare(
     })
     .await?
     {
-        return Ok(unasked(Refusal::invalid(message)));
+        return Ok(Refusal::invalid(message).unasked());
     }
 
     let field = request.field.name();
@@ -167,6 +168,11 @@ impl Refusal {
             reason: UPDATE_INVALID,
             message,
         }
+    }
+
+    /// The change refused before anyone was asked.
+    fn unasked(self) -> ToolPreparation {
+        unasked(self.reason, self.message.clone(), &self.message)
     }
 }
 
@@ -366,32 +372,8 @@ fn authored<'a>(section: &'a Map<String, Value>, name: &str) -> Option<&'a Value
         .get("authored")
 }
 
-/// The call's input as its tool's contract admits it.
-fn admitted<T: DeserializeOwned>(call: &ToolCall) -> Result<T, PluginError> {
-    serde_json::from_value(Value::Object(call.input().clone())).map_err(|error| {
-        PluginError::with_source(
-            format!("{} input is not what its contract admits", call.tool_name()),
-            error,
-        )
-    })
-}
-
 fn unknown(plugin: &str) -> String {
     format!("Plugin \"{plugin}\" is not installed.")
-}
-
-fn unasked(refusal: Refusal) -> ToolPreparation {
-    let Refusal { reason, message } = refusal;
-
-    ToolPreparation::Rejected {
-        reason: reason.to_owned(),
-        evidence: vec![EvidenceNote::new(
-            EvidenceKind::ToolInvocation,
-            EvidenceStatus::Rejected,
-            message.as_str(),
-        )],
-        message,
-    }
 }
 
 fn accepted(summary: String) -> EvidenceNote {

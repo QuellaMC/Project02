@@ -125,12 +125,25 @@ impl LeasedFiles for Leased<'_> {
         Ok(0)
     }
 
+    fn read_text(&self, _path: &str) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         self.0.insert(path.to_owned(), value.clone());
         Ok(())
     }
 
     fn append_jsonl(&mut self, _path: &str, _value: &Value) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn write_text(&mut self, _path: &str, _text: &str) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        self.0.remove(path);
         Ok(())
     }
 }

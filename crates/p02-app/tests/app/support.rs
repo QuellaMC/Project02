@@ -18,7 +18,7 @@ use p02_contracts::{
 };
 use p02_core::ClientStamp;
 use p02_plugins::list;
-use p02_shared::{DanglingLinks, canonical_path};
+use p02_shared::{BaseUrl, DanglingLinks, canonical_path};
 use p02_store::Home;
 use p02_wire::{CharacterState, Event, OpenOutcome, TurnProgress};
 use serde_json::{Value, json};
@@ -132,11 +132,17 @@ impl World {
                 test_provider: Some(Arc::clone(&self.model) as Arc<dyn RoleModelAdapter>),
                 durations: Durations::default(),
                 plugins: listed.chain([gated]).collect(),
+                app_catalog: nowhere(),
             },
         )
         .await
         .unwrap()
     }
+}
+
+/// An App Store nothing serves: no test of these reads it.
+fn nowhere() -> BaseUrl {
+    BaseUrl::parse("http://127.0.0.1:9").unwrap()
 }
 
 #[expect(

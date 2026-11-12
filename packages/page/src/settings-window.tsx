@@ -7,6 +7,7 @@ import type {ReactNode} from 'react';
 
 import type {Session} from './session.ts';
 import {AddPage} from './settings-add.tsx';
+import {AppFilePage, AppPage, GetAppsPage} from './settings-apps.tsx';
 import {
   CharacterModelPage,
   CharacterPage,
@@ -30,6 +31,7 @@ import {
   YouPage,
 } from './settings-pages.tsx';
 import {BotPage, TelegramPage} from './settings-telegram.tsx';
+import {characterFileTypes} from './settings.ts';
 import {
   characterName,
   type Settings,
@@ -116,6 +118,12 @@ function PageShown({
       return <PluginPage ctx={ctx} namespace={page.namespace} id={page.id} />;
     case 'add':
       return <AddPage ctx={ctx} page={page} />;
+    case 'app':
+      return <AppPage ctx={ctx} page={page} />;
+    case 'get-apps':
+      return <GetAppsPage ctx={ctx} characterId={page.characterId} />;
+    case 'app-file':
+      return <AppFilePage ctx={ctx} page={page} />;
   }
 }
 
@@ -171,6 +179,7 @@ function Sidebar({
         ))}
         <FileButton
           className="side-item side-add"
+          accept={characterFileTypes}
           current={page.kind === 'add'}
           onChoose={file => {
             void session.chooseCharacterFile(file);

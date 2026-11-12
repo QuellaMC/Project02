@@ -1,5 +1,7 @@
 import {expect, type Page} from '@playwright/test';
 
+import {publish, quiet, reminders} from '../conformance/harness/apps.ts';
+import {startCatalogServer} from '../conformance/harness/catalog-server.ts';
 import {startDaemon, type Daemon} from '../conformance/harness/daemon.ts';
 import {
   characterJson,
@@ -76,6 +78,14 @@ function clockIcon(page: Page) {
 /** The chat's Her Phone button, for the character whose chat is on screen. */
 function herPhoneButton(page: Page) {
   return page.getByRole('button', {name: /^Her Phone/u});
+}
+
+/** A line to Mira, sent from her chat. */
+async function tellMira(page: Page, line: string): Promise<void> {
+  const composer = page.getByRole('textbox', {name: 'Message Mira'});
+
+  await composer.fill(line);
+  await composer.press('Enter');
 }
 
 /** Her chat, opened from the roster. */
@@ -257,7 +267,6 @@ test("page.phone-in-use: while a turn of hers that called a tool of her phone wa
 }) => {
   const model = await startModelServer();
   const daemon = await startDaemon(quietHome(model));
-  const composer = page.getByRole('textbox', {name: 'Message Mira'});
   const using = page.getByText('Mira is using her phone…');
   const dot = herPhoneButton(page).getByRole('img', {name: 'In use'});
 
@@ -267,8 +276,7 @@ test("page.phone-in-use: while a turn of hers that called a tool of her phone wa
 
   const asked = model.hold();
 
-  await composer.fill('Is my alarm on?');
-  await composer.press('Enter');
+  await tellMira(page, 'Is my alarm on?');
   await asked.arrived();
   await expect(using).toBeVisible();
   await expect(dot).toBeVisible();
@@ -279,4 +287,106 @@ test("page.phone-in-use: while a turn of hers that called a tool of her phone wa
   ]);
   await expect(using).toHaveCount(0);
   await expect(dot).toHaveCount(0);
+});
+
+test("page.store-app-approved: her phone's window shows the App Store's list as she opens it, each app with its name, its summary and how it stands on her phone, then the page of the app she looks at; once she asks to install it the page says it waits for the person while her chat's card says in a sentence what she wants; Allow takes the card away, the page says Installed, and the app is on her home screen", async ({
+  context,
+  page,
+}) => {
+  const model = await startModelServer();
+  const catalog = await startCatalogServer();
+
+  publish(catalog, [reminders], [quiet('notes', 'Notes', '1.0.0')]);
+
+  const daemon = await startDaemon(quietHome(model), catalog.env);
+  const phone = await context.newPage();
+  const card = page.getByRole('group', {
+    name: 'Mira wants to install Reminders',
+  });
+  const pill = phone.locator('.phone-pill');
+
+  expect(await wireOf(daemon).installApp('mira', 'notes')).toMatchObject({
+    status: 'ok',
+  });
+  await phone.goto(phoneOf(daemon, 'mira'));
+  await page.goto(daemon.url);
+  model.answer(calling(['phone_open', {app: 'store'}]));
+
+  const looking = model.hold();
+
+  await tellMira(page, 'Is there an app for reminders?');
+  await looking.arrived();
+  await expect(phone.getByRole('heading', {name: 'App Store'})).toBeVisible();
+  await expect(phone.locator('.phone-row')).toHaveText([
+    'RemindersThings to do, on a day and time',
+    'NotesNotes, quietlyInstalled',
+  ]);
+
+  const asking = model.hold();
+
+  looking.release(
+    calling([
+      'phone_use',
+      {app: 'store', action: 'show_app', input: {app: 'reminders'}},
+    ]),
+  );
+  await asking.arrived();
+  await expect(
+    phone.getByRole('heading', {name: 'Reminders', exact: true}),
+  ).toBeVisible();
+  await expect(pill).toHaveText('Not on her phone');
+  // The app's page is another page of the store's view, not rows it gained.
+  await expect(phone.locator('.phone-row-new')).toHaveCount(0);
+
+  model.answer(reply('It is on my phone now.'));
+  asking.release(calling(['phone_install', {app: 'reminders'}]));
+  await expect(pill).toHaveText('Waiting for you');
+  await expect(card).toHaveAccessibleDescription(
+    'From the App Store. It keeps its own data and can wake her up.',
+  );
+
+  await card.getByRole('button', {name: 'Allow', exact: true}).click();
+  await expect(card).toHaveCount(0);
+  await expect(pill).toHaveText('Installed');
+  await phone.getByRole('button', {name: 'Home'}).click();
+  await expect(
+    phone.getByRole('button', {name: 'Reminders', exact: true}),
+  ).toBeVisible();
+});
+
+test("page.store-app-denied: while her ask to install an app on the App Store's list waits for the person, the app's row says Waiting and her chat's card what she wants; Don't Allow takes the card away, she answers, and the row says nothing of the app being on her phone", async ({
+  context,
+  page,
+}) => {
+  const model = await startModelServer();
+  const catalog = await startCatalogServer();
+
+  publish(catalog, [reminders]);
+
+  const daemon = await startDaemon(quietHome(model), catalog.env);
+  const phone = await context.newPage();
+  const card = page.getByRole('group', {
+    name: 'Mira wants to install Reminders',
+  });
+  const row = phone.locator('.phone-row');
+
+  await phone.goto(phoneOf(daemon, 'mira'));
+  await page.goto(daemon.url);
+  model.answer(
+    calling(['phone_open', {app: 'store'}]),
+    calling(['phone_install', {app: 'reminders'}]),
+    reply('Maybe later, then.'),
+  );
+  await tellMira(page, 'Get the reminders app.');
+  await expect(row).toHaveText(
+    'RemindersThings to do, on a day and timeWaiting',
+  );
+  await expect(card).toBeVisible();
+
+  await card.getByRole('button', {name: "Don't Allow"}).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Maybe later, then.',
+  ]);
+  await expect(row).toHaveText('RemindersThings to do, on a day and time');
 });

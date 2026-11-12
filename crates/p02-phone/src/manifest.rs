@@ -1,20 +1,21 @@
-//! `app.json`: what an app is called and how its icon is drawn, the views
-//! it shows and the actions she can take in it.
+//! An app's manifest, which its script exports as `manifest`: what the app
+//! is called, its version, how its icon is drawn and whether it wakes her,
+//! the views it shows and the actions she can take in it.
 
 use std::collections::BTreeSet;
 
 use p02_contracts::ToolInputContract;
 use p02_shared::Identifier;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::PackageError;
 
-/// The format of `app.json` the phone reads.
+/// The format of a manifest the phone reads.
 const FORMAT: &str = "project02.app.v1";
 
-/// What the script's own functions are named, which no action is.
-const RESERVED: [&str; 2] = ["screen", "rang"];
+/// What the script's own exports are named, which no action is.
+const RESERVED: [&str; 3] = ["manifest", "screen", "rang"];
 
 /// An app's manifest, every rule of it checked.
 #[derive(Clone, Debug)]
@@ -22,15 +23,17 @@ pub(crate) struct Manifest {
     pub(crate) id: Identifier,
     pub(crate) name: String,
     pub(crate) summary: String,
+    pub(crate) version: String,
     pub(crate) icon: String,
     pub(crate) tint: String,
+    pub(crate) wakes: bool,
     pub(crate) views: Vec<View>,
     pub(crate) opens_on: Identifier,
     pub(crate) actions: Vec<Action>,
 }
 
 /// A screen of an app she can open: a tab, in the Clock.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct View {
     id: Identifier,
     title: String,
@@ -56,8 +59,10 @@ struct Authored {
     id: Identifier,
     name: String,
     summary: String,
+    version: String,
     icon: String,
     tint: String,
+    wakes: bool,
     views: Vec<AuthoredView>,
     opens_on: String,
     actions: Vec<AuthoredAction>,
@@ -131,16 +136,26 @@ impl Action {
 }
 
 impl Manifest {
-    /// The manifest `text` holds.
-    pub(crate) fn read(text: &str) -> Result<Self, PackageError> {
-        let authored: Authored = serde_json::from_str(text).map_err(PackageError::NotAManifest)?;
+    /// The manifest `manifest`, the plain data a script exported, holds.
+    pub(crate) fn read(manifest: Value) -> Result<Self, PackageError> {
+        let authored: Authored =
+            serde_json::from_value(manifest).map_err(PackageError::NotAManifest)?;
 
         if authored.format != FORMAT {
             return Err(PackageError::Format);
         }
 
+        if !is_lowercase(&authored.id) {
+            return Err(PackageError::IdCase);
+        }
+
         not_blank("name", &authored.name)?;
         one_line("summary", &authored.summary)?;
+
+        if numbers(&authored.version).is_none() {
+            return Err(PackageError::Version);
+        }
+
         not_blank("icon", &authored.icon)?;
         not_blank("tint", &authored.tint)?;
 
@@ -153,13 +168,35 @@ impl Manifest {
             id: authored.id,
             name: authored.name,
             summary: authored.summary,
+            version: authored.version,
             icon: authored.icon,
             tint: authored.tint,
+            wakes: authored.wakes,
             views,
             opens_on,
             actions,
         })
     }
+}
+
+/// The three numbers of `version`, as `1.0.0` writes them with dots, each
+/// written as the number it is; none for anything else. They order
+/// versions as they are read: `1.10.0` is after `1.9.0`.
+pub(crate) fn numbers(version: &str) -> Option<[u32; 3]> {
+    let mut read = [0; 3];
+    let mut written = version.split('.');
+
+    for number in &mut read {
+        let text = written.next()?;
+
+        *number = text.parse().ok()?;
+
+        if number.to_string() != text {
+            return None;
+        }
+    }
+
+    written.next().is_none().then_some(read)
 }
 
 fn views(authored: Vec<AuthoredView>) -> Result<Vec<View>, PackageError> {
@@ -225,7 +262,7 @@ fn actions(authored: Vec<AuthoredAction>, views: &[View]) -> Result<Vec<Action>,
 
 /// Refuses `text`, what `field` of the manifest holds, when it is blank.
 fn not_blank(field: &str, text: &str) -> Result<(), PackageError> {
-    if text.trim().is_empty() {
+    if is_blank(text) {
         Err(PackageError::Blank(field.to_owned()))
     } else {
         Ok(())
@@ -235,15 +272,31 @@ fn not_blank(field: &str, text: &str) -> Result<(), PackageError> {
 /// Refuses `text`, what `field` of the manifest holds, unless it is one
 /// line that is not blank.
 fn one_line(field: &str, text: &str) -> Result<(), PackageError> {
-    if text.trim().is_empty() || text.contains(['\n', '\r']) {
-        Err(PackageError::NotOneLine(field.to_owned()))
-    } else {
+    if is_one_line(text) {
         Ok(())
+    } else {
+        Err(PackageError::NotOneLine(field.to_owned()))
     }
 }
 
+pub(crate) fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
+/// Whether `text` is one line that is not blank.
+pub(crate) fn is_one_line(text: &str) -> bool {
+    !is_blank(text) && !text.contains(['\n', '\r'])
+}
+
+/// Whether `id` is in lowercase: an id names an app's files, and a volume
+/// that folds case, the default on macOS and Windows, would give two ids
+/// one file.
+pub(crate) fn is_lowercase(id: &Identifier) -> bool {
+    id.as_str() == id.collision_key()
+}
+
 /// `name` as an action is named: lowercase letters, digits and `_`,
-/// beginning with a letter, and none of the script's own functions.
+/// beginning with a letter, and none of the script's own exports.
 fn action_name(name: &str) -> Option<Identifier> {
     let mut bytes = name.bytes();
     let spelled = bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())

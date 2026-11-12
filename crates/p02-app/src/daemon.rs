@@ -19,7 +19,8 @@ use p02_contracts::{
     FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
 };
 use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
-use p02_shared::{Identifier, error_sentence};
+use p02_plugins::AppCatalog;
+use p02_shared::{BaseUrl, Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
     Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
@@ -143,6 +144,9 @@ pub struct DaemonSettings {
     pub durations: Durations,
     /// The plugins compiled into the daemon.
     pub plugins: Vec<Plugin>,
+    /// Where the App Store's catalog is: the build's own, unless the test
+    /// switch names another.
+    pub app_catalog: BaseUrl,
 }
 
 /// A line a client delivers into a conversation.
@@ -166,7 +170,8 @@ pub struct OpenDaemonError {
 
 /// What every actor of the daemon reads and nothing changes: the home, the
 /// settings' sections, the plugins, the waits, the model that stands in
-/// for every character's, and the events.
+/// for every character's, the App Store's catalog her phone reads, and the
+/// events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -174,6 +179,7 @@ pub(crate) struct World {
     pub(crate) plugins: Vec<Plugin>,
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
+    pub(crate) catalog: Arc<AppCatalog>,
     pub(crate) events: Arc<Events>,
 }
 
@@ -343,6 +349,7 @@ impl Daemon {
             test_provider,
             durations,
             plugins,
+            app_catalog,
         } = settings;
 
         Ok(Self {
@@ -357,6 +364,7 @@ impl Daemon {
                     plugins,
                     durations,
                     test_provider,
+                    catalog: Arc::new(AppCatalog::new(app_catalog)),
                     events: Arc::default(),
                 }),
                 characters: Mutex::default(),

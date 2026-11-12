@@ -94,6 +94,50 @@ function phoneOffHome(model: ModelServer): string {
   });
 }
 
+/** A home where Mira answers through `model`, the person goes by Sam and her heartbeat is off; her Clock holds alarm a1 to ring once, its ring long gone, and Sam said the Clock may not wake her; and Notes, added from a file, does not say it wakes her and keeps a ring of a version that did, long gone too. */
+function mutedHome(model: ModelServer): string {
+  const notes = {
+    id: 'notes',
+    name: 'Notes',
+    summary: 'What she writes down',
+    version: '2.0.0',
+    icon: 'doc',
+    tint: 'gray',
+    wakes: false,
+    views: [{id: 'all', title: 'All', icon: 'doc'}],
+    opensOn: 'all',
+  };
+
+  return createHome({
+    'config.json': configJson({
+      project02: {...model.settings, userDisplayName: 'Sam'},
+    }),
+    'character-data': {
+      mira: {
+        'config.json': configJson({project02: {heartbeat: 'off'}}),
+        'plugin-data': {
+          phone: {
+            'muted.json': JSON.stringify({apps: ['clock']}),
+            'installed.json': JSON.stringify({
+              apps: [{...notes, source: 'file'}],
+            }),
+            apps: {
+              'clock.json': JSON.stringify(wakeSam([])),
+              'notes.txt': `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...notes, actions: []})};\nexport function screen() { return {items: []}; }\n`,
+              'notes.json': JSON.stringify({
+                storage: {},
+                rings: [
+                  {id: 'n1', at: '2026-01-05T08:00:00.000Z', title: 'Note'},
+                ],
+              }),
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 /** Her phone switched on in her settings, as her settings page switches it. */
 async function switchPhoneOn(wire: Wire): Promise<void> {
   await saveConfig(
@@ -173,7 +217,7 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
     messages: [{}, {text: 'Set for seven.'}],
   });
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
   );
 
   const [opened, used] = toolResults(model.requests[2]);
@@ -324,7 +368,7 @@ it("phone.refusals: what her phone refuses she reads as its sentence with what t
     refused(
       'phone.open',
       'app_not_found',
-      'There is no app "weather" on the phone. Your apps: Clock ("clock").',
+      'There is no app "weather" on the phone. Your apps: Clock ("clock"), App Store ("store").',
     ),
     refused(
       'phone.open',
@@ -489,6 +533,40 @@ it('phone.switched-on: while her settings switch her phone off, a ring that came
   expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
 });
 
+it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long due begins no turn of hers, her phone reads that it may not, and her note says so beside its name; a ring an app keeps that does not say it wakes her is told to her by nothing either; once Sam lets the Clock, its ring rings at once, late, in a turn of her own, alone', async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(mutedHome(model), pinging);
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const say = await converse(wire, 'mira');
+
+  await silent(events, 2);
+  expect(events.frames.filter(own('turn_running'))).toEqual([]);
+  expect(model.requests).toEqual([]);
+  expect(await wire.phone('mira')).toMatchObject({
+    status: 'ok',
+    apps: [
+      {id: 'clock', wakes: true, mayWake: false},
+      {id: 'notes', wakes: false},
+      {id: 'store'},
+    ],
+    ringing: [],
+  });
+
+  model.answer(reply('Morning, Sam.'));
+  await say('Morning.', 'morning');
+  expect(systemLines(model.requests[0])).toContain(
+    '- On your phone: Clock ("clock", which Sam said may not wake you) — Alarms, timers, and the time anywhere; Notes ("notes") — What she writes down; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+  );
+
+  model.answer(reply('Up you get, Sam.'));
+  expect(await wire.letAppWake('mira', 'clock', true)).toEqual({status: 'ok'});
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
+});
+
 it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint and views, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
@@ -500,8 +578,13 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
   const clock = {
     id: 'clock',
     name: 'Clock',
+    summary: 'Alarms, timers, and the time anywhere',
+    version: '1.0.0',
+    source: 'built_in',
     icon: 'clock',
     tint: 'graphite',
+    wakes: true,
+    mayWake: true,
     views: [
       {id: 'world', title: 'World Clock', icon: 'globe'},
       {id: 'alarms', title: 'Alarms', icon: 'alarm'},
@@ -510,10 +593,23 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     ],
     opensOn: 'alarms',
   };
+  const store = {
+    id: 'store',
+    name: 'App Store',
+    summary: 'More apps, each reviewed by Project02',
+    version: '1.0.0',
+    source: 'built_in',
+    icon: 'bag',
+    tint: 'blue',
+    wakes: false,
+    mayWake: true,
+    views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
+    opensOn: 'apps',
+  };
 
   expect(await wire.phone('mira')).toEqual({
     status: 'ok',
-    apps: [clock],
+    apps: [clock, store],
     ringing: [],
   });
 
@@ -549,7 +645,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
   ).toHaveLength(2);
   expect(phone).toEqual({
     status: 'ok',
-    apps: [clock],
+    apps: [clock, store],
     front: {
       appId: 'clock',
       viewId: 'alarms',

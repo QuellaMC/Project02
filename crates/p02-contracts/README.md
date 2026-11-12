@@ -10,7 +10,9 @@ code, a `RuntimePlugin`, to it. Beside its factory, a plugin has a
 says how a settings page draws the plugin: its row, the words for each
 field, and the cards its fields sit in, every field in one at least. The
 host calls only the hooks a plugin declares, under its budget and a
-cancellation token every capability call checks. A tool call runs only on
+cancellation token every capability call checks, and a hook that may only
+read, or has settled, changes none of the documents, logs and text files of
+its plugin's store. A tool call runs only on
 input its JSON Schema admits, a tool that asks the person first changes
 nothing until they say yes, and one rule decides whether a value fits a
 settings field.

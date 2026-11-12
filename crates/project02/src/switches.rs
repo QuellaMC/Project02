@@ -22,6 +22,13 @@ pub(crate) const TEST_DURATIONS: &str = "PROJECT02_TEST_DURATIONS";
 /// Names the Bot API the connector reaches in Telegram's place.
 pub(crate) const TEST_TELEGRAM_API: &str = "PROJECT02_TEST_TELEGRAM_API";
 
+/// Names the App Store's catalog in place of the build's own.
+pub(crate) const TEST_APP_CATALOG: &str = "PROJECT02_TEST_APP_CATALOG";
+
+/// Where this build's App Store is: its catalog, and each of its apps, by
+/// the rule the reader follows, under this base.
+const APP_CATALOG: &str = "https://raw.githubusercontent.com/QuellaMC/Project02-Apps/main";
+
 /// The waits serve reads, in the order a refusal lists them.
 const SERVE_KEYS: [&str; 6] = [
     "confirmation",
@@ -36,13 +43,25 @@ const SERVE_KEYS: [&str; 6] = [
 const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
-/// through, and the daemon's waits. The default is a run no switch touched,
-/// the one a program that runs the daemon starts, since no switch is a
-/// setting a person sees.
-#[derive(Debug, Default)]
+/// through, the daemon's waits, and where the App Store is. The default is
+/// a run no switch touched, the one a program that runs the daemon starts,
+/// since no switch is a setting a person sees.
+#[derive(Debug)]
 pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
     pub(crate) durations: Durations,
+    pub(crate) app_catalog: BaseUrl,
+}
+
+impl Default for Switches {
+    fn default() -> Self {
+        Self {
+            test_provider: None,
+            durations: Durations::default(),
+            app_catalog: BaseUrl::parse(APP_CATALOG)
+                .expect("the build's own App Store is at a base URL"),
+        }
+    }
 }
 
 /// A switch the command cannot use, and why.
@@ -59,11 +78,13 @@ pub(crate) struct TelegramSwitches {
 }
 
 /// Serve's switches as the environment sets them: the test provider's
-/// value and the durations', each none when unset. The durations are read
-/// first, then a test provider other than `deterministic` is refused.
+/// value, the durations' and the App Store's catalog's, each none when
+/// unset. The durations are read first, then a test provider other than
+/// `deterministic` is refused, then a catalog's address that is no base.
 pub(crate) fn read(
     provider: Option<&OsStr>,
     durations: Option<&OsStr>,
+    catalog: Option<&OsStr>,
 ) -> Result<Switches, SwitchError> {
     let mut switches = Switches::default();
 
@@ -91,12 +112,15 @@ pub(crate) fn read(
         );
     }
 
+    if let Some(catalog) = base(TEST_APP_CATALOG, catalog)? {
+        switches.app_catalog = catalog;
+    }
+
     Ok(switches)
 }
 
 /// The connector's switches as the environment sets them: the durations',
-/// then the Bot API's address, an absolute http or https one with no
-/// credentials, query or fragment.
+/// then the Bot API's address.
 pub(crate) fn telegram(
     durations: Option<&OsStr>,
     api: Option<&OsStr>,
@@ -105,18 +129,24 @@ pub(crate) fn telegram(
         .into_iter()
         .map(|(_, wait)| wait)
         .next();
-    let telegram = api
-        .map(|api| {
-            api.to_str()
-                .and_then(|api| BaseUrl::parse(api).ok())
-                .ok_or_else(|| SwitchError(format!("{TEST_TELEGRAM_API} must be {BASE_URL_RULE}.")))
-        })
-        .transpose()?;
 
     Ok(TelegramSwitches {
-        telegram,
+        telegram: base(TEST_TELEGRAM_API, api)?,
         draft_edits,
     })
+}
+
+/// The address switch `name` sets to `value`, an absolute http or https one
+/// with no credentials, query or fragment; none when unset.
+fn base(name: &str, value: Option<&OsStr>) -> Result<Option<BaseUrl>, SwitchError> {
+    value
+        .map(|value| {
+            value
+                .to_str()
+                .and_then(|value| BaseUrl::parse(value).ok())
+                .ok_or_else(|| SwitchError(format!("{name} must be {BASE_URL_RULE}.")))
+        })
+        .transpose()
 }
 
 /// The waits `pairs` sets among the command's `keys`, as `key=milliseconds`
@@ -160,25 +190,36 @@ fn refused(why: &str) -> SwitchError {
 mod tests {
     use super::*;
 
-    fn switched(provider: Option<&str>, durations: Option<&str>) -> Result<Switches, SwitchError> {
-        read(provider.map(OsStr::new), durations.map(OsStr::new))
+    fn switched(
+        provider: Option<&str>,
+        durations: Option<&str>,
+        catalog: Option<&str>,
+    ) -> Result<Switches, SwitchError> {
+        read(
+            provider.map(OsStr::new),
+            durations.map(OsStr::new),
+            catalog.map(OsStr::new),
+        )
     }
 
     #[test]
-    fn each_key_shortens_the_wait_it_names_and_the_rest_keep_their_own() {
+    fn each_switch_sets_what_it_names_and_the_rest_keep_their_own() {
         let ms = Duration::from_millis;
-        let unset = switched(None, None).unwrap();
+        let unset = switched(None, None, None).unwrap();
 
         assert_eq!(unset.test_provider, None);
         assert_eq!(unset.durations, Durations::default());
+        assert_eq!(unset.app_catalog.as_str(), APP_CATALOG);
 
         let set = switched(
             Some("deterministic"),
             Some("confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6"),
+            Some("http://127.0.0.1:8765/apps/"),
         )
         .unwrap();
 
         assert_eq!(set.test_provider, Some(TestProvider::Deterministic));
+        assert_eq!(set.app_catalog.as_str(), "http://127.0.0.1:8765/apps");
         assert_eq!(
             set.durations,
             Durations {
@@ -192,7 +233,7 @@ mod tests {
             }
         );
         assert_eq!(
-            switched(None, Some("grace=100")).unwrap().durations,
+            switched(None, Some("grace=100"), None).unwrap().durations,
             Durations {
                 grace: ms(100),
                 ..Durations::default()
@@ -204,15 +245,17 @@ mod tests {
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
         let keys = "the keys here are confirmation, pairing, silence, ping, grace, minute.";
 
-        for (provider, durations, said) in [
+        for (provider, durations, catalog, said) in [
             (
                 None,
                 Some("edit=100"),
+                None,
                 format!("PROJECT02_TEST_DURATIONS: unknown key \"edit\"; {keys}"),
             ),
             (
                 None,
                 Some("grace=1.5"),
+                None,
                 "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
                  above 0, not \"1.5\"."
                     .to_owned(),
@@ -220,13 +263,20 @@ mod tests {
             (
                 Some("nvidia"),
                 None,
+                None,
                 "PROJECT02_TEST_PROVIDER must be \"deterministic\" when it is set.".to_owned(),
+            ),
+            (
+                None,
+                None,
+                Some("127.0.0.1:8765"),
+                format!("PROJECT02_TEST_APP_CATALOG must be {BASE_URL_RULE}."),
             ),
         ] {
             assert_eq!(
-                switched(provider, durations).map(drop),
+                switched(provider, durations, catalog).map(drop),
                 Err(SwitchError(said)),
-                "{provider:?} {durations:?}"
+                "{provider:?} {durations:?} {catalog:?}"
             );
         }
     }

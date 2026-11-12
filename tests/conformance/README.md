@@ -46,6 +46,8 @@ other build of the same commands.
 | `harness/model-server.ts`    | An OpenAI-compatible model on loopback that answers as the test scripts it, streamed, whole or with an error status, streams at the test's pace or cuts a stream short, holds a request open on demand and keeps every request, with what each showed the model. |
 | `harness/mem0-server.ts`     | A Mem0 backend on loopback, a self-hosted server or the platform, that answers each path with the status and JSON body the test scripts, holds a request open on demand and keeps every request with its headers.                                                |
 | `harness/telegram-server.ts` | Telegram's Bot API on loopback, answering by Telegram's envelope and its server's rules: it keeps every call with its moment, answers one with a 429, and drops every call while Telegram is out of reach.                                                       |
+| `harness/catalog-server.ts`  | The App Store's catalog on loopback: each path answers what the test published there and any other a 404, it keeps every path asked, and out of reach it cuts every request off.                                                                                 |
+| `harness/apps.ts`            | Apps as the App Store serves them, for a test to publish on the catalog server: an app's one file, its entry in the catalog with the file's SHA-256, and a catalog of apps, each file where its rule puts it; with Reminders and quiet apps.                     |
 | `harness/server.ts`          | Binds a stand-in server to a loopback port of its own under the ceiling, and closes it with the test.                                                                                                                                                            |
 | `harness/terminal.py`        | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                                                                                     |
 | `harness/wait.ts`            | The ceiling, what a failed wait shows, and a wait on what a stand-in server keeps.                                                                                                                                                                               |
@@ -61,7 +63,8 @@ the same way: `target/debug/project02 inspect` when unset, and
 `target/debug/project02 telegram` when unset. A test adds its own
 arguments, and the switches of `crates/project02/README.md` it needs:
 `PROJECT02_TEST_PROVIDER=deterministic` for the fixed-reply voice,
-`PROJECT02_TEST_DURATIONS` for shortened waits. The connector takes two:
+`PROJECT02_TEST_DURATIONS` for shortened waits, and
+`PROJECT02_TEST_APP_CATALOG` for the catalog server. The connector takes two:
 `PROJECT02_TEST_TELEGRAM_API`, naming the test's Bot API, and `edit` in
 `PROJECT02_TEST_DURATIONS` for its draft edits. A test that needs the model server or the mem0 server
 writes its settings into the home's `config.json` before the start.

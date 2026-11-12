@@ -107,7 +107,7 @@ it("confirmations.answer: an approval is heard settled by every client before th
   expect(miraOverlay(home)).toBe(written);
   expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
     status: 'rejected',
-    reason: 'plugin_config_approval_denied',
+    reason: 'approval_denied',
   });
 });
 

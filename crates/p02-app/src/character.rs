@@ -63,6 +63,8 @@ enum Command {
     Open(oneshot::Sender<OpenOutcome>),
     /// A line was queued for her, which she takes in its turn.
     Queued,
+    /// The person changed her phone: she reads its rings again.
+    PhoneChanged,
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -186,6 +188,13 @@ impl CharacterHandle {
     pub(crate) fn queued(&self) {
         // One whose stop began takes no line: it waits for her next start.
         let _ = self.commands.send(Command::Queued);
+    }
+
+    /// Tells her the person changed her phone, whose rings she reads again
+    /// once she is free, as after a turn of hers.
+    pub(crate) fn phone_changed(&self) {
+        // One whose stop began reads her rings at her next start.
+        let _ = self.commands.send(Command::PhoneChanged);
     }
 
     /// The sentence she answers with while she takes nothing.
@@ -436,7 +445,20 @@ impl Actor {
             }
             // She looks in her inbox whenever she is free.
             Command::Queued => {}
+            Command::PhoneChanged => self.phone_changed().await,
         }
+    }
+
+    /// The person changed her phone: while she is built, she reads its
+    /// rings again, as after a turn of hers, so a ring that may wake her
+    /// now is due by its time and one that may not is not.
+    async fn phone_changed(&mut self) {
+        let Some(phone) = self.parts.as_ref().map(|parts| parts.built.phone()) else {
+            return;
+        };
+        let phoned = self.rings.read(phone).await;
+
+        self.her.noted(&phoned);
     }
 
     /// Takes the oldest line in her inbox through her thread, while she is
@@ -618,8 +640,9 @@ impl Actor {
                     Command::Start(answer) => {
                         let _ = answer.send(());
                     }
-                    // She looks in her inbox again once the turn ends.
-                    Command::Queued => {}
+                    // She looks in her inbox, and reads her phone's rings,
+                    // again once the turn ends.
+                    Command::Queued | Command::PhoneChanged => {}
                 },
             }
         }
@@ -867,7 +890,7 @@ impl Actor {
                     message: self.her.not_ready(),
                 });
             }
-            Command::Queued => {}
+            Command::Queued | Command::PhoneChanged => {}
         }
     }
 }
@@ -1216,8 +1239,9 @@ async fn take_turn(
 /// settings, which must be readable, hold nothing that stops her, and
 /// switch her on before anything is written for her, her package's
 /// settings merged into her overlay, her model, or what she needs for one,
-/// and her host built with `broker` to ask the person and her settings for
-/// its own plugin to read and change, through `daemon`.
+/// and her host built with `broker` to ask the person, her settings for
+/// its own plugin to read and change, through `daemon`, and the App Store's
+/// catalog for her phone to read.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -1261,6 +1285,7 @@ fn assemble(
                 Arc::new(data.clone()),
                 broker,
                 Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
+                Arc::clone(&world.catalog),
             ),
             |builder, (plugin, values)| {
                 builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())

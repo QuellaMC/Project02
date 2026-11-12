@@ -97,6 +97,45 @@ export function wireOf(daemon: Address) {
         `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/views/${segment(viewId)}`,
         'ScreenOutcome',
       ),
+    phoneStore: (characterId: string) =>
+      call(
+        'GET',
+        `/api/characters/${segment(characterId)}/phone/store`,
+        'StoreOutcome',
+      ),
+    installApp: (characterId: string, appId: string) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}`,
+        'AppInstallOutcome',
+      ),
+    previewApp: (characterId: string, file: string) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/phone/app-preview`,
+        'AppPreviewOutcome',
+        file,
+      ),
+    addApp: (characterId: string, file: string) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/phone/apps`,
+        'AppInstallOutcome',
+        file,
+      ),
+    removeApp: (characterId: string, appId: string) =>
+      call(
+        'DELETE',
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}`,
+        'AppRemoveOutcome',
+      ),
+    letAppWake: (characterId: string, appId: string, allowed: boolean) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/wake`,
+        'AppWakeOutcome',
+        {allowed},
+      ),
     open: async (characterId: string) =>
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,

@@ -6,6 +6,217 @@
 // twice. An alarm that is on, and a timer that is running, has one ring,
 // under its own id.
 
+export const manifest = {
+  format: 'project02.app.v1',
+  id: 'clock',
+  name: 'Clock',
+  summary: 'Alarms, timers, and the time anywhere',
+  version: '1.0.0',
+  icon: 'clock',
+  tint: 'graphite',
+  wakes: true,
+  views: [
+    {id: 'world', title: 'World Clock', icon: 'globe'},
+    {id: 'alarms', title: 'Alarms', icon: 'alarm'},
+    {id: 'stopwatch', title: 'Stopwatch', icon: 'stopwatch'},
+    {id: 'timers', title: 'Timers', icon: 'timer'},
+  ],
+  opensOn: 'alarms',
+  actions: [
+    {
+      name: 'set_alarm',
+      description:
+        'Set an alarm for a time of day, ringing once or on the days you give.',
+      did: 'Set an alarm',
+      view: 'alarms',
+      input: {
+        type: 'object',
+        properties: {
+          hour: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 23,
+            description: 'On a 24-hour clock.',
+          },
+          minute: {type: 'integer', minimum: 0, maximum: 59},
+          label: {
+            type: 'string',
+            maxLength: 60,
+            description: 'What it is for, shown under its time.',
+          },
+          days: {
+            type: 'array',
+            items: {type: 'integer', minimum: 1, maximum: 7},
+            uniqueItems: true,
+            description:
+              'The days it rings on, 1 (Monday) to 7 (Sunday); without them it rings once.',
+          },
+        },
+        required: ['hour', 'minute'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'change_alarm',
+      description:
+        "Change an alarm's time, label or days, or switch it on or off.",
+      did: 'Changed an alarm',
+      view: 'alarms',
+      input: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: "The alarm's id, as the Alarms view shows it.",
+          },
+          hour: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 23,
+            description: 'On a 24-hour clock.',
+          },
+          minute: {type: 'integer', minimum: 0, maximum: 59},
+          label: {
+            type: 'string',
+            maxLength: 60,
+            description: 'What it is for; empty to take its label away.',
+          },
+          days: {
+            type: 'array',
+            items: {type: 'integer', minimum: 1, maximum: 7},
+            uniqueItems: true,
+            description:
+              'The days it rings on, 1 (Monday) to 7 (Sunday); empty to make it ring once.',
+          },
+          on: {type: 'boolean', description: 'Whether it is switched on.'},
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'delete_alarm',
+      description: 'Delete an alarm.',
+      did: 'Deleted an alarm',
+      view: 'alarms',
+      input: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: "The alarm's id, as the Alarms view shows it.",
+          },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'start_timer',
+      description:
+        'Start a timer counting down from the hours, minutes and seconds you give.',
+      did: 'Started a timer',
+      view: 'timers',
+      input: {
+        type: 'object',
+        properties: {
+          hours: {type: 'integer', minimum: 0},
+          minutes: {type: 'integer', minimum: 0},
+          seconds: {type: 'integer', minimum: 0},
+          label: {
+            type: 'string',
+            maxLength: 60,
+            description: 'What it is for.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'cancel_timer',
+      description: 'Cancel a running timer.',
+      did: 'Cancelled a timer',
+      view: 'timers',
+      input: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: "The timer's id, as the Timers view shows it.",
+          },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'start_stopwatch',
+      description: 'Start the stopwatch, going on from the time it shows.',
+      did: 'Started the stopwatch',
+      view: 'stopwatch',
+      input: {type: 'object', properties: {}, additionalProperties: false},
+    },
+    {
+      name: 'stop_stopwatch',
+      description: 'Stop the stopwatch, keeping its time.',
+      did: 'Stopped the stopwatch',
+      view: 'stopwatch',
+      input: {type: 'object', properties: {}, additionalProperties: false},
+    },
+    {
+      name: 'lap_stopwatch',
+      description: 'Mark a lap on the running stopwatch.',
+      did: 'Marked a lap',
+      view: 'stopwatch',
+      input: {type: 'object', properties: {}, additionalProperties: false},
+    },
+    {
+      name: 'reset_stopwatch',
+      description:
+        'Stop the stopwatch and set it back to zero, clearing its laps.',
+      did: 'Reset the stopwatch',
+      view: 'stopwatch',
+      input: {type: 'object', properties: {}, additionalProperties: false},
+    },
+    {
+      name: 'add_city',
+      description:
+        'Add a city to your world clock, under the name you give it.',
+      did: 'Added a city',
+      view: 'world',
+      input: {
+        type: 'object',
+        properties: {
+          city: {type: 'string', minLength: 1, maxLength: 40},
+          zone: {
+            type: 'string',
+            description: 'Its IANA time zone, such as Asia/Tokyo.',
+          },
+        },
+        required: ['city', 'zone'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'remove_city',
+      description: 'Remove a city from your world clock.',
+      did: 'Removed a city',
+      view: 'world',
+      input: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            description: "The city's id, as the World Clock view shows it.",
+          },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+    },
+  ],
+};
+
 const WEEKDAYS = [
   'Monday',
   'Tuesday',

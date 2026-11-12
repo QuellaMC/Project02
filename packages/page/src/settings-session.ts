@@ -11,6 +11,17 @@ import type {
 } from '@project02/wire/contract';
 import type {GatewayClient} from '@project02/wire/client';
 import {
+  appFileAdded,
+  appFilePreviewed,
+  appFileRefusal,
+  appGiven,
+  appRemoveEnded,
+  appsCharacterOf,
+  catalogCharacterOf,
+  catalogRead,
+  herPhoneRead,
+} from './her-apps.ts';
+import {
   advancedSet,
   changeEnded,
   changeSent,
@@ -36,6 +47,7 @@ import {
   viewsRead,
   welcomeOpened,
   welcomeStepped,
+  windowPage,
   type Row,
 } from './settings.ts';
 import {
@@ -80,6 +92,23 @@ export type SettingsVerbs = {
   readonly addCharacter: () => Promise<void>;
   /** Removes a character a person added; her chats and memories stay. */
   readonly removeCharacter: (characterId: string) => Promise<void>;
+  /** Gives her an app of the App Store, by Get or Update: the person's own act, which asks nobody. */
+  readonly giveApp: (characterId: string, appId: string) => Promise<void>;
+  /**
+   * An app's file the person chose for her: read as it is, unless it is
+   * too large to be one, and shown as the daemon previews it.
+   */
+  readonly chooseAppFile: (characterId: string, file: File) => Promise<void>;
+  /** Adds the app the offer shows, sending its file again for the daemon to judge afresh. */
+  readonly addAppFile: () => Promise<void>;
+  /** Removes an app of hers, with what it kept. */
+  readonly removeApp: (characterId: string, appId: string) => Promise<void>;
+  /** The person's say on whether an app of hers may wake her. */
+  readonly letAppWake: (
+    characterId: string,
+    appId: string,
+    allowed: boolean,
+  ) => Promise<void>;
 };
 
 /** An address that can never work has no settings to change. */
@@ -98,6 +127,11 @@ export const noSettingsVerbs: SettingsVerbs = {
   chooseCharacterFile: () => Promise.resolve(),
   addCharacter: () => Promise.resolve(),
   removeCharacter: () => Promise.resolve(),
+  giveApp: () => Promise.resolve(),
+  chooseAppFile: () => Promise.resolve(),
+  addAppFile: () => Promise.resolve(),
+  removeApp: () => Promise.resolve(),
+  letAppWake: () => Promise.resolve(),
 };
 
 const advancedKey = 'project02.advanced';
@@ -144,11 +178,12 @@ type Tab = {
   readonly apply: (reduce: (state: WebState) => WebState) => void;
 };
 
-/** A character file's text as it is, or why the page does not send it. */
+/** A chosen file's text as it is, or why the page does not send it: too large for what it is to hold, or not text. */
 async function textOf(
   file: File,
+  refusalBySize: (size: number) => string | undefined,
 ): Promise<{readonly text: string} | {readonly refused: string}> {
-  const tooLarge = characterFileRefusal(file.size);
+  const tooLarge = refusalBySize(file.size);
 
   if (tooLarge !== undefined) {
     return {refused: tooLarge};
@@ -189,7 +224,7 @@ function characterVerbs({
 
       apply(noticeSpent);
 
-      const read = await textOf(file);
+      const read = await textOf(file, characterFileRefusal);
 
       if ('refused' in read) {
         show(current =>
@@ -243,6 +278,183 @@ function characterVerbs({
   };
 }
 
+/**
+ * Her apps as the window's pages read them. Every page the window comes
+ * to reads what it shows of them: her phone, for a page about her apps,
+ * and the App Store's apps for her, for Get More Apps and an app's page.
+ * Each kind of read is numbered per character as it begins, and only her
+ * newest lands, so one begun before her phone changed never shows it as
+ * it was.
+ */
+function herAppReads(tab: Tab): {
+  /** The tab's own, after which a page the window came to reads what it shows of her apps. */
+  readonly apply: Tab['apply'];
+  /** Her phone read again while a page about her apps is open: given a character, only while the page is about hers. */
+  readonly reread: (characterId?: string) => Promise<void>;
+} {
+  const {client, getState} = tab;
+  let reads = 0;
+  const phones = new Map<string, number>();
+  const catalogs = new Map<string, number>();
+  const phone = async (characterId: string): Promise<void> => {
+    const mine = (reads += 1);
+
+    phones.set(characterId, mine);
+
+    const outcome = await client.phone(characterId).catch(unanswered);
+
+    if (phones.get(characterId) === mine) {
+      tab.apply(current => herPhoneRead(current, characterId, outcome));
+    }
+  };
+  const catalog = async (characterId: string): Promise<void> => {
+    const mine = (reads += 1);
+
+    catalogs.set(characterId, mine);
+
+    const outcome = await client.phoneStore(characterId).catch(unanswered);
+
+    if (catalogs.get(characterId) === mine) {
+      tab.apply(current => catalogRead(current, characterId, outcome));
+    }
+  };
+
+  return {
+    apply: reduce => {
+      const before = windowPage(getState());
+
+      tab.apply(reduce);
+
+      const after = windowPage(getState());
+
+      if (after === undefined || after === before) {
+        return;
+      }
+
+      const hers = appsCharacterOf(after);
+      const shown = catalogCharacterOf(after);
+
+      if (hers !== undefined) {
+        void phone(hers);
+      }
+
+      if (shown !== undefined) {
+        void catalog(shown);
+      }
+    },
+    reread: async characterId => {
+      const hers = appsCharacterOf(windowPage(getState()));
+
+      if (hers !== undefined && (characterId ?? hers) === hers) {
+        await phone(hers);
+      }
+    },
+  };
+}
+
+/** Her apps: given from the App Store, added from a file, removed, and let wake her or not. */
+function appVerbs({
+  client,
+  getState,
+  apply,
+}: Tab): Pick<
+  SettingsVerbs,
+  'giveApp' | 'chooseAppFile' | 'addAppFile' | 'removeApp' | 'letAppWake'
+> {
+  /** Files chosen, numbered as they are: only the newest one's preview is shown. */
+  let chosen = 0;
+
+  return {
+    async giveApp(characterId, appId) {
+      apply(noticeSpent);
+
+      const outcome = await client
+        .installApp(characterId, appId)
+        .catch(unanswered);
+
+      apply(current => appGiven(current, characterId, appId, outcome));
+    },
+    async chooseAppFile(characterId, file) {
+      const mine = (chosen += 1);
+      // What is said of a file is shown only while it is the one last chosen.
+      const show = (reduce: (state: WebState) => WebState): void => {
+        if (mine === chosen) {
+          apply(reduce);
+        }
+      };
+
+      apply(noticeSpent);
+
+      const read = await textOf(file, appFileRefusal);
+
+      if ('refused' in read) {
+        show(current =>
+          appFilePreviewed(
+            current,
+            characterId,
+            {name: file.name},
+            {status: 'refused', reason: 'not_an_app', message: read.refused},
+          ),
+        );
+
+        return;
+      }
+
+      try {
+        const preview = await client.previewApp(characterId, read.text);
+
+        show(current =>
+          appFilePreviewed(
+            current,
+            characterId,
+            {name: file.name, text: read.text},
+            preview,
+          ),
+        );
+      } catch (error: unknown) {
+        show(current => noticed(current, problem(error)));
+      }
+    },
+    async addAppFile() {
+      const page = windowPage(getState());
+
+      if (page?.kind !== 'app-file' || page.text === undefined) {
+        return;
+      }
+
+      apply(noticeSpent);
+
+      const outcome = await client
+        .addApp(page.characterId, page.text)
+        .catch(unanswered);
+
+      apply(current => appFileAdded(current, page, outcome));
+    },
+    async removeApp(characterId, appId) {
+      apply(noticeSpent);
+
+      const outcome = await client
+        .removeApp(characterId, appId)
+        .catch(unanswered);
+
+      apply(current => appRemoveEnded(current, characterId, appId, outcome));
+    },
+    async letAppWake(characterId, appId, allowed) {
+      apply(noticeSpent);
+
+      const outcome = await client
+        .letAppWake(characterId, appId, allowed)
+        .catch(unanswered);
+
+      // Kept, the switch shows it once her phone is read again, which the
+      // stream's word that her phone changed asks for.
+      if (outcome.status !== 'ok') {
+        apply(current => noticed(current, outcome.message));
+      }
+    },
+  };
+}
+
 /** The welcome's steps: Continue saves what its step holds, as a box is saved, and the next step opens once it landed. */
 function welcomeVerbs(
   {getState, apply}: Tab,
@@ -283,8 +495,14 @@ export function createSettingsVerbs(tab: Tab): {
   readonly changed: () => Promise<void>;
   /** Every `ready`: what is open reads again; the first one judges the welcome, once per tab. */
   readonly ready: () => Promise<void>;
+  /** The stream says her phone changed: a page about her apps reads it again. */
+  readonly phoneChanged: (characterId: string) => Promise<void>;
 } {
-  const {client, getState, apply} = tab;
+  const {client, getState} = tab;
+  const herApps = herAppReads(tab);
+  const {apply} = herApps;
+  // The verbs move the window through the apply that reads what each page shows.
+  const reading: Tab = {...tab, apply};
   /** Reads, numbered as they begin, and the newest whose views have landed. */
   let reads = 0;
   let landed = 0;
@@ -501,18 +719,19 @@ export function createSettingsVerbs(tab: Tab): {
         remember(on);
         apply(current => advancedSet(current, on));
       },
-      ...welcomeVerbs(tab, save),
+      ...welcomeVerbs(reading, save),
       finishWelcome: close,
-      ...characterVerbs(tab),
+      ...characterVerbs(reading),
+      ...appVerbs(reading),
     },
     async changed() {
       if (getState().settings !== undefined) {
-        await refresh();
+        await Promise.all([refresh(), herApps.reread()]);
       }
     },
     async ready() {
       if (getState().settings !== undefined) {
-        await refresh();
+        await Promise.all([refresh(), herApps.reread()]);
 
         return;
       }
@@ -533,5 +752,6 @@ export function createSettingsVerbs(tab: Tab): {
       welcomeJudged = true;
       apply(current => welcomeOpened(current, view));
     },
+    phoneChanged: herApps.reread,
   };
 }

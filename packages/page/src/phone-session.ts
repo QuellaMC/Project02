@@ -8,6 +8,8 @@
  */
 import {tellTheChat} from './phone-link.ts';
 import {
+  askRaised,
+  askSettled,
   framed,
   healthSaid,
   initialPhoneState,
@@ -133,9 +135,19 @@ export function createPhoneSession(
       if (event.kind === 'phone_changed' && event.characterId === characterId) {
         void read();
       }
+
+      // Her ask to install an app stands over that app in the store while
+      // it waits for the person.
+      if (event.kind === 'confirmation_requested') {
+        apply(current => askRaised(current, event));
+      }
+
+      if (event.kind === 'confirmation_settled') {
+        apply(current => askSettled(current, event));
+      }
     },
     ready: snapshot => {
-      apply(current => phoneReady(current, snapshot.health));
+      apply(current => phoneReady(current, snapshot));
       void read();
     },
     lost: () => {

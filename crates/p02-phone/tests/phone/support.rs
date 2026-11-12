@@ -15,12 +15,13 @@ use serde_json::{Map, Value, json};
 /// Far past every limit a call runs under.
 const WAIT: Duration = Duration::from_secs(60);
 
-/// The files of a plugin store, in memory: each document a value, how many
-/// times one was written, and the one path whose writes fail, when a test
-/// names one.
+/// The files of a plugin store, in memory: each document a value, each
+/// text file its text, how many times one was written or removed, and the
+/// one path whose writes fail, when a test names one.
 #[derive(Debug, Default)]
 pub(crate) struct Files {
     pub(crate) documents: BTreeMap<String, Value>,
+    pub(crate) texts: BTreeMap<String, String>,
     pub(crate) writes: usize,
     pub(crate) unwritable: Option<&'static str>,
 }
@@ -38,6 +39,10 @@ impl LeasedFiles for Files {
         unreachable!("the phone keeps no log")
     }
 
+    fn read_text(&self, path: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.texts.get(path).cloned())
+    }
+
     fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
         if self.unwritable == Some(path) {
             return Err(StoreError::Store("the disk is full".into()));
@@ -50,6 +55,19 @@ impl LeasedFiles for Files {
 
     fn append_jsonl(&mut self, _: &str, _: &Value) -> Result<(), StoreError> {
         unreachable!("the phone keeps no log")
+    }
+
+    fn write_text(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.texts.insert(path.to_owned(), text.to_owned());
+        self.writes += 1;
+        Ok(())
+    }
+
+    fn remove(&mut self, path: &str) -> Result<(), StoreError> {
+        self.documents.remove(path);
+        self.texts.remove(path);
+        self.writes += 1;
+        Ok(())
     }
 }
 
@@ -77,16 +95,19 @@ pub(crate) fn millis(moment: &str) -> i64 {
     Timestamp::new(moment).unwrap().unix_millis()
 }
 
-/// The manifest of Notes, which opens on its one view, with `fields` in
-/// place of its own and without those `fields` sets to `null`.
-pub(crate) fn manifest(fields: &Value) -> String {
+/// The manifest of Notes, which opens on its one view and does not wake
+/// her, with `fields` in place of its own and without those `fields` sets
+/// to `null`.
+pub(crate) fn manifest(fields: &Value) -> Value {
     let mut manifest = json!({
         "format": "project02.app.v1",
         "id": "notes",
         "name": "Notes",
         "summary": "What she writes down",
+        "version": "1.0.0",
         "icon": "notebook",
         "tint": "orange",
+        "wakes": false,
         "views": [{"id": "all", "title": "All", "icon": "doc"}],
         "opensOn": "all",
         "actions": [],
@@ -100,7 +121,12 @@ pub(crate) fn manifest(fields: &Value) -> String {
         }
     }
 
-    manifest.to_string()
+    manifest
+}
+
+/// An app's one file: `script`, exporting `manifest` beside it.
+pub(crate) fn text(manifest: &Value, script: &str) -> String {
+    format!("export const manifest = {manifest};\n\n{script}")
 }
 
 /// A view of this `id` and `title`.
@@ -127,7 +153,7 @@ pub(crate) fn actions(names: &[&str]) -> Value {
 
 /// The app `script` makes with the manifest of Notes and `fields`.
 pub(crate) fn app(fields: &Value, script: &str) -> App {
-    App::new(&manifest(fields), script).unwrap()
+    App::new(&text(&manifest(fields), script)).unwrap()
 }
 
 pub(crate) fn input(value: &Value) -> Map<String, Value> {

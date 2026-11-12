@@ -23,8 +23,9 @@ use ts_rs::TS;
 pub enum PhoneOutcome {
     Ok {
         apps: Vec<PhoneApp>,
+        // Boxed, since it holds her whole screen.
         #[serde(skip_serializing_if = "Option::is_none")]
-        front: Option<PhoneFront>,
+        front: Option<Box<PhoneFront>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         did: Option<PhoneDid>,
         ringing: Vec<PhoneRing>,
@@ -45,18 +46,38 @@ pub enum PhoneRefusal {
     NoPhone,
 }
 
-/// An app on her phone as her window draws it: its icon and the tint of
-/// its tile, names of the page's own set, which falls back for one it does
-/// not know; its views, in its order; and the view it opens on.
+/// An app on her phone as her window draws it and her settings show it:
+/// the line she knows it by, its version and where it came from; its icon
+/// and the tint of its tile, names of the page's own set, which falls back
+/// for one it does not know; whether it says it wakes her, and whether the
+/// person lets it; its views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PhoneApp {
     pub id: Identifier,
     pub name: String,
+    pub summary: String,
+    pub version: String,
+    pub source: AppSource,
     pub icon: String,
     pub tint: String,
+    /// Whether it says it wakes her: only such an app sets a ring.
+    pub wakes: bool,
+    /// Whether the person lets it wake her: yes unless they said it may
+    /// not.
+    pub may_wake: bool,
     pub views: Vec<AppView>,
     pub opens_on: Identifier,
+}
+
+/// Where an app on her phone came from: it comes with her phone, it is the
+/// App Store's, or the person added it from a file nobody read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AppSource {
+    BuiltIn,
+    Catalog,
+    File,
 }
 
 /// A view of an app, which she opens it on: a tab, in the Clock.
@@ -138,11 +159,18 @@ pub enum ScreenRefusal {
     AppFailed,
 }
 
-/// What a view of an app shows: its pieces, top to bottom.
+/// What a view of an app shows: its pieces, top to bottom, and which page
+/// of the view it is, when the view shows more than one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(optional_fields)]
 pub struct Screen {
     pub items: Vec<ScreenItem>,
+    /// Which page of its view this is, as the App Store's page of an app
+    /// says that app's id; none for a view of one page. One page's rows
+    /// are not another's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
 }
 
 /// A piece of a screen.
@@ -172,18 +200,32 @@ pub enum ScreenItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         live: Option<LiveReading>,
     },
-    /// A line of plain words, as for a view with nothing in it yet.
+    /// Plain words: a line alone on a view with nothing in it yet, or a
+    /// paragraph among other pieces.
     Text { text: String },
+    /// An app's header: its tile, its name, a small line under it and its
+    /// status, as a store's page of the app shows them.
+    App {
+        /// The app's own id, which she passes to an action.
+        id: String,
+        tile: ScreenTile,
+        name: String,
+        subtitle: String,
+        status: String,
+    },
 }
 
 /// A row of a list: a title, a time or both.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(optional_fields)]
 pub struct ScreenRow {
     /// The thing's own id, which she passes to an action to change it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// An app's tile at the row's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tile: Option<ScreenTile>,
     /// A small line above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
@@ -201,6 +243,15 @@ pub struct ScreenRow {
     /// A switch, shown on or off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switch: Option<bool>,
+}
+
+/// An app's tile as a screen draws it: its icon and its tint, names of the
+/// page's own set, as an app's on her home screen are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenTile {
+    pub icon: String,
+    pub tint: String,
 }
 
 /// How a readout's reading moves, in milliseconds since the epoch.
