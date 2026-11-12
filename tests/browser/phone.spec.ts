@@ -297,7 +297,16 @@ test("page.phone-button: her chat's Her Phone button opens her phone's address i
   ).toHaveCount(0);
   await Promise.all([
     phone.waitForEvent('close'),
-    phone.getByRole('button', {name: 'Close her phone'}).click(),
+    // The click closes the very window it is made in, which may be gone
+    // before the click is said to have landed: only then is that no failure.
+    phone
+      .getByRole('button', {name: 'Close her phone'})
+      .click()
+      .catch((error: unknown) => {
+        if (!phone.isClosed()) {
+          throw error;
+        }
+      }),
   ]);
   await expect(button).toHaveAttribute('aria-pressed', 'false');
 
