@@ -47,6 +47,12 @@
   --pink-glyph: #e7124d;
   --mint-tile: rgba(0, 200, 179, 0.14);
   --mint-glyph: #008575;
+  --graphite-tile: rgba(28, 28, 30, 0.12);
+  --graphite-glyph: #1c1c1e;
+  --float-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.16);
+  --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  --wall-mix: 10%;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI',
     Roboto, sans-serif;
@@ -98,6 +104,12 @@
     --pink-glyph: #ff375f;
     --mint-tile: rgba(0, 218, 195, 0.22);
     --mint-glyph: #00dac3;
+    --graphite-tile: rgba(229, 229, 234, 0.18);
+    --graphite-glyph: #e5e5ea;
+    --float-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.5);
+    --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+    --wall-mix: 16%;
   }
 }
 
@@ -472,6 +484,39 @@ code {
   font-weight: 600;
 }
 
+/* Her Phone, at the head's end: filled while her phone's window shows her phone, a dot while she is using it. */
+.thread-phone {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: none;
+  border-radius: 16px;
+  background: var(--fill);
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.thread-phone[aria-pressed='true'] {
+  background: var(--link);
+  color: #ffffff;
+}
+
+.thread-phone-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.thread-phone[aria-pressed='true'] .thread-phone-dot {
+  background: #ffffff;
+}
+
 .messages {
   flex: 1;
   min-height: 0;
@@ -534,8 +579,12 @@ code {
   margin-bottom: 2px;
 }
 
+/* What she is doing before her reply begins: writing it, or using her phone. */
 .typing {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .composer {
@@ -1098,6 +1147,11 @@ code {
   color: var(--mint-glyph);
 }
 
+.tint-graphite {
+  background: var(--graphite-tile);
+  color: var(--graphite-glyph);
+}
+
 .face {
   flex: none;
   border-radius: 50%;
@@ -1109,6 +1163,13 @@ code {
 
 .face-person {
   background: linear-gradient(180deg, #a9a9af, #86868c);
+}
+
+.face-bar {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .face-side {
@@ -1163,7 +1224,9 @@ code {
   transition: background 0.2s ease;
 }
 
-.switch[aria-checked='true'] .switch-track {
+/* A switch of her phone's is drawn the same, as it stands, and never pressed. */
+.switch[aria-checked='true'] .switch-track,
+.switch-track-on {
   background: var(--green);
 }
 
@@ -1181,7 +1244,8 @@ code {
   transition: transform 0.2s cubic-bezier(0.3, 0.7, 0.4, 1);
 }
 
-.switch[aria-checked='true'] .switch-knob {
+.switch[aria-checked='true'] .switch-knob,
+.switch-track-on .switch-knob {
   transform: translateX(18px);
 }
 
@@ -1688,6 +1752,594 @@ code {
   place-items: center;
   background: var(--ok);
   color: #ffffff;
+}
+
+/*
+ * Her phone's window: a bar, her phone and a line under it, at the design's
+ * size, with nothing around them; a window that can show what is behind it
+ * does, and a browser's popup shows its own background.
+ */
+body:has(> #root > .phone-window) {
+  background: transparent;
+}
+
+.phone-window {
+  width: 372px;
+  height: 792px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.phone-bar {
+  flex: none;
+  align-self: stretch;
+  height: 40px;
+  padding: 0 4px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--float-shadow);
+}
+
+/* In a window without a frame of its own, the bar moves the window. */
+.phone-bar-moves {
+  cursor: grab;
+}
+
+.phone-bar-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.phone-watching {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: var(--fill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.phone-pin,
+.phone-close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--secondary);
+}
+
+.phone-pin + .phone-close {
+  margin-left: 0;
+}
+
+/* Pressed while the window stays on top of other windows. */
+.phone-pin[aria-pressed='true'] {
+  background: var(--fill);
+  color: var(--link);
+}
+
+/* Said where her phone would be, when it cannot be shown. */
+.phone-said {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 340px;
+  height: 700px;
+  margin: 0;
+  padding: 0 28px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+.phone-line {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: var(--card);
+  box-shadow: var(--float-shadow);
+  font-size: 13px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+
+.phone-line-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chevron);
+}
+
+.phone-line-dot-lit {
+  background: var(--green);
+}
+
+.phone-line-what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--label);
+}
+
+/* Her phone: the bezel, and its screen inside it. */
+.phone {
+  flex: none;
+  width: 340px;
+  height: 700px;
+  padding: 8px;
+  border-radius: 46px;
+  background: #0c0c0e;
+  box-shadow: var(--device-shadow);
+  font-size: 15px;
+}
+
+.phone-screen {
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: 38px;
+  background: var(--bg);
+  color: var(--label);
+}
+
+.phone-status {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 36px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.phone-blank {
+  flex: 1 1 auto;
+}
+
+/* Her home screen: her apps four to a row, on a wallpaper of her colour. */
+.phone-home {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 30px 14px 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px 4px;
+  align-content: start;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.phone-app {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* An app's icon: white on its tint, solid, in light and dark alike. */
+.phone-app-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  color: #ffffff;
+}
+
+.phone-app-icon.tint-indigo {
+  background: #564ade;
+}
+
+.phone-app-icon.tint-blue {
+  background: #1e6ef4;
+}
+
+.phone-app-icon.tint-brown {
+  background: #956d51;
+}
+
+.phone-app-icon.tint-gray {
+  background: #6c6c70;
+}
+
+.phone-app-icon.tint-orange {
+  background: #c55300;
+}
+
+.phone-app-icon.tint-cyan {
+  background: #007eae;
+}
+
+.phone-app-icon.tint-pink {
+  background: #e7124d;
+}
+
+.phone-app-icon.tint-mint {
+  background: #008575;
+}
+
+.phone-app-icon.tint-graphite {
+  background: #1c1c1e;
+}
+
+.phone-app-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+/* A view of an app: its title, its pieces top to bottom, and its views as tabs. */
+.phone-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-view-title {
+  flex: none;
+  margin: 6px 20px 12px;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.phone-pieces {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* A reading or a line alone on its view stands in the middle of it. */
+.phone-pieces > .phone-readout:only-child,
+.phone-pieces > .phone-quiet:only-child {
+  margin: auto 0;
+  padding-bottom: 60px;
+}
+
+.phone-quiet {
+  margin: 0;
+  text-align: center;
+  font-size: 17px;
+  color: var(--secondary);
+}
+
+.phone-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phone-list-header {
+  margin: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.phone-card {
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.phone-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.phone-row + .phone-row {
+  border-top: 1px solid var(--divider);
+}
+
+.phone-row-fresh {
+  background: var(--blue-tile);
+}
+
+.phone-row-off .phone-row-words,
+.phone-row-off .phone-row-end {
+  color: var(--secondary);
+}
+
+.phone-row-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+
+.phone-row-caption {
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.phone-row-title {
+  font-size: 17px;
+}
+
+.phone-row-timed .phone-row-title {
+  font-size: 20px;
+}
+
+.phone-row-time,
+.phone-row-end {
+  font-weight: 300;
+  letter-spacing: -0.5px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.phone-row-time {
+  font-size: 36px;
+}
+
+.phone-row-end {
+  flex: none;
+  font-size: 32px;
+}
+
+.phone-period {
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.phone-row-end .phone-period {
+  font-size: 15px;
+}
+
+.phone-row-subtitle {
+  font-size: 13px;
+}
+
+.phone-row-new {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--link);
+}
+
+.phone-row-value {
+  flex: none;
+  font-size: 17px;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.phone-row .switch-track {
+  flex: none;
+}
+
+/* One large reading; counting down, inside a ring of what is left of its whole. */
+.phone-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.phone-readout-label,
+.phone-readout-caption {
+  font-size: 14px;
+  color: var(--secondary);
+}
+
+.phone-readout-text {
+  font-size: 60px;
+  font-weight: 200;
+  letter-spacing: -1px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.phone-readout-ringed {
+  position: relative;
+  align-self: center;
+  width: 216px;
+  height: 216px;
+}
+
+.phone-readout-ringed svg {
+  display: block;
+}
+
+.phone-readout-words {
+  position: absolute;
+  inset: 0;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.phone-readout-ringed .phone-readout-text {
+  font-size: 46px;
+  font-weight: 300;
+  letter-spacing: -0.5px;
+}
+
+.phone-readout-ringed .phone-readout-caption {
+  font-size: 13px;
+}
+
+.phone-ring-whole {
+  stroke: var(--fill);
+}
+
+.phone-ring-left {
+  stroke: var(--orange-glyph);
+}
+
+.phone-tabs {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  padding: 6px 6px 0;
+  border-top: 1px solid var(--divider);
+  background: var(--card);
+}
+
+.phone-tab {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--secondary);
+}
+
+.phone-tab[aria-current='page'] {
+  color: var(--orange-glyph);
+}
+
+.phone-tab-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+/* What rings, over everything. */
+.phone-ringing {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 24px 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.phone-ringing-badge {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--orange-tile);
+  color: var(--orange-glyph);
+}
+
+.phone-ringing-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.phone-ringing-time {
+  font-size: 80px;
+  font-weight: 200;
+  letter-spacing: -2px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.phone-ringing-body {
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.phone-ringing-state {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--orange-glyph);
+}
+
+/* The bar at the bottom, which goes to her home screen. */
+.phone-home-bar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.phone-home-bar-tabbed {
+  background: var(--card);
+}
+
+.phone-home-bar:focus-visible {
+  outline-offset: -6px;
+}
+
+.phone-home-indicator {
+  width: 120px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--label);
+  opacity: 0.3;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -56,6 +56,10 @@ impl Now {
         )
     }
 
+    pub(crate) fn at(&self) -> &Timestamp {
+        &self.at
+    }
+
     pub(crate) fn millis(&self) -> i64 {
         self.at.unix_millis()
     }

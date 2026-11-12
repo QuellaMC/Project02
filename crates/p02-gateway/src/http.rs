@@ -119,6 +119,11 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/characters", post(add_character))
         .route("/api/characters/{id}", delete(remove_character))
         .route("/api/characters/{id}/start", post(start))
+        .route("/api/characters/{id}/phone", get(phone))
+        .route(
+            "/api/characters/{id}/phone/apps/{app}/views/{view}",
+            get(phone_screen),
+        )
         .route("/api/conversations/open", post(open))
         .route("/api/turns", post(turn))
         .route("/api/conversations/{id}/messages", get(history))
@@ -271,6 +276,17 @@ async fn add_character(State(app): State<App>, body: Result<Bytes, BytesRejectio
 
 async fn remove_character(State(app): State<App>, Path(id): Path<String>) -> Response {
     answer(&app.0.daemon.remove_character(&id).await)
+}
+
+async fn phone(State(app): State<App>, Path(id): Path<String>) -> Response {
+    answer(&app.0.daemon.phone(&id).await)
+}
+
+async fn phone_screen(
+    State(app): State<App>,
+    Path((id, phone_app, view)): Path<(String, String, String)>,
+) -> Response {
+    answer(&app.0.daemon.phone_screen(&id, &phone_app, &view).await)
 }
 
 async fn open(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {

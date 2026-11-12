@@ -83,7 +83,7 @@ export function Face({
 }: {
   readonly id: string;
   readonly name: string;
-  readonly size: 'side' | 'row' | 'page' | 'welcome';
+  readonly size: 'bar' | 'side' | 'row' | 'page' | 'welcome';
 }) {
   return (
     <span

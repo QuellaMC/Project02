@@ -88,6 +88,11 @@ pub enum Event {
         #[serde(flatten)]
         failure: MaintenanceFailure,
     },
+    /// Her phone is to be read again: a call of hers to it came back
+    /// accepted, or a ring's moment of hers began or ended.
+    PhoneChanged {
+        character_id: Identifier,
+    },
 }
 
 /// How a turn ended, as the frame announcing it says.
@@ -150,6 +155,9 @@ pub enum TurnProgress {
     ToolCallCompleted {
         round: NonZeroU32,
         status: ToolCallStatus,
+        /// The plugin that provides the tool, or `undeclared.<tool>` for a
+        /// tool the turn did not offer.
+        plugin_id: Identifier,
         tool_name: Identifier,
     },
 }

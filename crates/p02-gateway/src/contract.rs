@@ -17,19 +17,21 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, BotState, BotUsername,
+    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, AppView, BotState, BotUsername,
     CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
     CharacterPreviewOutcome, CharacterPreviewRefusal, CharacterState, CharacterSummary,
     ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId,
     ConfirmationQuestion, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
     ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody,
-    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal,
+    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading,
     MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
     PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingRequestBody, PairingSubject, PendingConfirmation, ProtocolVersion, Ready, Refusal,
-    RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, SubmitOutcome, ToolCallStatus,
-    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    PairingRequestBody, PairingSubject, PendingConfirmation, PhoneApp, PhoneDid, PhoneFront,
+    PhoneOutcome, PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
+    RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenItem,
+    ScreenOutcome, ScreenRefusal, ScreenRow, Settlement, StartOutcome, StartRefusal,
+    StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
+    TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -65,6 +67,8 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<ConnectorBotsOutcome>();
     wire.written::<PairingRequest>();
     wire.written::<PairingAnswer>();
+    wire.written::<PhoneOutcome>();
+    wire.written::<ScreenOutcome>();
     wire.written::<ErrorBody>();
     wire.written::<Ready>();
     wire.written::<Event>();
@@ -449,6 +453,24 @@ fn written() -> Vec<(&'static str, Value)> {
         drafts: Vec::new(),
         ..running.clone()
     };
+    let (clock, screen) = phone();
+    let front = PhoneFront {
+        app_id: id("clock"),
+        view_id: id("alarms"),
+        screen: Some(screen.clone()),
+        message: None,
+    };
+    let did = PhoneDid {
+        app_id: id("clock"),
+        words: "Set an alarm".to_owned(),
+        at: at.clone(),
+    };
+    let ring = PhoneRing {
+        app_name: "Clock".to_owned(),
+        title: "Alarm".to_owned(),
+        body: Some("Wake Sam".to_owned()),
+        at: at.clone(),
+    };
     let events = [
         Event::TurnProgress {
             character_id: id("mira"),
@@ -468,6 +490,7 @@ fn written() -> Vec<(&'static str, Value)> {
             progress: TurnProgress::ToolCallCompleted {
                 round: NonZeroU32::MIN,
                 status: ToolCallStatus::Rejected,
+                plugin_id: id("notes"),
                 tool_name: id("notes.add"),
             },
         },
@@ -516,6 +539,9 @@ fn written() -> Vec<(&'static str, Value)> {
         Event::MaintenanceFailed {
             character_id: id("mira"),
             failure: maintenance,
+        },
+        Event::PhoneChanged {
+            character_id: id("mira"),
         },
     ];
 
@@ -688,6 +714,55 @@ fn written() -> Vec<(&'static str, Value)> {
                 decision: Answer::Denied,
             },
         ),
+        value(
+            "PhoneOutcome",
+            &PhoneOutcome::Ok {
+                apps: vec![clock.clone()],
+                front: Some(front.clone()),
+                did: Some(did),
+                ringing: vec![ring],
+            },
+        ),
+        value(
+            "PhoneOutcome",
+            &PhoneOutcome::Ok {
+                apps: vec![clock],
+                front: Some(PhoneFront {
+                    screen: None,
+                    message: Some("Clock took too long and was stopped.".to_owned()),
+                    ..front
+                }),
+                did: None,
+                ringing: Vec::new(),
+            },
+        ),
+        value(
+            "PhoneOutcome",
+            &PhoneOutcome::Refused {
+                reason: PhoneRefusal::NoPhone,
+                message: "Mira has no phone: her settings switch it off.".to_owned(),
+            },
+        ),
+        value(
+            "PhoneOutcome",
+            &PhoneOutcome::Failed {
+                message: "Her phone could not be read: the disk is gone.".to_owned(),
+            },
+        ),
+        value("ScreenOutcome", &ScreenOutcome::Ok { screen }),
+        value(
+            "ScreenOutcome",
+            &ScreenOutcome::Refused {
+                reason: ScreenRefusal::UnknownView,
+                message: "Clock has no view \"calendar\".".to_owned(),
+            },
+        ),
+        value(
+            "ScreenOutcome",
+            &ScreenOutcome::Failed {
+                message: "Her phone could not be read: the disk is gone.".to_owned(),
+            },
+        ),
         read_back(
             "GatewayErrorBody",
             &ErrorBody {
@@ -711,6 +786,65 @@ fn written() -> Vec<(&'static str, Value)> {
 
     written.extend(events.iter().map(|event| read_back("GatewayEvent", event)));
     written
+}
+
+/// Her phone's Clock as her window draws it, and a screen holding every
+/// piece and field a screen has.
+fn phone() -> (PhoneApp, Screen) {
+    let id = |text: &str| Identifier::new(text).unwrap();
+    let words = |text: &str| Some(text.to_owned());
+    let then = 1_794_571_440_000;
+
+    (
+        PhoneApp {
+            id: id("clock"),
+            name: "Clock".to_owned(),
+            icon: "clock".to_owned(),
+            tint: "graphite".to_owned(),
+            views: vec![AppView {
+                id: id("alarms"),
+                title: "Alarms".to_owned(),
+                icon: "alarm".to_owned(),
+            }],
+            opens_on: id("alarms"),
+        },
+        Screen {
+            items: vec![
+                ScreenItem::List {
+                    header: words("Laps"),
+                    rows: vec![ScreenRow {
+                        id: words("c1"),
+                        caption: words("Today, +8HRS"),
+                        title: words("London"),
+                        subtitle: words("Wake Sam, weekdays"),
+                        time: words("5:41 PM"),
+                        value: words("00:12.34"),
+                        switch: Some(true),
+                    }],
+                },
+                ScreenItem::Readout {
+                    id: words("t1"),
+                    label: words("Tea"),
+                    text: "12:34".to_owned(),
+                    caption: words("Ends 9:54 AM"),
+                    live: Some(LiveReading::Down {
+                        to: then,
+                        of: 900_000,
+                    }),
+                },
+                ScreenItem::Readout {
+                    id: None,
+                    label: None,
+                    text: "00:00.00".to_owned(),
+                    caption: None,
+                    live: Some(LiveReading::Up { from: then }),
+                },
+                ScreenItem::Text {
+                    text: "No World Clocks".to_owned(),
+                },
+            ],
+        },
+    )
 }
 
 /// The settings of a home whose documents each name a connector this build

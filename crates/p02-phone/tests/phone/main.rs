@@ -9,6 +9,7 @@
 mod apps;
 mod calls;
 mod clock;
+mod front;
 mod rings;
 mod screens;
 mod support;

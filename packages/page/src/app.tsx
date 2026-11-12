@@ -52,6 +52,16 @@ export function App({session}: {readonly session: Session}) {
   );
 }
 
+/** Why the page's address will never work, and where to go instead: said by every surface of the page. */
+export function AddressRefused({message}: {readonly message: string}) {
+  return (
+    <>
+      {message} This address does not work: open the one{' '}
+      <code>project02 serve</code> printed, or open the app again.
+    </>
+  );
+}
+
 function ConnectionBanners({state}: {readonly state: WebState}) {
   const {connection} = state;
 
@@ -59,8 +69,7 @@ function ConnectionBanners({state}: {readonly state: WebState}) {
     <>
       {connection.status === 'refused' ? (
         <p className="banner banner-refused" role="alert">
-          {connection.message} This address does not work: open the one{' '}
-          <code>project02 serve</code> printed, or open the app again.
+          <AddressRefused message={connection.message} />
         </p>
       ) : null}
       {connection.status === 'connecting' ? (

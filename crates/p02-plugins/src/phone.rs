@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use p02_contracts::{
     BeforeRoleModelCallOutput, ContextItem, ContextItemKind, EvidenceKind, EvidenceNote,
     EvidenceStatus, FactoryInput, FileStore, HookContext, LeasedStore, PluginError, ProvidedTool,
-    RuntimePlugin, ToolCall, ToolCallOutcome,
+    RuntimePlugin, StoreError, ToolCall, ToolCallOutcome,
 };
 use p02_phone::{Acted, Action, App, Now, Opened, Phone, PhoneError, View};
 use p02_shared::{Identifier, error_chain, sentence};
@@ -99,6 +99,13 @@ struct PhonePlugin {
     note: String,
 }
 
+/// What her phone answered a call: what she reads, and why what she has in
+/// front could not be kept, when it could not. The call stands either way.
+struct Answered {
+    output: Value,
+    unkept: Option<String>,
+}
+
 /// A call of one of the tools, its input as the tool's contract admits it.
 enum Request {
     Open(Opening),
@@ -163,13 +170,23 @@ impl RuntimePlugin for PhonePlugin {
         .await?;
 
         Ok(match answered {
-            Ok(output) => ToolCallOutcome::Accepted {
+            Ok(Answered { output, unkept }) => ToolCallOutcome::Accepted {
                 output,
-                evidence: vec![EvidenceNote::new(
-                    EvidenceKind::ToolInvocation,
-                    EvidenceStatus::Accepted,
-                    summary,
-                )],
+                evidence: vec![match unkept {
+                    None => EvidenceNote::new(
+                        EvidenceKind::ToolInvocation,
+                        EvidenceStatus::Accepted,
+                        summary,
+                    ),
+                    Some(why) => EvidenceNote::new(
+                        EvidenceKind::ToolInvocation,
+                        EvidenceStatus::Degraded,
+                        format!(
+                            "{summary} What she has in front could not be kept: {}",
+                            sentence(&why)
+                        ),
+                    ),
+                }],
             },
             Err(refusal) => refused(phone, &app, &refusal),
         })
@@ -214,16 +231,30 @@ impl Request {
         }
     }
 
-    /// What her phone answers the call now, as she reads it.
-    fn answer(&self, phone: &Phone, files: &mut LeasedStore<'_>) -> Result<Value, PhoneError> {
+    /// What her phone answers the call now, as she reads it, and why what
+    /// she has in front could not be kept, when it could not.
+    fn answer(&self, phone: &Phone, files: &mut LeasedStore<'_>) -> Result<Answered, PhoneError> {
         let now = Now::system();
+        let unkept = |unkept: Option<StoreError>| unkept.as_ref().map(|error| error_chain(error));
 
         match self {
-            Self::Open(Opening { app, view }) => phone
-                .open(files, app, view.as_deref(), &now)
-                .map(|opened| shown(&opened)),
+            Self::Open(Opening { app, view }) => {
+                phone
+                    .open(files, app, view.as_deref(), &now)
+                    .map(|opened| Answered {
+                        output: shown(&opened),
+                        unkept: unkept(opened.unkept),
+                    })
+            }
             Self::Use(Using { app, action, input }) => {
-                phone.act(files, app, action, input, &now).map(used)
+                phone.act(files, app, action, input, &now).map(|mut acted| {
+                    let unkept = unkept(acted.unkept.take());
+
+                    Answered {
+                        output: used(acted),
+                        unkept,
+                    }
+                })
             }
         }
     }
@@ -339,6 +370,7 @@ mod tests {
             screen: Err(PhoneError::TookTooLong {
                 app: "Clock".to_owned(),
             }),
+            unkept: None,
         };
 
         assert_eq!(

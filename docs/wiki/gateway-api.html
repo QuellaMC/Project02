@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 10,
+  "protocolVersion": 11,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -399,6 +399,35 @@
             </td>
           </tr>
           <tr>
+            <td>her phone</td>
+            <td><code>GET /api/characters/:id/phone</code></td>
+            <td>
+              → <code>PhoneOutcome</code>: <code>ok</code> with her
+              <code>apps</code>, <code>front</code> when she has an app in
+              front rather than her home screen, <code>did</code> once she
+              did anything on it, and <code>ringing</code>; or
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, when her settings switch it off), or
+              <code>failed</code> with why it could not be read. Read from her
+              data whether she is ready, stopped or failed. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>phone screen</td>
+            <td>
+              <code>GET /api/characters/:id/phone/apps/:app/views/:view</code>
+            </td>
+            <td>
+              → <code>ScreenOutcome</code>: <code>ok</code> with the view's
+              <code>screen</code>, as someone looking around her phone sees
+              it; <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, <code>unknown_app</code>,
+              <code>unknown_view</code>, <code>app_failed</code>) in the
+              phone's own sentence; or <code>failed</code>. It changes nothing
+              of hers: what she has in front stays as it was.
+            </td>
+          </tr>
+          <tr>
             <td>open</td>
             <td><code>POST /api/conversations/open</code></td>
             <td>
@@ -627,7 +656,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":10,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":11,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -710,7 +739,13 @@ data: {…}</code></pre>
               <code>user_message</code> (with <code>source</code> and
               <code>clientMessageId</code>) and <code>visible_reply</code>,
               which names the <code>draftId</code> it replaces — and its rounds'
-              tool calls.
+              tool calls: <code>tool_calls_requested</code> with the
+              <code>toolNames</code> a round called, then a
+              <code>tool_call_completed</code> for each call as it came back,
+              <code>accepted</code> or <code>rejected</code>, with its
+              <code>toolName</code> and the <code>pluginId</code> of the plugin
+              that provides the tool (<code>undeclared.&lt;tool&gt;</code> for
+              one the turn did not offer).
             </td>
           </tr>
           <tr>
@@ -822,6 +857,13 @@ data: {…}</code></pre>
             <td>
               A segment rotation that failed after a completed turn; health
               shows the same <code>at</code>.
+            </td>
+          </tr>
+          <tr>
+            <td><code>phone_changed</code></td>
+            <td>
+              Her <code>characterId</code>: her phone is to be read again.
+              Described below.
             </td>
           </tr>
         </tbody>
@@ -969,6 +1011,68 @@ data: {…}</code></pre>
         <code>ready</code> and its config read — and edits a draft's message in
         each chat at most every 1.5 seconds, to her turn as the daemon last
         said it. <code>crates/p02-telegram/README.md</code> has the rest.
+      </p>
+
+      <h2>Her phone</h2>
+
+      <p class="rule">
+        Her phone is hers: a client reads it and looks around it, and nothing
+        it reads changes anything of hers.
+      </p>
+
+      <p>
+        <code>GET /api/characters/:id/phone</code> reads her phone from her
+        data, whether she runs or not. Her <code>apps</code> come in her
+        phone's order, each with its <code>id</code>, <code>name</code>, the
+        <code>icon</code> and the <code>tint</code> of its tile — names of the
+        page's own set, which falls back for one it does not know — its
+        <code>views</code>, each an <code>id</code>, a <code>title</code> and
+        an <code>icon</code>, and the view it <code>opensOn</code>.
+        <code>front</code> is the app she has in front, by its
+        <code>appId</code> and <code>viewId</code>, with that view's
+        <code>screen</code>, or, when the app fails to show it, the
+        <code>message</code> saying why in its place; absent, she is on her
+        home screen. <code>did</code> is what she last did on it: the
+        <code>appId</code>, a few <code>words</code> in the past tense —
+        <code>Opened Clock</code>, or an action's own, such as
+        <code>Set an alarm</code> — and the moment <code>at</code>.
+        <code>ringing</code> is empty but while a moment of hers that a ring
+        began runs, and then holds each ring it tells: its
+        <code>appName</code>, <code>title</code>, <code>body</code> when it
+        has one, and the time <code>at</code> it was set for. Her opening an
+        app and her taking an action in one put it in front and say what she
+        did; a call her phone refuses, or an app fails, changes neither.
+      </p>
+
+      <p>
+        A screen is one piece of data, the same she reads when she opens the
+        view: its <code>items</code>, top to bottom. A <code>list</code> is a
+        card of <code>rows</code> under an optional <code>header</code>, each
+        row a <code>title</code>, a clock reading as <code>time</code> or
+        both, with an optional <code>caption</code> above,
+        <code>subtitle</code> below, <code>value</code> at its end and
+        <code>switch</code> drawn on or off; a <code>readout</code> is one
+        large reading, <code>text</code> as of the read, with an optional
+        <code>label</code> and <code>caption</code>, and, when it moves,
+        <code>live</code>: <code>{counts: "up", from}</code> or
+        <code>{counts: "down", to, of}</code>, in milliseconds since the
+        epoch, which a client counts from without asking again; a
+        <code>text</code> is a quiet line of words. Any view is read on
+        request with
+        <code>GET /api/characters/:id/phone/apps/:app/views/:view</code>,
+        which puts nothing in front of her.
+      </p>
+
+      <p>
+        <code>phone_changed</code> says her phone is to be read again: after a
+        call of her phone's tools came back accepted, as a moment that a ring
+        began begins, and once that moment's rings went to their apps, before
+        its <code>turn_completed</code>. A surface showing her phone reads it
+        again then, and on every <code>ready</code>. A call of one of her
+        phone's tools comes back as a <code>tool_call_completed</code> whose
+        <code>pluginId</code> is <code>phone</code>, accepted or not: the page
+        says she is using her phone from it until her next reply begins or
+        the turn ends.
       </p>
 
       <h2>The sync rule</h2>

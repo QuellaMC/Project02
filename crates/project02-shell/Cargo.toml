@@ -11,6 +11,8 @@ name = "project02-shell"
 p02-shared.workspace = true
 p02-telegram.workspace = true
 project02.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 # Declared here, not in the workspace table: Tauri's CLI reads the tray
 # feature on this entry to bundle the library the tray loads, and skips an
 # inherited one.

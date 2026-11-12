@@ -1,10 +1,11 @@
 /**
  * Everything a tab shows, as one value, and every change to it as a pure
  * function of the previous value and one input: the daemon's snapshot, an
- * event, a history page, a send, a line's end. The session applies them
- * and React reads the value; a reducer that changes nothing returns the
- * value it was given. Nothing here touches the DOM, so the rules a page
- * follows are tested in Node with the rest of the suite.
+ * event, a history page, a send, a line's end, what her phone's window
+ * says of itself. The session applies them and React reads the value; a
+ * reducer that changes nothing returns the value it was given. Nothing
+ * here touches the DOM, so the rules a page follows are tested in Node
+ * with the rest of the suite.
  */
 import type {
   AnswerOutcome,
@@ -21,6 +22,7 @@ import type {
   PairingRequest,
   PairingSettleOutcome,
   PendingConfirmation,
+  PhoneOutcome,
   RunningTurn,
   RuntimeConfigSectionNamespace,
   TurnStatus,
@@ -33,6 +35,9 @@ export type Connection =
   | {readonly status: 'live'}
   /** The address will never work: a dead token, a wrong protocol, no token. */
   | {readonly status: 'refused'; readonly message: string};
+
+/** A surface's value, the chat's or her phone's window's: how its connection stands moves the same way for each. */
+type Connected = {readonly connection: Connection};
 
 /** A committed message as the page shows it; a person's own is told by its role. */
 export type Message = {
@@ -217,6 +222,16 @@ export type WebState = {
    */
   readonly turns: ReadonlyMap<string, RunningTurn>;
   /**
+   * The conversations whose turn has her using her phone: a round of it
+   * called a tool of her phone, and her next reply has not begun. The page
+   * works it out from the stream alone, so a snapshot starts without.
+   */
+  readonly phoning: ReadonlySet<string>;
+  /** Whose phone her phone's window shows, as it last said; none once it said it went. */
+  readonly phoneWindow?: string | undefined;
+  /** The characters the daemon last said have no phone: their chat has no Her Phone button. */
+  readonly phoneless: ReadonlySet<string>;
+  /**
    * The characters with a reply this tab has not shown: one committed to
    * a conversation that was not the thread on screen, whatever began her
    * turn. Her name carries a dot, one however many wait, until her chat
@@ -246,6 +261,9 @@ export type LineEnding = {
 
 export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 
+/** The plugin that puts her phone in her hands: a tool it provides is one of her phone's. */
+const phonePlugin = 'phone';
+
 export const initialState: WebState = {
   connection: {status: 'connecting'},
   advanced: false,
@@ -254,6 +272,8 @@ export const initialState: WebState = {
   pending: new Map(),
   composers: new Map(),
   turns: new Map(),
+  phoning: new Set(),
+  phoneless: new Set(),
   unseen: new Set(),
   notices: [],
 };
@@ -276,9 +296,10 @@ export function composerText(state: WebState): string {
 /**
  * Every `ready` is the truth: the roster, the waiting confirmations and
  * pairing requests, and the turns in progress replace what the tab held —
- * how a turn ended is still news — and what the thread shows is set aside
- * for the newest page the session reads next, kept on screen and stitched
- * to nothing that comes.
+ * how a turn ended is still news, and whether she is using her phone in
+ * one is the stream's to say again — and what the thread shows is set
+ * aside for the newest page the session reads next, kept on screen and
+ * stitched to nothing that comes.
  */
 export function installSnapshot(
   state: WebState,
@@ -291,6 +312,7 @@ export function installSnapshot(
     confirmations: snapshot.confirmations,
     pairings: snapshot.pairings,
     turns: new Map(snapshot.turns.map(turn => [turn.conversationId, turn])),
+    phoning: new Set(),
     ...(state.thread === undefined ? {} : {thread: setAside(state.thread)}),
   };
 
@@ -328,7 +350,7 @@ function setAside(thread: Thread): Thread {
  * connecting again: what it shows is from before, and a line sent now
  * waits for that `ready` to go.
  */
-export function streamLost(state: WebState): WebState {
+export function streamLost<State extends Connected>(state: State): State {
   return state.connection.status === 'live'
     ? {...state, connection: {status: 'connecting'}}
     : state;
@@ -339,7 +361,7 @@ export function streamLost(state: WebState): WebState {
  * frame this tab applied, so what follows is what it missed, and nothing
  * on screen moves. A refused address stays refused.
  */
-export function streamResumed(state: WebState): WebState {
+export function streamResumed<State extends Connected>(state: State): State {
   return state.connection.status === 'connecting'
     ? {...state, connection: {status: 'live'}}
     : state;
@@ -362,6 +384,7 @@ export function connectionRefused(state: WebState, message: string): WebState {
     confirmations: [],
     pairings: [],
     turns: new Map(),
+    phoning: new Set(),
   };
 }
 
@@ -735,6 +758,57 @@ function withoutPairing(state: WebState, code: string): WebState {
   };
 }
 
+/** Her phone's window says it shows her phone: her chat's Her Phone button is pressed. */
+export function phoneWindowShows(
+  state: WebState,
+  characterId: string,
+): WebState {
+  return state.phoneWindow === characterId
+    ? state
+    : {...state, phoneWindow: characterId};
+}
+
+/**
+ * Her phone's window says her phone went from it. A window taken over for
+ * another character's phone may say so before it says the phone it had
+ * went: only the phone it last said it shows can go.
+ */
+export function phoneWindowGone(
+  state: WebState,
+  characterId: string,
+): WebState {
+  return state.phoneWindow === characterId
+    ? {...state, phoneWindow: undefined}
+    : state;
+}
+
+/**
+ * What the daemon answered when her phone was read: a refusal says she
+ * has none, since her settings give her none or it does not know her, and
+ * any other answer that she has one.
+ */
+export function phoneAnswered(
+  state: WebState,
+  characterId: string,
+  outcome: PhoneOutcome,
+): WebState {
+  const none = outcome.status === 'refused';
+
+  if (state.phoneless.has(characterId) === none) {
+    return state;
+  }
+
+  const phoneless = new Set(state.phoneless);
+
+  if (none) {
+    phoneless.add(characterId);
+  } else {
+    phoneless.delete(characterId);
+  }
+
+  return {...state, phoneless};
+}
+
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
   switch (event.kind) {
     case 'state_changed':
@@ -749,6 +823,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'health_changed':
       // The daemon's word on the roster, in order with every state frame.
       return rosterSaid(state, event.health);
+    case 'phone_changed':
+      // What her phone holds is her phone's window's to read.
+      return state;
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state
@@ -769,12 +846,19 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
         : withoutPairing(state, event.code);
     case 'turn_progress':
       return progressed(state, event);
-    case 'turn_running':
-      // The daemon's word on the turn replaces the tab's copy whole.
-      return {
+    case 'turn_running': {
+      // The daemon's word on the turn replaces the tab's copy whole. A
+      // round's drafts end before its tool calls run, so a draft now is
+      // her next reply begun.
+      const running = {
         ...state,
         turns: new Map(state.turns).set(event.conversationId, runningOf(event)),
       };
+
+      return event.drafts.length === 0
+        ? running
+        : withoutPhoning(running, event.conversationId);
+    }
     case 'turn_completed': {
       const ended = withoutTurnEnded(state, event);
 
@@ -797,9 +881,10 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
 
 /**
  * A step of a turn, in whichever conversation it ran: a line the daemon
- * took settles, whichever thread it went to; a committed message joins
- * the thread on screen; and a reply of hers committed anywhere else is
- * one the person has not seen.
+ * took settles, whichever thread it went to; whether she is using her
+ * phone moves with the turn's tool calls and replies; a committed message
+ * joins the thread on screen; and a reply of hers committed anywhere else
+ * is one the person has not seen.
  */
 function progressed(
   state: WebState,
@@ -811,14 +896,50 @@ function progressed(
     state.pending.has(progress.clientMessageId)
       ? settled(state, progress.clientMessageId)
       : state;
+  const used = phoneUse(taken, event);
 
   if (state.thread?.conversationId === event.conversationId) {
-    return withThread(taken, thread => committed(thread, progress));
+    return withThread(used, thread => committed(thread, progress));
   }
 
   return progress.kind === 'visible_reply'
-    ? replyUnseen(taken, event.characterId)
-    : taken;
+    ? replyUnseen(used, event.characterId)
+    : used;
+}
+
+/**
+ * She is using her phone from a call of one of its tools in a turn of hers
+ * the tab holds, whatever began the turn, until her next reply begins: a
+ * reply committed is one begun. Her phone's tools are known by the plugin
+ * that provides them, as the daemon names it.
+ */
+function phoneUse(
+  state: WebState,
+  {conversationId, progress}: Extract<GatewayEvent, {kind: 'turn_progress'}>,
+): WebState {
+  if (progress.kind === 'visible_reply') {
+    return withoutPhoning(state, conversationId);
+  }
+
+  return progress.kind === 'tool_call_completed' &&
+    progress.pluginId === phonePlugin &&
+    state.turns.has(conversationId) &&
+    !state.phoning.has(conversationId)
+    ? {...state, phoning: new Set(state.phoning).add(conversationId)}
+    : state;
+}
+
+/** Her next reply began, or her turn ended: she is not using her phone in it any more. */
+function withoutPhoning(state: WebState, conversationId: string): WebState {
+  if (!state.phoning.has(conversationId)) {
+    return state;
+  }
+
+  const phoning = new Set(state.phoning);
+
+  phoning.delete(conversationId);
+
+  return {...state, phoning};
 }
 
 /** A reply of hers landed where the person was not looking: one dot beside her name, however many land. */
@@ -878,7 +999,7 @@ function runningOf(
 /**
  * A turn ends at its own completion, never at another's: the end of
  * another line's turn, or of a turn of her own, which names no line,
- * leaves it running.
+ * leaves it running. Her using her phone in it ends with it.
  */
 function withoutTurnEnded(
   state: WebState,
@@ -898,7 +1019,7 @@ function withoutTurnEnded(
 
   turns.delete(ended.conversationId);
 
-  return {...state, turns};
+  return withoutPhoning({...state, turns}, ended.conversationId);
 }
 
 /** The daemon took the line, whichever thread it went to; what its ending said stands. */

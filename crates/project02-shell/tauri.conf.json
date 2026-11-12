@@ -7,7 +7,24 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "phone-window",
+          "description": "Her phone's window, on the daemon's page: its bar moves it, its pin keeps it on top of other windows, and it closes.",
+          "windows": ["phone"],
+          "local": false,
+          "remote": {
+            "urls": ["http://127.0.0.1:*"]
+          },
+          "permissions": [
+            "core:window:allow-start-dragging",
+            "core:window:allow-is-always-on-top",
+            "core:window:allow-set-always-on-top",
+            "core:window:allow-close"
+          ]
+        }
+      ]
     }
   },
   "bundle": {

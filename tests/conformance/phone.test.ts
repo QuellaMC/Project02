@@ -23,7 +23,7 @@ import {
   type ModelRequest,
   type ModelServer,
 } from './harness/model-server.ts';
-import {converse, saveConfig, wireOf} from './harness/wire.ts';
+import {converse, saveConfig, wireOf, type Wire} from './harness/wire.ts';
 
 /** The person is where the clocks read UTC, so an alarm's ring lands at a moment the test can name. */
 const utc = {TZ: 'UTC'};
@@ -72,6 +72,35 @@ function quietHome(model: ModelServer, clock?: object): string {
       },
     },
   });
+}
+
+/** A home where Mira answers through `model`, the person goes by Sam, her heartbeat is off and her settings switch her phone off, whose Clock holds alarm a1 to ring once, its ring long gone. */
+function phoneOffHome(model: ModelServer): string {
+  return createHome({
+    'config.json': configJson({
+      project02: {...model.settings, userDisplayName: 'Sam'},
+    }),
+    'character-data': {
+      mira: {
+        'config.json': configJson({
+          project02: {heartbeat: 'off'},
+          plugins: {phone: {enabled: false}},
+        }),
+        'plugin-data': {
+          phone: {apps: {'clock.json': JSON.stringify(wakeSam([]))}},
+        },
+      },
+    },
+  });
+}
+
+/** Her phone switched on in her settings, as her settings page switches it. */
+async function switchPhoneOn(wire: Wire): Promise<void> {
+  await saveConfig(
+    wire,
+    {scope: 'character', characterId: 'mira'},
+    {kind: 'section_enabled', namespace: 'plugins', id: 'phone', enabled: true},
+  );
 }
 
 /** The Clock's file as the Clock writes it, holding alarm a1, Wake Sam at 07:00 on `days`, none for once, its ring set for 07:00 on Monday, January 5, 2026, long gone. */
@@ -445,23 +474,7 @@ it("phone.ring-kept: a ring whose turn the model fails stays set and begins no o
 
 it('phone.switched-on: while her settings switch her phone off, a ring that came due on it begins no turn; once they switch it on, the ring rings at once, in a turn of her own', async () => {
   const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({
-      project02: {...model.settings, userDisplayName: 'Sam'},
-    }),
-    'character-data': {
-      mira: {
-        'config.json': configJson({
-          project02: {heartbeat: 'off'},
-          plugins: {phone: {enabled: false}},
-        }),
-        'plugin-data': {
-          phone: {apps: {'clock.json': JSON.stringify(wakeSam([]))}},
-        },
-      },
-    },
-  });
-  const daemon = await startDaemon(home, pinging);
+  const daemon = await startDaemon(phoneOffHome(model), pinging);
   const events = await openEvents(daemon);
 
   await silent(events, 2);
@@ -469,13 +482,161 @@ it('phone.switched-on: while her settings switch her phone off, a ring that came
   expect(model.requests).toEqual([]);
 
   model.answer(reply('Up you get, Sam.'));
-  await saveConfig(
-    wireOf(daemon),
-    {scope: 'character', characterId: 'mira'},
-    {kind: 'section_enabled', namespace: 'plugins', id: 'phone', enabled: true},
-  );
+  await switchPhoneOn(wireOf(daemon));
   expect(await events.next(own('turn_completed'))).toSatisfy(
     frameOf('turn_completed', {status: 'completed'}),
   );
   expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
+});
+
+it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint and views, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({'config.json': configJson({project02: model.settings})}),
+  );
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const say = await converse(wire, 'mira');
+  const clock = {
+    id: 'clock',
+    name: 'Clock',
+    icon: 'clock',
+    tint: 'graphite',
+    views: [
+      {id: 'world', title: 'World Clock', icon: 'globe'},
+      {id: 'alarms', title: 'Alarms', icon: 'alarm'},
+      {id: 'stopwatch', title: 'Stopwatch', icon: 'stopwatch'},
+      {id: 'timers', title: 'Timers', icon: 'timer'},
+    ],
+    opensOn: 'alarms',
+  };
+
+  expect(await wire.phone('mira')).toEqual({
+    status: 'ok',
+    apps: [clock],
+    ringing: [],
+  });
+
+  model.answer(
+    calling(['phone_open', {app: 'clock'}]),
+    calling([
+      'phone_use',
+      {
+        app: 'clock',
+        action: 'set_alarm',
+        input: {hour: 7, minute: 0, label: 'Wake Sam'},
+      },
+    ]),
+    reply('Set for seven.'),
+  );
+  await say('Wake me at seven.', 'wake');
+
+  const ended = await events.next(
+    frameOf('turn_completed', {clientMessageId: 'wake'}),
+  );
+  const said = events.frames.slice(0, events.frames.indexOf(ended));
+  const phone = await wire.phone('mira');
+
+  expect(
+    said.filter(
+      frameOf('turn_progress', {
+        progress: {kind: 'tool_call_completed', pluginId: 'phone'},
+      }),
+    ),
+  ).toHaveLength(2);
+  expect(
+    said.filter(frameOf('phone_changed', {characterId: 'mira'})),
+  ).toHaveLength(2);
+  expect(phone).toEqual({
+    status: 'ok',
+    apps: [clock],
+    front: {
+      appId: 'clock',
+      viewId: 'alarms',
+      screen: {
+        items: [
+          {
+            kind: 'list',
+            rows: [
+              {
+                id: 'a1',
+                time: '7:00 AM',
+                subtitle: expect.stringMatching(
+                  /^Wake Sam, (?:today|tomorrow)$/u,
+                ) as string,
+                switch: true,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    did: {
+      appId: 'clock',
+      words: 'Set an alarm',
+      at: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+      ) as string,
+    },
+    ringing: [],
+  });
+  expect(await wire.phoneScreen('mira', 'clock', 'world')).toEqual({
+    status: 'ok',
+    screen: {items: [{kind: 'text', text: 'No World Clocks'}]},
+  });
+  expect(await wire.phone('mira')).toEqual(phone);
+  expect(await wire.phone('nova')).toEqual({
+    status: 'refused',
+    reason: 'unknown_character',
+    message: 'Character "nova" was not found; the characters are mira.',
+  });
+  expect(await wire.phoneScreen('mira', 'weather', 'today')).toEqual({
+    status: 'refused',
+    reason: 'unknown_app',
+    message: 'There is no app "weather" on the phone.',
+  });
+  expect(await wire.phoneScreen('mira', 'clock', 'calendar')).toEqual({
+    status: 'refused',
+    reason: 'unknown_view',
+    message: 'Clock has no view "calendar".',
+  });
+});
+
+it('phone.ring-on-the-wire: while her settings switch her phone off, her phone is refused in a sentence; once they switch it on and its ring begins a moment of hers, the stream says her phone changed, and while the moment runs her phone says what rings; once it ends, the stream says her phone changed again before the turn ends, and nothing rings', async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(phoneOffHome(model));
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const changed = frameOf('phone_changed', {characterId: 'mira'});
+
+  await wire.start('mira');
+  expect(await wire.phone('mira')).toEqual({
+    status: 'refused',
+    reason: 'no_phone',
+    message: 'Mira has no phone: her settings switch it off.',
+  });
+
+  const asked = model.hold();
+
+  await switchPhoneOn(wire);
+  await asked.arrived();
+  await events.next(changed);
+  expect(await wire.phone('mira')).toMatchObject({
+    status: 'ok',
+    ringing: [
+      {
+        appName: 'Clock',
+        title: 'Alarm',
+        body: 'Wake Sam',
+        at: '2026-01-05T07:00:00.000Z',
+      },
+    ],
+  });
+
+  asked.release(reply('Up you get, Sam.'));
+  await events.next(changed);
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(await wire.phone('mira')).toMatchObject({status: 'ok', ringing: []});
 });

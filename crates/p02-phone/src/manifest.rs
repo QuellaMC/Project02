@@ -1,5 +1,5 @@
-//! `app.json`: what an app is called, the views it shows and the actions
-//! she can take in it.
+//! `app.json`: what an app is called and how its icon is drawn, the views
+//! it shows and the actions she can take in it.
 
 use std::collections::BTreeSet;
 
@@ -22,6 +22,8 @@ pub(crate) struct Manifest {
     pub(crate) id: Identifier,
     pub(crate) name: String,
     pub(crate) summary: String,
+    pub(crate) icon: String,
+    pub(crate) tint: String,
     pub(crate) views: Vec<View>,
     pub(crate) opens_on: Identifier,
     pub(crate) actions: Vec<Action>,
@@ -32,6 +34,7 @@ pub(crate) struct Manifest {
 pub struct View {
     id: Identifier,
     title: String,
+    icon: String,
 }
 
 /// Something she can do in an app: the script's function of that name,
@@ -40,6 +43,7 @@ pub struct View {
 pub struct Action {
     name: Identifier,
     description: String,
+    did: String,
     view: Identifier,
     input: ToolInputContract,
 }
@@ -52,6 +56,8 @@ struct Authored {
     id: Identifier,
     name: String,
     summary: String,
+    icon: String,
+    tint: String,
     views: Vec<AuthoredView>,
     opens_on: String,
     actions: Vec<AuthoredAction>,
@@ -62,6 +68,7 @@ struct Authored {
 struct AuthoredView {
     id: Identifier,
     title: String,
+    icon: String,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +76,7 @@ struct AuthoredView {
 struct AuthoredAction {
     name: String,
     description: String,
+    did: String,
     view: String,
     input: Value,
 }
@@ -83,6 +91,13 @@ impl View {
     pub fn title(&self) -> &str {
         &self.title
     }
+
+    /// A name of the page's own icons, which falls back for one it does
+    /// not know.
+    #[must_use]
+    pub fn icon(&self) -> &str {
+        &self.icon
+    }
 }
 
 impl Action {
@@ -94,6 +109,13 @@ impl Action {
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    /// What her window says she did, a few words in the past tense: `Set
+    /// an alarm`.
+    #[must_use]
+    pub fn did(&self) -> &str {
+        &self.did
     }
 
     /// The view the phone shows after the action.
@@ -116,12 +138,11 @@ impl Manifest {
         if authored.format != FORMAT {
             return Err(PackageError::Format);
         }
-        if authored.name.trim().is_empty() {
-            return Err(PackageError::Name);
-        }
-        if authored.summary.trim().is_empty() || authored.summary.contains(['\n', '\r']) {
-            return Err(PackageError::Summary);
-        }
+
+        not_blank("name", &authored.name)?;
+        one_line("summary", &authored.summary)?;
+        not_blank("icon", &authored.icon)?;
+        not_blank("tint", &authored.tint)?;
 
         let views = views(authored.views)?;
         let opens_on = view_named(&views, &authored.opens_on)
@@ -132,6 +153,8 @@ impl Manifest {
             id: authored.id,
             name: authored.name,
             summary: authored.summary,
+            icon: authored.icon,
+            tint: authored.tint,
             views,
             opens_on,
             actions,
@@ -149,14 +172,16 @@ fn views(authored: Vec<AuthoredView>) -> Result<Vec<View>, PackageError> {
     authored
         .into_iter()
         .map(|view| {
-            if seen.insert(view.id.clone()) {
-                Ok(View {
-                    id: view.id,
-                    title: view.title,
-                })
-            } else {
-                Err(PackageError::DuplicateView(view.id))
+            if !seen.insert(view.id.clone()) {
+                return Err(PackageError::DuplicateView(view.id));
             }
+
+            not_blank(&format!("view \"{}\" icon", view.id), &view.icon)?;
+            Ok(View {
+                id: view.id,
+                title: view.title,
+                icon: view.icon,
+            })
         })
         .collect()
 }
@@ -174,6 +199,8 @@ fn actions(authored: Vec<AuthoredAction>, views: &[View]) -> Result<Vec<Action>,
                 return Err(PackageError::DuplicateAction(action.name));
             }
 
+            one_line(&format!("action \"{}\" did", action.name), &action.did)?;
+
             let view = view_named(views, &action.view).ok_or_else(|| PackageError::ActionView {
                 action: action.name.clone(),
                 view: action.view,
@@ -188,11 +215,31 @@ fn actions(authored: Vec<AuthoredAction>, views: &[View]) -> Result<Vec<Action>,
             Ok(Action {
                 name,
                 description: action.description,
+                did: action.did,
                 view,
                 input,
             })
         })
         .collect()
+}
+
+/// Refuses `text`, what `field` of the manifest holds, when it is blank.
+fn not_blank(field: &str, text: &str) -> Result<(), PackageError> {
+    if text.trim().is_empty() {
+        Err(PackageError::Blank(field.to_owned()))
+    } else {
+        Ok(())
+    }
+}
+
+/// Refuses `text`, what `field` of the manifest holds, unless it is one
+/// line that is not blank.
+fn one_line(field: &str, text: &str) -> Result<(), PackageError> {
+    if text.trim().is_empty() || text.contains(['\n', '\r']) {
+        Err(PackageError::NotOneLine(field.to_owned()))
+    } else {
+        Ok(())
+    }
 }
 
 /// `name` as an action is named: lowercase letters, digits and `_`,

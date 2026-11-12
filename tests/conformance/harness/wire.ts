@@ -85,6 +85,18 @@ export function wireOf(daemon: Address) {
         `/api/characters/${segment(characterId)}`,
         'RemoveCharacterOutcome',
       ),
+    phone: (characterId: string) =>
+      call(
+        'GET',
+        `/api/characters/${segment(characterId)}/phone`,
+        'PhoneOutcome',
+      ),
+    phoneScreen: (characterId: string, appId: string, viewId: string) =>
+      call(
+        'GET',
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/views/${segment(viewId)}`,
+        'ScreenOutcome',
+      ),
     open: async (characterId: string) =>
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,

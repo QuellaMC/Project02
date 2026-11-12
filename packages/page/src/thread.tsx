@@ -3,6 +3,7 @@ import {useEffect, useRef} from 'react';
 import type {CharacterSummary} from '@project02/wire/contract';
 import {avatarColor, initialOf} from './look.ts';
 import type {Session} from './session.ts';
+import {Icon} from './settings-controls.tsx';
 import {composerText, type Thread, type WebState} from './store.ts';
 
 /** States a character rests in; one switched off and resting is off. */
@@ -71,6 +72,9 @@ export function ThreadPane({
   );
   const turn = state.turns.get(thread.conversationId);
   const drafts = turn?.drafts ?? [];
+  // She is using her phone, in a turn of her own as in a line's, until her
+  // next reply begins.
+  const phoning = state.phoning.has(thread.conversationId);
   // A turn of her own, which no line began, shows nothing until she drafts.
   const writing = turn?.clientMessageId !== undefined && drafts.length === 0;
   const typed = composerText(state);
@@ -95,6 +99,15 @@ export function ThreadPane({
         <Avatar id={thread.characterId} name={name} />
         <h2 className="thread-name">{name}</h2>
         {character === undefined ? null : <StatePill character={character} />}
+        {state.phoneless.has(thread.characterId) ? null : (
+          <HerPhoneButton
+            pressed={state.phoneWindow === thread.characterId}
+            phoning={phoning}
+            onToggle={() => {
+              session.togglePhone(thread.characterId);
+            }}
+          />
+        )}
       </header>
       {thread.unread === undefined ? null : (
         <p className="notice" role="status">
@@ -132,7 +145,12 @@ export function ThreadPane({
         {drafts.map(draft => (
           <Bubble key={draft.draftId} name={name} text={draft.text} draft />
         ))}
-        {writing ? (
+        {phoning ? (
+          <p className="typing muted small">
+            <Icon name="phone" size={14} weight={1.8} />
+            {name} is using her phone…
+          </p>
+        ) : writing ? (
           <p className="typing muted small">{name} is writing…</p>
         ) : null}
         {pending.map(([clientMessageId, line]) => (
@@ -164,6 +182,36 @@ export function ThreadPane({
         </button>
       </form>
     </section>
+  );
+}
+
+/**
+ * Opens her phone in its window, and closes it: filled and pressed while
+ * that window shows her phone, and with a dot while she is using her
+ * phone, whether the window is open or not.
+ */
+function HerPhoneButton({
+  pressed,
+  phoning,
+  onToggle,
+}: {
+  readonly pressed: boolean;
+  readonly phoning: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="thread-phone"
+      aria-pressed={pressed}
+      onClick={onToggle}
+    >
+      <Icon name="phone" size={16} weight={1.8} />
+      Her Phone
+      {phoning ? (
+        <span className="thread-phone-dot" role="img" aria-label="In use" />
+      ) : null}
+    </button>
   );
 }
 

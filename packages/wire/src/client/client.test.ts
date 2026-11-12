@@ -47,6 +47,7 @@ describe('gateway client paths', () => {
 
     await client().history('conv a/b?c#d', {limit: 2});
     await client().removeCharacter('nova/../mira');
+    await client().phoneScreen('mira', 'clock/..', 'alarms?all');
 
     expect(requested.map(({url, method}) => ({url, method}))).toEqual([
       {
@@ -56,6 +57,10 @@ describe('gateway client paths', () => {
       {
         url: 'http://127.0.0.1:7777/api/characters/nova%2F..%2Fmira',
         method: 'DELETE',
+      },
+      {
+        url: 'http://127.0.0.1:7777/api/characters/mira/phone/apps/clock%2F../views/alarms%3Fall',
+        method: 'GET',
       },
     ]);
   });

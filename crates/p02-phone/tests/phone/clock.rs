@@ -29,14 +29,8 @@ fn act(files: &mut Files, action: &str, given: &Value, moment: &str) -> Result<V
 }
 
 /// What the Clock's `view` shows at `moment`.
-fn open(files: &Files, view: &str, moment: &str) -> Value {
-    serde_json::to_value(
-        phone()
-            .open(files, "clock", Some(view), &at(moment))
-            .unwrap()
-            .screen,
-    )
-    .unwrap()
+fn look(files: &Files, view: &str, moment: &str) -> Value {
+    serde_json::to_value(phone().look(files, "clock", view, &at(moment)).unwrap()).unwrap()
 }
 
 /// The rings set on the phone, soonest first, as the Clock's file keeps
@@ -118,7 +112,7 @@ fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
     );
 
     let opened = phone()
-        .open(&Files::default(), "clock", None, &at(MORNING))
+        .open(&mut Files::default(), "clock", None, &at(MORNING))
         .unwrap();
 
     assert_eq!(opened.view.as_str(), "alarms");
@@ -153,7 +147,7 @@ fn an_alarm_that_rings_once_rings_the_next_morning_and_is_then_off() {
         json!([{"id": "a1", "at": morning, "title": "Alarm", "body": "Wake Sam"}])
     );
     assert_eq!(
-        open(&files, "alarms", evening),
+        look(&files, "alarms", evening),
         list(&json!([
             {"id": "a1", "time": "7:00 AM", "subtitle": "Wake Sam, tomorrow", "switch": true},
         ]))
@@ -163,7 +157,7 @@ fn an_alarm_that_rings_once_rings_the_next_morning_and_is_then_off() {
 
     assert_eq!(rings(&files), json!([]));
     assert_eq!(
-        open(&files, "alarms", morning),
+        look(&files, "alarms", morning),
         list(&json!([
             {"id": "a1", "time": "7:00 AM", "subtitle": "Wake Sam", "switch": false},
         ]))
@@ -201,7 +195,7 @@ fn a_weekday_alarm_set_on_friday_rings_monday_then_tuesday_at_the_same_clock_tim
         json!([{"id": "a1", "at": "2026-03-10T14:00:00.000Z", "title": "Alarm"}])
     );
     assert_eq!(
-        open(&files, "alarms", monday),
+        look(&files, "alarms", monday),
         list(&json!([
             {"id": "a1", "time": "7:00 AM", "subtitle": "Alarm, weekdays", "switch": true},
         ]))
@@ -234,7 +228,7 @@ fn an_alarm_switched_off_has_no_ring_switched_on_has_one_and_deleted_is_gone_wit
     );
     assert_eq!(rings(&files), json!([wake]));
     assert_eq!(
-        open(&files, "alarms", MORNING),
+        look(&files, "alarms", MORNING),
         list(&json!([
             {"id": "a2", "time": "6:30 AM", "subtitle": "Yoga, weekdays", "switch": false},
             {"id": "a1", "time": "7:00 AM", "subtitle": "Wake Sam, tomorrow", "switch": true},
@@ -271,7 +265,7 @@ fn an_alarm_switched_off_has_no_ring_switched_on_has_one_and_deleted_is_gone_wit
     act(&mut files, "delete_alarm", &json!({"id": "a1"}), MORNING).unwrap();
 
     assert_eq!(rings(&files), json!([]));
-    assert_eq!(open(&files, "alarms", MORNING), nothing("No Alarms"));
+    assert_eq!(look(&files, "alarms", MORNING), nothing("No Alarms"));
     assert_eq!(
         act(
             &mut files,
@@ -302,7 +296,7 @@ fn a_timer_rings_when_it_ends_counts_down_and_is_gone_once_told_or_cancelled() {
     let five = json!({"time": "5:00", "subtitle": "5 min"});
     let fifteen = json!({"time": "15:00", "subtitle": "15 min"});
 
-    assert_eq!(open(&files, "timers", MORNING), nothing("No Timers"));
+    assert_eq!(look(&files, "timers", MORNING), nothing("No Timers"));
     assert_eq!(
         act(&mut files, "start_timer", &json!({}), MORNING),
         Err("Clock: A timer needs a length: give it hours, minutes or seconds.".to_owned())
@@ -328,7 +322,7 @@ fn a_timer_rings_when_it_ends_counts_down_and_is_gone_once_told_or_cancelled() {
         ])
     );
     assert_eq!(
-        open(&files, "timers", later),
+        look(&files, "timers", later),
         json!({"items": [
             {"kind": "readout", "id": "t2", "label": "5 min", "text": "3:34",
              "caption": "Ends 9:46 AM",
@@ -345,7 +339,7 @@ fn a_timer_rings_when_it_ends_counts_down_and_is_gone_once_told_or_cancelled() {
         json!([{"id": "t1", "at": tea_ends, "title": "Timer", "body": "Tea"}])
     );
     assert_eq!(
-        open(&files, "timers", ended),
+        look(&files, "timers", ended),
         json!({"items": [tea("10:00"), recents(json!([five, fifteen]))]})
     );
     assert_eq!(
@@ -358,7 +352,7 @@ fn a_timer_rings_when_it_ends_counts_down_and_is_gone_once_told_or_cancelled() {
     act(&mut files, "cancel_timer", &json!({"id": "t3"}), ended).unwrap();
 
     assert_eq!(
-        open(&files, "timers", ended),
+        look(&files, "timers", ended),
         json!({"items": [recents(json!([fifteen, five]))]})
     );
     assert_eq!(
@@ -397,7 +391,7 @@ fn the_stopwatch_runs_laps_stops_goes_on_and_resets_and_refuses_what_it_cannot_d
         Ok(json!({"running": true, "time": "00:30.00", "lap": 2, "length": "00:17.66"}))
     );
     assert_eq!(
-        open(&files, "stopwatch", "2026-11-11T17:41:45.678Z"),
+        look(&files, "stopwatch", "2026-11-11T17:41:45.678Z"),
         json!({"items": [
             {"kind": "readout", "text": "00:45.67", "caption": "Running",
              "live": {"counts": "up", "from": millis(MORNING)}},
@@ -420,7 +414,7 @@ fn the_stopwatch_runs_laps_stops_goes_on_and_resets_and_refuses_what_it_cannot_d
         Ok(json!({"running": true, "time": "01:01.50"}))
     );
     assert_eq!(
-        open(&files, "stopwatch", an_hour_on)["items"][0],
+        look(&files, "stopwatch", an_hour_on)["items"][0],
         json!({"kind": "readout", "text": "1:01:01.50", "caption": "Running",
                "live": {"counts": "up", "from": millis("2026-11-11T17:41:38.500Z")}})
     );
@@ -429,7 +423,7 @@ fn the_stopwatch_runs_laps_stops_goes_on_and_resets_and_refuses_what_it_cannot_d
         Ok(json!({"running": false, "time": "00:00.00"}))
     );
     assert_eq!(
-        open(&files, "stopwatch", an_hour_on),
+        look(&files, "stopwatch", an_hour_on),
         json!({"items": [{"kind": "readout", "text": "00:00.00", "caption": "Not running"}]})
     );
 }
@@ -445,7 +439,7 @@ fn the_world_clock_shows_cities_against_the_persons_day_and_refuses_an_unknown_z
         ("Honolulu", "Pacific/Honolulu", "7:41 AM", "Today, -2HRS"),
     ];
 
-    assert_eq!(open(&files, "world", MORNING), nothing("No World Clocks"));
+    assert_eq!(look(&files, "world", MORNING), nothing("No World Clocks"));
 
     for (number, (city, zone, time, offset)) in (1..).zip(cities) {
         assert_eq!(
@@ -476,7 +470,7 @@ fn the_world_clock_shows_cities_against_the_persons_day_and_refuses_an_unknown_z
         )
     );
     assert_eq!(
-        open(&files, "world", MORNING),
+        look(&files, "world", MORNING),
         list(&json!([
             {"id": "c1", "caption": "Today, +0HRS", "title": "Seattle", "time": "9:41 AM"},
             {"id": "c2", "caption": "Today, +8HRS", "title": "London", "time": "5:41 PM"},
@@ -490,7 +484,7 @@ fn the_world_clock_shows_cities_against_the_persons_day_and_refuses_an_unknown_z
         Ok(json!({"id": "c2", "city": "London", "zone": "Europe/London", "removed": true}))
     );
     assert_eq!(
-        open(&files, "world", MORNING)["items"][0]["rows"]
+        look(&files, "world", MORNING)["items"][0]["rows"]
             .as_array()
             .unwrap()
             .iter()

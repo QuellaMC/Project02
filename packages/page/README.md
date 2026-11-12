@@ -38,6 +38,17 @@ and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in
 the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
+Her chat's head has a Her Phone button unless the daemon says she has no
+phone. It opens her phone in the one window every character's phone
+shares, and closes it, and is pressed while that window shows hers: the
+window says whose phone it shows when it opens, when a chat asks and when
+it goes, over a channel of the page's origin (`phone-link.ts`). A browser
+that blocks that window is told so in a notice; in the desktop app, which
+opens the window itself and gives the page none, nothing is said. From a
+call of one of her phone's tools in a turn of hers, known by the plugin
+the stream names, until her next reply begins or the turn ends, she is
+using her phone: the button carries a dot, and her thread says so where
+it would say she is writing.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.
@@ -80,3 +91,32 @@ it again for the daemon to judge afresh. A character a person added has
 Remove at the bottom of her page, which asks first. The roster is
 health's, so a character added or removed anywhere appears or goes here,
 and a page of one who is gone is left for You.
+
+At `/?phone=<character id>`, the token in the fragment as ever, the same
+bundle draws one character's phone and nothing else: her phone's window, a
+second surface beside the chat's, with its own value and rules in
+`phone.ts`, pure and tested in Node, and its own session in
+`phone-session.ts`; what every surface is made of — its one value, the
+client for the page's address, the stream it follows — is `surface.ts`.
+The window reads her phone when it opens, on every `phone_changed` naming
+her and when the stream comes back, and follows her: it shows what she has
+in front, her home screen when nothing is. The person can open an app,
+switch its views and go home, each view read on its own and nothing of hers
+changed, until a read in which what she did, what she has in front or what
+rings is new takes the window back to her. What rings is drawn over
+everything, the soonest of several; a row that a read right after something
+she did holds for the first time is marked New until the next read; the
+view on screen is read again at each minute's turn, and a reading that
+moves is counted on the page from the moments it carries. A character the
+daemon does not know, or whose settings give her no phone, is said in the
+daemon's sentence where her phone would be. `phone-window.tsx` and
+`phone-device.tsx` draw it as the design draws an iPhone, with nothing
+painted around it, so a window that can show what is behind it does.
+`window-calls.ts` tells, from the page's `window` and importing nothing of
+the app, whether a page is in the desktop app and what its window
+answers. The app's window for her phone has no frame of its own and
+answers four window calls: there the bar moves the window, a pin keeps it
+on top of other windows as the window says it does, and closing it, from
+the bar or when the chat asks, is the app's. A browser's popup, which has
+a title bar of its own, answers none: it gets no pin and no moving bar,
+and closes as a window a script opened.

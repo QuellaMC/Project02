@@ -9,6 +9,7 @@ jiff = { workspace = true, features = ["tz-system", "tzdb-bundle-platform", "tzd
 p02-contracts.workspace = true
 p02-core.workspace = true
 p02-shared.workspace = true
+p02-wire.workspace = true
 rquickjs.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -167,6 +167,26 @@
       ],
       "description": "What an answer to a parked confirmation came to. `expired`: the deadline\nhad passed, so the confirmation was settled cancelled instead; the\nclient is never the judge of the deadline."
     },
+    "AppView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "title": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "icon"
+      ],
+      "description": "A view of an app, which she opens it on: a tab, in the Clock."
+    },
     "Authored": {
       "type": "object",
       "properties": {
@@ -1307,6 +1327,23 @@
             "message"
           ],
           "description": "A background failure the conversation never sees: the plugins' work\nafter a turn's commit, a segment rotation that failed, which the next\nturn plans again, what closing a segment left undone, or what opening\nher thread skipped because it could not be read."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "characterId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "kind": {
+              "type": "string",
+              "const": "phone_changed"
+            }
+          },
+          "required": [
+            "kind",
+            "characterId"
+          ],
+          "description": "Her phone is to be read again: a call of hers to it came back\naccepted, or a ring's moment of hers began or ended."
         }
       ],
       "description": "What every surface hears."
@@ -1315,7 +1352,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 10
+          "const": 11
         },
         "homeRoot": {
           "type": "string"
@@ -1380,7 +1417,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 10
+          "const": 11
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -1603,6 +1640,54 @@
         "is"
       ],
       "description": "A condition on a field of the same section that lists its allowed\nvalues: it holds while that field's value in effect is one of `is`.\nWhat it guards has no effect otherwise, so a page may hide it then."
+    },
+    "LiveReading": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "counts": {
+              "type": "string",
+              "const": "up"
+            }
+          },
+          "required": [
+            "counts",
+            "from"
+          ],
+          "description": "The time since `from`."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "to": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "of": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "counts": {
+              "type": "string",
+              "const": "down"
+            }
+          },
+          "required": [
+            "counts",
+            "to",
+            "of"
+          ],
+          "description": "The time left until `to`, out of a whole of `of` milliseconds."
+        }
+      ],
+      "description": "How a readout's reading moves, in milliseconds since the epoch."
     },
     "MaintenanceFailure": {
       "type": "object",
@@ -2120,6 +2205,195 @@
       ],
       "description": "A parked confirmation, as the stream announced it and the list shows it."
     },
+    "PhoneApp": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        },
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AppView"
+          }
+        },
+        "opensOn": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "tint",
+        "views",
+        "opensOn"
+      ],
+      "description": "An app on her phone as her window draws it: its icon and the tint of\nits tile, names of the page's own set, which falls back for one it does\nnot know; its views, in its order; and the view it opens on."
+    },
+    "PhoneDid": {
+      "type": "object",
+      "properties": {
+        "appId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "words": {
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "appId",
+        "words",
+        "at"
+      ],
+      "description": "What she last did on her phone: the app, a few words in the past tense,\nand when."
+    },
+    "PhoneFront": {
+      "type": "object",
+      "properties": {
+        "appId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "viewId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "screen": {
+          "$ref": "#/$defs/Screen"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "viewId"
+      ],
+      "description": "The app and the view she has in front, and that view's screen, or,\nwhen it cannot be shown, the sentence saying why in its place."
+    },
+    "PhoneOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "apps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PhoneApp"
+              }
+            },
+            "front": {
+              "$ref": "#/$defs/PhoneFront"
+            },
+            "did": {
+              "$ref": "#/$defs/PhoneDid"
+            },
+            "ringing": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PhoneRing"
+              }
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "apps",
+            "ringing"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/PhoneRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read."
+        }
+      ],
+      "description": "Her phone as it stands, read from her data whether she runs or not:\nher apps, in her phone's order; what she has in front, none her home\nscreen; what she last did on it; and what rings, which nothing does but\nwhile a ring's moment of hers runs."
+    },
+    "PhoneRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        }
+      ]
+    },
+    "PhoneRing": {
+      "type": "object",
+      "properties": {
+        "appName": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "appName",
+        "title",
+        "at"
+      ],
+      "description": "A ring the moment of hers that runs now tells her: its app's name, its\ntitle, its body when it has one, and the time it was set for."
+    },
     "Placement": {
       "oneOf": [
         {
@@ -2542,6 +2816,216 @@
       ],
       "description": "The two stanzas of a document that hold declared sections by id. A\nplugin and a connector may share an id: their sections never meet."
     },
+    "Screen": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScreenItem"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "description": "What a view of an app shows: its pieces, top to bottom."
+    },
+    "ScreenItem": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "header": {
+              "type": "string"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ScreenRow"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "list"
+            }
+          },
+          "required": [
+            "kind",
+            "rows"
+          ],
+          "description": "Rows on a card, under a header if it has one."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The thing's own id, which she passes to an action to change it."
+            },
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string",
+              "description": "The reading as of the call."
+            },
+            "caption": {
+              "type": "string"
+            },
+            "live": {
+              "description": "How the reading moves, when it does.",
+              "$ref": "#/$defs/LiveReading"
+            },
+            "kind": {
+              "type": "string",
+              "const": "readout"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "description": "One large reading, with a label above and a caption below if it has\nthem."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "text"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "description": "A line of plain words, as for a view with nothing in it yet."
+        }
+      ],
+      "description": "A piece of a screen."
+    },
+    "ScreenOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "screen": {
+              "$ref": "#/$defs/Screen"
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "screen"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/ScreenRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her phone could not be read."
+        }
+      ],
+      "description": "One view of an app on her phone, as a person looking around it sees it:\nits screen, or why there is none. Looking changes nothing of hers."
+    },
+    "ScreenRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character",
+            "unknown_app",
+            "unknown_view"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "Her settings give her no phone."
+        },
+        {
+          "type": "string",
+          "const": "app_failed",
+          "description": "The app failed to show the view, which the message says."
+        }
+      ]
+    },
+    "ScreenRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The thing's own id, which she passes to an action to change it."
+        },
+        "caption": {
+          "type": "string",
+          "description": "A small line above."
+        },
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "A small line below."
+        },
+        "time": {
+          "type": "string",
+          "description": "A clock reading, shown large."
+        },
+        "value": {
+          "type": "string",
+          "description": "Plain text at the row's end."
+        },
+        "switch": {
+          "type": "boolean",
+          "description": "A switch, shown on or off."
+        }
+      },
+      "description": "A row of a list: a title, a time or both."
+    },
     "Setup": {
       "type": "object",
       "properties": {
@@ -2855,6 +3339,10 @@
             "status": {
               "$ref": "#/$defs/ToolCallStatus"
             },
+            "pluginId": {
+              "$ref": "#/$defs/Identifier",
+              "description": "The plugin that provides the tool, or `undeclared.<tool>` for a\ntool the turn did not offer."
+            },
             "toolName": {
               "$ref": "#/$defs/Identifier"
             },
@@ -2867,6 +3355,7 @@
             "kind",
             "round",
             "status",
+            "pluginId",
             "toolName"
           ]
         }
