@@ -1426,6 +1426,15 @@ data: {…}</code></pre>
         a token or the account it went with.
       </p>
 
+      <p>
+        A character whose settings choose <code>anthropic</code> thinks with
+        the Claude API on the key her settings hold, of the model they name,
+        else Claude Opus 5.5. A message the model declines to write fails her
+        turn, saying Claude declined to answer, with the category the service
+        names; one cut short fails it too. Every failure is said in the
+        service's words after "Claude", and none repeats the key.
+      </p>
+
       <h2>The sync rule</h2>
 
       <p class="rule">
@@ -1462,9 +1471,10 @@ data: {…}</code></pre>
         history. It ends in one of two ways: the <code>visible_reply</code>
         that names its <code>draftId</code> comes first, then the turn without
         that draft; or the turn without it comes alone, a draft withdrawn — a
-        round the parser refused, a reply whose write failed. The daemon
-        closes every draft a round opened before the round moves on, so none
-        is open at <code>turn_completed</code>.
+        round the parser refused, a reply whose write failed, a reply its
+        model let go, whose <code>draftId</code> the next draft may take. The
+        daemon closes every draft a round opened before the round moves on, so
+        none is open at <code>turn_completed</code>.
       </p>
 
       <table>

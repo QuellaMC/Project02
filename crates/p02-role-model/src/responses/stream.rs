@@ -11,7 +11,7 @@ use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
 use crate::draft::Fragment;
-use crate::transport::{FailureCode, StreamError, malformed, provider_error};
+use crate::transport::{FailureCode, StreamError, malformed, provider_error, typed_event};
 
 #[derive(Debug, Default)]
 pub(super) struct EventFold {
@@ -70,35 +70,30 @@ impl EventFold {
             return Ok(Some(self.ended(Ending::Completed, None)?));
         }
 
-        let event = serde_json::from_str::<Value>(data)
-            .map_err(|_| malformed("stream event must be JSON."))?;
-        let Value::Object(mut event) = event else {
-            return Err(malformed("stream event must be an object."));
-        };
-        let ending = match event.get("type").and_then(Value::as_str) {
-            Some("response.completed" | "response.done") => Ending::Completed,
-            Some("response.incomplete") => Ending::Incomplete,
-            Some("response.failed") => Ending::Failed,
-            Some("error") => {
+        let (kind, mut event) = typed_event(data)?;
+        let ending = match kind.as_str() {
+            "response.completed" | "response.done" => Ending::Completed,
+            "response.incomplete" => Ending::Incomplete,
+            "response.failed" => Ending::Failed,
+            "error" => {
                 return Err(StreamError {
                     code: FailureCode::ProviderError,
                     message: provider_error(&event).unwrap_or_else(|| "provider error.".to_owned()),
                 });
             }
-            Some("response.output_item.added") => {
+            "response.output_item.added" => {
                 self.added(&event, heard);
                 return Ok(None);
             }
-            Some("response.function_call_arguments.delta") => {
+            "response.function_call_arguments.delta" => {
                 self.delta(&event, heard);
                 return Ok(None);
             }
-            Some("response.output_item.done") => {
+            "response.output_item.done" => {
                 self.item_done(&mut event);
                 return Ok(None);
             }
-            Some(_) => return Ok(None),
-            None => return Err(malformed("stream event must carry its type.")),
+            _ => return Ok(None),
         };
 
         Ok(Some(self.ended(ending, event.remove("response"))?))

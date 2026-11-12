@@ -43,7 +43,7 @@ pub use role_model::{
     DecisionRejection, DecisionRejectionReason, DecisionResult, DuplicateToolError, Invocation,
     ModelOutput, ModelToolCall, ModelToolDefinition, Occasion, PLUGIN_LIST_TOOL,
     ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, ProviderAnswer,
-    ProviderFailure, ProviderName, Rang, ReasoningFilter, ReplyDelta, RoleModelAdapter,
+    ProviderFailure, ProviderName, Rang, ReasoningFilter, ReplyDelta, ReplyDraft, RoleModelAdapter,
     RuntimeNote, TextCompletion, TextCompletionRequest, TokenUsage, ToolCallResult, ToolRound,
     VISIBLE_REPLY, WrittenCall, scrub_reasoning_blocks,
 };

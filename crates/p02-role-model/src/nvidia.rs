@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::draft::ReplyDrafts;
 use crate::prompt::{ToolNameMapping, json_text, provider_name, provider_names, runtime_name};
 use crate::transport::{
-    self, Access, Answer, BuildAdapterError, Client, Failure, FailureCode, Fault, Silence, said,
+    self, Access, BuildAdapterError, Client, Failure, FailureCode, Fault, Silence, said,
 };
 use stream::{Completion, Flow, StreamFold};
 
@@ -104,7 +104,7 @@ impl NvidiaAdapter {
     ) -> Result<ProviderAnswer, Fault> {
         let http = self.http.get()?;
         let mut silence = Silence::start(self.silence);
-        let mut response = match transport::send(
+        let mut response = transport::send(
             http,
             &self.endpoint,
             &self.access,
@@ -112,18 +112,7 @@ impl NvidiaAdapter {
             &mut silence,
         )
         .await?
-        {
-            Answer::Accepted(response) => response,
-            Answer::Refused {
-                status, message, ..
-            } => {
-                return Err(Fault {
-                    code: FailureCode::HttpError,
-                    message,
-                    status: Some(status),
-                });
-            }
-        };
+        .accepted()?;
         let status = response.status().as_u16();
         let refused = |code, message| Fault {
             code,
@@ -150,14 +139,11 @@ impl NvidiaAdapter {
         let http = self.http.get().map_err(Failure::message)?;
         let mut silence = Silence::start(self.silence);
         let body = completion_request(&self.model, request);
-        let response =
-            match transport::send(http, &self.endpoint, &self.access, &body, &mut silence)
-                .await
-                .map_err(Failure::message)?
-            {
-                Answer::Accepted(response) => response,
-                Answer::Refused { message, .. } => return Err(message),
-            };
+        let response = transport::send(http, &self.endpoint, &self.access, &body, &mut silence)
+            .await
+            .map_err(Failure::message)?
+            .accepted()
+            .map_err(|fault| fault.message)?;
         let body = transport::read_all(response, &mut silence)
             .await
             .map_err(Failure::message)?;

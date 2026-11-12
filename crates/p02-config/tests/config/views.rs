@@ -184,6 +184,15 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
                 "fields": ["openaiApiKey", "openaiModel"],
             },
             {
+                "id": "anthropic",
+                "name": "Claude API",
+                "summary": "Pay as you go, with an API key",
+                "keyFrom": "Get one in the Claude Console.",
+                "connected": false,
+                "model": "anthropicModel",
+                "fields": ["anthropicApiKey", "anthropicModel"],
+            },
+            {
                 "id": "nvidia",
                 "name": "NVIDIA",
                 "summary": "An API key, or a server of your own",
@@ -199,6 +208,7 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
         [
             json!(["chatgpt", false]),
             json!(["openai", true]),
+            json!(["anthropic", false]),
             json!(["nvidia", true])
         ]
     );
@@ -220,7 +230,7 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
             },
             "default",
             "gpt-6-luna",
-            ["chatgpt", "openai", "nvidia"],
+            ["chatgpt", "openai", "anthropic", "nvidia"],
         ])
     );
 }
@@ -317,6 +327,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let secrets = [
         "nvapi-home-secret",
         "sk-home-secret",
+        "sk-ant-home-secret",
         "mem0-key-secret",
         "123456:management-secret",
         "111111:misplaced-secret",
@@ -330,7 +341,11 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
 
     world
         .write_home(&document(json!({
-            "project02": {"nvidiaApiKey": "nvapi-home-secret", "openaiApiKey": "sk-home-secret"},
+            "project02": {
+                "nvidiaApiKey": "nvapi-home-secret",
+                "openaiApiKey": "sk-home-secret",
+                "anthropicApiKey": "sk-ant-home-secret",
+            },
             "plugins": {"mem0": {"config": {"apiKey": "mem0-key-secret"}}},
             "connectors": {"telegram": {"config": {
                 "managementBotToken": "123456:management-secret",
@@ -356,7 +371,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let report = serde_json::to_value(world.resolve(&of("mira")).report(&world.home)).unwrap();
     let telegram = section(&home_view, "connectors", "telegram").unwrap();
 
-    for key in ["nvidiaApiKey", "openaiApiKey"] {
+    for key in ["nvidiaApiKey", "openaiApiKey", "anthropicApiKey"] {
         assert_eq!(
             host_field(&home_view, key)["effective"]["value"],
             "[redacted]"
@@ -554,6 +569,7 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "roleModelProvider": "openai",
             "openaiApiKey": "[redacted]",
             "openaiModel": "gpt-6-luna",
+            "anthropicModel": "claude-opus-5-5",
             "nvidiaApiKey": "[redacted]",
             "contextWindowTokens": 4096,
             "heartbeatMinutes": 30,

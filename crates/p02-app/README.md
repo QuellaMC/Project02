@@ -83,10 +83,10 @@ with an outcome of p02-wire, never an error.
   again when what she runs on changed. A turn in flight meets it before
   its next request to her model, where her settings are read again in any
   case. Whether they give her a model is one judgement, which her
-  settings' view asks too: the service they choose, built, the OpenAI API
-  and a ChatGPT plan's service at the stand-ins the binary names under
-  their test switches, the plan on the home's sign-in, which she needs
-  as she needs a key. The view is told the sign-in too.
+  settings' view asks too: the service they choose, built, the OpenAI API,
+  a ChatGPT plan's service and the Claude API at the stand-ins the binary
+  names under their test switches, the plan on the home's sign-in, which
+  she needs as she needs a key. The view is told the sign-in too.
 - **A character's package** is added from a file, updated or removed
   while the daemon runs: judged as discovery would publish it, written or
   removed under the locks of her settings, and then announced and

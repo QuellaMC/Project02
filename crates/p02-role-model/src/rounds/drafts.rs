@@ -40,15 +40,16 @@ impl fmt::Display for DraftId {
 pub enum DraftEvent {
     /// The next piece of the draft, after what came before.
     Delta { draft: DraftId, text: String },
-    /// The draft ended unsaid: no commit named it before its round moved
-    /// on.
+    /// The draft ended unsaid: its model let it go, or no commit named it
+    /// before its round moved on.
     Withdrawn { draft: DraftId },
 }
 
 /// A round's drafts. A draft opens with its first piece and ends once:
-/// the commit that names its id replaces it, and closing the round
-/// withdraws whatever it opened that no commit named: a refused round's
-/// text, a reply whose commit failed, a draft the decision did not make.
+/// the commit that names its id replaces it, a model that lets its replies
+/// go withdraws it, and closing the round withdraws whatever it opened that
+/// no commit named: a refused round's text, a reply whose commit failed, a
+/// draft the decision did not make.
 #[derive(Debug)]
 pub(super) struct Drafts<'s, S> {
     round: NonZeroU32,
@@ -104,6 +105,23 @@ impl<'s, S: TurnSink> Drafts<'s, S> {
         });
     }
 
+    /// Withdraws, in the order they opened, the drafts of a model that lets
+    /// its replies go while it writes, so the next piece opens its draft
+    /// anew; a closed round has none left to withdraw.
+    pub(super) fn let_go(&self) {
+        let opened = {
+            let mut ledger = self.ledger.lock().unwrap_or_else(PoisonError::into_inner);
+
+            if ledger.closed {
+                return;
+            }
+
+            std::mem::take(&mut ledger.opened)
+        };
+
+        self.withdraw(opened);
+    }
+
     /// The reply was committed under its draft's id.
     pub(super) fn settle(&self, reply: usize) {
         self.ledger
@@ -132,7 +150,11 @@ impl<'s, S: TurnSink> Drafts<'s, S> {
                 .collect()
         };
 
-        for reply in unsaid {
+        self.withdraw(unsaid);
+    }
+
+    fn withdraw(&self, replies: Vec<usize>) {
+        for reply in replies {
             self.sink.draft(DraftEvent::Withdrawn {
                 draft: self.id(reply),
             });

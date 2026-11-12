@@ -137,6 +137,7 @@ impl World {
                 openai_api: Some(nowhere()),
                 openai_auth: Some(nowhere()),
                 chatgpt_api: Some(nowhere()),
+                anthropic_api: Some(nowhere()),
             },
         )
         .await
@@ -145,7 +146,8 @@ impl World {
 }
 
 /// Where nothing serves: no test of these reads the App Store, reaches the
-/// internet, asks the OpenAI API or signs in to a ChatGPT plan or asks it.
+/// internet, asks the OpenAI API, signs in to a ChatGPT plan or asks it, or
+/// asks the Claude API.
 fn nowhere() -> BaseUrl {
     BaseUrl::parse("http://127.0.0.1:9").unwrap()
 }

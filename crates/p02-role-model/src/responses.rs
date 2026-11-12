@@ -25,19 +25,17 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::draft::{Fragment, ReplyDrafts};
-use crate::prompt::{ToolNameMapping, json_text, provider_name, provider_names, runtime_name};
+use crate::prompt::{
+    CallIds, ToolNameMapping, json_text, provider_name, provider_names, runtime_name,
+};
 use crate::transport::{
-    self, Access, Answer, BuildAdapterError, Client, Failure, FailureCode, Fault, Silence, said,
+    self, Access, Answer, BuildAdapterError, Client, Failure, FailureCode, Fault,
+    MAX_OUTPUT_TOKENS, Silence, said,
 };
 pub use plan::{ChatgptSettings, PlanAccess, PlanSignIn};
 use stream::{Ended, Ending, EventFold};
 
 const OPENAI_API: &str = "https://api.openai.com/v1";
-
-/// How many tokens a response of the OpenAI API may take, its reasoning
-/// among them: as much room as NVIDIA's models get to think, and then to
-/// reply.
-const MAX_OUTPUT_TOKENS: u32 = 32_768;
 
 /// A character's settings for the OpenAI API.
 #[derive(Clone)]
@@ -180,16 +178,7 @@ impl ResponsesAdapter {
                 )
                 .await
                 .map_err(Fault::from)
-                .and_then(|answer| match answer {
-                    Answer::Accepted(response) => Ok(response),
-                    Answer::Refused {
-                        status, message, ..
-                    } => Err(Fault {
-                        code: FailureCode::HttpError,
-                        message,
-                        status: Some(status),
-                    }),
-                }),
+                .and_then(Answer::accepted),
             },
             Dialect::Plan(sign_in) => {
                 plan::send(
@@ -325,31 +314,13 @@ impl RoleModelAdapter for ResponsesAdapter {
 /// function call's arguments told to `heard`: how it ended, or why it did
 /// not, under the status that answered.
 async fn streamed(
-    mut response: Response,
+    response: Response,
     silence: &mut Silence,
     heard: &mut impl FnMut(Fragment<'_>),
 ) -> Result<Ended, Fault> {
-    let status = response.status().as_u16();
-    let refused = |code, message| Fault {
-        code,
-        message,
-        status: Some(status),
-    };
     let mut fold = EventFold::default();
 
-    while let Some(chunk) = transport::next_chunk(&mut response, silence).await? {
-        if let Some(ended) = fold
-            .push(&chunk, heard)
-            .map_err(|error| refused(error.code, error.message))?
-        {
-            return Ok(ended);
-        }
-    }
-
-    Err(refused(
-        FailureCode::MalformedResponse,
-        "response ended before it finished.".to_owned(),
-    ))
+    transport::streamed(response, silence, |chunk| fold.push(chunk, heard)).await
 }
 
 /// A request as it goes on the wire: its body exactly, and the session it
@@ -651,27 +622,6 @@ fn items<'a>(
     }
 
     items
-}
-
-/// The ids a request shows the service for the runtime's calls: `call_<n>`,
-/// numbered in the order the request first names each. The runtime's own
-/// are longer than the protocol takes.
-#[derive(Debug, Default)]
-struct CallIds(Vec<ToolCallId>);
-
-impl CallIds {
-    fn shown(&mut self, id: &ToolCallId) -> ToolCallId {
-        let at = self
-            .0
-            .iter()
-            .position(|named| named == id)
-            .unwrap_or_else(|| {
-                self.0.push(id.clone());
-                self.0.len() - 1
-            });
-
-        ToolCallId::new(&format!("call_{}", at + 1)).expect("a numbered call id is not empty")
-    }
 }
 
 /// How a response read whole ended, by its status.

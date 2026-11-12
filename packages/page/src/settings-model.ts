@@ -678,6 +678,8 @@ export function serviceArt(serviceId: string): Art {
       return {icon: 'person', tint: 'mint'};
     case 'openai':
       return {icon: 'key', tint: 'graphite'};
+    case 'anthropic':
+      return {icon: 'leaf', tint: 'orange'};
     case 'nvidia':
       return {icon: 'grid', tint: 'teal'};
     default:

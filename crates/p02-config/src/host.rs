@@ -61,8 +61,9 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
             "label": "Service",
             "description": "Who answers as the character: chatgpt is a model of the ChatGPT \
                 plan this home is signed in to; openai is a model of the OpenAI API, on your key; \
-                nvidia is a model on NVIDIA's cloud, or on the server nvidiaBaseUrl names. No \
-                character starts until one is chosen.",
+                anthropic is a model of the Claude API, on your key; nvidia is a model on \
+                NVIDIA's cloud, or on the server nvidiaBaseUrl names. No character starts until \
+                one is chosen.",
             "secret": false,
             "valueType": "enum",
             "allowedValues": RoleModelProvider::ALL
@@ -157,6 +158,57 @@ const OPENAI_MODEL: HostSetting<String> = HostSetting {
             "defaultValue": OPENAI_DEFAULT_MODEL,
             "suggestedValues": OPENAI_MODELS.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
             "choices": OPENAI_MODELS
+                .iter()
+                .map(|(id, name)| ((*id).to_owned(), Value::from(*name)))
+                .collect::<Map<String, Value>>(),
+            "redactionLabels": [],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
+};
+
+const ANTHROPIC_API_KEY: HostSetting<String> = HostSetting {
+    name: "anthropicApiKey",
+    field: || {
+        json!({
+            "label": "API Key",
+            "description": "Your Claude API key. Needed when the provider is anthropic; never \
+                shown back once saved.",
+            "placeholder": "Paste key",
+            "secret": true,
+            "valueType": "string",
+            "redactionLabels": ["secret"],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
+};
+
+/// Anthropic's current models, most capable first, each id with the name a
+/// person reads. Each takes Anthropic's own fallback for a decline, so a
+/// request for one asks for it; an id typed in their place may not.
+const ANTHROPIC_MODELS: [(&str, &str); 3] = [
+    ("claude-opus-5-5", "Claude Opus 5.5"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("claude-haiku-5-5", "Claude Haiku 5.5"),
+];
+
+/// The most capable, as Anthropic's own guidance defaults to: a person
+/// chooses a lighter one.
+const ANTHROPIC_DEFAULT_MODEL: &str = "claude-opus-5-5";
+
+const ANTHROPIC_MODEL: HostSetting<String> = HostSetting {
+    name: "anthropicModel",
+    field: || {
+        json!({
+            "label": "Model",
+            "description": "The Claude model to talk to: one of these, or the id of another.",
+            "secret": false,
+            "valueType": "string",
+            "defaultValue": ANTHROPIC_DEFAULT_MODEL,
+            "suggestedValues": ANTHROPIC_MODELS.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            "choices": ANTHROPIC_MODELS
                 .iter()
                 .map(|(id, name)| ((*id).to_owned(), Value::from(*name)))
                 .collect::<Map<String, Value>>(),
@@ -306,12 +358,14 @@ fn text(value: &Value) -> Option<String> {
 /// person decides first, the service and each service's own fields in the
 /// order the services are listed, then the knobs, then what is each
 /// character's own: her switch and her heartbeat.
-static SETTINGS: [&dyn Setting; 11] = [
+static SETTINGS: [&dyn Setting; 13] = [
     &USER_DISPLAY_NAME,
     &ROLE_MODEL_PROVIDER,
     &CHATGPT_MODEL,
     &OPENAI_API_KEY,
     &OPENAI_MODEL,
+    &ANTHROPIC_API_KEY,
+    &ANTHROPIC_MODEL,
     &NVIDIA_API_KEY,
     &NVIDIA_MODEL,
     &NVIDIA_BASE_URL,
@@ -357,6 +411,14 @@ fn service(provider: RoleModelProvider) -> Service {
             fields: &[OPENAI_API_KEY.name, OPENAI_MODEL.name],
             model: OPENAI_MODEL.name,
             connected_by: ConnectedBy::Credentials(&[OPENAI_API_KEY.name]),
+        },
+        RoleModelProvider::Anthropic => Service {
+            name: "Claude API",
+            summary: "Pay as you go, with an API key",
+            key_from: Some("Get one in the Claude Console."),
+            fields: &[ANTHROPIC_API_KEY.name, ANTHROPIC_MODEL.name],
+            model: ANTHROPIC_MODEL.name,
+            connected_by: ConnectedBy::Credentials(&[ANTHROPIC_API_KEY.name]),
         },
         RoleModelProvider::Nvidia => Service {
             name: "NVIDIA",
@@ -440,14 +502,14 @@ fn plan_default(plan: Option<&str>) -> &'static str {
 /// character's settings offer them, and the one it asks until another is
 /// chosen, as a character's own thinking starts with: of a ChatGPT plan of
 /// `plan`, those its plan offers and the best of them; of the OpenAI API,
-/// its models and the least costly. NVIDIA, whose models no list holds, is
-/// none.
+/// its models and the least costly. The Claude API, which no app signs in
+/// with, and NVIDIA, whose models no list holds, are none.
 #[must_use]
 pub fn connection(provider: RoleModelProvider, plan: Option<&str>) -> Option<AppConnection> {
     let (models, default_model): (Vec<(&str, &str)>, &str) = match provider {
         RoleModelProvider::Chatgpt => (plan_models(plan).collect(), plan_default(plan)),
         RoleModelProvider::Openai => (OPENAI_MODELS.to_vec(), OPENAI_DEFAULT_MODEL),
-        RoleModelProvider::Nvidia => return None,
+        RoleModelProvider::Anthropic | RoleModelProvider::Nvidia => return None,
     };
 
     Some(AppConnection {
@@ -638,6 +700,9 @@ pub struct HostSettings {
     pub openai_api_key: Option<String>,
     /// The OpenAI model to ask, the field's default unless one is set.
     pub openai_model: String,
+    pub anthropic_api_key: Option<String>,
+    /// The Claude model to ask, the field's default unless one is set.
+    pub anthropic_model: String,
     pub nvidia_api_key: Option<String>,
     pub nvidia_model: Option<String>,
     pub nvidia_base_url: Option<BaseUrl>,
@@ -658,6 +723,8 @@ impl HostSettings {
             chatgpt_model: CHATGPT_MODEL.value(fields),
             openai_api_key: OPENAI_API_KEY.value(fields),
             openai_model: OPENAI_MODEL.value_or_default(fields),
+            anthropic_api_key: ANTHROPIC_API_KEY.value(fields),
+            anthropic_model: ANTHROPIC_MODEL.value_or_default(fields),
             nvidia_api_key: NVIDIA_API_KEY.value(fields),
             nvidia_model: NVIDIA_MODEL.value(fields),
             nvidia_base_url: NVIDIA_BASE_URL.value(fields),
@@ -675,6 +742,15 @@ impl HostSettings {
             .clone()
             .unwrap_or_else(|| plan_default(plan).to_owned())
     }
+
+    /// Whether the Claude model she asks for is one the setting offers, and
+    /// so takes Anthropic's own fallback for a decline.
+    #[must_use]
+    pub fn anthropic_fallback(&self) -> bool {
+        ANTHROPIC_MODELS
+            .iter()
+            .any(|(id, _)| *id == self.anthropic_model)
+    }
 }
 
 impl fmt::Debug for HostSettings {
@@ -689,6 +765,11 @@ impl fmt::Debug for HostSettings {
                 &self.openai_api_key.as_ref().map(|_| "[redacted]"),
             )
             .field("openai_model", &self.openai_model)
+            .field(
+                "anthropic_api_key",
+                &self.anthropic_api_key.as_ref().map(|_| "[redacted]"),
+            )
+            .field("anthropic_model", &self.anthropic_model)
             .field(
                 "nvidia_api_key",
                 &self.nvidia_api_key.as_ref().map(|_| "[redacted]"),

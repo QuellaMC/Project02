@@ -50,6 +50,7 @@ const icons = {
   pin: 'M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z M12 15v5',
   key: 'M11.5 15a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0z M10.5 12.5L19 4 M16 7l2 2 M14 9l2 2',
   alert: 'M12 4l9 16H3z M12 10v4 M12 17h.01',
+  leaf: 'M5 19c0-8 5-13 14-14 0 9-5 14-13 14z M5 19l7-7',
 } as const;
 
 export type IconName = keyof typeof icons;

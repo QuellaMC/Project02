@@ -1,9 +1,10 @@
 /**
  * A model on loopback for every service, in its protocol: OpenAI's chat
- * completions as NVIDIA's settings reach it, a server of the person's own,
- * and OpenAI's Responses as the switches of the OpenAI API and of a ChatGPT
- * plan's service name it in their places. It answers each request with the
- * next answer the test scripted, and it keeps every request the daemon
+ * completions as NVIDIA's settings reach it, a server of the person's own;
+ * OpenAI's Responses as the switches of the OpenAI API and of a ChatGPT
+ * plan's service name it in their places; and Anthropic's Messages as the
+ * Claude API's switch names it in its place. It answers each request with
+ * the next answer the test scripted, and it keeps every request the daemon
  * sent.
  */
 import {
@@ -37,7 +38,7 @@ export type ChatMessage = {
   readonly tool_call_id?: string;
 };
 
-/** One event of a response the Responses protocol streams: its type, and whatever its type carries. */
+/** One event of a response the Responses or the Messages protocol streams: its type, and whatever its type carries. */
 export type ResponseEvent = {
   readonly type: string;
   readonly [field: string]: unknown;
@@ -47,7 +48,7 @@ export type ResponseEvent = {
 export type Answer =
   /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut. */
   | {readonly chunks: readonly unknown[]; readonly end?: 'cut'}
-  /** Streamed as the Responses protocol streams, ending after its last event unless the stream is cut. */
+  /** Streamed as the Responses and the Messages protocols stream, ending after its last event unless the stream is cut. */
   | {readonly events: readonly ResponseEvent[]; readonly end?: 'cut'}
   /** Whole, in one JSON body: how `stream: false` is answered. */
   | {readonly completion: unknown}
@@ -69,7 +70,7 @@ export type Driven = {
   readonly write: (chunks: readonly unknown[]) => void;
   /** These bytes as they are: a frame, or a character, may end in the next piece. */
   readonly send: (bytes: Uint8Array) => void;
-  /** Ends the answer as its protocol does: chat completions with `[DONE]`, a response with its last event. */
+  /** Ends the answer as its protocol does: chat completions with `[DONE]`, a response or a message with its last event. */
   readonly end: () => void;
 };
 
@@ -100,6 +101,18 @@ export type ModelServer = {
   readonly chatgpt: {
     readonly env: {readonly PROJECT02_TEST_CHATGPT_API: string};
     readonly settings: {readonly roleModelProvider: 'chatgpt'};
+  };
+  /**
+   * The Claude API here, under `/anthropic/v1`: the switch that names this
+   * server in its place, for the daemon's environment, and the `project02`
+   * settings that choose it with a key.
+   */
+  readonly anthropic: {
+    readonly env: {readonly PROJECT02_TEST_ANTHROPIC_API: string};
+    readonly settings: {
+      readonly roleModelProvider: 'anthropic';
+      readonly anthropicApiKey: string;
+    };
   };
   readonly requests: readonly ModelRequest[];
   /** The answers to the next requests, in order. */
@@ -141,7 +154,8 @@ export async function startModelServer(): Promise<ModelServer> {
 
     if (
       !recorded.path.endsWith('/chat/completions') &&
-      !recorded.path.endsWith('/responses')
+      !recorded.path.endsWith('/responses') &&
+      !recorded.path.endsWith('/messages')
     ) {
       response.writeHead(404).end();
 
@@ -202,6 +216,15 @@ export async function startModelServer(): Promise<ModelServer> {
       },
       settings: {roleModelProvider: 'chatgpt'},
     },
+    anthropic: {
+      env: {
+        PROJECT02_TEST_ANTHROPIC_API: `http://127.0.0.1:${String(port)}/anthropic/v1`,
+      },
+      settings: {
+        roleModelProvider: 'anthropic',
+        anthropicApiKey: 'anthropic-server-key',
+      },
+    },
     requests,
     answer: (...answers) => {
       script.push(...answers);
@@ -246,7 +269,9 @@ export async function startModelServer(): Promise<ModelServer> {
           response = driven.writeHead(200, {
             'content-type': 'text/event-stream',
           });
-          last = request.path.endsWith('/responses') ? '' : 'data: [DONE]\n\n';
+          last = request.path.endsWith('/chat/completions')
+            ? 'data: [DONE]\n\n'
+            : '';
           flush();
         },
       });
@@ -331,7 +356,7 @@ function give(
   }
 }
 
-/** Each event as the Responses protocol streams it: an `event:` line naming it, and a `data:` line of its JSON. */
+/** Each event as the Responses and the Messages protocols stream it: an `event:` line naming it, and a `data:` line of its JSON. */
 export function responseStream(events: readonly ResponseEvent[]): string {
   return events
     .map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)

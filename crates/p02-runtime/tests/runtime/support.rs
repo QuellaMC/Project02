@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
     BeforeRoleModelCallOutput, ChatMessage, HookContext, Invocation, Manifest, ModelOutput,
-    PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta, RoleModelAdapter,
-    RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome, ToolInputContract,
-    WrittenCall,
+    PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta, ReplyDraft,
+    RoleModelAdapter, RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome,
+    ToolInputContract, WrittenCall,
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_phone::Account;
@@ -294,10 +294,10 @@ impl Chat {
     }
 }
 
-/// One round of a scripted model: the pieces of a reply it drafts, then its
-/// answer, if it ever gives one.
+/// One round of a scripted model: what it says of the replies it drafts,
+/// then its answer, if it ever gives one.
 pub(crate) struct Round {
-    drafts: Vec<ReplyDelta>,
+    drafts: Vec<ReplyDraft>,
     answer: Option<ProviderAnswer>,
 }
 
@@ -336,13 +336,18 @@ impl Round {
     /// Drafts its reply `reply`, counted from zero, in `pieces` before it
     /// answers.
     pub(crate) fn drafting(mut self, reply: usize, pieces: &[&str]) -> Self {
-        self.drafts = pieces
-            .iter()
-            .map(|piece| ReplyDelta {
+        self.drafts.extend(pieces.iter().map(|piece| {
+            ReplyDraft::Delta(ReplyDelta {
                 reply,
                 text: (*piece).to_owned(),
             })
-            .collect();
+        }));
+        self
+    }
+
+    /// Lets go the replies it drafted so far, before it drafts on.
+    pub(crate) fn letting_go(mut self) -> Self {
+        self.drafts.push(ReplyDraft::LetGo);
         self
     }
 }
@@ -382,8 +387,11 @@ impl RoleModelAdapter for Model {
             return Round::fails("No round was scripted.").answer.unwrap();
         };
 
-        for delta in round.drafts {
-            invocation.hear(delta);
+        for draft in round.drafts {
+            match draft {
+                ReplyDraft::Delta(delta) => invocation.hear(delta),
+                ReplyDraft::LetGo => invocation.let_go(),
+            }
         }
 
         let Some(answer) = round.answer else {

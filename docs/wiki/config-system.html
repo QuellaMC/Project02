@@ -42,6 +42,8 @@
     "chatgptModel": "gpt-6.1-sol",
     "openaiApiKey": "sk-…",
     "openaiModel": "gpt-6-luna",
+    "anthropicApiKey": "sk-ant-…",
+    "anthropicModel": "claude-opus-5-5",
     "nvidiaApiKey": "nvapi-…",
     "nvidiaModel": "nvidia/nemotron-3-nano-30b-a3b",
     "nvidiaBaseUrl": "https://integrate.api.nvidia.com/v1",
@@ -98,7 +100,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the service a character thinks with, <code>chatgpt</code>, <code>openai</code> or <code>nvidia</code>, with each service's own fields: the ChatGPT plan's model (the first the home's plan offers unless another is chosen; the plan itself is signed in to, never set), the OpenAI API's key and model (GPT-6 Luna unless another is chosen), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the service a character thinks with, <code>chatgpt</code>, <code>openai</code>, <code>anthropic</code> or <code>nvidia</code>, with each service's own fields: the ChatGPT plan's model (the first the home's plan offers unless another is chosen; the plan itself is signed in to, never set), the OpenAI API's key and model (GPT-6 Luna unless another is chosen), the Claude API's key and model (Claude Opus 5.5 unless another is chosen; a request for a model it offers asks for Anthropic's own fallback for a decline, one for an id typed in does not), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
         <tr><td><code>connectors.&lt;id&gt;</code></td><td>The named connector's built-in declaration</td><td>Explicit enablement and the declared fields a messaging connector runs on.</td></tr>
       </tbody>
@@ -216,7 +218,7 @@
 
     <p>
       A secret — a plugin or connector field declared <code>secret: true</code>, or the host's
-      <code>openaiApiKey</code> or <code>nvidiaApiKey</code> — is a plain string in whichever document authored it, kept at
+      <code>openaiApiKey</code>, <code>anthropicApiKey</code> or <code>nvidiaApiKey</code> — is a plain string in whichever document authored it, kept at
       mode <code>0600</code> like the rest of that document; a blank is refused, since removing
       a credential is the unset operation. Every read but a connector's redacts it: a view says only that it is set. Authored fingerprints hash a secret's presence, never its value, so
       the fingerprint a page holds cannot leak it. Where a secret's scope lets both documents

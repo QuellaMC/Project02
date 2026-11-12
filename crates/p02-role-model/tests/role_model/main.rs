@@ -4,6 +4,7 @@
     reason = "a test, and the world it builds, fail by panicking, as in the unit tests"
 )]
 
+mod anthropic;
 mod nvidia;
 mod responses;
 mod rounds;

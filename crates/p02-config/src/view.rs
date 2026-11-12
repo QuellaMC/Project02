@@ -367,6 +367,9 @@ pub struct HostReport {
     openai_api_key: Option<&'static str>,
     openai_model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    anthropic_api_key: Option<&'static str>,
+    anthropic_model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_api_key: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_model: Option<String>,
@@ -440,6 +443,8 @@ impl Resolution<'_> {
                     chatgpt_model: host.chatgpt_model.clone(),
                     openai_api_key: host.openai_api_key.as_ref().map(|_| "[redacted]"),
                     openai_model: host.openai_model.clone(),
+                    anthropic_api_key: host.anthropic_api_key.as_ref().map(|_| "[redacted]"),
+                    anthropic_model: host.anthropic_model.clone(),
                     nvidia_api_key: host.nvidia_api_key.as_ref().map(|_| "[redacted]"),
                     nvidia_model: host.nvidia_model.clone(),
                     nvidia_base_url: host

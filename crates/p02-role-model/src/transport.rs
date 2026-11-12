@@ -1,8 +1,8 @@
 //! One exchange with a service's endpoint, whatever protocol it speaks:
 //! how the request proves who sends it, the request, sent again after a
 //! transport fault, the answer read under a bound on the provider's
-//! silence, and how a round that got no answer failed, in the words the
-//! person is told.
+//! silence, a streamed one to the event that ends it, and how a round that
+//! got no answer failed, in the words the person is told.
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -18,6 +18,11 @@ use tokio::time::Instant;
 /// How long the provider may say nothing, before the headers or between
 /// two chunks, unless the bound is shortened.
 pub(crate) const PROVIDER_SILENCE: Duration = Duration::from_secs(30);
+
+/// How many tokens an answer of the OpenAI API or the Claude API may take,
+/// its reasoning among them: as much room as NVIDIA's models get to think,
+/// and then to reply.
+pub(crate) const MAX_OUTPUT_TOKENS: u32 = 32_768;
 
 /// How long to wait before the second and the third attempt.
 const RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(250), Duration::from_secs(1)];
@@ -170,6 +175,24 @@ pub(crate) fn malformed(message: &str) -> StreamError {
     }
 }
 
+/// A streamed event's data as the protocols that name their events send
+/// it, Responses and Messages alike: its type, and the object that carries
+/// it.
+pub(crate) fn typed_event(data: &str) -> Result<(String, Map<String, Value>), StreamError> {
+    let event =
+        serde_json::from_str::<Value>(data).map_err(|_| malformed("stream event must be JSON."))?;
+    let Value::Object(event) = event else {
+        return Err(malformed("stream event must be an object."));
+    };
+    let kind = event
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| malformed("stream event must carry its type."))?
+        .to_owned();
+
+    Ok((kind, event))
+}
+
 /// How a round ended without an answer.
 pub(crate) struct Fault {
     pub(crate) code: FailureCode,
@@ -282,6 +305,23 @@ pub(crate) enum Answer {
     },
 }
 
+impl Answer {
+    /// The response whose body is still to read, or the refusal as the
+    /// round's failure, in the provider's words under its status.
+    pub(crate) fn accepted(self) -> Result<Response, Fault> {
+        match self {
+            Self::Accepted(response) => Ok(response),
+            Self::Refused {
+                status, message, ..
+            } => Err(Fault {
+                code: FailureCode::HttpError,
+                message,
+                status: Some(status),
+            }),
+        }
+    }
+}
+
 /// Sends `body` with what `access` carries until an attempt is answered. A
 /// transport fault, or a 408, a 429 or a 5xx, is tried again after a
 /// pause, twice, but a plan's usage used up never is, nor a timeout.
@@ -355,6 +395,33 @@ pub(crate) async fn next_chunk(
     }
 
     Ok(chunk.map(|bytes| bytes.to_vec()))
+}
+
+/// A streamed answer read until `push`, handed each piece of it in turn,
+/// says how it ended, or why it is no answer, under the status that
+/// answered; a body that ends first ended before it finished.
+pub(crate) async fn streamed<T>(
+    mut response: Response,
+    silence: &mut Silence,
+    mut push: impl FnMut(&[u8]) -> Result<Option<T>, StreamError>,
+) -> Result<T, Fault> {
+    let status = response.status().as_u16();
+    let refused = |code, message| Fault {
+        code,
+        message,
+        status: Some(status),
+    };
+
+    while let Some(chunk) = next_chunk(&mut response, silence).await? {
+        if let Some(ended) = push(&chunk).map_err(|error| refused(error.code, error.message))? {
+            return Ok(ended);
+        }
+    }
+
+    Err(refused(
+        FailureCode::MalformedResponse,
+        "response ended before it finished.".to_owned(),
+    ))
 }
 
 /// The whole body, each piece within the window.

@@ -3,7 +3,7 @@
 //! page knows them. A value the command cannot use refuses the start rather
 //! than doing nothing, before anything is bound or written.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
@@ -38,6 +38,9 @@ pub(crate) const TEST_OPENAI_AUTH: &str = "PROJECT02_TEST_OPENAI_AUTH";
 /// Names where a ChatGPT plan's service is, in place of its own address.
 pub(crate) const TEST_CHATGPT_API: &str = "PROJECT02_TEST_CHATGPT_API";
 
+/// Names where the Claude API is, in place of its own address.
+pub(crate) const TEST_ANTHROPIC_API: &str = "PROJECT02_TEST_ANTHROPIC_API";
+
 /// Where this build's App Store is: its catalog, and each of its apps, by
 /// the rule the reader follows, under this base.
 const APP_CATALOG: &str = "https://raw.githubusercontent.com/QuellaMC/Project02-Apps/main";
@@ -57,10 +60,10 @@ const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
 /// through, the daemon's waits, where the App Store is, the stand-in her
-/// apps' requests go to, and where the OpenAI API, OpenAI's sign-in and a
-/// ChatGPT plan's service are. The default is a run no switch touched, the
-/// one a program that runs the daemon starts, since no switch is a setting
-/// a person sees.
+/// apps' requests go to, and where the OpenAI API, OpenAI's sign-in, a
+/// ChatGPT plan's service and the Claude API are. The default is a run no
+/// switch touched, the one a program that runs the daemon starts, since no
+/// switch is a setting a person sees.
 #[derive(Debug)]
 pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
@@ -70,6 +73,7 @@ pub struct Switches {
     pub(crate) openai_api: Option<BaseUrl>,
     pub(crate) openai_auth: Option<BaseUrl>,
     pub(crate) chatgpt_api: Option<BaseUrl>,
+    pub(crate) anthropic_api: Option<BaseUrl>,
 }
 
 impl Default for Switches {
@@ -83,6 +87,7 @@ impl Default for Switches {
             openai_api: None,
             openai_auth: None,
             chatgpt_api: None,
+            anthropic_api: None,
         }
     }
 }
@@ -100,24 +105,16 @@ pub(crate) struct TelegramSwitches {
     pub(crate) draft_edits: Option<Duration>,
 }
 
-/// Serve's switches as the environment sets them: the test provider's
-/// value, the durations', the App Store's catalog's, her apps' internet's,
-/// the OpenAI API's, OpenAI's sign-in's and a ChatGPT plan's, each none
-/// when unset. The durations are read first, then a test provider other
-/// than `deterministic` is refused, then a catalog's address, an
-/// internet's, an OpenAI API's, a sign-in's and a plan's that is no base.
-pub(crate) fn read(
-    provider: Option<&OsStr>,
-    durations: Option<&OsStr>,
-    catalog: Option<&OsStr>,
-    internet: Option<&OsStr>,
-    openai: Option<&OsStr>,
-    auth: Option<&OsStr>,
-    chatgpt: Option<&OsStr>,
-) -> Result<Switches, SwitchError> {
+/// Serve's switches as the environment sets them, `variable` reading each
+/// by its name, none when unset. The durations are read first, then a test
+/// provider other than `deterministic` is refused, then a catalog's
+/// address, an internet's, an OpenAI API's, a sign-in's, a plan's and a
+/// Claude API's that is no base.
+pub(crate) fn read(variable: impl Fn(&str) -> Option<OsString>) -> Result<Switches, SwitchError> {
     let mut switches = Switches::default();
+    let address = |name| base(name, variable(name).as_deref());
 
-    for (key, wait) in waits(durations, &SERVE_KEYS)? {
+    for (key, wait) in waits(variable(TEST_DURATIONS).as_deref(), &SERVE_KEYS)? {
         match key {
             "confirmation" => switches.durations.confirmation = wait,
             "pairing" => switches.durations.pairing = wait,
@@ -128,7 +125,7 @@ pub(crate) fn read(
         }
     }
 
-    if let Some(provider) = provider {
+    if let Some(provider) = variable(TEST_PROVIDER) {
         switches.test_provider = Some(
             provider
                 .to_str()
@@ -141,14 +138,15 @@ pub(crate) fn read(
         );
     }
 
-    if let Some(catalog) = base(TEST_APP_CATALOG, catalog)? {
+    if let Some(catalog) = address(TEST_APP_CATALOG)? {
         switches.app_catalog = catalog;
     }
 
-    switches.app_internet = base(TEST_APP_INTERNET, internet)?;
-    switches.openai_api = base(TEST_OPENAI_API, openai)?;
-    switches.openai_auth = base(TEST_OPENAI_AUTH, auth)?;
-    switches.chatgpt_api = base(TEST_CHATGPT_API, chatgpt)?;
+    switches.app_internet = address(TEST_APP_INTERNET)?;
+    switches.openai_api = address(TEST_OPENAI_API)?;
+    switches.openai_auth = address(TEST_OPENAI_AUTH)?;
+    switches.chatgpt_api = address(TEST_CHATGPT_API)?;
+    switches.anthropic_api = address(TEST_ANTHROPIC_API)?;
 
     Ok(switches)
 }
@@ -224,30 +222,19 @@ fn refused(why: &str) -> SwitchError {
 mod tests {
     use super::*;
 
-    fn switched(
-        provider: Option<&str>,
-        durations: Option<&str>,
-        catalog: Option<&str>,
-        internet: Option<&str>,
-        openai: Option<&str>,
-        auth: Option<&str>,
-        chatgpt: Option<&str>,
-    ) -> Result<Switches, SwitchError> {
-        read(
-            provider.map(OsStr::new),
-            durations.map(OsStr::new),
-            catalog.map(OsStr::new),
-            internet.map(OsStr::new),
-            openai.map(OsStr::new),
-            auth.map(OsStr::new),
-            chatgpt.map(OsStr::new),
-        )
+    /// Serve's switches as an environment that sets `set` reads them.
+    fn switched(set: &[(&str, &str)]) -> Result<Switches, SwitchError> {
+        read(|name| {
+            set.iter()
+                .find(|(variable, _)| *variable == name)
+                .map(|(_, value)| OsString::from(value))
+        })
     }
 
     #[test]
     fn each_switch_sets_what_it_names_and_the_rest_keep_their_own() {
         let ms = Duration::from_millis;
-        let unset = switched(None, None, None, None, None, None, None).unwrap();
+        let unset = switched(&[]).unwrap();
 
         assert_eq!(unset.test_provider, None);
         assert_eq!(unset.durations, Durations::default());
@@ -256,16 +243,21 @@ mod tests {
         assert_eq!(unset.openai_api, None);
         assert_eq!(unset.openai_auth, None);
         assert_eq!(unset.chatgpt_api, None);
+        assert_eq!(unset.anthropic_api, None);
 
-        let set = switched(
-            Some("deterministic"),
-            Some("confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6"),
-            Some("http://127.0.0.1:8765/apps/"),
-            Some("http://127.0.0.1:8766"),
-            Some("http://127.0.0.1:8767/openai/v1"),
-            Some("http://127.0.0.1:8768/"),
-            Some("http://127.0.0.1:8769/chatgpt"),
-        )
+        let set = switched(&[
+            (TEST_PROVIDER, "deterministic"),
+            (
+                TEST_DURATIONS,
+                "confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6",
+            ),
+            (TEST_APP_CATALOG, "http://127.0.0.1:8765/apps/"),
+            (TEST_APP_INTERNET, "http://127.0.0.1:8766"),
+            (TEST_OPENAI_API, "http://127.0.0.1:8767/openai/v1"),
+            (TEST_OPENAI_AUTH, "http://127.0.0.1:8768/"),
+            (TEST_CHATGPT_API, "http://127.0.0.1:8769/chatgpt"),
+            (TEST_ANTHROPIC_API, "http://127.0.0.1:8770/anthropic/v1"),
+        ])
         .unwrap();
 
         assert_eq!(set.test_provider, Some(TestProvider::Deterministic));
@@ -287,6 +279,10 @@ mod tests {
             Some("http://127.0.0.1:8769/chatgpt")
         );
         assert_eq!(
+            set.anthropic_api.as_ref().map(BaseUrl::as_str),
+            Some("http://127.0.0.1:8770/anthropic/v1")
+        );
+        assert_eq!(
             set.durations,
             Durations {
                 confirmation: ms(1),
@@ -299,7 +295,7 @@ mod tests {
             }
         );
         assert_eq!(
-            switched(None, Some("grace=100"), None, None, None, None, None)
+            switched(&[(TEST_DURATIONS, "grace=100")])
                 .unwrap()
                 .durations,
             Durations {
@@ -313,98 +309,59 @@ mod tests {
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
         let keys = "the keys here are confirmation, pairing, silence, ping, grace, minute.";
 
-        for (provider, durations, catalog, internet, openai, auth, chatgpt, said) in [
+        for (variable, value, said) in [
             (
-                None,
-                Some("edit=100"),
-                None,
-                None,
-                None,
-                None,
-                None,
+                TEST_DURATIONS,
+                "edit=100",
                 format!("PROJECT02_TEST_DURATIONS: unknown key \"edit\"; {keys}"),
             ),
             (
-                None,
-                Some("grace=1.5"),
-                None,
-                None,
-                None,
-                None,
-                None,
+                TEST_DURATIONS,
+                "grace=1.5",
                 "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
                  above 0, not \"1.5\"."
                     .to_owned(),
             ),
             (
-                Some("nvidia"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                TEST_PROVIDER,
+                "nvidia",
                 "PROJECT02_TEST_PROVIDER must be \"deterministic\" when it is set.".to_owned(),
             ),
             (
-                None,
-                None,
-                Some("127.0.0.1:8765"),
-                None,
-                None,
-                None,
-                None,
+                TEST_APP_CATALOG,
+                "127.0.0.1:8765",
                 format!("PROJECT02_TEST_APP_CATALOG must be {BASE_URL_RULE}."),
             ),
             (
-                None,
-                None,
-                None,
-                Some("http://127.0.0.1:8766/?all=1"),
-                None,
-                None,
-                None,
+                TEST_APP_INTERNET,
+                "http://127.0.0.1:8766/?all=1",
                 format!("PROJECT02_TEST_APP_INTERNET must be {BASE_URL_RULE}."),
             ),
             (
-                None,
-                None,
-                None,
-                None,
-                Some("http://user:key@127.0.0.1:8767/v1"),
-                None,
-                None,
+                TEST_OPENAI_API,
+                "http://user:key@127.0.0.1:8767/v1",
                 format!("PROJECT02_TEST_OPENAI_API must be {BASE_URL_RULE}."),
             ),
             (
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some("http://127.0.0.1:8768/#top"),
-                None,
+                TEST_OPENAI_AUTH,
+                "http://127.0.0.1:8768/#top",
                 format!("PROJECT02_TEST_OPENAI_AUTH must be {BASE_URL_RULE}."),
             ),
             (
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some("chatgpt.com/backend-api/codex"),
+                TEST_CHATGPT_API,
+                "chatgpt.com/backend-api/codex",
                 format!("PROJECT02_TEST_CHATGPT_API must be {BASE_URL_RULE}."),
+            ),
+            (
+                TEST_ANTHROPIC_API,
+                "api.anthropic.com/v1",
+                format!("PROJECT02_TEST_ANTHROPIC_API must be {BASE_URL_RULE}."),
             ),
         ] {
             assert_eq!(
-                switched(
-                    provider, durations, catalog, internet, openai, auth, chatgpt
-                )
-                .map(drop),
+                switched(&[(variable, value)]).map(drop),
                 Err(SwitchError(said)),
-                "{provider:?} {durations:?} {catalog:?} {internet:?} {openai:?} {auth:?} \
-                 {chatgpt:?}"
+                "{variable}={value}"
             );
         }
     }

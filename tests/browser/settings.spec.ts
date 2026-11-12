@@ -11,6 +11,7 @@ import {
   createHome,
 } from '../conformance/harness/home.ts';
 import {startMem0Server} from '../conformance/harness/mem0-server.ts';
+import {messaged, replyUse} from '../conformance/harness/messages.ts';
 import {
   messagesOf,
   reply,
@@ -26,8 +27,9 @@ import {test} from './fixture.ts';
 
 /**
  * Mira on the model server as NVIDIA, which also stands in for the OpenAI
- * API and a ChatGPT plan's service, the home's config.json holding these
- * settings beside the model's, and the daemon's switches `env` too.
+ * API, a ChatGPT plan's service and the Claude API, the home's config.json
+ * holding these settings beside the model's, and the daemon's switches
+ * `env` too.
  */
 async function miraHome(
   config: {readonly project02?: object; readonly [section: string]: unknown},
@@ -49,6 +51,7 @@ async function miraHome(
     daemon: await startDaemon(home, {
       ...model.openai.env,
       ...model.chatgpt.env,
+      ...model.anthropic.env,
       ...env,
     }),
   };
@@ -533,6 +536,111 @@ test("page.settings-her-service: a character given a service of her own on her A
   await expect(service.locator('option:checked')).toHaveText(
     'Same as Everyone (NVIDIA)',
   );
+});
+
+test("page.settings-claude-api: beside NVIDIA, the Claude API added by pasting its key on its own page is listed under Connected; a character given it of her own with a model answers through it while another keeps everyone's; and chosen at the top with a model, the next reply comes through it", async ({
+  page,
+}) => {
+  const {model, home, daemon} = await miraHome(
+    {},
+    {
+      characters: {
+        nova: {'project02.character.json': characterJson('nova', 'Nova')},
+      },
+    },
+  );
+  const {anthropicApiKey} = model.anthropic.settings;
+  const roster = page.getByRole('complementary', {name: 'Characters'});
+  const connected = group(page, 'Connected');
+  const thinksWith = group(page, 'Characters Think With');
+  const bubbles = page.locator('.bubble-theirs .bubble-text');
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await link(group(page, 'Add a Service'), 'Claude API').click();
+  await expect(page.getByRole('heading', {name: 'Claude API'})).toBeVisible();
+  await expect(
+    page.getByText(
+      'Paste a key and press Return; it is never shown again. Get one in the Claude Console.',
+    ),
+  ).toBeVisible();
+
+  const key = page.getByLabel('API Key', {exact: true});
+
+  await key.fill(anthropicApiKey);
+  await key.press('Enter');
+  await expect(page.getByRole('button', {name: 'Remove Key'})).toBeVisible();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: 'AI Model', exact: true})
+    .click();
+  await expect(link(connected, 'Claude API')).toContainText('Key saved');
+
+  // Nova's own first, while everyone's is still NVIDIA.
+  await entry(page, 'Advanced').click();
+  await page.getByRole('switch', {name: 'Show Advanced Settings'}).click();
+  await entry(page, 'Nova').click();
+  await link(page.getByRole('main'), 'AI Model').click();
+  await page.getByRole('combobox', {name: 'Service'}).selectOption('anthropic');
+  await page
+    .getByRole('combobox', {name: 'Model'})
+    .selectOption('claude-sonnet-5-5');
+  await expect
+    .poll(() => characterConfig(home, 'nova'))
+    .toMatchObject({
+      project02: {
+        roleModelProvider: 'anthropic',
+        anthropicModel: 'claude-sonnet-5-5',
+      },
+    });
+
+  model.answer(
+    messaged(replyUse('Through my own.')),
+    reply("Through everyone's."),
+  );
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await link(roster, 'Nova').click();
+  await say(page, 'Hi, Nova.', 'Nova');
+  await expect(bubbles).toHaveText(['Through my own.']);
+  await link(roster, 'Mira').click();
+  await say(page, 'Hi, Mira.');
+  await expect(bubbles).toHaveText(["Through everyone's."]);
+
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await thinksWith
+    .getByRole('combobox', {name: 'Service'})
+    .selectOption('anthropic');
+  await thinksWith
+    .getByRole('combobox', {name: 'Model'})
+    .selectOption('claude-haiku-5-5');
+  await expect(link(connected, 'Claude API')).toContainText('In Use');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({
+      project02: {
+        roleModelProvider: 'anthropic',
+        anthropicModel: 'claude-haiku-5-5',
+      },
+    });
+
+  model.answer(messaged(replyUse('Through Claude.')));
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await say(page, 'Hello again.');
+  await expect(bubbles).toHaveText(["Through everyone's.", 'Through Claude.']);
+
+  const toClaude = (chosen: string) => ({
+    path: '/anthropic/v1/messages',
+    headers: {'x-api-key': anthropicApiKey},
+    body: {model: chosen},
+  });
+
+  expect(model.requests).toMatchObject([
+    toClaude('claude-sonnet-5-5'),
+    {path: '/v1/chat/completions'},
+    toClaude('claude-haiku-5-5'),
+  ]);
 });
 
 test("page.settings-chatgpt-plan: beside NVIDIA, the ChatGPT Plan's page signs in by a code it shows with the warning that this is no official way, to copy or to approve on OpenAI's page, and moves on by itself to the account and its plan once the code is approved; chosen at the top with a model, the next reply comes through the plan; and Sign Out puts it back under Add a Service", async ({

@@ -127,6 +127,13 @@ it("config.view-global: the home's view lists the host fields the home may set i
         effectiveSource: 'default',
         effective: {source: 'default', value: 'gpt-6-luna'},
       },
+      unset('anthropicApiKey'),
+      {
+        name: 'anthropicModel',
+        authored: {configured: false},
+        effectiveSource: 'default',
+        effective: {source: 'default', value: 'claude-opus-5-5'},
+      },
       unset('nvidiaApiKey'),
       unset('nvidiaModel'),
       unset('nvidiaBaseUrl'),

@@ -81,13 +81,15 @@ impl Gateway {
                 test_provider: Some(Arc::clone(&model) as Arc<dyn RoleModelAdapter>),
                 durations,
                 plugins,
-                // An App Store, an internet, an OpenAI API, a sign-in and a
-                // ChatGPT plan nothing serves: no test of these reaches any.
+                // An App Store, an internet, an OpenAI API, a sign-in, a
+                // ChatGPT plan and a Claude API nothing serves: no test of
+                // these reaches any.
                 app_catalog: BaseUrl::parse("http://127.0.0.1:9").unwrap(),
                 app_internet: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
                 openai_api: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
                 openai_auth: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
                 chatgpt_api: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
+                anthropic_api: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
             },
         )
         .await

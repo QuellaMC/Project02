@@ -190,7 +190,7 @@ const phone = section('phone', {
 /**
  * The services as a view lists them: the ChatGPT plan, signed in as
  * `account` when one is given, then the OpenAI API's and NVIDIA's, each
- * connected or not.
+ * connected or not, and between them the Claude API's, not connected.
  */
 function services(
   openai: boolean,
@@ -215,6 +215,15 @@ function services(
       connected: openai,
       model: 'openaiModel',
       fields: ['openaiApiKey', 'openaiModel'],
+    },
+    {
+      id: 'anthropic',
+      name: 'Claude API',
+      summary: 'Pay as you go, with an API key',
+      keyFrom: 'Get one in the Claude Console.',
+      connected: false,
+      model: 'anthropicModel',
+      fields: ['anthropicApiKey', 'anthropicModel'],
     },
     {
       id: 'nvidia',
@@ -247,8 +256,13 @@ const serviceShapes: Readonly<Record<string, Partial<Field>>> = {
   roleModelProvider: {
     label: 'Service',
     valueType: 'enum',
-    allowedValues: ['chatgpt', 'openai', 'nvidia'],
-    choices: {chatgpt: 'ChatGPT Plan', openai: 'OpenAI API', nvidia: 'NVIDIA'},
+    allowedValues: ['chatgpt', 'openai', 'anthropic', 'nvidia'],
+    choices: {
+      chatgpt: 'ChatGPT Plan',
+      openai: 'OpenAI API',
+      anthropic: 'Claude API',
+      nvidia: 'NVIDIA',
+    },
   },
   openaiApiKey: {label: 'API Key', secret: true},
   openaiModel,
@@ -648,7 +662,7 @@ describe('settings model', () => {
     expect(sidebar({}).connections.map(entry => entry.value)).toEqual(['', '']);
   });
 
-  it("lists the services on AI Model: once one is connected, what every character thinks with over those connected, each by whom the ChatGPT plan is signed in as, its key or a server of the person's own and In Use on the one chosen; then the rest by what each is, under Add a Service, or Services while none is; and the sidebar says the one connected or how many, and Set Up while a character has no model", () => {
+  it("lists the services on AI Model in the order the view lists them, each on the tile the design gives it: once one is connected, what every character thinks with over those connected, each by whom the ChatGPT plan is signed in as, its key or a server of the person's own and In Use on the one chosen; then the rest by what each is, under Add a Service, or Services while none is; and the sidebar says the one connected or how many, and Set Up while a character has no model", () => {
     const rows = (listed: readonly ListedService[]) =>
       listed.map(entry => [entry.service.name, entry.line, entry.inUse]);
     const page = (view: OkView) => {
@@ -669,6 +683,7 @@ describe('settings model', () => {
         false,
       ],
       openai: ['OpenAI API', 'Pay as you go, with an API key', false],
+      anthropic: ['Claude API', 'Pay as you go, with an API key', false],
       nvidia: ['NVIDIA', 'An API key, or a server of your own', false],
     };
     const none = homeView({
@@ -682,14 +697,17 @@ describe('settings model', () => {
       others: {
         title: 'Services',
         footer: 'Connect one to start. You can connect more than one.',
-        services: [offer.chatgpt, offer.openai, offer.nvidia],
+        services: [offer.chatgpt, offer.openai, offer.anthropic, offer.nvidia],
       },
     });
     expect(word(none)).toMatchObject({value: 'Set Up', dot: true});
 
     expect(page(homeView())).toEqual({
       connected: [['NVIDIA', 'Key saved', true]],
-      others: {title: 'Add a Service', services: [offer.chatgpt, offer.openai]},
+      others: {
+        title: 'Add a Service',
+        services: [offer.chatgpt, offer.openai, offer.anthropic],
+      },
     });
     expect(word(homeView())).toMatchObject({value: 'NVIDIA', dot: false});
 
@@ -708,7 +726,10 @@ describe('settings model', () => {
         ['OpenAI API', 'Key saved', true],
         ['NVIDIA', 'Your server', false],
       ],
-      others: {title: 'Add a Service', services: [offer.chatgpt]},
+      others: {
+        title: 'Add a Service',
+        services: [offer.chatgpt, offer.anthropic],
+      },
     });
     expect(word(both)).toMatchObject({value: '2 Services', dot: false});
     expect(everyone.chosen?.id).toBe('openai');
@@ -732,7 +753,10 @@ describe('settings model', () => {
 
     expect(page(keyless)).toEqual({
       connected: [['NVIDIA', 'Your server', false]],
-      others: {title: 'Add a Service', services: [offer.chatgpt, offer.openai]},
+      others: {
+        title: 'Add a Service',
+        services: [offer.chatgpt, offer.openai, offer.anthropic],
+      },
     });
     expect(
       serviceChoice(settingsOf({home: keyless}), home).options.map(
@@ -753,16 +777,21 @@ describe('settings model', () => {
 
     expect(page(plan)).toEqual({
       connected: [['ChatGPT Plan', 'sam@example.com · Plus', true]],
-      others: {title: 'Add a Service', services: [offer.openai, offer.nvidia]},
+      others: {
+        title: 'Add a Service',
+        services: [offer.openai, offer.anthropic, offer.nvidia],
+      },
     });
     expect(word(plan)).toMatchObject({value: 'ChatGPT Plan', dot: false});
     expect([
       serviceArt('chatgpt'),
       serviceArt('openai'),
+      serviceArt('anthropic'),
       serviceArt('nvidia'),
     ]).toEqual([
       {icon: 'person', tint: 'mint'},
       {icon: 'key', tint: 'graphite'},
+      {icon: 'leaf', tint: 'orange'},
       {icon: 'grid', tint: 'teal'},
     ]);
     expect(serviceArt('elsewhere')).toEqual({icon: 'grid', tint: 'gray'});

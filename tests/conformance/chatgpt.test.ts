@@ -502,7 +502,12 @@ it('chatgpt.needs-sign-in: the plan chosen while the home is signed out leaves a
   });
   expect(await view()).toMatchObject({
     model: {ready: false, message: signInNeeded},
-    services: [{...plan, connected: false}, {id: 'openai'}, {id: 'nvidia'}],
+    services: [
+      {...plan, connected: false},
+      {id: 'openai'},
+      {id: 'anthropic'},
+      {id: 'nvidia'},
+    ],
   });
   expect(
     ((await view()) as {readonly services: readonly object[]}).services[0],
@@ -521,6 +526,7 @@ it('chatgpt.needs-sign-in: the plan chosen while the home is signed out leaves a
         account: {email: sam.email, plan: 'plus'},
       },
       {id: 'openai'},
+      {id: 'anthropic'},
       {id: 'nvidia'},
     ],
   });
@@ -548,7 +554,12 @@ it('chatgpt.needs-sign-in: the plan chosen while the home is signed out leaves a
   );
   expect(await view()).toMatchObject({
     model: {ready: false, message: signInNeeded},
-    services: [{...plan, connected: false}, {id: 'openai'}, {id: 'nvidia'}],
+    services: [
+      {...plan, connected: false},
+      {id: 'openai'},
+      {id: 'anthropic'},
+      {id: 'nvidia'},
+    ],
   });
 });
 
