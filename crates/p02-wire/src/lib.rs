@@ -3,6 +3,7 @@
 
 mod apps;
 mod bots;
+mod chatgpt;
 mod config;
 mod confirmation;
 mod conversation;
@@ -23,11 +24,12 @@ pub use apps::{
 pub use bots::{
     BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
 };
+pub use chatgpt::{ChatgptOutcome, ChatgptSignIn};
 pub use config::{
     AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
-    LayoutRow, LayoutWhen, ModelService, Namespace, Operation, Placement, PluginPage,
+    LayoutRow, LayoutWhen, ModelService, Namespace, Operation, Placement, PlanAccount, PluginPage,
     RoleModelProvider, SectionActivation, SectionView, Setup, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{

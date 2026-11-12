@@ -82,6 +82,8 @@ pub(crate) async fn run(
         app_catalog: switches.app_catalog,
         app_internet: switches.app_internet,
         openai_api: switches.openai_api,
+        openai_auth: switches.openai_auth,
+        chatgpt_api: switches.chatgpt_api,
     };
 
     serve(home, claim, settings, &stop, console).await

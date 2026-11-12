@@ -179,6 +179,30 @@ diagnostic?: string,
 maintenance?: MaintenanceFailure, };
 
 /**
+ * What came of starting a sign-in, calling off its wait or signing out:
+ * the sign-in as it then stands, or the sentence saying why it failed.
+ */
+export type ChatgptOutcome = { "status": "ok", signIn: ChatgptSignIn, } | { "status": "failed", message: string, };
+
+/**
+ * The home's sign-in to a ChatGPT plan as it stands.
+ */
+export type ChatgptSignIn = { "state": "signed_out", message?: string, } | { "state": "waiting", 
+/**
+ * The code the person types there.
+ */
+code: string, 
+/**
+ * Where they type it.
+ */
+url: string, 
+/**
+ * When the code stops working, in milliseconds since the Unix
+ * epoch.
+ */
+expiresAt: number, } | { "state": "signed_in", email?: string, plan?: string, };
+
+/**
  * What a client stamps on a line it carries: the surface it came from, or
  * the id it submitted the line under, which a repeat of the line reuses. An
  * ASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`
@@ -346,7 +370,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 14, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 15, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -359,7 +383,11 @@ packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connector
  * The person's accounts her phone knows, which the home's settings
  * hold the keys of.
  */
-accounts: ReadonlyArray<PersonAccount>, };
+accounts: ReadonlyArray<PersonAccount>, 
+/**
+ * The home's sign-in to a ChatGPT plan.
+ */
+chatgpt: ChatgptSignIn, };
 
 /**
  * The person's line into one conversation, with the two stamps its client
@@ -372,7 +400,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 14, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 15, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -455,8 +483,8 @@ export type MessageId = string;
 
 /**
  * A service as a settings page lists it: its name, what it is and where a
- * key for it comes from, whether it is connected, and which of the host's
- * fields are its own, its model's among them.
+ * key for it comes from, whether it is connected and as whom, and which of
+ * the host's fields are its own, its model's among them.
  */
 export type ModelService = { id: RoleModelProvider, 
 /**
@@ -468,14 +496,20 @@ name: string,
  */
 summary: string, 
 /**
- * Where a key for it comes from, in a sentence.
+ * Where a key for it comes from, in a sentence; none for the ChatGPT
+ * plan, which takes no key.
  */
-keyFrom: string, 
+keyFrom?: string, 
 /**
- * Whether a credential of it is in effect for the target: its key,
- * or for NVIDIA a server of the person's own too.
+ * Whether it is connected for the target: a credential of it in
+ * effect, its key or for NVIDIA a server of the person's own too; for
+ * the ChatGPT plan, the home signed in, which is no setting.
  */
 connected: boolean, 
+/**
+ * Whom the ChatGPT plan is connected as, while the home is signed in.
+ */
+account?: PlanAccount, 
 /**
  * The one of its fields that names the model she asks it for.
  */
@@ -658,6 +692,12 @@ export type PhoneRing = { appName: string, title: string, body?: string, at: Tim
 export type Placement = "mind_body" | "permission";
 
 /**
+ * The account a ChatGPT plan is signed in to: its email and its plan, such
+ * as `plus`, as OpenAI named them.
+ */
+export type PlanAccount = { email?: string, plan?: string, };
+
+/**
  * How a plugin's row on a settings page is drawn, as its manifest
  * declares it.
  */
@@ -702,7 +742,7 @@ export type RemoveCharacterRefusal = "built_in" | "unknown_character";
  * harness's switch, never a setting, and a home has none until its
  * person chooses one.
  */
-export type RoleModelProvider = "openai" | "nvidia";
+export type RoleModelProvider = "chatgpt" | "openai" | "nvidia";
 
 /**
  * Where an installed character stands as health reports her: her

@@ -4,9 +4,10 @@ A home's state at storage schema version 15, plugins' files and databases
 included. It reaches the disk only through p02-shared's fs seam, and no
 other crate opens a database.
 
-- **Layout.** `schema.json`, `config.json`, `daemon.json`, `.locks`,
-  `conversations/<id>/conversation.json`, the packages a person added from
-  a file, `characters/<id>/project02.character.json`, and per character
+- **Layout.** `schema.json`, `config.json`, `daemon.json`,
+  `chatgpt-sign-in.json`, `.locks`, `conversations/<id>/conversation.json`,
+  the packages a person added from a file,
+  `characters/<id>/project02.character.json`, and per character
   `character-data/<id>/`: her marker, overlay and `.locks`, `inbox.jsonl`,
   `sessions.jsonl`, `sessions/<conversation>.<n>/raw-events.jsonl`,
   `taken-lines/` and `plugin-data/<plugin>/`: a plugin's databases, and
@@ -20,11 +21,15 @@ other crate opens a database.
   locks keep one daemon per home and one writer per conversation, session
   or plugin. A character's package is written whole or removed under the
   locks of her settings, its folder kept when it holds anything of the
-  person's. A newer build's marker and a link where state lives, or on the
-  way to a package written or removed, are refused, credentials redacted,
-  and a line already taken not run again.
+  person's. The home's sign-in to a ChatGPT plan, its tokens, is written
+  only by the daemon serving the home, one write at a time, whole and
+  owner-only, and a write makes the folder a home first. A newer build's
+  marker and a link where state lives, or on the way to a package written
+  or removed, are refused, credentials redacted, and a line already taken
+  not run again.
 - **Reading.** A log line or catalog row that cannot be read is skipped
-  and said, and a plugin database damaged or of another version is
+  and said, a sign-in that does not read is no sign-in, nothing of it
+  repeated, and a plugin database damaged or of another version is
   rebuilt. What reading past would lose is refused: a catalog its
   directories contradict, a continued segment's missing log, a plugin's
   damaged document or text file.

@@ -220,7 +220,7 @@ it("services.own-service: a character whose own settings choose the other servic
   ]);
 });
 
-it("services.listed: a view lists every service in a page's order with its name, what it is, where its key comes from and its own fields, its model's named, each connected while a credential of it is in effect, a server of the person's own among NVIDIA's; the OpenAI key set connects it and gives her a model, and cleared takes both away, saying what to add", async () => {
+it("services.listed: a view lists every service in a page's order with its name, what it is, where a key for it comes from and its own fields, its model's named, the ChatGPT plan first with no key, each connected while a credential of it is in effect, a server of the person's own among NVIDIA's; the OpenAI key set connects it and gives her a model, and cleared takes both away, saying what to add", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({
@@ -240,6 +240,7 @@ it("services.listed: a view lists every service in a page's order with its name,
   const key = (operation: object) =>
     saveConfig(wire, {scope: 'global'}, operation);
   const connected = (openai: boolean) => [
+    {id: 'chatgpt', connected: false},
     {id: 'openai', connected: openai},
     {id: 'nvidia', connected: true},
   ];
@@ -248,6 +249,14 @@ it("services.listed: a view lists every service in a page's order with its name,
   expect(await view()).toMatchObject({
     model: {ready: false, message: needed},
     services: [
+      {
+        id: 'chatgpt',
+        name: 'ChatGPT Plan',
+        summary: 'Sign in with the plan you already pay for',
+        connected: false,
+        model: 'chatgptModel',
+        fields: ['chatgptModel'],
+      },
       {
         id: 'openai',
         name: 'OpenAI API',

@@ -4,6 +4,7 @@ use std::fmt;
 
 pub(crate) const SCHEMA_FILE: &str = "schema.json";
 pub(crate) const CONFIG_FILE: &str = "config.json";
+pub(crate) const CHATGPT_SIGN_IN_FILE: &str = "chatgpt-sign-in.json";
 pub(crate) const LOCKS_DIRECTORY: &str = ".locks";
 pub(crate) const CHARACTER_DATA_DIRECTORY: &str = "character-data";
 pub(crate) const CONVERSATIONS_DIRECTORY: &str = "conversations";

@@ -11,6 +11,7 @@ import {
   type AppWakeBody,
   type AppWakeOutcome,
   type CharacterPreviewOutcome,
+  type ChatgptOutcome,
   type ClientStamp,
   type ConfigChange,
   type ConfigChangeOutcome,
@@ -224,6 +225,16 @@ export type GatewayClient = {
     options?: GatewayCallOptions,
   ): Promise<PairingSettleOutcome>;
   /**
+   * Starts signing the home in to a ChatGPT plan: OpenAI gives a code the
+   * person approves on its page, and the daemon waits for that in place of
+   * any wait before. Health says the sign-in from then on.
+   */
+  startChatgptSignIn(options?: GatewayCallOptions): Promise<ChatgptOutcome>;
+  /** Calls off the wait for the person's approval; the home keeps what it held. */
+  cancelChatgptSignIn(options?: GatewayCallOptions): Promise<ChatgptOutcome>;
+  /** Signs the home out of its ChatGPT plan: its tokens leave the home. */
+  signOutOfChatgpt(options?: GatewayCallOptions): Promise<ChatgptOutcome>;
+  /**
    * Follows the event stream until the signal aborts, reconnecting after
    * the daemon closes it with the id of the last frame it handed on, so a
    * daemon that still holds that frame resumes the stream instead of
@@ -411,77 +422,109 @@ export function createGatewayClient(
         {decision} satisfies AnswerBody,
         callOptions,
       ),
-    async events(listener, eventsOptions) {
-      const {signal, connector} = eventsOptions;
-      const aborted = (): boolean => signal.aborted;
-      const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
-      let reconnected = false;
-      // The id of the last frame handed on and applied, sent back on
-      // every reconnect: a frame the caller never applied is asked for
-      // again, and a `resumed` frame carries no id and moves nothing.
-      const cursor = {lastEventId: undefined as string | undefined};
-
-      while (!aborted()) {
-        try {
-          const response = await guardedFetch(
-            `${baseUrl}/api/events${query({connector})}`,
-            {
-              headers:
-                cursor.lastEventId === undefined
-                  ? headers
-                  : {...headers, 'last-event-id': cursor.lastEventId},
-              signal,
-            },
-          );
-
-          await rejectUnlessOk(response);
-          await followStream(
-            response,
-            {
-              listener,
-              async onReady(snapshot) {
-                const wasReconnect = reconnected;
-
-                reconnected = true;
-                await eventsOptions.onReady?.({
-                  reconnected: wasReconnect,
-                  snapshot,
-                });
-              },
-              onResumed: () => {
-                eventsOptions.onResumed?.();
-              },
-              cursor,
-            },
-            signal,
-          );
-        } catch (error: unknown) {
-          if (aborted()) {
-            return;
-          }
-
-          // The caller's own failure is the caller's, whatever it threw.
-          // A daemon that is down or stopping comes back; a refused token
-          // or a wrong protocol does not.
-          if (error instanceof CallbackFailure) {
-            throw error.cause;
-          }
-
-          if (
-            !(error instanceof GatewayClientError) ||
-            (error.status !== 0 && error.status !== 503)
-          ) {
-            throw error;
-          }
-        }
-
-        eventsOptions.onLost?.();
-        await pause(retryMs, signal);
-      }
-    },
+    startChatgptSignIn: callOptions =>
+      route.post<ChatgptOutcome>(
+        '/api/chatgpt/sign-in',
+        undefined,
+        callOptions,
+      ),
+    cancelChatgptSignIn: callOptions =>
+      route.post<ChatgptOutcome>(
+        '/api/chatgpt/sign-in/cancel',
+        undefined,
+        callOptions,
+      ),
+    signOutOfChatgpt: callOptions =>
+      route.post<ChatgptOutcome>(
+        '/api/chatgpt/sign-out',
+        undefined,
+        callOptions,
+      ),
+    events: (listener, eventsOptions) =>
+      followEvents(baseUrl, headers, guardedFetch, listener, eventsOptions),
   };
 
   return client;
+}
+
+/**
+ * The event stream, followed as `GatewayClient`'s `events` says: until
+ * the signal aborts, each stream the daemon ends taken up again from the
+ * last frame handed on.
+ */
+async function followEvents(
+  baseUrl: string,
+  headers: Readonly<Record<string, string>>,
+  transport: typeof fetch,
+  listener: (event: GatewayEvent) => void,
+  eventsOptions: GatewayEventsOptions,
+): Promise<void> {
+  const {signal, connector} = eventsOptions;
+  const aborted = (): boolean => signal.aborted;
+  const retryMs = eventsOptions.retryMs ?? defaultRetryMs;
+  let reconnected = false;
+  // The id of the last frame handed on and applied, sent back on every
+  // reconnect: a frame the caller never applied is asked for again, and a
+  // `resumed` frame carries no id and moves nothing.
+  const cursor = {lastEventId: undefined as string | undefined};
+
+  while (!aborted()) {
+    try {
+      const response = await transport(
+        `${baseUrl}/api/events${query({connector})}`,
+        {
+          headers:
+            cursor.lastEventId === undefined
+              ? headers
+              : {...headers, 'last-event-id': cursor.lastEventId},
+          signal,
+        },
+      );
+
+      await rejectUnlessOk(response);
+      await followStream(
+        response,
+        {
+          listener,
+          async onReady(snapshot) {
+            const wasReconnect = reconnected;
+
+            reconnected = true;
+            await eventsOptions.onReady?.({
+              reconnected: wasReconnect,
+              snapshot,
+            });
+          },
+          onResumed: () => {
+            eventsOptions.onResumed?.();
+          },
+          cursor,
+        },
+        signal,
+      );
+    } catch (error: unknown) {
+      if (aborted()) {
+        return;
+      }
+
+      // The caller's own failure is the caller's, whatever it threw. A
+      // daemon that is down or stopping comes back; a refused token or a
+      // wrong protocol does not.
+      if (error instanceof CallbackFailure) {
+        throw error.cause;
+      }
+
+      if (
+        !(error instanceof GatewayClientError) ||
+        (error.status !== 0 && error.status !== 503)
+      ) {
+        throw error;
+      }
+    }
+
+    eventsOptions.onLost?.();
+    await pause(retryMs, signal);
+  }
 }
 
 /** A request's body: its text, and the media type it travels under. */

@@ -3,6 +3,7 @@ import {join} from 'node:path';
 
 import {expect, type Locator, type Page} from '@playwright/test';
 
+import {startAuthServer} from '../conformance/harness/auth-server.ts';
 import {connector, startDaemon} from '../conformance/harness/daemon.ts';
 import {
   characterJson,
@@ -15,17 +16,23 @@ import {
   reply,
   startModelServer,
 } from '../conformance/harness/model-server.ts';
-import {responded, replying} from '../conformance/harness/responses.ts';
+import {
+  planResponded,
+  responded,
+  replying,
+} from '../conformance/harness/responses.ts';
 import {startTelegramServer} from '../conformance/harness/telegram-server.ts';
 import {test} from './fixture.ts';
 
 /**
  * Mira on the model server as NVIDIA, which also stands in for the OpenAI
- * API, the home's config.json holding these settings beside the model's.
+ * API and a ChatGPT plan's service, the home's config.json holding these
+ * settings beside the model's, and the daemon's switches `env` too.
  */
 async function miraHome(
   config: {readonly project02?: object; readonly [section: string]: unknown},
   seed: Parameters<typeof createHome>[0] = {},
+  env: Readonly<Record<string, string>> = {},
 ) {
   const model = await startModelServer();
   const home = createHome({
@@ -36,7 +43,15 @@ async function miraHome(
     ...seed,
   });
 
-  return {model, home, daemon: await startDaemon(home, model.openai.env)};
+  return {
+    model,
+    home,
+    daemon: await startDaemon(home, {
+      ...model.openai.env,
+      ...model.chatgpt.env,
+      ...env,
+    }),
+  };
 }
 
 /** The home's config.json as it stands. */
@@ -203,6 +218,68 @@ test('page.welcome-later: a person with no key at hand leaves the welcome for th
   await page.getByRole('button', {name: 'Set Up Later'}).click();
   await page.getByRole('button', {name: 'Choose an AI service.'}).click();
   await expect(page.getByRole('heading', {name: 'AI Model'})).toBeVisible();
+});
+
+test("page.welcome-chatgpt-plan: the ChatGPT Plan chosen in the welcome asks for no key: the sign-in its page shows stands in the key's place, Continue is offered once the code is approved, and she answers through the plan; the sidebar's AI Model then names it, its own name whole at the window's narrowest", async ({
+  page,
+}) => {
+  const auth = await startAuthServer();
+  const model = await startModelServer();
+  const daemon = await startDaemon(createHome(), {
+    ...auth.env,
+    ...model.chatgpt.env,
+  });
+  const next = page.getByRole('button', {name: 'Continue'});
+
+  await page.goto(daemon.url);
+  await page.getByRole('textbox', {name: 'Your Name'}).fill('Sam');
+  await next.click();
+  await page.getByRole('combobox', {name: 'Service'}).selectOption('chatgpt');
+  await expect(
+    page.getByText('This is not an official way to use a plan in another app.'),
+  ).toBeVisible();
+  await expect(page.getByLabel('API Key')).toHaveCount(0);
+  await expect(next).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('button', {name: 'Sign In', exact: true}).click();
+  await expect(page.getByText('CODE-1', {exact: true})).toBeVisible();
+  auth.approve();
+  await expect(page.getByText('sam@example.com')).toBeVisible();
+  await expect(next).toHaveAttribute('aria-disabled', 'false');
+  await next.click();
+  await expect(
+    page.getByRole('heading', {name: "You're All Set, Sam"}),
+  ).toBeVisible();
+
+  model.answer(planResponded(replying('Hello, Sam.')));
+  await page.getByRole('button', {name: 'Start Chatting'}).click();
+  await say(page, 'Hi.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello, Sam.',
+  ]);
+  expect(model.requests.at(-1)).toMatchObject({
+    path: '/chatgpt/responses',
+    body: {model: 'gpt-6.1-sol'},
+  });
+
+  // The narrowest window that keeps the sidebar beside the page, on AI
+  // Model, where its entry's name is bold and so at its widest.
+  await page.setViewportSize({width: 820, height: 760});
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await expect(entry(page, 'AI Model')).toContainText('ChatGPT Plan');
+  expect(
+    (await page.getByRole('navigation', {name: 'Settings'}).boundingBox())
+      ?.width,
+  ).toBeLessThan(300);
+  expect(
+    await page.evaluate<boolean>(`(() => {
+      const name = [...document.querySelectorAll('.side-label')].find(
+        label => label.textContent === 'AI Model',
+      );
+
+      return name.scrollWidth <= name.clientWidth;
+    })()`),
+  ).toBe(true);
 });
 
 test('page.settings-saves-as-typed: a box saves on Return with a check and no Save button anywhere, emptied it inherits again, and a key box stays empty, a stored key shown as dots and a new one never shown back', async ({
@@ -456,6 +533,106 @@ test("page.settings-her-service: a character given a service of her own on her A
   await expect(service.locator('option:checked')).toHaveText(
     'Same as Everyone (NVIDIA)',
   );
+});
+
+test("page.settings-chatgpt-plan: beside NVIDIA, the ChatGPT Plan's page signs in by a code it shows with the warning that this is no official way, to copy or to approve on OpenAI's page, and moves on by itself to the account and its plan once the code is approved; chosen at the top with a model, the next reply comes through the plan; and Sign Out puts it back under Add a Service", async ({
+  context,
+  page,
+}) => {
+  const auth = await startAuthServer();
+  const {model, home, daemon} = await miraHome({}, {}, auth.env);
+  const thinksWith = group(page, 'Characters Think With');
+  const back = page
+    .getByRole('main')
+    .getByRole('button', {name: 'AI Model', exact: true});
+  const signIn = page.getByRole('button', {name: 'Sign In', exact: true});
+  const warning = page.getByText(
+    'This is not an official way to use a plan in another app.',
+  );
+
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await expect(
+    link(group(page, 'Add a Service'), 'ChatGPT Plan'),
+  ).toContainText('Sign in with the plan you already pay for');
+  await link(group(page, 'Add a Service'), 'ChatGPT Plan').click();
+  await expect(warning).toBeVisible();
+  await signIn.click();
+  await expect(page.getByText('CODE-1', {exact: true})).toBeVisible();
+  await expect(warning).toBeVisible();
+  await expect(page.getByRole('link', {name: 'Open OpenAI'})).toHaveAttribute(
+    'href',
+    auth.page,
+  );
+  await page.getByRole('button', {name: 'Copy Code'}).click();
+  await expect(page.getByRole('button', {name: 'Copied'})).toBeVisible();
+  expect(await page.evaluate<string>('navigator.clipboard.readText()')).toBe(
+    'CODE-1',
+  );
+
+  auth.approve();
+  await expect(page.getByText('sam@example.com')).toBeVisible();
+  await expect(page.getByText('Plus', {exact: true})).toBeVisible();
+  await expect(warning).toHaveCount(0);
+  await back.click();
+  await expect(link(group(page, 'Connected'), 'ChatGPT Plan')).toContainText(
+    'sam@example.com · Plus',
+  );
+  await thinksWith
+    .getByRole('combobox', {name: 'Service'})
+    .selectOption('chatgpt');
+  await thinksWith
+    .getByRole('combobox', {name: 'Model'})
+    .selectOption('gpt-6-luna');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({
+      project02: {roleModelProvider: 'chatgpt', chatgptModel: 'gpt-6-luna'},
+    });
+
+  model.answer(planResponded(replying('Through the plan.')));
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await say(page, 'Hello.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Through the plan.',
+  ]);
+  expect(model.requests.at(-1)).toMatchObject({
+    path: '/chatgpt/responses',
+    authorization: `Bearer ${String(auth.accessToken())}`,
+    body: {model: 'gpt-6-luna'},
+  });
+
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await link(group(page, 'Connected'), 'ChatGPT Plan').click();
+  await page.getByRole('button', {name: 'Sign Out'}).click();
+  await expect(signIn).toBeVisible();
+  await back.click();
+  await expect(
+    link(group(page, 'Add a Service'), 'ChatGPT Plan'),
+  ).toBeVisible();
+  await expect(thinksWith).toContainText('Sign in to your ChatGPT plan.');
+});
+
+test("page.settings-chatgpt-code-expires: a code that runs out before it is approved is said in the daemon's words where the person signs in, with Sign In offered again", async ({
+  page,
+}) => {
+  const auth = await startAuthServer(-60_000);
+  const {daemon} = await miraHome({}, {}, auth.env);
+  const signIn = page.getByRole('button', {name: 'Sign In', exact: true});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await link(group(page, 'Add a Service'), 'ChatGPT Plan').click();
+  await signIn.click();
+  await expect(
+    page.getByText('The code expired before it was approved. Start again.'),
+  ).toBeVisible();
+  await expect(signIn).toBeVisible();
+  await expect(page.getByText('CODE-1', {exact: true})).toHaveCount(0);
 });
 
 test('page.settings-feature-switch: Reply Style switched on from her page, with a tone and a sign-off, takes effect in her next reply', async ({

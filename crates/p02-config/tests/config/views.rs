@@ -2,7 +2,7 @@
 //! them.
 
 use p02_config::connector_config_view;
-use p02_wire::ConfigChange;
+use p02_wire::{ConfigChange, PlanAccount};
 use serde_json::{Value, json};
 
 use crate::support::{World, document, field, findings, home, host_field, of, section};
@@ -167,6 +167,14 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
         home_view["services"],
         json!([
             {
+                "id": "chatgpt",
+                "name": "ChatGPT Plan",
+                "summary": "Sign in with the plan you already pay for",
+                "connected": false,
+                "model": "chatgptModel",
+                "fields": ["chatgptModel"],
+            },
+            {
                 "id": "openai",
                 "name": "OpenAI API",
                 "summary": "Pay as you go, with an API key",
@@ -188,7 +196,11 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
     );
     assert_eq!(
         connected(&world.view(&of("mira"))),
-        [json!(["openai", true]), json!(["nvidia", true])]
+        [
+            json!(["chatgpt", false]),
+            json!(["openai", true]),
+            json!(["nvidia", true])
+        ]
     );
     assert_eq!(
         json!([
@@ -208,7 +220,94 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
             },
             "default",
             "gpt-6-luna",
-            ["openai", "nvidia"],
+            ["chatgpt", "openai", "nvidia"],
+        ])
+    );
+}
+
+/// The ChatGPT plan is connected while the home is signed in, which no
+/// document says, and then says as whom. Its model offers what the plan
+/// offers, every model to a paid plan and those of the free plan to a
+/// free one or one OpenAI does not name, each in its words; the first of
+/// them is in effect until one is set, and one set is in effect whatever
+/// the plan.
+#[test]
+fn the_chatgpt_plan_is_connected_while_signed_in_and_its_model_offers_what_the_plan_offers() {
+    let world = World::new();
+    let account = |plan: Option<&str>| PlanAccount {
+        email: Some("sam@example.com".to_owned()),
+        plan: plan.map(str::to_owned),
+    };
+    let offered = |view: &Value| {
+        let model = host_field(view, "chatgptModel");
+
+        json!([
+            view["services"][0]["connected"],
+            view["services"][0]["account"],
+            model["suggestedValues"],
+            model["effective"]["source"],
+            model["effective"]["value"],
+        ])
+    };
+    let every = json!([
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6.1-terra",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+    ]);
+    let free = json!([
+        "gpt-6.1-terra",
+        "gpt-6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna"
+    ]);
+
+    assert_eq!(
+        offered(&world.signed_in_view(&home(), Some(&account(Some("plus"))))),
+        json!([
+            true,
+            {"email": "sam@example.com", "plan": "plus"},
+            every,
+            "default",
+            "gpt-6.1-sol",
+        ])
+    );
+    assert_eq!(
+        host_field(
+            &world.signed_in_view(&home(), Some(&account(Some("free")))),
+            "chatgptModel"
+        )["choices"],
+        json!({
+            "gpt-6.1-terra": "GPT-6.1 Terra",
+            "gpt-6-luna": "GPT-6 Luna",
+            "gpt-5.6-terra": "GPT-5.6 Terra",
+            "gpt-5.6-luna": "GPT-5.6 Luna",
+        })
+    );
+    assert_eq!(
+        offered(&world.signed_in_view(&home(), Some(&account(None)))),
+        json!([true, {"email": "sam@example.com"}, free, "default", "gpt-6.1-terra"])
+    );
+    assert_eq!(
+        offered(&world.view(&home())),
+        json!([false, null, free, "default", "gpt-6.1-terra"])
+    );
+
+    world.write_home(&document(
+        json!({"project02": {"chatgptModel": "gpt-6-luna"}}),
+    ));
+
+    assert_eq!(
+        offered(&world.signed_in_view(&of("mira"), Some(&account(Some("pro"))))),
+        json!([
+            true,
+            {"email": "sam@example.com", "plan": "pro"},
+            every,
+            "config",
+            "gpt-6-luna",
         ])
     );
 }

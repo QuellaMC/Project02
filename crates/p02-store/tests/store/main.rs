@@ -10,6 +10,7 @@
 )]
 
 mod catalogs;
+mod chatgpt;
 mod databases;
 mod feed;
 mod generated;

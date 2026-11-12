@@ -1,12 +1,14 @@
 /**
- * A model on loopback for either service, in its protocol: OpenAI's chat
+ * A model on loopback for every service, in its protocol: OpenAI's chat
  * completions as NVIDIA's settings reach it, a server of the person's own,
- * and OpenAI's Responses as the OpenAI API's switch names it in that
- * service's place. It answers each request with the next answer the test
- * scripted, and it keeps every request the daemon sent.
+ * and OpenAI's Responses as the switches of the OpenAI API and of a ChatGPT
+ * plan's service name it in their places. It answers each request with the
+ * next answer the test scripted, and it keeps every request the daemon
+ * sent.
  */
 import {
   createServer,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
@@ -18,6 +20,8 @@ import {attachEvidence, within} from './wait.ts';
 export type ModelRequest = {
   readonly path: string;
   readonly authorization: string | undefined;
+  /** Every header it carried, by its name in lower case. */
+  readonly headers: IncomingHttpHeaders;
   /** The body as it came. */
   readonly text: string;
   readonly body: unknown;
@@ -88,6 +92,15 @@ export type ModelServer = {
       readonly openaiApiKey: string;
     };
   };
+  /**
+   * A ChatGPT plan's service here, under `/chatgpt`: the switch that names
+   * this server in its place, for the daemon's environment, and the
+   * `project02` settings that choose it, which the home's sign-in connects.
+   */
+  readonly chatgpt: {
+    readonly env: {readonly PROJECT02_TEST_CHATGPT_API: string};
+    readonly settings: {readonly roleModelProvider: 'chatgpt'};
+  };
   readonly requests: readonly ModelRequest[];
   /** The answers to the next requests, in order. */
   readonly answer: (...answers: Answer[]) => void;
@@ -119,6 +132,7 @@ export async function startModelServer(): Promise<ModelServer> {
     const recorded = {
       path: request.url ?? '',
       authorization: request.headers.authorization,
+      headers: request.headers,
       text: body,
       body: body === '' ? undefined : (JSON.parse(body) as unknown),
     };
@@ -181,6 +195,12 @@ export async function startModelServer(): Promise<ModelServer> {
         roleModelProvider: 'openai',
         openaiApiKey: 'openai-server-key',
       },
+    },
+    chatgpt: {
+      env: {
+        PROJECT02_TEST_CHATGPT_API: `http://127.0.0.1:${String(port)}/chatgpt`,
+      },
+      settings: {roleModelProvider: 'chatgpt'},
     },
     requests,
     answer: (...answers) => {

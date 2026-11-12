@@ -69,7 +69,9 @@ with an outcome of p02-wire, never an error.
   its next request to her model, where her settings are read again in any
   case. Whether they give her a model is one judgement, which her
   settings' view asks too: the service they choose, built, the OpenAI API
-  at the stand-in the binary names under its test switch.
+  and a ChatGPT plan's service at the stand-ins the binary names under
+  their test switches, the plan on the home's sign-in, which she needs
+  as she needs a key. The view is told the sign-in too.
 - **A character's package** is added from a file, updated or removed
   while the daemon runs: judged as discovery would publish it, written or
   removed under the locks of her settings, and then announced and
@@ -78,6 +80,26 @@ with an outcome of p02-wire, never an error.
   removal.
 - **Confirmations and pairing requests** wait for the person under a
   deadline the daemon judges, and each settles once.
+- **The home's sign-in to a ChatGPT plan**, as OpenAI's Codex app signs
+  in, at OpenAI's sign-in or the stand-in the binary names under its test
+  switch. A start asks for a code and answers it with where the person
+  types it and when it stops working; a task of its own then asks at
+  OpenAI's pace until they approve it, and trades it for the tokens, in
+  place of any wait before. This part alone writes the tokens into the
+  home, each write under the lock of what the daemon holds of them, so the
+  file and the daemon change together: a use within an hour of their
+  running out refreshes them first, the new ones kept before they are
+  handed out and two uses at once refreshing once. A token the plan's
+  service refused is refreshed whatever its age, unless another use
+  replaced it already. A refresh OpenAI refuses ends the sign-in, the
+  tokens leaving the home; one that met no answer or a server's error
+  ends nothing. A cancel ends the wait, and signing out removes the
+  tokens. Health says the sign-in, a code waiting, the account and its
+  plan, or signed out with why the last sign-in failed or ended or the
+  kept one could not be read, and never a token; it goes to every surface
+  whenever that changes, and a reconcile pass then builds again each
+  running character who thinks with the plan, with a model or needing
+  the person to sign in.
 - **A connector** is on the stream while a stream of its own is open, and
   the bots it last said it runs are kept as long; health shows both, and
   goes to every surface when either changes.

@@ -1,18 +1,19 @@
-//! The inspect command: a home's settings as they stand, and beside them,
-//! when asked, a character's sessions, the conversations or one
-//! conversation's segments, printed as one JSON document; or one session's
-//! records as stored, one JSON object per line. Everything is read through
-//! the store's own readers, and nothing is written, ever: a folder that
-//! holds no store reports an empty one.
+//! The inspect command: a home's settings as they stand and its sign-in to
+//! a ChatGPT plan, and beside them, when asked, a character's sessions,
+//! the conversations or one conversation's segments, printed as one JSON
+//! document; or one session's records as stored, one JSON object per line.
+//! Everything is read through the store's own readers, and nothing is
+//! written, ever: a folder that holds no store reports an empty one.
 
 use std::process::ExitCode;
 
-use p02_app::package_report;
+use p02_app::{kept_sign_in, package_report};
 use p02_characters::{CharacterDefinition, Discovery, discover};
 use p02_config::{ConfigReport, Resolution, Sections};
 use p02_core::{Conversation, SessionId, select_character};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Home, LogRecord, SessionEntry, StorageError};
+use p02_wire::ChatgptSignIn;
 use serde::Serialize;
 
 use crate::flags::{InspectFlags, Report};
@@ -32,11 +33,14 @@ pub(crate) fn run(flags: InspectFlags, console: &mut Console) -> ExitCode {
     }
 }
 
-/// What a report holds: the settings, and beside them what was asked for.
+/// What a report holds: the settings and the home's sign-in to a ChatGPT
+/// plan, who it is for and on which plan and never a token, and beside
+/// them what was asked for.
 #[derive(Serialize)]
 struct Inspection {
     #[serde(flatten)]
     settings: ConfigReport,
+    chatgpt: ChatgptSignIn,
     #[serde(flatten)]
     asked: Asked,
 }
@@ -123,8 +127,12 @@ fn inspected(flags: InspectFlags, console: &mut Console) -> Result<String, Strin
         .map_err(|error| error.sentence())?
         .report(&home);
 
-    serde_json::to_string_pretty(&Inspection { settings, asked })
-        .map_err(|error| error_sentence(&error))
+    serde_json::to_string_pretty(&Inspection {
+        settings,
+        chatgpt: kept_sign_in(&home),
+        asked,
+    })
+    .map_err(|error| error_sentence(&error))
 }
 
 /// The records of her session `session` as her log stores them, one JSON

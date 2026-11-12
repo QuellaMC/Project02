@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod character_data;
+mod chatgpt;
 mod conversations;
 mod daemon;
 mod database;
@@ -27,6 +28,7 @@ mod taken_lines;
 mod test_process;
 
 pub use character_data::CharacterData;
+pub use chatgpt::ChatgptTokens;
 pub use conversations::ConversationWriter;
 pub use daemon::DaemonLease;
 pub use database::OpenDatabaseError;

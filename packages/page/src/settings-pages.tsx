@@ -10,6 +10,7 @@ import type {ReactNode} from 'react';
 import type {
   ConfigTarget,
   ModelService,
+  RoleModelProvider,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
 import {accountKeyRow, herApp} from './her-apps.ts';
@@ -33,6 +34,7 @@ import {
   problemsAt,
   type Ctx,
 } from './settings-fields.tsx';
+import {PlanSignIn} from './settings-plan.tsx';
 import {
   accessLines,
   artOf,
@@ -279,19 +281,21 @@ function ServiceLink({
  * A service a character can think with, from AI Model: its tile, its name
  * and what it is; its key, pasted and never shown back, with where a key
  * comes from; under Advanced its other fields but its model, which AI
- * Model chooses; and Remove Key once a key is saved.
+ * Model chooses; and Remove Key once a key is saved. The ChatGPT plan has
+ * no key: its page is the home's sign-in to it.
  */
 export function ServicePage({
   ctx,
   serviceId,
 }: {
   readonly ctx: Ctx;
-  readonly serviceId: string;
+  readonly serviceId: RoleModelProvider;
 }) {
   const service = viewOf(ctx.settings, home)?.services.find(
     listed => listed.id === serviceId,
   );
   const art = serviceArt(serviceId);
+  const plan = serviceId === 'chatgpt';
 
   return (
     <>
@@ -306,13 +310,20 @@ export function ServicePage({
           <PageHeader
             art={<Tile icon={art.icon} tint={art.tint} size="page" />}
             title={service.name}
-            subtitle={`${service.summary}.`}
+            subtitle={
+              plan ? 'Use the plan you already pay for.' : `${service.summary}.`
+            }
           />
         )}
       </div>
       <HomeView ctx={ctx}>
         {view =>
-          service === undefined ? null : (
+          service === undefined ? null : plan ? (
+            <PlanSignIn
+              signIn={ctx.state.health?.chatgpt}
+              session={ctx.session}
+            />
+          ) : (
             <ServiceCards ctx={ctx} view={view} service={service} />
           )
         }
@@ -344,7 +355,12 @@ function ServiceCards({
     <>
       {key === undefined ? null : (
         <Group
-          footer={`Paste a key and press Return; it is never shown again. ${service.keyFrom}`}
+          footer={
+            <>
+              Paste a key and press Return; it is never shown again.{' '}
+              {service.keyFrom}
+            </>
+          }
         >
           <FieldRow ctx={ctx} row={hostRow(home, key.name)} field={key} />
         </Group>

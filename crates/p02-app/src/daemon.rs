@@ -32,6 +32,7 @@ use p02_wire::{
 use tokio::sync::mpsc;
 
 use crate::character::{CharacterHandle, model};
+use crate::chatgpt::Chatgpt;
 use crate::history::{self, HistoryPage};
 use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
@@ -154,6 +155,12 @@ pub struct DaemonSettings {
     /// Where the OpenAI API is, under the test switch; none, and it is at
     /// its own address.
     pub openai_api: Option<BaseUrl>,
+    /// Where OpenAI's sign-in is, under the test switch; none, and it is at
+    /// its own address.
+    pub openai_auth: Option<BaseUrl>,
+    /// Where a ChatGPT plan's service is, under the test switch; none, and
+    /// it is at its own address.
+    pub chatgpt_api: Option<BaseUrl>,
 }
 
 /// A line a client delivers into a conversation.
@@ -175,11 +182,12 @@ pub struct OpenDaemonError {
     source: StorageError,
 }
 
-/// What every actor of the daemon reads and nothing changes: the home, the
-/// settings' sections, the plugins, the waits, the model that stands in
-/// for every character's, where the OpenAI API is when the binary names a
-/// stand-in for it, the App Store's catalog her phone reads, the internet
-/// her apps reach, and the events.
+/// What every actor of the daemon reads: the home, the settings' sections,
+/// the plugins, the waits, the model that stands in for every character's,
+/// where the OpenAI API and a ChatGPT plan's service are when the binary
+/// names a stand-in for them, the App Store's catalog her phone reads, the
+/// internet her apps reach, the home's sign-in to a ChatGPT plan, and the
+/// events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -188,8 +196,10 @@ pub(crate) struct World {
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) openai_api: Option<BaseUrl>,
+    pub(crate) chatgpt_api: Option<BaseUrl>,
     pub(crate) catalog: Arc<AppCatalog>,
     pub(crate) internet: Arc<AppInternet>,
+    pub(crate) chatgpt: Arc<Chatgpt>,
     pub(crate) events: Arc<Events>,
 }
 
@@ -349,12 +359,6 @@ impl Daemon {
     ///
     /// [`OpenDaemonError`] when the store refuses the home.
     pub async fn open(home: Home, settings: DaemonSettings) -> Result<Self, OpenDaemonError> {
-        let checked = home.clone();
-
-        blocking(move || checked.check())
-            .await
-            .map_err(|source| OpenDaemonError { source })?;
-
         let DaemonSettings {
             test_provider,
             durations,
@@ -362,7 +366,16 @@ impl Daemon {
             app_catalog,
             app_internet,
             openai_api,
+            openai_auth,
+            chatgpt_api,
         } = settings;
+        let checked = home.clone();
+        let chatgpt = blocking(move || {
+            checked.check()?;
+            Ok(Chatgpt::open(checked, openai_auth))
+        })
+        .await
+        .map_err(|source| OpenDaemonError { source })?;
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -377,8 +390,10 @@ impl Daemon {
                     durations,
                     test_provider,
                     openai_api,
+                    chatgpt_api,
                     catalog: Arc::new(AppCatalog::new(app_catalog)),
                     internet: Arc::new(AppInternet::new(app_internet)),
+                    chatgpt: Arc::new(chatgpt),
                     events: Arc::default(),
                 }),
                 characters: Mutex::default(),
@@ -398,8 +413,9 @@ impl Daemon {
 
     /// The daemon's whole state, read now: the roster as the disk says it
     /// is, each character's state as her actor published it, the
-    /// connectors on the stream, each with its bots, and the accounts her
-    /// phone knows, each with whether the home's settings hold its key.
+    /// connectors on the stream, each with its bots, the accounts her phone
+    /// knows, each with whether the home's settings hold its key, and the
+    /// home's sign-in to a ChatGPT plan.
     pub async fn health(&self) -> Health {
         let daemon = self.clone();
 
@@ -452,6 +468,7 @@ impl Daemon {
                     .collect()
             },
             accounts: accounts(&self.inner.world),
+            chatgpt: self.inner.world.chatgpt.view(),
         }
     }
 
@@ -652,17 +669,22 @@ impl Daemon {
     }
 
     /// The settings of `target` as its settings screen shows them, their AI
-    /// model judged as a character's start judges hers.
+    /// model judged as a character's start judges hers, and the ChatGPT
+    /// plan's service as the home's sign-in stands.
     pub async fn config_view(&self, target: ConfigTarget) -> ConfigView {
         let world = Arc::clone(&self.inner.world);
+        let daemon = self.downgrade();
 
         blocking(move || {
+            let account = world.chatgpt.account();
+
             config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),
                 &target,
-                |host| model(&world, host).map(drop),
+                |host| model(&world, &daemon, host, account.as_ref()).map(drop),
+                account.as_ref(),
             )
         })
         .await
@@ -795,9 +817,11 @@ impl Daemon {
     /// recovery in flight is overtaken, a turn in flight finishes and is
     /// announced, the lines queued behind it wait in her inbox, and the
     /// reconcile pass in flight is waited for; once it answers, everything
-    /// the stop ended has been announced.
+    /// the stop ended has been announced. A wait for a sign-in's approval
+    /// asks no more.
     pub async fn stop(&self) {
         self.inner.pairings.stop();
+        self.inner.world.chatgpt.stop();
 
         let handles: Vec<Arc<CharacterHandle>> = {
             let mut characters = self.inner.characters();

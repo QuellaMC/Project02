@@ -21,19 +21,20 @@ use p02_wire::{
     AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal, AppSource, AppView,
     AppWakeBody, AppWakeOutcome, AppWakeRefusal, BotState, BotUsername, CancelReason,
     ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled, CharacterPreviewOutcome,
-    CharacterPreviewRefusal, CharacterState, CharacterSummary, ConfigChange, ConfigHealth,
-    ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion,
-    ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
-    ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody, Event, GatewayMessage,
-    Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading, MaintenanceFailure,
-    OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PairingAnswer,
-    PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingRequestBody,
-    PairingSubject, PendingConfirmation, PersonAccount, PhoneApp, PhoneDid, PhoneFront,
-    PhoneOutcome, PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
-    RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenCell, ScreenItem,
-    ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome,
-    StartRefusal, StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome,
-    ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    CharacterPreviewRefusal, CharacterState, CharacterSummary, ChatgptOutcome, ChatgptSignIn,
+    ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId,
+    ConfirmationQuestion, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
+    ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody,
+    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading,
+    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingRequestBody, PairingSubject, PendingConfirmation, PersonAccount, PhoneApp, PhoneDid,
+    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, PlanAccount, ProtocolVersion, Ready,
+    Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft,
+    RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal,
+    ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp,
+    StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal,
+    TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -76,6 +77,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<AppInstallOutcome>();
     wire.written::<AppRemoveOutcome>();
     wire.written::<AppWakeOutcome>();
+    wire.written::<ChatgptOutcome>();
     wire.written::<ErrorBody>();
     wire.written::<Ready>();
     wire.written::<Event>();
@@ -421,6 +423,10 @@ fn written() -> Vec<(&'static str, Value)> {
             has_key: true,
             key_from: "Get a free key at tavily.com.".to_owned(),
         }],
+        chatgpt: ChatgptSignIn::SignedIn {
+            email: Some("sam@example.com".to_owned()),
+            plan: Some("plus".to_owned()),
+        },
     };
     let turn = TurnStamp {
         conversation_id: conversation.clone(),
@@ -888,6 +894,32 @@ fn written() -> Vec<(&'static str, Value)> {
             },
         ),
         read_back(
+            "ChatgptOutcome",
+            &ChatgptOutcome::Ok {
+                sign_in: ChatgptSignIn::Waiting {
+                    code: "ABCD-EFGH".to_owned(),
+                    url: "https://auth.openai.com/codex/device".to_owned(),
+                    expires_at: 1_793_000_000_000,
+                },
+            },
+        ),
+        read_back(
+            "ChatgptOutcome",
+            &ChatgptOutcome::Ok {
+                sign_in: ChatgptSignIn::SignedOut {
+                    message: Some(
+                        "The code expired before it was approved. Start again.".to_owned(),
+                    ),
+                },
+            },
+        ),
+        read_back(
+            "ChatgptOutcome",
+            &ChatgptOutcome::Failed {
+                message: "OpenAI's sign-in could not be reached. Try again in a moment.".to_owned(),
+            },
+        ),
+        read_back(
             "GatewayErrorBody",
             &ErrorBody {
                 error: Refusal {
@@ -1034,7 +1066,8 @@ fn phone() -> (PhoneApp, Screen) {
 
 /// The settings of a home whose documents each name a connector this build
 /// lacks, a warning of the home's and one of Mira's overlay: the home's view,
-/// whose model is not set up, Mira's, and Telegram's read.
+/// whose model is not set up, Mira's, the home signed in to a ChatGPT plan,
+/// and Telegram's read.
 fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let directory = tempfile::TempDir::new().unwrap();
     let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
@@ -1061,9 +1094,14 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let discovery = discover(home.root());
 
     (
-        config_view(&home, &sections, &discovery, &ConfigTarget::Global, |_| {
-            Err("Choose an AI service.".to_owned())
-        }),
+        config_view(
+            &home,
+            &sections,
+            &discovery,
+            &ConfigTarget::Global,
+            |_| Err("Choose an AI service.".to_owned()),
+            None,
+        ),
         config_view(
             &home,
             &sections,
@@ -1072,6 +1110,10 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
                 character_id: mira.to_string(),
             },
             |_| Ok(()),
+            Some(&PlanAccount {
+                email: Some("sam@example.com".to_owned()),
+                plan: Some("plus".to_owned()),
+            }),
         ),
         connector_config_view(&home, &sections, &discovery, "telegram"),
     )

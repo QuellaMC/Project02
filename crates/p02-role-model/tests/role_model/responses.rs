@@ -1,14 +1,17 @@
-//! The Responses adapter, as the OpenAI API's, against a model server on
-//! the loopback interface.
+//! The Responses adapter, as the OpenAI API's and as a ChatGPT plan's,
+//! against a model server on the loopback interface.
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, Invocation, ProviderAnswer, ProviderName,
     ReplyDelta, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
 };
-use p02_role_model::{OpenaiSettings, ServiceSettings, select_adapter};
+use p02_role_model::{
+    ChatgptSettings, OpenaiSettings, PlanAccess, PlanSignIn, ServiceSettings, select_adapter,
+};
 use serde_json::{Value, json};
 
 use crate::stub::{Answer, Stub};
@@ -413,4 +416,393 @@ async fn a_plain_completion_asks_the_same_model_and_reads_its_text() {
             }
         );
     }
+}
+
+/// The home's sign-in as a plan's service reaches it: each use hands out
+/// `access-<n>` on Sam's account, `n` counting the refreshes so far, each of
+/// which keeps the access token it was told was refused; or, signed out,
+/// the sentence saying so.
+#[derive(Debug, Default)]
+struct SignIn {
+    signed_out: bool,
+    refused: Mutex<Vec<String>>,
+}
+
+impl SignIn {
+    fn access(&self) -> Result<PlanAccess, String> {
+        if self.signed_out {
+            return Err("Sign in to your ChatGPT plan first.".to_owned());
+        }
+
+        Ok(PlanAccess {
+            access_token: format!("access-{}", self.refused.lock().unwrap().len() + 1),
+            account_id: "acct-sam".to_owned(),
+        })
+    }
+}
+
+#[async_trait]
+impl PlanSignIn for SignIn {
+    async fn fresh(&self) -> Result<PlanAccess, String> {
+        self.access()
+    }
+
+    async fn refreshed(&self, refused: &PlanAccess) -> Result<PlanAccess, String> {
+        self.refused
+            .lock()
+            .unwrap()
+            .push(refused.access_token.clone());
+        self.access()
+    }
+}
+
+/// A ChatGPT plan at the stub, as a test harness names it, on `sign_in`.
+fn plan(stub: &Stub, sign_in: &Arc<SignIn>) -> Adapter {
+    select_adapter(
+        None,
+        Some(&ServiceSettings::Chatgpt(ChatgptSettings {
+            sign_in: Some(Arc::clone(sign_in) as Arc<dyn PlanSignIn>),
+            model: "gpt-6.1-sol".to_owned(),
+            base_url: Some(stub.at("chatgpt")),
+        })),
+        None,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+/// The event that gives the item at `index` whole.
+fn done(index: u64, item: &Value) -> String {
+    json!({"type": "response.output_item.done", "output_index": index, "item": item}).to_string()
+}
+
+/// A message's text as a plan takes it: one part of `kind`.
+fn part(kind: &str, text: &str) -> Value {
+    json!([{"type": kind, "text": text}])
+}
+
+#[tokio::test]
+async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_from_its_items() {
+    let stub = Stub::start().await;
+    let (mut messages, tools) = wire(&["visible_reply", "memory.search"]);
+
+    messages.insert(
+        1,
+        ChatMessage::Developer {
+            content: "Be brief.".to_owned(),
+        },
+    );
+    messages.extend(two_searches());
+
+    let (reply, replied) = call(0, "visible_reply", &["{\"text\":\"Hel", "lo.\"}"]);
+    let (search, searched) = call(1, "memory_search", &["{\"q\":", "\"sky\"}"]);
+
+    // Each item whole only as it is done: the end, as the plan's service
+    // ends an answer, carries none.
+    stub.answer(Answer::events(
+        &[
+            reply,
+            vec![done(0, &replied)],
+            search,
+            vec![
+                done(1, &searched),
+                done(2, &message("A note.")),
+                json!({"type": "response.completed", "response": {}}).to_string(),
+            ],
+        ]
+        .concat(),
+    ));
+
+    let heard = Mutex::new(Vec::new());
+    let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta.text);
+    let answer = plan(&stub, &Arc::new(SignIn::default()))
+        .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
+        .await;
+    let [request] = stub.requests().try_into().unwrap();
+    let body = request.json();
+    let session = body["prompt_cache_key"].as_str().unwrap();
+    let [first, first_result] = shown_search(1);
+    let [second, second_result] = shown_search(2);
+
+    assert_eq!(
+        [
+            Some(request.path.as_str()),
+            request.authorization.as_deref(),
+            request.header("chatgpt-account-id"),
+            request.header("originator"),
+            request.header("accept"),
+            request.header("session-id"),
+        ],
+        [
+            Some("/chatgpt/responses"),
+            Some("Bearer access-1"),
+            Some("acct-sam"),
+            Some("codex-tui"),
+            Some("text/event-stream"),
+            Some(session),
+        ]
+    );
+    assert!(uuid::Uuid::parse_str(session).is_ok(), "{session}");
+    assert_eq!(
+        body,
+        json!({
+            "model": "gpt-6.1-sol",
+            "instructions": "",
+            "input": [
+                {"type": "message", "role": "developer", "content": part("input_text", "You are Mira.")},
+                {"type": "message", "role": "developer", "content": part("input_text", "Be brief.")},
+                {"type": "message", "role": "user", "content": part("input_text", "Hello?")},
+                {"type": "message", "role": "assistant", "content": part("output_text", "Looking.")},
+                first,
+                first_result,
+                second,
+                second_result,
+            ],
+            "tools": [offered("visible_reply"), offered("memory_search")],
+            "tool_choice": "auto",
+            "stream": true,
+            "store": false,
+            "reasoning": {"effort": "low"},
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": session,
+        })
+    );
+    assert_eq!(*heard.lock().unwrap(), ["Hel", "lo."]);
+
+    let ProviderAnswer::Answered {
+        output,
+        finish_reason,
+        usage,
+    } = answer
+    else {
+        panic!("the round failed: {answer:?}");
+    };
+
+    assert_eq!(
+        (serde_json::to_value(output).unwrap(), finish_reason, usage),
+        (
+            json!({
+                "toolCalls": [
+                    {"name": "visible_reply", "input": {"text": "Hello."}},
+                    {"name": "memory.search", "input": {"q": "sky"}},
+                ],
+                "text": "A note.",
+            }),
+            Some("completed".to_owned()),
+            None
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_401_on_a_plan_is_asked_once_more_refreshed_and_a_second_turns_the_sign_in_down() {
+    let stub = Stub::start().await;
+    let sign_in = Arc::new(SignIn::default());
+    let adapter = plan(&stub, &sign_in);
+    let unauthorized = || Answer::Whole {
+        status: 401,
+        body: json!({"detail": "Unauthorized"}).to_string(),
+    };
+    let (reply, replied) = call(0, "visible_reply", &["{\"text\":\"Again.\"}"]);
+
+    stub.answer(unauthorized());
+    stub.answer(Answer::events(
+        &[
+            reply,
+            vec![ended(
+                "completed",
+                &json!({"status": "completed", "output": [replied]}),
+            )],
+        ]
+        .concat(),
+    ));
+    assert!(matches!(
+        invoke(&adapter).await,
+        ProviderAnswer::Answered { .. }
+    ));
+
+    stub.answer(unauthorized());
+    stub.answer(unauthorized());
+    assert_eq!(
+        failure(&invoke(&adapter).await),
+        (
+            "http_error".to_owned(),
+            "ChatGPT turned down your sign-in. Sign in to your ChatGPT plan again.".to_owned(),
+            Some(401)
+        )
+    );
+    assert_eq!(
+        stub.requests()
+            .iter()
+            .map(|request| request.authorization.clone().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "Bearer access-1",
+            "Bearer access-2",
+            "Bearer access-2",
+            "Bearer access-3"
+        ]
+    );
+    assert_eq!(*sign_in.refused.lock().unwrap(), ["access-1", "access-2"]);
+
+    let signed_out = plan(
+        &stub,
+        &Arc::new(SignIn {
+            signed_out: true,
+            ..SignIn::default()
+        }),
+    );
+
+    assert_eq!(
+        failure(&invoke(&signed_out).await),
+        (
+            "provider_error".to_owned(),
+            "ChatGPT could not be asked: Sign in to your ChatGPT plan first.".to_owned(),
+            None
+        )
+    );
+    assert_eq!(stub.requests().len(), 4);
+}
+
+#[tokio::test]
+async fn a_plan_s_limit_and_its_busy_service_are_said_in_its_words_and_no_failure_names_its_tokens()
+{
+    let stub = Stub::start().await;
+    let adapter = plan(&stub, &Arc::new(SignIn::default()));
+    let limit =
+        json!({"type": "usage_limit_reached", "message": "The usage limit has been reached"});
+    let limited = "ChatGPT says your plan's limit is reached; it resets later.";
+    let refused = |status: u16, body: Value| Answer::Whole {
+        status,
+        body: body.to_string(),
+    };
+    let busy = || {
+        refused(
+            429,
+            json!({"error": {"type": "rate_limit_exceeded", "message": "Slow down."}}),
+        )
+    };
+    // Each case: the answers scripted, the round's failure, and how many
+    // requests it made: a plan used up is asked no more until it resets.
+    let cases = [
+        (
+            vec![refused(429, json!({"error": limit}))],
+            ("http_error", limited, Some(429)),
+            1,
+        ),
+        (
+            vec![Answer::events(&[ended(
+                "failed",
+                &json!({"status": "failed", "error": limit}),
+            )])],
+            ("provider_error", limited, Some(200)),
+            1,
+        ),
+        (
+            vec![busy(), busy(), busy()],
+            (
+                "http_error",
+                "ChatGPT is busy. Try again in a moment.",
+                Some(429),
+            ),
+            3,
+        ),
+        (
+            vec![refused(400, json!({"detail": "Unsupported model."}))],
+            (
+                "http_error",
+                "ChatGPT provider error: Unsupported model.",
+                Some(400),
+            ),
+            1,
+        ),
+        (
+            vec![Answer::events(&[json!({
+                "type": "error",
+                "message": "access-1 may not be used for acct-sam.",
+            })
+            .to_string()])],
+            (
+                "provider_error",
+                "ChatGPT provider error: [redacted] may not be used for [redacted].",
+                Some(200),
+            ),
+            1,
+        ),
+    ];
+
+    for (answers, (code, message, status), asked) in cases {
+        let before = stub.requests().len();
+
+        for scripted in answers {
+            stub.answer(scripted);
+        }
+
+        let answer = invoke(&adapter).await;
+        let shown = format!("{answer:?}");
+
+        assert_eq!(
+            failure(&answer),
+            (code.to_owned(), message.to_owned(), status),
+            "{message}"
+        );
+        assert_eq!(stub.requests().len() - before, asked, "{message}");
+        assert!(
+            !shown.contains("access-1") && !shown.contains("acct-sam"),
+            "{shown}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_plain_completion_on_a_plan_is_streamed_as_every_request_of_it_and_read_from_its_items() {
+    let stub = Stub::start().await;
+    let adapter = plan(&stub, &Arc::new(SignIn::default()));
+    let request = TextCompletionRequest {
+        instructions: "Condense.".to_owned(),
+        input: "<conversation>...</conversation>".to_owned(),
+        max_output_chars: NonZeroUsize::new(6_001).unwrap(),
+    };
+
+    stub.answer(Answer::events(&[
+        done(0, &message("<think>planning</think>  We spoke of tea.  ")),
+        json!({"type": "response.done"}).to_string(),
+    ]));
+
+    assert_eq!(
+        adapter.complete_text(&request).await,
+        TextCompletion::Completed {
+            text: "We spoke of tea.".to_owned(),
+            provider: ProviderName::Openai,
+            model: Some("gpt-6.1-sol".to_owned()),
+        }
+    );
+
+    let [asked] = stub.requests().try_into().unwrap();
+    let body = asked.json();
+
+    assert_eq!(
+        asked.header("session-id"),
+        body["prompt_cache_key"].as_str()
+    );
+    assert_eq!(
+        body,
+        json!({
+            "model": "gpt-6.1-sol",
+            "input": [
+                {"type": "message", "role": "developer", "content": part("input_text", "Condense.")},
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": part("input_text", "<conversation>...</conversation>"),
+                },
+            ],
+            "stream": true,
+            "store": false,
+            "instructions": "",
+            "reasoning": {"effort": "low"},
+            "include": ["reasoning.encrypted_content"],
+            "prompt_cache_key": body["prompt_cache_key"],
+        })
+    );
 }

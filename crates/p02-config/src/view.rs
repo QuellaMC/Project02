@@ -12,21 +12,23 @@ use p02_store::Home;
 use p02_wire::{
     ActivationStatus, Authored, CharacterConnectorEntry, ConfigTarget, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, Diagnostic, EffectiveView, FieldView,
-    LayoutCard, Namespace, RoleModelProvider, SectionActivation, SectionView, ValueSource,
-    ViewRefusal,
+    LayoutCard, Namespace, PlanAccount, RoleModelProvider, SectionActivation, SectionView,
+    ValueSource, ViewRefusal,
 };
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::conceal::conceal;
 use crate::declaration::{Declared, Sections, Target, connector};
-use crate::host::{HostSettings, host_fields, services};
+use crate::host::{HostSettings, host_fields, plan_shaped, services};
 use crate::resolve::{
     Effective, Field, ReadSettingsError, Resolution, Section, Status, values_in_effect,
 };
 
 /// The view of `target`'s settings, `model` judging whether the host's
-/// values in effect give a character an AI model, as her start judges it.
+/// values in effect give a character an AI model, as her start judges it,
+/// and `account` the one the home is signed in to a ChatGPT plan as, if it
+/// is: neither is a setting.
 #[must_use]
 pub fn config_view(
     home: &Home,
@@ -34,9 +36,10 @@ pub fn config_view(
     discovery: &Discovery,
     target: &ConfigTarget,
     model: impl FnOnce(&HostSettings) -> Result<(), String>,
+    account: Option<&PlanAccount>,
 ) -> ConfigView {
     match Resolution::read(home, sections, discovery, target) {
-        Ok(resolution) => resolution.view(model),
+        Ok(resolution) => resolution.view(model, account),
         Err(error) => {
             let (reason, message) = refusal(&error);
 
@@ -73,12 +76,17 @@ impl ReadSettingsError {
 impl Resolution<'_> {
     /// The view of these settings: whether their host values give a
     /// character a model, as `model` judges them, every service and which
-    /// are connected, and every host field, and every section, and of each
+    /// are connected, the ChatGPT plan's while the home is signed in, as
+    /// `account`, and every host field, and every section, and of each
     /// section every field, that the target may set; secrets never. A
     /// person looks a section up by its name, so the screen lists the
     /// plugins' by id and then the connectors'.
     #[must_use]
-    pub fn view(&self, model: impl FnOnce(&HostSettings) -> Result<(), String>) -> ConfigView {
+    pub fn view(
+        &self,
+        model: impl FnOnce(&HostSettings) -> Result<(), String>,
+        account: Option<&PlanAccount>,
+    ) -> ConfigView {
         let mut sections: Vec<SectionView> = self
             .sections()
             .iter()
@@ -92,12 +100,12 @@ impl Resolution<'_> {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
             model: model(&HostSettings::of(self.host())).into(),
-            services: services(self.host()),
+            services: services(self.host(), account),
             project02: host_fields()
                 .iter()
                 .zip(self.host())
                 .filter(|(declared, _)| self.target().authors(declared.scope()))
-                .map(|(_, field)| field_view(field))
+                .map(|(_, field)| plan_shaped(field_view(field), account))
                 .collect(),
             sections,
         }
@@ -352,6 +360,9 @@ pub struct HostReport {
     user_display_name: SpeakerName,
     #[serde(skip_serializing_if = "Option::is_none")]
     role_model_provider: Option<RoleModelProvider>,
+    /// Absent until one is set: the plan's first is the sign-in's to say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chatgpt_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     openai_api_key: Option<&'static str>,
     openai_model: String,
@@ -426,6 +437,7 @@ impl Resolution<'_> {
                     enabled: host.enabled,
                     user_display_name: host.user_display_name.clone(),
                     role_model_provider: host.role_model_provider,
+                    chatgpt_model: host.chatgpt_model.clone(),
                     openai_api_key: host.openai_api_key.as_ref().map(|_| "[redacted]"),
                     openai_model: host.openai_model.clone(),
                     nvidia_api_key: host.nvidia_api_key.as_ref().map(|_| "[redacted]"),

@@ -22,17 +22,23 @@ use tokio::sync::oneshot;
 use crate::support::event_text;
 
 /// A request as the stub read it: where it was sent, who it said sent it,
-/// and its body.
+/// its headers and its body.
 #[derive(Clone, Debug)]
 pub(crate) struct Request {
     pub(crate) path: String,
     pub(crate) authorization: Option<String>,
+    pub(crate) headers: HeaderMap,
     pub(crate) body: Bytes,
 }
 
 impl Request {
     pub(crate) fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap()
+    }
+
+    /// Its header `name`, when it carried one as text.
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).and_then(|value| value.to_str().ok())
     }
 }
 
@@ -168,6 +174,7 @@ async fn respond(
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned),
+        headers,
         body,
     });
 

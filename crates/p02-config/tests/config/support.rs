@@ -9,7 +9,7 @@ use p02_config::{Resolution, Sections, apply_change, config_view, connector_conf
 use p02_contracts::{Manifest, SetupCheck};
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::Home;
-use p02_wire::{ChangeOutcome, ConfigChange, ConfigTarget};
+use p02_wire::{ChangeOutcome, ConfigChange, ConfigTarget, PlanAccount};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -243,14 +243,26 @@ impl World {
     }
 
     /// The view of `target` as a page receives it, whatever model its
-    /// settings choose taken as one a character can use.
+    /// settings choose taken as one a character can use, the home signed
+    /// in to no ChatGPT plan.
     pub(crate) fn view(&self, target: &ConfigTarget) -> Value {
+        self.signed_in_view(target, None)
+    }
+
+    /// [`World::view`], the home signed in to a ChatGPT plan as `account`
+    /// when there is one.
+    pub(crate) fn signed_in_view(
+        &self,
+        target: &ConfigTarget,
+        account: Option<&PlanAccount>,
+    ) -> Value {
         serde_json::to_value(config_view(
             &self.home,
             &self.sections,
             &self.discovery(),
             target,
             |_| Ok(()),
+            account,
         ))
         .unwrap()
     }

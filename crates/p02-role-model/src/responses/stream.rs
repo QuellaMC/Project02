@@ -1,8 +1,9 @@
 //! A streamed response, the Responses protocol's events read until the one
 //! that ends it: each function call's arguments are told as they arrive,
 //! under the name its item carried when it was added, so a draft can be
-//! shown while the model writes; the response the ending event carries is
-//! what is judged.
+//! shown while the model writes, and each item is kept as its done event
+//! gives it whole; how the response ended, the response its ending event
+//! carries and those items are what is judged.
 
 use std::collections::BTreeMap;
 
@@ -17,22 +18,43 @@ pub(super) struct EventFold {
     frames: SseFrameSplitter,
     /// Each function call's name, by its item's place in the output.
     names: BTreeMap<u64, String>,
+    /// Each item as its done event gave it, by its place in the output.
+    done: BTreeMap<u64, Value>,
+}
+
+/// How a response ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Ending {
+    Completed,
+    Incomplete,
+    Failed,
+}
+
+/// A streamed response at its end: how it ended, the response its ending
+/// event carried, an empty one when it carried none, and its items as each
+/// was done, in output order.
+#[derive(Debug, PartialEq)]
+pub(super) struct Ended {
+    pub(super) ending: Ending,
+    pub(super) response: Value,
+    pub(super) done: Vec<Value>,
 }
 
 impl EventFold {
     /// Takes the next bytes, cut anywhere, and tells `heard` each function
-    /// call's pieces: the response an ending event carries, once one
-    /// arrives; what follows it is not read.
+    /// call's pieces: the response once an event ends it, whichever of the
+    /// protocol's ends that is, or a `[DONE]` line, which completes it;
+    /// what follows it is not read.
     pub(super) fn push(
         &mut self,
         bytes: &[u8],
         heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<Option<Value>, StreamError> {
+    ) -> Result<Option<Ended>, StreamError> {
         for frame in self.frames.push(bytes) {
             if let Some(data) = frame.data.as_deref()
-                && let Some(ended) = self.take(data, heard)?
+                && let Some(ending) = self.take(data, heard)?
             {
-                return Ok(Some(ended));
+                return Ok(Some(ending));
             }
         }
 
@@ -43,34 +65,68 @@ impl EventFold {
         &mut self,
         data: &str,
         heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<Option<Value>, StreamError> {
+    ) -> Result<Option<Ended>, StreamError> {
+        if data == "[DONE]" {
+            return Ok(Some(self.ended(Ending::Completed, None)?));
+        }
+
         let event = serde_json::from_str::<Value>(data)
             .map_err(|_| malformed("stream event must be JSON."))?;
         let Value::Object(mut event) = event else {
             return Err(malformed("stream event must be an object."));
         };
-
-        match event.get("type").and_then(Value::as_str) {
-            Some("response.completed" | "response.incomplete" | "response.failed") => {
-                match event.remove("response") {
-                    Some(response @ Value::Object(_)) => Ok(Some(response)),
-                    _ => Err(malformed("stream event response must be an object.")),
-                }
+        let ending = match event.get("type").and_then(Value::as_str) {
+            Some("response.completed" | "response.done") => Ending::Completed,
+            Some("response.incomplete") => Ending::Incomplete,
+            Some("response.failed") => Ending::Failed,
+            Some("error") => {
+                return Err(StreamError {
+                    code: FailureCode::ProviderError,
+                    message: provider_error(&event).unwrap_or_else(|| "provider error.".to_owned()),
+                });
             }
-            Some("error") => Err(StreamError {
-                code: FailureCode::ProviderError,
-                message: provider_error(&event).unwrap_or_else(|| "provider error.".to_owned()),
-            }),
             Some("response.output_item.added") => {
                 self.added(&event, heard);
-                Ok(None)
+                return Ok(None);
             }
             Some("response.function_call_arguments.delta") => {
                 self.delta(&event, heard);
-                Ok(None)
+                return Ok(None);
             }
-            Some(_) => Ok(None),
-            None => Err(malformed("stream event must carry its type.")),
+            Some("response.output_item.done") => {
+                self.item_done(&mut event);
+                return Ok(None);
+            }
+            Some(_) => return Ok(None),
+            None => return Err(malformed("stream event must carry its type.")),
+        };
+
+        Ok(Some(self.ended(ending, event.remove("response"))?))
+    }
+
+    /// The response ended as `ending`, with the response its ending event
+    /// carried, which must be an object when there is one.
+    fn ended(&mut self, ending: Ending, response: Option<Value>) -> Result<Ended, StreamError> {
+        let response = match response {
+            None => Value::Object(Map::new()),
+            Some(response @ Value::Object(_)) => response,
+            Some(_) => return Err(malformed("stream event response must be an object.")),
+        };
+
+        Ok(Ended {
+            ending,
+            response,
+            done: std::mem::take(&mut self.done).into_values().collect(),
+        })
+    }
+
+    /// An item, done: kept whole at its place in the output.
+    fn item_done(&mut self, event: &mut Map<String, Value>) {
+        if let (Some(index), Some(item)) = (
+            event.get("output_index").and_then(Value::as_u64),
+            event.remove("item"),
+        ) {
+            self.done.insert(index, item);
         }
     }
 
@@ -118,12 +174,14 @@ impl EventFold {
 mod tests {
     use super::*;
 
+    use serde_json::json;
+
     /// Written by hand after the protocol's events: a reasoning item and a
     /// message whose text streams, then two function calls whose argument
     /// pieces interleave by their place in the output, a call's name on
-    /// its added item, the completed response, and an event after it that
-    /// is never read. CRLF and LF both end lines, and the text is not all
-    /// ASCII.
+    /// its added item, each call done whole, the later one first, the
+    /// completed response, and an event after it that is never read. CRLF
+    /// and LF both end lines, and the text is not all ASCII.
     const SAMPLE: &str = concat!(
         "event: response.created\r\ndata: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\",\"output\":[]}}\r\n\r\n",
         "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[]}}\n\n",
@@ -135,13 +193,15 @@ mod tests {
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":3,\"item_id\":\"fc_b\",\"delta\":\"{\\\"q\\\":\"}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"item_id\":\"fc_a\",\"delta\":\"ツー💖\\\"}\"}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":3,\"item_id\":\"fc_b\",\"delta\":\"\\\"sky\\\"}\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":3,\"item\":{\"type\":\"function_call\",\"name\":\"memory_search\",\"arguments\":\"{\\\"q\\\":\\\"sky\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"name\":\"visible_reply\",\"arguments\":\"{\\\"text\\\":\\\"ゼロツー💖\\\"}\"}}\n\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n",
         "data: {\"type\":\"error\",\"message\":\"never read\"}\n\n",
     );
 
     type Heard = Vec<(u64, String, String)>;
 
-    fn read(pieces: &[&[u8]]) -> (Result<Option<Value>, StreamError>, Heard) {
+    fn read(pieces: &[&[u8]]) -> (Result<Option<Ended>, StreamError>, Heard) {
         let mut fold = EventFold::default();
         let mut heard = Vec::new();
         let mut record = |fragment: Fragment<'_>| {
@@ -170,9 +230,22 @@ mod tests {
         assert_eq!(
             whole,
             (
-                Ok(Some(
-                    serde_json::json!({"status": "completed", "output": []})
-                )),
+                Ok(Some(Ended {
+                    ending: Ending::Completed,
+                    response: json!({"status": "completed", "output": []}),
+                    done: vec![
+                        json!({
+                            "type": "function_call",
+                            "name": "visible_reply",
+                            "arguments": "{\"text\":\"ゼロツー💖\"}",
+                        }),
+                        json!({
+                            "type": "function_call",
+                            "name": "memory_search",
+                            "arguments": "{\"q\":\"sky\"}",
+                        }),
+                    ],
+                })),
                 vec![
                     (2, "visible_reply".to_owned(), String::new()),
                     (2, "visible_reply".to_owned(), "{\"text\":\"ゼロ".to_owned()),
@@ -221,6 +294,11 @@ mod tests {
                 FailureCode::ProviderError,
                 "provider error: The server had an error.",
             ),
+            (
+                "{\"type\":\"error\",\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\"}}",
+                FailureCode::ProviderError,
+                "says your plan's limit is reached; it resets later.",
+            ),
         ] {
             let frame = format!("data: {data}\n\n");
 
@@ -231,6 +309,59 @@ mod tests {
                     message: message.to_owned(),
                 }),
                 "{data}"
+            );
+        }
+    }
+
+    /// The protocol's three ends, and those a ChatGPT plan's service may
+    /// send besides: `response.done`, and a `[DONE]` line, each of which
+    /// completes the response. An ending event that carries no response
+    /// ends it all the same, and the items stay as each was done.
+    #[test]
+    fn every_end_a_service_sends_ends_a_response_whatever_its_event_carries() {
+        let item = json!({"type": "function_call", "name": "visible_reply", "arguments": "{}"});
+        let done = json!({"type": "response.output_item.done", "output_index": 0, "item": item});
+        let incomplete = json!({"incomplete_details": {"reason": "max_output_tokens"}});
+        let failed = json!({"error": {"message": "Overloaded."}});
+
+        for (end, ending, response) in [
+            (
+                json!({"type": "response.completed", "response": {}}).to_string(),
+                Ending::Completed,
+                json!({}),
+            ),
+            (
+                json!({"type": "response.completed"}).to_string(),
+                Ending::Completed,
+                json!({}),
+            ),
+            (
+                json!({"type": "response.done"}).to_string(),
+                Ending::Completed,
+                json!({}),
+            ),
+            ("[DONE]".to_owned(), Ending::Completed, json!({})),
+            (
+                json!({"type": "response.incomplete", "response": incomplete}).to_string(),
+                Ending::Incomplete,
+                incomplete.clone(),
+            ),
+            (
+                json!({"type": "response.failed", "response": failed}).to_string(),
+                Ending::Failed,
+                failed.clone(),
+            ),
+        ] {
+            let stream = format!("data: {done}\n\ndata: {end}\n\n");
+
+            assert_eq!(
+                read(&[stream.as_bytes()]).0,
+                Ok(Some(Ended {
+                    ending,
+                    response,
+                    done: vec![item.clone()],
+                })),
+                "{end}"
             );
         }
     }

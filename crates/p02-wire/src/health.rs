@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::bots::ConnectorBot;
+use crate::chatgpt::ChatgptSignIn;
 use crate::diagnostic::Diagnostic;
 use crate::protocol::ProtocolVersion;
 
@@ -28,6 +29,8 @@ pub struct Health {
     /// The person's accounts her phone knows, which the home's settings
     /// hold the keys of.
     pub accounts: Vec<PersonAccount>,
+    /// The home's sign-in to a ChatGPT plan.
+    pub chatgpt: ChatgptSignIn,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]

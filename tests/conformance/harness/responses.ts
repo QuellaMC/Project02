@@ -1,8 +1,10 @@
 /**
  * The Responses protocol as the model server speaks it in the OpenAI
- * API's place: a response's output items, each streamed by its events at
- * its place in the output and held whole by the event that ends the
- * response, the service's error, and the input a request showed the model.
+ * API's place and in a ChatGPT plan's: a response's output items, each
+ * streamed by its events at its place in the output and held whole by the
+ * event that ends the response, or, as the plan's service may end one, by
+ * its own last event alone; the service's error, a plan's usage used up
+ * and a token refused; and the input a request showed the model.
  */
 import {
   pieces,
@@ -17,11 +19,12 @@ export type OutputItem = {
   readonly item: (index: number) => object;
 };
 
-/** An item of a request's input. */
+/** An item of a request's input: a message's text plain, or, as a plan's service takes it, one part. */
 export type InputItem = {
   readonly type: string;
   readonly role?: string;
-  readonly content?: string;
+  readonly content?:
+    string | readonly {readonly type: string; readonly text: string}[];
   readonly call_id?: string;
   readonly name?: string;
   readonly arguments?: string;
@@ -91,6 +94,38 @@ export function responseEvents(
 /** A response that completes with these items. */
 export function responded(...items: readonly OutputItem[]): Answer {
   return {events: responseEvents(...items)};
+}
+
+/** The events of a response as a ChatGPT plan's service streams it: each item held whole by its own last event, and an end that carries no output. */
+export function planEvents(...items: readonly OutputItem[]): ResponseEvent[] {
+  return [
+    {type: 'response.created', response: {status: 'in_progress', output: []}},
+    ...streamed(items),
+    {type: 'response.completed', response: {}},
+  ];
+}
+
+/** A response that completes with these items, as a ChatGPT plan's service streams it. */
+export function planResponded(...items: readonly OutputItem[]): Answer {
+  return {events: planEvents(...items)};
+}
+
+/** A ChatGPT plan's service refusing a request because the plan's usage is used up. */
+export function usageLimitReached(): Answer {
+  return {
+    status: 429,
+    body: {
+      error: {
+        type: 'usage_limit_reached',
+        message: 'The usage limit has been reached',
+      },
+    },
+  };
+}
+
+/** A ChatGPT plan's service refusing the token a request carried. */
+export function unauthorized(): Answer {
+  return {status: 401, body: {detail: 'Unauthorized'}};
 }
 
 /** These items streamed, then the service's error in its words. */

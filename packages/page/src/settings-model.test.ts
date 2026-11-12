@@ -187,9 +187,26 @@ const phone = section('phone', {
   fields: [field('askToInstall', {valueType: 'boolean'}, true)],
 });
 
-/** The services as a view lists them, the OpenAI API's and NVIDIA's each connected or not. */
-function services(openai: boolean, nvidia: boolean): ModelService[] {
+/**
+ * The services as a view lists them: the ChatGPT plan, signed in as
+ * `account` when one is given, then the OpenAI API's and NVIDIA's, each
+ * connected or not.
+ */
+function services(
+  openai: boolean,
+  nvidia: boolean,
+  account?: ModelService['account'],
+): ModelService[] {
   return [
+    {
+      id: 'chatgpt',
+      name: 'ChatGPT Plan',
+      summary: 'Sign in with the plan you already pay for',
+      connected: account !== undefined,
+      ...(account === undefined ? {} : {account}),
+      model: 'chatgptModel',
+      fields: ['chatgptModel'],
+    },
     {
       id: 'openai',
       name: 'OpenAI API',
@@ -230,8 +247,8 @@ const serviceShapes: Readonly<Record<string, Partial<Field>>> = {
   roleModelProvider: {
     label: 'Service',
     valueType: 'enum',
-    allowedValues: ['openai', 'nvidia'],
-    choices: {openai: 'OpenAI API', nvidia: 'NVIDIA'},
+    allowedValues: ['chatgpt', 'openai', 'nvidia'],
+    choices: {chatgpt: 'ChatGPT Plan', openai: 'OpenAI API', nvidia: 'NVIDIA'},
   },
   openaiApiKey: {label: 'API Key', secret: true},
   openaiModel,
@@ -376,13 +393,14 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 14,
+    protocolVersion: 15,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
     characters: [mira, nova],
     connectors: [{id: 'telegram', connected, bots}],
     accounts,
+    chatgpt: {state: 'signed_out'},
   };
 }
 
@@ -630,7 +648,7 @@ describe('settings model', () => {
     expect(sidebar({}).connections.map(entry => entry.value)).toEqual(['', '']);
   });
 
-  it("lists the services on AI Model: once one is connected, what every character thinks with over those connected, each by its key or a server of the person's own and In Use on the one chosen; then the rest by what each is, under Add a Service, or Services while none is; and the sidebar says the one connected or how many, and Set Up while a character has no model", () => {
+  it("lists the services on AI Model: once one is connected, what every character thinks with over those connected, each by whom the ChatGPT plan is signed in as, its key or a server of the person's own and In Use on the one chosen; then the rest by what each is, under Add a Service, or Services while none is; and the sidebar says the one connected or how many, and Set Up while a character has no model", () => {
     const rows = (listed: readonly ListedService[]) =>
       listed.map(entry => [entry.service.name, entry.line, entry.inUse]);
     const page = (view: OkView) => {
@@ -645,6 +663,11 @@ describe('settings model', () => {
       sidebarOf(settingsOf({home: view}), health(true), nothingFound, false)
         .connections[0];
     const offer = {
+      chatgpt: [
+        'ChatGPT Plan',
+        'Sign in with the plan you already pay for',
+        false,
+      ],
       openai: ['OpenAI API', 'Pay as you go, with an API key', false],
       nvidia: ['NVIDIA', 'An API key, or a server of your own', false],
     };
@@ -659,14 +682,14 @@ describe('settings model', () => {
       others: {
         title: 'Services',
         footer: 'Connect one to start. You can connect more than one.',
-        services: [offer.openai, offer.nvidia],
+        services: [offer.chatgpt, offer.openai, offer.nvidia],
       },
     });
     expect(word(none)).toMatchObject({value: 'Set Up', dot: true});
 
     expect(page(homeView())).toEqual({
       connected: [['NVIDIA', 'Key saved', true]],
-      others: {title: 'Add a Service', services: [offer.openai]},
+      others: {title: 'Add a Service', services: [offer.chatgpt, offer.openai]},
     });
     expect(word(homeView())).toMatchObject({value: 'NVIDIA', dot: false});
 
@@ -685,7 +708,7 @@ describe('settings model', () => {
         ['OpenAI API', 'Key saved', true],
         ['NVIDIA', 'Your server', false],
       ],
-      others: {title: 'Add a Service', services: []},
+      others: {title: 'Add a Service', services: [offer.chatgpt]},
     });
     expect(word(both)).toMatchObject({value: '2 Services', dot: false});
     expect(everyone.chosen?.id).toBe('openai');
@@ -709,7 +732,7 @@ describe('settings model', () => {
 
     expect(page(keyless)).toEqual({
       connected: [['NVIDIA', 'Your server', false]],
-      others: {title: 'Add a Service', services: [offer.openai]},
+      others: {title: 'Add a Service', services: [offer.chatgpt, offer.openai]},
     });
     expect(
       serviceChoice(settingsOf({home: keyless}), home).options.map(
@@ -717,7 +740,28 @@ describe('settings model', () => {
       ),
     ).toEqual(['openai', 'nvidia']);
     expect(word(keyless)).toMatchObject({value: 'Set Up', dot: true});
-    expect([serviceArt('openai'), serviceArt('nvidia')]).toEqual([
+
+    // The ChatGPT plan signed in, the one service connected, says whom it is
+    // signed in as where a key would say it is saved, and the sidebar names it.
+    const plan = homeView({
+      services: services(false, false, {
+        email: 'sam@example.com',
+        plan: 'plus',
+      }),
+      project02: serviceFields({roleModelProvider: 'chatgpt'}),
+    });
+
+    expect(page(plan)).toEqual({
+      connected: [['ChatGPT Plan', 'sam@example.com · Plus', true]],
+      others: {title: 'Add a Service', services: [offer.openai, offer.nvidia]},
+    });
+    expect(word(plan)).toMatchObject({value: 'ChatGPT Plan', dot: false});
+    expect([
+      serviceArt('chatgpt'),
+      serviceArt('openai'),
+      serviceArt('nvidia'),
+    ]).toEqual([
+      {icon: 'person', tint: 'mint'},
       {icon: 'key', tint: 'graphite'},
       {icon: 'grid', tint: 'teal'},
     ]);
@@ -1072,7 +1116,7 @@ describe('settings model', () => {
     ]);
   });
 
-  it("reads a row as it shows now: a click not yet landed, else the view; and opens the welcome's next step once a service is chosen and its own key is stored or typed", () => {
+  it("reads a row as it shows now: a click not yet landed, else the view; and opens the welcome's next step once a service is chosen and its own key is stored or typed, or for the ChatGPT plan, which has no key, once the home is signed in", () => {
     const service: Row = {
       target: home,
       place: {kind: 'host', name: 'roleModelProvider'},
@@ -1140,6 +1184,13 @@ describe('settings model', () => {
     ).toBe(true);
     expect(welcomeReady(settingsOf({home: homeView()}))).toBe(true);
     expect(welcomeReady(settingsOf({}))).toBe(false);
+
+    // The plan asks for no key: the welcome waits until the home's settings
+    // give her a model, which signing in does.
+    const plan = {'home/project02.roleModelProvider': 'chatgpt'};
+
+    expect(welcomeKey(settingsOf({home: keyless}, plan))).toBeUndefined();
+    expect(welcomeReady(settingsOf({home: keyless}, plan))).toBe(false);
   });
 
   it('knows the page a sub-page opens from, which the sidebar marks', () => {

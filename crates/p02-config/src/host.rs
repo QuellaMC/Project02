@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
 use p02_core::{Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl};
-use p02_wire::{ModelService, RoleModelProvider};
+use p02_wire::{FieldView, ModelService, PlanAccount, RoleModelProvider, ValueSource};
 use serde_json::{Map, Value, json};
 
 use crate::declaration::{Layer, expectation, outside_scope};
@@ -57,9 +57,10 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
     field: || {
         json!({
             "label": "Service",
-            "description": "Who answers as the character: openai is a model of the OpenAI API, \
-                on your key; nvidia is a model on NVIDIA's cloud, or on the server nvidiaBaseUrl \
-                names. No character starts until one is chosen.",
+            "description": "Who answers as the character: chatgpt is a model of the ChatGPT \
+                plan this home is signed in to; openai is a model of the OpenAI API, on your key; \
+                nvidia is a model on NVIDIA's cloud, or on the server nvidiaBaseUrl names. No \
+                character starts until one is chosen.",
             "secret": false,
             "valueType": "enum",
             "allowedValues": RoleModelProvider::ALL
@@ -75,6 +76,43 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
     },
     read: |value| value.as_str().and_then(RoleModelProvider::parse),
     must_be: None,
+};
+
+/// The models a ChatGPT plan thinks with, best first, each id with the name
+/// a person reads and whether only a paid plan has it: every plan has the
+/// rest. OpenAI offers no way to list them.
+const CHATGPT_MODELS: [(&str, &str, bool); 7] = [
+    ("gpt-6.1-sol", "GPT-6.1 Sol", true),
+    ("gpt-6-sol", "GPT-6 Sol", true),
+    ("gpt-6.1-terra", "GPT-6.1 Terra", false),
+    ("gpt-6-luna", "GPT-6 Luna", false),
+    ("gpt-5.6-sol", "GPT-5.6 Sol", true),
+    ("gpt-5.6-terra", "GPT-5.6 Terra", false),
+    ("gpt-5.6-luna", "GPT-5.6 Luna", false),
+];
+
+/// Suggests every model a plan may offer. Which of them the home's plan
+/// offers, and so the one it thinks with until one is set, is the sign-in's
+/// to say, which no document holds: see [`plan_shaped`].
+const CHATGPT_MODEL: HostSetting<String> = HostSetting {
+    name: "chatgptModel",
+    field: || {
+        json!({
+            "label": "Model",
+            "description": "The model of your ChatGPT plan to talk to: one your plan offers, or \
+                the id of another. The best your plan offers when left unset.",
+            "secret": false,
+            "valueType": "string",
+            "suggestedValues": CHATGPT_MODELS.iter().map(|(id, ..)| *id).collect::<Vec<_>>(),
+            "choices": CHATGPT_MODELS
+                .iter()
+                .map(|(id, name, _)| ((*id).to_owned(), Value::from(*name)))
+                .collect::<Map<String, Value>>(),
+            "redactionLabels": [],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
 };
 
 const OPENAI_API_KEY: HostSetting<String> = HostSetting {
@@ -266,9 +304,10 @@ fn text(value: &Value) -> Option<String> {
 /// person decides first, the service and each service's own fields in the
 /// order the services are listed, then the knobs, then what is each
 /// character's own: her switch and her heartbeat.
-static SETTINGS: [&dyn Setting; 10] = [
+static SETTINGS: [&dyn Setting; 11] = [
     &USER_DISPLAY_NAME,
     &ROLE_MODEL_PROVIDER,
+    &CHATGPT_MODEL,
     &OPENAI_API_KEY,
     &OPENAI_MODEL,
     &NVIDIA_API_KEY,
@@ -281,43 +320,59 @@ static SETTINGS: [&dyn Setting; 10] = [
 
 /// A service as the settings say it: what a page calls it, what it is and
 /// where a key for it comes from, its own fields in the order a page shows
-/// them, the one of them that names its model, and those that connect it
-/// while one holds a value in effect.
+/// them, the one of them that names its model, and what connects it.
 struct Service {
     name: &'static str,
     summary: &'static str,
-    key_from: &'static str,
+    key_from: Option<&'static str>,
     fields: &'static [&'static str],
     model: &'static str,
-    credentials: &'static [&'static str],
+    connected_by: ConnectedBy,
+}
+
+/// What connects a service.
+enum ConnectedBy {
+    /// Any of these of its fields holding a value in effect.
+    Credentials(&'static [&'static str]),
+    /// The home's sign-in to a ChatGPT plan, which is no setting.
+    SignIn,
 }
 
 fn service(provider: RoleModelProvider) -> Service {
     match provider {
+        RoleModelProvider::Chatgpt => Service {
+            name: "ChatGPT Plan",
+            summary: "Sign in with the plan you already pay for",
+            key_from: None,
+            fields: &[CHATGPT_MODEL.name],
+            model: CHATGPT_MODEL.name,
+            connected_by: ConnectedBy::SignIn,
+        },
         RoleModelProvider::Openai => Service {
             name: "OpenAI API",
             summary: "Pay as you go, with an API key",
-            key_from: "Get one at platform.openai.com.",
+            key_from: Some("Get one at platform.openai.com."),
             fields: &[OPENAI_API_KEY.name, OPENAI_MODEL.name],
             model: OPENAI_MODEL.name,
-            credentials: &[OPENAI_API_KEY.name],
+            connected_by: ConnectedBy::Credentials(&[OPENAI_API_KEY.name]),
         },
         RoleModelProvider::Nvidia => Service {
             name: "NVIDIA",
             summary: "An API key, or a server of your own",
-            key_from: "Get one at build.nvidia.com.",
+            key_from: Some("Get one at build.nvidia.com."),
             fields: &[NVIDIA_API_KEY.name, NVIDIA_MODEL.name, NVIDIA_BASE_URL.name],
             model: NVIDIA_MODEL.name,
             // A server of the person's own may ask for no key.
-            credentials: &[NVIDIA_API_KEY.name, NVIDIA_BASE_URL.name],
+            connected_by: ConnectedBy::Credentials(&[NVIDIA_API_KEY.name, NVIDIA_BASE_URL.name]),
         },
     }
 }
 
 /// Every service, in the order a page lists them, each connected while a
 /// credential of it has a value in effect among the host's resolved
-/// `fields`.
-pub(crate) fn services(fields: &[Field<'_>]) -> Vec<ModelService> {
+/// `fields`, or, for the ChatGPT plan, while the home is signed in, as
+/// `account`.
+pub(crate) fn services(fields: &[Field<'_>], account: Option<&PlanAccount>) -> Vec<ModelService> {
     let resolved = |name: &str| {
         fields
             .iter()
@@ -329,16 +384,23 @@ pub(crate) fn services(fields: &[Field<'_>]) -> Vec<ModelService> {
         .iter()
         .map(|&provider| {
             let service = service(provider);
+            let (connected, account) = match service.connected_by {
+                ConnectedBy::Credentials(credentials) => (
+                    credentials
+                        .iter()
+                        .any(|name| resolved(name).effective.value().is_some()),
+                    None,
+                ),
+                ConnectedBy::SignIn => (account.is_some(), account.cloned()),
+            };
 
             ModelService {
                 id: provider,
                 name: service.name.to_owned(),
                 summary: service.summary.to_owned(),
-                key_from: service.key_from.to_owned(),
-                connected: service
-                    .credentials
-                    .iter()
-                    .any(|name| resolved(name).effective.value().is_some()),
+                key_from: service.key_from.map(str::to_owned),
+                connected,
+                account,
                 model: resolved(service.model).declaration.name().clone(),
                 fields: service
                     .fields
@@ -348,6 +410,53 @@ pub(crate) fn services(fields: &[Field<'_>]) -> Vec<ModelService> {
             }
         })
         .collect()
+}
+
+/// The models a ChatGPT plan of `plan` offers, best first, each id with the
+/// name a person reads: those every plan has, for a free plan or one OpenAI
+/// does not name, and all of them otherwise.
+fn plan_models(plan: Option<&str>) -> impl Iterator<Item = (&'static str, &'static str)> {
+    let free = plan.is_none_or(|plan| plan == "free");
+
+    CHATGPT_MODELS
+        .iter()
+        .filter(move |(.., paid_only)| !(free && *paid_only))
+        .map(|&(id, name, _)| (id, name))
+}
+
+/// The model a plan of `plan` thinks with until one is chosen: the first it
+/// offers.
+fn plan_default(plan: Option<&str>) -> &'static str {
+    plan_models(plan)
+        .next()
+        .map(|(id, _)| id)
+        .expect("every plan offers models")
+}
+
+/// A host field's view as the home's sign-in, as `account`, shapes it: the
+/// ChatGPT plan's model offers the models its plan offers, in their words,
+/// and the first of them is in effect while none is set; any other field's
+/// view is its declaration's.
+pub(crate) fn plan_shaped(mut view: FieldView, account: Option<&PlanAccount>) -> FieldView {
+    if view.name.as_str() != CHATGPT_MODEL.name {
+        return view;
+    }
+
+    let plan = account.and_then(|account| account.plan.as_deref());
+
+    view.suggested_values = Some(plan_models(plan).map(|(id, _)| id.to_owned()).collect());
+    view.choices = Some(
+        plan_models(plan)
+            .map(|(id, name)| (id.to_owned(), name.to_owned()))
+            .collect(),
+    );
+
+    if view.effective.source == ValueSource::Missing {
+        view.effective.source = ValueSource::Default;
+        view.effective.value = Some(Value::from(plan_default(plan)));
+    }
+
+    view
 }
 
 /// A host setting, whatever the type of its value.
@@ -492,6 +601,9 @@ pub struct HostSettings {
     pub user_display_name: SpeakerName,
     /// None until the person chooses one, and no character starts before.
     pub role_model_provider: Option<RoleModelProvider>,
+    /// The ChatGPT plan's model, when one is set; see
+    /// [`HostSettings::chatgpt_model_on`].
+    pub chatgpt_model: Option<String>,
     pub openai_api_key: Option<String>,
     /// The OpenAI model to ask, the field's default unless one is set.
     pub openai_model: String,
@@ -512,6 +624,7 @@ impl HostSettings {
         Self {
             user_display_name: USER_DISPLAY_NAME.value_or_default(fields),
             role_model_provider: ROLE_MODEL_PROVIDER.value(fields),
+            chatgpt_model: CHATGPT_MODEL.value(fields),
             openai_api_key: OPENAI_API_KEY.value(fields),
             openai_model: OPENAI_MODEL.value_or_default(fields),
             nvidia_api_key: NVIDIA_API_KEY.value(fields),
@@ -522,6 +635,15 @@ impl HostSettings {
             heartbeat: HEARTBEAT.value_or_default(fields),
         }
     }
+
+    /// The model she asks a ChatGPT plan of `plan` for, such as `plus`: the
+    /// one her settings set, else the first the plan offers.
+    #[must_use]
+    pub fn chatgpt_model_on(&self, plan: Option<&str>) -> String {
+        self.chatgpt_model
+            .clone()
+            .unwrap_or_else(|| plan_default(plan).to_owned())
+    }
 }
 
 impl fmt::Debug for HostSettings {
@@ -530,6 +652,7 @@ impl fmt::Debug for HostSettings {
             .debug_struct("HostSettings")
             .field("user_display_name", &self.user_display_name)
             .field("role_model_provider", &self.role_model_provider)
+            .field("chatgpt_model", &self.chatgpt_model)
             .field(
                 "openai_api_key",
                 &self.openai_api_key.as_ref().map(|_| "[redacted]"),

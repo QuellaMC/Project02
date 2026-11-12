@@ -114,7 +114,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
   const home = createHome();
   const daemon = await startDaemon(home);
   const address = {
-    protocolVersion: 14,
+    protocolVersion: 15,
     token: daemon.token,
     port: Number(new URL(daemon.origin).port),
   };
@@ -132,7 +132,7 @@ it('lifecycle.daemon-record: while serving, daemon.json at mode 0600 holds the p
 it("lifecycle.port-default-and-fallback: when another program holds the home's port, serve says so before its address line, binds a free port and records it for the next run", async () => {
   const port = await occupiedPort();
   const home = createHome({
-    'daemon.json': JSON.stringify({protocolVersion: 14, token: 'kept', port}),
+    'daemon.json': JSON.stringify({protocolVersion: 15, token: 'kept', port}),
   });
   const moved = await startDaemon(home);
 
